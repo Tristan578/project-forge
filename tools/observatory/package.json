@@ -3,9 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Deterministic repository capability inventory scanner (core). Maps git-tracked files to stable capability IDs and emits a machine-readable inventory plus a human-readable unmapped/excluded report. Proposed tooling — see README.md.",
+  "description": "Deterministic repository capability inventory scanner (core). Maps git-tracked files to stable capability IDs and emits a machine-readable inventory plus a human-readable unmapped/excluded report. Internal tooling — see README.md.",
   "scripts": {
     "observatory:scan": "tsx scan.ts",
-    "test": "vitest run"
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   }
 }

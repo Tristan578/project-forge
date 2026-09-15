@@ -13,7 +13,7 @@
       "domain": "demo",
       "confidence": "reviewed",
       "primaryOwner": "app/featureA/index.ts",
-      "own": ["app/featureA/**"],
+      "own": ["app/featureA/**", "app/shared/helper.ts"],
       "crossLink": ["app/shared/helper.ts"]
     },
     {
@@ -32,8 +32,8 @@
     "unmappedTotal": 0,
     "notYetCoveredTotal": 0,
     "sharedFile": "app/shared/helper.ts",
-    "sharedFileOwner": "feat.b",
-    "sharedFileSecondaryLinkOn": "feat.a",
+    "sharedFileOwner": "feat.a",
+    "sharedFileSecondaryLinkOn": "feat.b",
     "gapCount": 0
   }
 }

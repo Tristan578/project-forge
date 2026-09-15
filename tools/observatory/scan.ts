@@ -27,19 +27,22 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+/** Declared confidence in a file-to-capability mapping; not runtime validation. */
 export type Confidence = 'extracted' | 'reviewed';
+/** Reason category for a tracked file intentionally omitted from ownership. */
 export type ExclusionCategory = 'generated' | 'vendored' | 'binary';
 
+/** Ordered ownership and secondary-link patterns for one stable capability ID. */
 export interface CapabilityRule {
   capabilityId: string;
   domain: string;
   confidence: Confidence;
-  /** Glob patterns whose matched files this capability OWNS (primary attribution). */
+  /** First matching rule owns the file; later matches become secondary links. */
   own: string[];
   /**
    * The single representative artifact for the capability. Must be one of the
-   * owned files when the capability has code; a declared owner absent from the
-   * tracked set is reported as a `missing-primary-owner` gap.
+   * owned files. Missing or differently attributed paths produce an actionable
+   * primary-owner gap, even when the path exists in the tracked set.
    */
   primaryOwner?: string;
   /**
@@ -50,6 +53,7 @@ export interface CapabilityRule {
   crossLink?: string[];
 }
 
+/** Patterns excluded from otherwise unowned files, with a nonblank justification. */
 export interface ExclusionRule {
   category: ExclusionCategory;
   /** Human-readable justification. Required — a category alone is not a reason. */
@@ -57,6 +61,7 @@ export interface ExclusionRule {
   patterns: string[];
 }
 
+/** A requirement recorded before its implementation artifacts are complete. */
 export interface PlannedCapability {
   capabilityId: string;
   domain: string;
@@ -65,21 +70,24 @@ export interface PlannedCapability {
   confidence: Confidence;
 }
 
+/** A directed rename from a prior capability ID to another ID in the alias chain. */
 export interface Alias {
   from: string;
   to: string;
 }
 
+/** Pure scanner inputs: tracked paths, ordered mappings, and explicit coverage scope. */
 export interface ScanConfig {
   files: string[];
   rules: CapabilityRule[];
   exclusions?: ExclusionRule[];
   planned?: PlannedCapability[];
   aliases?: Alias[];
-  /** Path prefixes this scan claims to cover; anything else is `notYetCovered`. */
+  /** Unowned, non-excluded paths outside these prefixes become `notYetCovered`. */
   coveredScopes: string[];
 }
 
+/** Normalized attribution and planning information for one capability. */
 export interface CapabilityRecord {
   capabilityId: string;
   domain: string;
@@ -91,18 +99,29 @@ export interface CapabilityRecord {
   secondaryLinks: string[];
 }
 
+/** One unowned tracked path matched by a reasoned exclusion rule. */
 export interface ExcludedFile {
   path: string;
   category: ExclusionCategory;
   reason: string;
 }
 
+/** A structural mapping problem reported for repair without dropping its tracked path. */
 export type Gap =
   | { type: 'unmapped-in-covered-scope'; path: string }
   | { type: 'missing-primary-owner'; capabilityId: string; path: string }
+  | { type: 'primary-owner-not-owned'; capabilityId: string; path: string; actualOwner: string | null; bucket: 'owned' | 'excluded' | 'unmapped' | 'notYetCovered' }
   | { type: 'capability-without-artifact'; capabilityId: string }
-  | { type: 'broken-alias'; from: string; to: string };
+  | { type: 'broken-alias'; from: string; to: string }
+  | AliasProblem;
 
+type AliasProblem =
+  | { type: 'alias-cycle'; cycle: string[] }
+  | { type: 'ambiguous-alias'; from: string; targets: string[] };
+
+type AliasResolution = { ok: true; target: string } | { ok: false; problem: AliasProblem };
+
+/** Mutually exclusive file-bucket counts reconciled against unique tracked paths. */
 export interface Accounting {
   trackedTotal: number;
   ownedTotal: number;
@@ -113,6 +132,7 @@ export interface Accounting {
   reconciles: boolean;
 }
 
+/** Deterministically ordered attribution, diagnostics, and complete file accounting. */
 export interface ScanResult {
   capabilities: CapabilityRecord[];
   excluded: ExcludedFile[];
@@ -128,6 +148,8 @@ export interface ScanResult {
  * Convert a repo-relative glob to an anchored RegExp.
  * Supported tokens: `**` (zero or more path segments), `*` (within one
  * segment), and literal characters. All other regex metacharacters are escaped.
+ * @param glob Repository-relative path pattern; separators use forward slashes.
+ * @returns A whole-path matcher supporting literal text, `*`, and `**`.
  */
 export function globToRegExp(glob: string): RegExp {
   let re = '';
@@ -139,7 +161,7 @@ export function globToRegExp(glob: string): RegExp {
           re += '(?:[^/]*/)*';
           i += 2;
         } else {
-          re += '.*';
+          re += '[\\s\\S]*';
           i += 1;
         }
       } else {
@@ -160,30 +182,86 @@ function matchesAny(res: RegExp[], file: string): boolean {
 
 const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
+function aliasTargets(aliases: Alias[]): Map<string, string[]> {
+  const targets = new Map<string, Set<string>>();
+  for (const { from, to } of aliases) {
+    if (!targets.has(from)) targets.set(from, new Set());
+    targets.get(from)!.add(to);
+  }
+  return new Map([...targets].map(([from, to]) => [from, [...to].sort(byString)]));
+}
+
+function resolveAliasTarget(targets: Map<string, string[]>, id: string): AliasResolution {
+  const visited: string[] = [];
+  let current = id;
+  while (targets.has(current)) {
+    const cycleStart = visited.indexOf(current);
+    if (cycleStart !== -1) {
+      const cycle = visited.slice(cycleStart);
+      // Normalize the rotation so each cycle is reported once regardless of
+      // which alias was followed first.
+      const first = cycle.indexOf([...cycle].sort(byString)[0]);
+      const ordered = [...cycle.slice(first), ...cycle.slice(0, first)];
+      return { ok: false, problem: { type: 'alias-cycle', cycle: [...ordered, ordered[0]] } };
+    }
+    const next = targets.get(current)!;
+    if (next.length !== 1) {
+      return { ok: false, problem: { type: 'ambiguous-alias', from: current, targets: next } };
+    }
+    visited.push(current);
+    current = next[0];
+  }
+  return { ok: true, target: current };
+}
+
+function aliasProblems(targets: Map<string, string[]>): AliasProblem[] {
+  const problems = new Map<string, AliasProblem>();
+  for (const from of [...targets.keys()].sort(byString)) {
+    const resolved = resolveAliasTarget(targets, from);
+    if (!resolved.ok) problems.set(JSON.stringify(resolved.problem), resolved.problem);
+  }
+  return [...problems.values()];
+}
+
 /**
- * Resolve a capability ID through the alias table, following at most `from -> to`
- * chains and guarding against cycles. Returns the input unchanged when no alias
- * applies.
+ * Resolve an ID to its terminal alias target; unchanged when no alias applies.
+ * Identical duplicate mappings are allowed. Throws if the table contains any
+ * cycle or conflicting targets, including problems outside the requested chain.
+ * Target existence is checked by scan(), which has the capability catalog.
+ * @param aliases Directed mappings from prior IDs to current IDs.
+ * @param id Capability ID to resolve.
+ * @returns The terminal target or the unchanged ID when no alias applies.
+ * @throws Error when the alias table contains a cycle or conflicting targets.
  */
 export function resolveCapabilityId(aliases: Alias[], id: string): string {
-  const map = new Map(aliases.map((a) => [a.from, a.to]));
-  const seen = new Set<string>();
-  let current = id;
-  while (map.has(current) && !seen.has(current)) {
-    seen.add(current);
-    current = map.get(current) as string;
+  const targets = aliasTargets(aliases);
+  const problems = aliasProblems(targets);
+  if (problems.length > 0) {
+    throw new Error(`Invalid capability alias table: ${JSON.stringify(problems)}`);
   }
-  return current;
+  const resolved = resolveAliasTarget(targets, id);
+  if (!resolved.ok) throw new Error(`Invalid capability alias: ${JSON.stringify(resolved.problem)}`);
+  return resolved.target;
 }
 
 /**
  * Pure inventory pass over an in-memory config. Deterministic: every collection
- * in the result is sorted, and no wall-clock value is embedded.
+ * in the result is sorted, and no wall-clock value is embedded. Invalid alias
+ * graphs produce gaps; an exclusion without a nonblank string reason throws
+ * before any files are classified.
+ * @param config Tracked paths, ordered ownership rules and reviewed exclusions.
+ * @returns Sorted attribution, aliases, gaps and reconciled bucket counts.
+ * @throws Error when an exclusion lacks a nonblank string reason.
  */
 export function scan(config: ScanConfig): ScanResult {
+  const exclusions = config.exclusions ?? [];
+  exclusions.forEach((exclusion, index) => {
+    if (typeof exclusion.reason !== 'string' || exclusion.reason.trim() === '') {
+      throw new Error(`Exclusion rule ${index + 1} requires a non-empty string reason.`);
+    }
+  });
   const files = [...new Set(config.files)].sort(byString);
   const { rules } = config;
-  const exclusions = config.exclusions ?? [];
   const planned = config.planned ?? [];
   const aliases = config.aliases ?? [];
   const coveredScopes = [...config.coveredScopes].sort(byString);
@@ -256,14 +334,15 @@ export function scan(config: ScanConfig): ScanResult {
     rec.members.sort(byString);
     if (!rec.primaryOwner && rec.members.length > 0) rec.primaryOwner = rec.members[0];
   }
-  for (const { rule, crossLink } of compiledRules) {
-    if (crossLink.length === 0) continue;
+  for (const { rule, own, crossLink } of compiledRules) {
     const rec = recById.get(rule.capabilityId);
     if (!rec) continue;
     const links = new Set<string>();
     for (const file of files) {
       const id = owner.get(file);
-      if (id && id !== rule.capabilityId && matchesAny(crossLink, file)) links.add(file);
+      if (id && id !== rule.capabilityId && (matchesAny(own, file) || matchesAny(crossLink, file))) {
+        links.add(file);
+      }
     }
     // Preserve any links already recorded from an earlier rule with the same id.
     for (const existing of rec.secondaryLinks) links.add(existing);
@@ -299,16 +378,30 @@ export function scan(config: ScanConfig): ScanResult {
   const fileSet = new Set(files);
   const capIds = new Set(capabilities.map((c) => c.capabilityId));
   for (const rec of capabilities) {
-    if (rec.planned) continue;
     if (rec.primaryOwner && !fileSet.has(rec.primaryOwner)) {
       gaps.push({ type: 'missing-primary-owner', capabilityId: rec.capabilityId, path: rec.primaryOwner });
+    } else if (rec.primaryOwner && owner.get(rec.primaryOwner) !== rec.capabilityId) {
+      const actualOwner = owner.get(rec.primaryOwner) ?? null;
+      gaps.push({
+        type: 'primary-owner-not-owned',
+        capabilityId: rec.capabilityId,
+        path: rec.primaryOwner,
+        actualOwner,
+        bucket: actualOwner !== null ? 'owned' : excludedSet.has(rec.primaryOwner)
+          ? 'excluded' : unmapped.includes(rec.primaryOwner) ? 'unmapped' : 'notYetCovered',
+      });
     }
-    if (rec.members.length === 0) {
+    if (!rec.planned && rec.members.length === 0) {
       gaps.push({ type: 'capability-without-artifact', capabilityId: rec.capabilityId });
     }
   }
-  for (const a of aliases) {
-    if (!capIds.has(a.to)) gaps.push({ type: 'broken-alias', from: a.from, to: a.to });
+  const targets = aliasTargets(aliases);
+  gaps.push(...aliasProblems(targets));
+  for (const from of targets.keys()) {
+    const resolved = resolveAliasTarget(targets, from);
+    if (resolved.ok && !capIds.has(resolved.target)) {
+      gaps.push({ type: 'broken-alias', from, to: resolved.target });
+    }
   }
   for (const file of unmapped) gaps.push({ type: 'unmapped-in-covered-scope', path: file });
   gaps.sort((x, y) => byString(JSON.stringify(x), JSON.stringify(y)));
@@ -330,7 +423,7 @@ export function scan(config: ScanConfig): ScanResult {
     unmapped: unmapped.sort(byString),
     notYetCovered: notYetCovered.sort(byString),
     gaps,
-    aliases: [...aliases].sort((a, b) => byString(a.from + a.to, b.from + b.to)),
+    aliases: [...aliases].sort((a, b) => byString(a.from, b.from) || byString(a.to, b.to)),
     coveredScopes,
     accounting,
   };
@@ -341,7 +434,9 @@ export const INVENTORY_SCHEMA_VERSION = 1 as const;
 
 /**
  * Build the normalized machine-readable inventory object. Contains no
- * timestamps so two runs on the same commit tree serialize byte-identically.
+ * timestamps so identical scan inputs serialize byte-identically.
+ * @param result Completed scan with exact, unescaped tracked paths.
+ * @returns Versioned machine-readable inventory data.
  */
 export function buildInventoryJson(result: ScanResult): Record<string, unknown> {
   return {
@@ -357,6 +452,7 @@ export function buildInventoryJson(result: ScanResult): Record<string, unknown> 
   };
 }
 
+/** Human-readable domain labels explaining the current mapping scope. */
 export interface CoverageScope {
   covered: string[];
   notYetCovered: string[];
@@ -374,10 +470,56 @@ function summarizeByTopDir(files: string[]): Array<{ prefix: string; count: numb
     .sort((a, b) => byString(a.prefix, b.prefix));
 }
 
+/** Escape data as Markdown text, keeping control characters visible on one line. */
+function reportLiteral(value: string): string {
+  const controls = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/;
+  return value.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff&<>\\\x60*_{}\[\]()#+.!|~-]/g, (character) => {
+    if (controls.test(character)) {
+      const visible = character === '\n' ? 'n' : character === '\r' ? 'r'
+        : character === '\t' ? 't' : 'u' + character.charCodeAt(0).toString(16).padStart(4, '0');
+      // Two source backslashes render one literal backslash in Markdown.
+      return '\\\\' + visible;
+    }
+    if (character === '&') return '&amp;';
+    if (character === '<') return '&lt;';
+    if (character === '>') return '&gt;';
+    return '\\' + character;
+  });
+}
+
+/** Every structural gap gets a reference and a concrete repair in the report. */
+function gapDetails(gap: Gap): [string, string, string] {
+  switch (gap.type) {
+    case 'unmapped-in-covered-scope':
+      return ['Unmapped file', gap.path, 'Add an ownership rule or a justified exclusion.'];
+    case 'missing-primary-owner':
+      return ['Missing primary owner', gap.capabilityId,
+        `Primary artifact ${gap.path} is not tracked. Restore it or choose an owned tracked file.`];
+    case 'primary-owner-not-owned':
+      return ['Primary owner not owned', gap.capabilityId,
+        `${gap.path} belongs to ${gap.actualOwner ?? gap.bucket}. Choose an artifact owned by this capability or correct the ownership rules.`];
+    case 'capability-without-artifact':
+      return ['Capability without artifact', gap.capabilityId,
+        'Map an owned artifact or declare this capability as planned.'];
+    case 'broken-alias':
+      return ['Broken alias', gap.from,
+        `Terminal target ${gap.to} is not declared. Correct the alias chain or declare the target capability.`];
+    case 'alias-cycle':
+      return ['Alias cycle', gap.cycle.join(' → '), 'Remove the cycle so the alias chain reaches a terminal capability.'];
+    case 'ambiguous-alias':
+      return ['Ambiguous alias', gap.from,
+        `Conflicting targets: ${gap.targets.join(', ')}. Keep one target for this alias source.`];
+  }
+}
+
 /**
- * Build the human-readable unmapped/excluded report. Deterministic; the
+ * Build the human-readable report including every structural gap. Deterministic; the
  * `coverageScope` argument names the domains this slice does and does not cover
- * so uncovered areas are an explicit entry rather than a silent omission.
+ * so uncovered areas are an explicit entry rather than a silent omission. Paths
+ * and configuration text are escaped literals; control characters stay visible.
+ * @param result Completed inventory scan.
+ * @param coverageScope Human-readable covered and uncovered domain labels.
+ * @returns Markdown safe from headings or table rows embedded in input text.
  */
 export function buildUnmappedReport(result: ScanResult, coverageScope: CoverageScope): string {
   const a = result.accounting;
@@ -395,14 +537,14 @@ export function buildUnmappedReport(result: ScanResult, coverageScope: CoverageS
   lines.push('');
   lines.push('Domains covered by reviewed/extracted mapping rules in this slice:');
   lines.push('');
-  for (const d of [...coverageScope.covered].sort(byString)) lines.push(`- ${d}`);
+  for (const d of [...coverageScope.covered].sort(byString)) lines.push(`- ${reportLiteral(d)}`);
   lines.push('');
   lines.push(
-    'Domains **not yet covered** (explicit gap — tracked files here are reported as ' +
-      '`notYetCovered`, never silently dropped):',
+    'Domains **not yet covered** (explicit gap — unowned, non-excluded tracked ' +
+      'files here are reported as `notYetCovered`, never silently dropped):',
   );
   lines.push('');
-  for (const d of [...coverageScope.notYetCovered].sort(byString)) lines.push(`- ${d}`);
+  for (const d of [...coverageScope.notYetCovered].sort(byString)) lines.push(`- ${reportLiteral(d)}`);
   lines.push('');
 
   lines.push('## Accounting');
@@ -424,7 +566,9 @@ export function buildUnmappedReport(result: ScanResult, coverageScope: CoverageS
   } else {
     lines.push('| Path | Category | Reason |');
     lines.push('| --- | --- | --- |');
-    for (const e of result.excluded) lines.push(`| ${e.path} | ${e.category} | ${e.reason} |`);
+    for (const e of result.excluded) {
+      lines.push(`| ${reportLiteral(e.path)} | ${reportLiteral(e.category)} | ${reportLiteral(e.reason)} |`);
+    }
   }
   lines.push('');
 
@@ -433,7 +577,20 @@ export function buildUnmappedReport(result: ScanResult, coverageScope: CoverageS
   if (result.unmapped.length === 0) {
     lines.push('_None — every in-scope tracked file is owned or excluded._');
   } else {
-    for (const f of result.unmapped) lines.push(`- ${f}`);
+    for (const f of result.unmapped) lines.push(`- ${reportLiteral(f)}`);
+  }
+  lines.push('');
+
+  lines.push('## Structural gaps');
+  lines.push('');
+  if (result.gaps.length === 0) {
+    lines.push('_None._');
+  } else {
+    lines.push('| Gap | Reference | Action |');
+    lines.push('| --- | --- | --- |');
+    for (const gap of result.gaps) {
+      lines.push(`| ${gapDetails(gap).map(reportLiteral).join(' | ')} |`);
+    }
   }
   lines.push('');
 
@@ -444,7 +601,7 @@ export function buildUnmappedReport(result: ScanResult, coverageScope: CoverageS
     lines.push('_None._');
   } else {
     for (const c of extracted) {
-      lines.push(`- \`${c.capabilityId}\` (${c.domain}) — ${c.members.length} file(s)`);
+      lines.push(`- ${reportLiteral(c.capabilityId)} (${reportLiteral(c.domain)}) — ${c.members.length} file(s)`);
     }
   }
   lines.push('');
@@ -457,15 +614,13 @@ export function buildUnmappedReport(result: ScanResult, coverageScope: CoverageS
     lines.push('| Directory | Count |');
     lines.push('| --- | --- |');
     for (const { prefix, count } of summarizeByTopDir(result.notYetCovered)) {
-      lines.push(`| ${prefix} | ${count} |`);
+      lines.push(`| ${reportLiteral(prefix)} | ${count} |`);
     }
   }
   lines.push('');
 
   return lines.join('\n');
 }
-
-/* c8 ignore start -- CLI wiring is exercised manually via `npm run observatory:scan`. */
 
 /** Run `git ls-files -z` and return sorted, normalized repo-relative paths. */
 function listTrackedFiles(repoRoot: string): string[] {
@@ -480,6 +635,22 @@ function listTrackedFiles(repoRoot: string): string[] {
     .sort(byString);
 }
 
+/** Validate the required alias array before it can affect persisted rename history. */
+function parseAliases(document: unknown): Alias[] {
+  if (document === null || typeof document !== 'object' || Array.isArray(document) ||
+      !('aliases' in document) || !Array.isArray(document.aliases)) {
+    throw new Error('aliases.json must contain an aliases array (use [] for an empty history).');
+  }
+  return document.aliases.map((entry: unknown, index: number) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry) ||
+        !('from' in entry) || typeof entry.from !== 'string' || entry.from.trim() === '' ||
+        !('to' in entry) || typeof entry.to !== 'string' || entry.to.trim() === '') {
+      throw new Error(`aliases.json entry ${index + 1} must have nonblank string from and to fields.`);
+    }
+    return { from: entry.from, to: entry.to };
+  });
+}
+
 async function main(): Promise<void> {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: here })
@@ -487,9 +658,7 @@ async function main(): Promise<void> {
     .trim();
 
   const rulesMod = await import('./capabilityRules.ts');
-  const aliasesRaw = JSON.parse(fs.readFileSync(path.join(here, 'aliases.json'), 'utf8')) as {
-    aliases: Alias[];
-  };
+  const aliases = parseAliases(JSON.parse(fs.readFileSync(path.join(here, 'aliases.json'), 'utf8')));
 
   const files = listTrackedFiles(repoRoot);
   const result = scan({
@@ -497,7 +666,7 @@ async function main(): Promise<void> {
     rules: rulesMod.CAPABILITY_RULES,
     exclusions: rulesMod.EXCLUSION_RULES,
     planned: rulesMod.PLANNED_CAPABILITIES,
-    aliases: aliasesRaw.aliases,
+    aliases,
     coveredScopes: rulesMod.COVERED_SCOPES,
   });
 
@@ -530,5 +699,3 @@ if (invokedDirectly) {
     process.exit(1);
   });
 }
-
-/* c8 ignore stop */
