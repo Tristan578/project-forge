@@ -61,6 +61,43 @@ fi
 
 scanned=0
 bad=0
+bad_run=0
+
+# A second, narrower corruption: a shell line continuation (' \' + newline)
+# collapsed into the two ASCII characters '\' and 'n' (0x5C 0x6E), joining two
+# command lines into one run-on line inside a workflow `run:` block. This is not
+# a control byte, so the scan above cannot see it, and YAML parses the result
+# perfectly because the corruption lives inside the shell body where YAML has no
+# opinion (issue #9987; a real instance in ci.yml was caught only by an
+# unrelated byte-exact pin).
+#
+# WHY THIS SIGNATURE, and why not the others considered:
+#
+# The tell is WHITESPACE immediately before the backslash-n. A line continuation
+# is written ' \' -- a space (or tab) then a backslash at end of line -- so the
+# collapse always yields ' \n'. Every LEGITIMATE '\n' in a workflow is an escape
+# glued to a non-space: printf '%s\n', curl -w '\n%{http_code}', a JSON "...\n".
+# Across all workflows in this repo the sequence <whitespace>\n appears zero
+# times, so this signature catches the corruption with no false positive -- which
+# the acceptance criteria require, or the gate lands red and gets routed around.
+# Matching EVERY '\n' in a run: block was rejected for exactly that reason (it
+# flags printf/curl format strings, which are everywhere). Quote-stripping to
+# find "unquoted" '\n' was rejected too: it misfires on the generated *.lock.yml
+# files whose run: blocks embed multi-line escaped-JSON with nested \" quoting.
+#
+# Two options from #9987 are deliberately NOT taken here; the reasoning is
+# recorded so the next person does not re-derive it:
+#   * A general `verify-*` shell helper library (assert_no_literal_backslash_n,
+#     assert_yaml_step_command, ...) is the broad win, but it has no forcing
+#     function: nothing makes a given session adopt it, so it does not prevent
+#     the mistake, it only offers a correct implementation to whoever remembers
+#     to call it. A CI gate runs unconditionally; a helper does not.
+#   * A lessons-learned entry with a Bash-command trigger (matching an ad-hoc
+#     `yaml.safe_load`/`grep -n` in a command line) only WARNS before a mistake;
+#     it cannot FAIL a corruption that already landed. This gate does, on every
+#     push, which is the property that makes it worth committing.
+# Both remain worth doing; this PR ships the narrow, mechanically-enforceable
+# win that #9987 says should land regardless.
 
 while IFS= read -r f; do
   [ -n "$f" ] || continue
@@ -85,11 +122,60 @@ while IFS= read -r f; do
     printf '%s\n' "$hits" >&2
     bad=1
   fi
+
+  # Second check: literal backslash-n inside a workflow `run:` block. Scoped to
+  # workflow YAML only -- a `run:` key means "shell body" there; elsewhere it may
+  # be an ordinary field. The scan walks run: block scalars (`|`/`>`) and
+  # single-line `run:` values, and flags <whitespace>\n (a stripped ' \' line
+  # continuation) while leaving format-string escapes (printf '%s\n') untouched.
+  case "$f" in
+    */.github/workflows/*.yml|*/.github/workflows/*.yaml|.github/workflows/*.yml|.github/workflows/*.yaml)
+      run_hits="$(perl -e '
+        my $in_block = 0;
+        my $bi = -1;
+        while (my $l = <>) {
+          chomp $l;
+          my ($lead) = $l =~ /^([ \t]*)/;
+          my $indent = length $lead;
+          if ($in_block) {
+            if ($l =~ /^[ \t]*$/ || $indent > $bi) {
+              if ($l =~ /([ \t]\\n)/) {
+                printf("%s:%d:%d: literal backslash-n in run: block (a stripped shell line continuation)\n", $ARGV, $., $-[0] + 2);
+              }
+              next;
+            }
+            $in_block = 0;
+          }
+          if ($l =~ /^([ \t]*)run:[ \t]*[|>][-+0-9]*[ \t]*(?:#.*)?$/) {
+            $bi = length $1;
+            $in_block = 1;
+          } elsif ($l =~ /^([ \t]*)run:[ \t]+\S.*$/) {
+            if ($l =~ /([ \t]\\n)/) {
+              printf("%s:%d:%d: literal backslash-n in run: block (a stripped shell line continuation)\n", $ARGV, $., $-[0] + 2);
+            }
+          }
+        }
+      ' "$f" 2>/dev/null)"
+      if [ -n "$run_hits" ]; then
+        printf '%s\n' "$run_hits" >&2
+        bad_run=1
+      fi
+      ;;
+  esac
 done <<< "$files"
 
 if [ "$bad" -ne 0 ]; then
   echo "::error::check-source-encoding: control bytes found in tracked source (see above). These are invisible in normal output and survive lint, typecheck and tests. Write the character as a source escape instead of embedding the raw byte." >&2
+fi
+
+if [ "$bad_run" -ne 0 ]; then
+  # printf, not echo: the message shows a literal backslash, and echo's handling
+  # of backslashes is implementation-defined (shellcheck SC2028).
+  printf '%s\n' "::error::check-source-encoding: literal backslash-n found in run: block (see above). A shell line continuation (' \\' + newline) was collapsed into the two characters '\\' 'n', joining separate command lines into one run-on line. YAML parses it fine and lint never sees it -- only this byte check does. Restore the real line continuation." >&2
+fi
+
+if [ "$bad" -ne 0 ] || [ "$bad_run" -ne 0 ]; then
   exit 1
 fi
 
-echo "check-source-encoding: ${scanned} file(s) scanned, no control bytes outside TAB/LF"
+echo "check-source-encoding: ${scanned} file(s) scanned, no control bytes outside TAB/LF, no literal backslash-n in run: blocks"

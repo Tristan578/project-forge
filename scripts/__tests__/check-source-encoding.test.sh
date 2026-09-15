@@ -32,6 +32,22 @@ run_on() {
 }
 rc_of() { printf '%s' "${1##*|}"; }
 
+# Run the gate against one fixture WORKFLOW file, placed under a real
+# .github/workflows/ path so the run:-block check's path scoping matches it.
+# $1 = printf format producing the workflow's content. Returns "<output>|<rc>".
+run_on_workflow() {
+  local content_fmt="$1"
+  local dir out rc
+  dir="$(mktemp -d)"
+  mkdir -p "$dir/.github/workflows"
+  # shellcheck disable=SC2059  # the format IS the fixture under test
+  printf "$content_fmt" > "$dir/.github/workflows/fixture.yml"
+  printf '%s\n' "$dir/.github/workflows/fixture.yml" > "$dir/list"
+  out="$(SOURCE_ENCODING_FILE_LIST="$dir/list" bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+  rm -rf "$dir"
+  printf '%s|%s' "$out" "$rc"
+}
+
 # A CRLF shell source dies at its shebang (`$'\r': command not found`) on every
 # platform the suites run on; a Windows checkout with core.autocrlf=true
 # produces exactly that (#9611). CR stays tolerated in other files.
@@ -122,6 +138,69 @@ if [ "$(rc_of "$RES")" = "0" ]; then
   pass "a CR is left alone (line endings are git's job, not this gate's)"
 else
   fail "a CR was rejected -- that is line-ending policy, not control-byte corruption: $RES"
+fi
+
+echo ""
+echo "=== a literal backslash-n in a workflow run: block must be rejected ==="
+
+# THE CORRUPTION. A shell line continuation (' \' + newline) collapsed into the
+# two characters '\' and 'n', joining two command lines into one run-on line.
+# YAML still parses; shellcheck/lint never see it; only a byte check catches it.
+# The '\\n' below is printf for a literal backslash-n; the surrounding '\n' are
+# real newlines, so the fixture is a genuine one-line-run-on run: block.
+CORRUPT='jobs:\n  build:\n    steps:\n      - name: shellcheck\n        run: |\n          shellcheck scripts/*.sh \\n            --severity=error\n'
+RES="$(run_on_workflow "$CORRUPT")"
+if [ "$(rc_of "$RES")" != "0" ]; then
+  pass "a stripped ' \\' line continuation (literal \\n) in a run: block is rejected (exit $(rc_of "$RES"))"
+else
+  fail "a literal backslash-n in a run: block passed -- this is the exact corruption the check exists for: $RES"
+fi
+if grep -qE "fixture\.yml:[0-9]+" <<<"$RES"; then
+  pass "the report names the workflow file and line"
+else
+  fail "the report lacks a file:line locator: $RES"
+fi
+
+# THE MUTATION PAIR. Remove the corruption -- restore a real ' \' + newline line
+# continuation -- and the same fixture must go green.
+CLEAN='jobs:\n  build:\n    steps:\n      - name: shellcheck\n        run: |\n          shellcheck scripts/*.sh \\\n          --severity=error\n'
+RES="$(run_on_workflow "$CLEAN")"
+if [ "$(rc_of "$RES")" = "0" ]; then
+  pass "the same run: block with a real line continuation passes (red -> green mutation pair)"
+else
+  fail "a correctly-continued run: block was rejected: $RES"
+fi
+
+# NO FALSE POSITIVE on a legitimate escape. `printf "%s\n"` has \n glued to a
+# non-whitespace char and is real shell -- it is everywhere in the workflows and
+# must never be flagged, or the gate lands red and gets routed around.
+# shellcheck disable=SC2016  # single quotes are deliberate: $body/$url are
+# literal text in the fixture's shell body, not shell to be expanded here.
+LEGIT='jobs:\n  build:\n    steps:\n      - name: print\n        run: |\n          printf "%%s\\n" "$body"\n          curl -sS -w "\\n%%{http_code}" "$url"\n'
+RES="$(run_on_workflow "$LEGIT")"
+if [ "$(rc_of "$RES")" = "0" ]; then
+  pass "a legitimate printf/curl \\n (glued to a non-space, real shell) is not flagged"
+else
+  fail "a legitimate \\n escape in a run: block was flagged -- the gate would land red on the real tree: $RES"
+fi
+
+# SCOPE 1: the check is confined to run: blocks. A ' \n' inside an env: value
+# (not shell) must not be scanned, or the check over-reaches into other keys.
+ENVONLY='jobs:\n  build:\n    env:\n      GREETING: "hi \\n there"\n    steps:\n      - run: echo ok\n'
+RES="$(run_on_workflow "$ENVONLY")"
+if [ "$(rc_of "$RES")" = "0" ]; then
+  pass "a backslash-n outside any run: block (an env: value) is not scanned (run:-block scoping holds)"
+else
+  fail "the check reached outside a run: block into another YAML key: $RES"
+fi
+
+# SCOPE 2: the run: check applies only to workflow YAML. A ' \n' in a .ts source
+# is not the corruption class and must pass (it carries no control byte either).
+RES="$(run_on 'const s = "a \\n b";\n' ts)"
+if [ "$(rc_of "$RES")" = "0" ]; then
+  pass "a backslash-n in a non-workflow file is left alone (run: check is workflow-scoped)"
+else
+  fail "the run:-block check leaked into non-workflow files: $RES"
 fi
 
 echo ""
