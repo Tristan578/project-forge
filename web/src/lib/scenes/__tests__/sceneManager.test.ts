@@ -114,14 +114,8 @@ describe('saveProjectScenes — atomic write', () => {
     } as unknown as ProjectScenes;
     expect(() => saveProjectScenes(missingName)).toThrow(/validation/i);
 
-    const duplicateIds: ProjectScenes = {
-      version: '1.0',
-      activeSceneId: 'scene_1',
-      scenes: [
-        { id: 'scene_1', name: 'A', isStartScene: true, data: null, createdAt: '', updatedAt: '' },
-        { id: 'scene_1', name: 'B', isStartScene: false, data: null, createdAt: '', updatedAt: '' },
-      ],
-    };
+    const duplicateIds = makeProject('Duplicate IDs', 2);
+    duplicateIds.scenes[1].id = duplicateIds.scenes[0].id;
     expect(() => saveProjectScenes(duplicateIds)).toThrow(/validation/i);
 
     expect(loadProjectScenes()).toEqual(good);
