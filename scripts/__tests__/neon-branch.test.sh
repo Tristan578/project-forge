@@ -663,6 +663,41 @@ res="$(run_helper delete br-gone)"
 rc="${res%%|*}"
 if [ "$rc" = "3" ]; then pass "delete of a missing branch fails (exit 3)"; else fail "delete 404 should exit 3, got $rc"; fi
 
+# Deleting is asynchronous like creating: the 200 carries operations that may
+# still be running, and the preview policy retries a create straight after a
+# delete (#10015). delete must wait for them, exactly as create does.
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-gone-soon"},"operations":[{"id":"op-del","status":"running","action":"delete_timeline"}]}
+EOF
+stub_status 2 200
+stub_body 2 <<'EOF'
+{"operation":{"id":"op-del","status":"finished"}}
+EOF
+res="$(run_helper delete br-gone-soon)"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "delete with pending operations succeeds once they finish"; else fail "delete should exit 0 after its operations finish, got $rc ($out)"; fi
+if grep -qF 'GET https://console.neon.tech/api/v2/projects/proj-test/operations/op-del' <<<"$(requests)"; then
+  pass "delete polls the deletion's operation before returning (a retried create cannot race it)"
+else
+  fail "delete returned without polling its operations; log: $(requests | tr '\n' ' ')"
+fi
+if grep -qxF 'deleted=br-gone-soon' <<<"$out"; then pass "deleted= is printed after the wait"; else fail "deleted= line missing after an awaited delete"; fi
+
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branch":{"id":"br-stuck"},"operations":[{"id":"op-bad","status":"running"}]}
+EOF
+stub_status 2 200
+stub_body 2 <<'EOF'
+{"operation":{"id":"op-bad","status":"failed"}}
+EOF
+res="$(run_helper delete br-stuck)"
+rc="${res%%|*}"
+if [ "$rc" = "3" ]; then pass "a delete whose operation fails exits 3 (the branch may still be counted)"; else fail "a failed delete operation should exit 3, got $rc"; fi
+
 echo ""
 echo "=== neon-branch.sh: prune (snapshot retention) ==="
 # Snapshots are RETAINED after a successful deploy — that is the whole point, a
@@ -710,6 +745,23 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ] && grep -qxF 'pruned=0' <<<"$out"; then pass "prune with no stale matches reports pruned=0"; else fail "prune with no matches should report pruned=0 (rc=$rc)"; fi
 if grep -qF 'DELETE' <<<"$(requests)"; then fail "prune issued a DELETE with nothing stale to delete"; else pass "prune issues no DELETE when nothing is stale"; fi
 
+# A fractional-seconds created_at still parses. An unparseable date makes jq
+# abort the whole filter, `stale` comes back empty, and prune reports pruned=0
+# forever — the wrong kind of silent.
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[{"id":"br-frac","name":"predeploy-frac","created_at":"2020-01-01T00:00:00.250Z"}]}
+EOF
+stub_status 2 200
+res="$(run_helper prune predeploy- 7)"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && grep -qxF 'pruned=1' <<<"$out"; then
+  pass "prune parses a fractional-seconds created_at (pruned=1)"
+else
+  fail "prune should tolerate fractional seconds (rc=$rc): $(grep -F 'pruned' <<<"$out" | tr '\n' ' ')"
+fi
+
 # A failed individual delete must WARN, never fail the job: prune runs after a
 # deploy that already succeeded, and failing it would turn a green production
 # release red over housekeeping.
@@ -723,6 +775,152 @@ res="$(run_helper prune predeploy- 7)"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ]; then pass "a failed prune delete does not fail the job (exit 0)"; else fail "prune should stay exit 0 when a delete fails, got $rc"; fi
 if grep -qF '::warning::' <<<"$out"; then pass "a failed prune delete emits a ::warning::"; else fail "a failed prune delete is silent"; fi
+
+echo ""
+echo "=== neon-branch.sh: list (the audit view the preview reclaim reads) ==="
+# Oldest first, prefix-filtered, TSV. The preview policy evicts the FIRST row
+# it may, so the order is part of the contract, not a nicety.
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[
+  {"id":"br-new","name":"preview-pr-000300","created_at":"2026-09-14T20:00:00Z"},
+  {"id":"br-main","name":"production","created_at":"2026-03-01T00:00:00Z"},
+  {"id":"br-old","name":"preview-pr-000100","created_at":"2026-09-13T04:00:00Z"},
+  {"id":"br-mid","name":"preview-pr-000200","created_at":"2026-09-14T18:00:00Z"},
+  {"id":"br-snap","name":"db-snapshot-1-abc","created_at":"2026-09-04T00:00:00Z"}
+]}
+EOF
+res="$(run_helper list preview-pr-)"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "list succeeds (exit 0)"; else fail "list should exit 0, got $rc ($out)"; fi
+expected="$(printf 'br-old\tpreview-pr-000100\t2026-09-13T04:00:00Z\nbr-mid\tpreview-pr-000200\t2026-09-14T18:00:00Z\nbr-new\tpreview-pr-000300\t2026-09-14T20:00:00Z')"
+if [ "$out" = "$expected" ]; then
+  pass "list prints id/name/created_at as TSV, prefix-filtered, OLDEST FIRST"
+else
+  fail "list output differs: $(tr '\n\t' '|,' <<<"$out")"
+fi
+if grep -qF 'DELETE' <<<"$(requests)"; then fail "list issued a DELETE"; else pass "list is read-only"; fi
+
+# An empty prefix is the whole-project audit view.
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[
+  {"id":"br-b","name":"staging","created_at":"2026-03-03T00:00:00Z"},
+  {"id":"br-a","name":"production","created_at":"2026-03-01T00:00:00Z"}
+]}
+EOF
+res="$(run_helper list '')"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ "$(grep -c . <<<"$out")" = "2" ] && [ "$(head -1 <<<"$out" | cut -f1)" = "br-a" ]; then
+  pass "list '' prints every branch, oldest first"
+else
+  fail "list '' should print both branches oldest first (rc=$rc): $(tr '\n\t' '|,' <<<"$out")"
+fi
+
+# No matches: empty output and exit 0, so a caller can tell "nothing there"
+# from "could not look" (next case).
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[{"id":"br-main","name":"production","created_at":"2026-03-01T00:00:00Z"}]}
+EOF
+res="$(run_helper list preview-pr-)"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ] && [ -z "$out" ]; then pass "list with no matches prints nothing and exits 0"; else fail "list with no matches: rc=$rc out='$out'"; fi
+
+stub_reset
+stub_status 1 500
+res="$(run_helper list preview-pr-)"
+rc="${res%%|*}"
+if [ "$rc" = "3" ]; then pass "list fails loudly on an API error (exit 3)"; else fail "list on a 500 should exit 3, got $rc"; fi
+
+# --- list strips the CR jq.exe appends on Windows -----------------------------
+# jq.exe opens stdout in text mode and terminates every line with CRLF
+# (check-openapi-route-sync.test.sh case 17 documents the same quirk). The
+# first Windows sweep of this suite failed exactly here: every row came back
+# as "...Z\r". A row like that is not the TSV the helper promises -- the
+# preview policy's date parse fails on it and that row is silently never
+# evicted. Simulate that jq on EVERY platform, so deleting the normalisation
+# in cmd_list goes red on Linux CI instead of only on the Windows sweep.
+# The wrapper is written with printf/awk, not sed's GNU-only "\r", so the
+# fixture really injects CR bytes everywhere the suite runs -- and that is
+# asserted before the case relies on it (lessons-learned #19).
+CRJQ_DIR="$TMPDIR_T/crjq"
+mkdir -p "$CRJQ_DIR"
+real_jq="$(command -v jq)"
+{
+  printf '#!/usr/bin/env bash\n'
+  # shellcheck disable=SC2016
+  # The single quotes are deliberate: "$@" and "${PIPESTATUS[0]}" must land
+  # in the wrapper's SOURCE verbatim, to be expanded when it runs, not now.
+  printf '"%s" "$@" | awk '"'"'{ printf "%%s\\r\\n", $0 }'"'"'\n' "$real_jq"
+  # shellcheck disable=SC2016
+  printf 'exit "${PIPESTATUS[0]}"\n'
+} > "$CRJQ_DIR/jq"
+chmod +x "$CRJQ_DIR/jq"
+cr="$(printf '\r')"
+# Prove it the way the case below consumes it: a fresh `bash` started through
+# `env` with the wrapper first on PATH (run_helper_env's exact shape), reading
+# the bytes through a PIPE and od's rendering rather than a command
+# substitution. Two Windows quirks made the first cut of this guard trip while
+# the case it guards was genuinely exercised: Git Bash's `$(...)` strips a
+# trailing carriage return, so a one-line capture can never show one (which is
+# also why the single-value jq captures elsewhere never exposed the bug and
+# only the multi-row `list` output did), and a `PATH=... jq` prefix in the
+# suite's own shell did not resolve to the wrapper the child bash resolved to.
+if env PATH="$CRJQ_DIR:$PATH" bash -c 'echo "\"x\"" | jq -r .' | od -c | grep -q '\\r'; then
+  pass "the CRLF-jq fixture really emits a CR (the case below cannot pass vacuously)"
+else
+  fail "the CRLF-jq fixture emits no CR — the normalisation case below would be vacuous"
+fi
+stub_reset
+stub_status 1 200
+stub_body 1 <<'EOF'
+{"branches":[
+  {"id":"br-old","name":"preview-pr-000100","created_at":"2026-09-13T04:00:00Z"},
+  {"id":"br-new","name":"preview-pr-000300","created_at":"2026-09-14T20:00:00Z"}
+]}
+EOF
+res="$(run_helper_env PATH="$CRJQ_DIR:$PATH" list preview-pr-)"
+rc="${res%%|*}"; out="${res#*|}"
+expected="$(printf 'br-old\tpreview-pr-000100\t2026-09-13T04:00:00Z\nbr-new\tpreview-pr-000300\t2026-09-14T20:00:00Z')"
+case "$out" in
+  *"$cr"*) fail "list passed jq's CR through: $(tr '\n\t' '|,' <<<"$out" | od -c | head -3 | tr '\n' ' ')" ;;
+  *) pass "list strips the CR a text-mode jq appends" ;;
+esac
+if [ "$rc" = "0" ] && [ "$out" = "$expected" ]; then
+  pass "list output is byte-identical with and without a CRLF-emitting jq"
+else
+  fail "list under a CRLF jq: rc=$rc, output differs: $(tr '\n\t' '|,' <<<"$out")"
+fi
+
+echo ""
+echo "=== neon-branch.sh: a full branch allowance is a DISTINCT failure (exit 5) ==="
+# Observed live on #10000 (run 34889902111; #10015): the allowance is ten
+# branches, and once the eleventh create is refused every preview deploy fails
+# the same way until something is deleted. The caller can only reclaim-and-retry
+# if it can tell this apart from every other 4xx, so the code is typed, not
+# grepped out of a message.
+stub_reset
+stub_status 1 422
+stub_body 1 <<'EOF'
+{"request_id":"abc","code":"BRANCHES_LIMIT_EXCEEDED","message":"branches limit exceeded"}
+EOF
+res="$(run_helper create preview-pr-000042 --endpoint --uri-out "$TMPDIR_T/full.uri")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "5" ]; then pass "BRANCHES_LIMIT_EXCEEDED exits 5"; else fail "BRANCHES_LIMIT_EXCEEDED should exit 5, got $rc ($out)"; fi
+if grep -qF 'BRANCHES_LIMIT_EXCEEDED' <<<"$out"; then pass "the allowance error names the Neon code"; else fail "the allowance error does not name the code"; fi
+# Any OTHER 422 stays exit 3: the retry path must never fire on a validation error.
+stub_reset
+stub_status 1 422
+stub_body 1 <<'EOF'
+{"request_id":"abc","code":"INVALID_BRANCH_NAME","message":"bad name"}
+EOF
+res="$(run_helper create 'bad name')"
+rc="${res%%|*}"
+if [ "$rc" = "3" ]; then pass "a 422 with any other code stays exit 3"; else fail "a non-allowance 422 should exit 3, got $rc"; fi
 
 echo ""
 echo "=== neon-branch.sh: usage contract ==="
@@ -742,6 +940,8 @@ assert_usage "delete with no id" delete
 assert_usage "prune with no prefix" prune
 assert_usage "prune with a non-numeric retention" prune predeploy- seven
 assert_usage "prune with a negative retention" prune predeploy- -3
+assert_usage "list with no prefix" list
+assert_usage "list with two prefixes" list a b
 # --uri-out without --endpoint is a usage error, not a silent no-op: a branch
 # with no compute has no connection URI, so the caller's expectation is wrong
 # and the dry-run step downstream would read an empty file.
