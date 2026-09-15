@@ -56,8 +56,8 @@ const sampleManifest: MeasurementManifest = {
 };
 
 const unknownSystemCosts = [
-  { group: 'scripting', label: 'Scripting', totalMs: 'unknown' as const },
-  { group: 'bridge', label: 'Bridge', totalMs: 'unknown' as const },
+  { group: 'entitySync', label: 'Entity sync', totalMs: 'unknown' as const },
+  { group: 'transformApply', label: 'Transform apply', totalMs: 'unknown' as const },
   { group: 'physics', label: 'Physics', totalMs: 'unknown' as const },
   { group: 'rendering', label: 'Rendering', totalMs: 'unknown' as const },
 ];
@@ -271,10 +271,13 @@ describe('PerformanceProfiler', () => {
       render(<PerformanceProfiler />);
       const panel = screen.getByLabelText('Top costly systems');
       expect(panel).toBeInTheDocument();
-      expect(panel.textContent).toContain('Scripting');
-      expect(panel.textContent).toContain('Bridge');
+      expect(panel.textContent).toContain('Entity sync');
+      expect(panel.textContent).toContain('Transform apply');
       expect(panel.textContent).toContain('Physics');
       expect(panel.textContent).toContain('Rendering');
+      // The over-claiming labels must not reappear (#9880 review round 1).
+      expect(panel.textContent).not.toContain('Scripting');
+      expect(panel.textContent).not.toContain('Bridge');
     });
 
     it('shows an unmeasured group as "unknown", never as 0', () => {
@@ -298,7 +301,7 @@ describe('PerformanceProfiler', () => {
       setupStore({
         isProfilerOpen: true,
         systemCosts: [
-          { group: 'bridge', label: 'Bridge', totalMs: 0 },
+          { group: 'transformApply', label: 'Transform apply', totalMs: 0 },
           { group: 'rendering', label: 'Rendering', totalMs: 'unknown' },
         ],
       });

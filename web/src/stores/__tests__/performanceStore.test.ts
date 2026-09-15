@@ -12,6 +12,8 @@ import {
   usePerformanceStore,
   computeSystemCosts,
   MAX_SYSTEM_TIMING_FRAMES,
+  SYSTEM_GROUPS,
+  SYSTEM_GROUP_LABELS,
 } from '../performanceStore';
 
 describe('performanceStore', () => {
@@ -506,6 +508,21 @@ describe('performanceStore', () => {
       });
     });
 
+    it('labels each group for what it measures, not the broad name it replaced', () => {
+      // The bridge brackets do NOT measure user-script CPU (that runs off-frame
+      // in the JS Worker) or every JS→engine command drain — only the entity
+      // emit and the transform drain. The wire ids and UI labels must say so, or
+      // the "Top costly systems" panel over-claims (#9880 review round 1).
+      expect(SYSTEM_GROUPS).toEqual(['entitySync', 'transformApply', 'physics', 'rendering']);
+      expect(SYSTEM_GROUP_LABELS.entitySync).toBe('Entity sync');
+      expect(SYSTEM_GROUP_LABELS.transformApply).toBe('Transform apply');
+      // The retired over-claiming ids/labels must not come back.
+      expect(SYSTEM_GROUPS as readonly string[]).not.toContain('scripting');
+      expect(SYSTEM_GROUPS as readonly string[]).not.toContain('bridge');
+      expect(Object.values(SYSTEM_GROUP_LABELS)).not.toContain('Scripting');
+      expect(Object.values(SYSTEM_GROUP_LABELS)).not.toContain('Bridge');
+    });
+
     it('starts with every group unavailable (unknown), never zero', () => {
       const costs = computeSystemCosts([]);
       expect(costs).toHaveLength(4);
@@ -535,16 +552,16 @@ describe('performanceStore', () => {
     it('aggregates measured groups and keeps unmeasured groups unknown', () => {
       const store = usePerformanceStore.getState();
       store.startSystemCapture();
-      store.pushSystemTimingFrame({ frameIndex: 0, perGroupMs: { physics: 2, bridge: 1, scripting: 0 } });
+      store.pushSystemTimingFrame({ frameIndex: 0, perGroupMs: { physics: 2, transformApply: 1, entitySync: 0 } });
       store.pushSystemTimingFrame({ frameIndex: 1, perGroupMs: { physics: 3 } });
 
       const byGroup = Object.fromEntries(
         usePerformanceStore.getState().systemCosts.map((c) => [c.group, c.totalMs]),
       );
       expect(byGroup.physics).toBe(5);
-      expect(byGroup.bridge).toBe(1);
+      expect(byGroup.transformApply).toBe(1);
       // A measured 0 is a real value, distinct from unavailable.
-      expect(byGroup.scripting).toBe(0);
+      expect(byGroup.entitySync).toBe(0);
       // Rendering was never measured this slice -> unavailable, NOT 0.
       expect(byGroup.rendering).toBe('unknown');
       expect(byGroup.rendering).not.toBe(0);
@@ -553,11 +570,11 @@ describe('performanceStore', () => {
     it('ranks the costliest measured group first and unknown groups last', () => {
       const store = usePerformanceStore.getState();
       store.startSystemCapture();
-      store.pushSystemTimingFrame({ frameIndex: 0, perGroupMs: { scripting: 1, physics: 8, bridge: 4 } });
+      store.pushSystemTimingFrame({ frameIndex: 0, perGroupMs: { entitySync: 1, physics: 8, transformApply: 4 } });
       const costs = usePerformanceStore.getState().systemCosts;
       expect(costs[0].group).toBe('physics');
-      expect(costs[1].group).toBe('bridge');
-      expect(costs[2].group).toBe('scripting');
+      expect(costs[1].group).toBe('transformApply');
+      expect(costs[2].group).toBe('entitySync');
       expect(costs[3].group).toBe('rendering');
       expect(costs[3].totalMs).toBe('unknown');
     });

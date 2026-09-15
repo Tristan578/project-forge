@@ -8,10 +8,22 @@
 //! Isolation; `bridge/` is never compiled by `cargo test`, so the buffer's
 //! invariants are asserted natively in `core::system_timing` instead.
 //!
-//! Instrumented groups this slice: Scripting (per-frame script tick), Bridge
-//! (JS→engine command drain), Physics (play-mode step set). Rendering/GPU is
-//! NOT instrumented here (OP-02); it is never recorded, so it reaches the UI as
-//! `None` → "unknown" rather than a fabricated `0.0`.
+//! Instrumented groups this slice, each named for exactly what its bracket
+//! measures:
+//! - `EntitySync`: the per-frame entity-state emit (`emit_play_tick_system`),
+//!   Rust-side serialization only. User-script CPU runs off-frame in the JS
+//!   Worker sandbox and is unreachable from any Rust bracket, so this is NOT
+//!   labelled "Scripting".
+//! - `TransformApply`: the JS→engine transform drain (`apply_pending_transforms`)
+//!   only, not the other command drains, so it is NOT labelled "Bridge".
+//! - `Physics`: Rapier's real simulation step. Its bracket is registered in
+//!   `PostUpdate` around Rapier's `PhysicsSet` (SyncBackend→Writeback), the
+//!   schedule `RapierPhysicsPlugin` steps the simulation in — an `Update`
+//!   bracket would capture only joint lifecycle / gameplay systems, never the
+//!   solver, so it would report a physics-heavy frame as cheap.
+//!
+//! Rendering/GPU is NOT instrumented here (OP-02); it is never recorded, so it
+//! reaches the UI as `None` → "unknown" rather than a fabricated `0.0`.
 
 use bevy::platform::time::Instant;
 use bevy::prelude::*;
@@ -78,39 +90,39 @@ pub fn apply_system_timing_capture_request(mut buffer: ResMut<SystemTimingBuffer
 // in `bridge/mod.rs`; they take no anchor resources, so they add no ordering
 // constraint beyond that and cannot perturb gameplay system order.
 
-/// Begin Scripting-group timing (before the per-frame script tick).
-pub fn begin_scripting_timing(
+/// Begin EntitySync-group timing (before the per-frame entity-state emit).
+pub fn begin_entity_sync_timing(
     mut scratch: ResMut<SystemTimingScratch>,
     buffer: Res<SystemTimingBuffer>,
 ) {
-    scratch.begin(SystemGroup::Scripting, buffer.is_capturing());
+    scratch.begin(SystemGroup::EntitySync, buffer.is_capturing());
 }
 
-/// End Scripting-group timing (after the per-frame script tick).
-pub fn end_scripting_timing(
+/// End EntitySync-group timing (after the per-frame entity-state emit).
+pub fn end_entity_sync_timing(
     mut scratch: ResMut<SystemTimingScratch>,
     mut buffer: ResMut<SystemTimingBuffer>,
 ) {
-    scratch.end(SystemGroup::Scripting, &mut buffer);
+    scratch.end(SystemGroup::EntitySync, &mut buffer);
 }
 
-/// Begin Bridge-group timing (before the JS→engine command drains).
-pub fn begin_bridge_timing(
+/// Begin TransformApply-group timing (before the JS→engine transform drain).
+pub fn begin_transform_apply_timing(
     mut scratch: ResMut<SystemTimingScratch>,
     buffer: Res<SystemTimingBuffer>,
 ) {
-    scratch.begin(SystemGroup::Bridge, buffer.is_capturing());
+    scratch.begin(SystemGroup::TransformApply, buffer.is_capturing());
 }
 
-/// End Bridge-group timing (after the JS→engine command drains).
-pub fn end_bridge_timing(
+/// End TransformApply-group timing (after the JS→engine transform drain).
+pub fn end_transform_apply_timing(
     mut scratch: ResMut<SystemTimingScratch>,
     mut buffer: ResMut<SystemTimingBuffer>,
 ) {
-    scratch.end(SystemGroup::Bridge, &mut buffer);
+    scratch.end(SystemGroup::TransformApply, &mut buffer);
 }
 
-/// Begin Physics-group timing (before the play-mode physics step set).
+/// Begin Physics-group timing (before Rapier's `PhysicsSet` in `PostUpdate`).
 pub fn begin_physics_timing(
     mut scratch: ResMut<SystemTimingScratch>,
     buffer: Res<SystemTimingBuffer>,
@@ -118,7 +130,7 @@ pub fn begin_physics_timing(
     scratch.begin(SystemGroup::Physics, buffer.is_capturing());
 }
 
-/// End Physics-group timing (after the play-mode physics step set).
+/// End Physics-group timing (after Rapier's `PhysicsSet` in `PostUpdate`).
 pub fn end_physics_timing(
     mut scratch: ResMut<SystemTimingScratch>,
     mut buffer: ResMut<SystemTimingBuffer>,

@@ -38,16 +38,25 @@ export interface CapturedPerformanceReport {
 
 /**
  * Coarse engine system groups a frame's CPU cost is attributed to. Mirrors the
- * Rust `SystemGroup` labels exactly — these strings are the wire contract with
- * the `SYSTEM_TIMINGS` bridge event.
+ * Rust `SystemGroup::label()` strings exactly (same order) — these are the wire
+ * contract with the `SYSTEM_TIMINGS` bridge event. Each id names exactly what
+ * the engine bracket measures: `entitySync` is the Rust-side entity-state emit
+ * (NOT user-script CPU, which runs off-frame in the JS Worker), `transformApply`
+ * is the one transform command drain (NOT every JS→engine drain), and `physics`
+ * is Rapier's real solver step.
  */
-export const SYSTEM_GROUPS = ['scripting', 'bridge', 'physics', 'rendering'] as const;
+export const SYSTEM_GROUPS = ['entitySync', 'transformApply', 'physics', 'rendering'] as const;
 export type SystemGroupId = (typeof SYSTEM_GROUPS)[number];
 
-/** Human-readable label per group, for the "Top costly systems" panel. */
+/**
+ * Human-readable label per group, for the "Top costly systems" panel. These are
+ * deliberately narrow ("Entity sync", "Transform apply") rather than the broad
+ * "Scripting"/"Bridge" they replaced, so the panel never claims to measure cost
+ * it cannot see (user-script CPU, or command drains other than transforms).
+ */
 export const SYSTEM_GROUP_LABELS: Record<SystemGroupId, string> = {
-  scripting: 'Scripting',
-  bridge: 'Bridge',
+  entitySync: 'Entity sync',
+  transformApply: 'Transform apply',
   physics: 'Physics',
   rendering: 'Rendering',
 };
@@ -85,8 +94,8 @@ export interface SystemCost {
  */
 export function computeSystemCosts(history: SystemTimingFrame[]): SystemCost[] {
   const totals: Record<SystemGroupId, number | null> = {
-    scripting: null,
-    bridge: null,
+    entitySync: null,
+    transformApply: null,
     physics: null,
     rendering: null,
   };

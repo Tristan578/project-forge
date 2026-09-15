@@ -1,10 +1,19 @@
 //! Per-system-group CPU timing capture (performance.FR-1.OP-01 / OP-04).
 //!
 //! A bounded rolling buffer of per-frame CPU cost, attributed to a small set of
-//! coarse system groups (scripting, bridge, physics, rendering). It exists so
-//! that a frame spike observed in the editor can be attributed to the group of
-//! systems responsible for it, from a captured session rather than from a
-//! live-but-unrecorded read.
+//! coarse system groups (entity-sync, transform-apply, physics, rendering). It
+//! exists so that a frame spike observed in the editor can be attributed to the
+//! group of systems responsible for it, from a captured session rather than
+//! from a live-but-unrecorded read.
+//!
+//! Each group names exactly what its bridge bracket measures, so the "Top
+//! costly systems" panel never over-claims. In particular the labels are
+//! deliberately narrow (`EntitySync`, `TransformApply`) rather than the broad
+//! `Scripting`/`Bridge` they replaced: user-script CPU is paid off-frame in the
+//! JS Worker and never reaches a Rust bracket, and only the transform drain is
+//! bracketed, not every JS→engine command drain. `Physics` is the exception —
+//! its bracket wraps Rapier's actual `PhysicsSet` step, so the honest name is
+//! the accurate one.
 //!
 //! Design invariants:
 //! - Pure core/. This module holds only data + accumulation logic. The
@@ -41,11 +50,22 @@ pub const DEFAULT_TIMING_CAPACITY: usize = 240;
 /// represented here (see OP-02).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SystemGroup {
-    /// User-authored game scripts and the script-facing command drains.
-    Scripting,
-    /// JS to engine command application (the bridge command drains).
-    Bridge,
-    /// Physics stepping and joint/collider lifecycle.
+    /// Per-frame entity-state sync emitted to the JS script runtime
+    /// (`emit_play_tick_system`): builds and emits the delta-compressed entity
+    /// snapshot. This is Rust-side serialization only — user script code runs
+    /// off-frame in the JS Worker sandbox and is NOT captured here, so the group
+    /// is named for what it measures rather than "scripting".
+    EntitySync,
+    /// JS→engine transform command application (`apply_pending_transforms`).
+    /// Only the transform drain is bracketed, not the other JS→engine command
+    /// drains (visibility, material, tilemap, camera, skeleton2d, …), so the
+    /// group is named for that specific drain rather than the whole bridge.
+    TransformApply,
+    /// Rapier's physics simulation step — collision detection, constraint
+    /// solving and writeback. The bracket wraps Rapier's `PhysicsSet`
+    /// (SyncBackend→StepSimulation→Writeback) in `PostUpdate`, which is where
+    /// `RapierPhysicsPlugin` schedules the real simulation, so this is the
+    /// actual physics CPU cost.
     Physics,
     /// Render-side CPU work. Not instrumented in this slice (OP-02); always
     /// reported unavailable so it can never masquerade as 0.0.
@@ -55,8 +75,8 @@ pub enum SystemGroup {
 impl SystemGroup {
     /// Every group, in stable index order.
     pub const ALL: [SystemGroup; SYSTEM_GROUP_COUNT] = [
-        SystemGroup::Scripting,
-        SystemGroup::Bridge,
+        SystemGroup::EntitySync,
+        SystemGroup::TransformApply,
         SystemGroup::Physics,
         SystemGroup::Rendering,
     ];
@@ -65,19 +85,22 @@ impl SystemGroup {
     #[inline]
     pub const fn index(self) -> usize {
         match self {
-            SystemGroup::Scripting => 0,
-            SystemGroup::Bridge => 1,
+            SystemGroup::EntitySync => 0,
+            SystemGroup::TransformApply => 1,
             SystemGroup::Physics => 2,
             SystemGroup::Rendering => 3,
         }
     }
 
-    /// Stable machine label, matched by the web store / event handler.
+    /// Stable machine label, matched by the web store / event handler. These
+    /// strings are the wire contract with the `SYSTEM_TIMINGS` bridge event and
+    /// must stay in lockstep with `SYSTEM_GROUPS` in
+    /// `web/src/stores/performanceStore.ts`.
     #[inline]
     pub const fn label(self) -> &'static str {
         match self {
-            SystemGroup::Scripting => "scripting",
-            SystemGroup::Bridge => "bridge",
+            SystemGroup::EntitySync => "entitySync",
+            SystemGroup::TransformApply => "transformApply",
             SystemGroup::Physics => "physics",
             SystemGroup::Rendering => "rendering",
         }
@@ -259,10 +282,19 @@ mod tests {
             seen[g.index()] = true;
         }
         assert!(seen.iter().all(|&s| s), "every index must be covered");
-        assert_eq!(SystemGroup::Scripting.label(), "scripting");
-        assert_eq!(SystemGroup::Bridge.label(), "bridge");
+        // Wire labels are the contract with the web store; they must name what
+        // the bracket actually measures, not the broad group they replaced.
+        assert_eq!(SystemGroup::EntitySync.label(), "entitySync");
+        assert_eq!(SystemGroup::TransformApply.label(), "transformApply");
         assert_eq!(SystemGroup::Physics.label(), "physics");
         assert_eq!(SystemGroup::Rendering.label(), "rendering");
+        // The retired broad labels must not leak back: a "scripting" bucket
+        // that only measured Rust serialization, or a "bridge" bucket that only
+        // measured the transform drain, is exactly the mislabel this guards.
+        for g in SystemGroup::ALL {
+            assert_ne!(g.label(), "scripting", "'scripting' overclaims user-script CPU");
+            assert_ne!(g.label(), "bridge", "'bridge' overclaims the full command drains");
+        }
     }
 
     #[test]
@@ -279,12 +311,12 @@ mod tests {
         buf.start_capture();
         buf.record(SystemGroup::Physics, 1.5);
         buf.record(SystemGroup::Physics, 2.0);
-        buf.record(SystemGroup::Scripting, 0.25);
+        buf.record(SystemGroup::EntitySync, 0.25);
         let frame = buf.commit_frame().expect("capturing, so a frame commits");
         assert_eq!(frame.group(SystemGroup::Physics), Some(3.5));
-        assert_eq!(frame.group(SystemGroup::Scripting), Some(0.25));
-        // Bridge and Rendering were never recorded, so unavailable, NOT 0.0.
-        assert_eq!(frame.group(SystemGroup::Bridge), None);
+        assert_eq!(frame.group(SystemGroup::EntitySync), Some(0.25));
+        // TransformApply and Rendering were never recorded, so unavailable, NOT 0.0.
+        assert_eq!(frame.group(SystemGroup::TransformApply), None);
         assert_eq!(frame.group(SystemGroup::Rendering), None);
         assert_eq!(frame.measured_total_ms(), 3.75);
     }
@@ -293,9 +325,9 @@ mod tests {
     fn a_measured_zero_is_distinct_from_unmeasured() {
         let mut buf = SystemTimingBuffer::new(8);
         buf.start_capture();
-        buf.record(SystemGroup::Bridge, 0.0);
+        buf.record(SystemGroup::TransformApply, 0.0);
         let frame = buf.commit_frame().unwrap();
-        assert_eq!(frame.group(SystemGroup::Bridge), Some(0.0));
+        assert_eq!(frame.group(SystemGroup::TransformApply), Some(0.0));
         assert_eq!(frame.group(SystemGroup::Rendering), None);
     }
 
@@ -331,15 +363,15 @@ mod tests {
         let mut buf = SystemTimingBuffer::new(8);
         buf.start_capture();
         buf.record(SystemGroup::Physics, 2.0);
-        buf.record(SystemGroup::Bridge, 1.0);
+        buf.record(SystemGroup::TransformApply, 1.0);
         buf.commit_frame();
         buf.record(SystemGroup::Physics, 3.0);
         buf.commit_frame();
         let agg = buf.aggregate_ms();
         assert_eq!(agg[SystemGroup::Physics.index()], Some(5.0));
-        assert_eq!(agg[SystemGroup::Bridge.index()], Some(1.0));
-        // Scripting/Rendering never measured, so still unavailable, not 0.0.
-        assert_eq!(agg[SystemGroup::Scripting.index()], None);
+        assert_eq!(agg[SystemGroup::TransformApply.index()], Some(1.0));
+        // EntitySync/Rendering never measured, so still unavailable, not 0.0.
+        assert_eq!(agg[SystemGroup::EntitySync.index()], None);
         assert_eq!(agg[SystemGroup::Rendering.index()], None);
     }
 

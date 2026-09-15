@@ -41,7 +41,7 @@ export function handlePerformanceEvent(
       // handler forwards the payload verbatim, never coercing a gap to 0.
       const timingPayload = data as {
         frameIndex: number;
-        perGroupMs: Partial<Record<'scripting' | 'bridge' | 'physics' | 'rendering', number>>;
+        perGroupMs: Partial<Record<'entitySync' | 'transformApply' | 'physics' | 'rendering', number>>;
       };
       usePerformanceStore.getState().pushSystemTimingFrame({
         frameIndex: timingPayload.frameIndex,

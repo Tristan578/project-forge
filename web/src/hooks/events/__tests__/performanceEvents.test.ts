@@ -105,7 +105,7 @@ describe('handlePerformanceEvent', () => {
   it('SYSTEM_TIMINGS: forwards a per-frame system-group snapshot to the store', () => {
     const payload = {
       frameIndex: 7,
-      perGroupMs: { scripting: 1.5, bridge: 0.5, physics: 2.25 },
+      perGroupMs: { entitySync: 1.5, transformApply: 0.5, physics: 2.25 },
     };
 
     const result = handlePerformanceEvent('SYSTEM_TIMINGS', payload as never, mockSetGet.set, mockSetGet.get);
@@ -113,7 +113,7 @@ describe('handlePerformanceEvent', () => {
     expect(result).toBe(true);
     expect(mockPushSystemTimingFrame).toHaveBeenCalledWith({
       frameIndex: 7,
-      perGroupMs: { scripting: 1.5, bridge: 0.5, physics: 2.25 },
+      perGroupMs: { entitySync: 1.5, transformApply: 0.5, physics: 2.25 },
     });
   });
 

@@ -736,44 +736,67 @@ impl Plugin for SelectionPlugin {
         // Per-system-group CPU timing (performance.FR-1.OP-01/OP-04, #9880).
         // Always-present: a capture session stays inert until JS calls
         // `set_system_timing_capture`, so idle overhead is a single branch per
-        // bracket per frame. Each bracket is ordered around a representative
-        // anchor for its group via `.before`/`.after`; the brackets take no
-        // anchor resources, so they add no ordering edge beyond that pair and
-        // cannot perturb the order of the gameplay systems they wrap. Scripting,
-        // Bridge and Physics are instrumented here; Rendering/GPU (OP-02) is not,
-        // so it is never recorded and reaches the UI as "unknown", not 0.
+        // bracket per frame. Each bracket is ordered around the systems it
+        // actually measures via `.before`/`.after`; the brackets take no anchor
+        // resources, so they add no ordering edge beyond that pair and cannot
+        // perturb the order of the systems they wrap. Each group is named for
+        // exactly what its anchor covers:
+        //   - EntitySync   -> `emit_play_tick_system` (the per-frame entity-state
+        //                     emit; Rust-side serialization only, NOT user-script
+        //                     CPU, which runs off-frame in the JS Worker).
+        //   - TransformApply -> `apply_pending_transforms` (that one JS->engine
+        //                     drain only, NOT every command drain).
+        //   - Physics      -> Rapier's `PhysicsSet` in `PostUpdate`, which is the
+        //                     schedule `RapierPhysicsPlugin` steps the simulation
+        //                     in (SyncBackend -> StepSimulation -> Writeback). An
+        //                     `Update` bracket ordered around `PlaySystemSet`
+        //                     would see only joint lifecycle / gameplay systems
+        //                     and never the solver, reporting a physics-heavy
+        //                     frame as cheap. When physics is not enabled the set
+        //                     has no members and the ordering is simply inert.
+        // Rendering/GPU (OP-02) is not instrumented, so it is never recorded and
+        // reaches the UI as "unknown", not 0.
         app.init_resource::<crate::core::system_timing::SystemTimingBuffer>()
             .init_resource::<observability_bridge::SystemTimingScratch>()
             .add_systems(First, observability_bridge::apply_system_timing_capture_request)
             .add_systems(
                 Update,
-                observability_bridge::begin_scripting_timing
+                observability_bridge::begin_entity_sync_timing
                     .before(scripts::emit_play_tick_system),
             )
             .add_systems(
                 Update,
-                observability_bridge::end_scripting_timing
+                observability_bridge::end_entity_sync_timing
                     .after(scripts::emit_play_tick_system),
             )
             .add_systems(
                 Update,
-                observability_bridge::begin_bridge_timing
+                observability_bridge::begin_transform_apply_timing
                     .before(core_systems::apply_pending_transforms),
             )
             .add_systems(
                 Update,
-                observability_bridge::end_bridge_timing
+                observability_bridge::end_transform_apply_timing
                     .after(core_systems::apply_pending_transforms),
             )
+            // Both physics backends (3D `PhysicsPlugin`, 2D `Physics2dPlugin`)
+            // are always registered and each schedules its OWN `PhysicsSet`
+            // chain in `PostUpdate`, so the bracket orders before both
+            // SyncBackends and after both Writebacks — a 2D-only game would
+            // otherwise leave the rapier2d solver (its real cost) outside the
+            // window. Ordering against a set with no members (the unused backend
+            // in a given scene) is inert, so this adds no constraint there.
             .add_systems(
-                Update,
+                PostUpdate,
                 observability_bridge::begin_physics_timing
-                    .before(crate::core::engine_mode::PlaySystemSet),
+                    .before(bevy_rapier3d::prelude::PhysicsSet::SyncBackend)
+                    .before(bevy_rapier2d::prelude::PhysicsSet::SyncBackend),
             )
             .add_systems(
-                Update,
+                PostUpdate,
                 observability_bridge::end_physics_timing
-                    .after(crate::core::engine_mode::PlaySystemSet),
+                    .after(bevy_rapier3d::prelude::PhysicsSet::Writeback)
+                    .after(bevy_rapier2d::prelude::PhysicsSet::Writeback),
             )
             .add_systems(Last, observability_bridge::commit_and_emit_system_timings);
 
