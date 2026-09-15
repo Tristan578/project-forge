@@ -137,7 +137,11 @@ impl InputMap {
     }
 
     /// Remove one binding from a slot. Returns whether anything was removed. A
-    /// slot that does not exist removes nothing and is not created.
+    /// slot that does not exist removes nothing and is not created. Removing a
+    /// player 1+ slot's LAST binding drops the whole `players` entry rather than
+    /// leaving an empty one behind — `player_slots()` reads `players.keys()`
+    /// directly, so a lingering empty entry reported a "ghost" occupied slot
+    /// with nothing bound to it.
     pub fn remove_binding(&mut self, player: u8, name: &str) -> bool {
         let removed = if player == 0 {
             self.actions.remove(name).is_some()
@@ -147,7 +151,13 @@ impl InputMap {
             false
         };
         if removed {
-            self.set_preset(player, None);
+            let now_empty = player != 0
+                && self.players.get(&player).is_some_and(|p| p.actions.is_empty());
+            if now_empty {
+                self.players.remove(&player);
+            } else {
+                self.set_preset(player, None);
+            }
         }
         removed
     }
@@ -930,6 +940,9 @@ mod tests {
         let mut map = InputMap::default();
         map.set_binding(0, digital("grab", vec!["KeyE"]));
         map.set_binding(1, digital("grab", vec!["KeyP"]));
+        // A second binding on player 2 so removing "grab" leaves the slot
+        // occupied — the empty-slot case has its own dedicated test below.
+        map.set_binding(1, digital("jump", vec!["KeyO"]));
 
         assert!(map.remove_binding(1, "grab"), "player 2's grab is removed");
         assert!(
@@ -940,6 +953,32 @@ mod tests {
         // Removing from a slot that never existed removes nothing and creates nothing.
         assert!(!map.remove_binding(5, "grab"));
         assert!(map.actions_for(5).is_none());
+    }
+
+    /// REMOVING A SLOT'S LAST BINDING DROPS THE SLOT — NO GHOST ENTRY.
+    ///
+    /// Regression for a bug where `remove_binding` cleared a player 1+ slot's
+    /// `actions` map but left the (now-empty) `players` entry behind.
+    /// `player_slots()` reads `players.keys()` directly, so that empty entry
+    /// kept reporting the slot as occupied with nothing bound to it.
+    #[test]
+    fn op04_removing_the_last_binding_drops_the_ghost_slot() {
+        let mut map = InputMap::default();
+        map.set_binding(1, digital("grab", vec!["KeyP"]));
+        assert_eq!(map.player_slots(), vec![0, 1], "player 2 is occupied");
+
+        assert!(map.remove_binding(1, "grab"), "player 2's only binding is removed");
+
+        assert_eq!(
+            map.player_slots(),
+            vec![0],
+            "player 2's slot must not linger empty once its last binding is gone",
+        );
+        assert!(
+            map.actions_for(1).is_none(),
+            "an emptied slot reads exactly like one that was never bound",
+        );
+        assert_eq!(map.preset_for(1), None);
     }
 
     /// PRESSING PLAYER 1's KEY DOES NOT AFFECT PLAYER 2's ActionValue.
