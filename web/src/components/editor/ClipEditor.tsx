@@ -63,21 +63,25 @@ function ClipNumberField({ id, label, value, min, max, step = 0.01, unit, invali
   // from the assertive validation alert until the edit is deliberately committed
   // on blur or Enter.
   const [text, setText] = useState(() => format(value));
-  const committedRef = useRef(value);
+  const committedRef = useRef({ value, disabled });
+  const dirtyRef = useRef(false);
   useEffect(() => {
-    if (!Object.is(committedRef.current, value)) {
-      committedRef.current = value;
+    if (!Object.is(committedRef.current.value, value) || committedRef.current.disabled !== disabled) {
+      committedRef.current = { value, disabled };
+      dirtyRef.current = false;
       setText(format(value));
     }
-  }, [value, format]);
+  }, [value, disabled, format]);
 
   const commit = useCallback(() => {
+    if (!dirtyRef.current || disabled) return;
+    dirtyRef.current = false;
     onCommit(parseFloat(text));
     // On reject the committed `value` is unchanged and the effect above does not
     // fire, so drop the rejected intermediate text back to the last committed
     // value here; on accept the effect refreshes it to the new value.
     setText(format(value));
-  }, [onCommit, text, value, format]);
+  }, [onCommit, text, value, disabled, format]);
 
   return (
     <div className="flex items-center gap-2">
@@ -94,12 +98,20 @@ function ClipNumberField({ id, label, value, min, max, step = 0.01, unit, invali
         disabled={disabled}
         error={invalid}
         aria-invalid={invalid ? true : undefined}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          dirtyRef.current = true;
+          setText(e.target.value);
+        }}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
             commit();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            dirtyRef.current = false;
+            setText(format(value));
           }
         }}
         className={cn('min-w-0 flex-1 px-2 text-xs', invalid && 'ring-1 ring-[var(--sf-destructive)]')}

@@ -500,4 +500,38 @@ describe('Standalone clip editing prototype (audio.FR-1.OP-02)', () => {
     expect(gain.value).toBe('0');
     expect(screen.getByRole('button', { name: 'Undo clip edit' })).toBeDisabled();
   });
+  it('commits Enter followed by blur once and preserves redo on untouched controls', () => {
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
+    const gain = screen.getByLabelText('Gain');
+    const undo = screen.getByRole('button', { name: 'Undo clip edit' });
+    const redo = screen.getByRole('button', { name: 'Redo clip edit' });
+    fireEvent.change(gain, { target: { value: '-6' } });
+    fireEvent.keyDown(gain, { key: 'Enter' });
+    fireEvent.keyDown(gain, { key: 'Enter' });
+    fireEvent.blur(gain);
+    fireEvent.click(undo);
+    expect(gain).toHaveValue(0);
+    expect(undo).toBeDisabled();
+    expect(redo).toBeEnabled();
+
+    fireEvent.focus(gain);
+    fireEvent.blur(gain);
+    fireEvent.keyDown(screen.getByLabelText('Trim end'), { key: 'Enter' });
+    expect(undo).toBeDisabled();
+    expect(redo).toBeEnabled();
+    fireEvent.click(redo);
+    expect(gain).toHaveValue(-6);
+  });
+
+  it('Escape discards a draft and the following blur does not create an undo entry', () => {
+    render(<ClipEditor assetId={AUDIO_ASSET.id} asset={AUDIO_ASSET} sourceBounds={{ durationSec: 1, sampleRate: 48000 }} />);
+    const gain = screen.getByLabelText('Gain');
+    fireEvent.change(gain, { target: { value: '-70' } });
+    fireEvent.keyDown(gain, { key: 'Escape' });
+    expect(gain).toHaveValue(0);
+    fireEvent.blur(gain);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Undo clip edit' })).toBeDisabled();
+  });
+
 });

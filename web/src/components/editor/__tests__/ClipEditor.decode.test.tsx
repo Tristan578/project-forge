@@ -9,7 +9,7 @@ const asset: AssetMetadata = {
   source: { type: 'url', url: 'https://example.com/sound.wav' },
 };
 
-function mockDeferredDecode() {
+function mockDeferredDecode(duration = 4) {
   let resolveDecode!: (buffer: AudioBuffer) => void;
   let rejectDecode!: (error: Error) => void;
   const decoded = new Promise<AudioBuffer>((resolve, reject) => {
@@ -25,7 +25,7 @@ function mockDeferredDecode() {
   const fetchMock = vi.fn(async (_url: string, _options?: RequestInit) => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) }));
   vi.stubGlobal('fetch', fetchMock);
   const channel = new Float32Array([0, 0.5, -1, 0.25, 0, 0.5, 1, 0]);
-  const buffer: AudioBuffer = { duration: 4, sampleRate: 8, length: 32, numberOfChannels: 1,
+  const buffer: AudioBuffer = { duration, sampleRate: 8, length: 32, numberOfChannels: 1,
     getChannelData: () => new Float32Array([...channel, ...channel, ...channel, ...channel]),
     copyFromChannel: vi.fn(),
     copyToChannel: vi.fn(),
@@ -115,4 +115,20 @@ describe('ClipEditor decoded source bounds', () => {
     expect(screen.getByLabelText('Trim end')).toBeDisabled();
     expect(screen.getByLabelText('Trim end')).toHaveValue(null);
   });
+  it.each([1, 4])('shows every enabled field after decoding a %i second source', async (duration) => {
+    const source = mockDeferredDecode(duration);
+    render(<ClipEditor assetId={asset.id} asset={asset} />);
+    await waitFor(() => expect(source.decode).toHaveBeenCalledOnce());
+    await act(async () => source.resolveDecode());
+    for (const label of ['Trim start', 'Gain', 'Fade in', 'Fade out', 'Loop start']) {
+      expect(screen.getByLabelText(label)).toBeEnabled();
+      expect(screen.getByLabelText(label)).toHaveValue(0);
+    }
+    expect(screen.getByLabelText('Trim end')).toHaveValue(duration);
+    expect(screen.getByLabelText('Loop end')).toHaveValue(duration);
+    fireEvent.blur(screen.getByLabelText('Gain'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Undo clip edit' })).toBeDisabled();
+  });
+
 });
