@@ -283,16 +283,20 @@ async function POST_impl(request: NextRequest) {
     // — /play must never point at a bundle carrying the previous version's
     // scene data.
     const bundle = await mirrorBundleToR2(newVersion);
-    // cdnUrl becomes the CDN bundle URL only when the mirror succeeded, which
-    // is exactly when CDN_URL is configured (uploadToR2 throws otherwise);
-    // otherwise it stays the internal /play route.
+    // cdnUrl ALWAYS stays the stable internal /play route. Every consumer of
+    // this column (the community gallery's Play button and share link, the
+    // publish/list route) resolves it as the playable page, so it must never be
+    // repointed at the raw R2 bundle object. The bundle object is tracked solely
+    // by cdnBundleKey, which /play uses to decide whether to read from R2. On a
+    // failed mirror the key drops back to NULL so /play never points at a bundle
+    // carrying the previous version's scene data (#7580 review).
     await queryWithResilience(() => getDb().update(publishedGames)
       .set({
         title: title,
         description: description ?? null,
         status: 'published',
         version: newVersion,
-        cdnUrl: bundle?.url ?? gameUrl,
+        cdnUrl: gameUrl,
         cdnBundleKey: bundle?.key ?? null,
         thumbnail,
         updatedAt: new Date(),
@@ -320,8 +324,16 @@ async function POST_impl(request: NextRequest) {
   // Create new publication — use onConflictDoUpdate to handle concurrent
   // publishes with the same slug atomically (PF-212: TOCTOU fix).
   // The unique index uq_published_games_slug(userId, slug) prevents duplicates.
-  const bundle = await mirrorBundleToR2(1);
-  const [publication] = await queryWithResilience(() => getDb().insert(publishedGames)
+  //
+  // The row is PERSISTED FIRST, before the R2 mirror, so the database assigns
+  // the authoritative version: 1 on a genuine insert, or `version + 1` when a
+  // concurrent duplicate-slug publish raced this request onto the
+  // onConflictDoUpdate arm. Only then is the bundle mirrored, stamped with the
+  // version the row actually carries — so the manifest can never declare a
+  // version (e.g. a hardcoded 1) that diverges from what the concurrent writer
+  // stamped (#7580 review). cdnUrl always stays the /play route; the bundle
+  // object is tracked by cdnBundleKey, patched in the fail-open follow-up below.
+  const [inserted] = await queryWithResilience(() => getDb().insert(publishedGames)
     .values({
       userId: user.id,
       projectId: projectId,
@@ -329,8 +341,8 @@ async function POST_impl(request: NextRequest) {
       title: title,
       description: description ?? null,
       status: 'published',
-      cdnUrl: bundle?.url ?? gameUrl,
-      cdnBundleKey: bundle?.key ?? null,
+      cdnUrl: gameUrl,
+      cdnBundleKey: null,
       thumbnail,
     })
     .onConflictDoUpdate({
@@ -340,14 +352,29 @@ async function POST_impl(request: NextRequest) {
         title: title,
         description: description ?? null,
         status: 'published',
-        cdnUrl: bundle?.url ?? gameUrl,
-        cdnBundleKey: bundle?.key ?? null,
+        cdnUrl: gameUrl,
+        // Drop any stale key up front; the mirror below re-sets it on success.
+        // A failed mirror on this raced path must not leave /play pointed at the
+        // previous version's bundle.
+        cdnBundleKey: null,
         thumbnail,
         version: sql`${publishedGames.version} + 1`,
         updatedAt: new Date(),
       },
     })
     .returning());
+
+  // Mirror using the version the database actually stamped, so the manifest
+  // matches the persisted row on both the genuine-insert and the raced
+  // onConflictDoUpdate paths. FAIL-OPEN: on any R2 error `bundle` is null,
+  // cdnBundleKey stays NULL, and /play serves Postgres sceneData.
+  const bundle = await mirrorBundleToR2(inserted.version);
+  if (bundle) {
+    await queryWithResilience(() => getDb().update(publishedGames)
+      .set({ cdnBundleKey: bundle.key })
+      .where(eq(publishedGames.id, inserted.id)));
+  }
+  const publication = { ...inserted, cdnBundleKey: bundle?.key ?? null };
 
   // Replace tags atomically — delete old tags first to prevent duplicates
   // on concurrent publishes hitting the ON CONFLICT DO UPDATE path.
@@ -361,7 +388,7 @@ async function POST_impl(request: NextRequest) {
   reqLogAuth.info('Game published', {
     projectId: projectId,
     slug: slug,
-    version: 1,
+    version: publication.version,
   });
 
   return NextResponse.json({ publication: { ...publication, url: gameUrl } });

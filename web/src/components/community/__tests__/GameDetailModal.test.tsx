@@ -92,6 +92,48 @@ describe('GameDetailModal', () => {
     expect(screen.getByText('A great game')).toBeDefined();
   });
 
+  it('points the Play Game link at the /play route, never a raw R2 bundle url (#7580)', async () => {
+    // Regression guard for the #7580 review: publish once repurposed cdnUrl to
+    // the absolute R2 bundle object URL when the mirror succeeded. This <a href>
+    // (and the share link built from it) is a playable-page link, so cdnUrl must
+    // stay the relative /play/{userId}/{slug} route. The publish route now keeps
+    // it there; this pins the consumer's expectation so the contract cannot
+    // silently drift back.
+    const playUrl = '/play/clerk_1/amazing-game';
+    const gameData = {
+      game: {
+        id: 'game-1',
+        title: 'Amazing Game',
+        description: 'A great game',
+        authorName: 'Author',
+        authorId: 'author-1',
+        playCount: 100,
+        likeCount: 25,
+        avgRating: 4.2,
+        ratingCount: 10,
+        ratingBreakdown: [],
+        tags: ['action'],
+        cdnUrl: playUrl,
+        createdAt: '2024-01-01',
+        comments: [],
+      },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(gameData),
+    });
+
+    render(<GameDetailModal gameId="game-1" onClose={vi.fn()} />);
+
+    const playLink = await screen.findByRole('link', { name: /Play Game/i });
+    const href = playLink.getAttribute('href');
+    expect(href).toBe(playUrl);
+    // A raw bundle object url would be an absolute https://…/bundle.json — the
+    // exact regression this guards against.
+    expect(href).not.toMatch(/^https?:\/\//);
+    expect(href).not.toContain('bundle.json');
+  });
+
   it('renders nothing if game fetch fails', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,

@@ -42,10 +42,20 @@ function harness(): TestHarness {
   return harnessRef.current;
 }
 
+// queryWithResilience is a passthrough by default. `qwr.impl` is swappable so a
+// single test can hook the wrapped queries — used below to reproduce the
+// concurrent-publish TOCTOU race deterministically (inject a conflicting row
+// immediately before the route's INSERT, forcing the onConflictDoUpdate arm).
+const qwr = vi.hoisted(() => ({
+  impl: (fn: () => Promise<unknown>) => fn(),
+  reset() {
+    this.impl = (fn: () => Promise<unknown>) => fn();
+  },
+}));
 vi.mock('@/lib/db/client', () => ({
   getDb: () => harness().db,
   getNeonSql: () => harness().neonSql,
-  queryWithResilience: (fn: () => Promise<unknown>) => fn(),
+  queryWithResilience: (fn: () => Promise<unknown>) => qwr.impl(fn),
 }));
 
 // Whoever the middleware resolved; swapped per test.
@@ -415,10 +425,12 @@ describe('POST /api/publish — R2 bundle mirroring against real Postgres', () =
     await harness().truncateAll();
     writeBundleSpy.mockReset();
     captureExceptionSpy.mockReset();
+    qwr.reset();
     delete process.env.PUBLISH_TO_R2;
   });
 
   afterAll(() => {
+    qwr.reset();
     delete process.env.PUBLISH_TO_R2;
   });
 
@@ -429,7 +441,7 @@ describe('POST /api/publish — R2 bundle mirroring against real Postgres', () =
     `;
   }
 
-  it('mirrors the bundle and stores its R2 key + CDN url on the row when enabled', async () => {
+  it('mirrors the bundle and stores its R2 key, keeping cdn_url at /play, when enabled', async () => {
     process.env.PUBLISH_TO_R2 = 'true';
     const owner = await seedUser(harness().neonSql, { tier: 'creator' });
     const projectId = await seedProject(owner.id);
@@ -461,12 +473,70 @@ describe('POST /api/publish — R2 bundle mirroring against real Postgres', () =
     });
     expect(typeof manifestArg.publishedAt).toBe('string');
 
-    // The decisive assertion: the object key is persisted, and cdn_url becomes
-    // the CDN bundle url (the mirror returned one, i.e. CDN_URL was set).
+    // The decisive assertion: the object key is persisted, and cdn_url STAYS the
+    // stable /play route — never the raw R2 bundle url. Every cdn_url consumer
+    // (community gallery Play button + share link, publish/list) resolves it as
+    // the playable page (#7580 review); repointing it at the JSON object would
+    // send players at a raw file.
     const rows = await cdnColumns(owner.id);
     expect(rows).toHaveLength(1);
     expect(rows[0].cdn_bundle_key).toBe(key);
-    expect(rows[0].cdn_url).toBe(url);
+    expect(rows[0].cdn_url).toBe(`/play/${owner.clerkId}/my-awesome-game`);
+  });
+
+  it('stamps the DB-assigned version onto the manifest when the insert resolves via onConflictDoUpdate', async () => {
+    // Item 1 (#7580 review): the create branch used to mirror with a hardcoded
+    // manifest.version of 1. On the concurrent-publish race PF-212's
+    // onConflictDoUpdate exists for — a competing request inserts the row after
+    // this request's existence SELECTs saw nothing but before its own INSERT —
+    // the DB stamps `version + 1`, so a hardcoded 1 diverged from the persisted
+    // row. The fix persists first, then mirrors with the version the row
+    // actually carries.
+    process.env.PUBLISH_TO_R2 = 'true';
+    const owner = await seedUser(harness().neonSql, { tier: 'creator' });
+    const projectId = await seedProject(owner.id);
+
+    const key = `games/${owner.clerkId}/raced/bundle.json`;
+    writeBundleSpy.mockResolvedValue({ key, url: `https://cdn.test/${key}` });
+
+    // Reproduce the race deterministically: the create branch issues three
+    // wrapped queries before its INSERT (two existence SELECTs, then the project
+    // SELECT). Inject a conflicting row (already at version 4) just before the
+    // 4th wrapped query — the INSERT — so it lands on the ON CONFLICT DO UPDATE
+    // arm and the DB stamps version 5.
+    let wrapped = 0;
+    let injected = false;
+    qwr.impl = async (fn: () => Promise<unknown>) => {
+      wrapped += 1;
+      if (!injected && wrapped === 4) {
+        injected = true;
+        await harness().neonSql`
+          INSERT INTO published_games
+            (id, user_id, project_id, slug, title, status, version)
+          VALUES (${randomUUID()}::uuid, ${owner.id}::uuid, ${projectId}::uuid,
+                  'raced', 'Racer', 'published'::publish_status, 4)
+        `;
+      }
+      return fn();
+    };
+
+    const res = await publish(owner, validBody({ projectId, slug: 'raced' }));
+
+    expect(injected).toBe(true);
+    expect(res.status).toBe(200);
+    // The row was updated, not duplicated, and the DB stamped 4 + 1.
+    expect(res.json.publication?.version).toBe(5);
+
+    // The decisive assertion: the manifest version handed to the mirror matches
+    // the version the row actually carries — not a hardcoded 1.
+    expect(writeBundleSpy).toHaveBeenCalledTimes(1);
+    const manifestArg = writeBundleSpy.mock.calls[0][3] as { version: number };
+    expect(manifestArg.version).toBe(5);
+
+    const rows = await cdnColumns(owner.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cdn_bundle_key).toBe(key);
+    expect(rows[0].cdn_url).toBe(`/play/${owner.clerkId}/raced`);
   });
 
   it('keeps cdn_url at /play and cdn_bundle_key NULL when PUBLISH_TO_R2 is off', async () => {
