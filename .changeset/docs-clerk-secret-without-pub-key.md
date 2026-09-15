@@ -1,5 +1,5 @@
 ---
-"web": patch
+"@spawnforge/docs": patch
 ---
 
 Fail the docs build when Clerk is half-configured. `apps/docs`'s build-time
