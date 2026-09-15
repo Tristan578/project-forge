@@ -1,21 +1,28 @@
 name: Preview DB Cleanup
 
-# Delete the Neon branch backing a PR's preview once the PR closes (#9972).
+# Delete the Neon branch backing a PR's preview once the PR closes (#9972), and
+# sweep on a schedule for whatever the close event missed (#10015).
 #
-# The free allowance is 10 branches per project and branch compute counts
-# against the project's CU-hour budget, so cleanup is a cost control, not just
-# hygiene. Without it the allowance is exhausted by branches of long-merged PRs
-# and the NEXT preview fails to get a database — which would look like a broken
-# pipeline rather than a full quota.
+# The allowance is 10 branches per project and branch compute counts against
+# the project's CU-hour budget, so cleanup is a cost control, not just hygiene.
+# Without it the allowance is exhausted and the NEXT preview fails to get a
+# database — which looks like a broken pipeline rather than a full quota.
 #
 # `pull_request: closed` fires on merge and on close-without-merge alike, which
-# is what we want: both end the preview.
+# is what we want: both end the preview. It is the fast path, and it can miss:
+# a cancelled run, a secret outage, a close that raced the preview job's own
+# create. The schedule is the slow path that catches what the fast path
+# dropped. It also prunes the dry-run leftovers and expired snapshots cd.yml
+# can only prune on its next schema deploy. Six-hourly keeps a missed close
+# from holding a slot for more than a quarter of a day; on a ten-branch
+# allowance that slot is one of roughly six a preview can use.
 
 on:
   pull_request:
     types: [closed]
-  # Sweep leftovers by hand when a run was cancelled before its cleanup, or
-  # when the retention sweep below needs forcing.
+  schedule:
+    - cron: '23 */6 * * *'
+  # Force the sweep by hand.
   workflow_dispatch:
 
 permissions:
@@ -31,9 +38,12 @@ jobs:
     name: Delete the preview Neon branch
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
     # Dependabot-triggered runs cannot read repo secrets, and the preview job
     # skips for the same reason — so there is no branch to delete.
-    if: github.actor != 'dependabot[bot]'
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,30 +55,42 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-
-          if [ -z "${PR_NUMBER:-}" ]; then
-            echo "No PR number (manual dispatch); skipping the per-PR delete."
-            exit 0
-          fi
-
-          # Same zero-padded shape ci.yml creates. The padding is what makes
-          # prune's `startswith` match safe: without it "preview-pr-1" would also
-          # match "preview-pr-12" and this cleanup would delete the branches of
-          # every PR whose number starts with 1.
-          name="preview-pr-$(printf '%06d' "$PR_NUMBER")"
+          # The same fixed-width name ci.yml creates, from the same code. The
+          # padding is what makes prune's `startswith` match safe: without it
+          # "preview-pr-1" would also match "preview-pr-12" and this cleanup
+          # would delete the branches of every PR whose number starts with 1.
+          name="$(bash scripts/preview-db-branch.sh name "$PR_NUMBER")"
           echo "Pruning Neon branch: ${name}"
           bash scripts/neon-branch.sh prune "$name" 0
 
       - name: Sweep abandoned preview branches
-        # Safety net for the case the per-PR delete never ran — a cancelled
-        # workflow, a force-pushed close, a secret outage. Seven days is well
-        # past any live PR's preview while still bounding the allowance.
-        #
-        # `continue-on-error` because housekeeping must never turn a merged PR's
-        # workflow red; the per-PR delete above is the real cleanup and it fails
-        # loudly.
+        # Use the same state-aware policy as scheduled cleanup. An old branch
+        # can still back an open PR; age alone does not make it abandoned.
         continue-on-error: true
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-        run: bash scripts/neon-branch.sh prune 'preview-pr-' 7
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/preview-db-branch.sh sweep
+
+  sweep:
+    name: Sweep closed-PR previews, dry-run leftovers and expired snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Sweep
+        # PR state comes from GitHub through `gh` (GH_TOKEN, read-only); a
+        # lookup that fails keeps the branch. Policy and exit codes:
+        # scripts/preview-db-branch.sh.
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/preview-db-branch.sh sweep
