@@ -58,12 +58,13 @@ describe('SkeletonInspector', () => {
     skeleton = null as SkeletonData2d | null,
     animations = [] as { name: string; duration: number }[],
     selectedBone = null as string | null,
+    entityId = 'entity-1',
   } = {}) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useEditorStore).mockImplementation((selector: any) => {
       const state = {
-        skeletons2d: skeleton ? { 'entity-1': skeleton } : {},
-        skeletalAnimations2d: { 'entity-1': animations },
+        skeletons2d: skeleton ? { [entityId]: skeleton } : {},
+        skeletalAnimations2d: { [entityId]: animations },
         selectedBone,
         setSelectedBone: mockSetSelectedBone,
         setSkeleton2d: mockSetSkeleton2d,
@@ -571,6 +572,52 @@ describe('SkeletonInspector', () => {
     });
   });
 
+  it('discards another entity\'s draft before edits can be applied to the new selection', () => {
+    setupStore({ skeleton: texturedSkeleton });
+    const { rerender } = render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    fireEvent.change(screen.getByLabelText('Vertex 1 X'), { target: { value: '999' } });
+
+    // Updates to the same selection retain its in-progress edits.
+    rerender(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByLabelText('Vertex 1 X')).toHaveValue(999);
+
+    const secondAttachment = {
+      ...texturedSkeleton.skins.default.attachments.cloak,
+      textureId: 'second-texture',
+      vertices: [[12, 13], [14, 15], [16, 17]] as [number, number][],
+      uvs: [[0, 0], [1, 0], [0, 1]] as [number, number][],
+      triangles: [0, 1, 2],
+      weights: Array.from({ length: 3 }, () => ({ bones: ['root'], weights: [1] })),
+    };
+    setupStore({
+      entityId: 'entity-2',
+      skeleton: {
+        ...baseSkeleton,
+        activeSkin: 'alternate',
+        skins: { alternate: { name: 'alternate', attachments: { cloak: secondAttachment } } },
+      },
+    });
+    rerender(<SkeletonInspector entityId="entity-2" />);
+
+    expect(screen.queryByRole('button', { name: 'Apply Mesh Attachment' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Mesh: cloak')).not.toBeInTheDocument();
+    expect(mockSetSkeleton2d).not.toHaveBeenCalled();
+
+    // The new entity's own skin and mesh are the only source for a fresh edit.
+    fireEvent.click(screen.getByLabelText('Edit mesh attachment cloak'));
+    expect(screen.getByLabelText('Vertex 1 X')).toHaveValue(12);
+    fireEvent.change(screen.getByLabelText('Vertex 1 X'), { target: { value: '20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Mesh Attachment' }));
+    expect(mockSetSkeleton2d).toHaveBeenCalledTimes(1);
+    expect(mockSetSkeleton2d.mock.calls[0][0]).toBe('entity-2');
+    const saved = mockSetSkeleton2d.mock.calls[0][1] as SkeletonData2d;
+    expect(saved.skins.alternate.attachments.cloak).toEqual({
+      ...secondAttachment,
+      vertices: [[20, 13], [14, 15], [16, 17]],
+    });
+  });
+
   it('remaps surviving triangles and UVs when an interior vertex is deleted', () => {
     setupStore({ skeleton: texturedSkeleton });
     render(<SkeletonInspector entityId="entity-1" />);
@@ -610,7 +657,8 @@ describe('SkeletonInspector', () => {
   it('opens a draft editor pre-populated with the first bone when a mesh attachment is added', () => {
     setupStore({ skeleton: baseSkeleton });
     render(<SkeletonInspector entityId="entity-1" />);
-    fireEvent.change(screen.getByPlaceholderText('Attachment name'), { target: { value: 'cloak' } });
+    expect(screen.getByText('Attachment name')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Attachment name'), { target: { value: 'cloak' } });
     fireEvent.click(screen.getByLabelText('Add mesh attachment'));
     expect(screen.getByText('Mesh: cloak')).toBeInTheDocument();
     expect(screen.getByLabelText('Vertex 1 influence 1 bone')).toHaveValue('root');

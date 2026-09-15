@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactElement, useState } from 'react';
+import { type ReactElement, useId, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
@@ -34,6 +34,12 @@ interface MeshDraft {
 }
 
 export function SkeletonInspector({ entityId }: { entityId: string }) {
+  // Drafts belong to one entity; changing selection must discard them before Apply.
+  return <EntitySkeletonInspector key={entityId} entityId={entityId} />;
+}
+
+function EntitySkeletonInspector({ entityId }: { entityId: string }) {
+  const attachmentNameId = useId();
   const skeleton = useEditorStore((s) => s.skeletons2d[entityId]);
   const animations = useEditorStore((s) => s.skeletalAnimations2d[entityId] ?? []);
   const selectedBone = useEditorStore((s) => s.selectedBone);
@@ -502,8 +508,12 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
           </div>
         )}
 
+        <label htmlFor={attachmentNameId} className="mb-1 block text-xs text-zinc-400">
+          Attachment name
+        </label>
         <div className="flex gap-2">
           <input
+            id={attachmentNameId}
             type="text"
             value={newAttachmentName}
             onChange={(e) => setNewAttachmentName(e.target.value)}
