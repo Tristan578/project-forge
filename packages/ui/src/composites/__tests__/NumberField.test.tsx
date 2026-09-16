@@ -102,6 +102,24 @@ describe('NumberField', () => {
     expect(onChangeSpy.mock.calls.at(-1)?.[0]).toBe(25);
   });
 
+  it('associates a caller-provided input id with the visible label', () => {
+    render(<NumberField label="Distance" id="custom-distance" value={1} onChange={() => {}} />);
+    expect(screen.getByLabelText('Distance')).toHaveAttribute('id', 'custom-distance');
+  });
+
+  it('drops an empty draft and still calls a caller-provided blur handler', () => {
+    const onBlur = vi.fn();
+    const onChange = vi.fn();
+    render(<NumberField label="Distance" value={5} onChange={onChange} onBlur={onBlur} />);
+    const input = screen.getByLabelText('Distance') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input.value).toBe('');
+    fireEvent.blur(input);
+    expect(input.value).toBe('5');
+    expect(onBlur).toHaveBeenCalledOnce();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('gives two instances distinct label associations under one render', () => {
     // Two NumberFields with different labels must each resolve to their own
     // input; a shared or missing id would make getByLabelText ambiguous or wrong.

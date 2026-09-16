@@ -31,9 +31,12 @@ export function NumberField({
   step = 0.1,
   className,
   disabled,
+  id: providedId,
+  onBlur,
   ...props
 }: NumberFieldProps) {
-  const id = useId();
+  const generatedId = useId();
+  const id = providedId ?? generatedId;
 
   // Buffer the in-flight edit as a raw string so the field can be cleared and
   // retyped. Two failures are fixed together: (1) forwarding parseFloat('') as
@@ -75,7 +78,10 @@ export function NumberField({
         step={step}
         disabled={disabled}
         onChange={handleChange}
-        onBlur={() => setDraft(null)}
+        onBlur={(event) => {
+          setDraft(null);
+          onBlur?.(event);
+        }}
         className={cn(
           'flex-1 min-w-0 rounded px-2 py-1 text-xs outline-none focus:ring-1',
           'disabled:opacity-50 disabled:cursor-not-allowed',
