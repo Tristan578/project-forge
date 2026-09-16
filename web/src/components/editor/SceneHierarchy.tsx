@@ -184,6 +184,10 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
       case 'ArrowUp':
       case 'Home':
       case 'End': {
+        // Skip while an inline rename is active: moving DOM focus to another
+        // row via focusRow() below would blur the rename input and commit it
+        // with whatever partial text is currently typed.
+        if (editingEntityId) return;
         e.preventDefault();
         const nextIndex = computeNavIndex(e.key, currentIndex, flatNodeIds.length);
         if (nextIndex !== null) {
@@ -194,6 +198,9 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
         break;
       }
       case 'ArrowRight': {
+        // Same rename-in-progress guard as above: expanding to a child row
+        // would call focusRow() and blur the active rename input.
+        if (editingEntityId) return;
         e.preventDefault();
         if (focusedEntityId) {
           const node = sceneGraph.nodes[focusedEntityId];
@@ -210,6 +217,9 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
         break;
       }
       case 'ArrowLeft': {
+        // Same rename-in-progress guard: moving focus to the parent row
+        // would call focusRow() and blur the active rename input.
+        if (editingEntityId) return;
         e.preventDefault();
         if (focusedEntityId) {
           const node = sceneGraph.nodes[focusedEntityId];

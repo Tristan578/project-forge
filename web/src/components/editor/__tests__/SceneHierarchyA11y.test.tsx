@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup, within, waitFor } from '@/test/utils/componentTestUtils';
 import userEvent from '@testing-library/user-event';
 import { axe } from 'jest-axe';
 import { SceneHierarchy } from '../SceneHierarchy';
@@ -195,6 +195,45 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     await user.keyboard('v');
 
     expect(toggleVisibility).toHaveBeenCalledWith('player');
+  });
+
+  it('ArrowDown/ArrowUp/Home/End do not commit an in-progress rename (#9875)', async () => {
+    const renameEntity = vi.fn();
+    mockStore({ renameEntity });
+    const user = userEvent.setup();
+    render(<SceneHierarchy />);
+    const tree = screen.getByRole('tree');
+    tree.focus();
+
+    await user.keyboard('{ArrowDown}'); // focus Camera
+    await user.keyboard('{F2}'); // enter rename mode on Camera
+
+    const input = await within(tree).findByRole('textbox');
+    await waitFor(() => expect(input).toHaveFocus());
+
+    // Replace the full name with partial text, then navigate with each of the
+    // roving-tabindex keys the container also handles. None of them may blur
+    // the input (which would commit "Ca" as the new entity name).
+    await user.clear(input);
+    await user.type(input, 'Ca');
+    await user.keyboard('{ArrowDown}');
+    expect(input).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(input).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(input).toHaveFocus();
+    await user.keyboard('{Home}');
+    expect(input).toHaveFocus();
+    await user.keyboard('{ArrowRight}');
+    expect(input).toHaveFocus();
+    await user.keyboard('{ArrowLeft}');
+    expect(input).toHaveFocus();
+
+    expect(renameEntity).not.toHaveBeenCalled();
+
+    // The guard only blocks navigation; committing via Enter still works.
+    await user.keyboard('{Enter}');
+    expect(renameEntity).toHaveBeenCalledWith('cam', 'Ca');
   });
 
   it('renders a childless, axe-valid tree when the scene is empty', async () => {
