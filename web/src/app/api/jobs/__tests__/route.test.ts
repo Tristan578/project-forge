@@ -9,6 +9,8 @@ vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 
 // Mock dependencies before importing route
 vi.mock('@/lib/db/client', () => ({
@@ -16,13 +18,11 @@ vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(),
 }));
 
-vi.mock('@/lib/db/schema', () => ({
-  generationJobs: {
-    userId: 'userId',
-    status: 'status',
-    createdAt: 'createdAt',
-  },
-}));
+vi.mock('@/lib/db/schema', async () => {
+  const { pgTable, text } = await import('drizzle-orm/pg-core');
+  const table = pgTable('generation_jobs', { resultUrl: text('result_url') });
+  return { generationJobs: { userId: 'userId', status: 'status', createdAt: 'createdAt', resultUrl: table.resultUrl } };
+});
 
 vi.mock('drizzle-orm', async (importOriginal) => ({
   sql: (await importOriginal<typeof import('drizzle-orm')>()).sql,
@@ -312,9 +312,15 @@ describe('/api/jobs', () => {
     const response = await GET(new NextRequest('http://localhost/api/jobs?status=active'));
     expect(response.status).toBe(200);
     const projection = vi.mocked(vi.mocked(getDb)().select).mock.calls[0][0];
-    expect(JSON.stringify(projection?.resultUrl)).toContain('CASE WHEN');
-    expect(JSON.stringify(projection?.resultUrl)).toContain('data:%');
-    expect(JSON.stringify(projection?.hasInlineResult)).toContain('COALESCE');
+    const dialect = new PgDialect();
+    expect(dialect.sqlToQuery(projection!.resultUrl as SQL)).toEqual({
+      sql: `CASE WHEN "generation_jobs"."result_url" LIKE 'data:%' THEN NULL ELSE "generation_jobs"."result_url" END`,
+      params: [],
+    });
+    expect(dialect.sqlToQuery(projection!.hasInlineResult as SQL)).toEqual({
+      sql: `COALESCE("generation_jobs"."result_url" LIKE 'data:%', FALSE)`,
+      params: [],
+    });
     const text = await response.text();
     expect(text.length).toBeLessThan(4096);
     expect(JSON.parse(text).jobs).toEqual([
