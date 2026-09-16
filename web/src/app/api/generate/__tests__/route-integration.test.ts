@@ -839,9 +839,13 @@ describe('generate routes match the published OpenAPI response contract', () => 
       `POST ${routePath} ${status} body ${JSON.stringify(body)} `
         + `violates the spec: ${JSON.stringify(validate.errors)}`,
     ).toBe(true);
-    expect(
-      diffAgainstSpec(contract.operationSchema('post', routePath, status), body),
-    ).toEqual(expectedDivergences);
+    // The union validator checks types and the provider discriminator above.
+    // Compare every property against the matching documented response variant.
+    const schema = routePath === '/api/generate/sprite' && status === 201
+      ? contract.componentSchema((body as { provider: string }).provider === 'dalle3'
+        ? 'SpriteSyncGenerationJob' : 'SpriteAsyncGenerationJob')
+      : contract.operationSchema('post', routePath, status);
+    expect(diffAgainstSpec(schema, body)).toEqual(expectedDivergences);
   }
 
   it('POST /api/generate/music 201 matches the inline AudioResult (#9522)', async () => {
@@ -875,10 +879,36 @@ describe('generate routes match the published OpenAPI response contract', () => 
   it('POST /api/generate/sprite 201 matches GenerationJob', async () => {
     const { POST } = await import('@/app/api/generate/sprite/route');
     const res = await POST(makeRequest('http://test/api/generate/sprite', {
-      prompt: 'hero character', size: '64x64', removeBackground: true,
+      prompt: 'hero character', size: '64x64', provider: 'sdxl', removeBackground: true,
     }));
     expect(res.status).toBe(201);
-    expectContract('/api/generate/sprite', 201, await res.json());
+    const body = await res.json();
+    expect(body.backgroundRemoval).toBe('unsupported');
+    expectContract('/api/generate/sprite', 201, body);
+  });
+
+  it('POST /api/generate/sprite 201 documents the completed body without polling', async () => {
+    const { SpriteClient } = await import('@/lib/generate/spriteClient');
+    vi.mocked(SpriteClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      this.generateSprite = vi.fn().mockResolvedValue({
+        taskId: 'provider-image', status: 'completed',
+        resultUrl: 'data:image/png;base64,YWJj', backgroundRemoval: 'not-requested',
+      });
+    } as never);
+    const { POST } = await import('@/app/api/generate/sprite/route');
+    const res = await POST(makeRequest('http://test/api/generate/sprite', {
+      prompt: 'hero character', provider: 'dalle3', removeBackground: false,
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.jobId).toBe('dalle3-sync:usage-int');
+    expect(body.resultUrl).toBe('data:image/png;base64,YWJj');
+    expectContract('/api/generate/sprite', 201, body);
+    const validate = contract.operation('post', '/api/generate/sprite', 201);
+    const { resultUrl: _resultUrl, ...missingImage } = body;
+    expect(validate(missingImage)).toBe(false);
+    expect(validate({ ...body, backgroundRemoval: 'unsupported' })).toBe(false);
+    expect(validate({ ...body, provider: 'sdxl' })).toBe(false);
   });
 
   it('POST /api/generate/sprite-sheet 201 matches GenerationJob', async () => {
