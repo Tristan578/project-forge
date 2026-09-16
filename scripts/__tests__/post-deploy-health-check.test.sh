@@ -325,7 +325,14 @@ for scope in '' 'https://different.example.test' 'http://www.example.test' 'http
     fail "an unsafe bypass scope reached curl: $OUT"
   fi
 done
-if grep -q -- '--location' "$SCRIPT"; then
+OUT="$(PYTHONOPTIMIZE=1 VERCEL_AUTOMATION_BYPASS=fixture-only VERCEL_AUTOMATION_BYPASS_ORIGIN=https://different.example.test e2e 200 "$HEALTHY")"; RC=$?
+if [ "$RC" != 0 ] && [ ! -s "$TMP/args" ]; then
+  pass "optimized Python still rejects an unauthorized credential origin before curl"
+else
+  fail "optimized Python disabled credential origin validation: $OUT"
+fi
+OUT="$(VERCEL_AUTOMATION_BYPASS=fixture-only VERCEL_AUTOMATION_BYPASS_ORIGIN=https://www.example.test e2e 302 '' $'HTTP/2 302\nlocation: https://untrusted.example.test')"; RC=$?
+if [ "$RC" = 0 ] || grep -qE -- '^--location($|=|-)|^-[^-]*L' "$TMP/args"; then
   fail "health probe follows redirects and could forward its scoped credential"
 else
   pass "health probe does not follow redirects"

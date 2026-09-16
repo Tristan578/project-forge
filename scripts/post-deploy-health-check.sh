@@ -92,8 +92,9 @@ def origin(value):
         raise ValueError('not an HTTPS origin')
     return (u.scheme, u.hostname, u.port or 443)
 try:
-    assert origin(os.environ['HEALTH_DEPLOY_URL']) == origin(os.environ['HEALTH_BYPASS_ORIGIN'])
-except (AssertionError, ValueError):
+    if origin(os.environ['HEALTH_DEPLOY_URL']) != origin(os.environ['HEALTH_BYPASS_ORIGIN']):
+        raise ValueError('origin mismatch')
+except ValueError:
     raise SystemExit(1)
 PY
   then
