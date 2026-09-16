@@ -4,7 +4,14 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyEngineWasm } from './verify-engine-wasm.mjs';
 
-/** Validate the complete artifact before touching any existing fallback files. */
+/**
+ * Validate the complete artifact before replacing any existing fallback files.
+ * @param {string} engineRoot Directory containing the four exact pkg-* artifacts.
+ * @param {string} publicRoot Destination directory for public browser assets.
+ * @returns {string[]} The four destination engine-pkg-* directory names.
+ * @throws {Error} Validation or filesystem failures; validation precedes replacement,
+ * but copy failures can leave some destinations replaced and are not atomic.
+ */
 export function populateEngineFallback(engineRoot, publicRoot) {
   const variants = verifyEngineWasm(engineRoot);
   mkdirSync(publicRoot, { recursive: true });
