@@ -856,12 +856,15 @@ describe('createGenerationHandler', () => {
 
     // Content safety replaces prompt with the filtered value ('test prompt' → 'test prompt'
     // per the mock, same value). count is a number; the type guard skips it unchanged.
+    // The 6th arg is the resolved capability (#9523); '/api/generate/test' has no
+    // ROUTE_CAPABILITY entry, so it is undefined — the direct route is preserved.
     expect(mockResolve).toHaveBeenCalledWith(
       'user-1',
       'elevenlabs',
       10,
       'test_generation',
       { prompt: 'test prompt', count: 3 },
+      undefined,
     );
   });
 
@@ -999,6 +1002,79 @@ describe('createGenerationHandler', () => {
       const res = await handler(makeRequest({ prompt: 'door creak' }));
       expect(res.status).toBe(200);
       expect(mockResolve).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // #9523: the handler is the SOLE caller of resolveApiKey for all 12 generate
+  // routes, so if it drops the capability argument, gateway routing is dead in
+  // production no matter what resolver.test.ts proves in isolation. These pin the
+  // wiring at the createGenerationHandler seam itself.
+  describe('capability forwarding to resolveApiKey (#9523)', () => {
+    it('forwards a declared gateway capability as the 6th arg (no-cache path)', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/image-test',
+        provider: 'openai',
+        capability: 'image',
+        operation: 'image_generation',
+        rateLimitKey: 'gen-image',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ ok: true }),
+      });
+      const res = await handler(makeRequest({ prompt: 'a fox in a forest' }));
+      expect(res.status).toBe(200);
+      expect(mockResolve).toHaveBeenCalledWith(
+        'user-1',
+        'openai',
+        expect.any(Number),
+        'image_generation',
+        expect.anything(),
+        'image',
+      );
+    });
+
+    it('forwards the capability on the cached path too', async () => {
+      const handler = createGenerationHandler({
+        route: '/api/generate/image-test',
+        provider: 'openai',
+        capability: 'image',
+        operation: 'image_generation',
+        rateLimitKey: 'gen-image',
+        cacheKeyParams: (p) => ({ prompt: (p as { prompt: string }).prompt }),
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ ok: true }),
+      });
+      const res = await handler(makeRequest({ prompt: 'a fox in a forest' }));
+      expect(res.status).toBe(200);
+      expect(mockResolve).toHaveBeenCalledWith(
+        'user-1',
+        'openai',
+        expect.any(Number),
+        'image_generation',
+        expect.anything(),
+        'image',
+      );
+    });
+
+    it('resolves the capability from ROUTE_CAPABILITY when the config omits it', async () => {
+      // `/api/generate/localize` maps to the gateway-routed `chat` capability.
+      const handler = createGenerationHandler({
+        route: '/api/generate/localize',
+        provider: 'anthropic',
+        operation: 'localize_generation',
+        rateLimitKey: 'gen-localize',
+        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+        execute: async () => ({ ok: true }),
+      });
+      const res = await handler(makeRequest({ prompt: 'translate this' }));
+      expect(res.status).toBe(200);
+      expect(mockResolve).toHaveBeenCalledWith(
+        'user-1',
+        'anthropic',
+        expect.any(Number),
+        'localize_generation',
+        expect.anything(),
+        'chat',
+      );
     });
   });
 });

@@ -88,6 +88,22 @@ Generate a custom skybox cubemap. Access this from the **Generate Skybox** butto
 |---|---|
 | Prompt | Description of the sky and environment |
 
+## Provider routing and keys
+
+Each capability's platform key resolves through one of two paths (a user's own key added in **Settings** always takes precedence over both). `GATEWAY_CAPABILITIES` in `web/src/lib/config/providers.ts` names what the Vercel AI Gateway can serve — read by the `vercel-gateway` backend and `verify-platform-generation.ts` — while the narrower `RESOLVER_GATEWAY_CAPABILITIES` names the capabilities whose platform key `resolveApiKey` resolves through the gateway with **no** fallback. The availability gates read the same routing, so an environment they report configured is one the resolver can serve.
+
+| Capability | Platform path | Platform key |
+|---|---|---|
+| Image | Gateway only (#9523) | `AI_GATEWAY_API_KEY` (or Vercel OIDC) — `PLATFORM_OPENAI_KEY` no longer serves it |
+| Embedding | Gateway only (#9523) | `AI_GATEWAY_API_KEY` (or Vercel OIDC) — `PLATFORM_OPENAI_KEY` no longer serves it |
+| Chat | Gateway preferred, direct fallback | `AI_GATEWAY_API_KEY` / Vercel OIDC when present, else `ANTHROPIC_API_KEY` |
+| Sprite / Pixel art | Direct | `PLATFORM_REPLICATE_KEY` + `PLATFORM_OPENAI_KEY` (DALL-E 3 default) |
+| 3D Model / Texture | Direct | `PLATFORM_MESHY_KEY` |
+| Sound Effect / Voice / Music | Direct | `PLATFORM_ELEVENLABS_KEY` |
+| Background Removal | Direct | `PLATFORM_REMOVEBG_KEY` |
+
+Image and embedding resolve `AI_GATEWAY_API_KEY` (or Vercel OIDC) and never fall back to the direct OpenAI key: if neither is present the capability reports unavailable rather than silently routing around the gateway. Chat is gateway-served too, but it is **not** gateway-only — with no gateway key the chat routes (including `/api/generate/localize` and `/api/generate/pacing`) resolve `ANTHROPIC_API_KEY`, so a direct-Anthropic deployment keeps working (#10074). `sprite`/`pixel_art` stay on their direct keys pending an output-quality evaluation, and voice/sfx/music stay on ElevenLabs (the gateway has no sound-effect or music models). The full per-capability decision table lives in `docs/guides/platform-keys.md`.
+
 ## Tips
 
 - Keep 3D model prompts specific about the shape and style — "a round wooden barrel with metal bands" works better than "a barrel".

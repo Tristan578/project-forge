@@ -265,7 +265,8 @@ describe('POST /api/generate/sfx', () => {
         'elevenlabs',
         50,
         'sfx_generation',
-        expect.objectContaining({ prompt: 'sword clash' })
+        expect.objectContaining({ prompt: 'sword clash' }),
+        'sfx', // capability forwarded for gateway/direct routing (#9523)
       );
     });
   });
