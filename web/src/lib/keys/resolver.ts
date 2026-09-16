@@ -8,7 +8,8 @@ import {
   PLATFORM_KEY_ENV,
   getPlatformKeyEnvVar,
   GATEWAY_KEY_ENV,
-  isGatewayRoutedCapability,
+  isResolverGatewayCapability,
+  isVercelRuntime,
   type ProviderCapability,
   type RetiredByokProvider,
 } from '../config/providers';
@@ -47,24 +48,35 @@ const _PLATFORM_KEY_ENV_COMPLETE = PLATFORM_KEY_ENV satisfies Record<
 void _PLATFORM_KEY_ENV_COMPLETE;
 
 function getPlatformKey(provider: Provider, capability?: ProviderCapability): string {
-  // A gateway-routed capability (image/embedding, #9523) resolves the single
+  // A resolver-gateway capability (image/embedding, #9523) resolves the single
   // AI_GATEWAY_API_KEY instead of the provider's PLATFORM_* var, and never
-  // falls back to it: the gateway is production's intended path, so a direct
-  // key present but the gateway key absent must still fail rather than silently
-  // route around the gateway. `isGatewayRoutedCapability` reads
-  // GATEWAY_CAPABILITIES — the same list the verify script and the
-  // vercel-gateway backend read — so key resolution and route reporting cannot
-  // disagree. Only the platform path is affected; the BYOK check in
-  // resolveApiKey runs first and is keyed on the provider, so a user's own
+  // falls back to it: those capabilities have no direct platform path anymore,
+  // so a direct key present but the gateway key absent must still fail rather
+  // than silently route around the gateway. `isResolverGatewayCapability` reads
+  // RESOLVER_GATEWAY_CAPABILITIES — the SAME routing the availability gates
+  // apply through CAPABILITY_ENV_VARS — so key resolution and feature gating
+  // cannot disagree (lesson 1). `chat` is deliberately NOT in that set: it is
+  // gateway-served but also has direct/OpenRouter/GitHub-Models backends, so
+  // forcing it here 500'd every direct-Anthropic deployment when the gateway
+  // key was unset (#10074). Only the platform path is affected; the BYOK check
+  // in resolveApiKey runs first and is keyed on the provider, so a user's own
   // OpenAI key still wins.
-  //
+  if (capability && isResolverGatewayCapability(capability)) {
+    const gatewayKey = process.env[GATEWAY_KEY_ENV.vercelGateway];
+    if (gatewayKey) return gatewayKey;
+    // Vercel OIDC auto-auth: on a Vercel runtime the AI Gateway needs no
+    // explicit key — the runtime injects an OIDC token — so return the empty
+    // key the gateway client reads as "use OIDC" (mirroring
+    // vercelGatewayBackend.isConfigured()/getApiKey()), rather than 500ing an
+    // OIDC-only deployment the gateway backend would have served (#10074).
+    if (isVercelRuntime()) return '';
+    throw new Error(`Platform key not configured: ${GATEWAY_KEY_ENV.vercelGateway}`);
+  }
+
   // getPlatformKeyEnvVar returns null for a retired/keyless provider (Suno):
   // its platform path is gone, so resolving one throws the same "not
   // configured" error a genuinely-unset key would.
-  const envVar =
-    capability && isGatewayRoutedCapability(capability)
-      ? GATEWAY_KEY_ENV.vercelGateway
-      : getPlatformKeyEnvVar(provider);
+  const envVar = getPlatformKeyEnvVar(provider);
   const key = envVar ? process.env[envVar] : undefined;
   if (!key) {
     throw new Error(`Platform key not configured: ${envVar ?? provider}`);
@@ -85,12 +97,14 @@ function getPlatformKey(provider: Provider, capability?: ProviderCapability): st
  *    key) → throw with guidance.
  *
  * `capability` is optional and affects only the platform path: when it is a
- * gateway-routed capability (image/embedding, #9523) the platform key resolves
- * to AI_GATEWAY_API_KEY rather than the provider's PLATFORM_* var. BYOK
- * precedence, tier gating, token deduction and the ResolvedKey shape are
- * identical on both routes — the gateway changes only WHICH platform secret is
- * read, so token accounting and the circuit breaker (both keyed on `provider`)
- * behave the same. Existing 5-arg callers omit it and keep the direct route.
+ * resolver-gateway capability (image/embedding, #9523 — NOT chat, see
+ * `RESOLVER_GATEWAY_CAPABILITIES`) the platform key resolves to
+ * AI_GATEWAY_API_KEY rather than the provider's PLATFORM_* var, or to the empty
+ * key on a Vercel OIDC runtime. BYOK precedence, tier gating, token deduction
+ * and the ResolvedKey shape are identical on both routes — the gateway changes
+ * only WHICH platform secret is read, so token accounting and the circuit
+ * breaker (both keyed on `provider`) behave the same. Existing 5-arg callers
+ * omit it and keep the direct route.
  */
 export async function resolveApiKey(
   userId: string,

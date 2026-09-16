@@ -153,15 +153,7 @@ vi.mock('@ai-sdk/anthropic', () => ({
   createAnthropic: vi.fn().mockReturnValue(vi.fn().mockReturnValue('mock-model')),
 }));
 
-// AI_MODELS is not imported directly by any route — it is pulled in
-// transitively via `@/lib/providers/backends/vercelGateway` (localize/pacing,
-// #9523: routing through the AI Gateway on the platform path), whose
-// `DEFAULT_MODELS` reads `AI_MODELS.gatewayChat`/`gatewayEmbedding` at module
-// load. Omitting it here throws "No AI_MODELS export" on that eager read.
-vi.mock('@/lib/ai/models', () => ({
-  AI_MODEL_FAST: 'claude-mock',
-  AI_MODELS: { gatewayChat: 'anthropic/claude-mock', gatewayEmbedding: 'google/gemini-mock' },
-}));
+vi.mock('@/lib/ai/models', () => ({ AI_MODEL_FAST: 'claude-mock' }));
 
 vi.mock('@/lib/i18n/gameLocalization', () => ({
   buildTranslationPrompt: vi.fn().mockReturnValue('translate these'),

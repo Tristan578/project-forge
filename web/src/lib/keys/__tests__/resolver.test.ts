@@ -394,6 +394,80 @@ describe('resolveApiKey - gateway-routed capability (#9523)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// resolveApiKey — chat is NOT forced onto the gateway, + OIDC (#10074)
+// ---------------------------------------------------------------------------
+
+describe('resolveApiKey - chat fallback and Vercel OIDC (#10074)', () => {
+  const remaining = { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null };
+
+  beforeEach(() => {
+    resetMocks();
+    delete process.env['AI_GATEWAY_API_KEY'];
+    delete process.env['ANTHROPIC_API_KEY'];
+    delete process.env['VERCEL'];
+    delete process.env['VERCEL_ENV'];
+  });
+
+  afterEach(() => {
+    delete process.env['AI_GATEWAY_API_KEY'];
+    delete process.env['ANTHROPIC_API_KEY'];
+    delete process.env['VERCEL'];
+    delete process.env['VERCEL_ENV'];
+  });
+
+  it('resolves ANTHROPIC_API_KEY for the chat capability when AI_GATEWAY_API_KEY is unset', async () => {
+    // The critical regression (#10074): forwarding capability 'chat' to the
+    // resolver must NOT re-key localize/pacing onto the gateway. A
+    // direct-Anthropic deployment (`.env.example`) has ANTHROPIC_API_KEY set and
+    // no gateway key, and both routes must keep working.
+    process.env['ANTHROPIC_API_KEY'] = 'sk-ant-platform';
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat' });
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'localize_scene', undefined, 'chat');
+    expect(result.type).toBe('platform');
+    expect(result.key).toBe('sk-ant-platform');
+  });
+
+  it('does not consult AI_GATEWAY_API_KEY for the chat capability even when it is set', async () => {
+    // chat is gateway-SERVED (via /api/chat) but not gateway-ONLY: the resolver
+    // path for localize/pacing resolves the provider's own Anthropic key.
+    process.env['AI_GATEWAY_API_KEY'] = 'gw-secret';
+    process.env['ANTHROPIC_API_KEY'] = 'sk-ant-platform';
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat2' });
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'pacing_suggestions', undefined, 'chat');
+    expect(result.key).toBe('sk-ant-platform');
+  });
+
+  it.each(['image', 'embedding'] as const)(
+    'accepts Vercel OIDC for %s: returns the empty key instead of throwing when AI_GATEWAY_API_KEY is unset on Vercel',
+    async (capability) => {
+      // vercelGatewayBackend.isConfigured() is true on OIDC alone; the resolver
+      // must mirror it or the PR's one-credential goal is unreachable on an
+      // OIDC-only deployment (#10074).
+      process.env['VERCEL_ENV'] = 'production';
+      wireDb([], [makeUser({ tier: 'pro' })]);
+      mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-oidc' });
+      const result = await resolveApiKey('user-1', 'openai', 20, `${capability}_generation`, undefined, capability);
+      expect(result.type).toBe('platform');
+      expect(result.key).toBe('');
+      expect(result.metered).toBe(true);
+    },
+  );
+
+  it('still throws off-Vercel for a resolver-gateway capability with no gateway key', async () => {
+    // No VERCEL/VERCEL_ENV: OIDC is unavailable, so the missing gateway key is a
+    // real misconfiguration and must fail before any token deduction.
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-x' });
+    await expect(
+      resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image'),
+    ).rejects.toThrow('Platform key not configured: AI_GATEWAY_API_KEY');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // storeProviderKey
 // ---------------------------------------------------------------------------
 
