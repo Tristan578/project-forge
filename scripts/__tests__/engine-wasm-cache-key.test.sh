@@ -234,7 +234,7 @@ else
 
   if [ -z "$pc_if" ]; then
     fail "publish-engine-cache has no if: — it runs on EVERY push, including the engine-changed pushes where build-wasm is already building and saving the same key, so the engine gets built twice concurrently"
-  elif grep -qE "engine-changed != 'true'[[:space:]]*&&[[:space:]]*github[.]event_name != 'workflow_dispatch'" <<<"$pc_if"; then
+  elif grep -qE "engine-changed != 'true'[[:space:]]*&&[[:space:]]*needs[.]check-changes[.]outputs[.]web-changed != 'true'[[:space:]]*&&[[:space:]]*github[.]event_name != 'workflow_dispatch'" <<<"$pc_if"; then
     pass "publish-engine-cache runs only when build-wasm does not (operator pinned: != AND !=)"
   else
     fail "publish-engine-cache's if: is not the complement of build-wasm's — got: ${pc_if}"
@@ -246,10 +246,10 @@ else
   # separately passes whether they are joined by || or &&, and swapping them
   # inverts the complement below so that on an engine change NEITHER job runs
   # and nothing builds or caches the engine at all.
-  if grep -qE "engine-changed == 'true'[[:space:]]*\|\|[[:space:]]*github[.]event_name == 'workflow_dispatch'" <<<"$bw_if"; then
-    pass "build-wasm triggers on engine-changed OR workflow_dispatch (operator pinned)"
+  if grep -qE "engine-changed == 'true'[[:space:]]*\|\|[[:space:]]*needs[.]check-changes[.]outputs[.]web-changed == 'true'[[:space:]]*\|\|[[:space:]]*github[.]event_name == 'workflow_dispatch'" <<<"$bw_if"; then
+    pass "build-wasm prepares artifacts on engine-changed OR web-changed OR workflow_dispatch"
   else
-    fail "build-wasm's trigger is not 'engine-changed == true || workflow_dispatch' — got: ${bw_if} — publish-engine-cache's complement must be updated in the same commit or the two stop being complements"
+    fail "build-wasm's trigger is not 'engine-changed == true || web-changed == true || workflow_dispatch' — got: ${bw_if} — publish-engine-cache's complement must be updated in the same commit or the two stop being complements"
   fi
 fi
 
@@ -684,7 +684,7 @@ else
 fi
 
 echo ""
-if node --test "$HERE/verify-engine-wasm.test.mjs"; then
+if node --test "$HERE/verify-engine-wasm.test.mjs" "$HERE/populate-engine-fallback.test.mjs"; then
   pass "behavioral production validator fixtures pass"
 else
   fail "production validator behavioral fixtures failed"

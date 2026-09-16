@@ -341,7 +341,7 @@ jobs:
     # and build the engine CONCURRENTLY, paying for the expensive build twice on
     # exactly the pushes that are already the slowest.
     needs: [check-changes]
-    if: needs.check-changes.outputs.engine-changed != 'true' && github.event_name != 'workflow_dispatch'
+    if: needs.check-changes.outputs.engine-changed != 'true' && needs.check-changes.outputs.web-changed != 'true' && github.event_name != 'workflow_dispatch'
     permissions:
       contents: read
     steps:
@@ -507,8 +507,10 @@ jobs:
     name: WASM Build
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Every web deployment needs a current-run artifact for its same-origin
+    # fallback. Exact all4 cache hits skip compilation; misses rebuild visibly.
     needs: [check-changes]
-    if: ${{ needs.check-changes.outputs.engine-changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.check-changes.outputs.engine-changed == 'true' || needs.check-changes.outputs.web-changed == 'true' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
     steps:
@@ -1071,23 +1073,13 @@ jobs:
         with:
           name: wasm-binaries
           path: engine/
-        continue-on-error: true
 
       - name: Populate same-origin WASM fallback
-        if: steps.download-wasm-staging.outcome == 'success'
         run: |
-          for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
-            src="engine/pkg-${variant}"
-            dest="web/public/engine-pkg-${variant}"
-            if [ -d "$src" ]; then
-              mkdir -p "$dest"
-              cp "$src"/* "$dest"/
-            fi
-          done
+          node scripts/populate-engine-fallback.mjs engine web/public
           bash scripts/generate-wasm-manifests.sh web/public
 
       - name: Verify staging upload contains the engine
-        if: steps.download-wasm-staging.outcome == 'success'
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
@@ -1465,23 +1457,13 @@ jobs:
         with:
           name: wasm-binaries
           path: engine/
-        continue-on-error: true
 
       - name: Populate same-origin WASM fallback
-        if: steps.download-wasm-production.outcome == 'success'
         run: |
-          for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
-            src="engine/pkg-${variant}"
-            dest="web/public/engine-pkg-${variant}"
-            if [ -d "$src" ]; then
-              mkdir -p "$dest"
-              cp "$src"/* "$dest"/
-            fi
-          done
+          node scripts/populate-engine-fallback.mjs engine web/public
           bash scripts/generate-wasm-manifests.sh web/public
 
       - name: Verify production upload contains the engine
-        if: steps.download-wasm-production.outcome == 'success'
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

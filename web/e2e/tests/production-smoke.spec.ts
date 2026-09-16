@@ -172,6 +172,30 @@ test.describe('Production Smoke Tests @smoke @production', () => {
     expect(body.length).toBeGreaterThan(1_000_000);
   });
 
+  for (const variant of ['webgl2', 'webgpu', 'webgl2-runtime', 'webgpu-runtime']) {
+    for (const dependency of ['forge_engine.js', 'forge_engine_bg.wasm', 'wasm-manifest.json']) {
+      test('same-origin fallback serves ' + variant + '/' + dependency, async ({ request }) => {
+        const url = PROD_URL + '/engine-pkg-' + variant + '/' + dependency;
+        const res = dependency.endsWith('.json')
+          ? await request.get(url, { maxRedirects: 0 })
+          : await request.head(url, { maxRedirects: 0 });
+        expect(res.status()).toBe(200);
+        if (dependency.endsWith('.json')) {
+          expect(res.headers()['content-type']).toContain('application/json');
+          const manifest = await res.json();
+          expect(manifest.jsFile).toBe('forge_engine.js');
+          expect(manifest.wasmFile).toBe('forge_engine_bg.wasm');
+          for (const field of ['jsHash', 'wasmHash', 'buildId']) {
+            expect(manifest[field]).toMatch(/^[0-9a-f]{16}$/);
+          }
+        } else {
+          expect(res.headers()['content-type']).toMatch(dependency.endsWith('.wasm') ? /application\/wasm/ : /javascript/);
+          expect(Number(res.headers()['content-length'])).toBeGreaterThan(0);
+        }
+      });
+    }
+  }
+
   test('API health endpoint responds', async ({ request }) => {
     const res = await request.get(`${PROD_URL}/api/health`);
     // Health endpoint should return 200 with JSON
