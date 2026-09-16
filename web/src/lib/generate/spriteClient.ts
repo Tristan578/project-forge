@@ -288,6 +288,7 @@ export class SpriteClient {
       method: 'POST',
       headers: {
         'X-Api-Key': apiKey,
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         image_url: imageUrl,

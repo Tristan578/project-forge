@@ -235,7 +235,10 @@ describe('SpriteClient', () => {
         'https://api.remove.bg/v1.0/removebg',
         expect.objectContaining({
           method: 'POST',
-          headers: expect.objectContaining({ 'X-Api-Key': mockApiKey }),
+          headers: expect.objectContaining({
+            'X-Api-Key': mockApiKey,
+            'Content-Type': 'application/json',
+          }),
         })
       );
     });
