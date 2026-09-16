@@ -208,9 +208,12 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
             // If collapsed, expand. If already expanded, move to first child
             if (!effectiveExpandedIds.has(focusedEntityId)) {
               toggleExpanded(focusedEntityId);
-            } else if (node.children.length > 0) {
-              setFocusedEntityId(node.children[0]);
-              focusRow(node.children[0]);
+            } else {
+              const firstVisibleChild = node.children.find((id) => indexMap.has(id));
+              if (firstVisibleChild) {
+                setFocusedEntityId(firstVisibleChild);
+                focusRow(firstVisibleChild);
+              }
             }
           }
         }
@@ -500,7 +503,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
       <div
         className={`${hasEntities ? 'flex-1 ' : ''}overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]`}
         data-editor-region="hierarchy"
-        tabIndex={0}
+        tabIndex={flatNodeIds.length === 0 ? 0 : -1}
         role="tree"
         aria-label="Scene hierarchy"
         onClick={handleBackgroundClick}

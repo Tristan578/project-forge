@@ -15,7 +15,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, within, waitFor } from '@/test/utils/componentTestUtils';
 import userEvent from '@testing-library/user-event';
 import { axe } from 'jest-axe';
-import { SceneHierarchy } from '../SceneHierarchy';
+import { SceneHierarchy } from '@/components/editor/SceneHierarchy';
+import type { EditorState } from '@/stores/editorStore';
 
 function summarize(violations: { id: string; impact?: string | null; help?: string }[]): string {
   return violations.map((v) => `[${v.impact ?? 'unknown'}] ${v.id}: ${v.help ?? ''}`).join('\n');
@@ -35,9 +36,10 @@ vi.mock('@/stores/editorStore', () => ({
 
 import { useEditorStore } from '@/stores/editorStore';
 
+const { useEditorStore: actualEditorStore } = await vi.importActual<typeof import('@/stores/editorStore')>('@/stores/editorStore');
 const mockSelectEntity = vi.fn();
 
-function makeFixtureGraph() {
+function makeFixtureGraph(): EditorState['sceneGraph'] {
   return {
     rootIds: ['cam', 'player', 'ground'],
     nodes: {
@@ -49,8 +51,9 @@ function makeFixtureGraph() {
   };
 }
 
-function mockStore(overrides: Record<string, unknown> = {}) {
-  const state: Record<string, unknown> = {
+function mockStore(overrides: Partial<EditorState> = {}) {
+  const state: EditorState = {
+    ...actualEditorStore.getInitialState(),
     sceneGraph: makeFixtureGraph(),
     selectedIds: new Set<string>(),
     primaryId: null,
@@ -67,8 +70,7 @@ function mockStore(overrides: Record<string, unknown> = {}) {
     clearHierarchyFilter: vi.fn(),
     ...overrides,
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  vi.mocked(useEditorStore).mockImplementation((selector: any) => selector(state));
+  vi.mocked(useEditorStore).mockImplementation(<T,>(selector: (state: EditorState) => T) => selector(state));
 }
 
 // jsdom does not implement scrollIntoView; the focus effect calls it.
@@ -113,12 +115,16 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     let rows = screen.getAllByRole('treeitem');
     expect(rows[0]).toHaveFocus();
     expect(rows[0]).toHaveAttribute('tabindex', '0');
+    expect(rows[0].querySelector('[draggable]')).toHaveClass('ring-2', 'ring-inset', 'ring-[var(--sf-accent)]');
+    expect(rows[1].querySelector('[draggable]')).not.toHaveClass('ring-2');
 
     await user.keyboard('{ArrowDown}'); // -> Player (index 1)
     rows = screen.getAllByRole('treeitem');
     expect(rows[1]).toHaveFocus();
     expect(rows[1]).toHaveAttribute('tabindex', '0');
     expect(rows[0]).toHaveAttribute('tabindex', '-1');
+    expect(rows[1].querySelector('[draggable]')).toHaveClass('ring-2', 'ring-inset', 'ring-[var(--sf-accent)]');
+    expect(rows[0].querySelector('[draggable]')).not.toHaveClass('ring-2');
   });
 
   it('Home and End jump focus to the first and last visible rows', async () => {
@@ -307,6 +313,48 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     await waitFor(() => expect(row).toHaveFocus());
   });
 
+
+  it('Tab enters directly at the active row and exits the single-stop tree', async () => {
+    const user = userEvent.setup();
+    render(<div><button>Before</button><SceneHierarchy /><button>After</button></div>);
+    screen.getByRole('button', { name: 'Before' }).focus();
+    await user.tab();
+    expect(screen.getByRole('textbox', { name: 'Search entities' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('treeitem', { name: 'Camera' })).toHaveFocus();
+    expect(screen.getByRole('tree')).toHaveAttribute('tabindex', '-1');
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'After' })).toHaveFocus();
+  });
+
+  it('ArrowRight focuses the first filtered child and commands act on that visible child', async () => {
+    const renameEntity = vi.fn();
+    const toggleVisibility = vi.fn();
+    const graph = makeFixtureGraph();
+    graph.nodes.player.children = ['cam', 'sword'];
+    graph.nodes.cam.parentId = 'player';
+    graph.rootIds = ['player', 'ground'];
+    mockStore({ sceneGraph: graph, hierarchyFilter: 'Sword', renameEntity, toggleVisibility });
+    const user = userEvent.setup();
+    render(<SceneHierarchy />);
+    expect(screen.queryByRole('treeitem', { name: 'Camera' })).toBeNull();
+    screen.getByRole('treeitem', { name: 'Player' }).focus();
+    await user.keyboard('{ArrowRight}');
+    const child = screen.getByRole('treeitem', { name: 'Sword' });
+    expect(child).toHaveFocus();
+    expect(child).toHaveAttribute('tabindex', '0');
+    mockSelectEntity.mockClear();
+    await user.keyboard('{Enter}v');
+    expect(mockSelectEntity).toHaveBeenCalledExactlyOnceWith('sword', 'replace');
+    expect(toggleVisibility).toHaveBeenCalledExactlyOnceWith('sword');
+    await user.keyboard('{F2}');
+    const input = await within(child).findByRole('textbox', { name: 'Rename Sword' });
+    await waitFor(() => expect(input).toHaveFocus());
+    await user.clear(input);
+    await user.type(input, 'Visible target{Enter}');
+    expect(renameEntity).toHaveBeenCalledExactlyOnceWith('sword', 'Visible target');
+  });
+
   it('renders a childless, axe-valid tree when the scene is empty', async () => {
     // The empty-scene UI must live OUTSIDE role="tree": a tree that CONTAINS a
     // non-treeitem child trips aria-required-children (critical). An empty tree
@@ -318,6 +366,7 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     const emptyState = screen.getByText(/No entities yet/i);
     // The empty state is a sibling of the tree, never its child.
     expect(tree.contains(emptyState)).toBe(false);
+    expect(tree).toHaveAttribute('tabindex', '0');
     expect(tree.querySelector('[role="treeitem"], [role="group"]')).toBeNull();
 
     const results = await axe(container);

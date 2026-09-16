@@ -17,7 +17,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import userEvent from '@testing-library/user-event';
 import { axe } from 'jest-axe';
-import { InspectorPanel } from '../InspectorPanel';
+import { InspectorPanel } from '@/components/editor/InspectorPanel';
+import type { EditorState } from '@/stores/editorStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -40,29 +41,29 @@ vi.mock('@/stores/complexitySlice', () => ({
 // Sub-inspectors are separate concerns — stub them so the render stays scoped
 // to the inspector chrome. Vec3Input, InfoTooltip, CollapsibleSection and
 // InspectorErrorBoundary are kept REAL so axe audits the actual markup.
-vi.mock('../LightInspector', () => ({ LightInspector: () => null }));
-vi.mock('../MaterialInspector', () => ({ MaterialInspector: () => null }));
-vi.mock('../SceneSettings', () => ({ SceneSettings: () => null }));
-vi.mock('../InputBindingsPanel', () => ({ InputBindingsPanel: () => null }));
-vi.mock('../PhysicsInspector', () => ({ PhysicsInspector: () => null }));
-vi.mock('../Physics2dInspector', () => ({ Physics2dInspector: () => null }));
-vi.mock('../AudioInspector', () => ({ AudioInspector: () => null }));
-vi.mock('../ParticleInspector', () => ({ ParticleInspector: () => null }));
-vi.mock('../AnimationInspector', () => ({ AnimationInspector: () => null }));
-vi.mock('../AnimationClipInspector', () => ({ AnimationClipInspector: () => null }));
-vi.mock('../TerrainInspector', () => ({ TerrainInspector: () => null }));
-vi.mock('../JointInspector', () => ({ JointInspector: () => null }));
-vi.mock('../GameComponentInspector', () => ({ GameComponentInspector: () => null }));
-vi.mock('../GameCameraInspector', () => ({ GameCameraInspector: () => null }));
-vi.mock('../SpriteInspector', () => ({ SpriteInspector: () => null }));
-vi.mock('../SpriteAnimationInspector', () => ({ SpriteAnimationInspector: () => null }));
-vi.mock('../SkeletonInspector', () => ({ SkeletonInspector: () => null }));
-vi.mock('../Camera2dInspector', () => ({ Camera2dInspector: () => null }));
-vi.mock('../TilemapInspector', () => ({ TilemapInspector: () => null }));
-vi.mock('../ReverbZoneInspector', () => ({ ReverbZoneInspector: () => null }));
-vi.mock('../EditModeInspector', () => ({ EditModeInspector: () => null }));
-vi.mock('../AdaptiveMusicInspector', () => ({ __esModule: true, default: () => null }));
-vi.mock('../LodInspector', () => ({ LodInspector: () => null }));
+vi.mock('@/components/editor/LightInspector', () => ({ LightInspector: () => null }));
+vi.mock('@/components/editor/MaterialInspector', () => ({ MaterialInspector: () => null }));
+vi.mock('@/components/editor/SceneSettings', () => ({ SceneSettings: () => null }));
+vi.mock('@/components/editor/InputBindingsPanel', () => ({ InputBindingsPanel: () => null }));
+vi.mock('@/components/editor/PhysicsInspector', () => ({ PhysicsInspector: () => null }));
+vi.mock('@/components/editor/Physics2dInspector', () => ({ Physics2dInspector: () => null }));
+vi.mock('@/components/editor/AudioInspector', () => ({ AudioInspector: () => null }));
+vi.mock('@/components/editor/ParticleInspector', () => ({ ParticleInspector: () => null }));
+vi.mock('@/components/editor/AnimationInspector', () => ({ AnimationInspector: () => null }));
+vi.mock('@/components/editor/AnimationClipInspector', () => ({ AnimationClipInspector: () => null }));
+vi.mock('@/components/editor/TerrainInspector', () => ({ TerrainInspector: () => null }));
+vi.mock('@/components/editor/JointInspector', () => ({ JointInspector: () => null }));
+vi.mock('@/components/editor/GameComponentInspector', () => ({ GameComponentInspector: () => null }));
+vi.mock('@/components/editor/GameCameraInspector', () => ({ GameCameraInspector: () => null }));
+vi.mock('@/components/editor/SpriteInspector', () => ({ SpriteInspector: () => null }));
+vi.mock('@/components/editor/SpriteAnimationInspector', () => ({ SpriteAnimationInspector: () => null }));
+vi.mock('@/components/editor/SkeletonInspector', () => ({ SkeletonInspector: () => null }));
+vi.mock('@/components/editor/Camera2dInspector', () => ({ Camera2dInspector: () => null }));
+vi.mock('@/components/editor/TilemapInspector', () => ({ TilemapInspector: () => null }));
+vi.mock('@/components/editor/ReverbZoneInspector', () => ({ ReverbZoneInspector: () => null }));
+vi.mock('@/components/editor/EditModeInspector', () => ({ EditModeInspector: () => null }));
+vi.mock('@/components/editor/AdaptiveMusicInspector', () => ({ __esModule: true, default: () => null }));
+vi.mock('@/components/editor/LodInspector', () => ({ LodInspector: () => null }));
 vi.mock('@/lib/transformClipboard', () => ({
   copyTransformProperty: vi.fn(),
   copyFullTransform: vi.fn(),
@@ -70,15 +71,19 @@ vi.mock('@/lib/transformClipboard', () => ({
   readTransformFromClipboard: vi.fn(),
 }));
 
+const { useEditorStore: actualEditorStore } = await vi.importActual<typeof import('@/stores/editorStore')>('@/stores/editorStore');
+const { useChatStore: actualChatStore } = await vi.importActual<typeof import('@/stores/chatStore')>('@/stores/chatStore');
+type ChatState = ReturnType<typeof actualChatStore.getInitialState>;
 const mockRenameEntity = vi.fn();
 
 function setupStore() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  vi.mocked(useEditorStore).mockImplementation((selector: any) => {
-    const state = {
+  vi.mocked(useEditorStore).mockImplementation(<T,>(selector: (state: EditorState) => T) => {
+    const state: EditorState = {
+      ...actualEditorStore.getInitialState(),
       primaryId: 'ent-1',
       primaryName: 'MyCube',
       primaryTransform: {
+        entityId: 'ent-1',
         position: [0, 0, 0] as [number, number, number],
         rotation: [0, 0, 0] as [number, number, number],
         scale: [1, 1, 1] as [number, number, number],
@@ -88,14 +93,13 @@ function setupStore() {
       renameEntity: mockRenameEntity,
       allScripts: {},
       projectType: '3d',
-      sceneGraph: { nodes: { 'ent-1': { components: [] } }, rootIds: ['ent-1'] },
+      sceneGraph: { nodes: { 'ent-1': { entityId: 'ent-1', name: 'MyCube', visible: true, parentId: null, children: [], components: [] } }, rootIds: ['ent-1'] },
       skeletons2d: {},
     };
     return selector(state);
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  vi.mocked(useChatStore).mockImplementation((selector: any) =>
-    selector({ setRightPanelTab: vi.fn() }),
+  vi.mocked(useChatStore).mockImplementation(<T,>(selector: (state: ChatState) => T) =>
+    selector({ ...actualChatStore.getInitialState(), setRightPanelTab: vi.fn() }),
   );
 }
 
@@ -143,5 +147,12 @@ describe('InspectorPanel accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     expect(mockRenameEntity).not.toHaveBeenCalled();
     // The field is restored to the entity's committed name.
     expect(nameInput.value).toBe('MyCube');
+
+    // Cancellation is consumed once; a later edit in the same session commits.
+    await user.click(nameInput);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Second edit');
+    await user.tab();
+    expect(mockRenameEntity).toHaveBeenCalledExactlyOnceWith('ent-1', 'Second edit');
   });
 });

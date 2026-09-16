@@ -12,6 +12,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from '../fixtures/editor.fixture';
 import type { Page } from '@playwright/test';
+import type { useEditorStore } from '@/stores/editorStore';
 import {
   E2E_TIMEOUT_SHORT_MS,
   E2E_TIMEOUT_ELEMENT_MS,
@@ -140,8 +141,28 @@ test.describe('Accessibility Audit — Editor @ui @dev', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Accessibility Audit — Hierarchy & Inspector @ui @dev', () => {
-  test.beforeEach(async ({ editor }) => {
+  test.beforeEach(async ({ editor, page }) => {
     await editor.loadPage();
+    await editor.waitForEditorStore();
+    await page.evaluate(() => {
+      const store = (window as Window & {
+        __EDITOR_STORE?: Pick<typeof useEditorStore, 'setState'>;
+      }).__EDITOR_STORE;
+      if (!store) throw new Error('Populated accessibility audit requires the editor store');
+      store.setState({
+        sceneGraph: {
+          rootIds: ['audit-parent'],
+          nodes: {
+            'audit-parent': { entityId: 'audit-parent', name: 'Audit Parent', visible: true, parentId: null, children: ['audit-child'], components: [] },
+            'audit-child': { entityId: 'audit-child', name: 'Audit Child', visible: true, parentId: 'audit-parent', children: [], components: [] },
+          },
+        },
+        selectedIds: new Set(['audit-child']),
+        primaryId: 'audit-child',
+        primaryName: 'Audit Child',
+        primaryTransform: { entityId: 'audit-child', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      });
+    });
   });
 
   test('scene hierarchy has zero critical or serious axe violations', async ({
@@ -149,6 +170,8 @@ test.describe('Accessibility Audit — Hierarchy & Inspector @ui @dev', () => {
   }) => {
     const tree = page.locator('[role="tree"][aria-label="Scene hierarchy"]');
     await expect(tree).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    await expect(tree.getByRole('treeitem', { name: 'Audit Parent' })).toBeVisible();
+    await expect(tree.getByRole('treeitem', { name: 'Audit Child' })).toBeVisible();
 
     const results = await new AxeBuilder({ page })
       .include('[role="tree"][aria-label="Scene hierarchy"]')
@@ -171,6 +194,10 @@ test.describe('Accessibility Audit — Hierarchy & Inspector @ui @dev', () => {
   }) => {
     const inspector = page.locator('[role="region"][aria-label="Inspector"]');
     await expect(inspector.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    await expect(inspector.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Audit Child');
+    await expect(inspector.getByRole('button', { name: 'Copy transform', exact: true })).toBeVisible();
+    await expect(inspector.getByRole('button', { name: 'Paste transform', exact: true })).toBeVisible();
+    await inspector.getByRole('button', { name: 'Copy transform', exact: true }).focus();
 
     // Exclude the deferred SceneSettings panel (rendered in the Inspector's
     // no-selection state); its pre-existing form-control labelling is outside
