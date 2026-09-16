@@ -268,11 +268,11 @@ if [ ! -f "$CD_YML" ]; then
 else
   # The line that decides engine=true. Matched on its two stable parts rather
   # than on the exact regex, which is what this rule is allowed to change.
-  engine_filter="$(grep -E "grep -q" "$CD_YML" | grep -F "engine/" || true)"
+  engine_filter="$(awk '/if echo.*CHANGED.*grep.*engine/ { filter = $0 } /echo "engine=true"/ { print filter; exit }' "$CD_YML")"
   if [ -z "$engine_filter" ]; then
     fail "could not find the engine path filter in cd.yml — this rule would pass vacuously"
   else
-    for path_input in 'engine/' 'transform-gizmo-fork/'; do
+    for path_input in 'engine/' 'transform-gizmo-fork/' 'github/workflows/cd[.]yml'; do
       if grep -qF "$path_input" <<<"$engine_filter"; then
         pass "cd.yml's engine filter covers '${path_input}' (a cache-key input)"
       else
@@ -282,15 +282,43 @@ else
   fi
 fi
 
+# Exercise the actual Detect Changed Paths shell body against a recipe-only commit.
+filter_script="$(awk '
+  /^  check-changes:/ { in_job = 1 }
+  in_job && /^  [a-z][a-z0-9-]*:$/ && !/^  check-changes:/ { exit }
+  in_job && /^        run: \|/ { in_run = 1; next }
+  in_run && /^          / { sub(/^          /, ""); print; next }
+  in_run && /^[[:space:]]*$/ { print ""; next }
+  in_run { exit }
+' "$CD_YML")"
+if [ -z "$filter_script" ]; then
+  fail "cannot extract the real recipe rebuild trigger"
+else
+  TRIGGER_REPO="$(make_repo)"
+  BEFORE_RECIPE="$(git -C "$TRIGGER_REPO" rev-parse HEAD)"
+  printf 'jobs:\n  build-wasm:\n    steps:\n      - run: cargo build --features webgpu,runtime\n' > "$TRIGGER_REPO/.github/workflows/cd.yml"
+  commit_in "$TRIGGER_REPO" "recipe-only edit"
+  if ( cd "$TRIGGER_REPO" && BEFORE_SHA="$BEFORE_RECIPE" GITHUB_OUTPUT="$TRIGGER_REPO/output" bash -c "$filter_script" ) >/dev/null; then
+    if grep -q '^engine=true$' "$TRIGGER_REPO/output"; then
+      pass "actual recipe-only trigger requests a WASM rebuild"
+    else
+      fail "actual recipe-only trigger skips the WASM rebuild"
+    fi
+    if grep -q '^web=true$' "$TRIGGER_REPO/output"; then
+      pass "actual recipe-only trigger deploys the web app to select its new engine prefix"
+    else
+      fail "actual recipe-only trigger leaves the web app on its old engine prefix"
+    fi
+  else
+    fail "actual recipe-only trigger execution failed"
+  fi
+  rm -rf "$TRIGGER_REPO"
+fi
+
 # --- all4 mode: the four-variant key (#9525) ----------------------------------
-# cd.yml's build-wasm reuses a content-addressed cache covering all FOUR engine
-# variants, not just the WebGL2 editor binary. The four are built from the SAME
-# engine tree + fork + bindgen version and differ only by cargo feature flags,
-# so the key's hash body is identical to the webgl2 key's and only the prefix
-# distinguishes them. The prefix MUST distinguish them: actions/cache segments a
-# cache by (key, hash(paths)), so a four-path save and the single-path restore
-# engine-smoke does would otherwise be two versions of one key and the restore
-# would silently miss.
+# The four-variant key shares engine/fork/bindgen identity with webgl2, uses a
+# distinct prefix, and adds the CD recipe blob. Recipe edits invalidate all4
+# without changing the legacy single-WebGL2 key consumed by engine-smoke.
 echo ""
 echo "=== all4 mode identifies the four-variant set with the same tree hash ==="
 REPO4="$(make_repo)"
@@ -396,6 +424,42 @@ else
       fail "build-wasm does not call 'engine-wasm-cache-key.sh all4' — the four-variant reuse would drift from the shared key or fall back to webgl2 only"
     fi
 
+    restore_step="$(awk '
+      /^      - / { instep = (index($0, "Restore all 4 WASM variants") > 0) }
+      instep { print }
+    ' <<<"$buildwasm")"
+    if [ -z "$restore_step" ]; then
+      fail "missing all4 restore step"
+    else
+      if grep -qE '^        id: engine-cache-all4$' <<<"$restore_step"; then
+        pass "all4 restore publishes the cache-hit ID used by build guards"
+      else
+        fail "all4 restore ID differs from build guard references"
+      fi
+      if grep -qE '^        uses: actions/cache/restore@[0-9a-f]{40}' <<<"$restore_step"; then
+        pass "all4 restore uses the pinned restore action"
+      else
+        fail "all4 restore does not use the pinned restore action"
+      fi
+      if grep -qE '^          key: \$\{\{ steps[.]engine-key-all4[.]outputs[.]key \}\}$' <<<"$restore_step"; then
+        pass "all4 restore uses the exact recipe key also used by save"
+      else
+        fail "all4 restore does not use the recipe key"
+      fi
+      if grep -qE '^        if:' <<<"$restore_step"; then
+        fail "all4 restore is conditional and may never attempt reuse"
+      else
+        pass "all4 restore always attempts reuse within build-wasm"
+      fi
+      for variant in pkg-webgl2 pkg-webgpu pkg-webgl2-runtime pkg-webgpu-runtime; do
+        if grep -qE "^[[:space:]]+engine/${variant}$" <<<"$restore_step"; then
+          pass "all4 restore contains exact engine/${variant} path"
+        else
+          fail "all4 restore lacks exact engine/${variant} path"
+        fi
+      done
+    fi
+
     # 2. The cache entry (restore AND save) lists all four variant directories.
     #    Anchored to a BARE path line so pkg-webgl2 is not conflated with
     #    pkg-webgl2-runtime, nor with the inline `path: engine/pkg-webgl2` of the
@@ -434,7 +498,7 @@ else
     if grep -qE '^[[:space:]]*continue-on-error:' <<<"$buildwasm"; then
       fail "build-wasm still has a continue-on-error: step field — a reuse failure could be masked as success (the exact bug #9525 fixes)"
     else
-      pass "build-wasm has no continue-on-error: step field (a reuse failure surfaces as a red step)"
+      pass "build-wasm has no continue-on-error field to mask a failed restore action"
     fi
 
     # 5. Every BUILD step is gated on a cache MISS. On a hit the four variants
@@ -542,13 +606,9 @@ else
       fi
     fi
 
-    # 7. A cache MISS must be an explicit line in the log (#9525 item 2).
-    #    Removing continue-on-error did NOT make a reuse miss loud:
-    #    actions/cache/restore suppresses every non-validation error (a 5xx is a
-    #    core.error annotation, everything else a core.warning) and returns with
-    #    cache-hit unset without failing the step. So a cache-service outage is a
-    #    warned, silent rebuild. The reuse-miss notice, gated on the miss, is the
-    #    one line that names the fall-through to a rebuild.
+    # 7. Successful restore actions without an exact hit rebuild visibly.
+    # SDK-internally handled errors can return a miss; errors escaping the SDK
+    # fail the restore action and stop subsequent default-guarded steps.
     miss_step="$(awk '
       /^      - / { instep = (index($0, "Note engine WASM reuse miss") > 0) }
       instep { print }
@@ -610,10 +670,15 @@ else
     ' <<<"$buildwasm")"
     if [ -z "$verify_step" ]; then
       fail "no Verify step to check for the glue-file assertion"
-    elif grep -qF 'node scripts/verify-engine-wasm.mjs engine' <<<"$verify_step"; then
+    elif grep -qE '^        run: node scripts/verify-engine-wasm[.]mjs engine$' <<<"$verify_step"; then
       pass "the completeness gate executes the tested exact-module/glue validator"
     else
       fail "the completeness gate checks only *.wasm, never forge_engine.js — a variant missing the glue passes the gate and 404s in production (#9525)"
+    fi
+    if grep -qE '^        if:' <<<"$verify_step"; then
+      fail "artifact verification is conditional and may skip a hit or miss"
+    else
+      pass "artifact verification is unconditional on cache hits and misses"
     fi
   fi
 fi

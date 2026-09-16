@@ -421,10 +421,12 @@ jobs:
           # Default web=true so the deploy pipeline is not silently skipped.
           if [ -z "$CHANGED" ]; then
             echo "::warning::git diff returned empty output -- defaulting web=true engine=false"
-            echo "engine=false" >> "$GITHUB_OUTPUT"
-            echo "web=true" >> "$GITHUB_OUTPUT"
-            echo "docs-changed=false" >> "$GITHUB_OUTPUT"
-            echo "design-changed=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "engine=false"
+              echo "web=true"
+              echo "docs-changed=false"
+              echo "design-changed=false"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -435,7 +437,9 @@ jobs:
           # the stale engine -- while scripts/engine-wasm-cache-key.sh, which
           # correctly includes the fork tree, produced a new key and rebuilt.
           # CI would then test a binary users never received.
-          if echo "$CHANGED" | grep -qE '^engine/|^[.]transform-gizmo-fork/'; then
+          # The all4 key includes this CD recipe. Recipe-only edits must build
+          # and deploy the web app so its engine prefix selects the new binaries.
+          if echo "$CHANGED" | grep -qE '^engine/|^[.]transform-gizmo-fork/|^[.]github/workflows/cd[.]yml$'; then
             echo "engine=true" >> "$GITHUB_OUTPUT"
             echo "Engine files changed -- WASM build required"
           else
@@ -443,7 +447,7 @@ jobs:
             echo "No engine changes -- skipping WASM build"
           fi
 
-          if echo "$CHANGED" | grep -qE '^web/|^packages/|^engine/|^[.]transform-gizmo-fork/|^scripts/|^(package(-lock)?\.json|turbo\.json|tsconfig\.json|[.]node-version|[.]nvmrc)$'; then
+          if echo "$CHANGED" | grep -qE '^web/|^packages/|^engine/|^[.]transform-gizmo-fork/|^[.]github/workflows/cd[.]yml$|^scripts/|^(package(-lock)?\.json|turbo\.json|tsconfig\.json|[.]node-version|[.]nvmrc)$'; then
             echo "web=true" >> "$GITHUB_OUTPUT"
             echo "Web files changed -- deploy required"
           else
@@ -451,14 +455,16 @@ jobs:
             echo "No web changes -- skipping deploy"
           fi
 
-          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && echo "docs-changed=true" >> "$GITHUB_OUTPUT" || echo "docs-changed=false" >> "$GITHUB_OUTPUT"
-          echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && echo "design-changed=true" >> "$GITHUB_OUTPUT" || echo "design-changed=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && echo "docs-changed=true" || echo "docs-changed=false"
+            echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && echo "design-changed=true" || echo "design-changed=false"
 
-          # Expose changed web file list for schema-change gating
-          WEB_FILES=$(echo "$CHANGED" | grep '^web/' || true)
-          echo "web-changed-files<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$WEB_FILES" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+            # Expose changed web file list for schema-change gating
+            WEB_FILES=$(echo "$CHANGED" | grep '^web/' || true)
+            echo "web-changed-files<<EOF"
+            echo "$WEB_FILES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
   check-deployment-drift:
     name: Detect Deployment Drift
@@ -532,16 +538,10 @@ jobs:
       # segments a cache by (key, hash(paths)), so mixing path lists under one
       # key makes the other caller's restore silently miss.
       #
-      # continue-on-error is gone, but removing it does NOT by itself make a
-      # reuse miss loud: actions/cache/restore suppresses every non-validation
-      # error (a 5xx cache-service failure surfaces as a core.error annotation,
-      # anything else as a core.warning) and returns with cache-hit unset rather
-      # than failing the step -- "caching should be optional" is its documented
-      # contract, unlike the download-artifact step it replaced, which failed
-      # hard. So a cache-service outage degrades to a WARNED rebuild, not a red
-      # step. The "reuse MISS" notice step just after the restore is what makes
-      # every miss -- a cold key or a suppressed service error -- an explicit
-      # line in the log instead of a silent fall-through into the build.
+      # Ordinary misses, and service errors handled internally by the cache SDK,
+      # leave cache-hit unset and follow the visible rebuild path. An exception
+      # escaping the SDK fails the restore action and stops default-guarded
+      # subsequent steps. There is no continue-on-error to mask that failure.
       - name: Resolve the 4-variant engine cache key
         id: engine-key-all4
         run: |
@@ -560,12 +560,8 @@ jobs:
             engine/pkg-webgpu-runtime
           key: ${{ steps.engine-key-all4.outputs.key }}
 
-      # A restore that does not hit -- a cold key for a newly merged engine tree,
-      # or a cache-service error actions/cache swallowed -- leaves cache-hit
-      # unset, and every build step below then runs. actions/cache fails the step
-      # for neither case, so this notice is the one line that names the
-      # fall-through to a rebuild in the log; without it a service outage is
-      # indistinguishable from a clean run that simply built.
+      # A successful restore action with no exact hit rebuilds. This notice
+      # names the miss; a failed restore action stops the job before this step.
       - name: Note engine WASM reuse miss
         if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         env:
