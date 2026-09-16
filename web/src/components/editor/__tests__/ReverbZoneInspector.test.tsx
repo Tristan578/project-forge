@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, within } from '@/test/utils/componentTestUtils';
 import { ReverbZoneInspector } from '../ReverbZoneInspector';
 import { useEditorStore } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -144,6 +144,20 @@ describe('ReverbZoneInspector', () => {
     expect(screen.getByText('Size')).toBeInTheDocument();
   });
 
+  it('exposes the three Size axis inputs as one named group', () => {
+    // The shared Vec3Input composite wraps X/Y/Z under a labelled group so the
+    // "Size" label is announced once for the trio rather than being inert on a
+    // role="generic" div (which the ARIA spec forbids from taking an author name).
+    // getByRole('group', { name: 'Size' }) resolves only through role="group" +
+    // aria-labelledby, so dropping either fails here.
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    const group = screen.getByRole('group', { name: 'Size' });
+    expect(within(group).getByLabelText('Size X')).toHaveAttribute('type', 'number');
+    expect(within(group).getByLabelText('Size Y')).toHaveAttribute('type', 'number');
+    expect(within(group).getByLabelText('Size Z')).toHaveAttribute('type', 'number');
+  });
+
   it('shows Radius input for sphere shape', () => {
     setupStore({
       reverbZone: {
@@ -200,10 +214,18 @@ describe('ReverbZoneInspector', () => {
     for (const name of ['Shape', 'Type', 'Wet Mix', 'Decay Time', 'Pre-Delay', 'Priority']) {
       expect(screen.getByLabelText(name)).toBeInTheDocument();
     }
+    // The three sliders now come from the shared @spawnforge/ui SliderInput
+    // composite; pin that each still resolves to a real range input through its
+    // own htmlFor label, so a regression in the composite's label wiring fails
+    // here rather than silently shipping unlabelled sliders.
+    for (const name of ['Wet Mix', 'Decay Time', 'Pre-Delay']) {
+      expect(screen.getByLabelText(name)).toHaveAttribute('type', 'range');
+    }
     // Three inputs under one "Size" label — each axis needs its own name, or all
-    // three announce identically.
+    // three announce identically. These are the shared Vec3Input composite's
+    // per-axis number inputs.
     for (const axis of ['Size X', 'Size Y', 'Size Z']) {
-      expect(screen.getByLabelText(axis)).toBeInTheDocument();
+      expect(screen.getByLabelText(axis)).toHaveAttribute('type', 'number');
     }
   });
 
@@ -214,6 +236,38 @@ describe('ReverbZoneInspector', () => {
     });
     render(<ReverbZoneInspector entityId="entity-1" />);
     expect(screen.getByLabelText('Radius')).toBeInTheDocument();
+  });
+
+  it('renders the Size axes at their raw magnitude without gaining decimals', () => {
+    // Routing Size through the shared Vec3Input at its default precision of 3
+    // displayed the integer size [10, 5, 10] as "10.000"/"5.000". The call site
+    // pins precision={1} and the composite drops trailing zeros, so an integer
+    // size reads exactly as the prior bespoke control did.
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    expect((screen.getByLabelText('Size X') as HTMLInputElement).value).toBe('10');
+    expect((screen.getByLabelText('Size Y') as HTMLInputElement).value).toBe('5');
+    expect((screen.getByLabelText('Size Z') as HTMLInputElement).value).toBe('10');
+  });
+
+  it('lets a Size axis be cleared without dispatching a non-finite size to the store', () => {
+    // The Size edit path (handleSizeChange -> updateReverbZone -> set_reverb_zone
+    // dispatch) must never see a NaN axis. Clearing the field produces an empty
+    // intermediate state the draft buffer keeps local until a finite value is
+    // typed, so no update is dispatched for the bare clear.
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    const x = screen.getByLabelText('Size X') as HTMLInputElement;
+
+    fireEvent.change(x, { target: { value: '' } });
+
+    expect(x.value).toBe('');
+    for (const call of mockUpdateReverbZone.mock.calls) {
+      const shape = call[1]?.shape;
+      if (shape?.type === 'box') {
+        expect(shape.size.every((n: number) => Number.isFinite(n))).toBe(true);
+      }
+    }
   });
 
   it('shows Remove Reverb Zone button', () => {

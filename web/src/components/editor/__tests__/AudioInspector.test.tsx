@@ -95,9 +95,76 @@ describe('AudioInspector', () => {
     render(<AudioInspector />);
     expect(screen.getByText('Volume')).toBeInTheDocument();
     expect(screen.getByText('Pitch')).toBeInTheDocument();
-    expect(screen.getByText('Loop')).toBeInTheDocument();
     expect(screen.getByText('Preview')).toBeInTheDocument();
     expect(screen.getByText('Remove Audio')).toBeInTheDocument();
+    // The three checkbox controls carry an associated accessible name (useId +
+    // htmlFor/id), so getByLabelText — which resolves ONLY through that pairing —
+    // finds each real checkbox. getByText would pass on a visual label sitting
+    // beside an unassociated input, which is the exact PF-1182/PF-1183 drift.
+    for (const name of ['Loop', 'Spatial', 'Autoplay']) {
+      expect(screen.getByLabelText(name)).toHaveAttribute('type', 'checkbox');
+    }
+  });
+
+  it('gives the migrated Volume and Pitch sliders their own accessible names', () => {
+    // Both sliders now come from the shared @spawnforge/ui SliderInput composite,
+    // which renders its own <label htmlFor>. getByLabelText resolves only through
+    // that association, so it fails if the composite ever stops wiring the label
+    // to the range input (the drift this dedupe removes). Each also carries its
+    // range role and value, proving the migrated control is the real slider.
+    mockEditorStore({
+      entityAudio: {
+        'ent-1': {
+          assetId: null,
+          volume: 0.5,
+          pitch: 1.5,
+          loopAudio: false,
+          spatial: false,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
+      },
+    });
+    render(<AudioInspector />);
+    const volume = screen.getByLabelText('Volume');
+    const pitch = screen.getByLabelText('Pitch');
+    expect(volume).toHaveAttribute('type', 'range');
+    expect(volume).toHaveValue('0.5');
+    expect(pitch).toHaveAttribute('type', 'range');
+    expect(pitch).toHaveValue('1.5');
+  });
+
+  it('forwards a slider change to setAudio for the migrated Volume and Pitch sliders', () => {
+    // The migration routes onChange through the shared SliderInput composite
+    // (onChange={(e) => onChange(Number(e.target.value))}) and SliderRowWithTerm's
+    // onChange={onChange} pass-through. Firing a real change event proves that
+    // path still reaches setAudio with the parsed numeric value — a regression
+    // that dropped/mis-wired the forwarding (e.g. to formatValue) would leave the
+    // accessible-name test above green while breaking every edit.
+    const setAudio = vi.fn();
+    mockEditorStore({
+      setAudio,
+      entityAudio: {
+        'ent-1': {
+          assetId: null,
+          volume: 0.5,
+          pitch: 1.5,
+          loopAudio: false,
+          spatial: false,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
+      },
+    });
+    render(<AudioInspector />);
+    fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '0.75' } });
+    expect(setAudio).toHaveBeenCalledWith('ent-1', { volume: 0.75 });
+    fireEvent.change(screen.getByLabelText('Pitch'), { target: { value: '2' } });
+    expect(setAudio).toHaveBeenCalledWith('ent-1', { pitch: 2 });
   });
 
   it('reads the selected entity, not whichever entity reported audio last', () => {
@@ -141,9 +208,39 @@ describe('AudioInspector', () => {
       },
     });
     render(<AudioInspector />);
-    expect(screen.getByText('Max Distance')).toBeInTheDocument();
-    expect(screen.getByText('Ref Distance')).toBeInTheDocument();
-    expect(screen.getByText('Rolloff')).toBeInTheDocument();
+    // These come from the shared @spawnforge/ui NumberField composite, which
+    // renders its own <label htmlFor>. getByLabelText resolves only through that
+    // association, so it fails if the composite ever stops wiring the label to the
+    // number input — the drift PF-1183 removed by deleting the bespoke local copy.
+    for (const name of ['Max Distance', 'Ref Distance', 'Rolloff']) {
+      expect(screen.getByLabelText(name)).toHaveAttribute('type', 'number');
+    }
+  });
+
+  it('forwards a spatial number-field edit to setAudio through the shared composite', () => {
+    // Proves the NumberField onChange path (parseFloat -> onChange) still reaches
+    // setAudio with the parsed numeric value, so the accessible-name test above
+    // cannot pass while the edit wiring is broken (lessons-learned #11).
+    const setAudio = vi.fn();
+    mockEditorStore({
+      setAudio,
+      entityAudio: {
+        'ent-1': {
+          assetId: null,
+          volume: 1.0,
+          pitch: 1.0,
+          loopAudio: false,
+          spatial: true,
+          maxDistance: 50,
+          refDistance: 1,
+          rolloffFactor: 1,
+          autoplay: false,
+        },
+      },
+    });
+    render(<AudioInspector />);
+    fireEvent.change(screen.getByLabelText('Max Distance'), { target: { value: '80' } });
+    expect(setAudio).toHaveBeenCalledWith('ent-1', { maxDistance: 80 });
   });
 
   it('names the tier a locked generate button needs, not just in the tooltip', () => {
