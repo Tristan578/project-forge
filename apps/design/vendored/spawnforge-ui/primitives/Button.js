@@ -1,4 +1,5 @@
 import { jsx as _jsx } from "react/jsx-runtime";
+/** Shared button variants, sizing, keyboard focus and disabled interaction states. */
 import { forwardRef } from 'react';
 import { cn } from '../utils/cn';
 const variantStyles = {
@@ -21,7 +22,7 @@ const variantStyles = {
     outline: [
         'bg-[var(--sf-bg-surface)] border border-[var(--sf-border-strong)] text-[var(--sf-text)]',
         'shadow-[0_1px_2px_rgba(0,0,0,0.2)]',
-        'hover:bg-[var(--sf-bg-elevated)] hover:border-[var(--sf-accent)] hover:text-[var(--sf-accent)]',
+        'hover:bg-[var(--sf-bg-elevated)] hover:border-[var(--sf-accent)] hover:text-[var(--sf-text)]',
         'active:scale-[0.97]',
     ].join(' '),
     ghost: [
@@ -35,6 +36,13 @@ const sizeStyles = {
     md: 'h-9 px-4 text-sm gap-2',
     lg: 'h-11 px-6 text-base gap-2.5',
 };
+/**
+ * Renders a native button with shared focus, disabled and variant styling.
+ * Outline text retains the primary foreground at rest and hover so normal-sized
+ * labels remain readable on both surface and elevated backgrounds.
+ * @param props Native button attributes, children and optional variant/size.
+ * @returns A button whose forwarded ref points to its native element.
+ */
 export const Button = forwardRef(({ className, variant = 'default', size = 'md', disabled, children, ...props }, ref) => {
     return (_jsx("button", { ref: ref, className: cn('inline-flex items-center justify-center font-medium', 'rounded-[var(--sf-radius-md)]', 'transition-all duration-[var(--sf-transition)] ease-out', 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sf-bg-app)]', 'disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none', 'select-none', variantStyles[variant], sizeStyles[size], className), disabled: disabled, ...props, children: children }));
 });

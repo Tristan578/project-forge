@@ -337,4 +337,47 @@ describe('Theme Definitions', () => {
       ).toBeGreaterThanOrEqual(3.0);
     }
   );
+
+  // PF-1068 / #9108: status-colour semantic (healthy / degraded / down /
+  // unknown). Each status is a foreground/background PAIR — the filled band
+  // that `HealthDashboard`'s overall banner paints puts normal-weight copy
+  // (the `environment • version` sub-line, text-sm) directly on the background,
+  // so the pair must clear the AA 4.5:1 floor for NORMAL text, not the 3:1
+  // large-text floor. The values are theme-independent by design (green means
+  // healthy in every theme, like a traffic light) but graded per theme anyway
+  // so a future per-theme override cannot silently drop below AA.
+  const STATUS_PAIRS: Array<[keyof ThemeTokens, keyof ThemeTokens, string]> = [
+    ['--sf-status-healthy-fg', '--sf-status-healthy-bg', 'healthy'],
+    ['--sf-status-degraded-fg', '--sf-status-degraded-bg', 'degraded'],
+    ['--sf-status-down-fg', '--sf-status-down-bg', 'down'],
+    ['--sf-status-unknown-fg', '--sf-status-unknown-bg', 'unknown'],
+  ];
+
+  it.each(THEMES)('%s theme defines every status-colour token as opaque hex', (theme) => {
+    const tokens = THEME_DEFINITIONS[theme];
+    for (const [fgKey, bgKey] of STATUS_PAIRS) {
+      for (const key of [fgKey, bgKey]) {
+        expect(tokens[key], `${theme} missing ${key}`).toBeDefined();
+        expect(tokens[key], `${theme}.${key} = ${tokens[key]}`).toMatch(
+          /^#[0-9a-fA-F]{6}$/
+        );
+      }
+    }
+  });
+
+  it.each(THEMES)(
+    '%s theme: every status variant meets WCAG AA (>= 4.5:1) for normal text',
+    (theme) => {
+      const tokens = THEME_DEFINITIONS[theme];
+      for (const [fgKey, bgKey, name] of STATUS_PAIRS) {
+        const fgHex = tokens[fgKey] as string;
+        const bgHex = tokens[bgKey] as string;
+        const ratio = contrastRatio(fgHex, bgHex);
+        expect(
+          ratio,
+          `${theme}: status ${name} — ${fgKey} ${fgHex} on ${bgKey} ${bgHex} = ${ratio.toFixed(2)}:1, need >= 4.5:1`
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  );
 });

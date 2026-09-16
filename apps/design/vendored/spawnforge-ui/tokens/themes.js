@@ -1,12 +1,34 @@
+/** Complete built-in theme palettes and generated CSS, including verified status color pairs. */
 import { THEME_NAMES } from './colors';
 const BASE_STRUCTURE = {
     '--sf-radius-sm': '4px',
     '--sf-radius-full': '9999px',
     '--sf-font-mono': "'Geist Mono', ui-monospace, monospace",
 };
+/**
+ * Status-colour semantic (PF-1068 / #9108). Foreground/background PAIRS so a
+ * filled status band can carry normal-weight text at >= WCAG AA 4.5:1 (proven
+ * per theme in themes.test.ts). Shared across every theme — a status must not
+ * change meaning between themes, and holding the pair constant is what lets the
+ * contrast be verified once rather than re-derived at each site. Measured
+ * ratios: healthy 5.02, degraded 10.95, down 6.47, unknown 7.73 (:1). Any
+ * single-theme override must keep clearing 4.5 or themes.test.ts fails.
+ */
+const STATUS_COLORS = {
+    '--sf-status-healthy-bg': '#15803d',
+    '--sf-status-healthy-fg': '#ffffff',
+    '--sf-status-degraded-bg': '#eab308',
+    '--sf-status-degraded-fg': '#000000',
+    '--sf-status-down-bg': '#b91c1c',
+    '--sf-status-down-fg': '#ffffff',
+    '--sf-status-unknown-bg': '#52525b',
+    '--sf-status-unknown-fg': '#ffffff',
+};
+/** Complete built-in palettes; every theme includes the shared readable status pairs. */
 export const THEME_DEFINITIONS = {
     dark: {
         ...BASE_STRUCTURE,
+        ...STATUS_COLORS,
         '--sf-bg-app': '#09090b',
         '--sf-bg-surface': '#18181b',
         '--sf-bg-elevated': '#27272a',
@@ -33,6 +55,7 @@ export const THEME_DEFINITIONS = {
     },
     light: {
         ...BASE_STRUCTURE,
+        ...STATUS_COLORS,
         '--sf-bg-app': '#fafafa',
         '--sf-bg-surface': '#ffffff',
         '--sf-bg-elevated': '#f4f4f5',
@@ -59,6 +82,7 @@ export const THEME_DEFINITIONS = {
     },
     ember: {
         ...BASE_STRUCTURE,
+        ...STATUS_COLORS,
         '--sf-bg-app': '#1a0f05',
         '--sf-bg-surface': '#2a1a0a',
         '--sf-bg-elevated': '#3d2814',
@@ -85,6 +109,7 @@ export const THEME_DEFINITIONS = {
     },
     rust: {
         ...BASE_STRUCTURE,
+        ...STATUS_COLORS,
         '--sf-bg-app': '#1c1917',
         '--sf-bg-surface': '#292524',
         '--sf-bg-elevated': '#44403c',
@@ -111,6 +136,7 @@ export const THEME_DEFINITIONS = {
     },
     ice: {
         ...BASE_STRUCTURE,
+        ...STATUS_COLORS,
         '--sf-bg-app': '#0f172a',
         '--sf-bg-surface': '#1e293b',
         '--sf-bg-elevated': '#334155',
@@ -137,6 +163,7 @@ export const THEME_DEFINITIONS = {
     },
     leaf: {
         ...BASE_STRUCTURE,
+        ...STATUS_COLORS,
         '--sf-bg-app': '#0a1a0f',
         '--sf-bg-surface': '#132a1a',
         '--sf-bg-elevated': '#1e3d24',
@@ -166,6 +193,7 @@ export const THEME_DEFINITIONS = {
     },
     mech: {
         ...BASE_STRUCTURE,
+        ...STATUS_COLORS,
         '--sf-bg-app': '#0c0c0e',
         '--sf-bg-surface': '#141418',
         '--sf-bg-elevated': '#1e1e24',

@@ -1,8 +1,12 @@
+/** Shared button variants, sizing, keyboard focus and disabled interaction states. */
 import { forwardRef, type ButtonHTMLAttributes } from 'react';
 import { cn } from '../utils/cn';
 
+/** Native button attributes with library variants and sizes. */
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  /** Visual treatment; defaults to the primary filled button. */
   variant?: 'default' | 'destructive' | 'outline' | 'ghost';
+  /** Spacing and type scale; defaults to md. Small buttons retain a 44px mobile target. */
   size?: 'sm' | 'md' | 'lg';
 }
 
@@ -26,7 +30,7 @@ const variantStyles: Record<NonNullable<ButtonProps['variant']>, string> = {
   outline: [
     'bg-[var(--sf-bg-surface)] border border-[var(--sf-border-strong)] text-[var(--sf-text)]',
     'shadow-[0_1px_2px_rgba(0,0,0,0.2)]',
-    'hover:bg-[var(--sf-bg-elevated)] hover:border-[var(--sf-accent)] hover:text-[var(--sf-accent)]',
+    'hover:bg-[var(--sf-bg-elevated)] hover:border-[var(--sf-accent)] hover:text-[var(--sf-text)]',
     'active:scale-[0.97]',
   ].join(' '),
   ghost: [
@@ -42,6 +46,13 @@ const sizeStyles: Record<NonNullable<ButtonProps['size']>, string> = {
   lg: 'h-11 px-6 text-base gap-2.5',
 };
 
+/**
+ * Renders a native button with shared focus, disabled and variant styling.
+ * Outline text retains the primary foreground at rest and hover so normal-sized
+ * labels remain readable on both surface and elevated backgrounds.
+ * @param props Native button attributes, children and optional variant/size.
+ * @returns A button whose forwarded ref points to its native element.
+ */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = 'default', size = 'md', disabled, children, ...props }, ref) => {
     return (
