@@ -1,6 +1,15 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+/** Shared labelled range editor with readable values, visible handles and responsive touch targets. */
 import { useId } from 'react';
 import { cn } from '../utils/cn';
+/**
+ * Renders a controlled range with an associated label and optional live readout.
+ * Defaults to bounds 0–100 and step 1. Mobile uses a 44px input target around a
+ * centered 6px rail; from the small breakpoint the input is compact at 6px.
+ * Both browser thumb styles use the primary foreground for a visible handle.
+ * @param props Controlled value/callback, label, range limits and native attributes.
+ * @returns A labelled range editor and an optional formatted value readout.
+ */
 export function SliderInput({ label, value, onChange, min = 0, max = 100, step = 1, showValue = true, formatValue, className, disabled, ...props }) {
     const id = useId();
     const displayValue = formatValue ? formatValue(value) : String(value);
