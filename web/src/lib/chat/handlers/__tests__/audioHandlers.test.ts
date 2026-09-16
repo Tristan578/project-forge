@@ -4,6 +4,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invokeHandler } from './handlerTestUtils';
 import { audioHandlers } from '../audioHandlers';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { createEmptyArrangement } from '@/lib/music/arrangementTypes';
 
 // ---------------------------------------------------------------------------
 // Mock audioManager
@@ -385,5 +387,168 @@ describe('audioHandlers', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('WebAudio error');
     });
+  });
+});
+
+// ===========================================================================
+// Music arrangement handlers (music.FR-2.OP-01 / OP-02, #9854) — the in-app
+// AI half of the same operations MusicArrangementPanel offers manually. These
+// drive the real useMusicArrangementStore singleton, proving the AI path and
+// the manual UI share one command/data contract (issue #9854 F2 parity).
+// ===========================================================================
+
+describe('audioHandlers — music arrangement (in-app AI parity)', () => {
+  const arr = () => useMusicArrangementStore.getState();
+
+  beforeEach(() => {
+    useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
+  });
+
+  it('arrangement_add_track adds a track and returns its id', async () => {
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_add_track', { name: 'Lead' });
+    expect(result.success).toBe(true);
+    const trackId = (result.result as { trackId: string }).trackId;
+    expect(arr().arrangement.tracks).toEqual([{ id: trackId, name: 'Lead', muted: false }]);
+  });
+
+  it('arrangement_add_clip places a clip on the track (same effect as the panel)', async () => {
+    const trackId = arr().addTrack('T');
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_add_clip', {
+      trackId,
+      sourceUrl: 'music-boss',
+      sourceDurationSeconds: 40,
+    });
+    expect(result.success).toBe(true);
+    expect(arr().arrangement.clips[0]).toMatchObject({ trackId, sourceUrl: 'music-boss', sourceDurationSeconds: 40 });
+  });
+
+  it('arrangement_add_clip reports an unknown track instead of a phantom clip', async () => {
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_add_clip', {
+      trackId: 'ghost',
+      sourceUrl: 'x',
+      sourceDurationSeconds: 10,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('track not found');
+    expect(arr().arrangement.clips).toHaveLength(0);
+  });
+
+  it('arrangement_move_clip / trim_clip / set_loop mutate the same clip the panel would', async () => {
+    const trackId = arr().addTrack();
+    const clipId = arr().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 20 })!;
+
+    await invokeHandler(audioHandlers, 'arrangement_move_clip', { clipId, startOffset: 7 });
+    expect(arr().arrangement.clips[0].startOffset).toBe(7);
+
+    await invokeHandler(audioHandlers, 'arrangement_trim_clip', { clipId, trimStart: 3, trimEnd: 15 });
+    expect(arr().arrangement.clips[0]).toMatchObject({ trimStart: 3, trimEnd: 15 });
+
+    await invokeHandler(audioHandlers, 'arrangement_set_loop', { clipId, loopEnabled: true });
+    expect(arr().arrangement.clips[0].loopEnabled).toBe(true);
+  });
+
+  it('arrangement_move_clip reports an unknown target track instead of silently no-op-ing', async () => {
+    const trackId = arr().addTrack();
+    const clipId = arr().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 20 })!;
+
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_move_clip', {
+      clipId,
+      startOffset: 4,
+      trackId: 'ghost-track',
+    });
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('track not found'),
+    });
+    // The clip must be untouched — no silent partial move.
+    expect(arr().arrangement.clips[0]).toMatchObject({ trackId, startOffset: 0 });
+  });
+
+  // Each of the three clip-mutating handlers guards on the clip existing before
+  // touching the store. Without a test per handler, a regression that silently
+  // no-ops (or throws) on an unknown clipId would pass the suite — the mutate
+  // test above only ever hands them a real clip.
+  it.each([
+    ['arrangement_move_clip', { clipId: 'ghost', startOffset: 4 }],
+    ['arrangement_trim_clip', { clipId: 'ghost', trimStart: 1, trimEnd: 5 }],
+    ['arrangement_set_loop', { clipId: 'ghost', loopEnabled: true }],
+  ] as const)('%s reports a missing clip instead of mutating', async (handler, args) => {
+    // A real track exists but no clip with this id — the guard must still fire.
+    arr().addTrack();
+    const { result } = await invokeHandler(audioHandlers, handler, args);
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('clip not found'),
+    });
+    expect(arr().arrangement.clips).toHaveLength(0);
+  });
+
+  it('arrangement_delete_clip / delete_track report a missing target and remove a real one', async () => {
+    const missing = await invokeHandler(audioHandlers, 'arrangement_delete_clip', { clipId: 'nope' });
+    expect(missing.result.success).toBe(false);
+
+    const trackId = arr().addTrack();
+    const clipId = arr().addClip({ trackId, sourceUrl: 'a', sourceDurationSeconds: 10 })!;
+    const del = await invokeHandler(audioHandlers, 'arrangement_delete_clip', { clipId });
+    expect(del.result.success).toBe(true);
+    expect(arr().arrangement.clips).toHaveLength(0);
+
+    const delTrack = await invokeHandler(audioHandlers, 'arrangement_delete_track', { trackId });
+    expect(delTrack.result.success).toBe(true);
+    expect(arr().arrangement.tracks).toHaveLength(0);
+  });
+
+  // Parity with the MusicArrangementPanel Mute checkbox (setTrackMuted). Without
+  // an AI/MCP command the manual control had no in-app-AI equivalent.
+  it('arrangement_set_track_muted mutes and unmutes a real track', async () => {
+    const trackId = arr().addTrack();
+    const mute = await invokeHandler(audioHandlers, 'arrangement_set_track_muted', { trackId, muted: true });
+    expect(mute.result.success).toBe(true);
+    expect(arr().arrangement.tracks[0].muted).toBe(true);
+
+    await invokeHandler(audioHandlers, 'arrangement_set_track_muted', { trackId, muted: false });
+    expect(arr().arrangement.tracks[0].muted).toBe(false);
+  });
+
+  it('arrangement_set_track_muted reports a missing track instead of mutating', async () => {
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_set_track_muted', { trackId: 'ghost', muted: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('track not found');
+  });
+
+  // Parity with the MusicArrangementPanel's rename control (renameTrack, #10058):
+  // without this the AI/MCP path had no way to rename a track at all.
+  it('arrangement_rename_track renames a real track', async () => {
+    const trackId = arr().addTrack('Original');
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_rename_track', { trackId, name: 'Lead Synth' });
+    expect(result.success).toBe(true);
+    expect(arr().arrangement.tracks[0].name).toBe('Lead Synth');
+  });
+
+  it('arrangement_rename_track reports a missing track instead of mutating', async () => {
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_rename_track', { trackId: 'ghost', name: 'Nope' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('track not found');
+  });
+
+  it('arrangement_rename_track rejects a blank name instead of silently no-op-ing', async () => {
+    const trackId = arr().addTrack('Original');
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_rename_track', { trackId, name: '   ' });
+    expect(result.success).toBe(false);
+    expect(arr().arrangement.tracks[0].name).toBe('Original');
+  });
+
+  it('arrangement mutations from the AI path are undoable, sharing the panel history', async () => {
+    const trackId = arr().addTrack();
+    await invokeHandler(audioHandlers, 'arrangement_add_clip', { trackId, sourceUrl: 'a', sourceDurationSeconds: 10 });
+    expect(arr().arrangement.clips).toHaveLength(1);
+    arr().undo();
+    expect(arr().arrangement.clips).toHaveLength(0);
+  });
+
+  it('arrangement_set_tempo clamps and reports the applied tempo', async () => {
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_set_tempo', { bpm: 999 });
+    expect(result.success).toBe(true);
+    expect(arr().arrangement.tempoBpm).toBe(400);
   });
 });
