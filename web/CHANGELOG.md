@@ -1,5 +1,314 @@
 # web
 
+## 0.10.0
+
+### Minor Changes
+
+- [#10061](https://github.com/Tristan578/project-forge/pull/10061) [`a8b982f`](https://github.com/Tristan578/project-forge/commit/a8b982fdcf6e1580c6771d38c642336205d79736) Thanks [@Tristan578](https://github.com/Tristan578)! - Prefabs now track a versioned source record. Saving a prefab cuts version 1 (with a stable source-content hash and created/updated timestamps), and editing it bumps the version while preserving its history. A new manual reimport flow lets you preview which prefab instances and fields a re-read of the source asset would change before applying it, then applies the update while preserving each instance's transform, script, and any material overrides. Reimport is transactional at the prefab level: a missing or incompatible source is rejected and the previous playable version is kept with no partial mutation.
+
+- [#10011](https://github.com/Tristan578/project-forge/pull/10011) [`8a50ed5`](https://github.com/Tristan578/project-forge/commit/8a50ed510aaa08de6fe4519a6bd522182d380011) Thanks [@Tristan578](https://github.com/Tristan578)! - Add the audio clip document foundation: pure trim, gain, fade and loop helpers, bounded undo history, waveform extraction and manifest parsing helpers. The standalone editor prototype remains outside the Audio inspector until scene persistence, audible preview and export consume the document, tracked in [#9936](https://github.com/Tristan578/project-forge/issues/9936). This foundation does not yet provide persistent or audible clip editing in the product.
+
+- [#10008](https://github.com/Tristan578/project-forge/pull/10008) [`87a1c35`](https://github.com/Tristan578/project-forge/commit/87a1c356039ee0d5f6cdda9257edce8eee9183cf) Thanks [@Tristan578](https://github.com/Tristan578)! - Add an experimental input-trace recorder and replay runner, capped at 120 ticks
+  and 30 seconds, with manual controls in the Playtest panel. The runner reports
+  observed movement and collectible disappearance separately from the heuristic
+  AI Playtest rating. Live-engine verification and AI command registration remain
+  tracked by [#10007](https://github.com/Tristan578/project-forge/issues/10007); the shared runner's unit tests do not establish either.
+
+- [#9999](https://github.com/Tristan578/project-forge/pull/9999) [`8312793`](https://github.com/Tristan578/project-forge/commit/83127938c6e4b3cbca95d92a16ccc670ad61dd9e) Thanks [@Tristan578](https://github.com/Tristan578)! - Add the shared validator foundation for intentional game completion modes. The pre-play/verify winnability gate now accepts an (internal-only) `completionMode` — `win`, `endless`, `sandbox`, or `narrative` — and, for `endless`/`sandbox`/`narrative`, no longer demands a win condition, while still fully validating any win condition that IS present in every mode. The human Play button, the AI play action, and orchestrator verification all read this one field, so they gate identically. No scene sets the mode in this release: there is no manual control or AI operation that authors it yet, so every scene reads `undefined` and keeps the classic `win` behavior unchanged. The creator- and AI-facing controls that choose a mode, and the persistence that saves it across reopen, land in a follow-up ([#9998](https://github.com/Tristan578/project-forge/issues/9998)).
+
+- [#10065](https://github.com/Tristan578/project-forge/pull/10065) [`d366340`](https://github.com/Tristan578/project-forge/commit/d366340f8db65a7b51489e90b7ad303c01d49c5a) Thanks [@Tristan578](https://github.com/Tristan578)! - Add manual per-system-group CPU timing capture to the performance profiler. A
+  new "Top costly systems" panel lets you start a bounded capture session and see
+  which engine system group a frame spike is attributable to. Each group is named
+  for exactly what it measures — "Entity sync" (the per-frame entity-state emit),
+  "Transform apply" (the transform command drain) and "Physics" (Rapier's real
+  simulation step) — so the panel never over-claims cost it cannot see, such as
+  user-script CPU that runs off-frame in the JS worker. Groups the engine does not
+  measure — rendering and GPU timing — are shown as "unknown" rather than a
+  misleading zero, and long capture sessions stay memory-bounded and can be
+  stopped at any time.
+
+- [#10019](https://github.com/Tristan578/project-forge/pull/10019) [`23efec9`](https://github.com/Tristan578/project-forge/commit/23efec99808adcf0e616fda260fac7ea3ea66f1a) Thanks [@Tristan578](https://github.com/Tristan578)! - Implement `forge.i18n` translation lookup and locale selection in the editor's
+  script worker. Add the `forge.leaderboard` namespace and async channel so calls
+  reject with an actionable error instead of accessing an undefined namespace.
+  Leaderboard submission and reads remain unavailable in running games: the editor
+  has no published identity, and published play pages do not yet host this worker.
+  Published worker integration remains tracked by [#9856](https://github.com/Tristan578/project-forge/issues/9856).
+
+- [#10075](https://github.com/Tristan578/project-forge/pull/10075) [`ef7b1be`](https://github.com/Tristan578/project-forge/commit/ef7b1be8bc1647f5b3262adaf7786c729bdc6da3) Thanks [@Tristan578](https://github.com/Tristan578)! - Prepare image and embedding platform credential resolution for the Vercel AI Gateway.
+  
+  `createGenerationHandler` now forwards its server-derived capability to `resolveApiKey`. For image and embedding, the resolver selects `AI_GATEWAY_API_KEY` without falling back to `PLATFORM_OPENAI_KEY`. On Vercel it returns an empty-key OIDC sentinel. Availability gates report this credential readiness; they do not prove a provider request succeeds. Existing stored BYOK credentials retain precedence, and tier gating, token accounting and circuit-breaker provider attribution remain unchanged.
+  
+  This change makes no image or embedding upstream request. A consumer must pair the selected credential with the gateway endpoint and model adapter; an OIDC-aware SDK must handle the sentinel. The actual image consumer and transport verification remain tracked in [#9818](https://github.com/Tristan578/project-forge/issues/9818). Settings supports Anthropic, Meshy, Hyper3D and ElevenLabs keys; it has no OpenAI key option.
+  
+  `/api/chat` retains its existing backend routing. Localization and pacing always use direct Anthropic credentials, even when a gateway key is present. DALL-E sprites and other existing direct-provider clients keep their current credentials.
+
+- [#10068](https://github.com/Tristan578/project-forge/pull/10068) [`e70fe56`](https://github.com/Tristan578/project-forge/commit/e70fe5603bfe01be687965f4692e790be9457bee) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a token-driven `InlineAlert` primitive to `@spawnforge/ui` (warning / error / info variants, optional `id`, `role="alert"` for errors and `role="status"` for warnings and info) and migrate the editor's bespoke inline notice boxes to use it: the generation-unavailable notice, the feedback dialog error, the GDD panel error, the procedural-animation default-bones warning, and the engine init overlay's timeout and failure boxes. Notice colours now come from the shared theme tokens, so light/dark theming is handled once instead of per hardcoded amber/yellow Tailwind literal.
+
+- [#9765](https://github.com/Tristan578/project-forge/pull/9765) [`4c776ff`](https://github.com/Tristan578/project-forge/commit/4c776fff849c0b2cbb76ca248d21cb461dc3df0b) Thanks [@Tristan578](https://github.com/Tristan578)! - **Input actions belong to the creator, not to a genre.**
+  
+  A new project used to respond to no key at all: `InputMap::default()` was an
+  empty map, and the only thing that ever filled it was one of four genre presets
+  (`fps`, `platformer`, `topdown`, `racing`). Choosing a genre was the price of
+  having a keyboard, and a game that was none of those four had no vocabulary.
+  
+  A new scene now starts with thirteen actions named for the input rather than for
+  a kind of game — `move_left`/`move_right`/`move_up`/`move_down`,
+  `move_forward`/`move_backward` on the same keys, the `move_horizontal` and
+  `move_vertical` axes, `jump`, `interact`, `pause`, `action_primary`,
+  `action_secondary` — and every one of them can be renamed, rebound or deleted.
+  
+  Three things that made input genre-shaped are fixed with it:
+  
+  - A template's own declared actions were discarded on load, so shipped content
+    could only ever speak a preset. They are honoured now, which is what lets a
+    game define `grapple`, `rewind` or a second player's controls.
+  - A scene file had to state a complete input map or fail to load. Omitting it
+    now means "use the defaults".
+  - Applying a preset **replaced** every action the project had, including ones
+    the creator authored. Presets merge now; removing a binding is an explicit act
+    on a named action.
+  
+  **Fixes movement that never worked.** The four action names every shipped and
+  generated script used — `move_left`, `move_right`, `move_forward`,
+  `move_backward` — were defined by no preset, so movement was dead in all eleven
+  templates. Under `fps` an axis reports pressed in both directions, so
+  `isPressed('move_forward')` was true for W *or* S while `isPressed('move_left')`
+  was never true: the player could not walk left, and walking backwards read as
+  walking forwards. Both AI system prompts taught those names, so generated games
+  were born with it.
+
+- [#10063](https://github.com/Tristan578/project-forge/pull/10063) [`c67992b`](https://github.com/Tristan578/project-forge/commit/c67992b3deb5e21f6c2b4c027cf2fe2a65067d41) Thanks [@Tristan578](https://github.com/Tristan578)! - Two local players can now each author an independent, rebindable input action map. The Input Bindings panel gains a Player 1 / Player 2 selector so a creator can add, rebind and remove actions for each player separately, and the same operation is available through the in-app AI commands (`set_input_binding`, `remove_input_binding`, `set_input_preset` all accept an optional player slot). At runtime, `forge.input.isPressed(action, player)` (and `justPressed` / `justReleased` / `getAxis`) resolve either player's state, so two players sharing one keyboard can be driven from distinct keys. Single-player scenes, scripts and saved projects are unaffected — an omitted player is always the primary player (slot 0), and a scene with no second player serializes exactly as before.
+
+- [#10059](https://github.com/Tristan578/project-forge/pull/10059) [`caf2151`](https://github.com/Tristan578/project-forge/commit/caf2151f94e35bfb074c632bf4f224288fe91419) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a music track/clip arrangement data model and a manual arrangement editor. Generated and imported audio now share one editable timeline: create tracks, place clips, trim their in/out points, move them, and toggle looping from the new Music Arrangement panel. The arrangement is saved with the project alongside the scene, so it survives closing and reopening. Generating music now places the result on the timeline as a clip instead of a one-shot, play-only result.
+
+- [#9996](https://github.com/Tristan578/project-forge/pull/9996) [`e176bce`](https://github.com/Tristan578/project-forge/commit/e176bce8bc4f29204c9255fd2f8d5151cce29687) Thanks [@Tristan578](https://github.com/Tristan578)! - Add the shared Forge Observatory metric contract ([#9751](https://github.com/Tristan578/project-forge/issues/9751)): `web/src/lib/observatory/` now holds a versioned TypeScript schema, a runtime validator, and golden JSON fixtures for the four Observatory metrics (completeness, friction, latency, uptime), plus the metric dictionary in `specs/forge-observatory.md`. The contract separates applicability, freshness, and measured health as three axes so a stale value keeps its last-observed value without claiming current health, distinguishes explicit Unknown/Stale/InsufficientSample/NotApplicable states from any numeric zero, defines half-open UTC windows, per-source freshness TTLs, and minimum sample counts, and rejects zero-denominator, formula-version-mismatch, and mixed-environment records. This is the schema ingestion, snapshots, the API and views will consume; no runtime behavior changes yet.
+
+- [#10014](https://github.com/Tristan578/project-forge/pull/10014) [`17261a4`](https://github.com/Tristan578/project-forge/commit/17261a4e737323e3c9c507fab6be2d7c3756b24a) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a versioned measurement manifest alongside captured performance reports. Capture report snapshots existing profiler statistics with available build identity, OS, browser major version, active render backend, viewport, device memory and sample count. Manifest metadata that cannot be determined is shown as "unknown"; fixture identity, cache state and GPU/driver information remain unknown until supplied by a measurement harness. Capturing a report does not establish a performance budget pass.
+
+- [#9766](https://github.com/Tristan578/project-forge/pull/9766) [`98dda61`](https://github.com/Tristan578/project-forge/commit/98dda61e9b33089e6e6347a1eb5fcdf0115f3a07) Thanks [@Tristan578](https://github.com/Tristan578)! - **Breaking for scripts.** Seven `forge.*` methods that dispatched commands the
+  engine never implemented are removed: `forge.physics.setVelocity`,
+  `forge.physics2d.setVelocity`, `forge.physics2d.setAngularVelocity`,
+  `forge.camera.setPosition`, `forge.camera.lookAt`,
+  `forge.skeleton.stopAnimation` and `forge.skeleton.setIkTarget`. Each
+  already did nothing — the command was accepted and discarded — so no behaviour
+  changes, but a script that calls one now throws a `TypeError` where the author
+  can see it instead of failing silently. There is no replacement: use
+  `applyForce` / `applyImpulse` for velocity, and the `camera` commands for the
+  camera.
+  
+  `forge.setScale(entityId, x, y, z)` is **added**. It was the opposite case —
+  `update_transform` has always carried an optional scale, and the shipped Arena
+  Shooter template already called the method, which simply did not exist.
+  
+  Three script-console messages that were written to a channel the console never
+  read — an engine command refusal, the infinite-loop watchdog, and a command
+  blocked by the allowlist — are now displayed.
+  
+  The `forge.*` conformance gate now also covers the Template Gallery, the
+  `/api/chat` system prompt and `docs/reference/script-api.md`. That found all six
+  2D starter templates to be non-functional; they are recorded and tracked at
+  [#9763](https://github.com/Tristan578/project-forge/issues/9763), not fixed here.
+
+- [#10095](https://github.com/Tristan578/project-forge/pull/10095) [`e1f78f1`](https://github.com/Tristan578/project-forge/commit/e1f78f1492045cc9b597fc9d5a9be2c60d6906d2) Thanks [@Tristan578](https://github.com/Tristan578)! - Add editor-local manual pixel layers with independent drawing, visibility, opacity, ordering and names. Undo/redo restores the layer stack, selection and canvas dimensions, including rename/opacity edits. Preview, PNG download and sprite application composite visible layers into a flat image. This does not add durable engine layers or AI parity; selections, palette work and the remaining [#9817](https://github.com/Tristan578/project-forge/issues/9817) operations stay open.
+
+- [#9988](https://github.com/Tristan578/project-forge/pull/9988) [`0dab498`](https://github.com/Tristan578/project-forge/commit/0dab4983664a23645d89bcb670269d4e301d803b) Thanks [@Tristan578](https://github.com/Tristan578)! - Enable PostHog session replay, with the one rendered credential masked.
+  
+  Replay has been available the whole time and was never switched on, so we have had no visibility into what a user actually did in a canvas-heavy editor before abandoning a session. It inherits the existing cookie-consent gate: `initPostHog` returns before `init()` unless the visitor accepted, so nothing records beforehand.
+  
+  Inputs are masked explicitly rather than by relying on the SDK default, and the API key shown once on creation is marked `ph-no-capture` — `maskAllInputs` does not cover it, because the key is rendered as text rather than typed.
+  
+  Surveys needed no change: they ship in the main bundle and the CSP already admits the assets host that serves them.
+
+- [#10000](https://github.com/Tristan578/project-forge/pull/10000) [`0e1aede`](https://github.com/Tristan578/project-forge/commit/0e1aede0ab7a43753a5f8c911382613d71c1583a) Thanks [@Tristan578](https://github.com/Tristan578)! - Route music generation to ElevenLabs instead of Suno ([#9522](https://github.com/Tristan578/project-forge/issues/9522)). Music is generated again — it now uses ElevenLabs `/v1/music`, the same provider (and the same `PLATFORM_ELEVENLABS_KEY`) that already powers sound-effect and voice generation, so one key covers all three audio capabilities. The Suno client is removed, `PLATFORM_SUNO_KEY` is gone, and `studio-api.suno.ai` is dropped from the Content-Security-Policy. `/api/generate/music` now resolves the track synchronously and returns the audio inline (like SFX and voice); the Generate Music dialog and the in-app AI tool attach it immediately. Suno is no longer offered as a bring-your-own-key provider (an existing stored key can still be removed). Historical `suno` database rows are untouched.
+
+- [#10050](https://github.com/Tristan578/project-forge/pull/10050) [`e1557bf`](https://github.com/Tristan578/project-forge/commit/e1557bffa6b255e45e59b4e77465395b8c47aa8b) Thanks [@Tristan578](https://github.com/Tristan578)! - Add recovery checkpoints to the Scene Browser and in-app AI. Checkpoints are stored in this browser for the current project, with at most ten retained per project. Saving validates each scene with the engine before writing; quota failures preserve the previous stored value. A restore waits for the engine to apply and export the requested scene before replacing the active save. If confirmation or storage fails, the editor keeps the previous save, attempts to recover unsaved viewport work, and displays an actionable error. Restore and delete require confirmation.
+  
+  Existing anonymous checkpoints are not assigned to named projects. Browser autosaves, cross-device recovery, and the broader multi-scene workflow remain separate work tracked in [#10052](https://github.com/Tristan578/project-forge/issues/10052) and [#9813](https://github.com/Tristan578/project-forge/issues/9813).
+
+- [#10006](https://github.com/Tristan578/project-forge/pull/10006) [`89367a9`](https://github.com/Tristan578/project-forge/commit/89367a9c264616ad49cf7a8fdb7f11fe1c362d78) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a mesh-attachment editor to the 2D SkeletonInspector. Creators can now define a skeleton2d mesh attachment — its vertices and the per-vertex bone weights that skin it — directly from the inspector under the selected skin, without dropping to chat or an MCP command. Apply adds new client-side validation that the `add_skeleton2d_mesh_attachment` command and chat path do not enforce (that path only checks that the vertex and weight counts match): an influence must name a real bone and every vertex must carry a positive total weight, both rejected with a clear message (never silently normalized) so the prior attachment is left unchanged. The store now models `weights` on mesh attachments and preserves them when parsing engine updates. Existing textures, UVs and unaffected triangles survive vertex and weight edits. Real-runtime deformation and save/reopen verification remain tracked in [#10005](https://github.com/Tristan578/project-forge/issues/10005).
+
+- [#10055](https://github.com/Tristan578/project-forge/pull/10055) [`804b671`](https://github.com/Tristan578/project-forge/commit/804b67173d4b4d9725ef1233fbee415ef451ed48) Thanks [@Tristan578](https://github.com/Tristan578)! - Add per-tile collision silhouette metadata authoring: none, full, half-top, half-bottom, slope-left, and slope-right. Use the Tilemap inspector, the in-app AI command `set_tile_collision_shape`, or `forge.tilemap.setCollisionShape` during editor test-play. Edits appear after engine confirmation, persist in scene exports, and support undo; unchanged shapes preserve redo history. Older scenes retain their layer collision flag and load with no per-cell shapes authored.
+  
+  These shapes do not affect play physics yet; runtime collider generation remains tracked in [#9814](https://github.com/Tristan578/project-forge/issues/9814). The new script methods are unavailable in standalone HTML/ZIP scripts.
+
+- [#9997](https://github.com/Tristan578/project-forge/pull/9997) [`d30d4f0`](https://github.com/Tristan578/project-forge/commit/d30d4f09e1af0cdfa21e1d5beee1c2eb67e60afa) Thanks [@Tristan578](https://github.com/Tristan578)! - Game-creation steps can query entity state before reporting success. The observation adapter checks the latest cached `QUERY_ENTITY_DETAILS` response against entity-presence or transform predicates, with a five-second deadline and cancellation support. Missing or mismatched observations time out.
+  
+  The returned result carries the caller's operation label and entity ID. These labels do not correlate an engine response to a particular command or prove that the cached response is fresh. World-build and auto-polish compare observed position and scale with the requested values using an f32 tolerance; this is observation evidence, not a command acknowledgement. Contexts without a query capability retain the existing command-acceptance and frame-wait path.
+
+- [#10067](https://github.com/Tristan578/project-forge/pull/10067) [`92179b4`](https://github.com/Tristan578/project-forge/commit/92179b4b2eb428cf631bf0ac23eb5cc8ee9f58d1) Thanks [@Tristan578](https://github.com/Tristan578)! - UI builder widgets now support responsive layout anchors and constraints. Each widget can pin to any of nine edge/corner anchors and carry pixel offsets plus minimum/maximum width and height bounds, so a screen built once adapts from a 360px phone to a desktop without clipping its core actions (for example, a call-to-action keeps a 44px tappable size on narrow screens). Anchors and constraints resolve identically in the editor preview and in played/exported games, are editable from the widget property panel, and are settable through the in-app AI with the same validated data contract: the AI merges a partial constraint update onto a widget's existing bounds (so nudging one field never wipes another), and a min-above-max pair is accepted and resolved by the documented "minimum wins at render" rule — exactly as the manual panel accepts it — so any layout a creator can reach by hand is also reachable through AI. Scenes authored before this change keep their existing absolute positioning unchanged.
+
+- [#9749](https://github.com/Tristan578/project-forge/pull/9749) [`237417a`](https://github.com/Tristan578/project-forge/commit/237417ab51b192d3ccc2b69602912913fa9585b7) Thanks [@Tristan578](https://github.com/Tristan578)! - Three 2D engine reads that were armed but unreachable now have producers:
+  `get_joint_2d`, `list_joints_2d` and `get_camera_2d`. The engine has answered
+  `QueryRequest::Joint2dState`, `ListJoints2d` and `Camera2dState` all along and
+  no TypeScript handler dispatched them, so nothing could ask for them from chat
+  or over MCP. Like the `get_*` handlers beside them they read the store, which
+  the engine keeps current, so the answer is synchronous.
+  
+  `get_camera_2d` reports the **absence** of a camera rather than an empty
+  object: "no camera" and "a camera with no settings" are different answers.
+
+### Patch Changes
+
+- [#10047](https://github.com/Tristan578/project-forge/pull/10047) [`b3a8f9f`](https://github.com/Tristan578/project-forge/commit/b3a8f9f12509844a408d67a76d1e2ede4e710d5a) Thanks [@Tristan578](https://github.com/Tristan578)! - Add win-condition outcome tests for the six 2D starter templates and repair the 2D puzzle starter. Each 2D starter is now asserted to enumerate under its category, declare a reachable win/score/progress outcome, call only `forge.*` symbols that exist in the scripting API, and wire its game loop to input actions (2d.FR-2.OP-01/OP-02). The Match-3 puzzle starter, which relied on a mouse-and-material scripting API the sandbox never exposed and so never advanced its game loop, is rewritten as a working keyboard-driven match-3 that reaches a real win.
+
+- [#9994](https://github.com/Tristan578/project-forge/pull/9994) [`f04cd6b`](https://github.com/Tristan578/project-forge/commit/f04cd6b7ddfa59cb5fb67a5fb02af84f7035f44e) Thanks [@Tristan578](https://github.com/Tristan578)! - Wire the Adaptive Music inspector's intensity slider to the audio engine. Configure Stems now registers the `default` adaptive track (`audioManager.setAdaptiveMusic`) that the slider drives, and moving the slider forwards the value to `audioManager.setMusicIntensity` on the same path the `set_music_intensity` chat tool uses — clamped to 0–1 and with non-finite input refused — so manual edits actually change the adaptive-music mix instead of only updating store state. Moving the slider before any track is registered now shows a toast telling the user to configure stems first, instead of silently doing nothing.
+
+- [#10070](https://github.com/Tristan578/project-forge/pull/10070) [`f71d98a`](https://github.com/Tristan578/project-forge/commit/f71d98adbf5eebfe5bdc92fc7f0a1ae0246ee20d) Thanks [@Tristan578](https://github.com/Tristan578)! - Deploys no longer fail with the `api/bridges/aseprite/status` function exceeding Vercel's 250 MB limit: the four public engine WASM packages are now excluded from every function's file trace instead of only the `execute` route's, since no server function reads them from disk. A test pins the wildcard exclusion.
+
+- [#9731](https://github.com/Tristan578/project-forge/pull/9731) [`af1ecde`](https://github.com/Tristan578/project-forge/commit/af1ecdef4b63cf97b5c2fbdae40fee11f880169e) Thanks [@Tristan578](https://github.com/Tristan578)! - Publish `docs/capability-matrix.md` — one row per generation capability and per MCP command category, with a proven / implemented-unverified / partial / unavailable / excluded status for the editor UI, the in-app AI, game scripts and external MCP — and retire the README's "every capability is controllable via MCP" claim in favour of measured counts that link to it. Web: `capabilityMatrix.test.ts` fails when a `PROVIDER_CAPABILITIES` entry or a manifest category has no row, a cell is not one of the five statuses, the Legend table or the manifest counts drift, the External MCP column disagrees with `bridgeAllowlist.ts`, or the docs-site copy is stale, and it derives README.md's command counts from the manifest, `getChatTools()` and `bridgeAllowedCommands()` instead of trusting the prose (the "350" that rotted was a README number); `ci.yml` now runs it for a matrix-only edit. Docs: `/capability-matrix` renders the matrix from a statically imported `data/capability-matrix.json` (generated by `npm run sync:capability-matrix`; a runtime file read would not survive output file tracing, [#9718](https://github.com/Tristan578/project-forge/issues/9718)), with an artifact test pinning the import shape, a post-deploy probe in `cd.yml`, correct heading levels and `scope="col"` headers; `known-limitations.md` is reconciled with the matrix (dated 2026-09-05).
+
+- [#9971](https://github.com/Tristan578/project-forge/pull/9971) [`1c998c7`](https://github.com/Tristan578/project-forge/commit/1c998c74511c8ca0795b0ba615753b006ef61c17) Thanks [@Tristan578](https://github.com/Tristan578)! - Install the declared Clerk SDK upgrade by aligning root dependency overrides, including its compatible shared package.
+
+- [#10033](https://github.com/Tristan578/project-forge/pull/10033) [`4a0a1f0`](https://github.com/Tristan578/project-forge/commit/4a0a1f0bd137c43812ca459ad46bd53e40e9225a) Thanks [@Tristan578](https://github.com/Tristan578)! - Improve numeric editing in the standalone audio clip editor. Edits commit once on blur or Enter, Escape cancels the draft, and unchanged fields preserve undo and redo history. Controls show their committed values when audio decoding enables them. Inspector integration, persistence and audible playback remain separate follow-up work.
+
+- [#10092](https://github.com/Tristan578/project-forge/pull/10092) [`85a02bc`](https://github.com/Tristan578/project-forge/commit/85a02bc3c404bc71cf05f9b9c097f8169f01d375) Thanks [@Tristan578](https://github.com/Tristan578)! - Use independent native View and Like controls in community cards, removing nested interactive semantics while retaining card-wide pointer activation and like state announcements. Interactive star ratings are native single-choice radio groups with named choices, one selected value, arrow-key selection, and 44px targets; read-only averages announce once. Keep the game-details dialog and Close control mounted during loading and failure so focus, Tab trapping, and Escape dismissal work with stable callbacks.
+
+- [#9989](https://github.com/Tristan578/project-forge/pull/9989) [`84d1e3e`](https://github.com/Tristan578/project-forge/commit/84d1e3e112a6a02e9bd158b824cf6af9eed03254) Thanks [@Tristan578](https://github.com/Tristan578)! - Update `hono` to 4.13.7, closing three moderate advisories, and refresh `posthog-js`, `zod` and `@playwright/test`.
+  
+  The Hono bump needed a manifest change, not just a lockfile refresh: a root `overrides` entry pinned it to an exact `4.13.0`, so no amount of `npm update` could move it. That pin is now a floor (`>=4.13.5`), matching how every sibling security override is written, so future patches flow without a manual bump.
+
+- [#9962](https://github.com/Tristan578/project-forge/pull/9962) [`9db6236`](https://github.com/Tristan578/project-forge/commit/9db62360a2b99c02c6b6be3d92d7125a140b094c) Thanks [@Tristan578](https://github.com/Tristan578)! - Minor and patch dependency bundle — 41 bumps across five workspaces ([#9961](https://github.com/Tristan578/project-forge/issues/9961)).
+  
+  Runtime dependencies move here, not just tooling: `next` 16.3.3 → 16.3.4, `@sentry/nextjs` and `@sentry/profiling-node` 10.72.0 → 10.73.0 (kept on the same version, which `sentry-regressions.test.ts` pins), `@clerk/nextjs` 7.8.4 → 7.9.1, `stripe` 22.6.0 → 22.6.1, `posthog-js` 1.422.5 → 1.427.2, `@upstash/redis` 1.38.3 → 1.38.4, `@xyflow/react` 12.11.5 → 12.11.6 and the `@ai-sdk/*` family. No source change accompanies them.
+  
+  One transitive move is worth recording because it broke a test without changing any declared range: `lucide-react` re-resolved 1.37.0 → 1.43.0 inside its unchanged `^1.33.0`, and Lucide now emits `lucide-sidebar` as an alias class on every `PanelLeft` icon. Three E2E specs were selecting the sidebar with `[class*="sidebar"]` — a selector for the word rather than the element — and now target `data-testid="editor-sidebar"` instead.
+
+- [#10003](https://github.com/Tristan578/project-forge/pull/10003) [`27d81a8`](https://github.com/Tristan578/project-forge/commit/27d81a838d1aede06cd5ef58606f86745b782d55) Thanks [@dependabot](https://github.com/apps/dependabot)! - Update the editor and documentation site to React 19.3.0 and Next.js 16.3.5, keeping React DOM and Next.js tooling aligned. Refresh the editor's docking, icons, translations and S3 dependencies, and the documentation site's Fumadocs dependencies. The shared UI package now requires React 19.3 or later within React 19.
+
+- [#9990](https://github.com/Tristan578/project-forge/pull/9990) [`b3638ce`](https://github.com/Tristan578/project-forge/commit/b3638ceddf586bde1d3361c2bf92ccf80afff905) Thanks [@Tristan578](https://github.com/Tristan578)! - Repair the Drizzle snapshot history so `drizzle-kit generate` emits correct incremental migrations.
+  
+  The repo carried one snapshot against 13 journal entries. `generate` diffs against the latest snapshot, so it was twelve migrations stale — and rather than merely emitting a destructive diff, it stalled on an interactive rename prompt, threw for want of a TTY, and exited 0 having written nothing.
+  
+  `0012_snapshot.json` now describes the current schema. Adding one nullable column and running `generate` produces exactly that one `ALTER TABLE`.
+
+- [#10088](https://github.com/Tristan578/project-forge/pull/10088) [`fdb0b22`](https://github.com/Tristan578/project-forge/commit/fdb0b227694a4950e787983f090da7833aa9f4df) Thanks [@Tristan578](https://github.com/Tristan578)! - Correct stale accuracy claims in the marketing use-cases pages and project docs: the RPG use-case now advertises the true count of drag-and-drop game components (13, not 12) and names only real components (Checkpoint and DialogueTrigger in place of the non-existent Inventory and NPC). The root README now describes the project as source-available, matching the unchanged BSL 1.1 LICENSE; README and CONTRIBUTING clarify the four editor/runtime WebGPU/WebGL2 WASM builds and distinguish editor selection from exported-game runtime selection, and the docs README documents the environment variable the code actually reads (NEXT_PUBLIC_DOCS_URL) and drops a build-dependency claim that no longer applies. A new test keeps the component count and named examples in sync with the engine's registry.
+
+- [#9742](https://github.com/Tristan578/project-forge/pull/9742) [`f583c2d`](https://github.com/Tristan578/project-forge/commit/f583c2da7194e46605ca02776dc7d5b00949fd20) Thanks [@Tristan578](https://github.com/Tristan578)! - Fix three defects in the [#9117](https://github.com/Tristan578/project-forge/issues/9117) generation gating that reached `main` ([#9741](https://github.com/Tristan578/project-forge/issues/9741)).
+  
+  The capability cache could strand itself: `isCacheStale()` returned early whenever the cached state was the loading placeholder, so if a consumer unmounted before the first fetch settled and an invalidation then ran with no subscribers, no further fetch was ever issued and `useCapabilities()` stayed `loading` for the rest of the session — during which every capability reported as not blocked, including the permanently unavailable `music`, and the dialogs re-enabled Generate with no notice.
+  
+  The Audio inspector keyed its "Unavailable" badge on `blocked` while its label and title keyed on `unprovisionable`, so a tier-locked user on an unconfigured capability saw a badge saying the feature is not offered beside a label saying they need a higher tier, with the upgrade affordance gone. Both now key on `unprovisionable`, matching the Asset panel.
+  
+  The guidance no longer points at Settings for a capability whose providers Settings cannot accept: `useGenerationGate` reports `byokConfigurable`, false for `sprite` (Replicate + OpenAI), `image` and `bg_removal` (OpenAI, remove.bg), so the notice stops offering a link to a page where the named key cannot be added.
+  
+  Also corrects the single-sprite price. The dialog hard-coded 15 for both the quote and its balance check while the route charges `SPRITE_TOKEN_COST` for the provider the style resolves to — 10 for SDXL, 20 for DALL·E — so a 10–14 balance was refused on a request the server would have charged 10 for, a 15–19 balance submitted one the server then rejected for 20, and the displayed price was wrong for every single-sprite generation. Both now derive from one shared `resolveSpriteProvider` / `spriteTokenCost`. The sprite style select also gained the `htmlFor`/`id` pair it was missing, so it is no longer announced as an unlabelled combobox.
+
+- [#10081](https://github.com/Tristan578/project-forge/pull/10081) [`5b2029b`](https://github.com/Tristan578/project-forge/commit/5b2029b37cde2bef16abc31e8ae00129d4ccdbf6) Thanks [@Tristan578](https://github.com/Tristan578)! - Add a status-colour semantic (healthy / degraded / down / unknown) to the design-system tokens as verified foreground/background pairs, and migrate the public `/health` dashboard onto them. The overall-status banner and its Refresh/Retry actions now use `@spawnforge/ui` tokens and the `Button` primitive instead of raw Tailwind palette literals, so the status page participates in the theme system and both action buttons show a visible keyboard focus ring (WCAG 2.4.7). Every status variant clears the WCAG AA 4.5:1 contrast floor for normal text (healthy 5.02:1, degraded 10.95:1, down 6.47:1, unknown 7.73:1), verified per theme in the token tests.
+
+- [#9727](https://github.com/Tristan578/project-forge/pull/9727) [`eb183ba`](https://github.com/Tristan578/project-forge/commit/eb183ba8c0eb093f9c39624e8c92f357a7785d89) Thanks [@Tristan578](https://github.com/Tristan578)! - Stop `/api/health` reporting green on key presence alone ([#9719](https://github.com/Tristan578/project-forge/issues/9719)). "AI Providers" is now `degraded` — naming the unconfigured capabilities in a public-safe `summary` — whenever a chat backend resolves but any generation capability has neither a platform key nor a gateway route, and `healthy` only when every capability is configured. "Payments (Stripe)" performs one credit-free authenticated `GET /v1/balance` (Stripe's documented Retrieve balance) bounded by `AbortSignal.timeout` (3s) and reports the latency the attempt cost, timeouts included. Per Stripe's documented status meanings, 2xx and 403 both mean the key was ACCEPTED and take the same MODE rule first — `degraded` when a test-mode key is running in production — after which they part ways: 2xx is `healthy`, while 403 ("the API key doesn't have permissions") is `degraded`, because a restricted key without `balance:read` means the probe COULD NOT RUN and authentication would otherwise be the only property ever graded (a live restricted key would have reported `healthy` forever, including after its checkout scope was revoked). The missing scope and the fix are in `error` and `details.probeResult`, with no public `summary`. 401 is `down` (no valid key: every checkout fails); 5xx, timeout or network error are `degraded`; `down` without a request only when the key is unset. The probe now also cancels the response body it does not read, so undici returns the socket to the pool deterministically rather than at GC. `summary` — the public-safe one-liner, in the feature-label vocabulary of the new `CAPABILITY_LABELS` (which `useFeatureGating` now derives its own labels from) — is rendered on the `/health` dashboard and carried into `/api/status` entries. Because the probe grades the platform path only, that copy states the BYOK caveat ("Available only with your own API key: 3D Model Generation, …") instead of claiming the feature is down, and it never names a credential: a rejected key reads "Payments are unavailable" and a test-mode key in production carries no public summary at all. Capabilities declared unavailable (music, [#9522](https://github.com/Tristan578/project-forge/issues/9522)) are never listed as unconfigured. The capability-to-env-var table moves into `lib/config/providers` (`CAPABILITY_ENV_VARS`) and is shared by `/api/capabilities` and the probe.
+  
+  A `degraded` verdict caused by a deliberate configuration state is now marked `configurationOnly` on the service entry, and `checkAiProviders` sets it on the unconfigured-capabilities branch. Production runs with no `PLATFORM_*` key by decision (`docs/guides/platform-keys.md`), so without that marker this ships as a permanent incident signal: `computeOverallStatus`/`deriveOverallStatus` would pin `/health`'s banner at "Partial Service Disruption" and `/api/status` at `partial_outage` forever, and `/api/cron/health-monitor` would capture a Sentry exception for it every 15 minutes — ~96 identical synthetic-monitor pages a day, until the genuine AI-provider outage arrived indistinguishable from them (lessons-learned [lesson 13](../.claude/rules/lessons-learned.md#13-a-comparison-gate-whose-reference-state-is-never-written-compares-against-nothing)). Both derivations now skip `configurationOnly` degradations, and the cron logs them at warn instead of paging (extending the [#7075](https://github.com/Tristan578/project-forge/issues/7075) noise-reduction split, which had stopped at the logger). Nothing else changes: the service entry still reports `degraded` and still names the unavailable capabilities — [#9719](https://github.com/Tristan578/project-forge/issues/9719)'s acceptance criterion — a `down` service still pages and still drives `overall` whatever markers it carries, and any degradation without the marker behaves exactly as before. The field is published on `/api/health` and `/api/status` and documented in `docs/api/openapi.json`.
+  
+  The status page entry is renamed from "AI Assistant" to **"AI Providers"** with its description widened to cover asset generation, so the published name matches what the probe now grades: it degrades because asset-generation keys are absent while chat is fully operational, and its summary names features the old name and description did not cover. On the `/health` card the summary now takes the emphasised box and the sanitized `error` beside it is suppressed — after `sanitizeForPublic` that box always read "&lt;name&gt; is &lt;status&gt;", a verbatim repeat of the badge, so the emphasis sat on the one element carrying no information. Two drift alarms are added for tables that can silently disagree: every capability in `GATEWAY_CAPABILITIES` must accept the gateway key in `CAPABILITY_ENV_VARS` (and every capability outside it must not), and every `CAPABILITY_REQUIRED_PROVIDERS` row must equal the key set `isCapabilityConfigured` actually grades. The "six outbound probes" fan-out cost — restated by hand in ten comments and the number the shared budget is sized against — is now pinned by a test that counts the real fan-out.
+
+- [#10084](https://github.com/Tristan578/project-forge/pull/10084) [`13240a7`](https://github.com/Tristan578/project-forge/commit/13240a7f1876bf5174bedc3c46ba1c78d0e1abe7) Thanks [@Tristan578](https://github.com/Tristan578)! - Improve keyboard navigation and accessible names, states, and focus for the Scene Hierarchy and Inspector chrome. SceneSettings form-control accessibility remains deferred. Hierarchy rows now use a roving tabindex with Home/End jumps, arrow navigation moves real focus, and Enter selects the focused entity. Every icon-only control in the hierarchy, inspector, search box, and inspector error boundary gains a visible focus ring and an accessible name, the inspector name field is properly labelled, and pressing Escape while renaming discards the unconfirmed edit instead of saving it. Collapsible inspector section headers no longer nest their action buttons inside the toggle button, so copy/paste no longer collapses the section and the markup passes accessibility checks.
+
+- [#10078](https://github.com/Tristan578/project-forge/pull/10078) [`9787c0c`](https://github.com/Tristan578/project-forge/commit/9787c0cc449fb07ed0e73fc646637000031f4521) Thanks [@Tristan578](https://github.com/Tristan578)! - Reverb Zone and Audio inspector controls now use the shared `@spawnforge/ui` design-library composites instead of bespoke local copies. The slider, vector-axis and numeric-field controls each carry a properly associated accessible name, so screen-reader users hear a distinct label for every control. A new `NumberField` composite replaces the duplicated `NumberInputRow` that both inspectors carried verbatim, and the Audio inspector's Loop, Spatial and Autoplay checkboxes gain the same label association the Reverb Zone inspector already had.
+
+- [#9984](https://github.com/Tristan578/project-forge/pull/9984) [`354a4da`](https://github.com/Tristan578/project-forge/commit/354a4dada6f6571301a0adcbe1a0e331def647fb) Thanks [@Tristan578](https://github.com/Tristan578)! - Apply production schema changes with migrations instead of `drizzle-kit push`.
+  
+  `cd.yml` pushed `schema.ts` straight onto production on every schema-touching deploy. `drizzle-kit push` exits 0 on failure, applies without a transaction, and silently skips a destructive diff in CI, so four migrations' worth of tables, columns and indexes never landed and nothing went red — including two unique indexes guarding the credit and refund paths against double-processing.
+  
+  Production now applies recorded migrations and records them, a drift check runs immediately afterwards and again daily, and `db:push` refuses a migrate-managed database.
+
+- [#10031](https://github.com/Tristan578/project-forge/pull/10031) [`c21da3b`](https://github.com/Tristan578/project-forge/commit/c21da3b891c5b25c078e1c53dc219aedb1dd0dea) Thanks [@Tristan578](https://github.com/Tristan578)! - Reserve refund time when music generation reaches the request deadline, including when the optional generation agent is disabled.
+
+- [#9725](https://github.com/Tristan578/project-forge/pull/9725) [`c0c4eaf`](https://github.com/Tristan578/project-forge/commit/c0c4eaff8da552c0d6b4f1fdcb0dd0959a1e7731) Thanks [@Tristan578](https://github.com/Tristan578)! - Refuse generation that cannot succeed, before any token is spent ([#9117](https://github.com/Tristan578/project-forge/issues/9117)).
+  
+  `/api/capabilities` now answers per-user rather than per-deployment: it honours a signed-in user's own (BYOK) keys, is always served `private`, and marks capabilities no key can ever enable (`UNAVAILABLE_CAPABILITIES` — currently `music`, pending the ElevenLabs move in [#9522](https://github.com/Tristan578/project-forge/issues/9522)) as `unprovisionable` with a user-facing reason and the tracking issue.
+  
+  The editor acts on that in two different ways, because they are two different situations:
+  
+  - **Nothing can enable it** (`music`): the Asset panel menu item and the Audio inspector button are disabled at the entry point with an "Unavailable" badge and the reason in their accessible name; the `generate_music` chat tool and `forge.ai.generateMusic` answer with the reason instead of calling the route; and `/api/generate/music` returns 503 `SERVICE_UNAVAILABLE` immediately after authentication.
+  - **A key is missing** (any capability with no platform key and no BYOK key of yours): the entry point stays clickable. Opening it shows a notice naming the provider you need and linking to Settings, with the prompt inputs and Generate disabled — so the instruction for fixing it is somewhere you can actually reach.
+  
+  If the route cannot read your saved keys (auth, user lookup, or the BYOK query fails) it answers `degraded: true` and the editor blocks nothing on it, so a database blip can never disable generation for someone who holds their own key.
+  
+  Also adds `web/scripts/verify-platform-generation.ts`, which probes each configured provider's documented credit-free endpoint and prints a pass/fail table, and the `docs/guides/platform-keys.md` runbook.
+
+- [#10090](https://github.com/Tristan578/project-forge/pull/10090) [`4321ef6`](https://github.com/Tristan578/project-forge/commit/4321ef6e8bbb23aafa913af7d68b8bf72cf0b857) Thanks [@Tristan578](https://github.com/Tristan578)! - Return a literal script-free HTTP404 document for missing or unpublished play URLs before App Router streaming starts. Database lookup failures instead return a no-store HTTP503 with Retry-After and no removal/noindex signal. Preserve proxy authentication cookies and CSP/security headers, omit HEAD bodies, and keep page-level notFound as an absence race guard while propagating lookup failures. Published URLs perform an additional metadata lookup during proxy preflight; metadata and body still share one lookup within their React server render. Separate browser and actual Neon/Drizzle transport regressions distinguish genuine absence from temporary failure.
+
+- [#10051](https://github.com/Tristan578/project-forge/pull/10051) [`841f21a`](https://github.com/Tristan578/project-forge/commit/841f21ab7a5b90ffce197864e3220425ae7d82fc) Thanks [@Tristan578](https://github.com/Tristan578)! - Preserve saved prefab link metadata and its source definitions during scene changes, saves, recovery, and game export. Reject cyclic or incomplete imported graphs before writing them, retain stable nesting ids on scene reopen, and keep rejected scene switches attached to the original scene.
+  
+  The Prefabs panel can inspect saved links and overridden field names. Linked scene placement, nested entity creation, and propagation are unavailable; their controls are disabled and compatibility commands return explicit errors. Existing flat prefab copies remain available. This change does not complete the linked prefab engine workflow tracked in [#9811](https://github.com/Tristan578/project-forge/issues/9811).
+  
+  Tab navigation now moves keyboard focus with Arrow, Home, and End keys while preventing page scrolling. The Prefabs panel uses labeled, themed controls with readable tab states and mobile touch targets.
+  
+  A scene the editor cannot open now says so instead of leaving a blank editor, and every save path — manual save, cloud save, autosave, checkpoints, scene switch and duplicate, and game export — refuses while that rejection stands, so an empty editor can no longer overwrite the project it failed to open.
+
+- [#10053](https://github.com/Tristan578/project-forge/pull/10053) [`172f8d7`](https://github.com/Tristan578/project-forge/commit/172f8d7481622ec7b1522abb9516cbd656293c39) Thanks [@Tristan578](https://github.com/Tristan578)! - Publishing now preserves a scene snapshot in Postgres and can mirror that snapshot to private R2 object storage. Play links continue to use the gated `/play/{creator}/{slug}` route, which validates the stored object and falls back to the publication snapshot during storage failures. Concurrent publication attempts cannot overwrite each other's snapshots, and cleanup covers failed writes, replaced snapshots, and account deletion. This foundation does not provide public CDN hosting or deploy a standalone exported game.
+
+- [#9748](https://github.com/Tristan578/project-forge/pull/9748) [`db54088`](https://github.com/Tristan578/project-forge/commit/db540882ac4e02cb19f38cf119f9b91b20530f96) Thanks [@Tristan578](https://github.com/Tristan578)! - 2D raycasts from scripts now return the engine's actual answer. The physics
+  channel dispatched a command the engine never implemented and read the
+  acceptance envelope as the result, so `forge.physics2d.raycast` and
+  `isGrounded` never reported a real hit.
+
+- [#10085](https://github.com/Tristan578/project-forge/pull/10085) [`0120454`](https://github.com/Tristan578/project-forge/commit/01204549f3465e96df6b6ce9fbd460312fef898f) Thanks [@Tristan578](https://github.com/Tristan578)! - Lock saving when an engine dispatch throws mid-load during a scene switch. A thrown `load_scene` was previously folded into a clean rejection, so `sceneLoadError` stayed null and the next autosave, Ctrl+S, or cloud save could overwrite the stored scene with the wrecked engine viewport. A thrown dispatch now sets the `ENGINE_LOAD_THREW` lockout regardless of the caller's rejection policy, and both the Scene Browser and the AI `switch_scene` handler tell the user to reload the editor rather than claiming the scene is unchanged. Prefab-state rollback now guards each storage write independently so a failed instances write still attempts library restoration; failures are logged and rollback can remain partial, and checkpoint recovery preserves a throw lockout when its prior capture was taken under that lockout, while confirmed replacement or recovery of a previously trusted prior can restore saving.
+
+- [#9737](https://github.com/Tristan578/project-forge/pull/9737) [`f62125d`](https://github.com/Tristan578/project-forge/commit/f62125d4ed60ac1e7c75bfb9d3942c85d88fd2bc) Thanks [@Tristan578](https://github.com/Tristan578)! - Prevent provider diagnostics from exposing credentials in API responses. Generation failures now return fixed, actionable messages while server monitoring retains the diagnostic details.
+  
+  App Router route handlers now apply a shared response guard to supported text bodies, response headers, cookies and redirect locations. The guard checks JSON escapes and percent-encoded credentials, preserves responses that need no redaction, and verifies rewritten output before returning it. If redaction cannot complete safely, it returns a fixed error response and reports the failure instead of returning partially sanitized data.
+  
+  The guard preserves legitimate one-time API key displays, signed asset download URLs and successful binary responses. Its documented limits remain: successful event-stream bodies are not redacted; framework-generated errors and metadata responses are outside the wrapper; percent-decoding before JSON-unescaping is not supported. Coverage tests enforce the wrapper on route handlers, and regression tests cover nested scene data, encoded credentials, response headers and failure paths.
+  
+  Background generation failures now show persistent, deduplicated messages with retry guidance. Refund messages appear only after a refund succeeds.
+  
+  See [#9736](https://github.com/Tristan578/project-forge/issues/9736) and the repository's security lessons for the implementation rationale and validation history.
+
+- [#9729](https://github.com/Tristan578/project-forge/pull/9729) [`d04db34`](https://github.com/Tristan578/project-forge/commit/d04db345466e252de14c179c77b87819819b9a66) Thanks [@Tristan578](https://github.com/Tristan578)! - Server-side `captureException` now accepts `NEXT_PUBLIC_SENTRY_DSN` as a
+  fallback, matching the Sentry init and the cron monitor. A deployment carrying
+  only the public variable used to initialise Sentry and register cron check-ins
+  while silently dropping every captured exception.
+
+- [#9982](https://github.com/Tristan578/project-forge/pull/9982) [`4aa1c67`](https://github.com/Tristan578/project-forge/commit/4aa1c675617a7db3fc1645cb737ef28d210b0fdc) Thanks [@Tristan578](https://github.com/Tristan578)! - Flush Sentry's transport before a cron handler returns, so terminal check-ins actually send.
+  
+  Vercel freezes a serverless function the moment its response returns, and Sentry's transport is asynchronous — so `withCronMonitor` recorded the terminal check-in and the process was frozen before it left. Sentry saw an `in_progress` check-in with no terminal one and reported "A timeout check-in was detected" every 15 minutes for 7 days, during which the health monitor read as quiet rather than unhealthy.
+  
+  The flush runs in a `finally` so it covers the throw path too, and can never mask the handler's own result or error.
+
+- [#10036](https://github.com/Tristan578/project-forge/pull/10036) [`ddd9e69`](https://github.com/Tristan578/project-forge/commit/ddd9e699a561677f7dc0f8e2f5225777fa7d3f4c) Thanks [@Tristan578](https://github.com/Tristan578)! - Stop game-creation asset steps from reporting completion without a delivered asset. Asset generation now reports that it is unavailable, stops required steps, and skips optional steps with an explanation. Suggested fallback identifiers are not presented as attached assets.
+  
+  The pipeline does not call a separate paid sound-generation route while artifact delivery and reservation-aware billing are incomplete. This does not add playable audio generation to game creation; that integration remains pending.
+
+- [#9956](https://github.com/Tristan578/project-forge/pull/9956) [`d9fb04d`](https://github.com/Tristan578/project-forge/commit/d9fb04dfd885da1cd7668a0a97b0dc29410bfcad) Thanks [@Tristan578](https://github.com/Tristan578)! - Stop shipping the whole MCP command manifest to the browser ([#9954](https://github.com/Tristan578/project-forge/issues/9954)).
+  
+  `web/src/lib/mcp/bridgeAllowlist.ts` decides which manifest commands a remote MCP agent may drive inside the editor tab. It needs three short strings per command — `name`, `category`, `requiredScope` — and it was importing the entire manifest to get them, so all 354 commands' descriptions and JSON parameter schemas travelled to every browser that opened the editor: 344 KB of JSON, and a 205 KB chunk after minification, to answer a question about three fields.
+  
+  There is now a generated projection, `web/src/data/commandIndex.json` (40 KB), carrying exactly those three fields and nothing else. `npm run generate:command-index` rewrites it from the canonical `mcp-server/manifest/commands.json`, and the Docs Internal Gate fails when the committed index is not that projection — including when it carries an extra field, because "just one more field" is how the 344 KB comes back. Swapping the source of an allowlist is not cosmetic, so the equivalence is asserted directly: every command in the canonical manifest gets the same bridge verdict it did before.
+  
+  This also unblocks the `Next.js Production Build` gate, which `main` had been failing on its own by 120 bytes.
+
+- [#10028](https://github.com/Tristan578/project-forge/pull/10028) [`553ed83`](https://github.com/Tristan578/project-forge/commit/553ed835659c87212eab9dd86ff9084bc94b685a) Thanks [@Tristan578](https://github.com/Tristan578)! - Prevent game creation from repeating accepted spawn operations when engine confirmation times out. The pipeline now reports the unresolved result and preserves existing entities instead of automatically creating duplicates.
+
+- [#9991](https://github.com/Tristan578/project-forge/pull/9991) [`3ae505a`](https://github.com/Tristan578/project-forge/commit/3ae505aa378449062e418803f3ecf330eeddb87c) Thanks [@Tristan578](https://github.com/Tristan578)! - Adopt the two `tsconfig` changes TypeScript 7 requires, under TypeScript 6.
+  
+  `baseUrl` is removed from the root config (TS 5+ resolves `paths` relative to the config file without it) and every workspace now states `"types": []` explicitly instead of relying on `@types` auto-discovery. Both are proven no-ops on the current compiler — zero errors across all four workspaces, and `apps/docs` builds clean in its own deploy root.
+  
+  The compiler itself is deferred until 7.1 ships a stable programmatic API, because 7.0 has none and `typescript-eslint` can only use 6.x.
+
+- [#9960](https://github.com/Tristan578/project-forge/pull/9960) [`16d0a2c`](https://github.com/Tristan578/project-forge/commit/16d0a2cf20b9cf5205a67dfea7ff701fbc1e3b46) Thanks [@Tristan578](https://github.com/Tristan578)! - Upgrade vitest 4 -> 5 across every workspace, as one change ([#9959](https://github.com/Tristan578/project-forge/issues/9959)).
+  
+  Dependabot split the major into two PRs — `vitest` in [#9772](https://github.com/Tristan578/project-forge/issues/9772), `@vitest/coverage-v8` in [#9771](https://github.com/Tristan578/project-forge/issues/9771) — and neither can pass alone: `npm ci` fails with `ERESOLVE` before a single test runs, which is why lint, typecheck and all four suites read red on both. The red was an install failure, not test breakage.
+  
+  vitest 5's jsdom makes `localStorage` and `document` getter-only on the window, so three test files that assigned over them now use `vi.stubGlobal` instead. One of them, `pwaGenerator.test.ts`, replaced `document` nine times and never restored it, leaking a fake document into every later file in the same worker; it now unstubs in `afterEach`. That leak predates the upgrade — vitest 5 is what made it visible.
+  
+  No production code changed. Suite counts match the vitest-4 baseline: web 21302, packages/ui 621, apps/docs 178, mcp-server 490.
+
+- [#10073](https://github.com/Tristan578/project-forge/pull/10073) [`bc21d9f`](https://github.com/Tristan578/project-forge/commit/bc21d9f97d817f1199e52ca8c6410c005964c76b) Thanks [@Tristan578](https://github.com/Tristan578)! - Background removal now runs as part of sprite generation. When a sprite is
+  generated on the DALL-E path with background removal requested, `/api/generate/sprite`
+  resolves the remove.bg key (a user's own key first, else the platform key) and
+  posts the finished image to remove.bg, returning a transparent sprite. The key is
+  resolved without an extra token charge, and a sprite still generates normally when
+  no remove.bg key is configured or its lookup fails, with an explicit warning that
+  the background remains. SDXL reports that removal is unsupported. Configured
+  remove.bg request failures fail the job and refund the generation charge. This also fixes a latent bug that would have thrown the
+  first time the path ran on the server (it used a browser-only API to encode the
+  result).
+
+- [#10028](https://github.com/Tristan578/project-forge/pull/10028) [`553ed83`](https://github.com/Tristan578/project-forge/commit/553ed835659c87212eab9dd86ff9084bc94b685a) Thanks [@Tristan578](https://github.com/Tristan578)! - Prevent duplicate entities when spawn or transform confirmation is delayed. Confirmation timeouts stop automatic retries because an accepted spawn may still apply after the observation deadline. On repeated invocations, `world_build` reuses positively observed entities, and `auto_polish` uses a reserved ground-plane id with the same observation guard. A missing cached observation does not prove that an earlier spawn failed.
+- Updated dependencies [[`27d81a8`](https://github.com/Tristan578/project-forge/commit/27d81a838d1aede06cd5ef58606f86745b782d55), [`5b2029b`](https://github.com/Tristan578/project-forge/commit/5b2029b37cde2bef16abc31e8ae00129d4ccdbf6), [`e70fe56`](https://github.com/Tristan578/project-forge/commit/e70fe5603bfe01be687965f4692e790be9457bee), [`9787c0c`](https://github.com/Tristan578/project-forge/commit/9787c0cc449fb07ed0e73fc646637000031f4521), [`841f21a`](https://github.com/Tristan578/project-forge/commit/841f21ab7a5b90ffce197864e3220425ae7d82fc)]:
+  - @spawnforge/ui@0.3.0
+
 ## 0.9.0
 
 ### Minor Changes
