@@ -113,10 +113,14 @@ export interface EnvValidationResult {
  *
  * - In development (`NODE_ENV === 'development'`), validation is skipped and
  *   always returns `{ valid: true }` so local dev works without full config.
- * - In production/staging, missing required vars are reported as errors.
+ * - Outside development, unset required vars and invalid present credentials
+ *   are reported in `missing`. Staging requires a Stripe secret or restricted
+ *   key beginning with sk_test_ or rk_test_; live or malformed keys are invalid.
+ *   The development early return skips these credential checks.
  * - Optional vars with missing values produce warnings (informational only).
  *
- * @returns Validation result with lists of missing required and optional vars.
+ * @returns Validation result with unset or invalid required fields in `missing`
+ *   and optional configuration notices in `warnings`.
  */
 export function validateEnvironment(): EnvValidationResult {
   const isDev = process.env.NODE_ENV === 'development';

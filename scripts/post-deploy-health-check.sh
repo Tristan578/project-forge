@@ -12,7 +12,7 @@
 #              (https://spawnforge-abc123.vercel.app) or the public production
 #              domain (https://www.spawnforge.ai) — see HEALTH_CHECK_FORCE_CANARY.
 #
-# Environment variables (all optional):
+# Environment variables (optional unless a dependency is stated):
 #   HEALTH_CHECK_RETRIES        Number of attempts before declaring failure (default: 3)
 #   HEALTH_CHECK_INTERVAL_S     Seconds between retry attempts (default: 10)
 #   HEALTH_CHECK_STABILIZE_S    Seconds to wait before the first check (default: 30)
@@ -40,7 +40,10 @@
 #                               IPs alike (vercel.com/docs/deployment-protection/
 #                               methods-to-bypass-deployment-protection/
 #                               protection-bypass-automation).
-#   VERCEL_AUTOMATION_BYPASS_ORIGIN Exact HTTPS origin allowed to receive bypass.
+#   VERCEL_AUTOMATION_BYPASS_ORIGIN Required when VERCEL_AUTOMATION_BYPASS is set.
+#                               Must match the deployment HTTPS origin without
+#                               credentials, a path, query or fragment. A trailing
+#                               slash and explicit default port 443 are accepted.
 #   HEALTH_CHECK_EXPECT_ENVIRONMENT Expected application identity when set.
 #   HEALTH_CHECK_REQUIRE_SERVICES Comma-separated service names that must be up.
 #
