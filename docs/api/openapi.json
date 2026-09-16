@@ -175,6 +175,7 @@
             "type": "string",
             "description": "Usage record ID needed to trigger a client-side refund if the async job fails after queuing. Omitted on BYOK (bring-your-own-key) requests where billing is not metered."
           },
+          "durable": { "type": "boolean", "enum": [true], "description": "Present when durable callbacks are configured for this route." },
           "backgroundRemoval": {
             "type": "string",
             "enum": [
@@ -218,6 +219,7 @@
             "type": "string",
             "description": "Usage record ID needed to trigger a client-side refund if the async job fails after queuing. Omitted on BYOK (bring-your-own-key) requests where billing is not metered."
           },
+          "durable": { "type": "boolean", "enum": [true], "description": "Present when durable callbacks are configured for this route." },
           "backgroundRemoval": {
             "type": "string",
             "enum": [

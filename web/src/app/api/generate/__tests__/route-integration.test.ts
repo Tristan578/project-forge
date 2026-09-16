@@ -11,6 +11,14 @@
  */
 
 vi.mock('server-only', () => ({}));
+vi.mock('next/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/server')>()),
+  after: vi.fn(),
+}));
+vi.mock('@/lib/qstash/client', () => ({
+  isQstashConfigured: vi.fn(() => false),
+  publishGenerationCallback: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -168,6 +176,7 @@ vi.mock('@/lib/i18n/gameLocalization', () => ({
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey } from '@/lib/keys/resolver';
+import { isQstashConfigured } from '@/lib/qstash/client';
 
 const mockAuth = vi.mocked(authenticateRequest);
 const mockResolve = vi.mocked(resolveApiKey);
@@ -193,6 +202,7 @@ beforeEach(() => {
     ctx: { user: { id: 'user-int', tier: 'pro' } as any, clerkId: 'clerk-int' },
   });
   mockResolve.mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-int' });
+  vi.mocked(isQstashConfigured).mockReturnValue(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -845,7 +855,15 @@ describe('generate routes match the published OpenAPI response contract', () => 
       ? contract.componentSchema((body as { provider: string }).provider === 'dalle3'
         ? 'SpriteSyncGenerationJob' : 'SpriteAsyncGenerationJob')
       : contract.operationSchema('post', routePath, status);
-    expect(diffAgainstSpec(schema, body)).toEqual(expectedDivergences);
+    // Strict sprite schemas explicitly distinguish required and optional keys.
+    // Absent optional fields are valid; present fields still undergo the full diff.
+    const propertySchema = routePath === '/api/generate/sprite' && status === 201
+      ? { ...schema, properties: Object.fromEntries(
+        Object.entries(schema.properties as Record<string, unknown>).filter(([key]) =>
+          (schema.required as string[]).includes(key) || Object.hasOwn(body as object, key)),
+      ) }
+      : schema;
+    expect(diffAgainstSpec(propertySchema, body)).toEqual(expectedDivergences);
   }
 
   it('POST /api/generate/music 201 matches the inline AudioResult (#9522)', async () => {
@@ -909,6 +927,28 @@ describe('generate routes match the published OpenAPI response contract', () => 
     expect(validate(missingImage)).toBe(false);
     expect(validate({ ...body, backgroundRemoval: 'unsupported' })).toBe(false);
     expect(validate({ ...body, provider: 'sdxl' })).toBe(false);
+  });
+
+  it.each(['sdxl', 'dalle3'] as const)('POST sprite %s documents the configured durable extension', async (provider) => {
+    vi.mocked(isQstashConfigured).mockReturnValue(true);
+    if (provider === 'dalle3') {
+      const { SpriteClient } = await import('@/lib/generate/spriteClient');
+      vi.mocked(SpriteClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+        this.generateSprite = vi.fn().mockResolvedValue({
+          taskId: 'provider-image', status: 'completed',
+          resultUrl: 'data:image/png;base64,YWJj', backgroundRemoval: 'not-requested',
+        });
+      } as never);
+    }
+    const { POST } = await import('@/app/api/generate/sprite/route');
+    const res = await POST(makeRequest('http://test/api/generate/sprite', {
+      prompt: 'hero character', provider, removeBackground: false,
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.durable).toBe(true);
+    expectContract('/api/generate/sprite', 201, body);
+    expect(contract.operation('post', '/api/generate/sprite', 201)({ ...body, durable: false })).toBe(false);
   });
 
   it('POST /api/generate/sprite-sheet 201 matches GenerationJob', async () => {
