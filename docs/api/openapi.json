@@ -163,9 +163,12 @@
             "type": "string",
             "enum": [
               "pending",
+              "starting",
               "processing",
-              "completed",
-              "failed"
+              "succeeded",
+              "failed",
+              "canceled",
+              "aborted"
             ]
           },
           "estimatedSeconds": {

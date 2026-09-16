@@ -929,6 +929,23 @@ describe('generate routes match the published OpenAPI response contract', () => 
     expect(validate({ ...body, provider: 'sdxl' })).toBe(false);
   });
 
+  it.each(['starting', 'processing', 'succeeded', 'failed', 'canceled', 'aborted'])(
+    'POST SDXL sprite documents forwarded Replicate status %s', async (status) => {
+      const { SpriteClient } = await import('@/lib/generate/spriteClient');
+      vi.mocked(SpriteClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+        this.generateSprite = vi.fn().mockResolvedValue({ taskId: 'prediction-1', status });
+      } as never);
+      const { POST } = await import('@/app/api/generate/sprite/route');
+      const res = await POST(makeRequest('http://test/api/generate/sprite', {
+        prompt: 'hero character', provider: 'sdxl', removeBackground: false,
+      }));
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body.status).toBe(status);
+      expectContract('/api/generate/sprite', 201, body);
+    },
+  );
+
   it.each(['sdxl', 'dalle3'] as const)('POST sprite %s documents the configured durable extension', async (provider) => {
     vi.mocked(isQstashConfigured).mockReturnValue(true);
     if (provider === 'dalle3') {
