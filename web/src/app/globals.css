@@ -1,7 +1,5 @@
 @import "tailwindcss";
 @import '@spawnforge/ui/tokens/theme.css';
-@source "../../../packages/ui/src";
-
 /* Shared UI utilities live outside the web source tree. */
 @source "../../../packages/ui/src";
 
