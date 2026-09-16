@@ -1,7 +1,7 @@
 /** Real proxy-response contracts for published preflight and script-free404 documents. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
-import { gameNotFoundResponse } from '../notFoundDocument';
+import { gameNotFoundResponse, gameUnavailableResponse } from '../notFoundDocument';
 
 const { lookup } = vi.hoisted(() => ({ lookup: vi.fn() }));
 vi.mock('@/lib/play/gameMetadata', () => ({ loadPublishedGameMetadata: lookup }));
@@ -45,7 +45,8 @@ describe('published-game pre-stream response', () => {
     expect(html).not.toContain('VideoGame');
   });
 
-  it('preserves multiple authenticated cookies and security headers while removing routing headers', async () => {
+  it.each([[gameNotFoundResponse, 404], [gameUnavailableResponse, 503]] as const)
+  ('preserves multiple authenticated cookies and security headers for status %s', async (buildResponse, status) => {
     const source = NextResponse.next();
     source.headers.append('Set-Cookie', 'session=first; Path=/; HttpOnly; SameSite=Lax');
     source.headers.append('Set-Cookie', 'refresh=second; Path=/; HttpOnly; Secure');
@@ -55,8 +56,8 @@ describe('published-game pre-stream response', () => {
     source.headers.set('x-middleware-override-headers', 'x-nonce');
     const cookies = source.headers.getSetCookie();
     expect(cookies).toHaveLength(2);
-    const result = gameNotFoundResponse(source, false);
-    expect(result.status).toBe(404);
+    const result = buildResponse(source, false);
+    expect(result.status).toBe(status);
     expect(result.headers.getSetCookie()).toEqual(cookies);
     expect(result.headers.get('content-security-policy')).toBe(source.headers.get('content-security-policy'));
     expect(result.headers.get('x-frame-options')).toBe('DENY');
@@ -73,6 +74,29 @@ describe('published-game pre-stream response', () => {
     expect(response.headers.get('x-middleware-request-x-nonce')).toBeTruthy();
     expect(response.headers.get('content-security-policy')).toContain("'nonce-");
     expect(await response.text()).toBe('');
+  });
+
+  it.each(['GET', 'HEAD'])('returns a retryable503 rather than404 when lookup fails: %s', async method => {
+    lookup.mockRejectedValue(new Error('secret database connection string'));
+    const response = await invoke('/play/user_fixture/live-game', method);
+    expect(response.status).toBe(503);
+    expect(response.headers.get('retry-after')).toBe('60');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('x-robots-tag')).toBeNull();
+    expect(response.headers.get('content-security-policy')).toContain("script-src 'self' 'nonce-");
+    expect(response.headers.get('x-frame-options')).toBe('DENY');
+    expect([...response.headers.keys()].filter(name => name.startsWith('x-middleware-'))).toEqual([]);
+    const html = await response.text();
+    if (method === 'HEAD') {
+      expect(response.body).toBeNull();
+      expect(html).toBe('');
+    } else {
+      expect(html).toContain('Game Temporarily Unavailable');
+      expect(html).toContain('Please try again shortly.');
+      expect(html).not.toContain('noindex');
+      expect(html).not.toContain('secret database');
+      expect(html).not.toContain('<script');
+    }
   });
 
   it('returns404 for HEAD with no body', async () => {

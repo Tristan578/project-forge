@@ -212,14 +212,14 @@ describe('PlayPage 404 on missing game (PF-1029)', () => {
     expect(notFoundMock).toHaveBeenCalledExactlyOnceWith();
   });
 
-  it('takes the missing-game guard when the database query rejects', async () => {
-    limitResults = [new Error('database unreachable')];
-    await expect(renderPlayPage()).rejects.toThrow(NOT_FOUND_SIGNAL);
-    expect(notFoundMock).toHaveBeenCalledExactlyOnceWith();
-    limitResults = [new Error('database unreachable')];
+  it.each(['author', 'game'])('propagates a %s database failure without declaring the game missing', async query => {
+    limitResults = query === 'author' ? [new Error('database unreachable')] : [[USER_ROW], new Error('database unreachable')];
+    await expect(renderPlayPage()).rejects.toThrow('database unreachable');
+    expect(notFoundMock).not.toHaveBeenCalled();
+    limitResults = query === 'author' ? [new Error('database unreachable')] : [[USER_ROW], new Error('database unreachable')];
     const { generateMetadata } = await import('../page');
     await expect(generateMetadata({ params: Promise.resolve({ userId: 'user_abc', slug: 'cave-escape' }) }))
-      .resolves.toEqual({ title: 'Game Not Found - SpawnForge' });
+      .rejects.toThrow('database unreachable');
   });
 
   it('does NOT call notFound() when a published game exists', async () => {

@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadPublishedGameMetadata } from '@/lib/play/gameMetadata';
-import { gameNotFoundResponse } from '@/lib/play/notFoundDocument';
+import { gameNotFoundResponse, gameUnavailableResponse } from '@/lib/play/notFoundDocument';
 import {
   buildPlayContentSecurityPolicy,
   isPlayPath,
@@ -433,9 +433,9 @@ const authProxy = buildProxy();
 /**
  * Preflight exact play documents after normal proxy auth/CORS/CSP handling.
  * Missing published metadata returns a direct404 before root Suspense can stream.
- * Other routes/methods and redirects retain the existing proxy response.
+ * Lookup failures return a retryable503; other routes/methods and redirects retain their response.
  * @param req Incoming Next.js request.
- * @returns Existing proxy response, or a script-free missing-game document404.
+ * @returns Existing proxy response, a missing-game404, or a temporary-failure503.
  */
 export async function proxy(req: NextRequest): Promise<NextResponse> {
   const response = await authProxy(req);
@@ -452,8 +452,12 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
     // Let Next.js reject malformed route encoding with its native400 behavior.
     return response;
   }
-  const game = await loadPublishedGameMetadata(userId, slug);
-  return game ? response : gameNotFoundResponse(response, req.method === 'HEAD');
+  try {
+    const game = await loadPublishedGameMetadata(userId, slug);
+    return game ? response : gameNotFoundResponse(response, req.method === 'HEAD');
+  } catch {
+    return gameUnavailableResponse(response, req.method === 'HEAD');
+  }
 }
 
 /** Next.js static proxy matchers, including every user-controlled play slug. */
