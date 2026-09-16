@@ -26,16 +26,30 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(async () => ({ get: headersGet })),
 }));
 
+// notFound() throws a control-flow signal in Next; the real one throws an error
+// carrying the NEXT_HTTP_ERROR_FALLBACK;404 digest. The mock reproduces the
+// throw so the page's non-null narrowing and short-circuit are exercised.
+const NOT_FOUND_SIGNAL = 'NEXT_NOT_FOUND';
+const notFoundMock = vi.fn((): never => {
+  throw new Error(NOT_FOUND_SIGNAL);
+});
+vi.mock('next/navigation', () => ({
+  notFound: () => notFoundMock(),
+}));
+
 vi.mock('@/lib/auth/safe-auth', () => ({
   safeAuth: vi.fn(async () => ({ userId: null })),
 }));
 
 // The page renders these; their internals are irrelevant to the nonce contract.
+// They are vi.fn so the 404 path can assert they were never rendered.
+const gamePlayerMock = vi.fn((_props?: unknown) => null);
+const breadcrumbsMock = vi.fn((_props?: unknown) => null);
 vi.mock('@/components/play/GamePlayer', () => ({
-  GamePlayer: () => null,
+  GamePlayer: (props: unknown) => gamePlayerMock(props),
 }));
 vi.mock('@/components/marketing/Breadcrumbs', () => ({
-  Breadcrumbs: () => null,
+  Breadcrumbs: (props: unknown) => breadcrumbsMock(props),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -141,5 +155,52 @@ describe('PlayPage nonce consumption (PF-1018)', () => {
 
     const script = findJsonLd(await renderPlayPage());
     expect((script!.props as { nonce?: string }).nonce).toBe('a-different-nonce');
+  });
+});
+
+/**
+ * A missing published game must produce a true HTTP 404, not a soft-404 (a 200
+ * with a "Game Not Found" title that crawlers index).
+ *
+ * Acceptance criterion (PF-1029): "Given a visitor requests a published game
+ * that does not exist, When the response is returned, Then its HTTP status is
+ * 404 rather than 200." notFound() is Next's mechanism for that status, so the
+ * contract to pin is that the server component calls it (and therefore throws
+ * before rendering any game body) whenever getGameData resolves to null.
+ */
+describe('PlayPage 404 on missing game (PF-1029)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    headersGet.mockReturnValue(null);
+  });
+
+  it('calls notFound() and renders no game body when the game is missing', async () => {
+    // User exists, but no published game matches the slug — the realistic
+    // missing/unpublished case getGameData collapses to null.
+    limitResults = [[USER_ROW], []];
+
+    // notFound() throws, so the component never reaches its return: the JSON-LD
+    // script and the GamePlayer/Breadcrumbs elements are never constructed.
+    await expect(renderPlayPage()).rejects.toThrow('NEXT_NOT_FOUND');
+    expect(gamePlayerMock).not.toHaveBeenCalled();
+    expect(breadcrumbsMock).not.toHaveBeenCalled();
+  });
+
+  it('404s when the user itself does not exist', async () => {
+    // First query (user lookup) is empty, so getGameData short-circuits to null
+    // before the game query — this path must 404 too, not render a shell.
+    limitResults = [[], []];
+
+    await expect(renderPlayPage()).rejects.toThrow('NEXT_NOT_FOUND');
+    expect(gamePlayerMock).not.toHaveBeenCalled();
+  });
+
+  it('does NOT call notFound() when a published game exists', async () => {
+    // Guards the guard: proves the 404 is conditional on absence, not always on.
+    limitResults = [[USER_ROW], [GAME_ROW]];
+
+    const script = findJsonLd(await renderPlayPage());
+    expect(script, 'JSON-LD script did not render for a real game').not.toBeNull();
+    expect(notFoundMock).not.toHaveBeenCalled();
   });
 });

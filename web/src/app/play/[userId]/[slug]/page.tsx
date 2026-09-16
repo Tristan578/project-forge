@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
+import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users } from '@/lib/db/schema';
@@ -67,6 +68,10 @@ export async function generateMetadata({
   const { userId: clerkId, slug } = await params;
   const game = await getGameData(clerkId, slug);
 
+  // Single source of truth for the missing-game title. When the game is null the
+  // page body below calls notFound() and Next renders the colocated
+  // not-found.tsx for the visible UX; that file deliberately exports no metadata
+  // so the 404 <title> is defined here alone.
   if (!game) {
     return { title: 'Game Not Found - SpawnForge' };
   }
@@ -99,48 +104,49 @@ export default async function PlayPage({ params }: PlayPageProps) {
 
   const game = await getGameData(userId, slug);
 
+  // A missing, unpublished, or DB-unavailable game returns a true HTTP 404
+  // instead of a soft-404 (200 with a "Game Not Found" title), so crawlers and
+  // clients see the real status. notFound() throws, so `game` is non-null below.
+  if (!game) {
+    notFound();
+  }
+
   // VideoGame JSON-LD — user-controlled values from DB (title, description).
   // JSON.stringify does NOT escape '<', so we replace it with < to
   // prevent script tag breakout (XSS via </script> in user content).
   // getGameData filters for status='published', so drafts return null.
-  const videoGameJsonLd = game
-    ? JSON.stringify({
-        '@context': 'https://schema.org',
-        '@type': 'VideoGame',
-        name: game.title,
-        description: game.description || `Play ${game.title} on SpawnForge`,
-        url: `${SITE_URL}/play/${userId}/${slug}`,
-        gamePlatform: 'Web Browser',
-        playMode: 'SinglePlayer',
-        applicationCategory: 'Game',
-        author: game.authorName
-          ? { '@type': 'Person', name: game.authorName }
-          : undefined,
-        publisher: {
-          '@type': 'Organization',
-          name: 'SpawnForge',
-          url: SITE_URL,
-        },
-        datePublished: game.createdAt?.toISOString(),
-      }).replace(/</g, '\\u003c')
-    : null;
+  const videoGameJsonLd = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'VideoGame',
+    name: game.title,
+    description: game.description || `Play ${game.title} on SpawnForge`,
+    url: `${SITE_URL}/play/${userId}/${slug}`,
+    gamePlatform: 'Web Browser',
+    playMode: 'SinglePlayer',
+    applicationCategory: 'Game',
+    author: game.authorName
+      ? { '@type': 'Person', name: game.authorName }
+      : undefined,
+    publisher: {
+      '@type': 'Organization',
+      name: 'SpawnForge',
+      url: SITE_URL,
+    },
+    datePublished: game.createdAt?.toISOString(),
+  }).replace(/</g, '\\u003c');
 
   return (
     <>
-      {videoGameJsonLd && (
-        <script
-          type="application/ld+json"
-          nonce={nonce}
-          dangerouslySetInnerHTML={{ __html: videoGameJsonLd }}
-        />
-      )}
+      <script
+        type="application/ld+json"
+        nonce={nonce}
+        dangerouslySetInnerHTML={{ __html: videoGameJsonLd }}
+      />
       <div className="mx-auto max-w-7xl px-4 pt-4 sm:px-6 lg:px-8">
         <Breadcrumbs
           items={[
             { label: 'Community', href: '/community' },
-            ...(game?.title
-              ? [{ label: game.title, href: `/play/${userId}/${slug}` }]
-              : []),
+            { label: game.title, href: `/play/${userId}/${slug}` },
           ]}
         />
       </div>
