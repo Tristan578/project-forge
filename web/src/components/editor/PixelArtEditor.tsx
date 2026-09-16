@@ -193,6 +193,7 @@ function cloneLayer(layer: Layer): Layer {
 /**
  * Start a 16x16 transparent layer stack and edit it with manual layer/drawing controls.
  * Undo/redo restores layers, selection, dimensions and zoom; resize starts a fresh stack.
+ * Layer names commit on blur/Enter; empty drafts and Escape cancellation stay local.
  * State stays local while mounted. PNG download and sprite application flatten visible
  * layers; durable layer storage and AI parity remain work under #9817.
  * @param props Visibility, dismissal callback and optional sprite entity target.
@@ -229,6 +230,9 @@ export const PixelArtEditor = memo(function PixelArtEditor({
   const [redoStack, setRedoStack] = useState<LayerSnapshot[]>([]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const activeLayerButtonRef = useRef<HTMLButtonElement>(null);
+  const [nameEdit, setNameEdit] = useState<{ layerId: string; text: string } | null>(null);
+  const nameEditRef = useRef<{ layerId: string; text: string } | null>(null);
 
   // Active layer, clamped so a shrunk stack never dangles the index.
   const activeIndex = Math.min(activeLayerIndex, layers.length - 1);
@@ -271,51 +275,47 @@ export const PixelArtEditor = memo(function PixelArtEditor({
     [activeIndex]
   );
 
-  // Undo
+  // Discrete history transitions stay outside updater functions: StrictMode may
+  // replay an updater, but must never push the opposite stack more than once.
   const handleUndo = useCallback(() => {
-    setUndoStack((prev) => {
-      if (prev.length === 0) return prev;
-      const newStack = [...prev];
-      const last = newStack.pop()!;
-      setRedoStack((r) => [
-        ...r,
-        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex, canvasSize, zoom },
-      ]);
-      setLayers(last.layers);
-      setCanvasSize(last.canvasSize);
-      setZoom(last.zoom);
-      setPreviewGrid(null);
-      setLineStart(null);
-      setIsDrawing(false);
-      setActiveLayerIndex(Math.min(last.activeLayerIndex, last.layers.length - 1));
-      return newStack;
-    });
-  }, [layers, activeIndex, canvasSize, zoom]);
+    if (undoStack.length === 0) return;
+    const last = undoStack[undoStack.length - 1];
+    const current: LayerSnapshot = { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex, canvasSize, zoom };
+    setUndoStack(undoStack.slice(0, -1));
+    setRedoStack(previous => [...previous, current]);
+    setLayers(last.layers);
+    setCanvasSize(last.canvasSize);
+    setZoom(last.zoom);
+    setActiveLayerIndex(Math.min(last.activeLayerIndex, last.layers.length - 1));
+    nameEditRef.current = null;
+    setNameEdit(null);
+    setPreviewGrid(null);
+    setLineStart(null);
+    setIsDrawing(false);
+  }, [undoStack, layers, activeIndex, canvasSize, zoom]);
 
-  // Redo
   const handleRedo = useCallback(() => {
-    setRedoStack((prev) => {
-      if (prev.length === 0) return prev;
-      const newStack = [...prev];
-      const last = newStack.pop()!;
-      setUndoStack((u) => [
-        ...u,
-        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex, canvasSize, zoom },
-      ]);
-      setLayers(last.layers);
-      setCanvasSize(last.canvasSize);
-      setZoom(last.zoom);
-      setPreviewGrid(null);
-      setLineStart(null);
-      setIsDrawing(false);
-      setActiveLayerIndex(Math.min(last.activeLayerIndex, last.layers.length - 1));
-      return newStack;
-    });
-  }, [layers, activeIndex, canvasSize, zoom]);
+    if (redoStack.length === 0) return;
+    const last = redoStack[redoStack.length - 1];
+    const current: LayerSnapshot = { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex, canvasSize, zoom };
+    setRedoStack(redoStack.slice(0, -1));
+    setUndoStack(previous => [...previous, current]);
+    setLayers(last.layers);
+    setCanvasSize(last.canvasSize);
+    setZoom(last.zoom);
+    setActiveLayerIndex(Math.min(last.activeLayerIndex, last.layers.length - 1));
+    nameEditRef.current = null;
+    setNameEdit(null);
+    setPreviewGrid(null);
+    setLineStart(null);
+    setIsDrawing(false);
+  }, [redoStack, layers, activeIndex, canvasSize, zoom]);
 
   // Resize canvas — replaces the stack with a single fresh layer.
   const handleResize = useCallback((newSize: CanvasSize) => {
     pushHistory();
+    nameEditRef.current = null;
+    setNameEdit(null);
     setPreviewGrid(null);
     setLineStart(null);
     setIsDrawing(false);
@@ -661,7 +661,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
         </div>
 
         {/* Body */}
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 flex-wrap overflow-auto sm:flex-nowrap sm:overflow-hidden">
           {/* Tool Sidebar */}
           <div className="flex w-10 flex-col items-center gap-1 border-r border-zinc-800 py-2">
             {TOOLS.map(({ id, icon: Icon, label, shortcut }) => (
@@ -730,7 +730,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
           </div>
 
           {/* Canvas Area */}
-          <div className="flex flex-1 items-center justify-center overflow-auto bg-zinc-950 p-4">
+          <div className="flex min-w-0 flex-1 items-center justify-center overflow-auto bg-zinc-950 p-4">
             <canvas
               ref={canvasRef}
               onMouseDown={handleMouseDown}
@@ -747,7 +747,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
           </div>
 
           {/* Color Panel */}
-          <div className="flex w-44 flex-col border-l border-zinc-800 p-3">
+          <div className="flex w-full flex-col border-l border-zinc-800 p-3 sm:w-44 sm:shrink-0">
             {/* Current Color */}
             <div className="mb-3">
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
@@ -844,14 +844,14 @@ export const PixelArtEditor = memo(function PixelArtEditor({
           </div>
 
           {/* Layers Panel */}
-          <div className="flex w-44 flex-col border-l border-zinc-800 p-3">
+          <div className="flex w-full flex-col border-l border-zinc-800 p-3 sm:w-44 sm:shrink-0">
             <div className="mb-2 flex items-center justify-between">
               <label className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
                 Layers
               </label>
               <button
                 onClick={handleAddLayer}
-                className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
                 title="Add layer"
               >
                 <Plus size={14} />
@@ -859,7 +859,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
             </div>
 
             {/* Layer list — topmost layer first. */}
-            <div className="flex-1 space-y-1 overflow-auto">
+            <div className="max-h-48 flex-1 space-y-1 overflow-auto sm:max-h-none">
               {layers
                 .map((layer, index) => ({ layer, index }))
                 .slice()
@@ -874,17 +874,20 @@ export const PixelArtEditor = memo(function PixelArtEditor({
                     }`}
                   >
                     <button
+                      aria-pressed={layer.visible}
                       onClick={() => handleToggleVisibility(index)}
-                      className="rounded p-0.5 text-zinc-400 hover:text-zinc-200"
+                      className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded p-0.5 text-zinc-400 hover:text-zinc-200"
                       title={`Toggle visibility of ${layer.name}`}
                     >
                       {layer.visible ? <Eye size={12} /> : <EyeOff size={12} />}
                     </button>
                     <button
+                      ref={index === activeIndex ? activeLayerButtonRef : undefined}
+                      aria-pressed={index === activeIndex}
                       onClick={() => setActiveLayerIndex(index)}
-                      className={`flex-1 truncate text-left text-[11px] ${
+                      className={`min-h-11 min-w-11 flex-1 truncate text-left text-[11px] ${
                         index === activeIndex ? 'text-zinc-100' : 'text-zinc-400'
-                      } ${layer.visible ? '' : 'italic opacity-50'}`}
+                      } ${layer.visible ? '' : 'italic'}`}
                       title={`Select ${layer.name}`}
                     >
                       {layer.name}
@@ -897,13 +900,39 @@ export const PixelArtEditor = memo(function PixelArtEditor({
             <div className="mt-2 space-y-2 border-t border-zinc-800 pt-2">
               <input
                 type="text"
-                value={activeLayer.name}
-                onChange={(e) => handleRenameLayer(activeIndex, e.target.value)}
+                value={nameEdit?.layerId === activeLayer.id ? nameEdit.text : activeLayer.name}
+                onFocus={() => {
+                  const edit = { layerId: activeLayer.id, text: activeLayer.name };
+                  nameEditRef.current = edit;
+                  setNameEdit(edit);
+                }}
+                onChange={(e) => {
+                  const edit = { layerId: activeLayer.id, text: e.target.value };
+                  nameEditRef.current = edit;
+                  setNameEdit(edit);
+                }}
+                onBlur={() => {
+                  const edit = nameEditRef.current;
+                  nameEditRef.current = null;
+                  setNameEdit(null);
+                  if (edit?.layerId === activeLayer.id) handleRenameLayer(activeIndex, edit.text);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    nameEditRef.current = null;
+                    setNameEdit(null);
+                    activeLayerButtonRef.current?.focus();
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    activeLayerButtonRef.current?.focus();
+                  }
+                }}
                 aria-label="Layer name"
-                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300"
+                className="min-h-11 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300"
               />
               <div className="flex items-center gap-1">
-                <span className="text-[9px] uppercase tracking-wide text-zinc-500">Opacity</span>
+                <span className="text-[9px] uppercase tracking-wide text-zinc-400">Opacity</span>
                 <input
                   type="range"
                   min={0}
@@ -912,7 +941,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
                   value={activeLayer.opacity}
                   onChange={(e) => handleSetOpacity(activeIndex, Number(e.target.value))}
                   aria-label="Layer opacity"
-                  className="flex-1 accent-blue-500"
+                  className="min-h-11 min-w-11 flex-1 accent-blue-500"
                 />
                 <span className="w-6 text-right text-[9px] text-zinc-400">
                   {Math.round(activeLayer.opacity * 100)}
@@ -922,7 +951,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
                 <button
                   onClick={handleMoveLayerUp}
                   disabled={activeIndex >= layers.length - 1}
-                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:text-zinc-200 disabled:opacity-30"
+                  className="min-h-11 min-w-11 flex-1 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:text-zinc-200 disabled:opacity-30"
                   title="Move layer up"
                 >
                   <ChevronUp size={12} className="mx-auto" />
@@ -930,7 +959,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
                 <button
                   onClick={handleMoveLayerDown}
                   disabled={activeIndex <= 0}
-                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:text-zinc-200 disabled:opacity-30"
+                  className="min-h-11 min-w-11 flex-1 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:text-zinc-200 disabled:opacity-30"
                   title="Move layer down"
                 >
                   <ChevronDown size={12} className="mx-auto" />
@@ -938,7 +967,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
                 <button
                   onClick={handleDeleteLayer}
                   disabled={layers.length <= 1}
-                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:text-red-400 disabled:opacity-30"
+                  className="min-h-11 min-w-11 flex-1 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:text-red-400 disabled:opacity-30"
                   title="Delete layer"
                 >
                   <Trash2 size={12} className="mx-auto" />
