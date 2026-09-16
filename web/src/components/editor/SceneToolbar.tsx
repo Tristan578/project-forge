@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
 import { saveSceneToCloud } from '@/lib/projects/cloudSave';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, stagePrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
 import { showError } from '@/lib/toast';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
@@ -81,7 +82,10 @@ export function SceneToolbar() {
       if (cloudSaveId !== null && isSceneExportResponseFor(cloudSaveId, e.detail) && projectId) {
         pendingCloudSaveRef.current = null;
         const { json, name } = e.detail;
-        void saveSceneToCloud(projectId, name, json).then((result) => {
+        // Persist the music arrangement alongside the scene (#9854) so it
+        // survives save → reopen through the same project payload.
+        const arrangement = useMusicArrangementStore.getState().serialize();
+        void saveSceneToCloud(projectId, name, json, arrangement).then((result) => {
           if (result.ok && result.savedAt) {
             setCloudSaveStatus('saved');
             setLastCloudSave(result.savedAt);
