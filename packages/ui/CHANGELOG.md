@@ -1,5 +1,19 @@
 # @spawnforge/ui
 
+## 0.2.1
+
+### Patch Changes
+
+- [#10003](https://github.com/Tristan578/project-forge/pull/10003) [`27d81a8`](https://github.com/Tristan578/project-forge/commit/27d81a838d1aede06cd5ef58606f86745b782d55) Thanks [@dependabot](https://github.com/apps/dependabot)! - Update the editor and documentation site to React 19.3.0 and Next.js 16.3.5, keeping React DOM and Next.js tooling aligned. Refresh the editor's docking, icons, translations and S3 dependencies, and the documentation site's Fumadocs dependencies. The shared UI package now requires React 19.3 or later within React 19.
+
+- [#10051](https://github.com/Tristan578/project-forge/pull/10051) [`841f21a`](https://github.com/Tristan578/project-forge/commit/841f21ab7a5b90ffce197864e3220425ae7d82fc) Thanks [@Tristan578](https://github.com/Tristan578)! - Preserve saved prefab link metadata and its source definitions during scene changes, saves, recovery, and game export. Reject cyclic or incomplete imported graphs before writing them, retain stable nesting ids on scene reopen, and keep rejected scene switches attached to the original scene.
+  
+  The Prefabs panel can inspect saved links and overridden field names. Linked scene placement, nested entity creation, and propagation are unavailable; their controls are disabled and compatibility commands return explicit errors. Existing flat prefab copies remain available. This change does not complete the linked prefab engine workflow tracked in [#9811](https://github.com/Tristan578/project-forge/issues/9811).
+  
+  Tab navigation now moves keyboard focus with Arrow, Home, and End keys while preventing page scrolling. The Prefabs panel uses labeled, themed controls with readable tab states and mobile touch targets.
+  
+  A scene the editor cannot open now says so instead of leaving a blank editor, and every save path — manual save, cloud save, autosave, checkpoints, scene switch and duplicate, and game export — refuses while that rejection stands, so an empty editor can no longer overwrite the project it failed to open.
+
 ## 0.2.0
 
 ### Minor Changes
