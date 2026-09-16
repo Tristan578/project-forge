@@ -1,6 +1,8 @@
+/** Native gallery action isolation and keyboard activation regressions. */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { GameCard } from '../GameCard';
+import userEvent from '@testing-library/user-event';
 
 vi.mock('lucide-react', () => ({
   Heart: (props: Record<string, unknown>) => <span data-testid="heart-icon" {...props} />,
@@ -37,6 +39,14 @@ describe('GameCard', () => {
     cleanup();
   });
 
+  it('uses independent native View and Like controls without semantic nesting', () => {
+    render(<GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={vi.fn()} />);
+    const view = screen.getByRole('button', { name: 'View Test Game' });
+    const like = screen.getByRole('button', { name: 'Like' });
+    expect(view.tagName).toBe('BUTTON');
+    expect(view).not.toContainElement(like);
+  });
+
   it('renders game title and author', () => {
     render(
       <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={vi.fn()} />
@@ -59,7 +69,7 @@ describe('GameCard', () => {
     render(
       <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={onClick} />
     );
-    fireEvent.click(screen.getByText('Test Game'));
+    fireEvent.click(screen.getByRole('button', { name: 'View Test Game' }));
     expect(onClick).toHaveBeenCalled();
   });
 
@@ -72,41 +82,33 @@ describe('GameCard', () => {
   });
 
   // a11y (#9048): the card must be a real, keyboard-operable control.
-  it('exposes the card as a focusable button reachable by Tab', () => {
-    render(
-      <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={vi.fn()} />
-    );
-    const card = screen.getByRole('button', { name: 'View Test Game' });
-    expect(card.getAttribute('tabindex')).toBe('0');
+  it('reaches View and then Like through normal Tab order', async () => {
+    render(<GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'View Test Game' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Like' })).toHaveFocus();
   });
 
-  it('activates onClick when Enter is pressed on the card', () => {
+  it.each(['{Enter}', ' '])('activates View once with native %s keyboard behavior', async key => {
     const onClick = vi.fn();
-    render(
-      <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={onClick} />
-    );
-    const card = screen.getByRole('button', { name: 'View Test Game' });
-    fireEvent.keyDown(card, { key: 'Enter' });
+    render(<GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={onClick} />);
+    const user = userEvent.setup();
+    await user.tab();
+    await user.keyboard(key);
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it('activates onClick when Space is pressed on the card', () => {
+  it('activates Like with Enter without opening details', async () => {
     const onClick = vi.fn();
-    render(
-      <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={onClick} />
-    );
-    const card = screen.getByRole('button', { name: 'View Test Game' });
-    fireEvent.keyDown(card, { key: ' ' });
-    expect(onClick).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not activate the card when a key is pressed on the nested like button', () => {
-    const onClick = vi.fn();
-    render(
-      <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={onClick} />
-    );
-    const likeButton = screen.getByRole('button', { name: 'Like' });
-    fireEvent.keyDown(likeButton, { key: 'Enter' });
+    const onLike = vi.fn();
+    render(<GameCard game={mockGame} isLiked={false} onLike={onLike} onClick={onClick} />);
+    const user = userEvent.setup();
+    await user.tab();
+    await user.tab();
+    await user.keyboard('{Enter}');
+    expect(onLike).toHaveBeenCalledTimes(1);
     expect(onClick).not.toHaveBeenCalled();
   });
 
