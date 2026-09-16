@@ -34,6 +34,35 @@ function StatefulVec3({
 }
 
 describe('Vec3Input', () => {
+  it.each(['X', 'Y', 'Z'])('replaces a focused %s draft on external value changes', (axis) => {
+    const onChange = vi.fn();
+    const { rerender } = render(<Vec3Input label="Size" value={[1, 2, 3]} onChange={onChange} />);
+    const input = screen.getByLabelText('Size ' + axis);
+    input.focus();
+    fireEvent.change(input, { target: { value: '12.5' } });
+    expect(input).toHaveValue(12.5);
+    onChange.mockClear();
+    rerender(<Vec3Input label="Size" value={[4, 5, 6]} onChange={onChange} />);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue({ X: 4, Y: 5, Z: 6 }[axis]);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Size X')).toHaveValue(4);
+    expect(screen.getByLabelText('Size Y')).toHaveValue(5);
+    expect(screen.getByLabelText('Size Z')).toHaveValue(6);
+  });
+
+  it('retains raw precision for an echoed edit while updating other axes', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<Vec3Input label="Size" precision={1} value={[1, 2, 3]} onChange={onChange} />);
+    const input = screen.getByLabelText('Size X');
+    fireEvent.change(input, { target: { value: '2.56' } });
+    rerender(<Vec3Input label="Size" precision={1} value={[2.56, 5, 6]} onChange={onChange} />);
+    expect(input).toHaveValue(2.56);
+    expect(screen.getByLabelText('Size Y')).toHaveValue(5);
+    fireEvent.blur(input);
+    expect(input).toHaveValue(2.6);
+  });
+
   it('renders three axis inputs with labels', () => {
     render(<Vec3Input label="Position" value={[1, 2, 3]} onChange={() => {}} />);
     expect(screen.getByLabelText('Position X')).not.toBeNull();

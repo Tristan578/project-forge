@@ -13,7 +13,8 @@ import { cn } from '../utils/cn';
  * copies had already fallen into (one gained label association, the other did
  * not). Consumers that need a help tooltip compose it alongside this composite.
  * Empty drafts remain editable without dispatching; blur restores the committed
- * value and also invokes a caller-provided blur handler.
+ * value and also invokes a caller-provided blur handler. External value changes
+ * replace stale drafts; echoes of this field's own commits retain raw text.
  * @param props Controlled value/callback, label, bounds and native input attributes.
  * @returns A labelled numeric editor that retains raw drafts while editing.
  */
@@ -29,16 +30,24 @@ export function NumberField({ label, value, onChange, min, max, step = 0.1, clas
     // intermediate state never reaches state and the input snaps back. The draft
     // renders verbatim while editing; only a finite parse commits to onChange.
     const [draft, setDraft] = useState(null);
+    // Preserve an echo of this field's own commit (including raw precision and
+    // out-of-bounds text), but discard the draft for an external undo/store edit.
+    if (draft && !Object.is(value, draft.observedValue)) {
+        setDraft(Object.is(value, draft.emittedValue) ? { ...draft, observedValue: value } : null);
+    }
     const handleChange = (e) => {
         const raw = e.target.value;
-        setDraft(raw);
         const parsed = parseFloat(raw);
         if (Number.isFinite(parsed)) {
             const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed));
+            setDraft({ text: raw, observedValue: value, emittedValue: clamped });
             onChange(clamped);
         }
+        else {
+            setDraft({ text: raw, observedValue: value, emittedValue: value });
+        }
     };
-    const displayValue = draft !== null ? draft : String(value);
+    const displayValue = draft !== null ? draft.text : String(value);
     return (_jsxs("div", { className: cn('flex items-center gap-2', className), children: [_jsx("label", { htmlFor: id, className: "w-20 shrink-0 text-xs font-medium", style: { color: 'var(--sf-text-secondary)' }, children: label }), _jsx("input", { id: id, type: "number", value: displayValue, min: min, max: max, step: step, disabled: disabled, onChange: handleChange, onBlur: (event) => {
                     setDraft(null);
                     onBlur?.(event);

@@ -26,7 +26,8 @@ export interface NumberFieldProps extends Omit<InputHTMLAttributes<HTMLInputElem
  * copies had already fallen into (one gained label association, the other did
  * not). Consumers that need a help tooltip compose it alongside this composite.
  * Empty drafts remain editable without dispatching; blur restores the committed
- * value and also invokes a caller-provided blur handler.
+ * value and also invokes a caller-provided blur handler. External value changes
+ * replace stale drafts; echoes of this field's own commits retain raw text.
  * @param props Controlled value/callback, label, bounds and native input attributes.
  * @returns A labelled numeric editor that retains raw drafts while editing.
  */

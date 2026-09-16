@@ -80,15 +80,27 @@ function AxisInput({
   // user's new digits are appended to them instead of replacing them. Rendering
   // the draft verbatim — and only committing a finite parse to onChange — keeps
   // the intermediate empty/partial states the user creates while editing.
-  const [draft, setDraft] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{
+    text: string;
+    observedValue: number;
+    emittedValue: number;
+  } | null>(null);
+
+  // Preserve an echo of this field's own commit (including raw precision and
+  // out-of-bounds text), but discard the draft for an external undo/store edit.
+  if (draft && !Object.is(value, draft.observedValue)) {
+    setDraft(Object.is(value, draft.emittedValue) ? { ...draft, observedValue: value } : null);
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
-    setDraft(raw);
     const parsed = parseFloat(raw);
     if (Number.isFinite(parsed)) {
       const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed));
+      setDraft({ text: raw, observedValue: value, emittedValue: clamped });
       onChange(clamped);
+    } else {
+      setDraft({ text: raw, observedValue: value, emittedValue: value });
     }
   };
 
@@ -97,7 +109,7 @@ function AxisInput({
   // value rather than persisting NaN.
   const handleBlur = () => setDraft(null);
 
-  const displayValue = draft !== null ? draft : formatAxis(value, precision);
+  const displayValue = draft !== null ? draft.text : formatAxis(value, precision);
 
   return (
     <div className="flex flex-1 items-center gap-1 min-w-0">
@@ -139,6 +151,7 @@ function AxisInput({
 
 /**
  * Edits XYZ axes while retaining raw drafts, including empty intermediate edits.
+ * External axis changes replace stale drafts; echoes of local commits retain raw text.
  * Only finite edits commit; optional bounds clamp the edited axis. Blur discards
  * the draft and restores the parent value, rounded for display to precision
  * (default 3), without changing its committed precision. The default step is 0.1.

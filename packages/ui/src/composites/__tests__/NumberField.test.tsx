@@ -26,6 +26,32 @@ function StatefulNumberField({
 }
 
 describe('NumberField', () => {
+  it.each(['', '12.5'])('replaces draft %s when an external value changes while focused', (raw) => {
+    const onChange = vi.fn();
+    const { rerender } = render(<NumberField label="Distance" value={10} onChange={onChange} />);
+    const input = screen.getByLabelText('Distance');
+    input.focus();
+    fireEvent.change(input, { target: { value: raw } });
+    expect(input).toHaveValue(raw === '' ? null : 12.5);
+    onChange.mockClear();
+    rerender(<NumberField label="Distance" value={7} onChange={onChange} />);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue(7);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('retains a raw draft when the parent echoes its own bounded commit', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<NumberField label="Distance" value={1} max={10} onChange={onChange} />);
+    const input = screen.getByLabelText('Distance');
+    fireEvent.change(input, { target: { value: '14' } });
+    expect(onChange).toHaveBeenCalledWith(10);
+    rerender(<NumberField label="Distance" value={10} max={10} onChange={onChange} />);
+    expect(input).toHaveValue(14);
+    fireEvent.blur(input);
+    expect(input).toHaveValue(10);
+  });
+
   it('associates the visible label with the number input', () => {
     // getByLabelText resolves only through the htmlFor/id pairing, so this fails
     // if the composite ever renders the label as an unassociated sibling — the

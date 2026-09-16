@@ -29,20 +29,28 @@ function AxisInput({ axis, value, onChange, step, precision, min, max, disabled,
     // the draft verbatim — and only committing a finite parse to onChange — keeps
     // the intermediate empty/partial states the user creates while editing.
     const [draft, setDraft] = useState(null);
+    // Preserve an echo of this field's own commit (including raw precision and
+    // out-of-bounds text), but discard the draft for an external undo/store edit.
+    if (draft && !Object.is(value, draft.observedValue)) {
+        setDraft(Object.is(value, draft.emittedValue) ? { ...draft, observedValue: value } : null);
+    }
     const handleChange = (e) => {
         const raw = e.target.value;
-        setDraft(raw);
         const parsed = parseFloat(raw);
         if (Number.isFinite(parsed)) {
             const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed));
+            setDraft({ text: raw, observedValue: value, emittedValue: clamped });
             onChange(clamped);
+        }
+        else {
+            setDraft({ text: raw, observedValue: value, emittedValue: value });
         }
     };
     // On blur, drop the draft so the resting display re-derives from the committed
     // (and clamped) number. A field left empty/invalid reverts to the last good
     // value rather than persisting NaN.
     const handleBlur = () => setDraft(null);
-    const displayValue = draft !== null ? draft : formatAxis(value, precision);
+    const displayValue = draft !== null ? draft.text : formatAxis(value, precision);
     return (_jsxs("div", { className: "flex flex-1 items-center gap-1 min-w-0", children: [_jsxs("span", { className: "shrink-0 w-4 text-xs font-medium", style: { color: 'var(--sf-text-secondary)' }, children: [_jsx("span", { "aria-hidden": "true", className: "mb-0.5 block h-0.5 w-3 rounded-full", style: { backgroundColor: AXIS_COLORS[axis] } }), AXIS_LABELS[axis]] }), _jsx("input", { type: "number", value: displayValue, onChange: handleChange, onBlur: handleBlur, step: step, min: min, max: max, disabled: disabled, "aria-label": ariaLabel, className: cn('w-full min-w-0 min-h-[44px] sm:min-h-0 rounded px-2 py-1.5 text-xs outline-none focus:ring-1', 'disabled:opacity-50 disabled:cursor-not-allowed', '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'), style: {
                     backgroundColor: 'var(--sf-bg-elevated)',
                     color: 'var(--sf-text)',
