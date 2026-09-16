@@ -23,6 +23,10 @@ const FONT_ALLOWLIST = [
     'ui-monospace, monospace',
 ];
 const COLOR_TOKEN_KEYS = new Set([
+    '--sf-status-healthy-bg', '--sf-status-healthy-fg',
+    '--sf-status-degraded-bg', '--sf-status-degraded-fg',
+    '--sf-status-down-bg', '--sf-status-down-fg',
+    '--sf-status-unknown-bg', '--sf-status-unknown-fg',
     '--sf-bg-app', '--sf-bg-surface', '--sf-bg-elevated', '--sf-bg-overlay',
     '--sf-text', '--sf-text-secondary', '--sf-text-muted', '--sf-text-disabled',
     '--sf-border', '--sf-border-strong',

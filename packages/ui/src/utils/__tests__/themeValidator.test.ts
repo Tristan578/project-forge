@@ -10,6 +10,24 @@ describe('themeValidator', () => {
     tokens: { '--sf-accent': '#ff00ff' },
   };
 
+
+  const STATUS_KEYS = ['healthy', 'degraded', 'down', 'unknown'].flatMap(
+    (status) => ['bg', 'fg'].map((side) => '--sf-status-' + status + '-' + side),
+  );
+  it('retains every status foreground and background through custom theme import', () => {
+    const tokens = Object.fromEntries(STATUS_KEYS.map((key) => [key, '#123456']));
+    const result = validateCustomTheme({ ...VALID_THEME, tokens });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.theme.tokens).toEqual(tokens);
+  });
+  it.each(STATUS_KEYS)('rejects injected CSS for new status token %s', (key) => {
+    const result = validateCustomTheme({ ...VALID_THEME, tokens: { [key]: 'red; background:url(https://evil.test)' } });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Invalid status token was accepted');
+    expect(result.error).toContain(key);
+  });
+
   // Happy path
   it('accepts valid complete theme', () => {
     const result = validateCustomTheme(VALID_THEME);

@@ -353,13 +353,13 @@ describe('Theme Definitions', () => {
     ['--sf-status-unknown-fg', '--sf-status-unknown-bg', 'unknown'],
   ];
 
-  it.each(THEMES)('%s theme defines every status-colour token as valid hex', (theme) => {
+  it.each(THEMES)('%s theme defines every status-colour token as opaque hex', (theme) => {
     const tokens = THEME_DEFINITIONS[theme];
     for (const [fgKey, bgKey] of STATUS_PAIRS) {
       for (const key of [fgKey, bgKey]) {
         expect(tokens[key], `${theme} missing ${key}`).toBeDefined();
         expect(tokens[key], `${theme}.${key} = ${tokens[key]}`).toMatch(
-          /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/
+          /^#[0-9a-fA-F]{6}$/
         );
       }
     }
