@@ -1,9 +1,10 @@
 'use client';
 
-import { InlineAlert } from '@spawnforge/ui';
+import { Button, InlineAlert } from '@spawnforge/ui';
 import { useEngineStatus, PHASE_LABELS, type PhaseStatus } from '@/hooks/useEngineStatus';
 import { copyInitLogToClipboard } from '@/lib/initLog';
 import { setPreferredBackend } from '@/hooks/useEngine';
+import type { InitPhase } from '@/lib/initLog';
 import { useState } from 'react';
 
 const GITHUB_ISSUES_URL = 'https://github.com/Tristan578/project-forge/issues/new';
@@ -43,7 +44,7 @@ function TimeoutWarning({
   phase,
   retryCount,
 }: {
-  phase: string | null;
+  phase: InitPhase | null;
   retryCount: number;
 }) {
   if (phase === 'wasm_loading') {
@@ -69,7 +70,8 @@ function TimeoutWarning({
 
   return (
     <InlineAlert variant="error" className="mt-4 text-sm">
-      Something went wrong during initialization.
+      {phase ? PHASE_LABELS[phase] : 'Engine initialization'} timed out. Select Retry to
+      try again, or copy the debug log and report the issue if it keeps failing.
     </InlineAlert>
   );
 }
@@ -197,12 +199,9 @@ export function InitOverlay() {
               <InlineAlert variant="error" className="mt-4 text-sm">
                 <p>Error: {error}</p>
                 {canRetry && (
-                  <button
-                    onClick={retry}
-                    className="mt-2 rounded bg-[var(--sf-destructive)] px-3 py-1.5 text-sm text-white hover:opacity-90"
-                  >
+                  <Button onClick={retry} size="sm" className="mt-2">
                     Retry
-                  </button>
+                  </Button>
                 )}
               </InlineAlert>
             )}

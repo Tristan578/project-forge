@@ -123,7 +123,8 @@ describe('InitOverlay', () => {
     });
     render(<InitOverlay />);
     const alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent(/Something went wrong/);
+    expect(alert).toHaveTextContent(/Setting Up Scene timed out/);
+    expect(alert).toHaveTextContent(/Select Retry/);
     // Never a hardcoded yellow/red palette literal after the migration.
     const leaks = Array.from(document.querySelectorAll('[class]'))
       .flatMap((el) => el.className.split(' '))
@@ -262,6 +263,9 @@ describe('InitOverlay', () => {
     });
     render(<InitOverlay />);
     expect(screen.getAllByText('Retry')).toHaveLength(1);
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    expect(retry).toHaveClass('bg-[var(--sf-accent-hover)]', 'text-[var(--sf-on-accent)]');
+    expect(retry).not.toHaveClass('text-white', 'bg-[var(--sf-destructive)]');
   });
 
   it('still shows exactly one Retry button after a non-timeout retry, alongside WebGL2 fallback (#9726)', () => {

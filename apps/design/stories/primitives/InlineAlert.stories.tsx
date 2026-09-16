@@ -23,7 +23,7 @@ export const Warning: Story = {
 export const Error: Story = {
   args: {
     variant: 'error',
-    children: 'Something went wrong during initialization.',
+    children: 'Engine initialization failed. Select Retry, or switch to WebGL2 mode.',
   },
 };
 
