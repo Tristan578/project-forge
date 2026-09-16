@@ -75,6 +75,29 @@ describe('sceneSlice', () => {
       expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
     });
 
+    it('locks saving and preserves the engine error when new-scene rollback storage fails', () => {
+      const engineError = new Error('engine despawned before failure');
+      const saveInstances = prefabStoreModule.savePrefabInstancesToStorage;
+      const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+        .mockImplementationOnce(saveInstances)
+        .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+      setSceneDispatcher((command) => {
+        if (command === 'new_scene') throw engineError;
+        return { success: true };
+      });
+      try {
+        expect(() => store.getState().newScene()).toThrow(engineError);
+        expect(write).toHaveBeenCalledTimes(2);
+        expect(store.getState().sceneLoadError?.reason).toContain(engineError.message);
+        mockDispatch.mockClear();
+        setSceneDispatcher(mockDispatch);
+        store.getState().saveScene();
+        expect(mockDispatch).not.toHaveBeenCalledWith('export_scene', expect.anything());
+      } finally {
+        write.mockRestore();
+      }
+    });
+
     // #10058: newScene()/loadScene() used to leave whatever music arrangement
     // was in the store from the PREVIOUS scene — stale tracks/clips that then
     // rode along into the new scene's next cloud save.

@@ -760,8 +760,6 @@ export const createSceneSlice: StateCreator<
       useMusicArrangementStore.getState().hydrate(null);
       return true;
     } catch (error) {
-      rollbackAudio();
-      savePrefabInstancesToStorage(previousInstances);
       // Mirrors `loadScene`'s `strandOnThrow` default (Sentry, #10079): a
       // THROWN `new_scene` dispatch can have despawned the outgoing scene
       // mid-apply, same as a thrown `load_scene`, so the viewport can no
@@ -779,6 +777,13 @@ export const createSceneSlice: StateCreator<
           at: Date.now(),
         },
       });
+      // The engine lockout must stand even if registry rollback storage fails.
+      rollbackAudio();
+      try {
+        savePrefabInstancesToStorage(previousInstances);
+      } catch (rollbackError) {
+        console.error('[Scenes] Failed to restore prefab instances after new-scene failure:', rollbackError);
+      }
       throw error;
     }
   },
