@@ -98,6 +98,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 200,
     minHeight: 80,
   },
+  'music-arrangement': {
+    id: 'music-arrangement',
+    title: 'Music Arrangement',
+    component: 'music-arrangement',
+    minWidth: 260,
+    minHeight: 160,
+  },
   docs: {
     id: 'docs',
     title: 'Documentation',
