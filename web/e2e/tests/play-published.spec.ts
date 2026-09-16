@@ -5,37 +5,9 @@ import {
 } from '../constants';
 
 /**
- * #8603: Playing a published game, end-to-end coverage.
- *
- * The published-game player (web/src/components/play/GamePlayer.tsx) fetches
- * GET /api/play/{userId}/{slug} and renders the returned scene. The public page
- * route web/src/app/play/[userId]/[slug]/page.tsx wraps that player.
- *
- * In the CI env (`next start`, SKIP_ENV_VALIDATION=true, no DATABASE_URL /
- * Clerk) there is NO seeded game, so the data route returns 404 (game not found)
- * or 500 (DB unavailable) and the page route still renders (200).
- *
- * Coverage is layered deliberately:
- *   - @api (this file): the data route's status + JSON shape for a missing game.
- *   - @ui (this file): that the real page route MOUNTS GamePlayer's SSR shell —
- *     200 + the "Loading game..." loading state + the Community breadcrumb —
- *     i.e. the page wiring (no hard 404, no redirect to sign-in, not the editor).
- *   - GamePlayer's CLIENT error block (the ":(" face, the "Game Not Found" /
- *     "Something Went Wrong" heading variants, and the "Back to SpawnForge" link)
- *     is owned by the component test
- *     web/src/components/play/__tests__/GamePlayer.test.tsx, which mocks fetch
- *     (404 / 500 / throw) and asserts each variant. That is the correct layer for
- *     it: the error block only paints AFTER GamePlayer hydrates and its fetch
- *     effect runs. In the DB-less @ui gate the dynamic /play render's RSC stream
- *     does not complete hydration of the interactive subtree (the network trace
- *     shows GamePlayer's /api/play fetch never fires and the page sits on the
- *     SSR'd "Loading game..." shell), so an E2E error-block assertion can never
- *     be deterministic here regardless of route stub or timeout — hence it lives
- *     at the component layer, not here.
- *
- * A true seeded happy path (real published game -> canvas boots -> playable)
- * needs WASM + a seeded DB, so it lives behind @engine and is excluded from the
- * PR/CD gate via `--grep-invert @engine`.
+ * DB-less PR gates verify exact temporary-failure503 documents. Missing published
+ * data is separately covered through actual proxy/Neon/Drizzle transport fixtures
+ * and database-backed browser cases; the seeded player stays in its engine suite.
  */
 
 const FAKE_USER = 'user_e2e_nonexistent_8603';
@@ -68,55 +40,66 @@ test.describe('Play Published Game — data route @api', () => {
   });
 });
 
-test.describe('Play Published Game — public page @ui', () => {
-  test('page route exists (not a hard 404 from the server)', async ({ request }) => {
-    // The /play/[userId]/[slug] page is a server component that always renders
-    // (it defers the missing-game decision to the client GamePlayer), so the
-    // HTML document itself must be served with 200.
+test.describe('Play Published Game — DB-less public page @ui', () => {
+  test.beforeEach(() => {
+    test.skip(!!process.env.DATABASE_URL, 'DB-backed runs assert exact404 separately; this suite requires the deliberate DB-less server');
+  });
+  test('database-unavailable page returns literal HTTP503 before any response streaming', async ({ request }) => {
     const response = await request.get(PAGE_PATH, { maxRedirects: 0 });
-    expect(response.status()).toBe(200);
+    expect(response.status()).toBe(503);
+    expect(response.headers()['content-type']).toContain('text/html');
+    expect(response.headers()['cache-control']).toBe('no-store');
+    expect(response.headers()['x-robots-tag']).toBeUndefined();
+    expect(response.headers()['retry-after']).toBe('60');
+    const html = await response.text();
+    expect(html).toContain('<title>Game Temporarily Unavailable - SpawnForge</title>');
+    expect(html).not.toContain('VideoGame');
+    expect(html).not.toContain('noindex');
   });
 
-  test('mounts the GamePlayer shell on the real page route', async ({ page }) => {
-    // What E2E uniquely verifies here is the PAGE-ROUTE WIRING: that
-    // /play/[userId]/[slug] actually mounts GamePlayer (and not a hard 404, a
-    // redirect to sign-in, or the editor) for a missing game. The route owns a
-    // stable mount marker around GamePlayer so the assertion does not race its
-    // short-lived loading state on faster browser engines.
-    //
-    // The CLIENT error block (":(" face, "Game Not Found" / "Something Went
-    // Wrong" heading, "Back to SpawnForge" link) is asserted at the component
-    // layer in web/src/components/play/__tests__/GamePlayer.test.tsx — it needs a
-    // hydrated, interactive GamePlayer, and the dynamic /play render's RSC stream
-    // does not complete that hydration in this gate (the network trace shows the
-    // /api/play fetch never fires), so it cannot be driven from here. See the
-    // file header for the full layering rationale.
-    await page.goto(PAGE_PATH);
-    await page.waitForLoadState('domcontentloaded');
-
-    // The route-owned mount stays present after hydration. The loading copy can
-    // disappear before WebKit observes it when the DB-less request fails fast.
-    await expect(page.getByTestId('game-player-route-mount')).toBeVisible({
+  test('renders the actual temporary-failure alert and reachable home link', async ({ page }) => {
+    const response = await page.goto(PAGE_PATH);
+    expect(response?.status()).toBe(503);
+    const alert = page.getByRole('alert');
+    await expect(alert.getByRole('heading', { name: 'Game Temporarily Unavailable' })).toBeVisible({
       timeout: E2E_TIMEOUT_LOAD_MS,
     });
+    await expect(alert).toContainText('Please try again shortly.');
+    const home = alert.getByRole('link', { name: 'Back to SpawnForge' });
+    await expect(home).toHaveAttribute('href', '/');
+    await page.keyboard.press('Tab');
+    await expect(home).toBeFocused();
+    await expect(page.getByTestId('game-player-route-mount')).toHaveCount(0);
+    await expect(page.locator('nav[aria-label="Breadcrumb"]')).toHaveCount(0);
+    await expect(page.locator('script[type="application/ld+json"]')).toHaveCount(0);
   });
 
-  test('Community breadcrumb is present on the play page', async ({ page }) => {
-    await page.goto(PAGE_PATH);
-    await page.waitForLoadState('domcontentloaded');
+  test('HEAD and crawler requests also receive503 without a player document', async ({ request }) => {
+    const head = await request.head(PAGE_PATH, { maxRedirects: 0 });
+    expect(head.status()).toBe(503);
+    expect(await head.body()).toHaveLength(0);
+    const bot = await request.get(PAGE_PATH, { maxRedirects: 0, headers: { 'user-agent': 'Twitterbot' } });
+    expect(bot.status()).toBe(503);
+    expect(await bot.text()).toContain('Game Temporarily Unavailable');
+  });
+});
 
-    const breadcrumb = page.locator('nav[aria-label="Breadcrumb"]');
-    await expect(breadcrumb).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
+test.describe('Play Published Game — database-backed absence @api', () => {
+  test.beforeEach(() => {
+    test.skip(!process.env.DATABASE_URL, 'Requires an available database; DB-less gates assert exact503 separately');
+  });
 
-    // In the DB-less @ui gate getGameData() returns null, so the only non-Home
-    // crumb passed to <Breadcrumbs> is { label: 'Community', href: '/community' }
-    // (href is a required BreadcrumbItem field) -> 'Community' is
-    // the TERMINAL crumb, rendered as a non-link <span aria-current="page">
-    // (a deeper game-title crumb only appears when the DB resolves the game,
-    // which never happens here). Assert the current-page span, not a link.
-    await expect(breadcrumb.locator('[aria-current="page"]')).toHaveText('Community');
-    // The prepended 'Home' entry is non-terminal, so it IS a real link.
-    await expect(breadcrumb.getByRole('link', { name: 'Home' })).toBeVisible();
+  test('an absent author has literal404 for GET, HEAD and crawlers', async ({ request }) => {
+    const response = await request.get(PAGE_PATH, { maxRedirects: 0 });
+    expect(response.status()).toBe(404);
+    expect(response.headers()['x-robots-tag']).toBe('noindex');
+    expect(await response.text()).toContain('<h1>Game Not Found</h1>');
+    const head = await request.head(PAGE_PATH, { maxRedirects: 0 });
+    expect(head.status()).toBe(404);
+    expect(await head.body()).toHaveLength(0);
+    const crawler = await request.get(PAGE_PATH, { maxRedirects: 0, headers: { 'user-agent': 'Twitterbot' } });
+    expect(crawler.status()).toBe(404);
+    expect(await crawler.text()).not.toContain('VideoGame');
   });
 });
 
