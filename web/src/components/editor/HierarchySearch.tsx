@@ -138,8 +138,9 @@ export function HierarchySearch({ matchCount }: HierarchySearchProps) {
           )}
           {hasValue && (
             <button
+              type="button"
               onClick={handleClear}
-              className="p-0.5 text-neutral-500 hover:text-neutral-300 rounded hover:bg-neutral-700"
+              className="p-0.5 text-neutral-500 hover:text-neutral-300 rounded hover:bg-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
               title="Clear filter (Esc)"
               aria-label="Clear search filter"
             >

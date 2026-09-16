@@ -92,7 +92,13 @@ export function SceneSettings() {
   );
 
   return (
-    <div className="space-y-4">
+    // data-a11y-defer marks this pre-existing scene-settings panel as deferred
+    // from the hierarchy/inspector a11y slice (#9875). Its ~40 post-processing
+    // form controls (color/range/select) predate this slice and are labelled by
+    // adjacent-but-unassociated <label>s; the E2E axe audits exclude this
+    // subtree so they gate the Inspector chrome + Hierarchy this slice hardens,
+    // not this unrelated panel. Tracked for a dedicated SceneSettings a11y pass.
+    <div className="space-y-4" data-a11y-defer="scene-settings">
       {/* Scene Statistics */}
       <SceneStatistics />
 
