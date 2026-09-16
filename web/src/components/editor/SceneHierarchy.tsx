@@ -84,6 +84,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
   const selectEntity = useEditorStore((s) => s.selectEntity);
   const deleteSelectedEntities = useEditorStore((s) => s.deleteSelectedEntities);
   const duplicateSelectedEntity = useEditorStore((s) => s.duplicateSelectedEntity);
+  const toggleVisibility = useEditorStore((s) => s.toggleVisibility);
   const renameEntity = useEditorStore((s) => s.renameEntity);
   const reparentEntity = useEditorStore((s) => s.reparentEntity);
   const hierarchyFilter = useEditorStore((s) => s.hierarchyFilter);
@@ -244,6 +245,19 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
         }
         break;
       }
+      case 'v':
+      case 'V': {
+        // Keyboard path for the visibility toggle. The per-row eye button is
+        // tabIndex=-1 (single-tab-stop tree), so this is how keyboard users
+        // hide/show the focused entity. Skip while an inline rename is active
+        // so the keystroke goes to the text field, not the toggle.
+        if (editingEntityId) return;
+        if (focusedEntityId) {
+          e.preventDefault();
+          toggleVisibility(focusedEntityId);
+        }
+        break;
+      }
       case 'F10': {
         // Shift+F10: open context menu for focused entity (keyboard right-click)
         if (e.shiftKey && focusedEntityId) {
@@ -269,7 +283,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
       default:
         return; // Don't prevent default for unhandled keys
     }
-  }, [flatNodeIds, indexMap, focusedEntityId, sceneGraph, effectiveExpandedIds, toggleExpanded, selectEntity, selectedIds, deleteSelectedEntities, setEditingEntityId, focusRow]);
+  }, [flatNodeIds, indexMap, focusedEntityId, sceneGraph, effectiveExpandedIds, toggleExpanded, selectEntity, selectedIds, deleteSelectedEntities, setEditingEntityId, focusRow, toggleVisibility, editingEntityId]);
 
   // Drag state
   const [dragState, setDragState] = useState<{
@@ -465,9 +479,16 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
       {/* Search input */}
       <HierarchySearch matchCount={isFiltering ? filterResult.matchCount : undefined} />
 
-      {/* Tree view */}
+      {/* Tree view.
+          role="tree" stays on this container even when the scene is empty. The
+          empty-scene and no-match UI is rendered as a SIBLING (below), never a
+          child, so an empty tree has zero non-treeitem children: axe treats an
+          empty tree as reviewable-incomplete (its aria-required-children
+          `reviewEmpty` list contains "tree"), not a critical
+          aria-required-children violation. Putting the EmptyState back inside
+          this node is what tripped that violation (#9875 review). */}
       <div
-        className="flex-1 overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]"
+        className={`${hasEntities ? 'flex-1 ' : ''}overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]`}
         data-editor-region="hierarchy"
         tabIndex={0}
         role="tree"
@@ -478,7 +499,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
         onDragOver={handleRootDragOver}
         onDrop={handleRootDrop}
       >
-        {hasEntities ? (
+        {hasEntities &&
           filterResult.filteredRootIds.map((rootId) => {
             const node = sceneGraph.nodes[rootId];
             if (!node) return null;
@@ -520,8 +541,18 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
                 onRowFocus={handleRowFocus}
               />
             );
-          })
-        ) : isFiltering ? (
+          })}
+
+        {/* Root drop zone indicator */}
+        {dragState.isDragging && dropTarget?.zone === 'root' && (
+          <div className="h-0.5 bg-blue-500 rounded-full mx-2 mt-2" />
+        )}
+      </div>
+
+      {/* Empty-scene / no-match states — siblings of the tree, never its
+          children, so they cannot trip aria-required-children on role="tree". */}
+      {!hasEntities &&
+        (isFiltering ? (
           <div className="flex flex-col items-center justify-center h-32 text-neutral-500 text-sm">
             <span>No matching entities</span>
           </div>
@@ -533,13 +564,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
               description="Add entities using the toolbar above, or ask AI to build a scene for you"
             />
           </div>
-        )}
-
-        {/* Root drop zone indicator */}
-        {dragState.isDragging && dropTarget?.zone === 'root' && (
-          <div className="h-0.5 bg-blue-500 rounded-full mx-2 mt-2" />
-        )}
-      </div>
+        ))}
 
       {/* Context Menu */}
       {contextMenu.isOpen && contextMenu.entityId && contextMenu.entityName && (

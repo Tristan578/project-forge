@@ -369,7 +369,12 @@ export function SceneNode({
           }`}
           onClick={handleExpandClick}
           aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
-          tabIndex={hasChildren ? 0 : -1}
+          // ARIA tree is a composite widget with a single tab stop (the roving
+          // treeitem). Descendant controls must NOT be independent page Tab
+          // stops on every row, which would defeat the roving tabindex — so the
+          // chevron is unconditionally -1 and driven by the row's Arrow keys
+          // (Right expands, Left collapses) plus pointer clicks.
+          tabIndex={-1}
         >
           {isExpanded ? (
             <ChevronDown className="w-3 h-3" />
@@ -385,7 +390,11 @@ export function SceneNode({
           title={node.visible ? 'Hide entity' : 'Show entity'}
           aria-label={node.visible ? `Hide ${node.name}` : `Show ${node.name}`}
           aria-pressed={!node.visible}
-          tabIndex={0}
+          // Single-tab-stop tree: the eye toggle is not an independent Tab stop
+          // on every row. Keyboard users toggle visibility with the "V" key on
+          // the focused row (see SceneHierarchy handleKeyDown); pointer users
+          // click it directly.
+          tabIndex={-1}
         >
           {node.visible ? (
             <Eye className="w-3 h-3" />

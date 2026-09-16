@@ -149,4 +149,69 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
 
     expect(mockSelectEntity).toHaveBeenCalledWith('player', 'replace');
   });
+
+  it('keeps every row chevron and visibility control out of the tab order', () => {
+    // Single-tab-stop tree (ARIA composite widget): the per-row chevron and eye
+    // buttons must never be independent page Tab stops — not on the active row
+    // and not on any other row. Only the roving treeitem carries tabindex=0.
+    render(<SceneHierarchy />);
+
+    // Camera is the active (roving) row; its inner controls are still -1.
+    expect(screen.getByRole('button', { name: 'Hide Camera' })).toHaveAttribute('tabindex', '-1');
+    // Player is a non-active row with children, so its chevron renders.
+    expect(screen.getByRole('button', { name: 'Collapse Player' })).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByRole('button', { name: 'Hide Player' })).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByRole('button', { name: 'Hide Ground' })).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('Tab from the roving row skips all inner controls and exits the tree', async () => {
+    const user = userEvent.setup();
+    render(
+      <div>
+        <SceneHierarchy />
+        <button data-testid="after">after</button>
+      </div>,
+    );
+
+    const rows = screen.getAllByRole('treeitem');
+    rows[0].focus(); // the roving row (Camera)
+    expect(rows[0]).toHaveFocus();
+
+    // A single Tab must land on the element AFTER the tree, proving none of the
+    // chevron/eye buttons on any row are in the page Tab order.
+    await user.tab();
+    expect(screen.getByTestId('after')).toHaveFocus();
+  });
+
+  it('V toggles visibility of the focused row (keyboard path for the eye toggle)', async () => {
+    const toggleVisibility = vi.fn();
+    mockStore({ toggleVisibility });
+    const user = userEvent.setup();
+    render(<SceneHierarchy />);
+    const tree = screen.getByRole('tree');
+    tree.focus();
+
+    await user.keyboard('{ArrowDown}{ArrowDown}'); // focus Player
+    await user.keyboard('v');
+
+    expect(toggleVisibility).toHaveBeenCalledWith('player');
+  });
+
+  it('renders a childless, axe-valid tree when the scene is empty', async () => {
+    // The empty-scene UI must live OUTSIDE role="tree": a tree that CONTAINS a
+    // non-treeitem child trips aria-required-children (critical). An empty tree
+    // with no children is only "incomplete" (axe reviewEmpty), not a violation.
+    mockStore({ sceneGraph: { rootIds: [], nodes: {} } });
+    const { container } = render(<SceneHierarchy />);
+
+    const tree = screen.getByRole('tree');
+    const emptyState = screen.getByText(/No entities yet/i);
+    // The empty state is a sibling of the tree, never its child.
+    expect(tree.contains(emptyState)).toBe(false);
+    expect(tree.querySelector('[role="treeitem"], [role="group"]')).toBeNull();
+
+    const results = await axe(container);
+    expect(results.violations, summarize(results.violations)).toHaveLength(0);
+    expect(results.violations.map((v) => v.id)).not.toContain('aria-required-children');
+  });
 });
