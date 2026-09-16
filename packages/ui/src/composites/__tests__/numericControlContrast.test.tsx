@@ -44,7 +44,7 @@ describe('numeric control contrast', () => {
     expect(slider.style.backgroundColor).toBe('transparent');
     expect(slider.style.backgroundImage).toBe('linear-gradient(var(--sf-bg-elevated), var(--sf-bg-elevated))');
     expect(slider.style.backgroundSize).toBe('100% 6px');
-    expect(slider.style.backgroundPosition).toBe('center');
+    expect(slider.style.backgroundPosition).toBe('center center');
     expect(slider.style.backgroundRepeat).toBe('no-repeat');
   });
   it.each(Object.entries(THEME_DEFINITIONS))('%s labels, readouts and handles meet their contrast floors', (_name, tokens) => {
