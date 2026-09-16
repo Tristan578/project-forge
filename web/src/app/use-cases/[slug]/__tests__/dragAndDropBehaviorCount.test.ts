@@ -1,5 +1,6 @@
+/** Guards published behavior counts and examples against the live component registry. */
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GAME_COMPONENT_TYPES } from '@/stores/slices/types';
 
@@ -23,7 +24,7 @@ import { GAME_COMPONENT_TYPES } from '@/stores/slices/types';
 // The web vitest gate runs with cwd === web/; fall back to <cwd>/web when a
 // developer invokes vitest from the repo root instead.
 const CWD = process.cwd();
-const WEB_DIR = CWD.endsWith(`${'/'}web`) ? CWD : join(CWD, 'web');
+const WEB_DIR = basename(CWD) === 'web' ? CWD : join(CWD, 'web');
 const REPO_ROOT = dirname(WEB_DIR);
 
 const PAGE_PATH = join(WEB_DIR, 'src', 'app', 'use-cases', '[slug]', 'page.tsx');
