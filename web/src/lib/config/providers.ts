@@ -153,6 +153,7 @@ export const DIRECT_CAPABILITY_PROVIDER: Record<ProviderCapability, ProviderName
  * value (e.g. 'openrouter'), TypeScript will error here instead of
  * silently passing and crashing at runtime with a Postgres enum violation.
  */
+import { UNAVAILABLE_LINKED_PREFAB_COMMANDS } from '@/lib/prefabs/prefabAvailability';
 import type { Provider } from '@/lib/db/schema';
 
 type DbCapability = 'model3d' | 'texture' | 'sfx' | 'voice' | 'music' | 'sprite' | 'bg_removal' | 'image' | 'chat' | 'embedding' | 'pixel_art';
@@ -439,11 +440,12 @@ export const CAPABILITY_REQUIRED_PROVIDERS: Partial<Record<ProviderCapability, r
 };
 
 /**
- * Whether a command may be offered to the model: true for every command that
- * spends no capability, and for capability commands whose capability is not
- * declared unavailable. Static, so safe in module-load tool tables.
+ * Whether a command may be offered to the model. Withholds unfinished linked
+ * prefab operations and provider capabilities declared unavailable. Static, so
+ * safe in module-load tool tables.
  */
 export function isCommandAvailable(commandName: string): boolean {
+  if (UNAVAILABLE_LINKED_PREFAB_COMMANDS.has(commandName)) return false;
   const capability = COMMAND_CAPABILITY[commandName];
   return capability === undefined || getCapabilityUnavailability(capability) === null;
 }

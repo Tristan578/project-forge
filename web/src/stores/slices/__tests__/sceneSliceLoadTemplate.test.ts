@@ -18,6 +18,8 @@ import {
   takeStagedSceneAudio,
   clearStagedSceneAudio,
 } from '@/lib/audio/sceneAudioManifest';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
 
 type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string } | void;
 
@@ -70,6 +72,22 @@ describe('sceneSlice.loadTemplate', () => {
       expect(nodeCount).toBeGreaterThan(0);
       expect(Object.keys(sceneGraph.nodes)).toContain('player');
       if (result.success) expect(result.entityCount).toBe(nodeCount);
+    });
+
+    // #10058: a template never carries its own music arrangement, but a
+    // freshly-loaded template used to leave whatever arrangement the
+    // PREVIOUS scene had sitting in the store — stale tracks/clips that then
+    // rode along into the template's next cloud save.
+    it('clears a stale music arrangement left by the previous scene', async () => {
+      const trackId = useMusicArrangementStore.getState().addTrack('Stale');
+      useMusicArrangementStore.getState().addClip({ trackId, sourceUrl: 'x', sourceDurationSeconds: 10 });
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(true);
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(0);
     });
 
     it('sends load_scene with JSON the engine can read, not the raw template data', async () => {
@@ -257,6 +275,44 @@ describe('sceneSlice.loadTemplate', () => {
       const result = await harness.store.getState().loadTemplate('2d-platformer', { timeoutMs: 20 });
 
       expect(result.success).toBe(false);
+    });
+  });
+
+  // scene.FR-1 N1 (Sentry): `loadTemplate` used to dispatch `load_scene`
+  // directly, bypassing the prefab-instance registry entirely — the OUTGOING
+  // scene's linked instances rode along into the template, and an autosave
+  // afterward folded them into the template's scene data as ghost references.
+  describe('prefab-instance registry (scene.FR-1 N1)', () => {
+    const STALE = [{ instanceId: 'pfi_stale', prefabId: 'stale_source', overrides: {} }];
+
+    it('clears the registry when a template loads successfully', async () => {
+      savePrefabInstancesToStorage(STALE);
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(true);
+      expect(loadPrefabInstances()).toEqual([]);
+    });
+
+    it('restores the previous registry when the engine rejects the load', async () => {
+      savePrefabInstancesToStorage(STALE);
+      setSceneDispatcher(vi.fn<Dispatcher>(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(false);
+      expect(loadPrefabInstances()).toEqual(STALE);
+    });
+
+    it('retains the accepted template registry when application is still unconfirmed', async () => {
+      savePrefabInstancesToStorage(STALE);
+      setSceneDispatcher(silentDispatcher());
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer', { timeoutMs: 20 });
+
+      expect(result).toMatchObject({ success: false, error: expect.stringContaining('may appear without its scripts or gameplay setup') });
+      expect(loadPrefabInstances()).toEqual([]);
     });
   });
 });

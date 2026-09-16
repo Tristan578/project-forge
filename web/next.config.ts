@@ -97,13 +97,19 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/changelog': ['../CHANGELOG.md'],
   },
-  // The Aseprite bridge executes a desktop binary and never reads the browser
-  // engine bundles. Its dynamic filesystem calls otherwise make Next's tracer
-  // conservatively attach all four public WASM variants to this function,
-  // pushing it beyond Vercel's 250 MB uncompressed limit. These exclusions only
-  // affect the function trace; the same files remain deployed as public assets.
+  // No server function ever reads the browser engine bundles from disk: they are
+  // public assets served through the rewrites/headers below and the R2 CDN.
+  // Any route whose dependency graph reaches a dynamic filesystem call (the
+  // desktop bridge manager's existsSync/readFileSync probes, for one) makes
+  // Next's tracer conservatively attach all four WASM variants to that
+  // function, pushing it past Vercel's 250 MB uncompressed limit. #9707 excluded
+  // them for /api/bridges/aseprite/execute only; /api/bridges/aseprite/status
+  // shares the same bridge manager and failed the staging deploy the same way
+  // (#10069). The exclusion is therefore global — a per-route list regresses the
+  // moment a new route imports the bridge manager. These exclusions only affect
+  // function traces; the same files remain deployed as public assets.
   outputFileTracingExcludes: {
-    '/api/bridges/aseprite/execute': ['./public/engine-pkg-*/**'],
+    '*': ['./public/engine-pkg-*/**'],
   },
   images: {
     remotePatterns: [

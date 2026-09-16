@@ -72,4 +72,28 @@ describe('cloudSave', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain('500');
   });
+
+  // #9854: the music arrangement rides the same project payload.
+  it('merges a music arrangement into sceneData under its namespaced key', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 200 }));
+    const arrangement = {
+      version: 1,
+      tempoBpm: 120,
+      tracks: [{ id: 'tk', name: 'T', muted: false }],
+      clips: [
+        { id: 'cl', trackId: 'tk', sourceUrl: 'm', sourceDurationSeconds: 10, startOffset: 0, trimStart: 0, trimEnd: 10, loopEnabled: false, name: 'm' },
+      ],
+    };
+    await saveSceneToCloud('proj-1', 'My Scene', '{"entities":[]}', arrangement);
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.sceneData.entities).toEqual([]);
+    expect(body.sceneData.musicArrangement).toEqual(arrangement);
+  });
+
+  it('omits the arrangement key when none is passed (existing one-shot flow unchanged)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 200 }));
+    await saveSceneToCloud('proj-1', 'My Scene', '{"entities":[]}');
+    const body = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect('musicArrangement' in body.sceneData).toBe(false);
+  });
 });

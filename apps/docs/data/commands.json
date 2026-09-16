@@ -4988,6 +4988,107 @@
       "visibility": "public"
     },
     {
+      "name": "create_prefab_instance",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "entityId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "nest_prefab",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "parentPrefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "childPrefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          },
+          "overrides": {
+            "type": "object",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          }
+        },
+        "required": [
+          "parentPrefabId",
+          "childPrefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "apply_prefab_to_instances",
+      "description": "Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Reserved for future linked prefab editing; this command currently makes no changes."
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "list_prefab_instances",
+      "description": "Inspect saved editor link metadata for a prefab by ID or name, including overridden field names. Records do not verify scene entity placement or propagation. This read is not advertised to the in-app chat model.",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": {
+            "type": "string",
+            "description": "Source prefab whose instances to list"
+          }
+        },
+        "required": [
+          "prefabId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
       "name": "create_scene",
       "description": "Create a new empty scene in the project",
       "category": "scene",
@@ -7008,6 +7109,36 @@
               "bottom_right"
             ]
           },
+          "constraints": {
+            "type": "object",
+            "description": "Responsive layout constraints (ui.FR-1.OP-01). Pixel offsets from the anchor plus optional min/max pixel size bounds. Omitted sub-fields are preserved when updating an existing widget; bounds keep core actions tappable (e.g. 44px) from mobile to desktop.",
+            "properties": {
+              "offsetX": {
+                "type": "number",
+                "description": "Pixel offset from the anchor on X (positive = right)"
+              },
+              "offsetY": {
+                "type": "number",
+                "description": "Pixel offset from the anchor on Y (positive = down)"
+              },
+              "minWidth": {
+                "type": ["number", "null"],
+                "description": "Minimum width in px (>= 0), or null for unconstrained"
+              },
+              "maxWidth": {
+                "type": ["number", "null"],
+                "description": "Maximum width in px (>= 0), or null for unconstrained"
+              },
+              "minHeight": {
+                "type": ["number", "null"],
+                "description": "Minimum height in px (>= 0), or null for unconstrained"
+              },
+              "maxHeight": {
+                "type": ["number", "null"],
+                "description": "Maximum height in px (>= 0), or null for unconstrained"
+              }
+            }
+          },
           "parentWidgetId": {
             "type": "string",
             "description": "Parent widget ID for nesting"
@@ -7066,6 +7197,36 @@
           },
           "visible": {
             "type": "boolean"
+          },
+          "constraints": {
+            "type": ["object", "null"],
+            "description": "Responsive layout constraints (ui.FR-1.OP-01). Pixel offsets from the anchor plus optional min/max pixel size bounds; omitted sub-fields are merged onto the widget's existing constraints. Pass null to clear all constraints (back to pure anchor/percentage layout).",
+            "properties": {
+              "offsetX": {
+                "type": "number",
+                "description": "Pixel offset from the anchor on X (positive = right)"
+              },
+              "offsetY": {
+                "type": "number",
+                "description": "Pixel offset from the anchor on Y (positive = down)"
+              },
+              "minWidth": {
+                "type": ["number", "null"],
+                "description": "Minimum width in px (>= 0), or null for unconstrained"
+              },
+              "maxWidth": {
+                "type": ["number", "null"],
+                "description": "Maximum width in px (>= 0), or null for unconstrained"
+              },
+              "minHeight": {
+                "type": ["number", "null"],
+                "description": "Minimum height in px (>= 0), or null for unconstrained"
+              },
+              "maxHeight": {
+                "type": ["number", "null"],
+                "description": "Maximum height in px (>= 0), or null for unconstrained"
+              }
+            }
           },
           "config": {
             "type": "object",
@@ -12252,6 +12413,272 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_add_track",
+      "description": "Add a track (lane) to the music arrangement editor. Manual/AI parity with the Music Arrangement panel.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Optional track name; auto-named 'Track N' when omitted"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_delete_track",
+      "description": "Delete a music arrangement track and every clip on it. Undoable in the arrangement editor.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "description": "Arrangement track id to delete"
+          }
+        },
+        "required": [
+          "trackId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_set_track_muted",
+      "description": "Mute or unmute a music arrangement track.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "description": "Arrangement track id to mute or unmute"
+          },
+          "muted": {
+            "type": "boolean",
+            "description": "Whether the track is silenced in the arrangement"
+          }
+        },
+        "required": [
+          "trackId",
+          "muted"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_rename_track",
+      "description": "Rename a music arrangement track.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "description": "Arrangement track id to rename"
+          },
+          "name": {
+            "type": "string",
+            "description": "New track name"
+          }
+        },
+        "required": [
+          "trackId",
+          "name"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_add_clip",
+      "description": "Place an imported or generated audio asset as a clip on a music arrangement track.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "description": "Track to place the clip on"
+          },
+          "sourceUrl": {
+            "type": "string",
+            "description": "Audio asset name/id the clip plays from"
+          },
+          "sourceDurationSeconds": {
+            "type": "number",
+            "description": "Full source length in seconds (the trim ceiling)"
+          },
+          "startOffset": {
+            "type": "number",
+            "description": "Seconds along the timeline where the clip begins (default 0)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional clip label; defaults to the source name"
+          }
+        },
+        "required": [
+          "trackId",
+          "sourceUrl",
+          "sourceDurationSeconds"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_move_clip",
+      "description": "Move a music arrangement clip along its timeline and optionally to another track.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clipId": {
+            "type": "string",
+            "description": "Clip to move"
+          },
+          "startOffset": {
+            "type": "number",
+            "description": "New timeline position in seconds (clamped to >= 0)"
+          },
+          "trackId": {
+            "type": "string",
+            "description": "Optional target track id; ignored when the track is unknown"
+          }
+        },
+        "required": [
+          "clipId",
+          "startOffset"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_trim_clip",
+      "description": "Adjust a music arrangement clip's trimmed source window (clamped to legal bounds).",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clipId": {
+            "type": "string",
+            "description": "Clip to trim"
+          },
+          "trimStart": {
+            "type": "number",
+            "description": "Seconds into the source where playback starts"
+          },
+          "trimEnd": {
+            "type": "number",
+            "description": "Seconds into the source where playback ends"
+          }
+        },
+        "required": [
+          "clipId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_set_loop",
+      "description": "Toggle looping on a music arrangement clip and optionally set its loop window.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clipId": {
+            "type": "string",
+            "description": "Clip to update"
+          },
+          "loopEnabled": {
+            "type": "boolean",
+            "description": "Whether the trimmed window repeats to fill its duration"
+          },
+          "trimStart": {
+            "type": "number",
+            "description": "Optional loop-window start in seconds"
+          },
+          "trimEnd": {
+            "type": "number",
+            "description": "Optional loop-window end in seconds"
+          }
+        },
+        "required": [
+          "clipId",
+          "loopEnabled"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_delete_clip",
+      "description": "Delete a clip from the music arrangement. Undoable in the arrangement editor.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clipId": {
+            "type": "string",
+            "description": "Clip to delete"
+          }
+        },
+        "required": [
+          "clipId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "arrangement_set_tempo",
+      "description": "Set the music arrangement tempo in beats per minute (clamped to 20-400).",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "bpm": {
+            "type": "number",
+            "description": "Tempo in BPM (20-400)"
+          }
+        },
+        "required": [
+          "bpm"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
       "destructive": false,
       "visibility": "public"
     },
