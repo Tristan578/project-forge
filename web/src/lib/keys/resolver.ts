@@ -191,6 +191,43 @@ export async function resolveApiKey(
   };
 }
 
+/**
+ * Resolve a provider key WITHOUT deducting tokens, applying the same
+ * BYOK-then-platform precedence as {@link resolveApiKey} — the user's own key
+ * first, else the platform env key, else `null`.
+ *
+ * For a SECONDARY, bundled provider step whose cost is already covered by the
+ * primary generation the user paid for: `/api/generate/sprite` resolves the
+ * remove.bg key this way to fold background removal into a sprite it already
+ * charged for (#9734). It never charges, never checks tier/balance, and returns
+ * `null` (rather than throwing) when no key exists, so a deployment or user
+ * without a remove.bg key still gets a sprite instead of a failed generation.
+ * Do NOT use it for a primary, billable capability — that is `resolveApiKey`.
+ * @param userId Internal user ID whose encrypted BYOK key is queried.
+ * @param provider Secondary provider to resolve.
+ * @returns Decrypted BYOK or platform key, or null when neither is configured.
+ * @throws Lookup and decryption errors; callers choose whether to degrade.
+ */
+export async function resolveByokOrPlatformKey(
+  userId: string,
+  provider: Provider,
+): Promise<string | null> {
+  const [byokKey] = await queryWithResilience(() =>
+    getDb()
+      .select()
+      .from(providerKeys)
+      .where(and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)))
+      .limit(1)
+  );
+  if (byokKey) {
+    return decryptProviderKey(byokKey.encryptedKey, byokKey.iv);
+  }
+
+  const envVar = getPlatformKeyEnvVar(provider);
+  const platformKey = envVar ? process.env[envVar] : undefined;
+  return platformKey ?? null;
+}
+
 /** Store (or update) a BYOK key for a provider */
 export async function storeProviderKey(
   userId: string,

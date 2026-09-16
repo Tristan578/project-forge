@@ -6,6 +6,7 @@
 
 import { validateResourceId } from '@/lib/validation/resourceId';
 import { REPLICATE_MODEL_SDXL } from '@/lib/ai/models';
+import { generationResultUrlSchema } from '@/lib/generation/resultUrl';
 import { composeAbortSignal } from '@/lib/generate/abortComposition';
 
 export interface SpriteGenerateParams {
@@ -14,6 +15,18 @@ export interface SpriteGenerateParams {
   size: '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
   provider?: 'auto' | 'dalle3' | 'sdxl';
   removeBackground?: boolean;
+  /**
+   * The remove.bg API key (platform PLATFORM_REMOVEBG_KEY or the user's BYOK
+   * key), resolved by the route with the same BYOK-then-platform precedence
+   * every generate route uses. Required to honour `removeBackground` — the
+   * client is constructed with the SPRITE provider's key (OpenAI / Replicate),
+   * which is not the remove.bg key, so background removal cannot reuse
+   * `this.apiKey`. Only the synchronous DALL-E path consumes it (#9734); the
+   * SDXL path returns a pending prediction id and has no resolved image URL to
+   * post to remove.bg inline. When absent, `removeBackground` is a no-op and the
+   * original sprite is returned unchanged rather than failing a paid generation.
+   */
+  removeBackgroundKey?: string;
   signal?: AbortSignal;
 }
 
@@ -35,6 +48,23 @@ export interface TilesetParams {
 export interface GenerationResult {
   taskId: string;
   status: string;
+  /**
+   * The finished, displayable image for a SYNCHRONOUSLY completed generation
+   * (the DALL-E path — `status === 'completed'`). It may be a base64 `data:`
+   * URL (after background removal, up to several MB for a 1024x1024 PNG) or a
+   * provider image URL.
+   *
+   * It is delivered to the client in the POST response BODY and imported
+   * directly. It must NEVER be threaded through `taskId`/`jobId` and the
+   * status-poll query string: `useGenerationPolling` fetches
+   * `…/status?jobId=<jobId>`, and a base64 payload there corrupts (`+` decodes
+   * to a space under `application/x-www-form-urlencoded` parsing) and blows the
+   * request-line / header size limit Node and proxies enforce (#9734). `taskId`
+   * therefore stays a short provider identifier even when background removal
+   * produced a large data URL.
+   */
+  resultUrl?: string;
+  backgroundRemoval?: 'removed' | 'not-requested' | 'unavailable' | 'unsupported';
 }
 
 function requireProviderArtifact(value: unknown, artifact: string): string {
@@ -86,10 +116,43 @@ export class SpriteClient {
 
     const data = await response.json();
     const imageUrl = requireProviderArtifact(data?.data?.[0]?.url, 'image URL');
-    // Return the URL directly as taskId for synchronous completion
+
+    // Background removal (#9734). DALL-E completes synchronously, so the image
+    // URL is in hand here — the one place a resolved URL exists before the
+    // client hands control back. Gated on both the flag AND a resolved
+    // remove.bg key: a deployment (or user) with no remove.bg key still gets a
+    // sprite rather than a failed, refunded generation. A remove.bg FAILURE, by
+    // contrast, propagates — the caller asked for a transparent sprite and did
+    // not get one, so `createGenerationHandler` refunds and reports it rather
+    // than silently shipping the background.
+    if (params.removeBackground && params.removeBackgroundKey) {
+      const { resultUrl } = await this.removeBackground(imageUrl, {
+        key: params.removeBackgroundKey,
+        signal: params.signal,
+      });
+      // `taskId` stays the SHORT DALL-E URL; the transparent PNG — a base64
+      // `data:` URL that can reach several MB — rides ONLY in `resultUrl`, which
+      // the route hands the client in the POST response body. Putting it in
+      // `taskId` would make it the `jobId`, and a multi-MB base64 payload in the
+      // status-poll query string corrupts and exceeds request-line limits
+      // (#9734).
+      return {
+        taskId: imageUrl,
+        status: 'completed',
+        resultUrl,
+        backgroundRemoval: 'removed',
+      };
+    }
+
+    // Synchronous completion: the finished image is the DALL-E URL itself.
+    // Carried in `resultUrl` (response body) so the client imports it directly
+    // rather than round-tripping even a short provider URL — which can itself
+    // contain `+`/`/`/`=` — through the status-poll query string.
     return {
       taskId: imageUrl,
       status: 'completed',
+      resultUrl: imageUrl,
+      backgroundRemoval: params.removeBackground ? 'unavailable' : 'not-requested',
     };
   }
 
@@ -216,11 +279,28 @@ export class SpriteClient {
     };
   }
 
-  async removeBackground(imageUrl: string, opts?: { signal?: AbortSignal }): Promise<{ resultUrl: string }> {
+  /**
+   * Remove an image background with remove.bg in the server request runtime.
+   * @param imageUrl Provider image URL sent in the JSON request body.
+   * @param opts Optional abort signal and remove.bg key override; absent key
+   * falls back to the constructor key for standalone provider clients.
+   * @returns A non-empty PNG data URL bounded for JSON responses and job storage.
+   * @throws Request, conversion, or artifact validation failures for caller refund.
+   */
+  async removeBackground(
+    imageUrl: string,
+    opts?: { signal?: AbortSignal; key?: string },
+  ): Promise<{ resultUrl: string }> {
+    // remove.bg uses its OWN key, distinct from the sprite provider key this
+    // client is constructed with. `generateSprite` chains here with the key the
+    // route resolved (#9734); direct callers of this method (provider
+    // 'removebg') fall back to `this.apiKey`.
+    const apiKey = opts?.key ?? this.apiKey;
     const response = await fetch('https://api.remove.bg/v1.0/removebg', {
       method: 'POST',
       headers: {
-        'X-Api-Key': this.apiKey,
+        'X-Api-Key': apiKey,
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         image_url: imageUrl,
@@ -237,7 +317,7 @@ export class SpriteClient {
     const blob = await response.blob();
     // Convert to data URL
     const base64 = await this.blobToBase64(blob);
-    return { resultUrl: base64 };
+    return { resultUrl: generationResultUrlSchema.parse(base64) };
   }
 
   private enhanceSpriteSheetPrompt(prompt: string, style: string | undefined, frameCount: number): string {
@@ -278,15 +358,15 @@ export class SpriteClient {
   }
 
   private async blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        resolve(result);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    // Server-side Node conversion (#9734). `FileReader` is a browser/worker API absent from
+    // the Node request runtime this client actually runs in — it only ever
+    // "worked" under jsdom in tests, and would have thrown the first time
+    // `generateSprite` chained background removal server-side. `Blob.arrayBuffer`
+    // + Node `Buffer` produces the PNG data URL in the request runtime.
+    const arrayBuffer = await blob.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    const mimeType = blob.type || 'image/png';
+    return `data:${mimeType};base64,${base64}`;
   }
 
   async getReplicateStatus(predictionId: string, opts?: { signal?: AbortSignal }): Promise<{ status: string; output?: string[] }> {

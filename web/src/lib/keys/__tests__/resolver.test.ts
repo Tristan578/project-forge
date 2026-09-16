@@ -60,7 +60,7 @@ vi.mock('@/lib/tokens/service', () => ({
 // Subject + imported mocks for assertion
 // ---------------------------------------------------------------------------
 
-import { resolveApiKey, storeProviderKey, deleteProviderKey, listConfiguredProviders, ApiKeyError } from '@/lib/keys/resolver';
+import { resolveApiKey, resolveByokOrPlatformKey, storeProviderKey, deleteProviderKey, listConfiguredProviders, ApiKeyError } from '@/lib/keys/resolver';
 import * as dbClient from '@/lib/db/client';
 import * as encryption from '@/lib/keys/encryption';
 import * as tokenService from '@/lib/tokens/service';
@@ -539,5 +539,49 @@ describe('listConfiguredProviders', () => {
     (mockDbChain.select as ReturnType<typeof vi.fn>).mockReturnValueOnce(selectChain);
     const result = await listConfiguredProviders('user-1');
     expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveByokOrPlatformKey (#9734) — non-charging secondary-provider resolution
+// ---------------------------------------------------------------------------
+
+describe('resolveByokOrPlatformKey', () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.stubEnv('PLATFORM_REMOVEBG_KEY', undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('returns the decrypted BYOK key first and never deducts tokens', async () => {
+    wireDb([{ userId: 'user-1', provider: 'removebg', encryptedKey: 'enc-removebg', iv: 'iv-1' }]);
+    vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'platform-removebg-secret');
+
+    const key = await resolveByokOrPlatformKey('user-1', 'removebg');
+
+    expect(key).toBe('decrypted:enc-removebg');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('falls back to PLATFORM_REMOVEBG_KEY when no BYOK key exists', async () => {
+    wireDb([]);
+    vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'platform-removebg-secret');
+
+    const key = await resolveByokOrPlatformKey('user-1', 'removebg');
+
+    expect(key).toBe('platform-removebg-secret');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('returns null when neither a BYOK key nor PLATFORM_REMOVEBG_KEY is set', async () => {
+    wireDb([]);
+
+    const key = await resolveByokOrPlatformKey('user-1', 'removebg');
+
+    expect(key).toBeNull();
+    expect(mockDeductTokens).not.toHaveBeenCalled();
   });
 });
