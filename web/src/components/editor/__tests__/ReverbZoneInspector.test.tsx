@@ -189,6 +189,31 @@ describe('ReverbZoneInspector', () => {
     expect(screen.getByRole('option', { name: 'Cave' })).toBeInTheDocument();
   });
 
+  it.each([
+    { label: 'Wet Mix', raw: '75', field: 'wetMix', expected: 0.75 },
+    { label: 'Decay Time', raw: '3.5', field: 'decayTime', expected: 3.5 },
+    { label: 'Pre-Delay', raw: '40', field: 'preDelay', expected: 40 },
+    { label: 'Priority', raw: '4', field: 'priority', expected: 4 },
+  ])('forwards a migrated $label edit with its exact value', ({ label, raw, field, expected }) => {
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByLabelText(label), { target: { value: raw } });
+    expect(mockUpdateReverbZone).toHaveBeenCalledExactlyOnceWith('entity-1', {
+      ...baseReverbZone, [field]: expected,
+    });
+  });
+
+  it.each(['X', 'Y', 'Z'])('forwards a migrated Size %s edit and preserves other axes', (axis) => {
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByLabelText('Size ' + axis), { target: { value: '12.5' } });
+    const size = [10, 5, 10];
+    size[['X', 'Y', 'Z'].indexOf(axis)] = 12.5;
+    expect(mockUpdateReverbZone).toHaveBeenCalledExactlyOnceWith('entity-1', {
+      ...baseReverbZone, shape: { type: 'box', size },
+    });
+  });
+
   it('shows Wet Mix slider', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
@@ -272,6 +297,7 @@ describe('ReverbZoneInspector', () => {
     fireEvent.change(x, { target: { value: '' } });
 
     expect(x.value).toBe('');
+    expect(mockUpdateReverbZone).not.toHaveBeenCalled();
     for (const call of mockUpdateReverbZone.mock.calls) {
       const shape = call[1]?.shape;
       if (shape?.type === 'box') {

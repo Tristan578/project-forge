@@ -7,10 +7,14 @@ import { Vec3Input } from '../Vec3Input';
 function StatefulVec3({
   initial,
   precision,
+  min,
+  max,
   onChangeSpy,
 }: {
   initial: [number, number, number];
   precision?: number;
+  min?: number;
+  max?: number;
   onChangeSpy?: (v: [number, number, number]) => void;
 }) {
   const [value, setValue] = useState<[number, number, number]>(initial);
@@ -19,6 +23,8 @@ function StatefulVec3({
       label="Size"
       value={value}
       precision={precision}
+      min={min}
+      max={max}
       onChange={(v) => {
         onChangeSpy?.(v);
         setValue(v);
@@ -91,8 +97,8 @@ describe('Vec3Input', () => {
     render(<Vec3Input label="Size" value={[10, 5, 10]} onChange={() => {}} />);
     expect(screen.getByLabelText('Size X')).toHaveValue(10);
     expect((screen.getByLabelText('Size X') as HTMLInputElement).value).toBe('10');
-    render(<Vec3Input label="Size2" value={[10.5, 5, 10]} onChange={() => {}} precision={1} />);
-    expect((screen.getByLabelText('Size2 X') as HTMLInputElement).value).toBe('10.5');
+    render(<Vec3Input label="Size2" value={[10.56, 5, 10]} onChange={() => {}} precision={1} />);
+    expect((screen.getByLabelText('Size2 X') as HTMLInputElement).value).toBe('10.6');
   });
 
   it('lets an axis be cleared to an empty intermediate state without emitting a non-finite value', () => {
@@ -111,6 +117,7 @@ describe('Vec3Input', () => {
     // The field actually clears — under the old derive-every-keystroke behaviour
     // this would still read "10.000".
     expect(x.value).toBe('');
+    expect(onChangeSpy).not.toHaveBeenCalled();
     // Nothing non-finite ever reached the consumer.
     for (const call of onChangeSpy.mock.calls) {
       expect(call[0].every((n: number) => Number.isFinite(n))).toBe(true);
@@ -131,6 +138,31 @@ describe('Vec3Input', () => {
     expect(x.value).toBe('25');
     const last = onChangeSpy.mock.calls.at(-1)?.[0];
     expect(last).toEqual([25, 5, 10]);
+  });
+
+  it.each(['X', 'Y', 'Z'])('restores an empty %s draft to its last good value on blur', (axis) => {
+    const onChangeSpy = vi.fn();
+    render(<StatefulVec3 initial={[10, 5, 10]} onChangeSpy={onChangeSpy} />);
+    const input = screen.getByLabelText('Size ' + axis) as HTMLInputElement;
+    const previous = input.value;
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input.value).toBe('');
+    fireEvent.blur(input);
+    expect(input.value).toBe(previous);
+    expect(onChangeSpy).not.toHaveBeenCalled();
+  });
+
+  it.each(['X', 'Y', 'Z'])('shows the clamped resting %s value after a bounded edit and blur', (axis) => {
+    const onChangeSpy = vi.fn();
+    render(<StatefulVec3 initial={[10, 5, 10]} min={0} max={100} onChangeSpy={onChangeSpy} />);
+    const input = screen.getByLabelText('Size ' + axis) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '150' } });
+    expect(input.value).toBe('150');
+    const expected = [10, 5, 10];
+    expected[['X', 'Y', 'Z'].indexOf(axis)] = 100;
+    expect(onChangeSpy).toHaveBeenCalledExactlyOnceWith(expected);
+    fireEvent.blur(input);
+    expect(input.value).toBe('100');
   });
 
   it('clamps a committed axis edit to min/max', () => {
