@@ -83,9 +83,13 @@ describe('use-cases drag-and-drop behavior count stays in sync with the registry
   });
 
   it('the README names only real game components as examples', () => {
-    const match = readme.match(/drag-and-drop behaviors \(([^)]+)\)/);
-    if (!match) return; // README example list is optional
-    const names = exampleNames(match[1]);
+    // Accept both prose forms so a reword cannot silence the guard:
+    //   "... behaviors (CharacterController, Health, ...)"  (parenthesised)
+    //   "... behaviors including CharacterController, Health, and NPC."  (inline)
+    const match = readme.match(/drag-and-drop behaviors (?:\(([^)]+)\)|including ([^.]+)\.)/);
+    expect(match, 'expected a drag-and-drop behaviors example list in README.md').not.toBeNull();
+    const names = exampleNames(match![1] ?? match![2]);
+    expect(names.length).toBeGreaterThan(0);
     for (const name of names) {
       expect(REGISTRY.has(norm(name)), `"${name}" is not a registered game component`).toBe(true);
     }
