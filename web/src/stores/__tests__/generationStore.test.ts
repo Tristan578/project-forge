@@ -8,6 +8,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { toast } from 'sonner';
+import { captureException } from '@/lib/monitoring/sentry-client';
+vi.mock('sonner', () => ({ toast: { warning: vi.fn() } }));
 import { useGenerationStore, type GenerationJob } from '../generationStore';
 
 // Mock Sentry client so captureException calls are trackable in tests
@@ -718,6 +721,19 @@ describe('generationStore', () => {
       await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/jobs/late-db', expect.objectContaining({ method: 'PATCH' })));
       expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string)).toEqual(expect.objectContaining({ status: 'completed', progress: 100, resultUrl, imported: true }));
     });
+  });
+
+  it('resumes unrelated jobs when one saved inline artifact cannot be restored', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ jobs: [
+      { id: 'missing-image', providerJobId: 'dalle3-sync:missing', type: 'sprite', provider: 'dalle3', status: 'downloading', progress: 100, prompt: 'hero', createdAt: '2026-09-16T00:00:00Z', hasInlineResult: true },
+      { id: 'async', providerJobId: 'sdxl-prediction', type: 'sprite', provider: 'sdxl', status: 'processing', progress: 30, prompt: 'terrain', createdAt: '2026-09-16T00:00:00Z' },
+    ] }) } as Response);
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 500 } as Response);
+    await useGenerationStore.getState().hydrateFromServer();
+    expect(useGenerationStore.getState().jobs['hydrated_async']).toEqual(expect.objectContaining({ status: 'processing', jobId: 'sdxl-prediction' }));
+    expect(useGenerationStore.getState().jobs['hydrated_missing-image']).toBeUndefined();
+    expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining('Refresh to retry'));
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), { context: 'generationStore.restoreArtifact', dbId: 'missing-image' });
   });
 
 });

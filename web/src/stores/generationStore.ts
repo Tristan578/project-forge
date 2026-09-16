@@ -7,6 +7,7 @@
  */
 
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import { useGenerationHistoryStore } from './generationHistoryStore';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import { trackAIAssetGenerated } from '@/lib/analytics/events';
@@ -208,6 +209,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       }
 
       const hydratedJobs: Record<string, GenerationJob> = {};
+      let artifactRecoveryFailed = false;
       for (const sj of serverJobs) {
         const localId = `hydrated_${sj.id}`;
         // Restore persisted placement fields from the parameters JSONB column
@@ -217,11 +219,19 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             : {};
         let resultUrl = typeof sj.resultUrl === 'string' ? sj.resultUrl : undefined;
         if (sj.hasInlineResult === true) {
-          const artifactResponse = await fetch(`/api/jobs/${encodeURIComponent(sj.id)}`);
-          if (!artifactResponse.ok) throw new Error('Failed to restore saved sprite result');
-          const artifact = await artifactResponse.json();
-          if (typeof artifact.resultUrl !== 'string') throw new Error('Saved sprite result is missing');
-          resultUrl = artifact.resultUrl;
+          try {
+            const artifactResponse = await fetch(`/api/jobs/${encodeURIComponent(sj.id)}`);
+            if (!artifactResponse.ok) throw new Error('Failed to restore saved sprite result');
+            const artifact = await artifactResponse.json();
+            if (typeof artifact.resultUrl !== 'string') throw new Error('Saved sprite result is missing');
+            resultUrl = artifact.resultUrl;
+          } catch (error) {
+            // Keep this row in the database for recovery on the next reload.
+            // Its opaque id cannot be polled; unrelated jobs must still resume.
+            captureException(error, { context: 'generationStore.restoreArtifact', dbId: sj.id });
+            artifactRecoveryFailed = true;
+            continue;
+          }
         }
         hydratedJobs[localId] = {
           id: localId,
@@ -248,6 +258,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         };
       }
 
+      if (artifactRecoveryFailed) toast.warning('Some saved sprites could not be restored. Refresh to retry; other generation jobs have resumed.');
       set((state) => ({
         jobs: { ...hydratedJobs, ...state.jobs },
         hydrated: true,

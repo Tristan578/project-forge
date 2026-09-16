@@ -4,6 +4,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
+import { rateLimit } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
+vi.mock('@/lib/rateLimit', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/lib/rateLimit')>()), rateLimit: vi.fn() }));
+vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
@@ -15,6 +19,7 @@ describe('PATCH /api/jobs/[id]', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 59, resetAt: 0 });
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as never },
@@ -231,6 +236,23 @@ describe('PATCH /api/jobs/[id]', () => {
     vi.mocked(getDb).mockReturnValue({ select: vi.fn(() => ({ from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ resultUrl: 'data:image/png;base64,' + 'A'.repeat(4 * 1024 * 1024) }]) })) } as never);
     const { GET } = await import('./route');
     expect((await GET(new NextRequest('http://localhost/api/jobs/sync-job'), { params: Promise.resolve({ id: 'sync-job' }) })).status).toBe(422);
+  });
+
+  it('rate limits artifact reads before accessing the database', async () => {
+    vi.mocked(rateLimit).mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: 0 });
+    vi.mocked(getDb).mockClear();
+    const { GET } = await import('./route');
+    expect((await GET(new NextRequest('http://localhost/api/jobs/sync-job'), { params: Promise.resolve({ id: 'sync-job' }) })).status).toBe(429);
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
+  it('returns a fixed server error when artifact lookup fails', async () => {
+    vi.mocked(getDb).mockImplementationOnce(() => { throw new Error('database secret must stay private'); });
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/jobs/sync-job'), { params: Promise.resolve({ id: 'sync-job' }) });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Failed to fetch saved artifact' });
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), { route: '/api/jobs/[id]', method: 'GET' });
   });
 
 });

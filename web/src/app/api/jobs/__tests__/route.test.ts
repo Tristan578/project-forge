@@ -24,7 +24,8 @@ vi.mock('@/lib/db/schema', () => ({
   },
 }));
 
-vi.mock('drizzle-orm', () => ({
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  sql: (await importOriginal<typeof import('drizzle-orm')>()).sql,
   eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
   and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
   inArray: vi.fn((...args: unknown[]) => ({ type: 'inArray', args })),
@@ -306,11 +307,14 @@ describe('/api/jobs', () => {
   it('keeps the active jobs list below the body limit when multiple inline PNGs exist', async () => {
     mockAuth(true);
     setupDb();
-    const resultUrl = 'data:image/png;base64,' + 'A'.repeat(3 * 1024 * 1024);
     const now = new Date();
-    mockSelectFrom.mockResolvedValueOnce(['one', 'two'].map((id) => ({ id, providerJobId: 'dalle3-sync:' + id, provider: 'dalle3', type: 'sprite', prompt: 'hero', parameters: {}, status: 'downloading', progress: 100, resultUrl, createdAt: now, updatedAt: now })));
+    mockSelectFrom.mockResolvedValueOnce(['one', 'two'].map((id) => ({ id, providerJobId: 'dalle3-sync:' + id, provider: 'dalle3', type: 'sprite', prompt: 'hero', parameters: {}, status: 'downloading', progress: 100, resultUrl: null, hasInlineResult: true, createdAt: now, updatedAt: now })));
     const response = await GET(new NextRequest('http://localhost/api/jobs?status=active'));
     expect(response.status).toBe(200);
+    const projection = vi.mocked(vi.mocked(getDb)().select).mock.calls[0][0];
+    expect(JSON.stringify(projection?.resultUrl)).toContain('CASE WHEN');
+    expect(JSON.stringify(projection?.resultUrl)).toContain('data:%');
+    expect(JSON.stringify(projection?.hasInlineResult)).toContain('COALESCE');
     const text = await response.text();
     expect(text.length).toBeLessThan(4096);
     expect(JSON.parse(text).jobs).toEqual([

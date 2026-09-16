@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { generationResultUrlSchema } from '@/lib/generation/resultUrl';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
-import { eq, and, inArray, desc } from 'drizzle-orm';
+import { eq, and, inArray, desc, sql } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
@@ -91,7 +91,20 @@ async function GET_impl(req: NextRequest) {
 
     const jobs = await queryWithResilience(() =>
       getDb()
-        .select()
+        .select({
+          id: generationJobs.id, providerJobId: generationJobs.providerJobId,
+          provider: generationJobs.provider, type: generationJobs.type,
+          prompt: generationJobs.prompt, parameters: generationJobs.parameters,
+          status: generationJobs.status, progress: generationJobs.progress,
+          errorMessage: generationJobs.errorMessage,
+          // Keep potentially multi-MB PNGs inside the database, not this list.
+          resultUrl: sql<string | null>`CASE WHEN ${generationJobs.resultUrl} LIKE 'data:%' THEN NULL ELSE ${generationJobs.resultUrl} END`,
+          hasInlineResult: sql<boolean>`COALESCE(${generationJobs.resultUrl} LIKE 'data:%', FALSE)`,
+          resultMeta: generationJobs.resultMeta, imported: generationJobs.imported,
+          tokenCost: generationJobs.tokenCost, tokenUsageId: generationJobs.tokenUsageId,
+          entityId: generationJobs.entityId, createdAt: generationJobs.createdAt,
+          updatedAt: generationJobs.updatedAt, completedAt: generationJobs.completedAt,
+        })
         .from(generationJobs)
         .where(conditions)
         .orderBy(desc(generationJobs.createdAt))
@@ -119,7 +132,7 @@ async function GET_impl(req: NextRequest) {
         // Inline artifacts are fetched individually; multiple PNGs would exceed
         // the host response limit in this list (for example character poses).
         resultUrl: j.resultUrl?.startsWith('data:') ? null : j.resultUrl,
-        hasInlineResult: j.resultUrl?.startsWith('data:') ?? false,
+        hasInlineResult: j.hasInlineResult,
         resultMeta: j.resultMeta,
         imported: j.imported === 1,
         tokenCost: j.tokenCost,
