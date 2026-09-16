@@ -230,3 +230,59 @@ describe('published-game preflight after Clerk forwarding (PF-381)', () => {
     expect(lookup).not.toHaveBeenCalled();
   });
 });
+
+
+describe('actual authenticated proxy factory with anonymous Clerk transport (PF-381)', () => {
+  const blockedFetch = vi.fn(() => Promise.reject(new Error('Anonymous proxy tests must not call provider APIs')));
+
+  beforeEach(() => {
+    vi.resetModules();
+    lookup.mockReset().mockResolvedValue(null);
+    blockedFetch.mockClear();
+    vi.stubGlobal('fetch', blockedFetch);
+    vi.stubEnv('NODE_ENV', 'production');
+    // Valid-shaped fixtures exercise Clerk's real signed-out transport without
+    // authenticating a user, contacting Clerk, or using any real credentials.
+    vi.stubEnv('CLERK_SECRET_KEY', 'sk_live_anonymous_transport_fixture_not_a_real_key');
+    vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+      'pk_live_' + Buffer.from('fixture.clerk.accounts.dev$').toString('base64'));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it.each(['GET', 'HEAD'])('returns404 through the real Clerk middleware for %s', async method => {
+    const response = await invoke('/play/user_fixture/missing', method);
+    expect(response.status).toBe(404);
+    expect(response.headers.get('x-clerk-auth-status')).toBe('signed-out');
+    expect(response.headers.get('x-robots-tag')).toBe('noindex');
+    expect(response.headers.get('x-middleware-rewrite')).toBeNull();
+    expect(lookup).toHaveBeenCalledExactlyOnceWith('user_fixture', 'missing');
+    expect(blockedFetch).not.toHaveBeenCalled();
+    if (method === 'HEAD') expect(response.body).toBeNull();
+  });
+
+  it('retains the real Clerk forwarding response for a published game', async () => {
+    lookup.mockResolvedValue({ title: 'Published' });
+    const response = await invoke('/play/user_fixture/live-game');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-clerk-auth-status')).toBe('signed-out');
+    expect(response.headers.get('x-middleware-next')).toBeNull();
+    expect(response.headers.get('x-middleware-rewrite')).toBe('http://localhost:3000/play/user_fixture/live-game');
+    expect(lookup).toHaveBeenCalledExactlyOnceWith('user_fixture', 'live-game');
+    expect(blockedFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns503 for failed metadata lookup through the real Clerk middleware', async () => {
+    lookup.mockRejectedValue(new Error('secret connection string'));
+    const response = await invoke('/play/user_fixture/live-game');
+    expect(response.status).toBe(503);
+    expect(response.headers.get('x-clerk-auth-status')).toBe('signed-out');
+    expect(response.headers.get('retry-after')).toBe('60');
+    expect(response.headers.get('x-middleware-rewrite')).toBeNull();
+    expect(response.headers.get('x-robots-tag')).toBeNull();
+    expect(await response.text()).not.toContain('secret connection string');
+    expect(blockedFetch).not.toHaveBeenCalled();
+  });
+});
