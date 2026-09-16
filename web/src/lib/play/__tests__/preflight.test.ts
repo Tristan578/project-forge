@@ -136,3 +136,97 @@ describe('published-game pre-stream response', () => {
     expect(response.headers.get('content-type')).toContain('text/html');
   });
 });
+
+
+describe('published-game preflight after Clerk forwarding (PF-381)', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    lookup.mockReset().mockResolvedValue(null);
+    vi.stubEnv('CLERK_SECRET_KEY', '');
+    vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', '');
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  // Clerk's decorateRequest removes x-middleware-next and rewrites to req.url
+  // to carry its auth request headers. This is still the original document.
+  function clerkForward(req: NextRequest) {
+    const response = NextResponse.rewrite(new URL(req.url));
+    response.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'nonce-trusted'");
+    response.headers.set('X-Frame-Options', 'DENY');
+    response.headers.append('Set-Cookie', 'session=first; Path=/; HttpOnly');
+    return response;
+  }
+
+  it.each(['GET', 'HEAD'])('returns404 after same-URL Clerk forwarding: %s', async method => {
+    const { preflightPublishedGame } = await import('@/proxy');
+    const req = new NextRequest('https://www.spawnforge.ai/play/user_missing/missing.html?check=1', { method });
+    const original = clerkForward(req);
+    expect(original.headers.get('x-middleware-next')).toBeNull();
+    const response = await preflightPublishedGame(req, original);
+    expect(response.status).toBe(404);
+    expect(lookup).toHaveBeenCalledExactlyOnceWith('user_missing', 'missing.html');
+    expect(response.headers.get('x-robots-tag')).toBe('noindex');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('content-security-policy')).toBe(original.headers.get('content-security-policy'));
+    expect(response.headers.get('x-frame-options')).toBe('DENY');
+    expect(response.headers.getSetCookie()).toEqual(original.headers.getSetCookie());
+    expect([...response.headers.keys()].filter(name => name.startsWith('x-middleware-'))).toEqual([]);
+    if (method === 'HEAD') {
+      expect(response.body).toBeNull();
+    } else {
+      expect(await response.text()).toContain('<h1>Game Not Found</h1>');
+    }
+  });
+
+  it('preserves Clerk forwarding for an existing published game', async () => {
+    const { preflightPublishedGame } = await import('@/proxy');
+    lookup.mockResolvedValue({ title: 'Published' });
+    const req = new NextRequest('https://www.spawnforge.ai/play/user_fixture/live-game');
+    const original = clerkForward(req);
+    expect(await preflightPublishedGame(req, original)).toBe(original);
+    expect(lookup).toHaveBeenCalledExactlyOnceWith('user_fixture', 'live-game');
+  });
+
+  it.each(['GET', 'HEAD'])('returns retryable503 on a failed lookup after Clerk forwarding: %s', async method => {
+    const { preflightPublishedGame } = await import('@/proxy');
+    lookup.mockRejectedValue(new Error('secret connection string'));
+    const req = new NextRequest('https://www.spawnforge.ai/play/user_fixture/live-game', { method });
+    const response = await preflightPublishedGame(req, clerkForward(req));
+    expect(response.status).toBe(503);
+    expect(response.headers.get('retry-after')).toBe('60');
+    expect(response.headers.get('x-robots-tag')).toBeNull();
+    expect(await response.text()).not.toContain('secret connection string');
+  });
+
+  it.each([
+    'https://www.spawnforge.ai/sign-in',
+    'https://www.spawnforge.ai/play/user_fixture/other-game',
+    'https://www.spawnforge.ai/play/user_fixture/live-game?other=1',
+    'https://external.invalid/play/user_fixture/live-game',
+  ])('preserves rewrites to another destination: %s', async destination => {
+    const { preflightPublishedGame } = await import('@/proxy');
+    const req = new NextRequest('https://www.spawnforge.ai/play/user_fixture/live-game');
+    const original = NextResponse.rewrite(new URL(destination));
+    original.headers.set('x-middleware-next', '1');
+    expect(await preflightPublishedGame(req, original)).toBe(original);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it('preserves redirects and ordinary200 response bodies', async () => {
+    const { preflightPublishedGame } = await import('@/proxy');
+    const req = new NextRequest('https://www.spawnforge.ai/play/user_fixture/live-game');
+    for (const original of [NextResponse.redirect(new URL('/sign-in', req.url)), new NextResponse('Auth decision')]) {
+      expect(await preflightPublishedGame(req, original)).toBe(original);
+    }
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it.each([['/community', 'GET'], ['/play/user_fixture/live-game', 'POST']] as const)
+  ('does not preflight other forwarded routes or methods: %s %s', async (path, method) => {
+    const { preflightPublishedGame } = await import('@/proxy');
+    const req = new NextRequest('https://www.spawnforge.ai' + path, { method });
+    const original = clerkForward(req);
+    expect(await preflightPublishedGame(req, original)).toBe(original);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+});
