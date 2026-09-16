@@ -22,6 +22,7 @@ import { useEffect, useRef } from 'react';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { getStatusEndpoint } from '@/lib/generation/statusEndpoints';
 import { postProcess, inferSfxCategory } from '@/lib/generate/postProcess';
 import { analyzeModelQuality } from '@/lib/generate/modelQuality';
@@ -34,6 +35,13 @@ import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
 const MAX_POLL_DURATION_MS = 5 * 60 * 1000;
+/**
+ * Fallback source length for an async-generated music clip when neither the
+ * status route nor the post-process metadata reports one. Matches the music
+ * dialog's default request duration so a length-less job still yields a
+ * sensibly sized clip rather than a zero-length one.
+ */
+const DEFAULT_MUSIC_CLIP_SECONDS = 30;
 
 interface StatusResponse {
   jobId: string;
@@ -398,6 +406,25 @@ export function useGenerationPolling() {
         const assetName = (ppResult.metadata.assetName as string) ?? `Music_${job.prompt.slice(0, 20)}`;
         const store = useEditorStore.getState();
         store.importAudio(base64, assetName);
+
+        // Async/jobId path parity with the sync branch (#9854): a track that
+        // arrives via job polling (the durable QStash path, or any non-instant
+        // ElevenLabs response) must also land as an editable clip in the Music
+        // Arrangement editor, not only attach to an entity. Duration comes from
+        // the status route (`data.durationSeconds`) or the post-process
+        // metadata; `Number.isFinite`, not `||`, so a 0 cannot mask a real
+        // value — and a missing duration falls back to the arrangement default.
+        const clipDurationSeconds =
+          typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds) && data.durationSeconds > 0
+            ? data.durationSeconds
+            : typeof ppResult.metadata.durationSeconds === 'number' && Number.isFinite(ppResult.metadata.durationSeconds) && ppResult.metadata.durationSeconds > 0
+              ? ppResult.metadata.durationSeconds
+              : DEFAULT_MUSIC_CLIP_SECONDS;
+        useMusicArrangementStore.getState().addGeneratedClip({
+          sourceUrl: assetName,
+          durationSeconds: clipDurationSeconds,
+          name: assetName,
+        });
 
         // Attach looping music audio to target entity
         // Use targetEntityId (from autoPlace) or fall back to legacy entityId

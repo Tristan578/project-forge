@@ -18,6 +18,7 @@ import {
   takeStagedSceneAudio,
   clearStagedSceneAudio,
 } from '@/lib/audio/sceneAudioManifest';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
 
 type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string } | void;
@@ -71,6 +72,22 @@ describe('sceneSlice.loadTemplate', () => {
       expect(nodeCount).toBeGreaterThan(0);
       expect(Object.keys(sceneGraph.nodes)).toContain('player');
       if (result.success) expect(result.entityCount).toBe(nodeCount);
+    });
+
+    // #10058: a template never carries its own music arrangement, but a
+    // freshly-loaded template used to leave whatever arrangement the
+    // PREVIOUS scene had sitting in the store — stale tracks/clips that then
+    // rode along into the template's next cloud save.
+    it('clears a stale music arrangement left by the previous scene', async () => {
+      const trackId = useMusicArrangementStore.getState().addTrack('Stale');
+      useMusicArrangementStore.getState().addClip({ trackId, sourceUrl: 'x', sourceDurationSeconds: 10 });
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(1);
+
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(true);
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(0);
     });
 
     it('sends load_scene with JSON the engine can read, not the raw template data', async () => {

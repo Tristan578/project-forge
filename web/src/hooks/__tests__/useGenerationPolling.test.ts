@@ -7,6 +7,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { createEmptyArrangement } from '@/lib/music/arrangementTypes';
+import { postProcess } from '@/lib/generate/postProcess';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -1123,6 +1126,7 @@ describe('useGenerationPolling', () => {
   // ---------------------------------------------------------------------------
   it('imports audio and sets looping audio on entity when music completes with entityId', async () => {
     vi.useRealTimers();
+    useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
 
     mockJobs['m2'] = makeJob('m2', {
       type: 'music',
@@ -1177,6 +1181,139 @@ describe('useGenerationPolling', () => {
       spatial: false,
       volume: 0.7,
     }));
+
+    // #9854: the async/jobId completion path must also land the track as an
+    // editable clip in the Music Arrangement editor, not only attach it. Neither
+    // the status route nor the post-process metadata reported a duration here, so
+    // the clip takes the documented fallback length (30s).
+    await vi.waitFor(() => {
+      expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1);
+    });
+    const clip = useMusicArrangementStore.getState().arrangement.clips[0];
+    expect(clip).toMatchObject({ sourceUrl: 'TestAsset', sourceDurationSeconds: 30 });
+
+    globalThis.FileReader = originalFileReader;
+    vi.useFakeTimers();
+  });
+
+  // #9854: the clip duration is a 3-way fallback chain — status-route
+  // `data.durationSeconds` wins, then post-process `metadata.durationSeconds`,
+  // then the 30s default. The test above pins the default; these two pin the
+  // two live sources so a regression that swaps their priority or drops either
+  // source fails here instead of shipping a wrong clip length.
+  it('uses the status route durationSeconds for the arrangement clip when present', async () => {
+    vi.useRealTimers();
+    useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
+
+    mockJobs['m3'] = makeJob('m3', {
+      type: 'music',
+      entityId: 'ent-music-3',
+      prompt: 'timed theme',
+    });
+
+    const originalFileReader = globalThis.FileReader;
+    class MockFileReader {
+      result = 'data:audio/mpeg;base64,dGVzdA==';
+      onloadend: (() => void) | null = null;
+      onerror: ((_e: unknown) => void) | null = null;
+      readAsDataURL() {
+        queueMicrotask(() => { if (this.onloadend) this.onloadend(); });
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.FileReader = MockFileReader as any;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-m3',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/music.mp3',
+            durationSeconds: 42,
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['audio-data'], { type: 'audio/mpeg' })),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+
+    await vi.waitFor(() => {
+      expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1);
+    });
+    // Verbatim from the status route — not the 30s default, not the metadata.
+    expect(useMusicArrangementStore.getState().arrangement.clips[0]).toMatchObject({
+      sourceDurationSeconds: 42,
+    });
+
+    globalThis.FileReader = originalFileReader;
+    vi.useFakeTimers();
+  });
+
+  it('falls back to postProcess metadata durationSeconds when the status route omits it', async () => {
+    vi.useRealTimers();
+    useMusicArrangementStore.setState({ arrangement: createEmptyArrangement(), past: [], future: [] });
+
+    // Only the post-process metadata reports a duration this time; the status
+    // response deliberately omits it so the second link of the chain is exercised.
+    vi.mocked(postProcess).mockReturnValueOnce({
+      ok: true,
+      warnings: [],
+      metadata: { assetName: 'TestAsset', durationSeconds: 55 },
+    });
+
+    mockJobs['m4'] = makeJob('m4', {
+      type: 'music',
+      entityId: 'ent-music-4',
+      prompt: 'metadata-timed theme',
+    });
+
+    const originalFileReader = globalThis.FileReader;
+    class MockFileReader {
+      result = 'data:audio/mpeg;base64,dGVzdA==';
+      onloadend: (() => void) | null = null;
+      onerror: ((_e: unknown) => void) | null = null;
+      readAsDataURL() {
+        queueMicrotask(() => { if (this.onloadend) this.onloadend(); });
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.FileReader = MockFileReader as any;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-m4',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/music.mp3',
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['audio-data'], { type: 'audio/mpeg' })),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+
+    await vi.waitFor(() => {
+      expect(useMusicArrangementStore.getState().arrangement.clips).toHaveLength(1);
+    });
+    expect(useMusicArrangementStore.getState().arrangement.clips[0]).toMatchObject({
+      sourceDurationSeconds: 55,
+    });
 
     globalThis.FileReader = originalFileReader;
     vi.useFakeTimers();
