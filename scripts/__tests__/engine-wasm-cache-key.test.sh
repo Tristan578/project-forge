@@ -55,10 +55,11 @@ make_repo() {
     git init -q
     git config user.email t@t.t
     git config user.name t
-    mkdir -p engine/src .transform-gizmo-fork/crates
+    mkdir -p engine/src .transform-gizmo-fork/crates .github/workflows
     printf 'fn main() {}\n' > engine/src/lib.rs
     printf '[package]\nname = "forge_engine"\n' > engine/Cargo.toml
     printf 'gizmo source\n' > .transform-gizmo-fork/crates/lib.rs
+    printf 'jobs:\n  build-wasm:\n    steps:\n      - run: cargo build --features webgl2\n' > .github/workflows/cd.yml
     printf 'unrelated\n' > README.md
     git add -A
     git commit -qm base
@@ -297,14 +298,15 @@ key4_in() { ( cd "$1" && bash "$SCRIPT" all4 2>/dev/null ); }
 ALL4_KEY="$(key4_in "$REPO4")"
 WEBGL2_KEY="$(key_in "$REPO4")"
 
-if [[ "$ALL4_KEY" =~ ^engine-wasm-all4-[0-9a-f]{40}-[0-9a-f]{40}-wb[0-9.]+$ ]]; then
-  pass "all4 key has the expected shape (distinct prefix + two tree hashes + bindgen version)"
+if [[ "$ALL4_KEY" =~ ^engine-wasm-all4-[0-9a-f]{40}-[0-9a-f]{40}-wb[0-9.]+-recipe[0-9a-f]{40}$ ]]; then
+  pass "all4 key has the expected shape (distinct prefix + engine/fork hashes + bindgen version + recipe)"
 else
   fail "unexpected all4 key shape: '$ALL4_KEY'"
 fi
 
-if [ "${ALL4_KEY#engine-wasm-all4-}" = "${WEBGL2_KEY#engine-wasm-webgl2-}" ]; then
-  pass "all4 and webgl2 keys share the identical tree-hash body (they differ only by prefix)"
+ALL4_SOURCE_BODY="${ALL4_KEY#engine-wasm-all4-}"
+if [ "${ALL4_SOURCE_BODY%-recipe*}" = "${WEBGL2_KEY#engine-wasm-webgl2-}" ]; then
+  pass "all4 retains the webgl2 source identity and adds the CD recipe"
 else
   fail "all4 body '${ALL4_KEY#engine-wasm-all4-}' != webgl2 body '${WEBGL2_KEY#engine-wasm-webgl2-}' — the two entries stopped describing the same source"
 fi
@@ -323,12 +325,44 @@ else
   fail "an unrelated commit changed the all4 key — every reuse would miss"
 fi
 
+printf 'jobs:\n  build-wasm:\n    steps:\n      - run: cargo build --features webgpu,runtime\n' > "$REPO4/.github/workflows/cd.yml"
+commit_in "$REPO4" "change workflow build features"
+RECIPE_KEY="$(key4_in "$REPO4")"
+if [ "$RECIPE_KEY" != "$ALL4_KEY" ]; then
+  pass "a CD build recipe change invalidates all4 binaries"
+else
+  fail "a CD build recipe change reused the old all4 key"
+fi
+if [ "$(key_in "$REPO4")" = "$WEBGL2_KEY" ]; then
+  pass "a CD recipe change preserves the legacy webgl2 key"
+else
+  fail "the legacy webgl2 key changed after a CD-only edit"
+fi
 printf 'fn added() {}\n' >> "$REPO4/engine/src/lib.rs"
 commit_in "$REPO4" "engine change"
-if [ "$(key4_in "$REPO4")" != "$ALL4_KEY" ]; then
+if [ "$(key4_in "$REPO4")" != "$RECIPE_KEY" ]; then
   pass "an engine/ change changes the all4 key (build-wasm rebuilds all four rather than reusing a stale set)"
 else
   fail "an engine/ change did NOT change the all4 key — build-wasm would reuse a stale four-variant set"
+fi
+LEGACY_AFTER_ENGINE="$(key_in "$REPO4")"
+rm "$REPO4/.github/workflows/cd.yml"
+commit_in "$REPO4" "remove the CD recipe"
+OUT4="$( ( cd "$REPO4" && bash "$SCRIPT" all4 2>&1 ) )" && RC4=0 || RC4=$?
+if [ "$RC4" -ne 0 ]; then
+  pass "missing CD recipe fails all4 rather than emitting a degenerate key"
+else
+  fail "missing CD recipe still produced an all4 key"
+fi
+if grep -q '.github/workflows/cd.yml' <<<"$OUT4"; then
+  pass "missing recipe error names the workflow input"
+else
+  fail "missing recipe error did not name cd.yml"
+fi
+if [ "$(key_in "$REPO4")" = "$LEGACY_AFTER_ENGINE" ]; then
+  pass "legacy webgl2 remains usable without the new CD recipe input"
+else
+  fail "legacy webgl2 now requires the all4 recipe input"
 fi
 rm -rf "$REPO4"
 
@@ -382,10 +416,10 @@ else
     else
       fail "build-wasm has no '4 WASM variants' completeness step — a partial restored/built set could reach the CDN"
     fi
-    if grep -qE '\-ne 4' <<<"$buildwasm"; then
-      pass "the completeness step fails unless exactly 4 variants are verified"
+    if grep -qF 'node scripts/verify-engine-wasm.mjs engine' <<<"$buildwasm"; then
+      pass "the completeness step calls the four-variant production validator covered by behavioral fixtures"
     else
-      fail "the completeness step does not assert a count of exactly 4"
+      fail "the completeness step does not call the tested four-variant validator"
     fi
 
     # 4. The broken same-SHA reuse step and its silent mask are gone.
@@ -576,8 +610,8 @@ else
     ' <<<"$buildwasm")"
     if [ -z "$verify_step" ]; then
       fail "no Verify step to check for the glue-file assertion"
-    elif grep -q 'forge_engine\.js' <<<"$verify_step"; then
-      pass "the completeness gate also requires forge_engine.js (the wasm-bindgen glue the browser actually loads)"
+    elif grep -qF 'node scripts/verify-engine-wasm.mjs engine' <<<"$verify_step"; then
+      pass "the completeness gate executes the tested exact-module/glue validator"
     else
       fail "the completeness gate checks only *.wasm, never forge_engine.js — a variant missing the glue passes the gate and 404s in production (#9525)"
     fi
@@ -585,6 +619,11 @@ else
 fi
 
 echo ""
+if node --test "$HERE/verify-engine-wasm.test.mjs"; then
+  pass "behavioral production validator fixtures pass"
+else
+  fail "production validator behavioral fixtures failed"
+fi
 echo "  PASS=$PASS FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then
   echo "SUITE PASSED"

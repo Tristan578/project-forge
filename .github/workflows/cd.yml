@@ -519,7 +519,8 @@ jobs:
       # happened (owner's diagnosis, #9525 comment thread).
       #
       # Reuse is CONTENT-ADDRESSED, not SHA-addressed: the key is a hash over
-      # engine/ + .transform-gizmo-fork/ + the wasm-bindgen version, from the
+      # engine/ + .transform-gizmo-fork/ + the wasm-bindgen version + this CD
+      # workflow recipe, from the
       # SAME scripts/engine-wasm-cache-key.sh that ci.yml and publish-engine-cache
       # use. SHA reuse is unsafe on this squash-only repo — the merged main SHA
       # is new and its squashed tree only equals the PR head tree if main did not
@@ -656,52 +657,7 @@ jobs:
       # build-wasm always runs on a fresh runner with a fresh checkout, so
       # nothing but this run's build/restore output can be present.
       - name: Verify all 4 WASM variants are present and non-empty
-        run: |
-          set -euo pipefail
-          variants="pkg-webgl2 pkg-webgpu pkg-webgl2-runtime pkg-webgpu-runtime"
-          found=0
-          for v in $variants; do
-            dir="engine/$v"
-            if [ ! -d "$dir" ]; then
-              echo "::error::WASM variant '$v' is missing ($dir not a directory)" >&2
-              exit 1
-            fi
-            # Glob loop, not `find | head`: under `pipefail`, head closing the
-            # pipe early can leave find killed by SIGPIPE (141) and fail the
-            # step spuriously. `-s` is true only for a file that exists AND is
-            # non-empty, so a literal unmatched glob (nullglob is off) fails it.
-            wasm=""
-            for f in "$dir"/*.wasm; do
-              if [ -s "$f" ]; then
-                wasm="$f"
-                break
-              fi
-            done
-            if [ -z "$wasm" ]; then
-              echo "::error::WASM variant '$v' has no non-empty *.wasm file in $dir" >&2
-              ls -la "$dir" >&2 || true
-              exit 1
-            fi
-            # The browser loads the wasm-bindgen JS glue, not the raw module:
-            # engine-pkg-*/forge_engine.js is what the runtime imports, and a
-            # variant dir carrying only forge_engine_bg.wasm passes a wasm-only
-            # check yet 404s in production -- the #9525 symptom was exactly a 404
-            # on engine-pkg-webgl2/forge_engine.js. Require the glue too, or a
-            # partial bindgen output reaches the CDN under an immutable key.
-            glue="$dir/forge_engine.js"
-            if [ ! -s "$glue" ]; then
-              echo "::error::WASM variant '$v' has no non-empty forge_engine.js (wasm-bindgen glue) in $dir" >&2
-              ls -la "$dir" >&2 || true
-              exit 1
-            fi
-            echo "ok: $v -> $wasm ($(wc -c < "$wasm") bytes) + $glue ($(wc -c < "$glue") bytes)"
-            found=$((found + 1))
-          done
-          if [ "$found" -ne 4 ]; then
-            echo "::error::expected exactly 4 WASM variants, verified $found" >&2
-            exit 1
-          fi
-          echo "All 4 WASM variants present and non-empty (wasm + glue)."
+        run: node scripts/verify-engine-wasm.mjs engine
 
       # Publish the WebGL2 build so CI's engine-smoke gate can restore it
       # instead of spending ~321s rebuilding an identical binary on every

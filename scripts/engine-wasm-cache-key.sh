@@ -3,7 +3,7 @@
 #
 # A positional mode selects the set: `webgl2` (default) for the single WebGL2
 # editor binary, or `all4` for all four build-wasm variants. Both hash the same
-# tree inputs and differ only by prefix — see "WHICH BINARY SET" near the bottom.
+# engine inputs; all4 additionally includes the CD workflow recipe — see "WHICH BINARY SET" near the bottom.
 #
 # WHY THIS IS A SCRIPT AND NOT TWO INLINE `run:` BLOCKS
 #
@@ -25,9 +25,10 @@
 #                            it compiles into the binary — the same input that
 #                            ci-gate used to miss entirely (#9567)
 #   wasm-bindgen version     the bindgen output shape is version-specific
+#   cd.yml (all4 only)       the build recipe, including features/toolchain/flags
 #
-# `git rev-parse HEAD:<path>` yields the TREE hash, which changes if and only if
-# the contents of that directory change — the property that makes this safe.
+# `git rev-parse HEAD:<path>` yields a tree hash for source directories or a
+# blob hash for the workflow, changing when that committed input changes.
 # It is not the commit SHA: an unrelated commit that touches nothing under these
 # paths keeps the same key, which is exactly the reuse being bought.
 #
@@ -51,7 +52,7 @@ resolve_tree() {
     echo "::error::engine-wasm-cache-key: cannot resolve '${REF}:${path}'. That path is a build input; if it moved, update this script rather than dropping it from the key." >&2
     exit 1
   fi
-  # rev-parse prints a 40-char object id. Anything else means we resolved
+  # rev-parse prints a 40-char tree or blob object id. Anything else means we resolved
   # something we did not expect, and a malformed key must not reach a cache.
   if [[ ! "$tree" =~ ^[0-9a-f]{40}$ ]]; then
     echo "::error::engine-wasm-cache-key: '${REF}:${path}' resolved to '${tree}', not an object id" >&2
@@ -69,15 +70,12 @@ resolve_tree() {
 #   all4              all four variants cd.yml's build-wasm produces: pkg-webgl2,
 #                     pkg-webgpu, pkg-webgl2-runtime, pkg-webgpu-runtime.
 #
-# The content hash is IDENTICAL for both modes: all four variants are built from
-# the same engine/ tree, the same .transform-gizmo-fork/ path dependency, and
-# the same wasm-bindgen version — they differ only by cargo feature flags, which
-# live in the workflow, not the tree. Only the prefix distinguishes the two
-# cache entries, and it MUST distinguish them: actions/cache segments an entry
-# by (key, hash(paths)), so the webgl2 entry (one path) and the all4 entry (four
-# paths) are already different versions of the same key and could otherwise
-# collide semantically — the prefix keeps the two intents legible and the
-# anti-drift suite honest.
+# Both modes share engine/fork/bindgen inputs and distinct prefixes. The new
+# all4 set also hashes the complete CD workflow blob: changing cargo features,
+# toolchain selection or bindgen arguments must invalidate immutable binaries.
+# Hashing the whole workflow is conservative (unrelated CD edits also miss) but
+# avoids a brittle extraction of only selected build steps. The legacy webgl2
+# key stays byte-for-byte compatible with CI and the existing main warmer.
 MODE="${1:-webgl2}"
 case "$MODE" in
   webgl2) PREFIX='engine-wasm-webgl2' ;;
@@ -91,4 +89,9 @@ esac
 ENGINE_TREE="$(resolve_tree engine)"
 FORK_TREE="$(resolve_tree .transform-gizmo-fork)"
 
-printf '%s-%s-%s-wb%s\n' "$PREFIX" "$ENGINE_TREE" "$FORK_TREE" "$WASM_BINDGEN_VERSION"
+if [ "$MODE" = 'all4' ]; then
+  RECIPE_BLOB="$(resolve_tree .github/workflows/cd.yml)"
+  printf '%s-%s-%s-wb%s-recipe%s\n' "$PREFIX" "$ENGINE_TREE" "$FORK_TREE" "$WASM_BINDGEN_VERSION" "$RECIPE_BLOB"
+else
+  printf '%s-%s-%s-wb%s\n' "$PREFIX" "$ENGINE_TREE" "$FORK_TREE" "$WASM_BINDGEN_VERSION"
+fi
