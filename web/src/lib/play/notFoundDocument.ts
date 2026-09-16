@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 /** Visible heading shared with the colocated React not-found boundary. */
 export const GAME_NOT_FOUND_HEADING = 'Game Not Found';
 /** Description shared with the colocated React not-found boundary. */
-export const GAME_NOT_FOUND_DESCRIPTION = 'This game does not exist or is not currently published.';
+export const GAME_NOT_FOUND_DESCRIPTION = 'This game is unavailable right now. It may be missing, unpublished, or temporarily unreachable.';
 /** Document title for an unavailable published game. */
 export const GAME_NOT_FOUND_PAGE_TITLE = 'Game Not Found - SpawnForge';
 

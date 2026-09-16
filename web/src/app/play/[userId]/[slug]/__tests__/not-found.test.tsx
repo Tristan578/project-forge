@@ -10,7 +10,7 @@ it('announces the unavailable game and exposes a native home link in the React f
   render(<GameNotFound />);
   const alert = screen.getByRole('alert');
   expect(alert).toContainElement(screen.getByRole('heading', { name: 'Game Not Found' }));
-  expect(alert).toHaveTextContent('This game does not exist or is not currently published.');
+  expect(alert).toHaveTextContent('This game is unavailable right now. It may be missing, unpublished, or temporarily unreachable.');
   const home = screen.getByRole('link', { name: 'Back to SpawnForge' });
   expect(home).toHaveAttribute('href', '/');
   expect(alert).toContainElement(home);

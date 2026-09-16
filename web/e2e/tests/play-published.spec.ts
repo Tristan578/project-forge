@@ -61,7 +61,7 @@ test.describe('Play Published Game — public page @ui', () => {
     await expect(alert.getByRole('heading', { name: 'Game Not Found' })).toBeVisible({
       timeout: E2E_TIMEOUT_LOAD_MS,
     });
-    await expect(alert).toContainText('This game does not exist or is not currently published.');
+    await expect(alert).toContainText('This game is unavailable right now. It may be missing, unpublished, or temporarily unreachable.');
     const home = alert.getByRole('link', { name: 'Back to SpawnForge' });
     await expect(home).toHaveAttribute('href', '/');
     await page.keyboard.press('Tab');
