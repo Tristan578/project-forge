@@ -11,6 +11,13 @@ describe('Token backward compatibility', () => {
     '--sf-text', '--sf-text-secondary', '--sf-text-muted', '--sf-text-disabled',
     '--sf-border', '--sf-border-strong',
     '--sf-accent', '--sf-accent-hover', '--sf-accent-active', '--sf-on-accent', '--sf-destructive', '--sf-success', '--sf-warning',
+    // Status-colour semantic (PF-1068 / #9108) — four healthy/degraded/down/
+    // unknown bg/fg pairs. Listed here so this removal guard fails if any is
+    // later dropped from ThemeTokens.
+    '--sf-status-healthy-bg', '--sf-status-healthy-fg',
+    '--sf-status-degraded-bg', '--sf-status-degraded-fg',
+    '--sf-status-down-bg', '--sf-status-down-fg',
+    '--sf-status-unknown-bg', '--sf-status-unknown-fg',
     '--sf-radius-sm', '--sf-radius-md', '--sf-radius-lg', '--sf-radius-xl', '--sf-radius-full',
     '--sf-border-width', '--sf-font-ui', '--sf-font-mono', '--sf-transition',
   ];
