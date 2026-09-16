@@ -20,6 +20,11 @@ import { filterHierarchy } from '@/lib/hierarchyFilter';
 /**
  * Build a flat, depth-first list of visible entity IDs for keyboard navigation.
  * Respects expanded state and filter visibility.
+ * @param rootIds Root entity IDs in display order.
+ * @param graph Entity records and their ordered child references.
+ * @param expandedIds Entities whose descendants are expanded.
+ * @param visibleIds Optional filter membership; omitted means all existing nodes.
+ * @returns Existing visible entity IDs in depth-first display order.
  */
 export function flattenVisibleNodes(
   rootIds: string[],
@@ -54,6 +59,10 @@ export function flattenVisibleNodes(
  * - Any other key returns null (caller should ignore it).
  *
  * Returns null when the list is empty.
+ * @param key Navigation key; other keys are ignored.
+ * @param currentIndex Current position, or -1 before the first focused row.
+ * @param length Number of visible rows.
+ * @returns The next wrapped/boundary index, or null for an empty list/other key.
  */
 export function computeNavIndex(
   key: string,
@@ -75,6 +84,12 @@ export function computeNavIndex(
   }
 }
 
+/**
+ * Renders the filtered scene tree with one roving row Tab stop (container only
+ * when empty), visible-row arrow navigation and entity keyboard commands.
+ * Inline rename owns its keys and restores row focus on completion/cancellation.
+ * @returns The named hierarchy tree, search and entity context menu.
+ */
 export const SceneHierarchy = memo(function SceneHierarchy() {
   const containerRef = useRef<HTMLDivElement>(null);
 

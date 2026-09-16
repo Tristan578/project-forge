@@ -1,3 +1,4 @@
+/** Scene-wide lighting, environment, post-processing, quality and bridge-tool settings. */
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
@@ -15,6 +16,11 @@ const sliderClass = `h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-7
   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
   [&::-webkit-slider-thumb]:bg-zinc-300`;
 
+/**
+ * Edits scene-wide settings through editor/workspace stores. The panel marks
+ * its existing form controls as deferred from the Inspector-chrome axe audit.
+ * @returns Scene settings controls and the optional skybox-generation dialog.
+ */
 export function SceneSettings() {
   const [colorGradingSection, setColorGradingSection] = useState<'shadows' | 'midtones' | 'highlights'>('midtones');
   const [generateSkyboxOpen, setGenerateSkyboxOpen] = useState(false);

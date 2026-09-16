@@ -1,17 +1,23 @@
+/** Isolates inspector render failures, reports them and offers an announced retry fallback. */
 'use client';
 
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { captureException } from '@/lib/monitoring/sentry-client';
 
+/** Content isolated by this boundary and its user-visible section identity. */
 interface Props {
+  /** Inspector content to remount when Retry clears the captured failure. */
   children: ReactNode;
   /** Section name shown in the fallback (e.g. "Material", "Physics") */
   section: string;
 }
 
+/** Captured render failure retained until an explicit Retry. */
 interface State {
+  /** Whether render should return the fallback. */
   hasError: boolean;
+  /** Captured exception; its message appears only in development. */
   error: Error | null;
 }
 
@@ -21,15 +27,26 @@ interface State {
  * Provides a retry button that resets the error state.
  */
 export class InspectorErrorBoundary extends Component<Props, State> {
+  /** @param props Inspector children and section name for the fallback/report. */
   constructor(props: Props) {
     super(props);
     this.state = { hasError: false, error: null };
   }
 
+  /**
+   * @param error Exception thrown by descendant rendering.
+   * @returns State selecting the fallback and retaining the failure.
+   */
   static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
   }
 
+  /**
+   * Reports a descendant failure with its section and component stack.
+   * @param error Captured descendant exception.
+   * @param errorInfo React component stack context.
+   * @returns Nothing; reporting does not rethrow the render failure.
+   */
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     captureException(error, {
       section: this.props.section,
@@ -38,10 +55,12 @@ export class InspectorErrorBoundary extends Component<Props, State> {
     console.error(`[InspectorErrorBoundary] ${this.props.section} crashed:`, error, errorInfo);
   }
 
+  /** Clear the captured failure so React renders the children again. */
   private handleRetry = () => {
     this.setState({ hasError: false, error: null });
   };
 
+  /** @returns Inspector children or an alert containing the named Retry control. */
   render() {
     if (this.state.hasError) {
       return (

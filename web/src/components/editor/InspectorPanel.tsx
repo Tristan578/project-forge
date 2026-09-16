@@ -1,3 +1,4 @@
+/** Selection-dependent entity Inspector chrome and deferred scene-wide settings. */
 'use client';
 
 import { useState, useRef, useCallback, memo } from 'react';
@@ -43,6 +44,12 @@ import { useComplexityStore } from '@/stores/complexitySlice';
 
 const EMPTY_COMPONENTS: string[] = [];
 
+/**
+ * Renders scene settings without selection or the selected entity's inspectors.
+ * Name blur/Enter commits; Escape cancels that edit without a blur commit.
+ * Transform actions remain independent of their disclosure toggle.
+ * @returns The named Inspector region and controls appropriate to store selection.
+ */
 export const InspectorPanel = memo(function InspectorPanel() {
   const isSectionVisible = useComplexityStore((s) => s.isInspectorSectionVisible);
   const primaryId = useEditorStore((s) => s.primaryId);

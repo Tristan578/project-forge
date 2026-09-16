@@ -1,13 +1,11 @@
 /**
  * Minimal, SELF-CONTAINED type declarations for jest-axe used with Vitest.
  *
- * Mirrors apps/docs/jest-axe.d.ts on purpose. `web` imports `it`/`expect`/etc.
- * from `'vitest'` explicitly (not via globals), so this file must NOT augment
- * the `vitest` module: doing so would require a top-level `export`, which turns
- * the whole file into a module and makes `declare module 'vitest'` REPLACE
- * vitest's real types — erasing its exported members and breaking every
- * `import { ... } from 'vitest'` in the app. (packages/ui gets away with the
- * augmenting variant only because it uses vitest globals.)
+ * This script supplies an ambient declaration for the otherwise untyped
+ * jest-axe package. An ambient declaration in a script can shadow an existing
+ * module's types; a declaration in a file with a top-level import/export is
+ * instead a module augmentation and preserves existing exports. No Vitest
+ * declaration is needed here because tests inspect violations directly.
  *
  * So `toHaveNoViolations` is deliberately not declared; the tests assert on
  * `results.violations` directly, which also prints the offending rules on
@@ -25,6 +23,7 @@ declare module 'jest-axe' {
     nodes?: unknown[];
   }
 
+  /** Accessibility results; web tests assert directly on violations. */
   interface AxeResults {
     violations: AxeViolation[];
     passes?: unknown[];
@@ -32,6 +31,7 @@ declare module 'jest-axe' {
     inapplicable?: unknown[];
   }
 
+  /** Optional jest-axe rule and execution configuration. */
   interface AxeOptions {
     rules?: Record<string, { enabled: boolean }>;
     runOnly?: unknown;
@@ -39,6 +39,12 @@ declare module 'jest-axe' {
     [key: string]: unknown;
   }
 
+  /**
+   * Audit a DOM element or HTML string with optional axe configuration.
+   * @param html Rendered element or HTML markup to inspect.
+   * @param options Optional rule/execution configuration.
+   * @returns A promise of accessibility findings, including violations.
+   */
   export function axe(
     html: Element | string,
     options?: AxeOptions,

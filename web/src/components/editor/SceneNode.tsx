@@ -13,9 +13,13 @@ import { useEditorStore, type SceneNode as SceneNodeData } from '@/stores/editor
 import type { DropTarget, DropZone } from '@/lib/dndUtils';
 import { HighlightedText } from './HighlightedText';
 
+/** Recursive entity row data, shared rename/focus state and interaction callbacks. */
 interface SceneNodeProps {
+  /** Entity record rendered by this row. */
   node: SceneNodeData;
+  /** Zero-based nesting depth used for indentation and aria-level. */
   depth: number;
+  /** Opens actions for this row at the supplied pointer position. */
   onContextMenu: (data: {
     entityId: string;
     entityName: string;
@@ -23,25 +27,40 @@ interface SceneNodeProps {
   }) => void;
   /** Enables editing when this row is rendered without a shared edit target. */
   isEditing?: boolean;
-  /** Shared rename target, propagated through every descendant row. */
+  /** Shared recursive rename target: undefined uses standalone isEditing; null disables editing. */
   editingEntityId?: string | null;
+  /** Receives a trimmed name to commit, or null to cancel/ignore an empty name. */
   onEditComplete?: (newName: string | null) => void;
   // Drag-related props
+  /** Whether a hierarchy drag interaction is active. */
   isDragging?: boolean;
+  /** Entity currently being moved, or null. */
   draggedEntityId?: string | null;
+  /** Entities that cannot receive the dragged entity. */
   invalidTargetIds?: Set<string>;
+  /** Current applicable drop target and zone. */
   dropTarget?: DropTarget | null;
+  /** Begins dragging the supplied entity identity/name. */
   onDragStart?: (entityId: string, entityName: string) => void;
+  /** Ends the active hierarchy drag. */
   onDragEnd?: () => void;
+  /** Updates the candidate target, drop zone and nesting depth. */
   onDragOver?: (entityId: string, zone: DropZone, depth: number) => void;
+  /** Completes a drop on the supplied entity. */
   onDrop?: (entityId: string) => void;
   // Filter-related props
+  /** Optional search text highlighted within entity names. */
   filterTerm?: string;
+  /** Optional entities whose names match the current search. */
   matchingIds?: Set<string>;
+  /** Optional filter membership used to omit nonvisible descendants. */
   visibleIds?: Set<string>;
   // Keyboard navigation props
+  /** Entity to highlight and scroll into view; parent moves DOM focus separately. */
   focusedEntityId?: string | null;
+  /** Requests a controlled expansion toggle for the supplied entity. */
   onToggleExpand?: (entityId: string) => void;
+  /** Controlled expanded entities; omitted uses local state, initially expanded. */
   expandedIds?: Set<string>;
   /**
    * The entity id that currently holds the roving tabindex. Exactly one visible
@@ -79,6 +98,13 @@ function EntityIcon({ type, className }: { type: 'camera' | 'sun' | 'layers' | '
   }
 }
 
+/**
+ * Renders an entity and its expanded, filtered descendants. Shared edit/focus
+ * state and callbacks propagate recursively so child renames target the same
+ * owner; the text input isolates keys from entity commands.
+ * @param props Entity/depth, interaction callbacks and optional shared tree state.
+ * @returns An accessible treeitem, row controls and optional child group.
+ */
 export function SceneNode({
   node,
   depth,

@@ -1,3 +1,4 @@
+/** Persisted inspector disclosure with a native toggle and independent header actions. */
 'use client';
 
 import { useState, useCallback, type ReactNode } from 'react';
@@ -31,6 +32,7 @@ function writeCollapsed(ids: Set<string>) {
   }
 }
 
+/** Section identity, content and optional sibling header controls. */
 interface CollapsibleSectionProps {
   /** Unique ID for localStorage persistence (e.g. "transform", "material") */
   id: string;
@@ -38,11 +40,18 @@ interface CollapsibleSectionProps {
   title: string;
   /** Optional right-side content (badges, buttons) */
   headerRight?: ReactNode;
+  /** Panel content retained in the DOM and hidden while collapsed. */
   children: ReactNode;
   /** Additional className on the outer wrapper */
   className?: string;
 }
 
+/**
+ * Renders a persisted disclosure; header actions are siblings of its toggle.
+ * Storage failures fall back to the local expanded state.
+ * @param props Unique persistence ID, title, content and optional header controls.
+ * @returns A keyboard-operable toggle and its associated content panel.
+ */
 export function CollapsibleSection({
   id,
   title,
