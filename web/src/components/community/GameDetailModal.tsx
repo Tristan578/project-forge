@@ -1,7 +1,7 @@
 /** Async community game details in a persistent keyboard-accessible modal. */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, Play, Heart, GitFork, ExternalLink, Share2, Check } from 'lucide-react';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { StarRating } from './StarRating';
@@ -70,7 +70,11 @@ interface GameDetailModalProps {
  * @returns A persistent modal showing loading, unavailable, or fetched content.
  */
 export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
-  const dialogRef = useDialogA11y(onClose);
+  // Caller rerenders must not rerun dialog autofocus while rating a game.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  const dismiss = useCallback(() => onCloseRef.current(), []);
+  const dialogRef = useDialogA11y(dismiss);
   const [game, setGame] = useState<GameDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -206,7 +210,7 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
           <div className="flex flex-wrap items-center gap-4">
             <button
               onClick={handleLike}
-              className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+              className={`flex min-h-11 items-center gap-2 px-4 py-2 rounded transition-colors ${
                 likedGameIds.has(gameId)
                   ? 'bg-red-500 text-white'
                   : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
@@ -219,14 +223,14 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
             </button>
             <button
               onClick={handleFork}
-              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded hover:bg-zinc-700"
+              className="flex min-h-11 items-center gap-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded hover:bg-zinc-700"
             >
               <GitFork className="w-5 h-5" />
               Fork
             </button>
             <button
               onClick={handleShare}
-              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded hover:bg-zinc-700"
+              className="flex min-h-11 items-center gap-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded hover:bg-zinc-700"
             >
               {copied ? <Check className="w-5 h-5 text-green-400" /> : <Share2 className="w-5 h-5" />}
               {copied ? 'Copied!' : 'Share'}

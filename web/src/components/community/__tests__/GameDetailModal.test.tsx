@@ -17,11 +17,6 @@ vi.mock('lucide-react', () => ({
   Flag: (props: Record<string, unknown>) => <span data-testid="flag-icon" {...props} />,
 }));
 
-vi.mock('../StarRating', () => ({
-  StarRating: ({ value }: { value: number }) => (
-    <span data-testid="star-rating">{value}</span>
-  ),
-}));
 
 vi.mock('../CommentSection', () => ({
   CommentSection: () => <div data-testid="comment-section" />,
@@ -75,6 +70,27 @@ describe('GameDetailModal', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
     await userEvent.setup().keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledExactlyOnceWith();
+  });
+
+
+  it('preserves rating focus when the caller replaces its dismissal callback', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ game: {
+      id: 'game-1', title: 'Focus Game', description: null,
+      authorName: 'Author', authorId: 'author-1', playCount: 0, likeCount: 0,
+      avgRating: 3, ratingCount: 1, ratingBreakdown: [], tags: [], cdnUrl: null,
+      createdAt: '2024-01-01', comments: [],
+    } }) });
+    const firstClose = vi.fn();
+    const latestClose = vi.fn();
+    const { rerender } = render(<GameDetailModal gameId="game-1" onClose={firstClose} />);
+    const radio = await screen.findByRole('radio', { name: 'Rate 3 stars' });
+    radio.focus();
+    expect(radio).toHaveFocus();
+    rerender(<GameDetailModal gameId="game-1" onClose={latestClose} />);
+    expect(radio).toHaveFocus();
+    await userEvent.setup().keyboard('{Escape}');
+    expect(latestClose).toHaveBeenCalledExactlyOnceWith();
+    expect(firstClose).not.toHaveBeenCalled();
   });
 
   it('shows loading state initially', () => {
