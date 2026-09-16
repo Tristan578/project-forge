@@ -121,6 +121,8 @@ export function ReverbZoneInspector({ entityId }: { entityId: string }) {
             <Vec3Input
               label="Size"
               value={reverbZone.shape.size}
+              step={0.1}
+              precision={1}
               onChange={handleSizeChange}
             />
           ) : (

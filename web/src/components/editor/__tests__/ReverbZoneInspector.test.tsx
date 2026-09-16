@@ -238,6 +238,38 @@ describe('ReverbZoneInspector', () => {
     expect(screen.getByLabelText('Radius')).toBeInTheDocument();
   });
 
+  it('renders the Size axes at their raw magnitude without gaining decimals', () => {
+    // Routing Size through the shared Vec3Input at its default precision of 3
+    // displayed the integer size [10, 5, 10] as "10.000"/"5.000". The call site
+    // pins precision={1} and the composite drops trailing zeros, so an integer
+    // size reads exactly as the prior bespoke control did.
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    expect((screen.getByLabelText('Size X') as HTMLInputElement).value).toBe('10');
+    expect((screen.getByLabelText('Size Y') as HTMLInputElement).value).toBe('5');
+    expect((screen.getByLabelText('Size Z') as HTMLInputElement).value).toBe('10');
+  });
+
+  it('lets a Size axis be cleared without dispatching a non-finite size to the store', () => {
+    // The Size edit path (handleSizeChange -> updateReverbZone -> set_reverb_zone
+    // dispatch) must never see a NaN axis. Clearing the field produces an empty
+    // intermediate state the draft buffer keeps local until a finite value is
+    // typed, so no update is dispatched for the bare clear.
+    setupStore({ reverbZone: baseReverbZone, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    const x = screen.getByLabelText('Size X') as HTMLInputElement;
+
+    fireEvent.change(x, { target: { value: '' } });
+
+    expect(x.value).toBe('');
+    for (const call of mockUpdateReverbZone.mock.calls) {
+      const shape = call[1]?.shape;
+      if (shape?.type === 'box') {
+        expect(shape.size.every((n: number) => Number.isFinite(n))).toBe(true);
+      }
+    }
+  });
+
   it('shows Remove Reverb Zone button', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);

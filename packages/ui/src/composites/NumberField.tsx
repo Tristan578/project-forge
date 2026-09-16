@@ -1,4 +1,4 @@
-import { useId, type InputHTMLAttributes } from 'react';
+import { useId, useState, type InputHTMLAttributes } from 'react';
 import { cn } from '../utils/cn';
 
 export interface NumberFieldProps
@@ -35,6 +35,27 @@ export function NumberField({
 }: NumberFieldProps) {
   const id = useId();
 
+  // Buffer the in-flight edit as a raw string so the field can be cleared and
+  // retyped. Two failures are fixed together: (1) forwarding parseFloat('') as
+  // NaN to onChange — an unguarded number that flows into the store and
+  // serializes to null in exported scene data — and (2) re-deriving the input's
+  // value from the committed number every keystroke, which (with the NaN guard
+  // added) would otherwise make the field impossible to clear because the empty
+  // intermediate state never reaches state and the input snaps back. The draft
+  // renders verbatim while editing; only a finite parse commits to onChange.
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setDraft(raw);
+    const parsed = parseFloat(raw);
+    if (Number.isFinite(parsed)) {
+      onChange(parsed);
+    }
+  };
+
+  const displayValue = draft !== null ? draft : String(value);
+
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <label
@@ -47,12 +68,13 @@ export function NumberField({
       <input
         id={id}
         type="number"
-        value={value}
+        value={displayValue}
         min={min}
         max={max}
         step={step}
         disabled={disabled}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
+        onChange={handleChange}
+        onBlur={() => setDraft(null)}
         className={cn(
           'flex-1 min-w-0 rounded px-2 py-1 text-xs outline-none focus:ring-1',
           'disabled:opacity-50 disabled:cursor-not-allowed',

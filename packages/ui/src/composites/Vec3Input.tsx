@@ -1,5 +1,18 @@
-import { useCallback, useMemo, useId } from 'react';
+import { useCallback, useMemo, useId, useState } from 'react';
 import { cn } from '../utils/cn';
+
+/**
+ * Render a committed axis value for the (non-editing) display. Rounds to
+ * `precision` decimals, then drops trailing zeros so an integer axis shows as
+ * `10` — matching the inspectors' prior raw `value={n}` display — instead of
+ * silently gaining fixed decimals like `10.000`. During an active edit the
+ * input renders the user's draft string verbatim instead (see AxisInput), so
+ * this only governs the resting display.
+ */
+function formatAxis(value: number, precision: number): string {
+  if (!Number.isFinite(value)) return '';
+  return String(parseFloat(value.toFixed(precision)));
+}
 
 export interface Vec3InputProps {
   label: string;
@@ -47,13 +60,31 @@ function AxisInput({
   disabled: boolean;
   ariaLabel: string;
 }) {
+  // Buffer the in-flight edit as a raw string. Deriving the input's value from
+  // the committed number on every keystroke (value={value.toFixed(precision)})
+  // makes the field impossible to clear or retype: clearing parses to NaN, which
+  // is discarded, so the controlled input snaps back to the old digits and the
+  // user's new digits are appended to them instead of replacing them. Rendering
+  // the draft verbatim — and only committing a finite parse to onChange — keeps
+  // the intermediate empty/partial states the user creates while editing.
+  const [draft, setDraft] = useState<string | null>(null);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const parsed = parseFloat(e.target.value);
+    const raw = e.target.value;
+    setDraft(raw);
+    const parsed = parseFloat(raw);
     if (Number.isFinite(parsed)) {
       const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed));
       onChange(clamped);
     }
   };
+
+  // On blur, drop the draft so the resting display re-derives from the committed
+  // (and clamped) number. A field left empty/invalid reverts to the last good
+  // value rather than persisting NaN.
+  const handleBlur = () => setDraft(null);
+
+  const displayValue = draft !== null ? draft : formatAxis(value, precision);
 
   return (
     <div className="flex flex-1 items-center gap-1 min-w-0">
@@ -65,8 +96,9 @@ function AxisInput({
       </span>
       <input
         type="number"
-        value={value.toFixed(precision)}
+        value={displayValue}
         onChange={handleChange}
+        onBlur={handleBlur}
         step={step}
         min={min}
         max={max}

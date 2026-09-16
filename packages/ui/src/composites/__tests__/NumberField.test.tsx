@@ -1,6 +1,29 @@
 import { describe, it, expect, vi } from 'vitest';
+import { useState } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { NumberField } from '../NumberField';
+
+/** Controlled wrapper mirroring how the inspectors wire NumberField to store state. */
+function StatefulNumberField({
+  initial,
+  onChangeSpy,
+}: {
+  initial: number;
+  onChangeSpy?: (v: number) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <NumberField
+      label="Priority"
+      value={value}
+      step={1}
+      onChange={(v) => {
+        onChangeSpy?.(v);
+        setValue(v);
+      }}
+    />
+  );
+}
 
 describe('NumberField', () => {
   it('associates the visible label with the number input', () => {
@@ -33,6 +56,37 @@ describe('NumberField', () => {
   it('respects the disabled state', () => {
     render(<NumberField label="Priority" value={0} onChange={() => {}} disabled />);
     expect(screen.getByLabelText('Priority')).toBeDisabled();
+  });
+
+  it('does not forward NaN to onChange when the field is cleared', () => {
+    // parseFloat('') is NaN. Forwarding it unguarded pushed a non-finite number
+    // into the store, which JSON.stringify serializes to null in exported scene
+    // data. The guard must swallow the non-finite parse.
+    const onChange = vi.fn();
+    render(<NumberField label="Priority" value={0} onChange={onChange} step={1} />);
+    fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '' } });
+    expect(onChange).not.toHaveBeenCalled();
+    for (const call of onChange.mock.calls) {
+      expect(Number.isFinite(call[0])).toBe(true);
+    }
+  });
+
+  it('stays clearable — the NaN guard does not snap the field back to the old value', () => {
+    // The guard alone would make the field unclearable if the display were
+    // re-derived from the committed number every keystroke: the empty state would
+    // never reach the input. The draft buffer must render the empty field
+    // verbatim so a user can clear and retype.
+    const onChangeSpy = vi.fn();
+    render(<StatefulNumberField initial={5} onChangeSpy={onChangeSpy} />);
+    const input = screen.getByLabelText('Priority') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input.value).toBe('');
+
+    fireEvent.change(input, { target: { value: '2' } });
+    fireEvent.change(input, { target: { value: '25' } });
+    expect(input.value).toBe('25');
+    expect(onChangeSpy.mock.calls.at(-1)?.[0]).toBe(25);
   });
 
   it('gives two instances distinct label associations under one render', () => {
