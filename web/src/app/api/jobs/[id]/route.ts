@@ -20,7 +20,15 @@ const patchJobSchema = z.object({
   imported: z.boolean().optional(),
 });
 
-// PATCH: Update job status (used by polling to sync provider status to DB)
+/**
+ * PATCH: Update an owned job. Optional status/progress (0–100), errorMessage
+ * (at most 2000 chars), resultMeta and imported synchronize polling/import.
+ * resultUrl is optional/null: HTTP URL at most 2000 chars or non-empty PNG
+ * data URL at most 4 MiB characters, sharing initial POST artifact validation.
+ * Returns 200 {updated:true}; middleware handles auth/rate/validation errors,
+ * a missing or unowned id returns 404, and database failures return fixed 500.
+ * Refund ownership remains server-side; refunded is not accepted here.
+ */
 async function PATCH_impl(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -88,7 +96,13 @@ async function PATCH_impl(
 export const PATCH = withEgressGuard(PATCH_impl);
 
 
-/** Retrieve one owned artifact so inline PNGs cannot overflow the jobs list. */
+/**
+ * GET: Retrieve one saved artifact by job id for the authenticated owner.
+ * Returns HTTP 200 {resultUrl} (bounded HTTP URL or inline PNG). Middleware
+ * returns 401/429 for authentication/rate errors, missing or unowned jobs
+ * return 404, invalid/oversized historical artifacts return 422, and query
+ * failures return a fixed 500 body. No generation or token charge occurs.
+ */
 async function GET_impl(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const mid = await withApiMiddleware(req, {

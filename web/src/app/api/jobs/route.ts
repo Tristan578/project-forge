@@ -23,7 +23,16 @@ const createJobSchema = z.object({
   entityId: z.string().max(100).nullish(),
 });
 
-// POST: Create a job record (called by client after generation API returns)
+/**
+ * POST: Persist an authenticated user's generation job after submission.
+ * Requires providerJobId (1–200 chars), provider (1–100), supported type, and
+ * prompt (1–2000; stored at most 500). Optional parameters store placement and
+ * metadata; tokenCost defaults to 0, tokenUsageId/entityId may be null.
+ * Optional resultUrl preserves an inline synchronous artifact: HTTP URL at
+ * most 2000 chars or non-empty PNG data URL at most 4 MiB characters.
+ * Returns HTTP 201 {job:{id}}; auth/rate/validation errors use middleware,
+ * and persistence failures return a fixed 500 response.
+ */
 async function POST_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
@@ -65,7 +74,14 @@ async function POST_impl(req: NextRequest) {
   }
 }
 
-// GET: Fetch user's active (in-progress) jobs for hydration on page load
+/**
+ * GET: List up to 50 owned jobs, newest first. status=active selects pending,
+ * processing and downloading; all or an absent status includes every state.
+ * HTTP 200 {jobs} retains HTTP resultUrl values, but inline artifacts are
+ * excluded in SQL and represented by resultUrl:null, hasInlineResult:true.
+ * Fetch each flagged artifact with GET /api/jobs/{id} during recovery.
+ * Authentication errors use middleware; query failures return fixed HTTP 500.
+ */
 async function GET_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });

@@ -1,3 +1,4 @@
+/** Validate bounded HTTP artifact URLs and inline PNGs for generation and saved jobs. */
 import { z } from 'zod';
 
 /** Keep inline PNG artifacts below the function's 4.5 MB JSON body limit. */
