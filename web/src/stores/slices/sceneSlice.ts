@@ -48,6 +48,7 @@ import {
   buildTemplateSceneFile,
   buildTemplateGameComponents,
 } from '@/lib/templates/templateSceneFile';
+import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
 
 /** Project scenes reduced to the shape the store mirrors for the Scene Browser. */
 function toSceneList(project: ProjectScenes) {
@@ -411,6 +412,22 @@ function withCapturedScene(project: ProjectScenes, capture: SceneCapture): Proje
 }
 
 /**
+ * Restore the music arrangement carried by a just-loaded scene, or clear it
+ * when the scene has none. Without this, `loadScene`/`newScene` left whatever
+ * arrangement was in the store from the PREVIOUS scene — stale tracks/clips
+ * that then rode along into the new scene's next cloud save (#10058). `json`
+ * is untrusted (AI/chat input, a local file pick, an auto-save entry), so a
+ * parse failure clears rather than throws.
+ */
+function syncArrangementFromLoadedScene(json: string): void {
+  try {
+    useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(JSON.parse(json)));
+  } catch {
+    useMusicArrangementStore.getState().hydrate(null);
+  }
+}
+
+/**
  * Capture the live scene with its prefab registry folded in, ATOMICALLY.
  *
  * The engine export knows nothing about linked instances — they live in the
@@ -698,6 +715,9 @@ export const createSceneSlice: StateCreator<
     // rejection: the engine has now accepted a scene, so serializing it is
     // once again describing the project rather than overwriting it.
     set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
+    // Swap in this scene's own arrangement (or clear it) — see
+    // `syncArrangementFromLoadedScene` (#10058).
+    syncArrangementFromLoadedScene(json);
     return true;
   },
   newScene: () => {
@@ -735,6 +755,9 @@ export const createSceneSlice: StateCreator<
       // again from here (#10056). A REJECTED new_scene leaves any existing
       // `sceneLoadError` standing, because the untrustworthy scene is still up.
       set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
+      // A blank scene has no saved arrangement — clear whatever the previous
+      // scene left behind (#10058).
+      useMusicArrangementStore.getState().hydrate(null);
       return true;
     } catch (error) {
       rollbackAudio();
@@ -969,6 +992,10 @@ export const createSceneSlice: StateCreator<
     // `loadScene`'s accepted path, and the reason a template load is a way out
     // of a rejected scene rather than a banner that never leaves (#10056).
     set({ sceneLoadError: null });
+    // A template never carries its own arrangement, but the arrangement store
+    // from whatever scene was active before this template loaded is still
+    // sitting there — clear it the same way `loadScene` does (#10058).
+    syncArrangementFromLoadedScene(sceneJson);
 
     // Only now that the entities exist can anything be attached to them.
     // Scripts and game components go through the store's own actions rather
@@ -1213,6 +1240,19 @@ export const createSceneSlice: StateCreator<
       }
       return accepted;
     };
+    // `dispatchRestoreLoad`, plus the arrangement sync `loadScene`/`newScene`/
+    // `loadTemplate` get. Used ONLY for the primary restore below, never for
+    // this function's own rollback (restoring `prior` on failure): `prior` is
+    // the scene that was already active — and whose arrangement is still
+    // correctly sitting in the store, untouched — before the restore attempt
+    // began, so re-syncing there would read "this scene has none" and wipe out
+    // the very arrangement the rollback is putting the user back onto. A
+    // checkpoint never captures the arrangement either way (#10058).
+    const dispatchRestoreLoadAndSyncArrangement = (json: string): boolean => {
+      const accepted = dispatchRestoreLoad(json);
+      if (accepted) syncArrangementFromLoadedScene(json);
+      return accepted;
+    };
     try {
       const result = restoreCheckpointIn(checkpointId, projectId);
       if ('error' in result) throw new Error(result.error);
@@ -1237,7 +1277,7 @@ export const createSceneSlice: StateCreator<
       }
       await applyCheckpointScene(activeData, (json) => {
         attempted = true;
-        const accepted = dispatchRestoreLoad(json);
+        const accepted = dispatchRestoreLoadAndSyncArrangement(json);
         attempted = accepted;
         return accepted;
       }, requestSceneExport, isCurrent);
@@ -1259,6 +1299,13 @@ export const createSceneSlice: StateCreator<
       if (prefabSnapshot) rollbackPrefabState(prefabSnapshot);
       if (attempted && prior && isCurrent()) {
         try {
+          // Plain `dispatchRestoreLoad`, deliberately not the arrangement-
+          // syncing variant: `prior` is the scene that was ALREADY active (and
+          // whose arrangement is still sitting in the store, untouched) before
+          // this restore attempt began, so re-syncing here would incorrectly
+          // clear it — a checkpoint capture never carries an arrangement, so
+          // the sync would read as "this scene has none" and wipe out the very
+          // arrangement the rollback is putting the user back onto (#10058).
           await applyCheckpointScene(prior, dispatchRestoreLoad, requestSceneExport, isCurrent);
           // Confirmed by the same SCENE_LOADED wait as the success path above —
           // the prior scene is back, so its name/dirty flag come back with it.
