@@ -2,4 +2,4 @@
 "web": patch
 ---
 
-Return a true HTTP 404 for a published-game URL that does not resolve. The `/play/[userId]/[slug]` page previously answered a missing, unpublished, or DB-unavailable game with HTTP 200 and a "Game Not Found" title — a soft-404 that search engines index. It now calls `notFound()` so crawlers and clients receive a real 404 status, with a colocated not-found boundary that preserves the existing "Game Not Found" presentation.
+Return a literal script-free HTTP404 document for missing, unpublished, or database-unavailable play URLs before App Router streaming starts. Preserve proxy authentication and CSP/security headers, omit HEAD bodies, and keep page-level notFound as a race guard. Published URLs perform an additional metadata lookup during proxy preflight; metadata and body still share one lookup within their React server render. Browser regressions now verify document/crawler/HEAD404, the actual error presentation, and absence of player/game metadata.

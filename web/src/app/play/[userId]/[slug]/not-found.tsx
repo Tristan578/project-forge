@@ -1,17 +1,13 @@
+/** React not-found fallback for a play render whose published metadata disappears. */
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
+import { GAME_NOT_FOUND_HEADING, GAME_NOT_FOUND_DESCRIPTION } from '@/lib/play/notFoundDocument';
 
 /**
- * Not-found boundary for /play/[userId]/[slug].
- *
- * Rendered when page.tsx calls notFound() for a game that is missing,
- * unpublished, or unreachable. This makes the server response a true HTTP 404
- * (fixing the previous soft-404 that returned 200 and got indexed) while
- * preserving the "Game Not Found" presentation the GamePlayer client component
- * already shows for the same condition, so the visible UX does not regress.
- *
- * No metadata is exported here on purpose: the missing-game <title> is the
- * single responsibility of generateMetadata in page.tsx.
+ * Render the unavailable-game presentation inside Next.js notFound handling.
+ * The proxy returns the same text as a direct HTTP404 document before streaming;
+ * this fallback catches removals after preflight, when status may already be sent.
+ * @returns An announced missing-game message and native home link.
  */
 export default function GameNotFound() {
   return (
@@ -24,16 +20,16 @@ export default function GameNotFound() {
         <div aria-hidden="true" className="mb-4 text-6xl">
           :(
         </div>
-        <h1 className="mb-2 text-xl font-semibold text-zinc-200">Game Not Found</h1>
+        <h1 className="mb-2 text-xl font-semibold text-zinc-200">{GAME_NOT_FOUND_HEADING}</h1>
         <p className="mb-6 text-sm text-zinc-400">
-          This game does not exist or is not currently published.
+          {GAME_NOT_FOUND_DESCRIPTION}
         </p>
         <div className="flex items-center justify-center gap-2">
           <Link
             href="/"
-            className="inline-flex items-center gap-2 rounded bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700"
+            className="inline-flex items-center gap-2 rounded bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700 min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
           >
-            <ArrowLeft size={14} />
+            <ArrowLeft size={14} aria-hidden="true" />
             Back to SpawnForge
           </Link>
         </div>

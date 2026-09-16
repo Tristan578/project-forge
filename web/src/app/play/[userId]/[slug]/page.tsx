@@ -1,66 +1,30 @@
+/** Public published-game page, metadata, and nonce-stamped structured data. */
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
-import { getDb, queryWithResilience } from '@/lib/db/client';
-import { publishedGames, users } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { loadPublishedGameMetadata } from '@/lib/play/gameMetadata';
+import { GAME_NOT_FOUND_PAGE_TITLE } from '@/lib/play/notFoundDocument';
 import { safeAuth } from '@/lib/auth/safe-auth';
 import { GamePlayer } from '@/components/play/GamePlayer';
 import { Breadcrumbs } from '@/components/marketing/Breadcrumbs';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://spawnforge.ai';
 
+/** Asynchronous author/slug route parameters supplied by Next.js. */
 interface PlayPageProps {
+  /** Author Clerk identifier and published game slug. */
   params: Promise<{ userId: string; slug: string }>;
 }
 
-/**
- * Fetch game data. Filters for status='published' so drafts never leak via
- * metadata or JSON-LD. Returns null when game is missing, unpublished, or DB
- * is unavailable. React.cache memoizes per-request so generateMetadata and the
- * page body share a single round-trip.
- */
-const getGameData = cache(async (clerkId: string, slug: string) => {
-  try {
-    const [user] = await queryWithResilience(() => getDb()
-      .select({ id: users.id, displayName: users.displayName })
-      .from(users)
-      .where(eq(users.clerkId, clerkId))
-      .limit(1));
-    if (!user) return null;
-
-    const [game] = await queryWithResilience(() => getDb()
-      .select({
-        title: publishedGames.title,
-        description: publishedGames.description,
-        createdAt: publishedGames.createdAt,
-      })
-      .from(publishedGames)
-      .where(
-        and(
-          eq(publishedGames.userId, user.id),
-          eq(publishedGames.slug, slug),
-          eq(publishedGames.status, 'published')
-        )
-      )
-      .limit(1));
-    if (!game) return null;
-
-    return {
-      title: game.title,
-      description: game.description,
-      createdAt: game.createdAt,
-      authorName: user.displayName,
-    };
-  } catch {
-    return null;
-  }
-});
+/** Share one lookup between metadata and body within a React server render. */
+const getGameData = cache(loadPublishedGameMetadata);
 
 /**
  * Generate dynamic metadata for the published game page.
  * Uses the game title and description for SEO and social sharing.
+ * @param props Next.js asynchronous author/slug parameters.
+ * @returns Published metadata or the missing-game title without game data.
  */
 export async function generateMetadata({
   params,
@@ -73,7 +37,7 @@ export async function generateMetadata({
   // not-found.tsx for the visible UX; that file deliberately exports no metadata
   // so the 404 <title> is defined here alone.
   if (!game) {
-    return { title: 'Game Not Found - SpawnForge' };
+    return { title: GAME_NOT_FOUND_PAGE_TITLE };
   }
 
   return {
@@ -86,7 +50,11 @@ export async function generateMetadata({
 /**
  * /play/[userId]/[slug] -- Public page for playing published games.
  * Server component that renders the client-side game player.
- * No authentication required.
+ * No authentication required. Proxy preflight returns a direct document 404
+ * before streaming; notFound below also guards a game removed after preflight.
+ * @param props Next.js asynchronous author/slug parameters.
+ * @returns Published player, breadcrumbs, and escaped structured data.
+ * @throws Next.js notFound control flow when no published metadata is available.
  */
 export default async function PlayPage({ params }: PlayPageProps) {
   const { userId, slug } = await params;
@@ -104,15 +72,16 @@ export default async function PlayPage({ params }: PlayPageProps) {
 
   const game = await getGameData(userId, slug);
 
-  // A missing, unpublished, or DB-unavailable game returns a true HTTP 404
-  // instead of a soft-404 (200 with a "Game Not Found" title), so crawlers and
-  // clients see the real status. notFound() throws, so `game` is non-null below.
+  // The proxy preflight handles document 404 status before this streamed render.
+  // This guard catches a game removed between that lookup and rendering; Next
+  // may already have streamed headers, so it cannot guarantee a new HTTP status.
+  // notFound terminates rendering and adds noindex without a game body.
   if (!game) {
     notFound();
   }
 
   // VideoGame JSON-LD — user-controlled values from DB (title, description).
-  // JSON.stringify does NOT escape '<', so we replace it with < to
+  // JSON.stringify does NOT escape '<', so we replace it with a Unicode escape to
   // prevent script tag breakout (XSS via </script> in user content).
   // getGameData filters for status='published', so drafts return null.
   const videoGameJsonLd = JSON.stringify({
