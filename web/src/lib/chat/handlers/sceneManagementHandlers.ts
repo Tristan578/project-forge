@@ -205,11 +205,18 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     // `rejectionStrandsEditor: false`: a rejected TARGET leaves the OUTGOING
     // scene on screen and unchanged, so a failed switch must not lock its saves
     // behind `sceneLoadError` — the failure is returned to the assistant below,
-    // parity with the store's own `switchScene` (#10056).
+    // parity with the store's own `switchScene` (#10056). `strandOnThrow: true`
+    // (the default, restated): a THROWN dispatch can have wrecked the outgoing
+    // scene mid-apply, so it DOES set `sceneLoadError(ENGINE_LOAD_THREW)` and
+    // lock saving, and the message below tells the user to reload rather than
+    // claiming the scene is unchanged (#10079), parity with the store. When
+    // `sceneToLoad` is null the fallback `newScene()` throw sets the same
+    // lockout itself (#10079 follow-up, Sentry), so both branches lock saving
+    // identically.
     let accepted: boolean;
     try {
       accepted = result.sceneToLoad
-        ? ctx.store.loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false })
+        ? ctx.store.loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false, strandOnThrow: true })
         : ctx.store.newScene();
     } catch (error) {
       // `loadScene`/`newScene` roll back their OWN state (audio, prefab
@@ -217,10 +224,13 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       // `project` — without persisting it here, a thrown dispatch error
       // skips both `saveProjectScenes` calls below and silently discards the
       // outgoing scene's unsaved work, parity with the store's `switchScene`.
+      // The persist writes the already-captured outgoing data, not a fresh
+      // export of the wrecked engine scene, so it is safe under the lockout
+      // both `loadScene` and `newScene` have by now set.
       saveProjectScenes(project, ctx.store.projectId);
       return {
         success: false,
-        error: `The scene switch failed unexpectedly (${error instanceof Error ? error.message : String(error)}). The current scene is unchanged.`,
+        error: `The scene could not be opened due to an engine error (${error instanceof Error ? error.message : String(error)}). Reload the editor before continuing — the viewport can no longer be trusted and saving is locked to protect your stored scene.`,
       };
     }
     if (accepted === false) {

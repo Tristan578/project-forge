@@ -87,6 +87,17 @@ const ENGINE_LOAD_REJECTION =
 /** The dispatch threw. The message is appended so the cause is not swallowed. */
 const ENGINE_LOAD_THREW = 'This scene could not be opened: the engine failed while loading it.';
 
+/**
+ * Was this lockout raised by a THROWN dispatch (as opposed to a clean
+ * `{success:false}` rejection)? A throw can have despawned the outgoing scene
+ * mid-apply, so a capture taken while such a lockout stands is a capture of a
+ * possibly-wrecked viewport — `restoreCheckpoint`'s recovery branch uses this
+ * to refuse to re-enable saving over that capture (#10079).
+ */
+function isEngineLoadThrewLockout(error: SceneLoadError | null): boolean {
+  return error !== null && error.reason.startsWith(ENGINE_LOAD_THREW);
+}
+
 export interface SceneSlice {
   sceneName: string;
   sceneModified: boolean;
@@ -161,8 +172,19 @@ export interface SceneSlice {
    * never displaced the outgoing one, so the editor is not stranded, the
    * `false` return still tells the caller to surface its own error, and saving
    * of the still-live outgoing scene stays enabled (#10056).
+   *
+   * `strandOnThrow` is a SEPARATE fact and defaults to `true` independently of
+   * `rejectionStrandsEditor`. A thrown dispatch is not a clean `{success:false}`
+   * rejection: an explicit rejection means the engine kept the outgoing scene,
+   * but a throw can leave it despawned mid-apply — the viewport can no longer be
+   * trusted. So a caller that passes `rejectionStrandsEditor: false` (a switch /
+   * import loading over an intact scene) still wants a THROWN dispatch to strand
+   * the editor and lock saving, and gets that by leaving `strandOnThrow` at its
+   * `true` default: {@link sceneLoadError} is set with the `ENGINE_LOAD_THREW`
+   * reason before the error propagates, so the next autosave / Ctrl+S / cloud
+   * save cannot serialize the wrecked engine scene over the stored one (#10079).
    */
-  loadScene: (json: string, opts?: { rejectionStrandsEditor?: boolean }) => boolean;
+  loadScene: (json: string, opts?: { rejectionStrandsEditor?: boolean; strandOnThrow?: boolean }) => boolean;
   /**
    * Return false when no engine is available or it rejects the new scene.
    * A successful new scene clears {@link sceneLoadError}: an empty scene the
@@ -254,10 +276,14 @@ export interface SceneSlice {
    * the previous save and attempts to restore prior unsaved viewport data.
    * checkpointError contains user-facing recovery guidance.
    *
-   * Tracks {@link sceneLoadError} on the same terms as {@link loadScene}: an
-   * accepted load clears it (restoring a checkpoint is a way OUT of a rejected
-   * scene, so saving comes back), a refused one sets it. That applies to the
-   * recovery load of the outgoing scene too.
+   * Tracks {@link sceneLoadError} on the same terms as {@link loadScene}, with
+   * one deliberate refinement: the clear happens ONLY at the SCENE_LOADED-
+   * confirmed points (the two `applyCheckpointScene` resolutions), never on a
+   * merely-accepted dispatch, because acceptance is not confirmation that the
+   * engine applied the scene. A refused or thrown load sets it. The recovery
+   * load of the outgoing scene follows the same contract — except it will NOT
+   * clear a lockout raised by the THREW branch, since the capture it re-applies
+   * was taken from a viewport that throw may already have wrecked (#10079).
    */
   restoreCheckpoint: (checkpointId: string) => Promise<boolean>;
   /** Delete a checkpoint by ID. */
@@ -513,11 +539,21 @@ function restorePrefabInstances(json: string): PrefabRestoreSnapshot | null {
  * visible; the prefab store may be left only partially rolled back.
  */
 function rollbackPrefabState(snapshot: PrefabRestoreSnapshot): void {
+  // Guarded INDEPENDENTLY so a throw from the instances write does not skip the
+  // library rollback. Wrapping both in one `try` let a `localStorage.setItem`
+  // failure on the first write abandon the second, leaving a rejected scene's
+  // embedded prefab DEFINITIONS installed permanently even though the engine
+  // never loaded it (scene.FR-1 N1 BUG-5 / #10079). Each write logs its own
+  // failure so a real storage fault is still visible.
   try {
     savePrefabInstancesToStorage(snapshot.instances);
+  } catch (error) {
+    console.error('[Scenes] Failed to roll back prefab instances; storage may be inconsistent:', error);
+  }
+  try {
     savePrefabsToStorage(snapshot.prefabs);
   } catch (error) {
-    console.error('[Scenes] Failed to roll back prefab state; storage may be inconsistent:', error);
+    console.error('[Scenes] Failed to roll back prefab library; storage may be inconsistent:', error);
   }
 }
 
@@ -591,8 +627,14 @@ export const createSceneSlice: StateCreator<
     // to fall back on; a caller loading over an intact outgoing scene passes
     // `false` so its rejection surfaces a toast without locking saving (#10056).
     const strandOnReject = opts?.rejectionStrandsEditor ?? true;
+    // A THROWN dispatch strands the editor even when a clean rejection would
+    // not: a throw can leave the outgoing scene despawned mid-apply, so the
+    // viewport is untrustworthy and saving must lock regardless of
+    // `rejectionStrandsEditor` (#10079). Defaults on independently.
+    const strandOnThrow = opts?.strandOnThrow ?? true;
+    const setLockout = (reason: string) => set({ sceneLoadError: { reason, at: Date.now() } });
     const rejectEditor = (reason: string) => {
-      if (strandOnReject) set({ sceneLoadError: { reason, at: Date.now() } });
+      if (strandOnReject) setLockout(reason);
     };
     // The engine reveals a loaded scene's audio one selection at a time
     // (`emit_audio_on_selection`), and SCENE_LOADED carries only a name — so
@@ -632,7 +674,11 @@ export const createSceneSlice: StateCreator<
       // into the boolean contract — callers that need to distinguish it
       // (`restoreCheckpoint`'s own recovery flow) rely on exactly this.
       rollbackPrefabState(snapshot);
-      rejectEditor(`${ENGINE_LOAD_THREW} ${error instanceof Error ? error.message : String(error)}`);
+      // Set the lockout on `strandOnThrow`, NOT `strandOnReject`: a caller that
+      // treats a clean rejection as non-stranding (a switch/import over an
+      // intact scene) still needs a throw to lock saving, because a throw can
+      // have wrecked the very scene it was falling back on (#10079).
+      if (strandOnThrow) setLockout(`${ENGINE_LOAD_THREW} ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
     if (!accepted) {
@@ -693,6 +739,23 @@ export const createSceneSlice: StateCreator<
     } catch (error) {
       rollbackAudio();
       savePrefabInstancesToStorage(previousInstances);
+      // Mirrors `loadScene`'s `strandOnThrow` default (Sentry, #10079): a
+      // THROWN `new_scene` dispatch can have despawned the outgoing scene
+      // mid-apply, same as a thrown `load_scene`, so the viewport can no
+      // longer be trusted and saving must lock until reload. Both
+      // `switchScene` (above) and its chat-handler mirror
+      // `sceneManagementHandlers.switch_scene` fall back to calling this
+      // function when the target scene's stored `data` is null, and both
+      // already assume — and TELL THE USER — that saving is locked when this
+      // throws. Before this fix that was false: no lockout was ever set on
+      // this path, so autosave could silently overwrite the previous scene
+      // with the wrecked engine viewport's corrupted state.
+      set({
+        sceneLoadError: {
+          reason: `${ENGINE_LOAD_THREW} ${error instanceof Error ? error.message : String(error)}`,
+          at: Date.now(),
+        },
+      });
       throw error;
     }
   },
@@ -977,20 +1040,31 @@ export const createSceneSlice: StateCreator<
     let accepted: boolean;
     try {
       accepted = result.sceneToLoad
-        ? get().loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false })
+        // `strandOnThrow: true` (the default, restated for the reader) is what
+        // makes the catch below honest: a clean rejection leaves the outgoing
+        // scene intact and non-stranding, but a THROWN dispatch sets
+        // `sceneLoadError(ENGINE_LOAD_THREW)` so saving locks over the wrecked
+        // viewport rather than being folded into a no-op (#10079). `newScene()`
+        // sets the same lockout on its own throw path, so both branches below
+        // leave saving locked identically (#10079 follow-up, Sentry).
+        ? get().loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false, strandOnThrow: true })
         : get().newScene();
     } catch (error) {
       // `loadScene`/`newScene` already rolled back their OWN state (audio,
-      // prefab registry) before rethrowing — see `dispatchSceneLoad`'s catch.
-      // What they cannot roll back is this function's own outgoing capture:
-      // without this, a thrown dispatch error skips straight past both
-      // `saveProjectScenes` calls below and the scene captured at the top of
-      // this function — the user's unsaved work in the OUTGOING scene — is
-      // silently lost, and `SceneBrowser.tsx` awaits this with a bare `void`,
-      // so the exception would otherwise become an unhandled rejection too.
-      console.error('[Scenes] Switch scene dispatch threw; persisting the outgoing scene and cancelling the switch:', error);
+      // prefab registry) before rethrowing — see `dispatchSceneLoad`'s catch —
+      // and both have already set `sceneLoadError(ENGINE_LOAD_THREW)` on this
+      // throw, so every save path is now locked. What they
+      // cannot roll back is this function's own outgoing capture: without the
+      // `saveProjectScenes` below, a thrown dispatch error skips both persists
+      // and the scene captured at the top of this function — the user's unsaved
+      // work in the OUTGOING scene — is silently lost, and `SceneBrowser.tsx`
+      // awaits this with a bare `void`, so the exception would otherwise become
+      // an unhandled rejection too. Persisting that capture is safe even with
+      // the lockout set: it writes the already-captured outgoing data, not a
+      // fresh export of the wrecked engine scene.
+      console.error('[Scenes] Switch scene dispatch threw; persisting the outgoing scene and locking saving until reload:', error);
       saveProjectScenes(project, get().projectId);
-      showError('The scene could not be opened, so the switch was cancelled. You are still on the current scene, which is unchanged.');
+      showError('The scene could not be opened due to an engine error. Reload the editor before continuing — the viewport can no longer be trusted, and saving is locked to protect your stored scene.');
       return;
     }
     if (!accepted) {
@@ -1083,6 +1157,13 @@ export const createSceneSlice: StateCreator<
     if (get().checkpointBusy) return false;
     const before = get();
     const { projectId, projectRevision, activeSceneId } = before;
+    // A lockout standing when this restore begins is the lockout the `prior`
+    // capture (taken below, before any dispatch) is made under. If it was
+    // raised by a THROWN dispatch, that capture is of a possibly-wrecked
+    // viewport, so the recovery branch must NOT clear the lockout when it
+    // re-applies `prior` — confirming SCENE_LOADED for the wreckage does not
+    // make it trustworthy (#10079, finding 4).
+    const priorCapturedUnderThrowLockout = isEngineLoadThrewLockout(before.sceneLoadError);
     let sceneOperationRevision = before.sceneOperationRevision;
     const isCurrent = () => get().projectId === projectId && get().projectRevision === projectRevision && get().sceneOperationRevision === sceneOperationRevision && get().activeSceneId === activeSceneId;
     set({ checkpointBusy: true, checkpointError: null, autoSaveEnabled: false });
@@ -1180,8 +1261,16 @@ export const createSceneSlice: StateCreator<
         try {
           await applyCheckpointScene(prior, dispatchRestoreLoad, requestSceneExport, isCurrent);
           // Confirmed by the same SCENE_LOADED wait as the success path above —
-          // the prior scene is back, so the save lockout can come back off too.
-          set({ sceneName: before.sceneName, sceneModified: before.sceneModified, sceneLoadError: null });
+          // the prior scene is back, so its name/dirty flag come back with it.
+          // The save lockout comes off too UNLESS `prior` was captured under a
+          // THREW lockout: re-applying a capture of a viewport a throw may have
+          // wrecked, and confirming SCENE_LOADED for it, does not make it
+          // trustworthy, so saving stays locked until the user reloads (#10079).
+          set({
+            sceneName: before.sceneName,
+            sceneModified: before.sceneModified,
+            ...(priorCapturedUnderThrowLockout ? {} : { sceneLoadError: null }),
+          });
         } catch {
           message += ' The previous save is intact, but the viewport could not be recovered. Reload the project before editing.';
         }
