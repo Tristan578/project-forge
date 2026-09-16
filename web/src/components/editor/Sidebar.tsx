@@ -1,6 +1,6 @@
 'use client';
 
-import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, MessageSquare, SlidersHorizontal, Plus, Minus, CircleDot, Merge, Sparkles } from 'lucide-react';
+import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, MessageSquare, SlidersHorizontal, Plus, Minus, CircleDot, Merge, Sparkles, Music } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -290,6 +290,13 @@ export function Sidebar() {
         icon={<SlidersHorizontal size={20} />}
         onClick={() => openPanel('audio-mixer')}
         title="Audio Mixer"
+      />
+
+      {/* Music Arrangement toggle */}
+      <ToolButton
+        icon={<Music size={20} />}
+        onClick={() => openPanel('music-arrangement')}
+        title="Music Arrangement"
       />
 
       {/* AI Chat toggle */}
