@@ -56,19 +56,20 @@ function toSceneList(project: ProjectScenes) {
 }
 
 /**
- * A scene the editor asked the engine to load and that was REJECTED — the
- * viewport therefore does not show the scene the caller asked for (#10056).
+ * A save lockout after scene validation/rejection or a thrown engine dispatch.
+ * The viewport may be empty, stale, or partly overwritten and cannot safely
+ * replace the stored scene.
  *
  * Deliberately NOT the same fact as `loadScene` returning `false`: that boolean
  * conflates rejection with *deferral*, because `loadScene` also returns false
  * when there is no dispatcher yet (the engine mounts after the editor page, so
- * a healthy cold open takes that branch every time). Only the rejection branches
- * set this, which is what makes it safe to gate saving and to show an error on.
+ * a healthy cold open takes that branch every time). Deferral does not create
+ * a lockout; rejection policy and thrown-dispatch policy are independent.
  */
 export interface SceneLoadError {
   /** User-facing sentence naming what went wrong. Never blank. */
   reason: string;
-  /** `Date.now()` at rejection, so a repeat rejection is a distinguishable value. */
+  /** `Date.now()` when the failure creates this lockout. */
   at: number;
 }
 
@@ -99,40 +100,57 @@ function isEngineLoadThrewLockout(error: SceneLoadError | null): boolean {
   return error !== null && error.reason.startsWith(ENGINE_LOAD_THREW);
 }
 
+/** Editor scene metadata, engine operations, persistence, and recovery state. */
 export interface SceneSlice {
+  /** Name displayed for the active viewport. */
   sceneName: string;
+  /** Whether the active viewport has unsaved edits. */
   sceneModified: boolean;
   /** Invalidates asynchronous scene work when another scene is requested. */
   sceneOperationRevision: number;
+  /** Whether periodic local saves are enabled. */
   autoSaveEnabled: boolean;
+  /** Stored project scene summaries for the Scene Browser. */
   scenes: Array<{ id: string; name: string; isStartScene: boolean }>;
+  /** Stored scene currently selected, or null before project setup. */
   activeSceneId: string | null;
+  /** Whether a Scene Browser switch is in progress. */
   sceneSwitching: boolean;
+  /** Active transition overlay and target metadata. */
   sceneTransition: {
     active: boolean;
     config: SceneTransitionConfig | null;
     targetScene: string | null;
     transitionId: string | null;
   };
+  /** Transition defaults merged into scene-switch requests. */
   defaultTransition: SceneTransitionConfig;
+  /** Terrain metadata mirrored by entity ID. */
   terrainData: Record<string, TerrainDataState>;
+  /** Whether an export UI operation is active. */
   isExporting: boolean;
+  /** Current project identifier, or null for an unsaved project. */
   projectId: string | null;
+  /** Invalidates asynchronous work when the project changes. */
   projectRevision: number;
+  /** Whether checkpoint capture or restore is in progress. */
   checkpointBusy: boolean;
+  /** Recovery guidance from the latest checkpoint failure. */
   checkpointError: string | null;
+  /** Status of the current or latest cloud-save request. */
   cloudSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
+  /** ISO timestamp of the latest successful cloud save. */
   lastCloudSave: string | null;
   /**
-   * Set while the scene the editor last asked for was REJECTED, so what the
-   * engine holds is NOT this project's scene; null whenever the viewport is
-   * trustworthy. See {@link SceneLoadError} for why this exists alongside
+   * Set after a stranding rejection or thrown dispatch while the viewport
+   * cannot safely be saved. A later non-replacing rejection preserves an
+   * existing throw lockout. See {@link SceneLoadError} for why this exists alongside
    * `loadScene`'s boolean rather than instead of it.
    *
    * Two consumers, and both are load-bearing: `SceneLoadErrorNotice` renders
-   * the rejection instead of leaving an empty viewport unexplained, and every
+   * the load failure instead of leaving an untrusted viewport unexplained, and every
    * save path refuses while it is set — otherwise the next Ctrl+S, cloud save
-   * or autosave tick would serialize the engine's (empty) scene over the
+   * or autosave tick could serialize the engine's empty or corrupted scene over the
    * project's stored `sceneData` (#10056).
    */
   sceneLoadError: SceneLoadError | null;
@@ -155,14 +173,14 @@ export interface SceneSlice {
    * Queue scene JSON in the engine. True means accepted for later application,
    * not that the viewport changed. Recovery waits for SCENE_LOADED and a
    * correlated export before committing its active save. Returns false when
-   * validation or engine dispatch rejects the load, in which case the prefab
-   * registry (and any merged definitions) are rolled back to what they were
-   * before this call.
+   * validation or engine dispatch rejects the load. Audio rollback is attempted
+   * and prefab instances/definitions are restored independently on a best-effort
+   * basis; storage failures are logged and may leave a partial prefab rollback.
    *
    * A `false` return is NOT by itself an error: it also means "no dispatcher
    * yet", which is the normal cold-open path. {@link sceneLoadError} is the
-   * field that distinguishes a rejection, and only the rejection branches set
-   * it. A `true` return clears it.
+   * field that records a stranding rejection or thrown dispatch. An accepted
+   * load clears it; this primitive does not wait for engine confirmation.
    *
    * `rejectionStrandsEditor` says what a REJECTION means for this caller, and
    * defaults to `true`. `true` is the primitive's safe default and the
@@ -184,12 +202,22 @@ export interface SceneSlice {
    * `true` default: {@link sceneLoadError} is set with the `ENGINE_LOAD_THREW`
    * reason before the error propagates, so the next autosave / Ctrl+S / cloud
    * save cannot serialize the wrecked engine scene over the stored one (#10079).
+   *
+   * @param json Serialized scene to load.
+   * @param opts Independent rejection and throw lockout policies, both default true.
+   * @returns Whether the engine accepted the request, not whether it applied it.
+   * @throws The original dispatch error after rollback attempts and optional lockout.
    */
   loadScene: (json: string, opts?: { rejectionStrandsEditor?: boolean; strandOnThrow?: boolean }) => boolean;
   /**
    * Return false when no engine is available or it rejects the new scene.
    * A successful new scene clears {@link sceneLoadError}: an empty scene the
    * user asked for deliberately IS trustworthy, so saving is allowed again.
+   * A thrown dispatch sets a save lockout before audio/prefab-instance rollback,
+   * logs any storage rollback failure, and rethrows the original engine error.
+   *
+   * @returns Whether the engine accepted a new scene.
+   * @throws The original dispatch error; prefab rollback may remain partial.
    */
   newScene: () => boolean;
   /**
@@ -208,12 +236,19 @@ export interface SceneSlice {
    * no error, which is exactly why the boolean needs this rather than that.
    */
   isEngineAttached: () => boolean;
+  /** Update the displayed scene name. */
   setSceneName: (name: string) => void;
+  /** Update the active scene dirty flag. */
   setSceneModified: (modified: boolean) => void;
+  /** Enable or disable periodic local saving. */
   setAutoSaveEnabled: (enabled: boolean) => void;
+  /** Replace stored scene summaries and active scene ID. */
   setScenes: (scenes: Array<{ id: string; name: string; isStartScene: boolean }>, activeId: string | null) => void;
+  /** Update the switch-in-progress flag. */
   setSceneSwitching: (switching: boolean) => void;
+  /** Run a transition around a scene-switch request. */
   startSceneTransition: (targetScene: string, configOverride?: Partial<SceneTransitionConfig>) => Promise<void>;
+  /** Merge new transition defaults. */
   setDefaultTransition: (config: Partial<SceneTransitionConfig>) => void;
   /**
    * Spawn a terrain. Returns the new entity's id **synchronously** so callers can
@@ -224,20 +259,33 @@ export interface SceneSlice {
    * updated until the engine emits SELECTION_CHANGED.
    */
   spawnTerrain: (terrainData?: Partial<TerrainDataState>, name?: string) => string | undefined;
+  /** Dispatch updated terrain parameters for an entity. */
   updateTerrain: (entityId: string, terrainData: TerrainDataState) => void;
+  /** Dispatch a terrain brush operation at a local position. */
   sculptTerrain: (entityId: string, position: [number, number], radius: number, strength: number) => void;
+  /** Mirror terrain metadata received from the engine. */
   setTerrainData: (entityId: string, data: TerrainDataState) => void;
+  /** Dispatch a union of two mesh entities. */
   csgUnion: (entityIdA: string, entityIdB: string, deleteSources?: boolean) => void;
+  /** Dispatch subtraction of the second mesh from the first. */
   csgSubtract: (entityIdA: string, entityIdB: string, deleteSources?: boolean) => void;
+  /** Dispatch intersection of two mesh entities. */
   csgIntersect: (entityIdA: string, entityIdB: string, deleteSources?: boolean) => void;
+  /** Dispatch extrusion using the supplied shape parameters. */
   extrudeShape: (shape: string, params: Record<string, unknown>) => void;
+  /** Dispatch a lathe mesh from the supplied profile. */
   latheShape: (profile: [number, number][], params: Record<string, unknown>) => void;
+  /** Dispatch a procedural array of an entity. */
   arrayEntity: (entityId: string, params: Record<string, unknown>) => void;
+  /** Dispatch mesh combination with optional source deletion. */
   combineMeshes: (entityIds: string[], deleteSources?: boolean, name?: string) => void;
+  /** Update the export UI progress flag. */
   setExporting: (value: boolean) => void;
+  /** Select a project and invalidate old project work. */
   setProjectId: (id: string | null) => void;
   /** Trigger the export whose event drives the cloud-save PUT. See {@link saveScene} for `requestId`. */
   saveToCloud: (requestId?: string) => void;
+  /** Update the cloud-save status. */
   setCloudSaveStatus: (status: 'idle' | 'saving' | 'saved' | 'error') => void;
   /** Set the ISO-8601 timestamp of the most recent successful cloud save (PF-540). */
   setLastCloudSave: (timestamp: string) => void;
@@ -253,12 +301,18 @@ export interface SceneSlice {
    */
   loadTemplate: (templateId: string, options?: { timeoutMs?: number }) => Promise<TemplateLoadResult>;
   /**
-   * Persist the live scene, then activate `sceneId`. Async because the scene
-   * has to be read back out of the engine first — resolves once the switch has
-   * happened (or been refused), so callers awaiting it can trust the new state.
+   * Capture the outgoing scene before requesting a switch. Rejection leaves
+   * the outgoing scene active; a thrown dispatch locks saving, attempts rollback,
+   * and persists the already-captured outgoing data with reload guidance.
+   * Prefab rollback is best-effort and a dispatch acceptance is not SCENE_LOADED.
+   *
+   * @param sceneId Stored scene to activate.
+   * @returns Resolves after the accepted switch is recorded or an error is surfaced.
    */
   switchScene: (sceneId: string) => Promise<void>;
+  /** Add an empty scene to the project scene list. */
   createNewScene: (name?: string) => void;
+  /** Delete a stored project scene when allowed. */
   deleteScene: (sceneId: string) => void;
   /** Persist the live scene first, so duplicating the ACTIVE scene copies its current contents. */
   duplicateScene: (sceneId: string) => Promise<void>;
@@ -282,11 +336,14 @@ export interface SceneSlice {
    * confirmed points (the two `applyCheckpointScene` resolutions), never on a
    * merely-accepted dispatch, because acceptance is not confirmation that the
    * engine applied the scene. A refused or thrown load sets it. The recovery
-   * load of the outgoing scene follows the same contract — except it will NOT
-   * clear a lockout raised by the THREW branch, since the capture it re-applies
-   * was taken from a viewport that throw may already have wrecked (#10079).
+   * load preserves a throw lockout that was already present when its prior
+   * capture was taken: that capture may contain wreckage. A throw during this
+   * attempt can be cleared by confirmed recovery of a previously trusted prior.
    * Non-replacing rejections preserve throw provenance across retries; recovery
    * of an untrusted prior capture explicitly restores its original throw lockout.
+   *
+   * @param checkpointId Stored checkpoint to restore.
+   * @returns Whether engine confirmation and active-save commitment succeeded.
    */
   restoreCheckpoint: (checkpointId: string) => Promise<boolean>;
   /** Delete a checkpoint by ID. */
@@ -303,6 +360,11 @@ type DispatchResult = { success: boolean; error?: string } | void;
 
 let dispatchCommand: ((command: string, payload: unknown) => DispatchResult) | null = null;
 
+/**
+ * Attach the engine command dispatcher and matching scene validator.
+ * @param dispatcher Engine dispatch function, or null when detached.
+ * @returns Nothing.
+ */
 export function setSceneDispatcher(
   dispatcher: ((command: string, payload: unknown) => DispatchResult) | null,
 ): void {
@@ -393,6 +455,9 @@ function watchForSceneApplied(
  * Ask the engine to export the active scene. Returns `false` when there is no
  * engine to ask, which `captureActiveScene` reads as "nothing to capture"
  * rather than "asked and got no answer".
+ * @param requestId Optional correlation identifier echoed by the export event.
+ * @returns Whether export dispatch was accepted; no scene data is returned here.
+ * @throws An engine dispatch error.
  */
 export function requestSceneExport(requestId?: string): boolean {
   if (!dispatchCommand) return false;
@@ -602,6 +667,13 @@ function dispatchSceneLoad(json: string): boolean {
   }
 }
 
+/**
+ * Create scene actions and initial state for the combined editor Zustand store.
+ * @param set Combined-store state updater.
+ * @param get Combined-store state reader.
+ * @param api Combined-store subscriptions and lifecycle API.
+ * @returns Initial scene state and bound actions.
+ */
 export const createSceneSlice: StateCreator<
   SceneSlice & TemplateApplyDeps,
   [],
@@ -1086,8 +1158,8 @@ export const createSceneSlice: StateCreator<
         ? get().loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false, strandOnThrow: true })
         : get().newScene();
     } catch (error) {
-      // `loadScene`/`newScene` already rolled back their OWN state (audio,
-      // prefab registry) before rethrowing — see `dispatchSceneLoad`'s catch —
+      // `loadScene`/`newScene` attempted audio and prefab registry rollback
+      // before rethrowing; prefab storage restoration is best-effort —
       // and both have already set `sceneLoadError(ENGINE_LOAD_THREW)` on this
       // throw, so every save path is now locked. What they
       // cannot roll back is this function's own outgoing capture: without the

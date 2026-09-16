@@ -43,6 +43,7 @@ function captureFailure(capture: SceneCapture, action: string): ExecutionResult 
   return { success: false, error: `Could not ${action}: ${capture.reason}` };
 }
 
+/** AI tool handlers that validate arguments and delegate scene operations to the editor store. */
 export const sceneManagementHandlers: Record<string, ToolHandler> = {
   validate_scene: async (args): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ json: z.string().min(1).max(50 * 1024 * 1024) }), args);
@@ -219,8 +220,8 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
         ? ctx.store.loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false, strandOnThrow: true })
         : ctx.store.newScene();
     } catch (error) {
-      // `loadScene`/`newScene` roll back their OWN state (audio, prefab
-      // registry) before rethrowing, but not this handler's captured
+      // `loadScene`/`newScene` attempt audio and best-effort prefab registry
+      // rollback before rethrowing, but not this handler's captured
       // `project` — without persisting it here, a thrown dispatch error
       // skips both `saveProjectScenes` calls below and silently discards the
       // outgoing scene's unsaved work, parity with the store's `switchScene`.
