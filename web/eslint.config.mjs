@@ -350,6 +350,7 @@ const eslintConfig = defineConfig([
       'src/app/**/route.ts',
       'src/app/api/**/*.ts',
       'src/lib/api/**/*.ts',
+      'src/lib/play/notFoundDocument.ts',
       'src/lib/auth/api-auth.ts',
       'src/lib/auth/step-up.ts',
       'src/lib/rateLimit.ts',
