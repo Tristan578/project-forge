@@ -97,9 +97,11 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
         // as a clip in the Music Arrangement editor instead of being a
         // play-only, standalone result, so imported and generated material sit
         // in one editable timeline. `Number.isFinite`, not `||`, so a 0-length
-        // report cannot mask a real duration with a default.
+        // report cannot mask a real duration with a default — but 0 itself is
+        // not a real duration either, matching the `> 0` guard in
+        // `generationHandlers.ts` and `useGenerationPolling.ts` (#10058).
         const durationSeconds =
-          typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds)
+          typeof data.durationSeconds === 'number' && Number.isFinite(data.durationSeconds) && data.durationSeconds > 0
             ? data.durationSeconds
             : duration;
         useMusicArrangementStore.getState().addGeneratedClip({

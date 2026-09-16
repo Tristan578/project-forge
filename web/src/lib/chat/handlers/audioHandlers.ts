@@ -193,6 +193,21 @@ export const audioHandlers: Record<string, ToolHandler> = {
     return { success: true, result: { message: `Set mute on track ${p.data.trackId} to ${p.data.muted}.` } };
   },
 
+  arrangement_rename_track: async (args, _ctx): Promise<ExecutionResult> => {
+    // `.trim().min(1)`, not the store's own trim-and-no-op: a blank (or
+    // whitespace-only) name silently doing nothing would report success
+    // without renaming anything, the same class of gap the trackId-not-found
+    // guards on this object exist to close.
+    const p = parseArgs(z.object({ trackId: z.string().min(1), name: z.string().trim().min(1) }), args);
+    if (p.error) return p.error;
+    const store = useMusicArrangementStore.getState();
+    if (!store.arrangement.tracks.some((t) => t.id === p.data.trackId)) {
+      return { success: false, error: `Arrangement track not found: ${p.data.trackId}` };
+    }
+    store.renameTrack(p.data.trackId, p.data.name);
+    return { success: true, result: { message: `Renamed track ${p.data.trackId} to "${p.data.name.trim()}".` } };
+  },
+
   arrangement_add_clip: async (args, _ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({
       trackId: z.string().min(1),

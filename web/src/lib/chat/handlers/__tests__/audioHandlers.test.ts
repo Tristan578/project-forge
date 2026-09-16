@@ -516,6 +516,28 @@ describe('audioHandlers — music arrangement (in-app AI parity)', () => {
     expect(result.error).toContain('track not found');
   });
 
+  // Parity with the MusicArrangementPanel's rename control (renameTrack, #10058):
+  // without this the AI/MCP path had no way to rename a track at all.
+  it('arrangement_rename_track renames a real track', async () => {
+    const trackId = arr().addTrack('Original');
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_rename_track', { trackId, name: 'Lead Synth' });
+    expect(result.success).toBe(true);
+    expect(arr().arrangement.tracks[0].name).toBe('Lead Synth');
+  });
+
+  it('arrangement_rename_track reports a missing track instead of mutating', async () => {
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_rename_track', { trackId: 'ghost', name: 'Nope' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('track not found');
+  });
+
+  it('arrangement_rename_track rejects a blank name instead of silently no-op-ing', async () => {
+    const trackId = arr().addTrack('Original');
+    const { result } = await invokeHandler(audioHandlers, 'arrangement_rename_track', { trackId, name: '   ' });
+    expect(result.success).toBe(false);
+    expect(arr().arrangement.tracks[0].name).toBe('Original');
+  });
+
   it('arrangement mutations from the AI path are undoable, sharing the panel history', async () => {
     const trackId = arr().addTrack();
     await invokeHandler(audioHandlers, 'arrangement_add_clip', { trackId, sourceUrl: 'a', sourceDurationSeconds: 10 });

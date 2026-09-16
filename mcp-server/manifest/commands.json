@@ -12483,6 +12483,32 @@
       "visibility": "public"
     },
     {
+      "name": "arrangement_rename_track",
+      "description": "Rename a music arrangement track.",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "description": "Arrangement track id to rename"
+          },
+          "name": {
+            "type": "string",
+            "description": "New track name"
+          }
+        },
+        "required": [
+          "trackId",
+          "name"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
       "name": "arrangement_add_clip",
       "description": "Place an imported or generated audio asset as a clip on a music arrangement track.",
       "category": "audio",

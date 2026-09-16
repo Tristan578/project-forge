@@ -1,6 +1,6 @@
 # Command Reference
 
-Reference for all 373 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
+Reference for all 374 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -19,7 +19,7 @@ Reference for all 373 registered MCP commands. Registration does not imply that 
 - [Runtime](#runtime) (12 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
-- [Audio](#audio) (37 commands)
+- [Audio](#audio) (38 commands)
 - [Particles](#particles) (8 commands)
 - [Animation](#animation) (20 commands)
 - [Mesh](#mesh) (11 commands)
@@ -3278,6 +3278,30 @@ Mute or unmute a music arrangement track.
   "params": {
     "trackId": "my_trackId",
     "muted": true
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_rename_track`
+
+Rename a music arrangement track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Arrangement track id to rename |
+| `name` | string | Yes | New track name |
+
+**Example:**
+```json
+{
+  "command": "arrangement_rename_track",
+  "params": {
+    "trackId": "my_trackId",
+    "name": "my_name"
   }
 }
 ```

@@ -141,6 +141,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "arrangement_rename_track",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "arrangement_set_loop",
       "category": "audio",
       "requiredScope": "scene:write"
