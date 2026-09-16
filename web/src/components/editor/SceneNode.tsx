@@ -13,33 +13,62 @@ import { useEditorStore, type SceneNode as SceneNodeData } from '@/stores/editor
 import type { DropTarget, DropZone } from '@/lib/dndUtils';
 import { HighlightedText } from './HighlightedText';
 
+/** Recursive entity row data, shared rename/focus state and interaction callbacks. */
 interface SceneNodeProps {
+  /** Entity record rendered by this row. */
   node: SceneNodeData;
+  /** Zero-based nesting depth used for indentation and aria-level. */
   depth: number;
+  /** Opens actions for this row at the supplied pointer position. */
   onContextMenu: (data: {
     entityId: string;
     entityName: string;
     position: { x: number; y: number };
   }) => void;
+  /** Enables editing when this row is rendered without a shared edit target. */
   isEditing?: boolean;
+  /** Shared recursive rename target: undefined uses standalone isEditing; null disables editing. */
+  editingEntityId?: string | null;
+  /** Receives a trimmed name to commit, or null to cancel/ignore an empty name. */
   onEditComplete?: (newName: string | null) => void;
   // Drag-related props
+  /** Whether a hierarchy drag interaction is active. */
   isDragging?: boolean;
+  /** Entity currently being moved, or null. */
   draggedEntityId?: string | null;
+  /** Entities that cannot receive the dragged entity. */
   invalidTargetIds?: Set<string>;
+  /** Current applicable drop target and zone. */
   dropTarget?: DropTarget | null;
+  /** Begins dragging the supplied entity identity/name. */
   onDragStart?: (entityId: string, entityName: string) => void;
+  /** Ends the active hierarchy drag. */
   onDragEnd?: () => void;
+  /** Updates the candidate target, drop zone and nesting depth. */
   onDragOver?: (entityId: string, zone: DropZone, depth: number) => void;
+  /** Completes a drop on the supplied entity. */
   onDrop?: (entityId: string) => void;
   // Filter-related props
+  /** Optional search text highlighted within entity names. */
   filterTerm?: string;
+  /** Optional entities whose names match the current search. */
   matchingIds?: Set<string>;
+  /** Optional filter membership used to omit nonvisible descendants. */
   visibleIds?: Set<string>;
   // Keyboard navigation props
+  /** Entity to highlight and scroll into view; parent moves DOM focus separately. */
   focusedEntityId?: string | null;
+  /** Requests a controlled expansion toggle for the supplied entity. */
   onToggleExpand?: (entityId: string) => void;
+  /** Controlled expanded entities; omitted uses local state, initially expanded. */
   expandedIds?: Set<string>;
+  /**
+   * The entity id that currently holds the roving tabindex. Exactly one visible
+   * row has tabIndex=0; every other row has tabIndex=-1 (ARIA tree pattern).
+   */
+  rovingActiveId?: string | null;
+  /** Called when DOM focus lands on this row (keeps the roving index in sync). */
+  onRowFocus?: (entityId: string) => void;
 }
 
 // Icon mapping based on component types or entity names
@@ -69,11 +98,19 @@ function EntityIcon({ type, className }: { type: 'camera' | 'sun' | 'layers' | '
   }
 }
 
+/**
+ * Renders an entity and its expanded, filtered descendants. Shared edit/focus
+ * state and callbacks propagate recursively so child renames target the same
+ * owner; the text input isolates keys from entity commands.
+ * @param props Entity/depth, interaction callbacks and optional shared tree state.
+ * @returns An accessible treeitem, row controls and optional child group.
+ */
 export function SceneNode({
   node,
   depth,
   onContextMenu,
-  isEditing = false,
+  isEditing: standaloneIsEditing = false,
+  editingEntityId,
   onEditComplete,
   isDragging,
   draggedEntityId,
@@ -89,6 +126,8 @@ export function SceneNode({
   focusedEntityId,
   onToggleExpand,
   expandedIds,
+  rovingActiveId,
+  onRowFocus,
 }: SceneNodeProps) {
   // Use external expanded state if provided, otherwise local state
   const [localExpanded, setLocalExpanded] = useState(true);
@@ -97,7 +136,10 @@ export function SceneNode({
   const rowRef = useRef<HTMLDivElement>(null);
   // Use a lazy initializer to avoid the linter warning
   const [editValue, setEditValue] = useState(() => node.name);
-  const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
+  const [editSessionEntityId, setEditSessionEntityId] = useState<string | null>(null);
+  const isEditing = editingEntityId !== undefined
+    ? editingEntityId === node.entityId
+    : standaloneIsEditing;
 
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const primaryId = useEditorStore((s) => s.primaryId);
@@ -120,17 +162,35 @@ export function SceneNode({
     }
   }, [isFocused]);
 
+  // Roving tabindex: exactly one visible row is in the tab order at a time.
+  // Fall back to isFocused only when no explicit roving id is supplied (e.g.
+  // SceneNode rendered in isolation).
+  const isRovingActive =
+    rovingActiveId != null ? rovingActiveId === node.entityId : isFocused;
+
+  // Sync the roving index when focus lands on THIS row (including its own
+  // icon-only controls), but ignore focus bubbling up from a descendant row.
+  const handleRowFocus = useCallback(
+    (e: React.FocusEvent<HTMLDivElement>) => {
+      const owner = (e.target as HTMLElement).closest('[data-tree-entity-id]');
+      if (owner?.getAttribute('data-tree-entity-id') === node.entityId) {
+        onRowFocus?.(node.entityId);
+      }
+    },
+    [node.entityId, onRowFocus],
+  );
+
   // Drag state
   const isInvalidTarget = invalidTargetIds?.has(node.entityId) ?? false;
   const isBeingDragged = draggedEntityId === node.entityId;
   const isDropTarget = dropTarget?.entityId === node.entityId;
 
   // Track when editing starts for a specific entity
-  if (isEditing && editingEntityId !== node.entityId) {
-    setEditingEntityId(node.entityId);
+  if (isEditing && editSessionEntityId !== node.entityId) {
+    setEditSessionEntityId(node.entityId);
     setEditValue(node.name);
-  } else if (!isEditing && editingEntityId === node.entityId) {
-    setEditingEntityId(null);
+  } else if (!isEditing && editSessionEntityId === node.entityId) {
+    setEditSessionEntityId(null);
   }
 
   // Focus input when editing starts
@@ -206,6 +266,9 @@ export function SceneNode({
 
   const handleEditKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Text editing owns its keys; Delete, Enter and context-menu shortcuts
+      // must not bubble into the hierarchy's entity commands.
+      e.stopPropagation();
       if (e.key === 'Enter') {
         e.preventDefault();
         onEditComplete?.(editValue.trim() || null);
@@ -267,9 +330,11 @@ export function SceneNode({
     onDrop?.(node.entityId);
   }, [isInvalidTarget, isBeingDragged, node.entityId, onDrop]);
 
-  // Get selection styling
+  // Get selection styling. The focus ring is driven by React state (not
+  // :focus-visible) so it renders reliably for programmatic/keyboard focus,
+  // which the browser does not always treat as focus-visible (lesson #11).
   const getSelectionClasses = () => {
-    const focus = isFocused ? ' ring-1 ring-blue-400/60 ring-inset' : '';
+    const focus = isFocused ? ' ring-2 ring-inset ring-[var(--sf-accent)]' : '';
     if (isPrimary) {
       return 'bg-blue-600/30 border-l-2 border-blue-500' + focus;
     }
@@ -308,7 +373,10 @@ export function SceneNode({
       aria-expanded={hasChildren ? isExpanded : undefined}
       aria-level={depth + 1}
       aria-label={node.name}
-      className={getVisibilityClasses()}
+      data-tree-entity-id={node.entityId}
+      tabIndex={isRovingActive ? 0 : -1}
+      onFocus={handleRowFocus}
+      className={`outline-none ${getVisibilityClasses()}`}
     >
       {/* Drop indicator BEFORE */}
       {isDropTarget && dropTarget?.zone === 'before' && (
@@ -332,12 +400,17 @@ export function SceneNode({
       >
         {/* Expand/collapse chevron */}
         <button
-          className={`w-4 h-4 flex items-center justify-center text-neutral-500 hover:text-neutral-300 ${
+          className={`w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)] ${
             !hasChildren ? 'invisible' : ''
           }`}
           onClick={handleExpandClick}
           aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
-          tabIndex={hasChildren ? 0 : -1}
+          // ARIA tree is a composite widget with a single tab stop (the roving
+          // treeitem). Descendant controls must NOT be independent page Tab
+          // stops on every row, which would defeat the roving tabindex — so the
+          // chevron is unconditionally -1 and driven by the row's Arrow keys
+          // (Right expands, Left collapses) plus pointer clicks.
+          tabIndex={-1}
         >
           {isExpanded ? (
             <ChevronDown className="w-3 h-3" />
@@ -348,12 +421,16 @@ export function SceneNode({
 
         {/* Visibility toggle */}
         <button
-          className="w-4 h-4 flex items-center justify-center text-neutral-500 hover:text-neutral-300"
+          className="w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
           onClick={handleVisibilityClick}
           title={node.visible ? 'Hide entity' : 'Show entity'}
           aria-label={node.visible ? `Hide ${node.name}` : `Show ${node.name}`}
           aria-pressed={!node.visible}
-          tabIndex={0}
+          // Single-tab-stop tree: the eye toggle is not an independent Tab stop
+          // on every row. Keyboard users toggle visibility with the "V" key on
+          // the focused row (see SceneHierarchy handleKeyDown); pointer users
+          // click it directly.
+          tabIndex={-1}
         >
           {node.visible ? (
             <Eye className="w-3 h-3" />
@@ -370,6 +447,7 @@ export function SceneNode({
           <input
             ref={inputRef}
             type="text"
+            aria-label={`Rename ${node.name}`}
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={handleEditKeyDown}
@@ -414,7 +492,7 @@ export function SceneNode({
                   node={childNode}
                   depth={depth + 1}
                   onContextMenu={onContextMenu}
-                  isEditing={editingEntityId === childId}
+                  editingEntityId={editingEntityId}
                   onEditComplete={onEditComplete}
                   isDragging={isDragging}
                   draggedEntityId={draggedEntityId}
@@ -430,6 +508,8 @@ export function SceneNode({
                   focusedEntityId={focusedEntityId}
                   onToggleExpand={onToggleExpand}
                   expandedIds={expandedIds}
+                  rovingActiveId={rovingActiveId}
+                  onRowFocus={onRowFocus}
                 />
               );
             })}

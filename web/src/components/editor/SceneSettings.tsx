@@ -1,3 +1,4 @@
+/** Scene-wide lighting, environment, post-processing, quality and bridge-tool settings. */
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
@@ -15,6 +16,11 @@ const sliderClass = `h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-7
   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
   [&::-webkit-slider-thumb]:bg-zinc-300`;
 
+/**
+ * Edits scene-wide settings through editor/workspace stores. The panel marks
+ * its existing form controls as deferred from the Inspector-chrome axe audit.
+ * @returns Scene settings controls and the optional skybox-generation dialog.
+ */
 export function SceneSettings() {
   const [colorGradingSection, setColorGradingSection] = useState<'shadows' | 'midtones' | 'highlights'>('midtones');
   const [generateSkyboxOpen, setGenerateSkyboxOpen] = useState(false);
@@ -92,7 +98,13 @@ export function SceneSettings() {
   );
 
   return (
-    <div className="space-y-4">
+    // data-a11y-defer marks this pre-existing scene-settings panel as deferred
+    // from the hierarchy/inspector a11y slice (#9875). Its ~40 post-processing
+    // form controls (color/range/select) predate this slice and are labelled by
+    // adjacent-but-unassociated <label>s; the E2E axe audits exclude this
+    // subtree so they gate the Inspector chrome + Hierarchy this slice hardens,
+    // not this unrelated panel. Tracked for a dedicated SceneSettings a11y pass.
+    <div className="space-y-4" data-a11y-defer="scene-settings">
       {/* Scene Statistics */}
       <SceneStatistics />
 

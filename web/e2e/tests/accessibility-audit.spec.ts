@@ -12,6 +12,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from '../fixtures/editor.fixture';
 import type { Page } from '@playwright/test';
+import type { useEditorStore } from '@/stores/editorStore';
 import {
   E2E_TIMEOUT_SHORT_MS,
   E2E_TIMEOUT_ELEMENT_MS,
@@ -31,7 +32,22 @@ import { waitForHydration } from '../helpers/wait-helpers';
  * Build a scoped AxeBuilder targeting WCAG 2.1 A + AA rules.
  * Always excludes:
  *   - canvas/WebGL content (not DOM — axe cannot audit it)
- *   - third-party dockview panels (we don't own that HTML)
+ *   - verified third-party Dockview *chrome* only: the tab strip / action bar
+ *     (`.dv-tabs-and-actions-container`) and the split/resize handles
+ *     (`.dv-sash`, `.dv-resize-container`). We do not own that markup; any
+ *     violations in it are tracked by #9677.
+ *   - the deferred `[data-a11y-defer="scene-settings"]` panel: SceneSettings'
+ *     ~40 post-processing color/range/select controls predate this slice
+ *     (#9875, which hardens the Hierarchy + Inspector *chrome*) and use
+ *     adjacent-but-unassociated <label>s. Auditing them here would gate this
+ *     slice on unrelated pre-existing markup; a dedicated SceneSettings a11y
+ *     pass is tracked separately.
+ *
+ * The previous blanket `.exclude('.dv-dockview')` also exempted SpawnForge's
+ * OWN panel content (Scene Hierarchy, Inspector), which renders inside the
+ * dockview content area — so those panels were never audited. Narrowing the
+ * exclusion to the third-party chrome above brings first-party panel markup
+ * back under axe (localization.FR-2.OP-04).
  *
  * Disables color-contrast globally because the zinc dark theme is
  * intentional; violations are tracked separately as PF-572.
@@ -41,7 +57,10 @@ function buildAxe(page: Page): AxeBuilder {
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .disableRules(['color-contrast'])
     .exclude('[data-testid="canvas-area"]')
-    .exclude('.dv-dockview');
+    .exclude('.dv-tabs-and-actions-container')
+    .exclude('.dv-sash')
+    .exclude('.dv-resize-container')
+    .exclude('[data-a11y-defer="scene-settings"]');
 }
 
 /**
@@ -109,6 +128,96 @@ test.describe('Accessibility Audit — Editor @ui @dev', () => {
 
     // Passes: zero is the target, but moderate/minor are not blocked.
     expect(results.violations).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scene Hierarchy + Inspector (localization.FR-2.OP-01 / OP-04)
+//
+// Scoped directly to the two first-party panels this slice hardens, so the
+// gate is independent of any pre-existing violations elsewhere in the editor.
+// These panels render inside the dockview content area and were previously
+// exempted by the blanket `.dv-dockview` exclusion (now narrowed above).
+// ---------------------------------------------------------------------------
+
+test.describe('Accessibility Audit — Hierarchy & Inspector @ui @dev', () => {
+  test.beforeEach(async ({ editor, page }) => {
+    await editor.loadPage();
+    await editor.waitForEditorStore();
+    await page.evaluate(() => {
+      const store = (window as Window & {
+        __EDITOR_STORE?: Pick<typeof useEditorStore, 'setState'>;
+      }).__EDITOR_STORE;
+      if (!store) throw new Error('Populated accessibility audit requires the editor store');
+      store.setState({
+        sceneGraph: {
+          rootIds: ['audit-parent'],
+          nodes: {
+            'audit-parent': { entityId: 'audit-parent', name: 'Audit Parent', visible: true, parentId: null, children: ['audit-child'], components: [] },
+            'audit-child': { entityId: 'audit-child', name: 'Audit Child', visible: true, parentId: 'audit-parent', children: [], components: [] },
+          },
+        },
+        selectedIds: new Set(['audit-child']),
+        primaryId: 'audit-child',
+        primaryName: 'Audit Child',
+        primaryTransform: { entityId: 'audit-child', position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      });
+    });
+  });
+
+  test('scene hierarchy has zero critical or serious axe violations', async ({
+    page,
+  }) => {
+    const tree = page.locator('[role="tree"][aria-label="Scene hierarchy"]');
+    await expect(tree).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    await expect(tree.getByRole('treeitem', { name: 'Audit Parent' })).toBeVisible();
+    await expect(tree.getByRole('treeitem', { name: 'Audit Child' })).toBeVisible();
+
+    const results = await new AxeBuilder({ page })
+      .include('[role="tree"][aria-label="Scene hierarchy"]')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .disableRules(['color-contrast'])
+      .analyze();
+
+    const criticalOrSerious = results.violations.filter(
+      (v) => v.impact === 'critical' || v.impact === 'serious',
+    );
+
+    expect(
+      criticalOrSerious,
+      `Scene hierarchy axe violations:\n${violationSummary(criticalOrSerious)}`,
+    ).toHaveLength(0);
+  });
+
+  test('inspector panel has zero critical or serious axe violations', async ({
+    page,
+  }) => {
+    const inspector = page.locator('[role="region"][aria-label="Inspector"]');
+    await expect(inspector.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    await expect(inspector.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Audit Child');
+    await expect(inspector.getByRole('button', { name: 'Copy transform', exact: true })).toBeVisible();
+    await expect(inspector.getByRole('button', { name: 'Paste transform', exact: true })).toBeVisible();
+    await inspector.getByRole('button', { name: 'Copy transform', exact: true }).focus();
+
+    // Exclude the deferred SceneSettings panel (rendered in the Inspector's
+    // no-selection state); its pre-existing form-control labelling is outside
+    // this slice — see buildAxe()'s doc comment. The Inspector chrome and the
+    // labelled InputBindings panel remain audited.
+    const results = await new AxeBuilder({ page })
+      .include('[role="region"][aria-label="Inspector"]')
+      .exclude('[data-a11y-defer="scene-settings"]')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .disableRules(['color-contrast'])
+      .analyze();
+
+    const criticalOrSerious = results.violations.filter(
+      (v) => v.impact === 'critical' || v.impact === 'serious',
+    );
+
+    expect(
+      criticalOrSerious,
+      `Inspector panel axe violations:\n${violationSummary(criticalOrSerious)}`,
+    ).toHaveLength(0);
   });
 });
 

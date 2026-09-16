@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { flattenVisibleNodes } from '../SceneHierarchy';
+import { flattenVisibleNodes, computeNavIndex } from '../SceneHierarchy';
 import type { SceneGraph } from '@/stores/editorStore';
 
 function makeGraph(nodes: Record<string, { name: string; parentId: string | null; children: string[] }>): SceneGraph {
@@ -94,5 +94,61 @@ describe('flattenVisibleNodes', () => {
     });
     const result = flattenVisibleNodes(multiRootGraph.rootIds, multiRootGraph, new Set(['x', 'y', 'z']));
     expect(result).toEqual(['x', 'y', 'z']);
+  });
+});
+
+describe('computeNavIndex (roving tabindex movement)', () => {
+  const LEN = 5; // indices 0..4
+
+  it('ArrowDown advances by one', () => {
+    expect(computeNavIndex('ArrowDown', 0, LEN)).toBe(1);
+    expect(computeNavIndex('ArrowDown', 3, LEN)).toBe(4);
+  });
+
+  it('ArrowDown wraps from last to first', () => {
+    expect(computeNavIndex('ArrowDown', LEN - 1, LEN)).toBe(0);
+  });
+
+  it('ArrowDown from "no focus" (-1) lands on the first row', () => {
+    expect(computeNavIndex('ArrowDown', -1, LEN)).toBe(0);
+  });
+
+  it('ArrowUp retreats by one', () => {
+    expect(computeNavIndex('ArrowUp', 3, LEN)).toBe(2);
+    expect(computeNavIndex('ArrowUp', 1, LEN)).toBe(0);
+  });
+
+  it('ArrowUp wraps from first to last', () => {
+    expect(computeNavIndex('ArrowUp', 0, LEN)).toBe(LEN - 1);
+  });
+
+  it('Home jumps to the first row regardless of current index', () => {
+    expect(computeNavIndex('Home', 4, LEN)).toBe(0);
+    expect(computeNavIndex('Home', 0, LEN)).toBe(0);
+    expect(computeNavIndex('Home', -1, LEN)).toBe(0);
+  });
+
+  it('End jumps to the last row regardless of current index', () => {
+    expect(computeNavIndex('End', 0, LEN)).toBe(LEN - 1);
+    expect(computeNavIndex('End', 2, LEN)).toBe(LEN - 1);
+  });
+
+  it('returns null for keys it does not handle', () => {
+    expect(computeNavIndex('Enter', 0, LEN)).toBeNull();
+    expect(computeNavIndex('ArrowRight', 0, LEN)).toBeNull();
+    expect(computeNavIndex('a', 0, LEN)).toBeNull();
+  });
+
+  it('returns null for an empty list', () => {
+    expect(computeNavIndex('ArrowDown', -1, 0)).toBeNull();
+    expect(computeNavIndex('Home', -1, 0)).toBeNull();
+    expect(computeNavIndex('End', -1, 0)).toBeNull();
+  });
+
+  it('handles a single-row list', () => {
+    expect(computeNavIndex('ArrowDown', 0, 1)).toBe(0);
+    expect(computeNavIndex('ArrowUp', 0, 1)).toBe(0);
+    expect(computeNavIndex('Home', 0, 1)).toBe(0);
+    expect(computeNavIndex('End', 0, 1)).toBe(0);
   });
 });
