@@ -89,7 +89,8 @@ export function computeNavIndex(
  * when empty), visible-row arrow navigation and entity keyboard commands.
  * Inline rename owns its keys and restores row focus on completion/cancellation.
  * Removing a focused row restores a visible row or the empty tree without
- * stealing connected search/Inspector focus; only unmodified V changes visibility.
+ * stealing connected search/Inspector focus; V without Ctrl, Meta or Alt changes
+ * visibility (Shift+V is also accepted).
  * @returns The named hierarchy tree, search and entity context menu.
  */
 export const SceneHierarchy = memo(function SceneHierarchy() {
