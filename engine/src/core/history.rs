@@ -18,6 +18,7 @@ use super::particles::ParticleData;
 use super::pending_commands::EntityType;
 use super::physics::{JointData, PhysicsData};
 use super::physics_2d::{PhysicsJoint2d, Physics2dData};
+use super::quality::QualitySettings;
 use super::scripting::ScriptData;
 use super::shader_effects::ShaderEffectData;
 use super::lod::LodData;
@@ -454,6 +455,20 @@ pub enum UndoableAction {
         new_skeleton: Option<SkeletonData2d>,
         new_enabled: bool,
     },
+
+    /// Global rendering quality profile changed.
+    ///
+    /// Unlike every other action here this one targets a global `Resource`
+    /// (`QualitySettings`), not an entity — so the whole settings struct is
+    /// stored on both sides rather than a per-entity delta. A preset change
+    /// rewrites MSAA, shadows, post-processing and particle density together;
+    /// storing the two full snapshots makes reverting exact regardless of which
+    /// fields the preset touched. Applied by `apply_undo_requests` /
+    /// `apply_redo_requests`, which hold `ResMut<QualitySettings>`.
+    QualityChange {
+        old_settings: QualitySettings,
+        new_settings: QualitySettings,
+    },
 }
 
 impl UndoableAction {
@@ -508,6 +523,7 @@ impl UndoableAction {
             UndoableAction::Joint2dChange { .. } => "2D Joint Change".to_string(),
             UndoableAction::TilemapChange { .. } => "Tilemap Change".to_string(),
             UndoableAction::SkeletonChange { .. } => "Skeleton 2D Change".to_string(),
+            UndoableAction::QualityChange { .. } => "Quality Change".to_string(),
         }
     }
 }

@@ -33,6 +33,7 @@ use crate::core::lighting::LightData;
 use crate::core::material::MaterialData;
 use crate::core::particles::{ParticleData, ParticleEnabled};
 use crate::core::physics::{JointData, PhysicsData, PhysicsEnabled};
+use crate::core::quality::QualitySettings;
 use crate::core::physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d};
 use crate::core::scripting::ScriptData;
 use crate::core::shader_effects::ShaderEffectData;
@@ -77,6 +78,9 @@ fn loaded_world() -> World {
     world.insert_resource(HistoryStack::default());
     world.insert_resource(Assets::<Mesh>::default());
     world.insert_resource(Assets::<StandardMaterial>::default());
+    // The undo/redo arms now read `ResMut<QualitySettings>` to service a
+    // `QualityChange`; a schedule that fetches a missing resource panics.
+    world.insert_resource(QualitySettings::default());
     world.spawn((
         EntityId(ENTITY.to_string()),
         EntityName(ENTITY.to_string()),
