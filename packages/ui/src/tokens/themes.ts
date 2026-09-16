@@ -1,3 +1,4 @@
+/** Complete built-in theme palettes and generated CSS, including verified status color pairs. */
 import { THEME_NAMES, type ThemeName, type ThemeTokens } from './colors';
 
 const BASE_STRUCTURE: Pick<ThemeTokens, '--sf-radius-sm' | '--sf-radius-full' | '--sf-font-mono'> = {
@@ -36,6 +37,7 @@ const STATUS_COLORS: Pick<
   '--sf-status-unknown-fg': '#ffffff',
 };
 
+/** Complete built-in palettes; every theme includes the shared readable status pairs. */
 export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
   dark: {
     ...BASE_STRUCTURE,

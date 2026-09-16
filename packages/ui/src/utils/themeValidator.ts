@@ -1,3 +1,4 @@
+/** Validate imported custom theme metadata and allowlisted CSS token values. */
 import type { ThemeTokens } from '../tokens';
 
 const CURRENT_SCHEMA_VERSION = 1;

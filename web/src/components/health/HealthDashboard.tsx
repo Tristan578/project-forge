@@ -1,3 +1,4 @@
+/** Public service status dashboard with cached report polling and retry recovery. */
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -6,6 +7,7 @@ import type { HealthReport, ServiceHealth } from '@/lib/monitoring/healthChecks'
 import { HEALTH_CACHE_TTL_MS } from '@/lib/config/timeouts';
 import { ServiceStatusCard } from './ServiceStatusCard';
 
+/** Initial server report, or a nullable shell that the client fills by polling. */
 interface HealthDashboardProps {
   /**
    * The server-rendered report, or `null` when the server declined to pay for a
@@ -99,6 +101,13 @@ function overallLabel(overall: HealthReport['overall']): string {
   }
 }
 
+/**
+ * Displays the initial service report and refreshes it at the health cache TTL.
+ * A null report starts an immediate client request and exposes Retry; failed
+ * refreshes retain the last report, and pending requests disable the controls.
+ * @param props Nullable initial server report for the public dashboard.
+ * @returns A loading/retry shell or a live status banner and service cards.
+ */
 export function HealthDashboard({ initialReport }: HealthDashboardProps) {
   const [report, setReport] = useState<HealthReport | null>(initialReport);
   const [refreshing, setRefreshing] = useState(false);

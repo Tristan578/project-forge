@@ -1,3 +1,4 @@
+/** Complete built-in theme palettes and generated CSS, including verified status color pairs. */
 import { THEME_NAMES } from './colors';
 const BASE_STRUCTURE = {
     '--sf-radius-sm': '4px',
@@ -23,6 +24,7 @@ const STATUS_COLORS = {
     '--sf-status-unknown-bg': '#52525b',
     '--sf-status-unknown-fg': '#ffffff',
 };
+/** Complete built-in palettes; every theme includes the shared readable status pairs. */
 export const THEME_DEFINITIONS = {
     dark: {
         ...BASE_STRUCTURE,

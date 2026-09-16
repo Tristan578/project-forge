@@ -1,3 +1,4 @@
+/** Type-safe design token names and the built-in theme catalog. */
 export declare const THEME_NAMES: readonly ["dark", "light", "ember", "rust", "ice", "leaf", "mech"];
 export type ThemeName = (typeof THEME_NAMES)[number];
 /** All semantic color tokens. Values are static hex strings (WCAG AA verified). */
