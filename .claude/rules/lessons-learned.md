@@ -695,3 +695,17 @@ test passed while five channels leaked.
   not only the source.
 
 **Ticket:** #9736
+
+### 22. Cached binaries depend on the build recipe as well as the source
+**Applies:** engine-wasm-cache-key|verify-engine-wasm|.github/workflows/cd.yml
+**What happens:** A workflow-only feature or bindgen change restores old WASM and
+skips the changed build. An arbitrary non-empty module can also pass a filename
+check and enter an immutable cache while the browser's real dependency is missing.
+**Why:** The new four-variant key hashed source trees but omitted the CD recipe.
+The completeness gate checked any non-empty *.wasm rather than the exact module
+and its validity. Existing cache contents cannot be replaced under the same key.
+**Prevention:** Include recipe identity in the four-variant key, preserving legacy
+consumer keys when required. Validate forge_engine_bg.wasm with WebAssembly.validate
+and syntax-check the glue before every save/upload. Exercise the production CLI
+with valid, wrong-filename, missing-glue and corrupted-module fixtures.
+**Ticket:** #9525
