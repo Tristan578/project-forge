@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 360 MCP commands available in SpawnForge.
+Reference for all 374 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -19,7 +19,7 @@ Complete reference for all 360 MCP commands available in SpawnForge.
 - [Runtime](#runtime) (12 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
-- [Audio](#audio) (28 commands)
+- [Audio](#audio) (38 commands)
 - [Particles](#particles) (8 commands)
 - [Animation](#animation) (20 commands)
 - [Mesh](#mesh) (11 commands)
@@ -27,7 +27,7 @@ Complete reference for all 360 MCP commands available in SpawnForge.
 - [Export](#export) (6 commands)
 - [Documentation](#documentation) (3 commands)
 - [Shaders](#shaders) (10 commands)
-- [Prefab](#prefab) (5 commands)
+- [Prefab](#prefab) (9 commands)
 - [Game_components](#game_components) (5 commands)
 - [Game_cameras](#game_cameras) (4 commands)
 - [Generation](#generation) (24 commands)
@@ -1588,7 +1588,7 @@ Scope: `scene:read` | Token cost: 0
 
 ### `get_input_bindings`
 
-Get all current input action bindings and active preset
+Get all current input action bindings and active preset, including any additional local players' maps under `players`
 
 **Example:**
 ```json
@@ -1886,6 +1886,7 @@ Create or update an input action binding (e.g. map 'jump' to Space key)
 | `positiveKeys` | string[] | No | Positive direction keys for axis actions |
 | `negativeKeys` | string[] | No | Negative direction keys for axis actions |
 | `deadZone` | number | No | Dead zone for axis (default 0.1) |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -1909,6 +1910,7 @@ Remove an input action binding by name
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `actionName` | string | Yes | Name of the action to remove |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -1926,11 +1928,12 @@ Scope: `scene:write` | Token cost: 0
 
 ### `set_input_preset`
 
-Apply a built-in input preset (replaces all bindings)
+Merge a built-in input preset into a player's bindings (additive; the preset's own actions win on name collisions)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `preset` | `"fps"` \| `"platformer"` \| `"topdown"` \| `"racing"` | Yes | Preset name |
+| `player` | integer | No | Local-player slot (0 = primary player, the default). Set 1 for a second local player's independent action map; omit for single-player. |
 
 **Example:**
 ```json
@@ -3209,6 +3212,243 @@ Enable or disable raycasting-based audio occlusion (low-pass filtering when geom
   "params": {
     "entityId": "entity_1",
     "enabled": true
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_add_track`
+
+Add a track (lane) to the music arrangement editor. Manual/AI parity with the Music Arrangement panel.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | Optional track name; auto-named 'Track N' when omitted |
+
+**Example:**
+```json
+{
+  "command": "arrangement_add_track",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_delete_track`
+
+Delete a music arrangement track and every clip on it. Undoable in the arrangement editor.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Arrangement track id to delete |
+
+**Example:**
+```json
+{
+  "command": "arrangement_delete_track",
+  "params": {
+    "trackId": "my_trackId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_set_track_muted`
+
+Mute or unmute a music arrangement track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Arrangement track id to mute or unmute |
+| `muted` | boolean | Yes | Whether the track is silenced in the arrangement |
+
+**Example:**
+```json
+{
+  "command": "arrangement_set_track_muted",
+  "params": {
+    "trackId": "my_trackId",
+    "muted": true
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_rename_track`
+
+Rename a music arrangement track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Arrangement track id to rename |
+| `name` | string | Yes | New track name |
+
+**Example:**
+```json
+{
+  "command": "arrangement_rename_track",
+  "params": {
+    "trackId": "my_trackId",
+    "name": "my_name"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_add_clip`
+
+Place an imported or generated audio asset as a clip on a music arrangement track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `trackId` | string | Yes | Track to place the clip on |
+| `sourceUrl` | string | Yes | Audio asset name/id the clip plays from |
+| `sourceDurationSeconds` | number | Yes | Full source length in seconds (the trim ceiling) |
+| `startOffset` | number | No | Seconds along the timeline where the clip begins (default 0) |
+| `name` | string | No | Optional clip label; defaults to the source name |
+
+**Example:**
+```json
+{
+  "command": "arrangement_add_clip",
+  "params": {
+    "trackId": "my_trackId",
+    "sourceUrl": "my_sourceUrl",
+    "sourceDurationSeconds": 1
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_move_clip`
+
+Move a music arrangement clip along its timeline and optionally to another track.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to move |
+| `startOffset` | number | Yes | New timeline position in seconds (clamped to >= 0) |
+| `trackId` | string | No | Optional target track id; ignored when the track is unknown |
+
+**Example:**
+```json
+{
+  "command": "arrangement_move_clip",
+  "params": {
+    "clipId": "my_clipId",
+    "startOffset": 1
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_trim_clip`
+
+Adjust a music arrangement clip's trimmed source window (clamped to legal bounds).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to trim |
+| `trimStart` | number | No | Seconds into the source where playback starts |
+| `trimEnd` | number | No | Seconds into the source where playback ends |
+
+**Example:**
+```json
+{
+  "command": "arrangement_trim_clip",
+  "params": {
+    "clipId": "my_clipId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_set_loop`
+
+Toggle looping on a music arrangement clip and optionally set its loop window.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to update |
+| `loopEnabled` | boolean | Yes | Whether the trimmed window repeats to fill its duration |
+| `trimStart` | number | No | Optional loop-window start in seconds |
+| `trimEnd` | number | No | Optional loop-window end in seconds |
+
+**Example:**
+```json
+{
+  "command": "arrangement_set_loop",
+  "params": {
+    "clipId": "my_clipId",
+    "loopEnabled": true
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_delete_clip`
+
+Delete a clip from the music arrangement. Undoable in the arrangement editor.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clipId` | string | Yes | Clip to delete |
+
+**Example:**
+```json
+{
+  "command": "arrangement_delete_clip",
+  "params": {
+    "clipId": "my_clipId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `arrangement_set_tempo`
+
+Set the music arrangement tempo in beats per minute (clamped to 20-400).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `bpm` | number | Yes | Tempo in BPM (20-400) |
+
+**Example:**
+```json
+{
+  "command": "arrangement_set_tempo",
+  "params": {
+    "bpm": 1
   }
 }
 ```
@@ -4829,6 +5069,99 @@ Scope: `scene:read` | Token cost: 0
 
 ---
 
+### `create_prefab_instance`
+
+Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `overrides` | object | No | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `entityId` | string | No | Reserved for future linked prefab editing; this command currently makes no changes. |
+
+**Example:**
+```json
+{
+  "command": "create_prefab_instance",
+  "params": {
+    "prefabId": "my_prefabId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `nest_prefab`
+
+Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `parentPrefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `childPrefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+| `overrides` | object | No | Reserved for future linked prefab editing; this command currently makes no changes. |
+
+**Example:**
+```json
+{
+  "command": "nest_prefab",
+  "params": {
+    "parentPrefabId": "my_parentPrefabId",
+    "childPrefabId": "my_childPrefabId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `apply_prefab_to_instances`
+
+Unavailable compatibility command: linked prefab placement, nesting, and propagation are not implemented. Returns an unavailable error without changing scene or library state. Use instantiate_prefab for an independent flat copy.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prefabId` | string | Yes | Reserved for future linked prefab editing; this command currently makes no changes. |
+
+**Example:**
+```json
+{
+  "command": "apply_prefab_to_instances",
+  "params": {
+    "prefabId": "my_prefabId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `list_prefab_instances`
+
+Inspect saved editor link metadata for a prefab by ID or name, including overridden field names. Records do not verify scene entity placement or propagation. This read is not advertised to the in-app chat model.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prefabId` | string | Yes | Source prefab whose instances to list |
+
+**Example:**
+```json
+{
+  "command": "list_prefab_instances",
+  "params": {
+    "prefabId": "my_prefabId"
+  }
+}
+```
+
+Scope: `scene:read` | Token cost: 0
+
+---
+
 ## Game_components
 
 ### `add_game_component`
@@ -5797,6 +6130,7 @@ Add a widget to a UI screen
 | `width` | number | No | Width (0-100%) |
 | `height` | number | No | Height (0-100%) |
 | `anchor` | `"top_left"` \| `"top_center"` \| `"top_right"` \| `"center_left"` \| `"center"` \| `"center_right"` \| `"bottom_left"` \| `"bottom_center"` \| `"bottom_right"` | No |  |
+| `constraints` | object | No | Responsive layout constraints (ui.FR-1.OP-01). Pixel offsets from the anchor plus optional min/max pixel size bounds. Omitted sub-fields are preserved when updating an existing widget; bounds keep core actions tappable (e.g. 44px) from mobile to desktop. |
 | `parentWidgetId` | string | No | Parent widget ID for nesting |
 | `config` | object | No | Type-specific configuration |
 | `style` | object | No | Style overrides |
@@ -5831,6 +6165,7 @@ Update a widget's properties, config, or style
 | `height` | number | No |  |
 | `anchor` | string | No |  |
 | `visible` | boolean | No |  |
+| `constraints` | object,null | No | Responsive layout constraints (ui.FR-1.OP-01). Pixel offsets from the anchor plus optional min/max pixel size bounds; omitted sub-fields are merged onto the widget's existing constraints. Pass null to clear all constraints (back to pure anchor/percentage layout). |
 | `config` | object | No | Type-specific config updates (merged) |
 | `style` | object | No | Style updates (merged) |
 

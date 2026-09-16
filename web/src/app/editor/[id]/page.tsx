@@ -10,11 +10,13 @@ const EditorLayout = dynamic(
   { ssr: false, loading: () => (<div className="flex h-full items-center justify-center bg-zinc-950"><div className="text-zinc-400">Loading editor...</div></div>) }
 );
 import { useEditorStore } from '@/stores/editorStore';
+import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
 import { trackProjectOpen } from '@/lib/workspace/recentProjects';
 import { EditorErrorBoundary } from '@/components/editor/EditorErrorBoundary';
 import { WasmErrorBoundary } from '@/components/editor/WasmErrorBoundary';
 import { EngineCrashOverlay } from '@/components/editor/EngineCrashOverlay';
 import { RemixQuarantineNotice } from '@/components/editor/RemixQuarantineNotice';
+import { SceneLoadErrorNotice } from '@/components/editor/SceneLoadErrorNotice';
 
 function EditorPageContent() {
   const params = useParams();
@@ -60,6 +62,13 @@ function EditorPageContent() {
           setLastCloudSave(project.updatedAt);
         }
         loadScene(JSON.stringify(project.sceneData));
+        // Restore the music arrangement persisted alongside the scene (#9854).
+        // `loadScene` itself now does this too (#10058, for every OTHER
+        // caller of loadScene/newScene) — this direct call stays as a
+        // guarantee for the initial mount specifically, since it must still
+        // run even if `loadScene` bails out early on a dispatch that isn't
+        // ready yet.
+        useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(project.sceneData));
         setLoading(false);
       } catch (err) {
         console.error('Failed to fetch project:', err);
@@ -78,6 +87,13 @@ function EditorPageContent() {
       <WasmErrorBoundary>
         <EngineCrashOverlay />
         <RemixQuarantineNotice count={quarantinedScripts} />
+        {/* Renders only when a scene load was REJECTED. `loadScene`'s boolean is
+            deliberately still discarded above: it is also false on a healthy
+            cold open (no engine dispatcher yet), so the store's
+            `sceneLoadError` — set only on the rejection branches — is the one
+            fact that can be shown to the user without false positives
+            (#10056). */}
+        <SceneLoadErrorNotice />
         <EditorLayout />
       </WasmErrorBoundary>
     </EditorErrorBoundary>

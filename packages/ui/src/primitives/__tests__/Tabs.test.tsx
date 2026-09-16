@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { useState } from 'react';
+import { render, screen, fireEvent, createEvent } from '@testing-library/react';
 import { Tabs } from '../Tabs';
 import { THEME_NAMES } from '../../tokens';
 
@@ -41,6 +42,45 @@ describe('Tabs', () => {
     const tabList = screen.getByRole('tablist');
     fireEvent.keyDown(tabList, { key: 'ArrowRight' });
     expect(onChange).toHaveBeenCalledWith('tab2');
+  });
+
+  it.each([
+    { initial: 'tab1', key: 'ArrowRight', next: 'Tab 2', content: 'Content 2' },
+    { initial: 'tab3', key: 'ArrowRight', next: 'Tab 1', content: 'Content 1' },
+    { initial: 'tab2', key: 'ArrowLeft', next: 'Tab 1', content: 'Content 1' },
+    { initial: 'tab1', key: 'ArrowLeft', next: 'Tab 3', content: 'Content 3' },
+    { initial: 'tab2', key: 'Home', next: 'Tab 1', content: 'Content 1' },
+    { initial: 'tab2', key: 'End', next: 'Tab 3', content: 'Content 3' },
+  ])('moves focus and selection together for $key from $initial', ({ initial, key, next, content }) => {
+    function ControlledTabs() {
+      const [activeTab, setActiveTab] = useState(initial);
+      return <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />;
+    }
+    render(<ControlledTabs />);
+    const selected = screen.getByRole('tab', { selected: true });
+    selected.focus();
+    const event = createEvent.keyDown(selected, { key });
+
+    fireEvent(selected, event);
+
+    const nextTab = screen.getByRole('tab', { name: next });
+    expect(document.activeElement).toBe(nextTab);
+    expect(nextTab.getAttribute('aria-selected')).toBe('true');
+    expect(nextTab.tabIndex).toBe(0);
+    expect(screen.getByRole('tabpanel').textContent).toBe(content);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('leaves ordinary Tab navigation to the browser', () => {
+    const onChange = vi.fn();
+    render(<Tabs tabs={tabs} activeTab="tab1" onChange={onChange} />);
+    const selected = screen.getByRole('tab', { selected: true });
+    const event = createEvent.keyDown(selected, { key: 'Tab' });
+
+    fireEvent(selected, event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it.each(THEME_NAMES)('renders without error in %s theme', (theme) => {

@@ -7,6 +7,9 @@ import {
 } from '@/stores/slices/__tests__/sceneSliceTestStore';
 import { setSceneDispatcher } from '@/stores/slices/sceneSlice';
 import { emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
+import { foldExportedSceneJson } from '@/lib/prefabs/prefabSceneFold';
+import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
+import type { SceneFileData } from '@/lib/scenes/sceneManager';
 
 // ---------------------------------------------------------------------------
 // Module mocks for dynamic imports inside the handlers
@@ -27,7 +30,8 @@ const mockListCheckpoints = vi.fn();
 const mockRestoreCheckpoint = vi.fn();
 const mockDeleteCheckpoint = vi.fn();
 
-vi.mock('@/lib/scenes/sceneManager', () => ({
+vi.mock('@/lib/scenes/sceneManager', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/scenes/sceneManager')>()),
   loadProjectScenes: (...args: unknown[]) => mockLoadProjectScenes(...args),
   saveProjectScenes: (...args: unknown[]) => mockSaveProjectScenes(...args),
   createScene: (...args: unknown[]) => mockCreateScene(...args),
@@ -51,6 +55,47 @@ const mockCaptureActiveScene = vi.fn();
 vi.mock('@/lib/scenes/captureScene', () => ({
   captureActiveScene: (...args: unknown[]) => mockCaptureActiveScene(...args),
 }));
+
+// scene.FR-1 N1: the handler reads the live instance registry to STAGE it for
+// the export it is about to request. Mocked so the folding tests can seed a
+// non-empty registry; default empty keeps every other scene test unchanged (a
+// staged empty registry leaves the JSON untouched, exactly as in production).
+// `stagePrefabInstancesForExport` is spied but kept REAL: the fold the tests
+// assert against consumes what it actually wrote, and the request id it was
+// written under is what `capturedFrom` below correlates on.
+const mockLoadPrefabInstances = vi.fn();
+const mockStagePrefabInstancesForExport = vi.fn();
+vi.mock('@/lib/prefabs/prefabStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/prefabs/prefabStore')>();
+  return {
+    ...actual,
+    loadPrefabInstances: (...args: unknown[]) => mockLoadPrefabInstances(...args),
+    stagePrefabInstancesForExport: (requestId: string, instances: PrefabInstance[]) => {
+      mockStagePrefabInstancesForExport(requestId, instances);
+      return actual.stagePrefabInstancesForExport(requestId, instances);
+    },
+  };
+});
+
+/**
+ * Stand in for the engine bridge AND its `SCENE_EXPORTED` handler together.
+ *
+ * The handler no longer folds the prefab registry itself on the way out of the
+ * capture: the single upstream fold does it, against the snapshot staged for
+ * the export this capture answers. So the double runs the REAL
+ * `foldExportedSceneJson` against the id the handler staged under, rather than
+ * restating a fold production no longer performs here — a double that restates
+ * it would keep passing after the real pipeline stopped folding at all.
+ */
+function capturedFrom(live: SceneFileData) {
+  return async () => {
+    const requestId = mockStagePrefabInstancesForExport.mock.calls.at(-1)?.[0] as string | undefined;
+    return {
+      status: 'captured',
+      data: JSON.parse(foldExportedSceneJson(JSON.stringify(live), requestId)) as SceneFileData,
+    };
+  };
+}
 
 const mockTemplateRegistry = [
   {
@@ -106,6 +151,9 @@ beforeEach(() => {
   mockGetSceneByName.mockReturnValue(undefined);
   // Default: no engine attached, so there is no live scene that could be lost
   mockCaptureActiveScene.mockResolvedValue({ status: 'unavailable' });
+  // Default: empty prefab-instance registry, so folding no-ops and the non-N1
+  // scene tests stay byte-identical.
+  mockLoadPrefabInstances.mockReturnValue([]);
   // Checkpoint defaults
   mockCreateCheckpoint.mockReturnValue({
     checkpoint: { id: 'ckpt_1', label: 'auto', createdAt: 't', snapshot: baseProject },
@@ -127,6 +175,18 @@ describe('export_scene', () => {
     expect((result.result as Record<string, unknown>).message).toBe('Scene export triggered');
     expect(store.saveScene).toHaveBeenCalled();
   });
+
+  it('reports a rejected scene load instead of claiming the export happened (#10056)', async () => {
+    // The store's `saveScene` refuses outright in this state, so returning
+    // success would have the assistant tell the user their work is saved when
+    // nothing was even asked of the engine.
+    const { result, store } = await invokeHandler(sceneManagementHandlers, 'export_scene', {}, {
+      sceneLoadError: { reason: 'This scene could not be opened: bad prefab data.', at: 1 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('could not be opened');
+    expect(store.saveScene).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -134,12 +194,19 @@ describe('export_scene', () => {
 // ---------------------------------------------------------------------------
 
 describe('load_scene', () => {
+  it('reports rejected prefab validation or engine loading instead of success', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'load_scene', { json: '{}' }, { loadScene: vi.fn(() => false) });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not loaded');
+  });
+
   it('calls loadScene with provided json and returns success message', async () => {
     const json = JSON.stringify({ entities: [] });
     const { result, store } = await invokeHandler(sceneManagementHandlers, 'load_scene', { json });
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toBe('Scene load triggered');
-    expect(store.loadScene).toHaveBeenCalledWith(json);
+    // Loading over an intact current scene must not strand the editor (#10056).
+    expect(store.loadScene).toHaveBeenCalledWith(json, { rejectionStrandsEditor: false });
   });
 
   it('returns failure when json parameter is missing', async () => {
@@ -154,6 +221,12 @@ describe('load_scene', () => {
 // ---------------------------------------------------------------------------
 
 describe('new_scene', () => {
+  it('reports a rejected engine transition instead of success', async () => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'new_scene', {}, { newScene: vi.fn(() => false) });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('unchanged');
+  });
+
   it('calls newScene on the store and returns success message', async () => {
     const { result, store } = await invokeHandler(sceneManagementHandlers, 'new_scene');
     expect(result.success).toBe(true);
@@ -457,7 +530,8 @@ describe('switch_scene', () => {
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toContain('Switched');
     expect(mockSwitchScene).toHaveBeenCalledWith(baseProject, 'scene_2');
-    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(sceneData));
+    // A rejected switch target must not strand the outgoing scene (#10056).
+    expect(store.loadScene).toHaveBeenCalledWith(JSON.stringify(sceneData), { rejectionStrandsEditor: false });
     expect(store.setScenes).toHaveBeenCalled();
   });
 
@@ -497,6 +571,59 @@ describe('switch_scene', () => {
     expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, live);
     // The switch must operate on the folded project, not the one off disk.
     expect(mockSwitchScene).toHaveBeenCalledWith(withLive, 'scene_2');
+  });
+
+  it('folds the live prefab-instance registry into the persisted scene before switching (scene.FR-1 N1)', async () => {
+    // The AI switch path must carry linked instances the same way the manual
+    // Scene Browser path does. If the handler stops staging the registry for
+    // the export it requests, the persisted scene loses every instance and
+    // override on reopen — and nothing else in this suite would fail. Seed a
+    // non-empty registry and assert it reaches the persisted data.
+    const live: SceneFileData = { formatVersion: 1, sceneName: 'Level 1', entities: [] };
+    const seeded: PrefabInstance[] = [{ instanceId: 'i1', prefabId: 'p1', overrides: { name: 'kept' } }];
+    mockLoadPrefabInstances.mockReturnValue(seeded);
+    mockCaptureActiveScene.mockImplementation(capturedFrom(live));
+    mockSaveCurrentSceneData.mockReturnValue({ ...baseProject, folded: true });
+    mockSwitchScene.mockReturnValue({ project: baseProject, sceneToLoad: null });
+
+    const { result } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' }
+    );
+
+    expect(result.success).toBe(true);
+    // Staged BEFORE the request goes out, which is what pairs the instances
+    // with the definitions the same fold writes (#10056).
+    expect(mockStagePrefabInstancesForExport).toHaveBeenCalledWith(expect.any(String), seeded);
+    // saveCurrentSceneData receives the capture WITH the instances folded in.
+    expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, {
+      ...live,
+      prefabInstances: seeded,
+    });
+  });
+
+  it('refuses to switch after a rejected scene load, without capturing or persisting (#10056)', async () => {
+    // A rejected load leaves the engine holding a non-project scene. Capturing
+    // and folding it would `saveCurrentSceneData` that scene over the OUTGOING
+    // scene's stored data — the exact overwrite the store's own `switchScene`
+    // refuses. The AI path must refuse at parity, and must not even ask the
+    // engine to export. Nothing else in this suite would catch a missing guard.
+    const { result, store } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' },
+      { sceneLoadError: { reason: 'This scene could not be opened: the engine refused to load it.', at: 1 } }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('could not be opened');
+    expect(result.error).toContain('left untouched');
+    expect(mockCaptureActiveScene).not.toHaveBeenCalled();
+    expect(mockSaveCurrentSceneData).not.toHaveBeenCalled();
+    expect(mockSwitchScene).not.toHaveBeenCalled();
+    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
+    expect(store.loadScene).not.toHaveBeenCalled();
   });
 
   it('refuses to switch when the live scene could not be read', async () => {
@@ -545,6 +672,29 @@ describe('switch_scene', () => {
     expect(store.newScene).toHaveBeenCalled();
     expect(store.loadScene).not.toHaveBeenCalled();
   });
+
+  // Sentry: `store.loadScene` rolls back its OWN state (audio, prefab
+  // registry) before rethrowing a dispatch error, but this handler previously
+  // let that exception propagate straight past its `saveProjectScenes` call —
+  // silently losing the outgoing scene's just-captured data, parity with the
+  // same bug fixed in the store's own `switchScene`.
+  it('persists the outgoing scene when the engine dispatch throws instead of losing it (Sentry)', async () => {
+    const sceneData = { formatVersion: 1, sceneName: 'Level 2', entities: [] };
+    mockSwitchScene.mockReturnValue({ project: { ...baseProject, activeSceneId: 'scene_2' }, sceneToLoad: sceneData });
+
+    const { result, store } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' },
+      { loadScene: vi.fn(() => { throw new Error('engine unreachable'); }) }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('unexpectedly');
+    expect(store.loadScene).toHaveBeenCalled();
+    // The pre-switch (outgoing) project is persisted rather than discarded.
+    expect(mockSaveProjectScenes).toHaveBeenCalledWith(baseProject, undefined);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -573,6 +723,51 @@ describe('duplicate_scene', () => {
     expect((result.result as Record<string, unknown>).sceneId).toBe(newSceneId);
     expect(mockDuplicateScene).toHaveBeenCalledWith(baseProject, 'scene_1', undefined);
     expect(store.setScenes).toHaveBeenCalled();
+  });
+
+  it('folds the live prefab-instance registry into the persisted scene before duplicating (scene.FR-1 N1)', async () => {
+    // Mirror of the switch_scene N1 test: the duplicated project must be built
+    // from a capture that carries the linked instances, or the copy (and the
+    // active scene it is saved from) loses them.
+    const live: SceneFileData = { formatVersion: 1, sceneName: 'Main', entities: [] };
+    const seeded: PrefabInstance[] = [{ instanceId: 'i1', prefabId: 'p1', overrides: {} }];
+    mockLoadPrefabInstances.mockReturnValue(seeded);
+    mockCaptureActiveScene.mockImplementation(capturedFrom(live));
+    mockSaveCurrentSceneData.mockReturnValue({ ...baseProject, folded: true });
+    mockDuplicateScene.mockReturnValue({ project: baseProject, newSceneId: 'scene_copy_1' });
+
+    const { result } = await invokeHandler(
+      sceneManagementHandlers,
+      'duplicate_scene',
+      { sceneId: 'scene_1' }
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockStagePrefabInstancesForExport).toHaveBeenCalledWith(expect.any(String), seeded);
+    expect(mockSaveCurrentSceneData).toHaveBeenCalledWith(baseProject, {
+      ...live,
+      prefabInstances: seeded,
+    });
+  });
+
+  it('refuses to duplicate after a rejected scene load, without capturing or persisting (#10056)', async () => {
+    // Parity with `switch_scene` and the store's own `duplicateScene`: a rejected
+    // load means the engine scene is not this project's, so capturing and folding
+    // it would overwrite the outgoing scene's stored data and copy from stale data.
+    const { result } = await invokeHandler(
+      sceneManagementHandlers,
+      'duplicate_scene',
+      { sceneId: 'scene_1' },
+      { sceneLoadError: { reason: 'This scene could not be opened: the engine refused to load it.', at: 1 } }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('could not be opened');
+    expect(result.error).toContain('left untouched');
+    expect(mockCaptureActiveScene).not.toHaveBeenCalled();
+    expect(mockSaveCurrentSceneData).not.toHaveBeenCalled();
+    expect(mockDuplicateScene).not.toHaveBeenCalled();
+    expect(mockSaveProjectScenes).not.toHaveBeenCalled();
   });
 
   it('refuses to duplicate when the live scene could not be read', async () => {

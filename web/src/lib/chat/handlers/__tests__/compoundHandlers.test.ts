@@ -390,6 +390,24 @@ describe('compoundHandlers', () => {
       expect(store.newScene).toHaveBeenCalled();
     });
 
+    // #10056: a discarded `newScene()` spawned every entity on top of the scene
+    // the user asked to replace and then reported success. When the engine
+    // refuses to clear, the handler must fail before spawning anything.
+    it('fails without spawning when the engine refuses to clear the scene', async () => {
+      const spawnEntity = vi.fn(() => 'spawned-1');
+      const { result, store } = await invoke('create_scene_from_description', {
+        entities: [{ type: 'cube', name: 'Box' }],
+        clearExisting: true,
+      }, {
+        newScene: vi.fn(() => false),
+        spawnEntity,
+      });
+
+      expect(result.success).toBe(false);
+      expect(store.newScene).toHaveBeenCalled();
+      expect(spawnEntity).not.toHaveBeenCalled();
+    });
+
     it('applies environment settings', async () => {
       const { store } = await invoke('create_scene_from_description', {
         entities: [],

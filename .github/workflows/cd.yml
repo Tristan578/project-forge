@@ -725,17 +725,21 @@ jobs:
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
-        # Same selection as ci.yml test-e2e-ui, and it has to STAY the same --
-        # this job and that one are the two places the @ui suite runs, and they
-        # drifting apart is how the deploy path keeps a hole the PR gate has
-        # already closed.
-        #
+          # Same @ui selection as ci.yml test-e2e-ui, and it has to STAY the same
+          # — this job and that one are the two places the @ui suite runs, and
+          # them drifting apart is how the deploy path keeps a hole the PR gate
+          # has already closed. Both now activate web/e2e/lib/uiSuiteReporter.ts
+          # (via PW_UI_SUITE=1) over the shared playwright.ci.config.ts instead
+          # of the `--grep '@ui' --grep-invert '@engine-ui|@journey'` pair — one
+          # source of truth for the selection, and a run that FAILS on a zero or
+          # implausible count rather than silently shrinking (#9636 / #9586).
+          PW_UI_SUITE: '1'
         # @journey needs E2E_STRICT_STORES on top of the hooks build and has its
         # own gate. @engine-ui marks the specs that assert on #game-canvas,
         # which stays `invisible` until the Bevy/wgpu renderer starts -- this
         # config launches with --disable-gpu, so they run in the engine-smoke
         # gate instead.
-        run: npx playwright test --grep '@ui' --grep-invert '@engine-ui|@journey' --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
+        run: npx playwright test --project=chromium --config playwright.ci.config.ts --shard=${{ matrix.shard }}
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}

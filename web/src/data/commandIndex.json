@@ -86,6 +86,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "apply_prefab_to_instances",
+      "category": "prefab",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "apply_script_template",
       "category": "scripting",
       "requiredScope": "scene:write"
@@ -108,6 +113,56 @@
     {
       "name": "arrange_entities",
       "category": "compound",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_add_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_add_track",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_delete_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_delete_track",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_move_clip",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_rename_track",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_set_loop",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_set_tempo",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_set_track_muted",
+      "category": "audio",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "arrangement_trim_clip",
+      "category": "audio",
       "requiredScope": "scene:write"
     },
     {
@@ -268,6 +323,11 @@
     {
       "name": "create_library_script",
       "category": "scripting",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_prefab_instance",
+      "category": "prefab",
       "requiredScope": "scene:write"
     },
     {
@@ -886,6 +946,11 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "list_prefab_instances",
+      "category": "prefab",
+      "requiredScope": "scene:read"
+    },
+    {
       "name": "list_prefabs",
       "category": "prefab",
       "requiredScope": "scene:read"
@@ -973,6 +1038,11 @@
     {
       "name": "mesh_subdivide",
       "category": "modeling",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "nest_prefab",
+      "category": "prefab",
       "requiredScope": "scene:write"
     },
     {

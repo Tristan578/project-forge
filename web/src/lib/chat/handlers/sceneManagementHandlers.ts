@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { ToolHandler, ExecutionResult, InputBinding } from './types';
 import { parseArgs } from './types';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
+import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
 import { isValidSceneFile } from '@/lib/scenes/sceneValidation';
 
@@ -15,9 +16,26 @@ import { isValidSceneFile } from '@/lib/scenes/sceneValidation';
  * (PF-1100). `unavailable` means there is no engine and so no live scene to
  * lose; `failed` means one exists and could not be read, which must abort the
  * mutation rather than persist a stale copy over it.
+ *
+ * The prefab-instance registry is folded in by the SCENE_EXPORTED handler
+ * (`hooks/events/transformEvents.ts`), which consumes the snapshot staged
+ * below. Staging at REQUEST time is what makes the instances and their
+ * transitive definitions ONE read: this used to ask with no request id and then
+ * fold a second time on the way out, and an instance created during the engine
+ * round trip then reached `prefabInstances` without its definition reaching
+ * `prefabDefinitions`. Mirrors `sceneSlice.capturePrefabAwareScene` so the AI
+ * and Scene Browser paths persist identical state (scene.FR-1 N1).
  */
 async function captureBeforeMutating(): Promise<SceneCapture> {
-  return captureActiveScene(requestSceneExport);
+  const { loadPrefabInstances, stagePrefabInstancesForExport, discardStagedPrefabInstancesForExport } =
+    await import('@/lib/prefabs/prefabStore');
+  const requestId = newSceneExportRequestId();
+  stagePrefabInstancesForExport(requestId, loadPrefabInstances());
+  const capture = await captureActiveScene(() => requestSceneExport(requestId));
+  // Unconditional and a no-op once the fold has taken it — see the twin's
+  // comment in `sceneSlice.ts` for why that ordering holds.
+  discardStagedPrefabInstancesForExport(requestId);
+  return capture;
 }
 
 function captureFailure(capture: SceneCapture, action: string): ExecutionResult | null {
@@ -40,6 +58,12 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   export_scene: async (_args, ctx): Promise<ExecutionResult> => {
+    // `saveScene` refuses while a scene load stands rejected (#10056). Reporting
+    // success for a refusal would have the assistant tell the user their work is
+    // saved when nothing was even asked of the engine.
+    if (ctx.store.sceneLoadError) {
+      return { success: false, error: `${ctx.store.sceneLoadError.reason} Nothing was exported.` };
+    }
     ctx.store.saveScene();
     return { success: true, result: { message: 'Scene export triggered' } };
   },
@@ -47,12 +71,19 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   load_scene: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ json: z.string().min(1) }), args);
     if (p.error) return p.error;
-    ctx.store.loadScene(p.data.json);
+    // The scene currently on screen is untouched when the load is rejected, so
+    // this must not strand the editor: the failure is reported back to the
+    // assistant below and saving of the current scene stays enabled (#10056).
+    if (ctx.store.loadScene(p.data.json, { rejectionStrandsEditor: false }) === false) {
+      return { success: false, error: 'The scene was not loaded. Check its prefab metadata and engine readiness, then try again.' };
+    }
     return { success: true, result: { message: 'Scene load triggered' } };
   },
 
   new_scene: async (_args, ctx): Promise<ExecutionResult> => {
-    ctx.store.newScene();
+    if (ctx.store.newScene() === false) {
+      return { success: false, error: 'The engine did not accept a new scene. The current scene is unchanged.' };
+    }
     return { success: true, result: { message: 'New scene created' } };
   },
 
@@ -148,6 +179,15 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   switch_scene: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ sceneId: z.string().min(1) }), args);
     if (p.error) return p.error;
+    // A rejected scene load leaves the engine holding something that is NOT
+    // this project's scene. Capturing here would export that non-project scene
+    // and `saveCurrentSceneData` it over the OUTGOING scene's stored data — the
+    // exact overwrite the store's own `switchScene` refuses (sceneSlice.ts) and
+    // that `export_scene` above refuses too. Refuse before `captureBeforeMutating`
+    // so the manual and AI paths stay at parity (#10056).
+    if (ctx.store.sceneLoadError) {
+      return { success: false, error: `${ctx.store.sceneLoadError.reason} The scene was not switched and your saved project was left untouched.` };
+    }
     const { switchScene, loadProjectScenes, saveProjectScenes, getSceneByName, saveCurrentSceneData } = await import('@/lib/scenes/sceneManager');
     const capture = await captureBeforeMutating();
     const failure = captureFailure(capture, 'switch scenes');
@@ -162,22 +202,49 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     const result = switchScene(project, targetId);
     if ('error' in result) return { success: false, error: result.error };
 
+    // `rejectionStrandsEditor: false`: a rejected TARGET leaves the OUTGOING
+    // scene on screen and unchanged, so a failed switch must not lock its saves
+    // behind `sceneLoadError` — the failure is returned to the assistant below,
+    // parity with the store's own `switchScene` (#10056).
+    let accepted: boolean;
+    try {
+      accepted = result.sceneToLoad
+        ? ctx.store.loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false })
+        : ctx.store.newScene();
+    } catch (error) {
+      // `loadScene`/`newScene` roll back their OWN state (audio, prefab
+      // registry) before rethrowing, but not this handler's captured
+      // `project` — without persisting it here, a thrown dispatch error
+      // skips both `saveProjectScenes` calls below and silently discards the
+      // outgoing scene's unsaved work, parity with the store's `switchScene`.
+      saveProjectScenes(project, ctx.store.projectId);
+      return {
+        success: false,
+        error: `The scene switch failed unexpectedly (${error instanceof Error ? error.message : String(error)}). The current scene is unchanged.`,
+      };
+    }
+    if (accepted === false) {
+      saveProjectScenes(project, ctx.store.projectId);
+      return { success: false, error: 'The engine rejected the scene switch. The current scene is unchanged.' };
+    }
     saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
     );
-    if (result.sceneToLoad) {
-      ctx.store.loadScene(JSON.stringify(result.sceneToLoad));
-    } else {
-      ctx.store.newScene();
-    }
     return { success: true, result: { message: `Switched to scene` } };
   },
 
   duplicate_scene: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ sceneId: z.string().min(1), name: z.string().optional() }), args);
     if (p.error) return p.error;
+    // Same refusal as `switch_scene` and the store's own `duplicateScene`: a
+    // rejected load means the engine scene is not this project's, so capturing
+    // and folding it here would overwrite the outgoing scene's stored data and
+    // copy from stale data (#10056).
+    if (ctx.store.sceneLoadError) {
+      return { success: false, error: `${ctx.store.sceneLoadError.reason} The scene was not duplicated and your saved project was left untouched.` };
+    }
     const { duplicateScene, loadProjectScenes, saveProjectScenes, getSceneByName, saveCurrentSceneData } = await import('@/lib/scenes/sceneManager');
     const capture = await captureBeforeMutating();
     const failure = captureFailure(capture, 'duplicate the scene');

@@ -23,6 +23,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CI_YML="${E2E_TAG_ROUTING_CI_YML:-$HERE/../../.github/workflows/ci.yml}"
 CD_YML="${E2E_TAG_ROUTING_CD_YML:-$HERE/../../.github/workflows/cd.yml}"
 E2E_DIR="${E2E_TAG_ROUTING_E2E_DIR:-$HERE/../../web/e2e}"
+# Since #9636 the @ui selection is no longer a CLI grep pair — it lives in this
+# reporter, which the @ui jobs activate with PW_UI_SUITE=1 over the shared
+# playwright.ci.config.ts. The excluded tags are read from here, not from a
+# --grep-invert expression that no longer exists.
+REPORTER_TS="${E2E_TAG_ROUTING_REPORTER_TS:-$HERE/../../web/e2e/lib/uiSuiteReporter.ts}"
 
 PASS=0
 FAIL=0
@@ -55,9 +60,10 @@ echo "=== the @ui job must build the editor it claims to test ==="
 
 ui_job="$(awk '/^  test-e2e-ui:/{f=1} f{print} f && /^  [a-z][a-z0-9-]*:$/ && !/test-e2e-ui/{exit}' "$CI_YML")"
 if [ -z "$ui_job" ]; then
-  # Fall back to locating by the run line, so a job rename does not silently
-  # turn this whole suite into a no-op.
-  ui_job="$(grep -n -B40 "grep '@ui'" "$CI_YML" | sed 's/^[0-9]*[-:]//')"
+  # Fall back to locating by the sharded @ui run line (playwright.ci.config.ts
+  # with --shard — the @api job uses the same config WITHOUT --shard), so a job
+  # rename does not silently turn this whole suite into a no-op.
+  ui_job="$(grep -n -B40 -E 'playwright.ci.config.ts.*--shard' "$CI_YML" | sed 's/^[0-9]*[-:]//')"
 fi
 if [ -z "$ui_job" ]; then
   fail "could not locate the @ui E2E job in ci.yml — this suite would pass vacuously"
@@ -98,52 +104,78 @@ else
 fi
 
 echo ""
-echo "=== no tag may be excluded from the @ui job without another job running it ==="
+echo "=== no tag may be excluded from the @ui selection without another job running it ==="
 
-invert="$(grep -oE "grep-invert '[^']+'" "$CI_YML" | head -1 | sed -E "s/grep-invert '([^']+)'/\1/")"
-if [ -z "$invert" ]; then
-  fail "could not read the @ui job's --grep-invert expression"
+# The excluded set is the reporter's EXCLUDE_TAGS (#9636), not a --grep-invert.
+if [ ! -f "$REPORTER_TS" ]; then
+  fail "uiSuiteReporter.ts not found at $REPORTER_TS — the @ui selection has no source to read"
 else
-  echo "  (@ui excludes: ${invert})"
-  IFS='|' read -r -a excluded <<< "$invert"
-  for tag in "${excluded[@]}"; do
-    [ -n "$tag" ] || continue
-    # Some OTHER playwright invocation must select this tag, or the specs
-    # carrying it run nowhere at all.
-    if grep -E "playwright test" "$CI_YML" | grep -v -- "--grep-invert" | grep -qF -- "$tag" \
-       || grep -rqF -- "$tag" "$HERE/../../web/playwright."*.config.ts 2>/dev/null; then
-      pass "'${tag}' is excluded from @ui but selected by another job or config"
-    else
-      fail "'${tag}' is excluded from the @ui job and NO other job or config selects it — specs carrying it run nowhere, while the required check stays green (this is exactly #9586)"
-    fi
-  done
+  invert="$(grep -E '^export const EXCLUDE_TAGS' "$REPORTER_TS" | grep -oE "'[^']+'" | tr -d "'" | paste -sd'|' -)"
+  if [ -z "$invert" ]; then
+    fail "could not read EXCLUDE_TAGS from uiSuiteReporter.ts — the @ui exclusion set is unreadable"
+  else
+    echo "  (@ui excludes: ${invert})"
+    IFS='|' read -r -a excluded <<< "$invert"
+    for tag in "${excluded[@]}"; do
+      [ -n "$tag" ] || continue
+      # Some OTHER playwright job or config must select this tag, or the specs
+      # carrying it run nowhere at all. Match a config's `grep:` selector rather
+      # than any mention, so a comment naming the tag cannot credit it.
+      if grep -E "playwright test" "$CI_YML" | grep -v -- "--grep-invert" | grep -qF -- "@${tag}" \
+         || grep -rhE "grep:[^#]*${tag}" "$HERE/../../web/playwright."*.config.ts 2>/dev/null | grep -q .; then
+        pass "'${tag}' is excluded from @ui but selected by another job or config"
+      else
+        fail "'${tag}' is excluded from the @ui selection and NO other job or config selects it — specs carrying it run nowhere, while the required check stays green (this is exactly #9586)"
+      fi
+    done
+  fi
 fi
 
 echo ""
-echo "=== ci.yml and cd.yml must run the SAME @ui selection ==="
+echo "=== ci.yml and cd.yml must activate the SAME @ui selection ==="
 # These are the only two places the @ui suite runs. When they drift, the deploy
 # path keeps a hole the PR gate has already closed -- which is exactly what
 # happened: ci.yml was fixed to stop excluding the editor specs and cd.yml was
 # left excluding them, so deploys would still have tested 91 of 422 (#9586).
-# Fixing one of two identical call sites is the same mistake that produced the
-# CDN failures this milestone chased, so it is asserted rather than remembered.
+# Since #9636 the two no longer carry a grep pair to compare; they select via
+# web/e2e/lib/uiSuiteReporter.ts, activated by PW_UI_SUITE=1 over the shared
+# playwright.ci.config.ts. "Same selection" now means: both invoke that config,
+# both set the activation flag, and NEITHER re-adds a --grep narrowing that
+# would reintroduce the silent-exclusion shape.
 if [ ! -f "$CD_YML" ]; then
   fail "cd.yml not found at $CD_YML — cannot verify the deploy path runs the same selection"
 else
-  ci_sel="$(grep -oE "grep-invert '[^']+'" "$CI_YML" | head -1)"
-  cd_sel="$(grep -oE "grep-invert '[^']+'" "$CD_YML" | head -1)"
-  if [ -z "$ci_sel" ] || [ -z "$cd_sel" ]; then
-    fail "could not read the @ui selection from both workflows (ci='${ci_sel:-none}' cd='${cd_sel:-none}') — this rule would pass vacuously"
-  elif [ "$ci_sel" = "$cd_sel" ]; then
-    pass "ci.yml and cd.yml exclude the same tags (${ci_sel})"
+  # The sharded @ui run in each workflow (the @api job uses the same config
+  # WITHOUT --shard, so this anchor does not catch it).
+  ci_ui_run="$(grep -E 'playwright test.*playwright.ci.config.ts.*--shard' "$CI_YML" | head -1)"
+  cd_ui_run="$(grep -E 'playwright test.*playwright.ci.config.ts.*--shard' "$CD_YML" | head -1)"
+  # cd.yml's @ui job is not named test-e2e-ui, so read its enclosing block as a
+  # window ending at the run line (captures both job- and step-level env).
+  cd_anchor="$(grep -nE 'playwright test.*playwright.ci.config.ts.*--shard' "$CD_YML" | head -1 | cut -d: -f1)"
+  if [ -n "$cd_anchor" ]; then
+    cd_start=$(( cd_anchor > 60 ? cd_anchor - 60 : 1 ))
+    cd_job="$(sed -n "${cd_start},${cd_anchor}p" "$CD_YML")"
   else
-    fail "the @ui selection has drifted — ci.yml uses ${ci_sel} but cd.yml uses ${cd_sel}; the deploy path tests a different set than the PR gate"
+    cd_job=""
   fi
 
-  # The hooks build is half the fix; a matching grep against a store-less build
-  # still cannot open the editor.
-  cd_job="$(awk '/^  test-e2e-ui:/{f=1} f{print} f && /^  [a-z][a-z0-9-]*:$/ && !/test-e2e-ui/{exit}' "$CD_YML")"
-  [ -n "$cd_job" ] || cd_job="$(grep -B40 "grep '@ui'" "$CD_YML")"
+  if [ -z "$ci_ui_run" ] || [ -z "$cd_ui_run" ]; then
+    fail "the @ui sharded run over playwright.ci.config.ts is missing from ci.yml or cd.yml (ci='${ci_ui_run:-none}' cd='${cd_ui_run:-none}') — this rule would pass vacuously"
+  else
+    if grep -q 'PW_UI_SUITE' <<<"$ui_job" && grep -q 'PW_UI_SUITE' <<<"$cd_job"; then
+      pass "both @ui jobs set PW_UI_SUITE=1 to activate the uiSuiteReporter selection"
+    else
+      fail "an @ui job does not set PW_UI_SUITE — without it uiSuiteReporter no-ops and the run selects the WHOLE corpus, or the two jobs have drifted (#9586)"
+    fi
+    if grep -qE -- '--grep' <<<"$ci_ui_run" || grep -qE -- '--grep' <<<"$cd_ui_run"; then
+      fail "an @ui run line still carries --grep — the reporter selection and a CLI grep must not both narrow the suite (that is the silent-exclusion shape #9586)"
+    else
+      pass "neither @ui run line uses --grep — the reporter is the sole selector"
+    fi
+  fi
+
+  # The hooks build is half the fix; a matching selection against a store-less
+  # build still cannot open the editor.
   if grep -q 'NEXT_PUBLIC_E2E_HOOKS' <<<"$cd_job"; then
     pass "cd.yml's @ui job also builds with NEXT_PUBLIC_E2E_HOOKS"
   else
@@ -158,8 +190,10 @@ echo "=== @dev must no longer be used as an exclusion ==="
 # route a spec happens to use.
 if grep -qE "grep-invert '[^']*@dev" "$CI_YML"; then
   fail "ci.yml still grep-inverts @dev — that is the filter that removed 331 of 422 tests while the job read as an application gate (#9586)"
+elif [ -f "$REPORTER_TS" ] && grep -E '^export const EXCLUDE_TAGS' "$REPORTER_TS" | grep -qw 'dev'; then
+  fail "uiSuiteReporter.ts excludes @dev — that empties the @ui gate the same way the old grep-invert did (#9586)"
 else
-  pass "no job excludes @dev (editor specs are routed by capability, not by route)"
+  pass "no job or reporter excludes @dev (editor specs are routed by capability, not by route)"
 fi
 
 echo ""
