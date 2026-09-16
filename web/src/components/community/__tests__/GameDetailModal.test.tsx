@@ -160,6 +160,41 @@ describe('GameDetailModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // a11y (#9048): the icon-only close button must have an accessible name.
+  it('gives the modal close button an accessible name', async () => {
+    const gameData = {
+      game: {
+        id: 'game-1',
+        title: 'Amazing Game',
+        description: 'A great game',
+        authorName: 'Author',
+        authorId: 'author-1',
+        playCount: 100,
+        likeCount: 25,
+        avgRating: 4.2,
+        ratingCount: 10,
+        ratingBreakdown: [],
+        tags: ['action'],
+        cdnUrl: null,
+        createdAt: '2024-01-01',
+        comments: [],
+      },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(gameData),
+    });
+    const onClose = vi.fn();
+
+    render(<GameDetailModal gameId="game-1" onClose={onClose} />);
+    await screen.findByText('Amazing Game');
+
+    const closeButton = screen.getByRole('button', { name: 'Close' });
+    expect(closeButton).toBeDefined();
+    fireEvent.click(closeButton);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('renders nothing if game fetch fails', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,

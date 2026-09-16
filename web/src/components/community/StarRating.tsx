@@ -29,15 +29,30 @@ export function StarRating({
   const starSize = sizeClasses[size];
   const displayRating = interactive && hoverRating > 0 ? hoverRating : value;
 
+  const roundedValue = Math.round(value * 10) / 10;
+  // Non-interactive stars are a display of an average, not five separate
+  // controls: expose them to assistive tech as one labelled image so a screen
+  // reader announces the value once instead of "button, button, ...".
+  const displayLabel = `Average rating: ${roundedValue} out of 5 stars${
+    count !== undefined ? `, ${count} rating${count === 1 ? '' : 's'}` : ''
+  }`;
+
   return (
     <div className="flex items-center gap-1">
-      <div className="flex gap-0.5">
+      <div
+        className="flex gap-0.5"
+        {...(interactive
+          ? { role: 'radiogroup', 'aria-label': 'Rate this game' }
+          : { role: 'img', 'aria-label': displayLabel })}
+      >
         {[1, 2, 3, 4, 5].map((star) => (
           <button
             key={star}
             type="button"
             disabled={!interactive}
-            className={`${interactive ? 'cursor-pointer hover:scale-110 transition-transform' : 'cursor-default'}`}
+            aria-label={interactive ? `Rate ${star} star${star === 1 ? '' : 's'}` : undefined}
+            aria-pressed={interactive ? star <= value : undefined}
+            className={`${interactive ? 'cursor-pointer hover:scale-110 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 rounded' : 'cursor-default'}`}
             onMouseEnter={() => interactive && setHoverRating(star)}
             onMouseLeave={() => interactive && setHoverRating(0)}
             onClick={() => interactive && onChange?.(star)}

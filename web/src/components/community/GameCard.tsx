@@ -17,10 +17,27 @@ export function GameCard({ game, onLike, isLiked, onClick }: GameCardProps) {
     onLike();
   };
 
+  // The card is a real activatable control (div + role="button" rather than a
+  // native <button>, because it nests the like button — nested <button>s are
+  // invalid HTML). Enter and Space activate it, matching native button
+  // semantics; Space is preventDefault'd so it does not scroll the page.
+  const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Only the card itself, never a bubbled keydown from the nested like button.
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      onClick();
+    }
+  };
+
   return (
     <div
-      className="bg-zinc-800 rounded-lg overflow-hidden cursor-pointer hover:bg-zinc-750 transition-colors group"
+      role="button"
+      tabIndex={0}
+      aria-label={`View ${game.title}`}
+      className="bg-zinc-800 rounded-lg overflow-hidden cursor-pointer hover:bg-zinc-750 transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900"
       onClick={onClick}
+      onKeyDown={handleCardKeyDown}
     >
       {/* Thumbnail */}
       <div className="aspect-video bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 relative">
@@ -34,8 +51,11 @@ export function GameCard({ game, onLike, isLiked, onClick }: GameCardProps) {
         )}
         <div className="absolute top-2 right-2 flex gap-2">
           <button
+            type="button"
             onClick={handleLikeClick}
-            className={`p-2 rounded-full backdrop-blur-sm transition-colors ${
+            aria-label={isLiked ? 'Unlike' : 'Like'}
+            aria-pressed={isLiked}
+            className={`p-2 rounded-full backdrop-blur-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${
               isLiked
                 ? 'bg-red-500/80 text-white'
                 : 'bg-black/40 text-white hover:bg-black/60'
