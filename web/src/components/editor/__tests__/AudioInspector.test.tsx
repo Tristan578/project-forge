@@ -217,6 +217,25 @@ describe('AudioInspector', () => {
     }
   });
 
+  it.each([
+    { label: 'Max Distance', raw: '-5', field: 'maxDistance', expected: 1 },
+    { label: 'Ref Distance', raw: '-5', field: 'refDistance', expected: 0.1 },
+    { label: 'Rolloff', raw: '-5', field: 'rolloffFactor', expected: 0 },
+    { label: 'Rolloff', raw: '20', field: 'rolloffFactor', expected: 10 },
+  ])('bounds $label before sending it to setAudio', ({ label, raw, field, expected }) => {
+    const setAudio = vi.fn();
+    mockEditorStore({
+      setAudio,
+      entityAudio: { 'ent-1': {
+        assetId: null, volume: 1, pitch: 1, loopAudio: false, spatial: true,
+        maxDistance: 50, refDistance: 1, rolloffFactor: 1, autoplay: false,
+      } },
+    });
+    render(<AudioInspector />);
+    fireEvent.change(screen.getByLabelText(label), { target: { value: raw } });
+    expect(setAudio).toHaveBeenCalledExactlyOnceWith('ent-1', { [field]: expected });
+  });
+
   it('forwards a spatial number-field edit to setAudio through the shared composite', () => {
     // Proves the NumberField onChange path (parseFloat -> onChange) still reaches
     // setAudio with the parsed numeric value, so the accessible-name test above

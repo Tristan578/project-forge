@@ -53,6 +53,19 @@ describe('NumberField', () => {
     expect(input).toHaveAttribute('step', '0.1');
   });
 
+  it.each([
+    { raw: '-4', min: 0, max: 10, expected: 0 },
+    { raw: '14', min: 0, max: 10, expected: 10 },
+    { raw: '2.5', min: 0, max: 10, expected: 2.5 },
+    { raw: '-4', min: 0, max: undefined, expected: 0 },
+    { raw: '14', min: undefined, max: 10, expected: 10 },
+  ])('commits a bounded value for $raw (min $min, max $max)', ({ raw, min, max, expected }) => {
+    const onChange = vi.fn();
+    render(<NumberField label="Distance" value={1} onChange={onChange} min={min} max={max} />);
+    fireEvent.change(screen.getByLabelText('Distance'), { target: { value: raw } });
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(expected);
+  });
+
   it('respects the disabled state', () => {
     render(<NumberField label="Priority" value={0} onChange={() => {}} disabled />);
     expect(screen.getByLabelText('Priority')).toBeDisabled();

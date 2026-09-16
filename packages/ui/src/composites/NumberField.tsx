@@ -50,7 +50,8 @@ export function NumberField({
     setDraft(raw);
     const parsed = parseFloat(raw);
     if (Number.isFinite(parsed)) {
-      onChange(parsed);
+      const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed));
+      onChange(clamped);
     }
   };
 

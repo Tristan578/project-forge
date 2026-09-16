@@ -170,6 +170,16 @@ describe('ReverbZoneInspector', () => {
     expect(screen.getByText('Radius')).toBeInTheDocument();
   });
 
+  it('bounds a negative sphere radius before updating the reverb zone', () => {
+    setupStore({ reverbZone: { ...baseReverbZone, shape: { type: 'sphere', radius: 5 } }, enabled: true });
+    render(<ReverbZoneInspector entityId="entity-1" />);
+    fireEvent.change(screen.getByLabelText('Radius'), { target: { value: '-5' } });
+    expect(mockUpdateReverbZone).toHaveBeenCalledExactlyOnceWith('entity-1', {
+      ...baseReverbZone,
+      shape: { type: 'sphere', radius: 0.1 },
+    });
+  });
+
   it('shows Type (preset) select', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
