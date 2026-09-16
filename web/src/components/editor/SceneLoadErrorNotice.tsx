@@ -1,3 +1,4 @@
+/** Persistent save-lockout notice and reload guidance for untrusted scene viewports. */
 'use client';
 
 import { AlertTriangle } from 'lucide-react';
@@ -5,27 +6,12 @@ import { Button } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 
 /**
- * Explains a REJECTED scene load instead of leaving an empty viewport with no
- * account of itself (#10056).
- *
- * Before this, `loadScene` gained rejection paths that return without
- * dispatching, and the editor page discarded the boolean: the editor rendered
- * with an empty viewport, the project's name already in the title bar, and no
- * indication anything had gone wrong — so the next save wrote that empty scene
- * over the project. The banner is the visible half of the fix; the refusal in
- * every save path is the half that protects the data, and this text is what
- * tells the user why nothing is saving.
- *
- * Reads `sceneLoadError`, NOT `loadScene`'s boolean: that boolean is also false
- * on a healthy cold open (the engine dispatcher mounts after this page), so
- * gating on it would show this alert every time.
- *
- * `role="alert"` rather than the `role="status"` its sibling
- * `RemixQuarantineNotice` uses: a quarantine notice is informational, whereas
- * this one says the work in front of the user is not their project and cannot
- * be saved — assertive announcement is the correct urgency. For the same
- * reason it is NOT dismissible: dismissing would hide a condition that is still
- * true and still blocking every save.
+ * Explain a save lockout after rejection or a thrown scene dispatch.
+ * The viewport may be empty, incomplete, or corrupted. Save paths refuse to
+ * overwrite stored scene data while this non-dismissible alert remains active.
+ * Reads sceneLoadError rather than loadScene's boolean, so a healthy cold-open
+ * deferral does not show a warning. A confirmed trustworthy recovery clears it.
+ * @returns An assertive alert with reload guidance, or null without a lockout.
  */
 export function SceneLoadErrorNotice() {
   const sceneLoadError = useEditorStore((s) => s.sceneLoadError);
@@ -45,8 +31,8 @@ export function SceneLoadErrorNotice() {
       <div className="flex flex-col gap-2">
         <p>{sceneLoadError.reason}</p>
         <p className="text-[var(--sf-text-secondary)]">
-          Saving is turned off so this empty editor cannot overwrite your saved project.
-          Reload to try again, or start a new scene to re-enable saving.
+          Saving is turned off because the viewport may be incomplete or corrupted.
+          Your stored scene is protected. Reload to try again, or start a new scene to re-enable saving.
         </p>
         <div>
           <Button

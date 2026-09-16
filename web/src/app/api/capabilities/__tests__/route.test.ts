@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server';
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CapabilitiesResponse } from '../route';
+import { PLATFORM_KEY_ENV, GATEWAY_KEY_ENV } from '@/lib/config/providers';
 
 // The route is BYOK-aware since #9117: it consults Clerk and the key
 // resolver. These tests cover the anonymous, env-var-only surface, so both
@@ -34,6 +35,8 @@ describe('GET /api/capabilities', () => {
     vi.resetModules();
     // Clear all provider env vars
     vi.unstubAllEnvs();
+    for (const name of [...Object.values(PLATFORM_KEY_ENV), ...Object.values(GATEWAY_KEY_ENV),
+      'VERCEL', 'VERCEL_ENV']) vi.stubEnv(name, '');
 
     const mod = await import('../route');
     GET = mod.GET;
@@ -201,7 +204,7 @@ describe('GET /api/capabilities', () => {
       expect(chat?.available).toBe(true);
     });
 
-    it('marks chat and embedding available via GITHUB_MODELS_PAT', async () => {
+    it('marks chat available via GITHUB_MODELS_PAT while embedding requires the gateway', async () => {
       vi.stubEnv('GITHUB_MODELS_PAT', 'ghp-test');
       vi.resetModules();
       const mod = await import('../route');
@@ -211,8 +214,33 @@ describe('GET /api/capabilities', () => {
       const chat = body.capabilities.find((c) => c.capability === 'chat');
       const embedding = body.capabilities.find((c) => c.capability === 'embedding');
       expect(chat?.available).toBe(true);
-      expect(embedding?.available).toBe(true);
+      expect(embedding?.available).toBe(false);
     });
+
+    it.each(['PLATFORM_OPENAI_KEY', 'OPENROUTER_API_KEY', 'GITHUB_MODELS_PAT'])(
+      'image and embedding stay unavailable with only %s configured', async (credential) => {
+        vi.stubEnv(credential, 'direct-or-router-key');
+        const res = await GET(new NextRequest('http://localhost/api/capabilities'));
+        const body: CapabilitiesResponse = await res.json();
+        for (const capability of ['image', 'embedding']) {
+          const entry = body.capabilities.find((c) => c.capability === capability);
+          expect(entry?.available).toBe(false);
+          expect(entry?.hint).toContain('Vercel AI Gateway');
+          expect(entry?.hint).not.toContain('Settings');
+        }
+      },
+    );
+
+    it.each(['AI_GATEWAY_API_KEY', 'VERCEL', 'VERCEL_ENV'])(
+      'image and embedding have credential readiness via %s', async (credential) => {
+        vi.stubEnv(credential, credential === 'VERCEL_ENV' ? 'production' : 'configured');
+        const res = await GET(new NextRequest('http://localhost/api/capabilities'));
+        const body: CapabilitiesResponse = await res.json();
+        for (const capability of ['image', 'embedding']) {
+          expect(body.capabilities.find((c) => c.capability === capability)?.available).toBe(true);
+        }
+      },
+    );
 
     it('model3d is NOT available via gateways (direct only)', async () => {
       vi.stubEnv('OPENROUTER_API_KEY', 'or-test');

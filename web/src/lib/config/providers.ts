@@ -279,6 +279,53 @@ export interface CapabilityUnavailability {
 export const GATEWAY_CAPABILITIES = ['chat', 'embedding', 'image'] as const satisfies readonly ProviderCapability[];
 
 /**
+ * Whether the gateway backend advertises this capability. The backend and
+ * verification script read GATEWAY_CAPABILITIES; the credential resolver reads
+ * the narrower RESOLVER_GATEWAY_CAPABILITIES, which excludes chat. This
+ * predicate does not select a transport or prove upstream generation.
+ * @param capability Server-derived provider capability to inspect.
+ * @returns True for an advertised gateway capability, including chat.
+ */
+export function isGatewayRoutedCapability(capability: ProviderCapability): boolean {
+  return (GATEWAY_CAPABILITIES as readonly ProviderCapability[]).includes(capability);
+}
+
+/**
+ * The subset of `GATEWAY_CAPABILITIES` whose PLATFORM path resolves through the
+ * Vercel AI Gateway with NO fallback to a direct provider key — the list the
+ * resolver (`getPlatformKey`) forces onto `AI_GATEWAY_API_KEY`. Deliberately
+ * NARROWER than `GATEWAY_CAPABILITIES`:
+ *
+ *   - `image` and `embedding` are gateway-ONLY on the platform path (#9523):
+ *     the platform no longer resolves `PLATFORM_OPENAI_KEY` for them, so a
+ *     missing gateway key must fail rather than silently route around it.
+ *   - `chat` is gateway-SERVED but NOT gateway-only. It stays in
+ *     `GATEWAY_CAPABILITIES` (the vercel-gateway backend and the verify script
+ *     read that list, and the gateway is production's primary chat backend),
+ *     yet the chat path also has direct/OpenRouter/GitHub-Models backends
+ *     (`CHAT_BACKENDS`) and `/api/generate/{localize,pacing}` resolve the
+ *     provider's own `ANTHROPIC_API_KEY`. Forcing `chat` onto the no-fallback
+ *     gateway key 500'd every direct-Anthropic deployment — the exact shape
+ *     `web/.env.example` ships — whenever `AI_GATEWAY_API_KEY` was unset
+ *     (#10074), so it is excluded here.
+ *
+ * The availability gates (`isCapabilityConfigured`, `/api/capabilities`) read
+ * the same routing through `CAPABILITY_ENV_VARS`, so an environment they grade
+ * configured has the matching credential policy; transport success is unverified.
+ */
+export const RESOLVER_GATEWAY_CAPABILITIES = ['embedding', 'image'] as const satisfies readonly ProviderCapability[];
+
+/**
+ * Whether the resolver forces a capability's PLATFORM key onto
+ * `AI_GATEWAY_API_KEY` with no fallback (see `RESOLVER_GATEWAY_CAPABILITIES`).
+ * @param capability Server-derived provider capability to inspect.
+ * @returns True for image or embedding; false for chat and direct capabilities.
+ */
+export function isResolverGatewayCapability(capability: ProviderCapability): boolean {
+  return (RESOLVER_GATEWAY_CAPABILITIES as readonly ProviderCapability[]).includes(capability);
+}
+
+/**
  * Capabilities that must be refused everywhere — `/api/capabilities`, the
  * generation dialogs, and `createGenerationHandler` — regardless of which
  * keys are set, because no key can make them work. Declared in code, not in
@@ -518,22 +565,21 @@ export function resolveConfiguredChatBackend(): ChatBackendDescriptor | null {
  * reported "up" with zero generation keys precisely because it graded a
  * different property than the endpoint users depend on (#9719, lesson 1).
  *
- * Chat is any chat backend; embedding and image can also come from the
- * multi-model routers. Everything else needs its direct provider's key.
+ * Chat is any chat backend. `embedding` and `image` are gateway-ONLY on the
+ * platform path (#9523/#10074): the resolver forces `AI_GATEWAY_API_KEY` for
+ * them and never falls back to `PLATFORM_OPENAI_KEY` or a multi-model router,
+ * so listing those here would grade an environment configured that the
+ * resolver then 500s on (lesson 1). They match the resolver by naming only the
+ * gateway key; OIDC on Vercel is handled by the `isVercelRuntime()` branch in
+ * `isCapabilityConfigured` / `/api/capabilities`, exactly as the resolver
+ * accepts OIDC. An existing stored BYOK OpenAI credential retains precedence, resolved by
+ * the BYOK branch of `resolveApiKey` / `/api/capabilities`, not this table.
+ * Everything else needs its direct provider's key.
  */
 export const CAPABILITY_ENV_VARS: Record<ProviderCapability, readonly string[]> = {
   chat: CHAT_BACKEND_ENV_VARS,
-  embedding: [
-    PLATFORM_KEY_ENV.openai,
-    GATEWAY_KEY_ENV.vercelGateway,
-    GATEWAY_KEY_ENV.openrouter,
-    GATEWAY_KEY_ENV.githubModels,
-  ],
-  image: [
-    PLATFORM_KEY_ENV.openai,
-    GATEWAY_KEY_ENV.vercelGateway,
-    GATEWAY_KEY_ENV.openrouter,
-  ],
+  embedding: [GATEWAY_KEY_ENV.vercelGateway],
+  image: [GATEWAY_KEY_ENV.vercelGateway],
   model3d: [PLATFORM_KEY_ENV.meshy],
   texture: [PLATFORM_KEY_ENV.meshy],
   sfx: [PLATFORM_KEY_ENV.elevenlabs],

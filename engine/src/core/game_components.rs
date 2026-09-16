@@ -1,6 +1,6 @@
 //! Pre-built game components for drag-and-drop gameplay behaviors.
 //!
-//! This module provides 12 game component types that execute during Play mode
+//! This module provides pre-built game component types that execute during Play mode
 //! via Bevy systems. They interact with physics/collision events and are exposed
 //! to the script sandbox via `forge.components.*`.
 

@@ -60,7 +60,7 @@ vi.mock('@/lib/tokens/service', () => ({
 // Subject + imported mocks for assertion
 // ---------------------------------------------------------------------------
 
-import { resolveApiKey, storeProviderKey, deleteProviderKey, listConfiguredProviders, ApiKeyError } from '@/lib/keys/resolver';
+import { resolveApiKey, resolveByokOrPlatformKey, storeProviderKey, deleteProviderKey, listConfiguredProviders, ApiKeyError } from '@/lib/keys/resolver';
 import * as dbClient from '@/lib/db/client';
 import * as encryption from '@/lib/keys/encryption';
 import * as tokenService from '@/lib/tokens/service';
@@ -304,6 +304,164 @@ describe('resolveApiKey - platform key', () => {
 });
 
 // ---------------------------------------------------------------------------
+// resolveApiKey — gateway-routed capability (#9523)
+// ---------------------------------------------------------------------------
+
+describe('resolveApiKey - gateway-routed capability (#9523)', () => {
+  const remaining = { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null };
+
+  beforeEach(() => {
+    resetMocks();
+    vi.stubEnv('VERCEL', '');
+    vi.stubEnv('VERCEL_ENV', '');
+    vi.stubEnv('PLATFORM_REPLICATE_KEY', '');
+    vi.stubEnv('PLATFORM_OPENAI_KEY', '');
+    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-secret');
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each(['image', 'embedding'] as const)(
+    'resolves AI_GATEWAY_API_KEY for %s with no PLATFORM_OPENAI_KEY set',
+    async (capability) => {
+      wireDb([], [makeUser({ tier: 'pro' })]);
+      mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-gw' });
+      const result = await resolveApiKey('user-1', 'openai', 20, `${capability}_generation`, undefined, capability);
+      expect(result.type).toBe('platform');
+      expect(result.key).toBe('gw-secret');
+      expect(result.metered).toBe(true);
+      expect(result.usageId).toBe('u-gw');
+    },
+  );
+
+  it('does NOT throw "Platform key not configured" for a gateway capability when its old PLATFORM_* var is absent', async () => {
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-gw2' });
+    await expect(
+      resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image'),
+    ).resolves.toMatchObject({ type: 'platform', key: 'gw-secret' });
+  });
+
+  it('deducts tokens against the capability provider, identically to the direct path', async () => {
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-gw3' });
+    const meta = { size: '1024x1024' };
+    await resolveApiKey('user-1', 'openai', 20, 'image_generation', meta, 'image');
+    // Accounting is keyed on the capability's provider, not the gateway — the
+    // circuit breaker and usage ledger behave identically to the direct route.
+    expect(mockDeductTokens).toHaveBeenCalledWith('user-1', 'image_generation', 20, 'openai', meta);
+  });
+
+  it('throws, and never falls back to PLATFORM_OPENAI_KEY, when AI_GATEWAY_API_KEY is absent', async () => {
+    vi.stubEnv('AI_GATEWAY_API_KEY', '');
+    vi.stubEnv('PLATFORM_OPENAI_KEY', 'sk-openai-direct');
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-leak' });
+    await expect(
+      resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image'),
+    ).rejects.toThrow('Platform key not configured: AI_GATEWAY_API_KEY');
+    // Key resolves before any deduction (#8597): a missing gateway key costs nothing.
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('lets a user BYOK key take precedence over gateway routing', async () => {
+    wireDb([{ userId: 'user-1', provider: 'openai', encryptedKey: 'enc-openai', iv: 'iv-o' }]);
+    const result = await resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image');
+    expect(result.type).toBe('byok');
+    expect(result.key).toBe('decrypted:enc-openai');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('leaves a non-gateway capability (sprite → replicate) requiring its PLATFORM_* var, unaffected by the gateway key', async () => {
+    // AI_GATEWAY_API_KEY is set by beforeEach, but sprite is direct-routed.
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-sprite' });
+    await expect(
+      resolveApiKey('user-1', 'replicate', 10, 'sprite_generation', undefined, 'sprite'),
+    ).rejects.toThrow('Platform key not configured: PLATFORM_REPLICATE_KEY');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('leaves the direct path unchanged when no capability is supplied', async () => {
+    // The existing 5-arg call shape (chat/decompose/status routes) never routes
+    // to the gateway: with no PLATFORM_OPENAI_KEY it throws the OpenAI-key error.
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    await expect(
+      resolveApiKey('user-1', 'openai', 20, 'image_generation'),
+    ).rejects.toThrow('Platform key not configured: PLATFORM_OPENAI_KEY');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveApiKey — chat is NOT forced onto the gateway, + OIDC (#10074)
+// ---------------------------------------------------------------------------
+
+describe('resolveApiKey - chat fallback and Vercel OIDC (#10074)', () => {
+  const remaining = { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null };
+
+  beforeEach(() => {
+    resetMocks();
+    vi.stubEnv('AI_GATEWAY_API_KEY', '');
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    vi.stubEnv('VERCEL', '');
+    vi.stubEnv('VERCEL_ENV', '');
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('resolves ANTHROPIC_API_KEY for the chat capability when AI_GATEWAY_API_KEY is unset', async () => {
+    // The critical regression (#10074): forwarding capability 'chat' to the
+    // resolver must NOT re-key localize/pacing onto the gateway. A
+    // direct-Anthropic deployment (`.env.example`) has ANTHROPIC_API_KEY set and
+    // no gateway key, and both routes must keep working.
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-platform');
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat' });
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'localize_scene', undefined, 'chat');
+    expect(result.type).toBe('platform');
+    expect(result.key).toBe('sk-ant-platform');
+  });
+
+  it('does not consult AI_GATEWAY_API_KEY for the chat capability even when it is set', async () => {
+    // chat is gateway-SERVED (via /api/chat) but not gateway-ONLY: the resolver
+    // path for localize/pacing resolves the provider's own Anthropic key.
+    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-secret');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-platform');
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat2' });
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'pacing_suggestions', undefined, 'chat');
+    expect(result.key).toBe('sk-ant-platform');
+  });
+
+  it.each(['image', 'embedding'] as const)(
+    'accepts Vercel OIDC for %s: returns the empty key instead of throwing when AI_GATEWAY_API_KEY is unset on Vercel',
+    async (capability) => {
+      // vercelGatewayBackend.isConfigured() is true on OIDC alone; the resolver
+      // must mirror it or the PR's one-credential goal is unreachable on an
+      // OIDC-only deployment (#10074).
+      vi.stubEnv('VERCEL_ENV', 'production');
+      wireDb([], [makeUser({ tier: 'pro' })]);
+      mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-oidc' });
+      const result = await resolveApiKey('user-1', 'openai', 20, `${capability}_generation`, undefined, capability);
+      expect(result.type).toBe('platform');
+      expect(result.key).toBe('');
+      expect(result.metered).toBe(true);
+    },
+  );
+
+  it('still throws off-Vercel for a resolver-gateway capability with no gateway key', async () => {
+    // No VERCEL/VERCEL_ENV: OIDC is unavailable, so the missing gateway key is a
+    // real misconfiguration and must fail before any token deduction.
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-x' });
+    await expect(
+      resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image'),
+    ).rejects.toThrow('Platform key not configured: AI_GATEWAY_API_KEY');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // storeProviderKey
 // ---------------------------------------------------------------------------
 
@@ -381,5 +539,49 @@ describe('listConfiguredProviders', () => {
     (mockDbChain.select as ReturnType<typeof vi.fn>).mockReturnValueOnce(selectChain);
     const result = await listConfiguredProviders('user-1');
     expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveByokOrPlatformKey (#9734) — non-charging secondary-provider resolution
+// ---------------------------------------------------------------------------
+
+describe('resolveByokOrPlatformKey', () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.stubEnv('PLATFORM_REMOVEBG_KEY', undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('returns the decrypted BYOK key first and never deducts tokens', async () => {
+    wireDb([{ userId: 'user-1', provider: 'removebg', encryptedKey: 'enc-removebg', iv: 'iv-1' }]);
+    vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'platform-removebg-secret');
+
+    const key = await resolveByokOrPlatformKey('user-1', 'removebg');
+
+    expect(key).toBe('decrypted:enc-removebg');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('falls back to PLATFORM_REMOVEBG_KEY when no BYOK key exists', async () => {
+    wireDb([]);
+    vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'platform-removebg-secret');
+
+    const key = await resolveByokOrPlatformKey('user-1', 'removebg');
+
+    expect(key).toBe('platform-removebg-secret');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('returns null when neither a BYOK key nor PLATFORM_REMOVEBG_KEY is set', async () => {
+    wireDb([]);
+
+    const key = await resolveByokOrPlatformKey('user-1', 'removebg');
+
+    expect(key).toBeNull();
+    expect(mockDeductTokens).not.toHaveBeenCalled();
   });
 });

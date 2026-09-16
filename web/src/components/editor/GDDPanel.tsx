@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { FileText, ChevronDown, ChevronRight, Download, Loader2, Wand2 } from 'lucide-react';
+import { InlineAlert } from '@spawnforge/ui';
 import {
   generateGDD,
   gddToMarkdown,
@@ -295,11 +296,7 @@ export function GDDPanel() {
         </p>
 
         {/* Error */}
-        {error && (
-          <div role="alert" className="rounded border border-red-900/50 bg-red-900/20 px-3 py-2 text-xs text-red-400">
-            {error}
-          </div>
-        )}
+        {error && <InlineAlert variant="error">{error}</InlineAlert>}
 
         {/* Result */}
         {gdd && !isGenerating && (

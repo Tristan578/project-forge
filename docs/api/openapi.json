@@ -139,6 +139,106 @@
           "usageId": { "type": "string", "description": "Usage record ID needed to trigger a client-side refund if the async job fails after queuing. Omitted on BYOK (bring-your-own-key) requests where billing is not metered." }
         }
       },
+      "SpriteAsyncGenerationJob": {
+        "type": "object",
+        "required": [
+          "jobId",
+          "provider",
+          "status",
+          "estimatedSeconds",
+          "backgroundRemoval"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "sdxl"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "starting",
+              "processing",
+              "succeeded",
+              "failed",
+              "canceled",
+              "aborted"
+            ]
+          },
+          "estimatedSeconds": {
+            "type": "integer"
+          },
+          "usageId": {
+            "type": "string",
+            "description": "Usage record ID needed to trigger a client-side refund if the async job fails after queuing. Omitted on BYOK (bring-your-own-key) requests where billing is not metered."
+          },
+          "durable": { "type": "boolean", "enum": [true], "description": "Present when durable callbacks are configured for this route." },
+          "backgroundRemoval": {
+            "type": "string",
+            "enum": [
+              "not-requested",
+              "unsupported"
+            ]
+          }
+        }
+      },
+      "SpriteSyncGenerationJob": {
+        "type": "object",
+        "required": [
+          "jobId",
+          "provider",
+          "status",
+          "estimatedSeconds",
+          "resultUrl",
+          "backgroundRemoval"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "dalle3"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed"
+            ]
+          },
+          "estimatedSeconds": {
+            "type": "integer"
+          },
+          "usageId": {
+            "type": "string",
+            "description": "Usage record ID needed to trigger a client-side refund if the async job fails after queuing. Omitted on BYOK (bring-your-own-key) requests where billing is not metered."
+          },
+          "durable": { "type": "boolean", "enum": [true], "description": "Present when durable callbacks are configured for this route." },
+          "backgroundRemoval": {
+            "type": "string",
+            "enum": [
+              "removed",
+              "not-requested",
+              "unavailable"
+            ]
+          },
+          "resultUrl": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4194304,
+            "description": "Completed image URL or base64 PNG data URL. Delivered in the body; never poll the opaque jobId."
+          }
+        }
+      },
       "GenerationStatus": {
         "type": "object",
         "properties": {
@@ -2041,7 +2141,7 @@
       "post": {
         "tags": ["Asset Generation"],
         "summary": "Generate sprite",
-        "description": "Starts a sprite generation job. Provider auto-selects DALL-E 3 for photorealistic styles and Replicate/SDXL for pixel-art. Returns a `jobId` to poll at `/api/generate/sprite/status`.",
+        "description": "Generates a sprite. DALL-E completes synchronously with a body resultUrl and an opaque nonpollable jobId; SDXL returns a prediction jobId to poll. backgroundRemoval reports the outcome.",
         "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
@@ -2066,7 +2166,7 @@
           }
         },
         "responses": {
-          "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
+          "201": { "description": "Completed image or pending prediction", "content": { "application/json": { "schema": { "oneOf": [{ "$ref": "#/components/schemas/SpriteAsyncGenerationJob" }, { "$ref": "#/components/schemas/SpriteSyncGenerationJob" }] } } } },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "402": { "$ref": "#/components/responses/PaymentRequired" },
           "422": { "description": "Prompt validation error" }

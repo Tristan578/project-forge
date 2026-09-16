@@ -27,6 +27,10 @@ import {
   type PlanRow,
   type ProbeResult,
 } from '../verify-platform-generation.ts';
+import {
+  PROVIDER_CAPABILITIES,
+  isGatewayRoutedCapability,
+} from '../../src/lib/config/providers.ts';
 
 /** First row per capability (sprite has two - see the dedicated test). */
 function rows(env: Record<string, string | undefined>): Record<string, PlanRow> {
@@ -71,6 +75,22 @@ describe('buildPlan', () => {
       expect(r[cap].route, cap).toBe('platform-key');
       expect(r[cap].configured, cap).toBe(false);
     }
+  });
+
+  it('grades exactly the advertised gateway capabilities on the gateway key (#9523)', () => {
+    // The route the script assigns each capability must match the routing table
+    // the gateway backend advertises (isGatewayRoutedCapability → GATEWAY_CAPABILITIES), so
+    // AI_GATEWAY_API_KEY is evidence for image and embedding — not chat alone —
+    // The resolver uses a narrower list that excludes direct localization/pacing.
+    const r = rows({ AI_GATEWAY_API_KEY: 'gw' });
+    for (const cap of PROVIDER_CAPABILITIES) {
+      const expected = isGatewayRoutedCapability(cap) ? 'gateway' : 'platform-key';
+      expect(r[cap].route, cap).toBe(expected);
+    }
+    // Concretely: image and embedding are gateway-routed alongside chat.
+    expect(isGatewayRoutedCapability('image')).toBe(true);
+    expect(isGatewayRoutedCapability('embedding')).toBe(true);
+    expect(isGatewayRoutedCapability('sprite')).toBe(false);
   });
 
   it('reports a gateway-served capability as missing AI_GATEWAY_API_KEY rather than falling back to a direct key', () => {

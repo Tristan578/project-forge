@@ -1,6 +1,9 @@
+/** Async modal loading/failure and keyboard dismissal/focus regressions. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@/test/utils/componentTestUtils';
 import { GameDetailModal } from '../GameDetailModal';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 
 vi.mock('lucide-react', () => ({
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
@@ -15,11 +18,6 @@ vi.mock('lucide-react', () => ({
   Flag: (props: Record<string, unknown>) => <span data-testid="flag-icon" {...props} />,
 }));
 
-vi.mock('../StarRating', () => ({
-  StarRating: ({ value }: { value: number }) => (
-    <span data-testid="star-rating">{value}</span>
-  ),
-}));
 
 vi.mock('../CommentSection', () => ({
   CommentSection: () => <div data-testid="comment-section" />,
@@ -41,6 +39,91 @@ describe('GameDetailModal', () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  it('installs Escape and focus trapping after a delayed fetch with stable onClose', async () => {
+    let complete: (response: Response) => void = () => { throw new Error('fetch promise not initialized'); };
+    mockFetch.mockReturnValueOnce(new Promise<Response>(resolve => { complete = resolve; }));
+    const onClose = vi.fn();
+    render(<><button>Outside</button><GameDetailModal gameId="game-1" onClose={onClose} /></>);
+    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    await act(async () => complete(new Response(JSON.stringify({ game: {
+      id: 'game-1', title: 'Delayed Game', description: null, authorName: 'Author', authorId: 'author-1',
+      playCount: 0, likeCount: 0, avgRating: 0, ratingCount: 0,
+      ratingBreakdown: [], tags: [], cdnUrl: null, createdAt: '2024-01-01', comments: [],
+    } }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    await screen.findByRole('heading', { name: 'Delayed Game' });
+    const close = screen.getByRole('button', { name: 'Close' });
+    expect(close).toHaveFocus();
+    const user = userEvent.setup();
+    await user.tab({ shift: true });
+    expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement);
+    expect(screen.getByRole('button', { name: 'Outside' })).not.toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it('keeps the loading dialog dismissible with focused Close', async () => {
+    mockFetch.mockReturnValueOnce(new Promise(() => {}));
+    const onClose = vi.fn();
+    render(<GameDetailModal gameId="game-1" onClose={onClose} />);
+    expect(screen.getByRole('dialog', { name: 'Loading game' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
+    await userEvent.setup().keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledExactlyOnceWith();
+  });
+
+
+  it('preserves rating focus when the caller replaces its dismissal callback', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ game: {
+      id: 'game-1', title: 'Focus Game', description: null,
+      authorName: 'Author', authorId: 'author-1', playCount: 0, likeCount: 0,
+      avgRating: 3, ratingCount: 1, ratingBreakdown: [], tags: [], cdnUrl: null,
+      createdAt: '2024-01-01', comments: [],
+    } }) });
+    const firstClose = vi.fn();
+    const latestClose = vi.fn();
+    const { rerender } = render(<GameDetailModal gameId="game-1" onClose={firstClose} />);
+    const radio = await screen.findByRole('radio', { name: 'Rate 3 stars' });
+    radio.focus();
+    expect(radio).toHaveFocus();
+    rerender(<GameDetailModal gameId="game-1" onClose={latestClose} />);
+    expect(radio).toHaveFocus();
+    await userEvent.setup().keyboard('{Escape}');
+    expect(latestClose).toHaveBeenCalledExactlyOnceWith();
+    expect(firstClose).not.toHaveBeenCalled();
+  });
+
+
+  it.each([
+    { state: 'loading', action: 'Escape' }, { state: 'loading', action: 'Close' },
+    { state: 'success', action: 'Escape' }, { state: 'success', action: 'Close' },
+    { state: 'failure', action: 'Escape' }, { state: 'failure', action: 'Close' },
+  ])('returns focus to the keyboard invoker after $action in $state', async ({ state, action }) => {
+    if (state === 'loading') mockFetch.mockReturnValueOnce(new Promise(() => {}));
+    else if (state === 'failure') mockFetch.mockResolvedValueOnce({ ok: false });
+    else mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ game: {
+      id: 'game-1', title: 'Focus Game', description: null,
+      authorName: 'Author', authorId: 'author-1', playCount: 0, likeCount: 0,
+      avgRating: 3, ratingCount: 1, ratingBreakdown: [], tags: [], cdnUrl: null,
+      createdAt: '2024-01-01', comments: [],
+    } }) });
+    function GalleryInvoker() {
+      const [open, setOpen] = useState(false);
+      return <><button onClick={() => setOpen(true)}>View Focus Game</button>
+        {open && <GameDetailModal gameId="game-1" onClose={() => setOpen(false)} />}</>;
+    }
+    render(<GalleryInvoker />);
+    const user = userEvent.setup();
+    const view = screen.getByRole('button', { name: 'View Focus Game' });
+    await user.tab(); expect(view).toHaveFocus();
+    await user.keyboard('{Enter}');
+    if (state !== 'loading') await screen.findByRole('heading', { name: state === 'success' ? 'Focus Game' : 'Game unavailable' });
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
+    if (action === 'Escape') await user.keyboard('{Escape}');
+    else await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(view).toHaveFocus();
   });
 
   it('shows loading state initially', () => {
@@ -160,21 +243,48 @@ describe('GameDetailModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('renders nothing if game fetch fails', async () => {
+  // a11y (#9048): the icon-only close button must have an accessible name.
+  it('gives the modal close button an accessible name', async () => {
+    const gameData = {
+      game: {
+        id: 'game-1',
+        title: 'Amazing Game',
+        description: 'A great game',
+        authorName: 'Author',
+        authorId: 'author-1',
+        playCount: 100,
+        likeCount: 25,
+        avgRating: 4.2,
+        ratingCount: 10,
+        ratingBreakdown: [],
+        tags: ['action'],
+        cdnUrl: null,
+        createdAt: '2024-01-01',
+        comments: [],
+      },
+    };
     mockFetch.mockResolvedValueOnce({
-      ok: false,
+      ok: true,
+      json: () => Promise.resolve(gameData),
     });
+    const onClose = vi.fn();
 
-    const { container } = render(
-      <GameDetailModal gameId="game-1" onClose={vi.fn()} />
-    );
+    render(<GameDetailModal gameId="game-1" onClose={onClose} />);
+    await screen.findByText('Amazing Game');
 
-    // Wait for loading to finish
-    await vi.waitFor(() => {
-      expect(screen.queryByText('Loading...')).toBeNull();
-    });
-
-    // Component returns null when no game
-    expect(container.innerHTML).toBe('');
+    const closeButton = screen.getByRole('button', { name: 'Close' });
+    expect(closeButton).toBeDefined();
+    fireEvent.click(closeButton);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
-});
+
+  it('keeps a failed fetch in a named dismissible dialog', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false });
+    const onClose = vi.fn();
+    render(<GameDetailModal gameId="game-1" onClose={onClose} />);
+    await screen.findByRole('heading', { name: 'Game unavailable' });
+    expect(screen.getByRole('dialog', { name: 'Game unavailable' })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('This game could not be loaded');
+    await userEvent.setup().keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledExactlyOnceWith();
+  });});

@@ -56,7 +56,9 @@ describe('ProceduralAnimPanel', () => {
   it('shows default bone warning when no skeleton is attached', () => {
     mockStore({ primaryId: 'ent1' });
     const { getByRole } = render(<ProceduralAnimPanel />);
-    const alert = getByRole('alert');
+    // The warning renders through the InlineAlert primitive (#9726): a warning
+    // is a polite status region, not an assertive alert.
+    const alert = getByRole('status');
     expect(alert.textContent).toContain('default humanoid bones');
   });
 
@@ -68,7 +70,7 @@ describe('ProceduralAnimPanel', () => {
       },
     });
     const { queryByRole } = render(<ProceduralAnimPanel />);
-    expect(queryByRole('alert')).toBeNull();
+    expect(queryByRole('status')).toBeNull();
   });
 
   it('shows custom bone input textarea when no skeleton detected', () => {

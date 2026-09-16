@@ -7,6 +7,7 @@
  */
 
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import { useGenerationHistoryStore } from './generationHistoryStore';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import { trackAIAssetGenerated } from '@/lib/analytics/events';
@@ -77,6 +78,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     if (job.targetEntityId !== undefined) parameters['targetEntityId'] = job.targetEntityId;
     if (job.materialSlot !== undefined) parameters['materialSlot'] = job.materialSlot;
     if (job.durable !== undefined) parameters['durable'] = job.durable;
+    if (job.metadata !== undefined) parameters['metadata'] = job.metadata;
 
     fetch('/api/jobs', {
       method: 'POST',
@@ -89,6 +91,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         tokenCost: 0,
         tokenUsageId: job.usageId,
         entityId: job.entityId,
+        resultUrl: job.resultUrl,
         parameters,
       }),
     })
@@ -107,6 +110,13 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             return {
               jobs: { ...state.jobs, [job.id]: { ...existing, dbId: data.job!.id } },
             };
+          });
+          // Inline import can finish before the POST establishes the DB id.
+          // Replay the latest state so the persisted job cannot remain pending.
+          const latest = get().jobs[job.id];
+          if (latest && (latest.status !== job.status || latest.progress !== job.progress || latest.resultUrl !== job.resultUrl || latest.error !== job.error)) get().updateJob(job.id, {
+            status: latest.status, progress: latest.progress,
+            resultUrl: latest.resultUrl, error: latest.error,
           });
         }
       })
@@ -199,6 +209,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       }
 
       const hydratedJobs: Record<string, GenerationJob> = {};
+      let artifactRecoveryFailed = false;
       for (const sj of serverJobs) {
         const localId = `hydrated_${sj.id}`;
         // Restore persisted placement fields from the parameters JSONB column
@@ -206,16 +217,36 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           sj.parameters && typeof sj.parameters === 'object'
             ? (sj.parameters as Record<string, unknown>)
             : {};
+        let resultUrl = typeof sj.resultUrl === 'string' ? sj.resultUrl : undefined;
+        if (sj.hasInlineResult === true) {
+          try {
+            const artifactResponse = await fetch(`/api/jobs/${encodeURIComponent(sj.id)}`);
+            if (!artifactResponse.ok) throw new Error('Failed to restore saved sprite result');
+            const artifact = await artifactResponse.json();
+            if (typeof artifact.resultUrl !== 'string') throw new Error('Saved sprite result is missing');
+            resultUrl = artifact.resultUrl;
+          } catch (error) {
+            // Keep this row in the database for recovery on the next reload.
+            // Its opaque id cannot be polled; unrelated jobs must still resume.
+            captureException(error, { context: 'generationStore.restoreArtifact', dbId: sj.id });
+            artifactRecoveryFailed = true;
+            continue;
+          }
+        }
         hydratedJobs[localId] = {
           id: localId,
           jobId: sj.providerJobId,
           type: sj.type,
           prompt: sj.prompt,
-          status: sj.status,
+          // A reload interrupts import. Requeue synchronous active artifacts.
+          status: sj.providerJobId.startsWith('dalle3-sync:') && resultUrl ? 'pending' : sj.status,
           progress: sj.progress,
           provider: sj.provider,
           createdAt: new Date(sj.createdAt).getTime(),
           entityId: sj.entityId ?? undefined,
+          resultUrl,
+          metadata: params['metadata'] && typeof params['metadata'] === 'object'
+            ? params['metadata'] as Record<string, unknown> : undefined,
           usageId: sj.tokenUsageId ?? undefined,
           dbId: sj.id,
           autoPlace: typeof params['autoPlace'] === 'boolean' ? params['autoPlace'] : undefined,
@@ -227,6 +258,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         };
       }
 
+      if (artifactRecoveryFailed) toast.warning('Some saved sprites could not be restored. Refresh to retry; other generation jobs have resumed.');
       set((state) => ({
         jobs: { ...hydratedJobs, ...state.jobs },
         hydrated: true,

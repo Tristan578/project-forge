@@ -1,0 +1,5 @@
+---
+"web": patch
+---
+
+Correct stale accuracy claims in the marketing use-cases pages and project docs: the RPG use-case now advertises the true count of drag-and-drop game components (13, not 12) and names only real components (Checkpoint and DialogueTrigger in place of the non-existent Inventory and NPC). The root README now describes the project as source-available, matching the unchanged BSL 1.1 LICENSE; README and CONTRIBUTING clarify the four editor/runtime WebGPU/WebGL2 WASM builds and distinguish editor selection from exported-game runtime selection, and the docs README documents the environment variable the code actually reads (NEXT_PUBLIC_DOCS_URL) and drops a build-dependency claim that no longer applies. A new test keeps the component count and named examples in sync with the engine's registry.
