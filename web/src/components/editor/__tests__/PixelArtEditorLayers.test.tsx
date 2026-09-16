@@ -12,7 +12,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { PixelArtEditor } from '../PixelArtEditor';
-import { useEditorStore } from '@/stores/editorStore';
+import { useEditorStore, type EditorState } from '@/stores/editorStore';
+const { useEditorStore: actualEditorStore } = await vi.importActual<typeof import('@/stores/editorStore')>('@/stores/editorStore');
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
@@ -32,22 +33,21 @@ const mockCtx = {
   lineTo: vi.fn(),
   stroke: vi.fn(),
   createImageData: vi.fn((w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h })),
-  putImageData: vi.fn(),
+  putImageData: vi.fn((_image: { data: Uint8ClampedArray; width: number; height: number }, _x: number, _y: number) => {}),
   getImageData: vi.fn((x: number, y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h })),
 };
 
 function setupStoreMock() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  vi.mocked(useEditorStore).mockImplementation((selector: any) => {
-    const state = { loadTexture: mockLoadTexture };
-    return selector(state);
-  });
+  const state: EditorState = { ...actualEditorStore.getInitialState(), loadTexture: mockLoadTexture };
+  vi.mocked(useEditorStore).mockImplementation(<T,>(selector: (state: EditorState) => T): T => selector(state));
 }
 
 const origCreateElement = document.createElement.bind(document);
 
 describe('PixelArtEditor layers panel (pixel.FR-1.OP-01)', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     vi.spyOn(document, 'createElement').mockImplementation((tag: string, options?: ElementCreationOptions) => {
       const el = origCreateElement(tag, options);
       if (tag === 'canvas') {
@@ -175,6 +175,123 @@ describe('PixelArtEditor layers panel (pixel.FR-1.OP-01)', () => {
     fireEvent.mouseDown(canvas, { clientX: 5, clientY: 5 });
     fireEvent.mouseUp(canvas);
     expect(screen.getByTitle('Undo (Ctrl+Z)').hasAttribute('disabled')).toBe(false);
+  });
+
+
+  function draw(canvas: HTMLCanvasElement, x = 5, y = 5) {
+    fireEvent.mouseDown(canvas, { clientX: x, clientY: y });
+    fireEvent.mouseUp(canvas);
+  }
+
+  function lastImage() {
+    const image = mockCtx.putImageData.mock.lastCall?.[0];
+    if (!image) throw new Error('Expected real editor pixel output');
+    return image;
+  }
+
+  function firstPixel() { return [...lastImage().data.slice(0, 4)]; }
+
+  it('restores dimensions, layers and edge pixels through resize undo and redo', () => {
+    const { container } = render(<PixelArtEditor open onClose={vi.fn()} entityId="sprite-1" />);
+    const canvas = container.querySelector('canvas.cursor-crosshair') as HTMLCanvasElement;
+    fireEvent.click(screen.getByTitle('#ff004d'));
+    draw(canvas, 245, 245);
+    fireEvent.click(screen.getByTitle('Add layer'));
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '64' } });
+    expect(screen.getByRole('combobox')).toHaveValue('64');
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    expect(screen.getByRole('combobox')).toHaveValue('16');
+    expect(screen.getByTitle('Select Layer 2')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to Sprite' }));
+    expect(lastImage().width).toBe(16);
+    expect([...lastImage().data.slice((15 * 16 + 15) * 4, (15 * 16 + 15) * 4 + 4)]).toEqual([255, 0, 77, 255]);
+    expect(mockLoadTexture).toHaveBeenLastCalledWith('mockbase64', 'pixel-art-16x16.png', 'sprite-1', 'base_color');
+    fireEvent.click(screen.getByTitle('Redo (Ctrl+Y)'));
+    expect(screen.getByRole('combobox')).toHaveValue('64');
+    expect(screen.queryByTitle('Select Layer 2')).not.toBeInTheDocument();
+    draw(canvas, 245, 245);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to Sprite' }));
+    expect(lastImage().width).toBe(64);
+    expect([...lastImage().data.slice((61 * 64 + 61) * 4, (61 * 64 + 61) * 4 + 4)]).toEqual([255, 0, 77, 255]);
+  });
+
+  it.each(['name', 'opacity'] as const)('makes %s changes undoable and invalidates stale redo', field => {
+    open();
+    fireEvent.click(screen.getByTitle('Add layer'));
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    expect(screen.getByTitle('Redo (Ctrl+Y)')).not.toBeDisabled();
+    const control = screen.getByLabelText(field === 'name' ? 'Layer name' : 'Layer opacity');
+    const changed = field === 'name' ? 'Outline' : '0.5';
+    fireEvent.change(control, { target: { value: changed } });
+    expect(screen.getByTitle('Redo (Ctrl+Y)')).toBeDisabled();
+    expect(control).toHaveValue(field === 'name' ? changed : '0.5');
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    expect(control).toHaveValue(field === 'name' ? 'Layer 1' : '1');
+    fireEvent.click(screen.getByTitle('Redo (Ctrl+Y)'));
+    expect(control).toHaveValue(changed);
+    expect(screen.queryByTitle('Select Layer 2')).not.toBeInTheDocument();
+  });
+
+  it('isolates active painting and composites preview, reorder, opacity, export and apply exactly', () => {
+    const { container } = render(<PixelArtEditor open onClose={vi.fn()} entityId="sprite-1" />);
+    const canvas = container.querySelector('canvas.cursor-crosshair') as HTMLCanvasElement;
+    fireEvent.click(screen.getByTitle('#ff004d')); draw(canvas);
+    expect(firstPixel()).toEqual([255, 0, 77, 255]);
+    fireEvent.click(screen.getByTitle('Add layer'));
+    fireEvent.click(screen.getByTitle('#29adff')); draw(canvas);
+    expect(firstPixel()).toEqual([41, 173, 255, 255]);
+    fireEvent.change(screen.getByLabelText('Layer opacity'), { target: { value: '0.5' } });
+    expect(firstPixel()).toEqual([148, 87, 166, 255]);
+    fireEvent.click(screen.getByRole('button', { name: 'Export PNG' }));
+    expect(firstPixel()).toEqual([148, 87, 166, 255]);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to Sprite' }));
+    expect(firstPixel()).toEqual([148, 87, 166, 255]);
+    expect(mockLoadTexture).toHaveBeenLastCalledWith('mockbase64', 'pixel-art-16x16.png', 'sprite-1', 'base_color');
+    fireEvent.click(screen.getByTitle('Toggle visibility of Layer 2'));
+    expect(firstPixel()).toEqual([255, 0, 77, 255]);
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    expect(firstPixel()).toEqual([148, 87, 166, 255]);
+    fireEvent.click(screen.getByTitle('Move layer down'));
+    expect(firstPixel()).toEqual([255, 0, 77, 255]);
+    fireEvent.click(screen.getByTitle('Move layer up'));
+    fireEvent.click(screen.getByTitle('Clear layer'));
+    expect(firstPixel()).toEqual([255, 0, 77, 255]);
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    expect(firstPixel()).toEqual([148, 87, 166, 255]);
+    fireEvent.click(screen.getByTitle('Delete layer'));
+    expect(firstPixel()).toEqual([255, 0, 77, 255]);
+    fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    expect(firstPixel()).toEqual([148, 87, 166, 255]);
+  });
+
+
+  it.each([
+    { title: 'Eraser (E)', erase: true }, { title: 'Fill (G)', erase: false },
+    { title: 'Line (L)', erase: false }, { title: 'Rectangle (R)', erase: false },
+  ])('keeps inactive layer pixels intact while using $title', ({ title, erase }) => {
+    const { container } = render(<PixelArtEditor open onClose={vi.fn()} />);
+    const canvas = container.querySelector('canvas.cursor-crosshair') as HTMLCanvasElement;
+    fireEvent.click(screen.getByTitle('#ff004d')); draw(canvas);
+    fireEvent.click(screen.getByTitle('Add layer'));
+    fireEvent.click(screen.getByTitle('#29adff'));
+    if (erase) draw(canvas);
+    fireEvent.click(screen.getByTitle(title));
+    fireEvent.mouseDown(canvas, { clientX: 5, clientY: 5 });
+    fireEvent.mouseMove(canvas, { clientX: 21, clientY: 21 });
+    fireEvent.mouseUp(canvas);
+    expect(firstPixel()).toEqual(erase ? [255, 0, 77, 255] : [41, 173, 255, 255]);
+    fireEvent.click(screen.getByTitle('Toggle visibility of Layer 2'));
+    expect(firstPixel()).toEqual([255, 0, 77, 255]);
+    expect([...lastImage().data.slice(4, 8)]).toEqual([0, 0, 0, 0]);
+  });
+
+  it('renders the drawing canvas when a retained closed editor opens', () => {
+    const { container, rerender } = render(<PixelArtEditor open={false} onClose={vi.fn()} />);
+    expect(container.querySelector('canvas')).not.toBeInTheDocument();
+    expect(mockCtx.fillRect).not.toHaveBeenCalled();
+    rerender(<PixelArtEditor open onClose={vi.fn()} />);
+    expect(container.querySelector('canvas.cursor-crosshair')).toBeInTheDocument();
+    expect(mockCtx.fillRect).toHaveBeenCalledWith(0, 0, 256, 256);
   });
 
   // ── Keyboard shortcuts guarded while renaming ──────────────────────────────

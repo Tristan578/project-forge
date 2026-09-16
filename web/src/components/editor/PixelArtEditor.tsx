@@ -1,3 +1,4 @@
+/** Manual editor-local pixel layers, drawing history, and flattened PNG export/apply. */
 'use client';
 
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from 'react';
@@ -31,6 +32,7 @@ import {
   cloneGrid,
   colorsEqual,
   createLayer,
+  clampOpacity,
   addLayer,
   deleteLayer,
   moveLayerUp,
@@ -45,8 +47,11 @@ import {
 
 type Tool = 'pencil' | 'eraser' | 'fill' | 'line' | 'rect' | 'eyedropper';
 
+/** Visibility and optional target for the manual pixel editor. */
 interface PixelArtEditorProps {
+  /** Show the editor; closing retains this mounted component's local state. */
   open: boolean;
+  /** Dismiss the editor without persisting a layer-stack format. */
   onClose: () => void;
   /** Entity to apply the texture to. If null, export-only mode. */
   entityId?: string | null;
@@ -54,8 +59,14 @@ interface PixelArtEditorProps {
 
 /** Undo/redo snapshot: the whole layer stack plus which layer was active. */
 interface LayerSnapshot {
+  /** Deep-copied bottom-to-top layer stack. */
   layers: Layer[];
+  /** Selected layer index within the saved stack. */
   activeLayerIndex: number;
+  /** Pixel dimensions restored together with the saved layer grids. */
+  canvasSize: CanvasSize;
+  /** Display zoom restored together with pixel dimensions. */
+  zoom: number;
 }
 
 /* ─── Constants ──────────────────────────────────────────────────────────── */
@@ -74,6 +85,12 @@ const MAX_HISTORY = 50;
 
 /* ─── Pixel Grid Helpers ─────────────────────────────────────────────────── */
 
+/**
+ * Convert a validated editor RGB color to one pixel.
+ * @param hex Valid six-digit RGB color beginning with #.
+ * @param alpha Alpha channel from 0 to 255, default 255.
+ * @returns The parsed RGBA pixel tuple.
+ */
 function hexToRgba(hex: string, alpha = 255): RGBA {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -81,11 +98,23 @@ function hexToRgba(hex: string, alpha = 255): RGBA {
   return [r, g, b, alpha];
 }
 
+/**
+ * Format a pixel color for the editor color input.
+ * @param c RGBA pixel with integer color channels from 0 to 255.
+ * @returns A six-digit RGB hex string; alpha is omitted.
+ */
 function rgbaToHex(c: RGBA): string {
   return `#${c[0].toString(16).padStart(2, '0')}${c[1].toString(16).padStart(2, '0')}${c[2].toString(16).padStart(2, '0')}`;
 }
 
-/** Flood fill from (x,y) replacing targetColor with fillColor. */
+/**
+ * Flood fill from (x,y) replacing targetColor with fillColor.
+ * @param grid Square RGBA grid to copy and fill.
+ * @param x Valid integer column of the starting pixel.
+ * @param y Valid integer row of the starting pixel.
+ * @param fillColor Valid RGBA replacement tuple.
+ * @returns A fresh grid replacing connected exact-color pixels; input is unchanged.
+ */
 function floodFill(grid: RGBA[][], x: number, y: number, fillColor: RGBA): RGBA[][] {
   const newGrid = cloneGrid(grid);
   const size = newGrid.length;
@@ -103,7 +132,14 @@ function floodFill(grid: RGBA[][], x: number, y: number, fillColor: RGBA): RGBA[
   return newGrid;
 }
 
-/** Bresenham line from (x0,y0) to (x1,y1). */
+/**
+ * Bresenham line from (x0,y0) to (x1,y1).
+ * @param x0 Integer start column.
+ * @param y0 Integer start row.
+ * @param x1 Integer end column.
+ * @param y1 Integer end row.
+ * @returns Inclusive integer pixel coordinates along the line.
+ */
 function bresenhamLine(x0: number, y0: number, x1: number, y1: number): [number, number][] {
   const points: [number, number][] = [];
   const dx = Math.abs(x1 - x0);
@@ -122,7 +158,11 @@ function bresenhamLine(x0: number, y0: number, x1: number, y1: number): [number,
   return points;
 }
 
-/** Generate PNG data URL from pixel grid. */
+/**
+ * Generate PNG data URL from pixel grid.
+ * @param grid Square valid RGBA grid to encode; requires a browser 2D canvas context.
+ * @returns A flattened PNG data URL with the grid side length as its dimensions.
+ */
 function gridToDataUrl(grid: RGBA[][]): string {
   const size = grid.length;
   const canvas = document.createElement('canvas');
@@ -150,6 +190,14 @@ function cloneLayer(layer: Layer): Layer {
 
 /* ─── Component ──────────────────────────────────────────────────────────── */
 
+/**
+ * Start a 16x16 transparent layer stack and edit it with manual layer/drawing controls.
+ * Undo/redo restores layers, selection, dimensions and zoom; resize starts a fresh stack.
+ * State stays local while mounted. PNG download and sprite application flatten visible
+ * layers; durable layer storage and AI parity remain work under #9817.
+ * @param props Visibility, dismissal callback and optional sprite entity target.
+ * @returns The editor while open, or null while its local state is retained closed.
+ */
 export const PixelArtEditor = memo(function PixelArtEditor({
   open,
   onClose,
@@ -201,13 +249,13 @@ export const PixelArtEditor = memo(function PixelArtEditor({
     setUndoStack((prev) => {
       const next = [
         ...prev,
-        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex },
+        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex, canvasSize, zoom },
       ];
       if (next.length > MAX_HISTORY) next.shift();
       return next;
     });
     setRedoStack([]);
-  }, [layers, activeIndex]);
+  }, [layers, activeIndex, canvasSize, zoom]);
 
   // Replace the active layer's grid (draw/erase/fill/clear).
   const setActiveGrid = useCallback(
@@ -231,13 +279,18 @@ export const PixelArtEditor = memo(function PixelArtEditor({
       const last = newStack.pop()!;
       setRedoStack((r) => [
         ...r,
-        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex },
+        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex, canvasSize, zoom },
       ]);
       setLayers(last.layers);
+      setCanvasSize(last.canvasSize);
+      setZoom(last.zoom);
+      setPreviewGrid(null);
+      setLineStart(null);
+      setIsDrawing(false);
       setActiveLayerIndex(Math.min(last.activeLayerIndex, last.layers.length - 1));
       return newStack;
     });
-  }, [layers, activeIndex]);
+  }, [layers, activeIndex, canvasSize, zoom]);
 
   // Redo
   const handleRedo = useCallback(() => {
@@ -247,17 +300,25 @@ export const PixelArtEditor = memo(function PixelArtEditor({
       const last = newStack.pop()!;
       setUndoStack((u) => [
         ...u,
-        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex },
+        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex, canvasSize, zoom },
       ]);
       setLayers(last.layers);
+      setCanvasSize(last.canvasSize);
+      setZoom(last.zoom);
+      setPreviewGrid(null);
+      setLineStart(null);
+      setIsDrawing(false);
       setActiveLayerIndex(Math.min(last.activeLayerIndex, last.layers.length - 1));
       return newStack;
     });
-  }, [layers, activeIndex]);
+  }, [layers, activeIndex, canvasSize, zoom]);
 
   // Resize canvas — replaces the stack with a single fresh layer.
   const handleResize = useCallback((newSize: CanvasSize) => {
     pushHistory();
+    setPreviewGrid(null);
+    setLineStart(null);
+    setIsDrawing(false);
     setCanvasSize(newSize);
     setLayers([createLayer(newSize, { name: 'Layer 1' })]);
     setActiveLayerIndex(0);
@@ -312,14 +373,19 @@ export const PixelArtEditor = memo(function PixelArtEditor({
   );
 
   const handleRenameLayer = useCallback((index: number, name: string) => {
+    if (!name.trim() || layers[index].name === name) return;
+    pushHistory();
     setLayers((prev) => renameLayer(prev, index, name));
-  }, []);
+  }, [layers, pushHistory]);
 
   const handleSetOpacity = useCallback(
     (index: number, opacity: number) => {
-      setLayers((prev) => setLayerOpacity(prev, index, opacity));
+      const normalized = clampOpacity(opacity);
+      if (layers[index].opacity === normalized) return;
+      pushHistory();
+      setLayers((prev) => setLayerOpacity(prev, index, normalized));
     },
-    []
+    [layers, pushHistory]
   );
 
   // Get pixel coords from mouse event
@@ -502,7 +568,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
         ctx.stroke();
       }
     }
-  }, [composited, canvasSize, zoom, showGrid]);
+  }, [composited, canvasSize, zoom, showGrid, open]);
 
   // Keyboard shortcuts
   useEffect(() => {

@@ -2,4 +2,4 @@
 "web": minor
 ---
 
-Add a multi-layer data model and layer panel to the Pixel Art Editor. Sprites are now composed of ordered layers, each with its own pixel grid, visibility toggle, opacity and name. The new layer panel lets you add, delete, reorder, rename, hide/show and select layers, and the canvas render, undo/redo and PNG export all composite the visible layers in order. Drawing tools write only to the active layer. This is the manual-controls layer-model slice; AI parity and the remaining pixel-editing operations continue under the parent tracking issue.
+Add editor-local manual pixel layers with independent drawing, visibility, opacity, ordering and names. Undo/redo restores the layer stack, selection and canvas dimensions, including rename/opacity edits. Preview, PNG download and sprite application composite visible layers into a flat image. This does not add durable engine layers or AI parity; selections, palette work and the remaining #9817 operations stay open.

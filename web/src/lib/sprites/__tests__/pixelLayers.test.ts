@@ -58,7 +58,7 @@ describe('createLayer', () => {
   it('clones a provided grid so the layer owns its data', () => {
     const src = filled(4, RED);
     const layer = createLayer(4, { grid: src });
-    layer.grid[0][0] = [...GREEN];
+    layer.grid[0][0][1] = 255;
     expect(src[0][0]).toEqual(RED); // source untouched
   });
 
@@ -90,7 +90,7 @@ describe('fromFlatGrid', () => {
     expect(layers[0].name).toBe('Layer 1');
     expect(layers[0].grid[0][0]).toEqual(BLUE);
     // Cloned, not aliased.
-    layers[0].grid[0][0] = [...RED];
+    layers[0].grid[0][0][0] = 255;
     expect(grid[0][0]).toEqual(BLUE);
   });
 });
@@ -224,11 +224,25 @@ describe('compositeLayers', () => {
     const top = createLayer(2, { grid: filled(2, [255, 255, 255, 255]), opacity: 0.5 });
     const out = compositeLayers([bottom, top], 2);
     // 50% white over black → mid grey, fully opaque.
-    expect(out[0][0][3]).toBe(255);
-    expect(out[0][0][0]).toBeGreaterThanOrEqual(126);
-    expect(out[0][0][0]).toBeLessThanOrEqual(129);
-    expect(out[0][0][0]).toBe(out[0][0][1]);
-    expect(out[0][0][1]).toBe(out[0][0][2]);
+    expect(out[0][0]).toEqual([128, 128, 128, 255]);
+  });
+
+
+  it('composites partially transparent colored source and destination exactly', () => {
+    const bottom = createLayer(1, { grid: [[[255, 0, 0, 128]]] });
+    const top = createLayer(1, { grid: [[[0, 0, 255, 128]]] });
+    const out = compositeLayers([bottom, top], 1);
+    expect(out[0][0]).toEqual([85, 0, 170, 192]);
+    out[0][0][0] = 0;
+    expect(bottom.grid[0][0]).toEqual([255, 0, 0, 128]);
+    expect(top.grid[0][0]).toEqual([0, 0, 255, 128]);
+  });
+
+  it('ignores zero opacity and missing rows or pixels without losing valid lower data', () => {
+    const base = createLayer(2, { grid: filled(2, RED) });
+    const invisible = createLayer(2, { grid: filled(2, GREEN), opacity: 0 });
+    const sparse = createLayer(2, { grid: [[BLUE]] });
+    expect(compositeLayers([base, invisible, sparse], 2)).toEqual([[BLUE, RED], [RED, RED]]);
   });
 
   it('leaves lower layers showing through a transparent hole in the top layer', () => {
@@ -261,7 +275,7 @@ describe('grid primitives', () => {
     const g = createGrid(3);
     expect(g).toHaveLength(3);
     const c = cloneGrid(g);
-    c[0][0] = [...RED];
+    c[0][0][0] = 255;
     expect(g[0][0]).toEqual([0, 0, 0, 0]);
     expect(colorsEqual(RED, [255, 0, 0, 255])).toBe(true);
     expect(colorsEqual(RED, GREEN)).toBe(false);
