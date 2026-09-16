@@ -1,6 +1,7 @@
 /** Real proxy-response contracts for published preflight and script-free404 documents. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { gameNotFoundResponse } from '../notFoundDocument';
 
 const { lookup } = vi.hoisted(() => ({ lookup: vi.fn() }));
 vi.mock('@/lib/play/gameMetadata', () => ({ loadPublishedGameMetadata: lookup }));
@@ -42,6 +43,25 @@ describe('published-game pre-stream response', () => {
     expect(html).toContain('href="/"');
     expect(html).not.toContain('<script');
     expect(html).not.toContain('VideoGame');
+  });
+
+  it('preserves multiple authenticated cookies and security headers while removing routing headers', async () => {
+    const source = NextResponse.next();
+    source.headers.append('Set-Cookie', 'session=first; Path=/; HttpOnly; SameSite=Lax');
+    source.headers.append('Set-Cookie', 'refresh=second; Path=/; HttpOnly; Secure');
+    source.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'nonce-trusted'");
+    source.headers.set('X-Frame-Options', 'DENY');
+    source.headers.set('x-middleware-request-x-nonce', 'trusted');
+    source.headers.set('x-middleware-override-headers', 'x-nonce');
+    const cookies = source.headers.getSetCookie();
+    expect(cookies).toHaveLength(2);
+    const result = gameNotFoundResponse(source, false);
+    expect(result.status).toBe(404);
+    expect(result.headers.getSetCookie()).toEqual(cookies);
+    expect(result.headers.get('content-security-policy')).toBe(source.headers.get('content-security-policy'));
+    expect(result.headers.get('x-frame-options')).toBe('DENY');
+    expect([...result.headers.keys()].filter(name => name.startsWith('x-middleware-'))).toEqual([]);
+    expect(source.headers.get('x-middleware-next')).toBe('1');
   });
 
   it('preserves the actual published-page passthrough response', async () => {

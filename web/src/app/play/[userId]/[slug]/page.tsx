@@ -32,10 +32,9 @@ export async function generateMetadata({
   const { userId: clerkId, slug } = await params;
   const game = await getGameData(clerkId, slug);
 
-  // Single source of truth for the missing-game title. When the game is null the
-  // page body below calls notFound() and Next renders the colocated
-  // not-found.tsx for the visible UX; that file deliberately exports no metadata
-  // so the 404 <title> is defined here alone.
+  // React fallback metadata uses the same title constant as the direct proxy404
+  // document. If metadata disappears after preflight, the body calls notFound
+  // and Next renders the colocated fallback, which exports no separate metadata.
   if (!game) {
     return { title: GAME_NOT_FOUND_PAGE_TITLE };
   }
