@@ -52,9 +52,9 @@ describe('use-cases drag-and-drop behavior count stays in sync with the registry
   const page = readFileSync(PAGE_PATH, 'utf8');
   const readme = readFileSync(README_PATH, 'utf8');
 
-  it('the registry has 13 components (guards the source-of-truth constant)', () => {
-    // If this fails, a component was added/removed — update the copy below to match.
-    expect(EXPECTED_COUNT).toBe(13);
+  it('the registry is nonempty and component names remain distinct after normalization', () => {
+    expect(EXPECTED_COUNT).toBeGreaterThan(0);
+    expect(REGISTRY.size).toBe(EXPECTED_COUNT);
   });
 
   it('every "N drag-and-drop behaviors" claim in the use-cases page matches the registry', () => {

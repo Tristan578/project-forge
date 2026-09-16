@@ -242,8 +242,8 @@ project-forge/
 
 | Command | Description |
 |---------|-------------|
-| `./build_wasm.sh` | Build both WASM variants — macOS / Linux |
-| `.\build_wasm.ps1` | Build both WASM variants — Windows (PowerShell) |
+| `./build_wasm.sh` | Build all four editor/runtime WebGPU/WebGL2 WASM variants — macOS / Linux |
+| `.\build_wasm.ps1` | Build all four editor/runtime WebGPU/WebGL2 WASM variants — Windows (PowerShell) |
 | `cd web && npm run dev` | Start the Next.js dev server |
 | `cd web && npm run build` | Production build |
 | `cd web && npm run lint` | Run ESLint |

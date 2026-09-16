@@ -66,7 +66,7 @@ Three rules flow from this architecture:
 
 3. **Event-driven state.** Bevy systems emit events through the bridge. JS receives them via a callback, routes them through `useEngineEvents`, and they propagate to Zustand stores, which trigger React re-renders. Rust never touches the DOM.
 
-**Rendering:** WebGPU is the primary renderer (auto-detected via `navigator.gpu`); WebGL2 is the fallback. Four WASM binaries are built per release — an editor and a runtime variant for each of WebGPU and WebGL2 — and the frontend selects the correct one at runtime in `useEngine.ts`.
+**Rendering:** WebGPU is the primary renderer (auto-detected via `navigator.gpu`); WebGL2 is the fallback. Four WASM binaries are built per release — an editor and a runtime variant for each of WebGPU and WebGL2 — The editor selects WebGPU or WebGL2 in `useEngine.ts`; exported games select their corresponding runtime variant through the export/game templates.
 
 ---
 
