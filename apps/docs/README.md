@@ -8,9 +8,6 @@ Fumadocs-based documentation site for the SpawnForge platform API and MCP comman
 # From the monorepo root — install all dependencies:
 npm ci
 
-# Build the design system first (docs imports @spawnforge/ui):
-cd packages/ui && npm run build
-
 # Run the docs dev server (port 3001):
 cd apps/docs && npm run dev
 ```
@@ -30,7 +27,6 @@ All three must stay byte-identical; `scripts/check-manifest-sync.ts` asserts the
 ## Build Prerequisites
 
 - **Node 24** — same as the rest of the monorepo (`.node-version`, `engines.node` `>=24.15 <25`)
-- **`@spawnforge/ui` built** — `packages/ui/dist/` must exist before `next build` runs
 - **`apps/docs/data/commands.json` in sync** — see the table above; `scripts/check-manifest-sync.ts` fails **CI's Docs Internal Gate** if any copy has drifted. It is *not* wired into `npm run build` or `vercel.json`'s `buildCommand`, and the gate is path-filtered (it runs only when `apps/docs/`, `mcp-server/manifest/` or `web/src/data/commands.json` changed), so a build can succeed on a drifted copy — the gate is the enforcement point, not the build
 
 ## Environment Variables
@@ -45,7 +41,7 @@ A production build reads the variables below. Only the first is one you set:
 
 | Variable | Purpose |
 |----------|---------|
-| `NEXT_PUBLIC_SITE_URL` | **Set this** on the Vercel project. Canonical origin for sitemap and OG tags |
+| `NEXT_PUBLIC_DOCS_URL` | **Set this** on the Vercel project. Canonical origin for sitemap and OG tags, resolved by `lib/site.ts` |
 | `VERCEL_GIT_COMMIT_SHA` | **Do NOT set this — Vercel supplies it per build, and only if the project is configured to expose it.** Adding it as a project env var hardcodes one SHA into every future build, so the deploy gate would report a "DIFFERENT build" forever. `app/layout.tsx` stamps it into every page as `<meta name="spawnforge-docs-commit">` (`lib/commit.ts`), and `scripts/post-deploy-docs-check.sh` refuses any page that does not carry the commit the deploy just published. See the prerequisite below |
 
 ### Required Vercel project setting: expose system environment variables

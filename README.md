@@ -1,6 +1,6 @@
 # SpawnForge
 
-**SpawnForge is an open-source, AI-native 2D/3D game engine that runs entirely in the browser.** It combines a Bevy-based Rust/WebAssembly rendering engine with a React visual editor and a 364-command MCP manifest (measured 2026-09-15 — which of those commands work today through which entry point is recorded in the [capability matrix](docs/capability-matrix.md)), enabling game creation through natural language, visual scripting, or manual editing. Games are built, tested, and published without leaving the browser — no install, no compile step, no deployment pipeline.
+**SpawnForge is a source-available, AI-native 2D/3D game engine that runs entirely in the browser.** It combines a Bevy-based Rust/WebAssembly rendering engine with a React visual editor and a 364-command MCP manifest (measured 2026-09-15 — which of those commands work today through which entry point is recorded in the [capability matrix](docs/capability-matrix.md)), enabling game creation through natural language, visual scripting, or manual editing. Games are built, tested, and published without leaving the browser — no install, no compile step, no deployment pipeline.
 
 [![CI](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml)
 [![CD](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml)
@@ -25,12 +25,12 @@
 | Visual scripting nodes | 73 across 10 categories |
 | Material presets | 56 across 9 categories |
 | AI modules | 25+ (chat, generation, asset creation) |
-| Game components | 12 drag-and-drop behaviors |
+| Game components | 13 drag-and-drop behaviors |
 | Test suite | 14,200+ tests |
 | Rendering | WebGPU primary, WebGL2 fallback |
 | Engine | Bevy 0.18, Rust/WASM |
 
-An open-source, AI-native 2D/3D game engine for the browser. Editor operations are JSON commands through `handle_command()`, and 364 of them (291 public) are published in the MCP manifest for the [Model Context Protocol](https://modelcontextprotocol.io/). Registration is not the same as a working feature: which capabilities are proven, implemented but unverified, partial or unavailable through the editor UI, the in-app AI, game scripts and external MCP is recorded per capability in [docs/capability-matrix.md](docs/capability-matrix.md). As of 2026-09-15, external MCP agents can attach only to local builds ([#9722](https://github.com/Tristan578/project-forge/issues/9722)) and platform-key asset generation is unavailable in production ([#9117](https://github.com/Tristan578/project-forge/issues/9117)). Build games by conversation, by code, or by hand — within those limits.
+A source-available, AI-native 2D/3D game engine for the browser. Editor operations are JSON commands through `handle_command()`, and 364 of them (291 public) are published in the MCP manifest for the [Model Context Protocol](https://modelcontextprotocol.io/). Registration is not the same as a working feature: which capabilities are proven, implemented but unverified, partial or unavailable through the editor UI, the in-app AI, game scripts and external MCP is recorded per capability in [docs/capability-matrix.md](docs/capability-matrix.md). As of 2026-09-15, external MCP agents can attach only to local builds ([#9722](https://github.com/Tristan578/project-forge/issues/9722)) and platform-key asset generation is unavailable in production ([#9117](https://github.com/Tristan578/project-forge/issues/9117)). Build games by conversation, by code, or by hand — within those limits.
 
 Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a React-based visual editor.
 
@@ -106,7 +106,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Game Export** — ZIP export with texture compression, custom loading screens, PWA generation
 - **Guided Onboarding** — Welcome wizard, interactive tutorials, context-sensitive tips
 - **In-Editor Documentation** — Browsable docs panel with BM25 search, help buttons on inspectors, F1 shortcut
-- **Pre-Built Game Components** — 12 drag-and-drop behaviors (CharacterController, Health, Collectible, Projectile, etc.)
+- **Pre-Built Game Components** — 13 drag-and-drop behaviors (CharacterController, Health, Collectible, Projectile, etc.)
 - **Responsive Layout** — Adaptive UI with compact (mobile), condensed (laptop), and full desktop modes
 
 ## Architecture
@@ -123,7 +123,7 @@ Game Runtime + TypeScript Scripting            In-browser game execution
 
 The MCP server and the visual editor share the same command interface — there is no separate "AI mode." An agent calling `set_material` goes through the exact same code path as a user dragging a color picker.
 
-**Rendering:** WebGPU primary (auto-detected), WebGL2 fallback. Two WASM binaries are built per release — the frontend auto-selects the correct one at runtime.
+**Rendering:** WebGPU primary (auto-detected), WebGL2 fallback. Four WASM binaries are built per release — an editor and a runtime variant for each of WebGPU and WebGL2 — and the frontend auto-selects the correct one at runtime.
 
 ## Prerequisites
 
