@@ -1,4 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+/** Shared labelled numeric editor with controlled finite commits and editable raw drafts. */
 import { useId, useState } from 'react';
 import { cn } from '../utils/cn';
 /**

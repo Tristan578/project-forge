@@ -1,6 +1,8 @@
+/** Shared labelled numeric editor with controlled finite commits and editable raw drafts. */
 import { useId, useState, type InputHTMLAttributes } from 'react';
 import { cn } from '../utils/cn';
 
+/** Controlled numeric value, accessible label, optional bounds and native input attributes. */
 export interface NumberFieldProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'onChange' | 'value'> {
   /** Visible label and accessible name for the input. */

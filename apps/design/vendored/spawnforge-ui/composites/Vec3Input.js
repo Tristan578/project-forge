@@ -1,4 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+/** Shared controlled XYZ editor with finite commits, optional bounds and raw editing drafts. */
 import { useCallback, useMemo, useId, useState } from 'react';
 import { cn } from '../utils/cn';
 /**
@@ -48,6 +49,14 @@ function AxisInput({ axis, value, onChange, step, precision, min, max, disabled,
                     borderRadius: 'var(--sf-radius-sm)',
                 } })] }));
 }
+/**
+ * Edits XYZ axes while retaining raw drafts, including empty intermediate edits.
+ * Only finite edits commit; optional bounds clamp the edited axis. Blur discards
+ * the draft and restores the parent value, rounded for display to precision
+ * (default 3), without changing its committed precision. The default step is 0.1.
+ * @param props Controlled vector, label, optional reset action and axis editing options.
+ * @returns An accessible labelled group of three numeric axis inputs.
+ */
 export function Vec3Input({ label, value, onChange, onReset, defaultValue, step = 0.1, precision = 3, min, max, disabled = false, className, }) {
     const id = useId();
     const handleChange = useCallback((axis, newValue) => {
