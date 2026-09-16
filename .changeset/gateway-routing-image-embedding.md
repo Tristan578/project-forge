@@ -2,12 +2,10 @@
 "web": minor
 ---
 
-Route image and embedding platform key resolution through the Vercel AI Gateway.
+Prepare image and embedding platform credential resolution for the Vercel AI Gateway.
 
-`resolveApiKey` now resolves `AI_GATEWAY_API_KEY` (or, on a Vercel runtime, the OIDC-injected token) for the resolver-gateway capabilities `image` and `embedding` instead of `PLATFORM_OPENAI_KEY`, and never falls back to a direct provider key for them — the same routing the availability gates (`isCapabilityConfigured`, `/api/capabilities`) and the platform-generation verify script apply, so a green gate is always an environment the resolver can serve. Bring-your-own-key precedence, tier gating, token accounting, and the circuit breaker are unchanged.
+`createGenerationHandler` now forwards its server-derived capability to `resolveApiKey`. For image and embedding, the resolver selects `AI_GATEWAY_API_KEY` without falling back to `PLATFORM_OPENAI_KEY`. On Vercel it returns an empty-key OIDC sentinel. Availability gates report this credential readiness; they do not prove a provider request succeeds. Existing stored BYOK credentials retain precedence, and tier gating, token accounting and circuit-breaker provider attribution remain unchanged.
 
-`createGenerationHandler` forwards each route's capability to `resolveApiKey`, so every `/api/generate/*` route resolves the key its capability requires.
+This change makes no image or embedding upstream request. A consumer must pair the selected credential with the gateway endpoint and model adapter; an OIDC-aware SDK must handle the sentinel. The actual image consumer and transport verification remain tracked in #9818. Settings supports Anthropic, Meshy, Hyper3D and ElevenLabs keys; it has no OpenAI key option.
 
-Operational requirement: after this release, the platform path for image and embedding generation requires `AI_GATEWAY_API_KEY` (or a Vercel OIDC runtime); `PLATFORM_OPENAI_KEY` no longer serves them. Set the gateway key before deploying, or those two capabilities report unavailable and 500 on use. A user's own OpenAI key added in Settings still works via bring-your-own-key.
-
-Chat is unchanged: it remains gateway-served through `/api/chat`, but is NOT forced onto the gateway by the resolver, so `/api/generate/localize` and `/api/generate/pacing` keep resolving `ANTHROPIC_API_KEY` and a direct-Anthropic deployment is unaffected.
+`/api/chat` retains its existing backend routing. Localization and pacing always use direct Anthropic credentials, even when a gateway key is present. DALL-E sprites and other existing direct-provider clients keep their current credentials.

@@ -104,7 +104,17 @@ function getPlatformKey(provider: Provider, capability?: ProviderCapability): st
  * and the ResolvedKey shape are identical on both routes — the gateway changes
  * only WHICH platform secret is read, so token accounting and the circuit
  * breaker (both keyed on `provider`) behave the same. Existing 5-arg callers
- * omit it and keep the direct route.
+ * omit it and keep the direct route. An empty key is an OIDC sentinel; a future
+ * consumer must use a gateway endpoint/model adapter and OIDC-aware SDK.
+ * This function does not authenticate an upstream HTTP request.
+ * @param userId Internal user whose stored credentials and balance are checked.
+ * @param provider Provider used for BYOK lookup and ledger attribution.
+ * @param tokenCost Platform token charge, applied after credential resolution.
+ * @param operation Ledger operation name.
+ * @param metadata Optional server-derived billing metadata.
+ * @param capability Optional server-derived capability selecting credential policy.
+ * @returns Stored unmetered BYOK credential or metered platform credential and usage ID.
+ * @throws ApiKeyError for tier or balance restrictions; Error for missing user or credentials.
  */
 export async function resolveApiKey(
   userId: string,

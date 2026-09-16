@@ -570,7 +570,7 @@ export function createGenerationHandler<TParams, TResult>(
             // This runs only on cache miss — deduct tokens and execute
             const metadata = billingMetadataFn ? billingMetadataFn(params) : (params as Record<string, unknown>);
             // Pass the resolved capability (#9523) so gateway-routed capabilities
-            // (image/embedding/chat) resolve AI_GATEWAY_API_KEY instead of the
+            // (image/embedding) resolve AI_GATEWAY_API_KEY instead of the
             // provider's PLATFORM_* var. `effectiveCapability` is the same value
             // the unavailability gate computed above (step 1a); `?? undefined`
             // keeps the direct 5-arg route for a route with no declared capability.

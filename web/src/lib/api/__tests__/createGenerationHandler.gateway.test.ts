@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import type { User } from '@/lib/db/schema';
+import { PLATFORM_KEY_ENV, GATEWAY_KEY_ENV } from '@/lib/config/providers';
 
 /**
- * End-to-end proof for #9523: the issue's Given/When/Then — "image and embedding
+ * Factory-to-resolver credential integration for #9523: the issue's Given/When/Then — "image and embedding
  * resolve through AI_GATEWAY_API_KEY with no PLATFORM_OPENAI_KEY set" — exercised
  * against createGenerationHandler.ts itself, NOT the isolated resolver unit.
  *
@@ -12,6 +14,8 @@ import { NextRequest } from 'next/server';
  * to PLATFORM_OPENAI_KEY, which is unset here, so the request would 500 instead of
  * resolving the gateway key. Only the DB and token-ledger dependencies of the real
  * resolver are mocked; resolver.ts, config/providers.ts and the handler run for real.
+ * The synthetic execute callback makes no upstream request: gateway endpoint,
+ * model adapter and OIDC authentication integration remain unverified.
  */
 
 const { afterCallbacks } = vi.hoisted(() => ({ afterCallbacks: [] as Array<() => unknown> }));
@@ -101,8 +105,12 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
 const GATEWAY_KEY = 'gw-secret-e2e-9523';
 
 describe('createGenerationHandler → real resolveApiKey gateway routing (#9523)', () => {
-  const originalGateway = process.env.AI_GATEWAY_API_KEY;
-  const originalPlatformOpenai = process.env.PLATFORM_OPENAI_KEY;
+  const user: User = {
+    id: 'user-1', clerkId: 'clerk-1', email: 'test@example.com', displayName: null, tier: 'pro',
+    monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0,
+    stripeCustomerId: null, stripeSubscriptionId: null, billingCycleStart: null,
+    activeFeatures: null, banned: 0, createdAt: new Date(0), updatedAt: new Date(0),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -110,12 +118,12 @@ describe('createGenerationHandler → real resolveApiKey gateway routing (#9523)
     queryResults.length = 0;
     // The exact production misconfiguration the new docs invite: gateway key set,
     // PLATFORM_OPENAI_KEY absent.
-    process.env.AI_GATEWAY_API_KEY = GATEWAY_KEY;
-    delete process.env.PLATFORM_OPENAI_KEY;
+    for (const name of [...Object.values(PLATFORM_KEY_ENV), ...Object.values(GATEWAY_KEY_ENV),
+      'VERCEL', 'VERCEL_ENV', 'USE_GENERATION_AGENT']) vi.stubEnv(name, '');
+    vi.stubEnv('AI_GATEWAY_API_KEY', GATEWAY_KEY);
     mockAuth.mockResolvedValue({
       ok: true,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ctx: { user: { id: 'user-1', tier: 'pro' } as any, clerkId: 'clerk-1' },
+      ctx: { user, clerkId: 'clerk-1' },
     });
     // BYOK lookup → none; user row → pro tier with balance.
     queryResults.push(
@@ -124,12 +132,7 @@ describe('createGenerationHandler → real resolveApiKey gateway routing (#9523)
     );
   });
 
-  afterEach(() => {
-    if (originalGateway === undefined) delete process.env.AI_GATEWAY_API_KEY;
-    else process.env.AI_GATEWAY_API_KEY = originalGateway;
-    if (originalPlatformOpenai === undefined) delete process.env.PLATFORM_OPENAI_KEY;
-    else process.env.PLATFORM_OPENAI_KEY = originalPlatformOpenai;
-  });
+  afterEach(() => vi.unstubAllEnvs());
 
   it('resolves AI_GATEWAY_API_KEY for an image route with PLATFORM_OPENAI_KEY unset', async () => {
     let capturedKey: string | undefined;
@@ -149,7 +152,7 @@ describe('createGenerationHandler → real resolveApiKey gateway routing (#9523)
     const res = await handler(makeRequest({ prompt: 'a fox in a forest' }));
 
     expect(res.status).toBe(200);
-    // The gateway key reached the provider call — not PLATFORM_OPENAI_KEY (unset),
+    // The gateway key reached the execute callback — not PLATFORM_OPENAI_KEY (unset),
     // which would have thrown "Platform key not configured" and produced a 500.
     expect(capturedKey).toBe(GATEWAY_KEY);
   });
@@ -180,23 +183,17 @@ describe('createGenerationHandler → real resolveApiKey gateway routing (#9523)
     // sfx is a direct-routed capability → PLATFORM_ELEVENLABS_KEY. Unset it so the
     // real resolver throws "Platform key not configured", proving the gateway pass
     // above succeeded because of routing, not because the mock hands back a key.
-    const originalElevenlabs = process.env.PLATFORM_ELEVENLABS_KEY;
-    delete process.env.PLATFORM_ELEVENLABS_KEY;
-    try {
-      const handler = createGenerationHandler({
-        route: '/api/generate/sfx-test',
-        provider: 'elevenlabs',
-        capability: 'sfx',
-        operation: 'sfx_generation',
-        rateLimitKey: 'gen-sfx',
-        validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
-        execute: async () => ({ ok: true }),
-      });
-      const res = await handler(makeRequest({ prompt: 'door creak' }));
-      expect(res.status).toBe(500);
-    } finally {
-      if (originalElevenlabs === undefined) delete process.env.PLATFORM_ELEVENLABS_KEY;
-      else process.env.PLATFORM_ELEVENLABS_KEY = originalElevenlabs;
-    }
+    vi.stubEnv('PLATFORM_ELEVENLABS_KEY', '');
+    const handler = createGenerationHandler({
+      route: '/api/generate/sfx-test',
+      provider: 'elevenlabs',
+      capability: 'sfx',
+      operation: 'sfx_generation',
+      rateLimitKey: 'gen-sfx',
+      validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
+      execute: async () => ({ ok: true }),
+    });
+    const res = await handler(makeRequest({ prompt: 'door creak' }));
+    expect(res.status).toBe(500);
   });
 });

@@ -84,6 +84,9 @@ describe('CAPABILITY_ENV_VARS', () => {
 describe('isCapabilityConfigured', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    for (const name of [...Object.values(PLATFORM_KEY_ENV), ...Object.values(GATEWAY_KEY_ENV)]) {
+      vi.stubEnv(name, '');
+    }
     vi.stubEnv('VERCEL', '');
     vi.stubEnv('VERCEL_ENV', '');
   });
@@ -202,6 +205,9 @@ describe('isCapabilityConfigured', () => {
 describe('listUnconfiguredCapabilities', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
+    for (const name of [...Object.values(PLATFORM_KEY_ENV), ...Object.values(GATEWAY_KEY_ENV)]) {
+      vi.stubEnv(name, '');
+    }
     vi.stubEnv('VERCEL', '');
     vi.stubEnv('VERCEL_ENV', '');
   });

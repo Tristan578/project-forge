@@ -312,15 +312,14 @@ describe('resolveApiKey - gateway-routed capability (#9523)', () => {
 
   beforeEach(() => {
     resetMocks();
-    delete process.env['PLATFORM_OPENAI_KEY'];
-    process.env['AI_GATEWAY_API_KEY'] = 'gw-secret';
+    vi.stubEnv('VERCEL', '');
+    vi.stubEnv('VERCEL_ENV', '');
+    vi.stubEnv('PLATFORM_REPLICATE_KEY', '');
+    vi.stubEnv('PLATFORM_OPENAI_KEY', '');
+    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-secret');
   });
 
-  afterEach(() => {
-    delete process.env['AI_GATEWAY_API_KEY'];
-    delete process.env['PLATFORM_OPENAI_KEY'];
-    delete process.env['PLATFORM_REPLICATE_KEY'];
-  });
+  afterEach(() => vi.unstubAllEnvs());
 
   it.each(['image', 'embedding'] as const)(
     'resolves AI_GATEWAY_API_KEY for %s with no PLATFORM_OPENAI_KEY set',
@@ -354,8 +353,8 @@ describe('resolveApiKey - gateway-routed capability (#9523)', () => {
   });
 
   it('throws, and never falls back to PLATFORM_OPENAI_KEY, when AI_GATEWAY_API_KEY is absent', async () => {
-    delete process.env['AI_GATEWAY_API_KEY'];
-    process.env['PLATFORM_OPENAI_KEY'] = 'sk-openai-direct';
+    vi.stubEnv('AI_GATEWAY_API_KEY', '');
+    vi.stubEnv('PLATFORM_OPENAI_KEY', 'sk-openai-direct');
     wireDb([], [makeUser({ tier: 'pro' })]);
     mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-leak' });
     await expect(
@@ -402,25 +401,20 @@ describe('resolveApiKey - chat fallback and Vercel OIDC (#10074)', () => {
 
   beforeEach(() => {
     resetMocks();
-    delete process.env['AI_GATEWAY_API_KEY'];
-    delete process.env['ANTHROPIC_API_KEY'];
-    delete process.env['VERCEL'];
-    delete process.env['VERCEL_ENV'];
+    vi.stubEnv('AI_GATEWAY_API_KEY', '');
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    vi.stubEnv('VERCEL', '');
+    vi.stubEnv('VERCEL_ENV', '');
   });
 
-  afterEach(() => {
-    delete process.env['AI_GATEWAY_API_KEY'];
-    delete process.env['ANTHROPIC_API_KEY'];
-    delete process.env['VERCEL'];
-    delete process.env['VERCEL_ENV'];
-  });
+  afterEach(() => vi.unstubAllEnvs());
 
   it('resolves ANTHROPIC_API_KEY for the chat capability when AI_GATEWAY_API_KEY is unset', async () => {
     // The critical regression (#10074): forwarding capability 'chat' to the
     // resolver must NOT re-key localize/pacing onto the gateway. A
     // direct-Anthropic deployment (`.env.example`) has ANTHROPIC_API_KEY set and
     // no gateway key, and both routes must keep working.
-    process.env['ANTHROPIC_API_KEY'] = 'sk-ant-platform';
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-platform');
     wireDb([], [makeUser({ tier: 'pro' })]);
     mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat' });
     const result = await resolveApiKey('user-1', 'anthropic', 10, 'localize_scene', undefined, 'chat');
@@ -431,8 +425,8 @@ describe('resolveApiKey - chat fallback and Vercel OIDC (#10074)', () => {
   it('does not consult AI_GATEWAY_API_KEY for the chat capability even when it is set', async () => {
     // chat is gateway-SERVED (via /api/chat) but not gateway-ONLY: the resolver
     // path for localize/pacing resolves the provider's own Anthropic key.
-    process.env['AI_GATEWAY_API_KEY'] = 'gw-secret';
-    process.env['ANTHROPIC_API_KEY'] = 'sk-ant-platform';
+    vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-secret');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-platform');
     wireDb([], [makeUser({ tier: 'pro' })]);
     mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-chat2' });
     const result = await resolveApiKey('user-1', 'anthropic', 10, 'pacing_suggestions', undefined, 'chat');
@@ -445,7 +439,7 @@ describe('resolveApiKey - chat fallback and Vercel OIDC (#10074)', () => {
       // vercelGatewayBackend.isConfigured() is true on OIDC alone; the resolver
       // must mirror it or the PR's one-credential goal is unreachable on an
       // OIDC-only deployment (#10074).
-      process.env['VERCEL_ENV'] = 'production';
+      vi.stubEnv('VERCEL_ENV', 'production');
       wireDb([], [makeUser({ tier: 'pro' })]);
       mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-oidc' });
       const result = await resolveApiKey('user-1', 'openai', 20, `${capability}_generation`, undefined, capability);

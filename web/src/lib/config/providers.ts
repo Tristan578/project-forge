@@ -278,16 +278,12 @@ export interface CapabilityUnavailability {
 export const GATEWAY_CAPABILITIES = ['chat', 'embedding', 'image'] as const satisfies readonly ProviderCapability[];
 
 /**
- * Whether a capability is routed through the Vercel AI Gateway rather than a
- * direct provider key (#9523). The single predicate behind gateway routing:
- * `lib/keys/resolver.ts` resolves `AI_GATEWAY_API_KEY` for these instead of the
- * capability provider's `PLATFORM_*` var (BYOK still wins), the `vercel-gateway`
- * backend advertises them, and `verify-platform-generation.ts` grades them on
- * the gateway key — three readers of ONE list, so the resolver and the verifier
- * cannot disagree about which capabilities the gateway owns. `image` and
- * `embedding` are OpenAI-compatible on the gateway under the same model names,
- * per the owner's 2026-09-05 decision; `sprite`/`voice`/`sfx`/`music` and the
- * Meshy/remove.bg capabilities stay on their direct keys.
+ * Whether the gateway backend advertises this capability. The backend and
+ * verification script read GATEWAY_CAPABILITIES; the credential resolver reads
+ * the narrower RESOLVER_GATEWAY_CAPABILITIES, which excludes chat. This
+ * predicate does not select a transport or prove upstream generation.
+ * @param capability Server-derived provider capability to inspect.
+ * @returns True for an advertised gateway capability, including chat.
  */
 export function isGatewayRoutedCapability(capability: ProviderCapability): boolean {
   return (GATEWAY_CAPABILITIES as readonly ProviderCapability[]).includes(capability);
@@ -314,13 +310,15 @@ export function isGatewayRoutedCapability(capability: ProviderCapability): boole
  *
  * The availability gates (`isCapabilityConfigured`, `/api/capabilities`) read
  * the same routing through `CAPABILITY_ENV_VARS`, so an environment they grade
- * green is exactly one the resolver can serve (lesson 1).
+ * configured has the matching credential policy; transport success is unverified.
  */
 export const RESOLVER_GATEWAY_CAPABILITIES = ['embedding', 'image'] as const satisfies readonly ProviderCapability[];
 
 /**
  * Whether the resolver forces a capability's PLATFORM key onto
  * `AI_GATEWAY_API_KEY` with no fallback (see `RESOLVER_GATEWAY_CAPABILITIES`).
+ * @param capability Server-derived provider capability to inspect.
+ * @returns True for image or embedding; false for chat and direct capabilities.
  */
 export function isResolverGatewayCapability(capability: ProviderCapability): boolean {
   return (RESOLVER_GATEWAY_CAPABILITIES as readonly ProviderCapability[]).includes(capability);
@@ -572,7 +570,7 @@ export function resolveConfiguredChatBackend(): ChatBackendDescriptor | null {
  * resolver then 500s on (lesson 1). They match the resolver by naming only the
  * gateway key; OIDC on Vercel is handled by the `isVercelRuntime()` branch in
  * `isCapabilityConfigured` / `/api/capabilities`, exactly as the resolver
- * accepts OIDC. A user's own BYOK OpenAI key still enables them, resolved by
+ * accepts OIDC. An existing stored BYOK OpenAI credential retains precedence, resolved by
  * the BYOK branch of `resolveApiKey` / `/api/capabilities`, not this table.
  * Everything else needs its direct provider's key.
  */
