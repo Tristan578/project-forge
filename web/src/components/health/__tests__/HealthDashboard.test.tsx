@@ -365,4 +365,59 @@ describe('HealthDashboard', () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
   });
+
+  /**
+   * Design-system regression guard (#10093 / #9108). The component half of this
+   * PR has two externally-visible acceptance criteria, and before these tests
+   * every one of them could be silently reverted with 19/19 still green:
+   *   - #10093: the overall banner carries NO raw palette literal — its colour
+   *     comes from the named `--sf-status-*` foreground/background PAIR.
+   *   - #9108 (Positive): controls use the design-system Button primitive, whose
+   *     `focus-visible:ring-2` is the WCAG 2.4.7 visible-focus indicator the raw
+   *     `<button>` on origin/main (`bg-zinc-700 …`, no focus ring) never had.
+   * These assert on CONTENT (the class strings) so reverting the file to
+   * origin/main — raw `bg-green-700` / `bg-yellow-500` / `bg-red-600` bands and
+   * ring-less buttons — turns them red.
+   */
+  describe('named design-system semantics (#10093 / #9108)', () => {
+    const bannerCases: Array<[HealthReport['overall'], string, string, string]> = [
+      ['healthy', 'All Systems Operational', 'bg-[var(--sf-status-healthy-bg)]', 'text-[var(--sf-status-healthy-fg)]'],
+      ['degraded', 'Partial Service Disruption', 'bg-[var(--sf-status-degraded-bg)]', 'text-[var(--sf-status-degraded-fg)]'],
+      ['down', 'Major Outage Detected', 'bg-[var(--sf-status-down-bg)]', 'text-[var(--sf-status-down-fg)]'],
+    ];
+
+    it.each(bannerCases)(
+      'paints the %s banner from the named status token pair with no raw palette literal',
+      (overall, label, bgClass, fgClass) => {
+        render(<HealthDashboard initialReport={makeReport(overall, allHealthyServices)} />);
+
+        // The banner div is the direct parent of the overall-status heading.
+        const banner = screen.getByText(label).parentElement as HTMLElement;
+
+        expect(banner.className).toContain(bgClass);
+        expect(banner.className).toContain(fgClass);
+        // #10093 acceptance: no raw Tailwind palette literal survives on the
+        // banner. Matches the exact family origin/main used
+        // (bg-green-700 / bg-yellow-500 / bg-red-600 / bg-zinc-600).
+        expect(banner.className).not.toMatch(/(?:bg|text)-(?:zinc|green|yellow|red)-\d/);
+      },
+    );
+
+    it('gives the Refresh control the primitive focus-visible ring (WCAG 2.4.7)', () => {
+      render(<HealthDashboard initialReport={makeReport('healthy', allHealthyServices)} />);
+
+      const refresh = screen.getByRole('button', { name: /refresh/i });
+      expect(refresh.className).toContain('focus-visible:ring-2');
+    });
+
+    it('gives the Retry control the primitive focus-visible ring (WCAG 2.4.7)', () => {
+      // Never-resolving fetch keeps the null-report shell (with its Retry button)
+      // on screen for the assertion.
+      vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+      render(<HealthDashboard initialReport={null} />);
+
+      const retry = screen.getByRole('button', { name: /retry/i });
+      expect(retry.className).toContain('focus-visible:ring-2');
+    });
+  });
 });

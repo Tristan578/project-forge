@@ -28,6 +28,22 @@ export interface ThemeColorTokens {
     '--sf-destructive': string;
     '--sf-success': string;
     '--sf-warning': string;
+    /**
+     * Status-colour semantic (PF-1068). Each status is a foreground/background
+     * PAIR so a filled status band (e.g. the /health overall banner) can put
+     * normal-weight text on it and stay >= WCAG AA 4.5:1. Verified per theme in
+     * `themes.test.ts`. Traffic-light semantics: green healthy, amber degraded,
+     * red down, neutral unknown — deliberately theme-independent so a status
+     * never changes meaning between themes.
+     */
+    '--sf-status-healthy-bg': string;
+    '--sf-status-healthy-fg': string;
+    '--sf-status-degraded-bg': string;
+    '--sf-status-degraded-fg': string;
+    '--sf-status-down-bg': string;
+    '--sf-status-down-fg': string;
+    '--sf-status-unknown-bg': string;
+    '--sf-status-unknown-fg': string;
 }
 /** Non-color tokens that vary per theme */
 export interface ThemeStructureTokens {

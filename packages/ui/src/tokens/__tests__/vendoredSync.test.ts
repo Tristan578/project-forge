@@ -19,6 +19,7 @@ import { resolve } from 'node:path';
 
 const REPO_ROOT = resolve(process.cwd(), '..', '..');
 const SOURCE_VALIDATOR = resolve(process.cwd(), 'src/utils/themeValidator.ts');
+const SOURCE_THEMES = resolve(process.cwd(), 'src/tokens/themes.ts');
 const VENDORED_VALIDATOR = resolve(
   REPO_ROOT,
   'apps/design/vendored/spawnforge-ui/utils/themeValidator.js',
@@ -47,10 +48,25 @@ describe('vendored @spawnforge/ui is in sync with source tokens', () => {
     ).toEqual([]);
   });
 
-  it('vendored themes carry the WCAG --sf-accent-active token (#8742)', () => {
-    const validator = sfTokens(readFileSync(VENDORED_VALIDATOR, 'utf8'));
-    const themes = readFileSync(VENDORED_THEMES, 'utf8');
-    expect(validator.has('--sf-accent-active')).toBe(true);
-    expect(themes).toContain('--sf-accent-active');
+  // A single-literal pin (previously just `--sf-accent-active`) passes
+  // vacuously on the NEXT token added to a theme — exactly how the eight
+  // `--sf-status-*` tokens (#9108) shipped to source while the vendored
+  // Storybook rendered every theme without them. Compare the whole `--sf-*`
+  // catalogue so no future token can drift in unguarded.
+  it('vendored themes.js carries every --sf-* token the source themes.ts defines', () => {
+    const sourceTokens = sfTokens(readFileSync(SOURCE_THEMES, 'utf8'));
+    const vendoredTokens = sfTokens(readFileSync(VENDORED_THEMES, 'utf8'));
+
+    // Non-vacuous: the source must define tokens, and the WCAG --sf-accent-active
+    // pin (#8742) must remain among them.
+    expect(sourceTokens.size).toBeGreaterThan(0);
+    expect(sourceTokens.has('--sf-accent-active')).toBe(true);
+
+    const missing = [...sourceTokens].filter((t) => !vendoredTokens.has(t));
+    expect(
+      missing,
+      `Vendored themes.js is STALE — missing tokens: ${missing.join(', ')}. ` +
+        'Re-run: bash apps/design/scripts/sync-vendored-ui.sh',
+    ).toEqual([]);
   });
 });
