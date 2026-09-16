@@ -1058,6 +1058,15 @@ jobs:
       # URL and leaves spawnforge-staging.vercel.app pinned to an old deployment.
       # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
       # Adding working-directory:web here causes web/web path doubling on remote builds.
+      - name: Require staging deployment verification access
+        env:
+          STAGING_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
+        run: |
+          if [ -z "$STAGING_BYPASS" ]; then
+            echo "::error::Configure the spawnforge-staging project's Protection Bypass for Automation key as VERCEL_AUTOMATION_BYPASS_STAGING before deploying."
+            exit 1
+          fi
+
       - name: Link Vercel project (staging)
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
@@ -1111,36 +1120,19 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to staging: $url"
 
-      # Staging is UNVERIFIABLE today: the deployment URL sits behind Vercel
-      # Authentication, the staging project has no automation bypass secret
-      # configured, and staging.spawnforge.ai answers 525 (#7581). The script
-      # fails closed on a protected answer (#9624), so rather than a red step
-      # that `continue-on-error` would hide forever — including the day the
-      # secret exists and staging is genuinely broken — the probe is an
-      # explicit, named skip while the secret is absent, and a REAL gate the
-      # moment `VERCEL_AUTOMATION_BYPASS_STAGING` (the staging project's
-      # Protection Bypass for Automation secret) is added. `if:` cannot read
-      # secrets, so a step turns its presence into an output first.
-      - name: Staging bypass secret present?
-        id: staging-bypass
-        env:
-          STAGING_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
-        run: |
-          if [ -n "$STAGING_BYPASS" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "present=false" >> "$GITHUB_OUTPUT"
-          echo "::notice::Staging health check SKIPPED: the repo secret VERCEL_AUTOMATION_BYPASS_STAGING is not set, and the staging deployment URL is SSO-protected, so the probe cannot observe it (#7581). Add the staging project's Protection Bypass for Automation secret under that name to turn this into a gate."
+      # Reach the application behind Deployment Protection and verify this build.
       - name: Post-deploy health check (staging)
         id: health-check-staging
-        if: ${{ steps.staging-bypass.outputs.present == 'true' }}
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
           HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
+          HEALTH_CHECK_EXPECT_COMMIT: ${{ github.sha }}
+          HEALTH_CHECK_EXPECT_ENVIRONMENT: staging
+          HEALTH_CHECK_REQUIRE_SERVICES: 'Payments (Stripe)'
           VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_STAGING }}
+          VERCEL_AUTOMATION_BYPASS_ORIGIN: ${{ steps.deploy.outputs.url }}
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
   # ---- Stage 2: Deploy to Production ----

@@ -154,6 +154,14 @@ export function validateEnvironment(): EnvValidationResult {
     console.warn(`[validateEnvironment] WARNING: ${msg}`);
   }
 
+  // Staging and preview must never charge a live payment account. Secrets can
+  // remain opaque in Vercel; the running deployment proves their mode at boot.
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  if (isStaging && stripeKey && !/^(sk|rk)_test_/.test(stripeKey)) {
+    missing.push('STRIPE_SECRET_KEY');
+    console.error('[validateEnvironment] CRITICAL: Staging requires a Stripe test-mode secret or restricted key.');
+  }
+
   // Encryption key charset validation: a present-but-malformed key (right length,
   // non-hex chars) passes the missing-var check above, then crashes the first
   // BYOK encrypt/decrypt with 'Invalid key length' instead of failing at boot.

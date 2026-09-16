@@ -40,6 +40,9 @@
 #                               IPs alike (vercel.com/docs/deployment-protection/
 #                               methods-to-bypass-deployment-protection/
 #                               protection-bypass-automation).
+#   VERCEL_AUTOMATION_BYPASS_ORIGIN Exact HTTPS origin allowed to receive bypass.
+#   HEALTH_CHECK_EXPECT_ENVIRONMENT Expected application identity when set.
+#   HEALTH_CHECK_REQUIRE_SERVICES Comma-separated service names that must be up.
 #
 # Exit codes:
 #   0  All checks passed — deployment is healthy
@@ -78,6 +81,25 @@ HEADERS_FILE="${HEALTH_HEADERS_FILE:-/tmp/health_headers.txt}"
 
 CURL_ARGS=(--silent --show-error --max-time "$TIMEOUT")
 if [ -n "${VERCEL_AUTOMATION_BYPASS:-}" ]; then
+  # The credential is only valid for the caller's declared deployment origin.
+  # Never follow redirects or forward it to a different host.
+  if ! HEALTH_DEPLOY_URL="$DEPLOY_URL" HEALTH_BYPASS_ORIGIN="${VERCEL_AUTOMATION_BYPASS_ORIGIN:-}" python3 - <<'PY'
+import os
+from urllib.parse import urlsplit
+def origin(value):
+    u = urlsplit(value)
+    if u.scheme != 'https' or not u.hostname or u.username or u.password or u.path not in ('', '/') or u.query or u.fragment:
+        raise ValueError('not an HTTPS origin')
+    return (u.scheme, u.hostname, u.port or 443)
+try:
+    assert origin(os.environ['HEALTH_DEPLOY_URL']) == origin(os.environ['HEALTH_BYPASS_ORIGIN'])
+except (AssertionError, ValueError):
+    raise SystemExit(1)
+PY
+  then
+    echo "::error::Deployment Protection bypass requires VERCEL_AUTOMATION_BYPASS_ORIGIN to match the exact HTTPS deployment origin." >&2
+    exit 1
+  fi
   CURL_ARGS+=(-H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS}")
   echo "Using the Deployment Protection bypass header"
 fi
@@ -192,6 +214,30 @@ PYEOF
   echo "Commit check passed (/api/health reports ${reported:0:8})"
 }
 
+# ---------- environment and required service identity -----------------------
+
+check_required_health() {
+  [ -n "${HEALTH_CHECK_EXPECT_ENVIRONMENT:-}${HEALTH_CHECK_REQUIRE_SERVICES:-}" ] || return 0
+  HEALTH_BODY="$RESPONSE_FILE" python3 - <<'PY'
+import json, os
+try:
+    d = json.load(open(os.environ['HEALTH_BODY']))
+except (OSError, ValueError):
+    print('::error::Cannot read deployment health JSON.')
+    raise SystemExit(1)
+expected = os.environ.get('HEALTH_CHECK_EXPECT_ENVIRONMENT', '')
+if expected and d.get('environment') != expected:
+    print('::error::Deployment environment does not match the expected environment.')
+    raise SystemExit(1)
+services = {s.get('name'): s.get('status') for s in d.get('services') or []}
+for name in filter(None, (s.strip() for s in os.environ.get('HEALTH_CHECK_REQUIRE_SERVICES', '').split(','))):
+    if services.get(name) not in ('up', 'healthy'):
+        print('::error::Required service is not verified healthy: ' + name)
+        raise SystemExit(1)
+print('Required environment/service checks passed.')
+PY
+}
+
 # ---------- stabilization wait --------------------------------------------
 
 echo "Waiting ${STABILIZE}s for deployment to stabilize: ${DEPLOY_URL}"
@@ -220,6 +266,9 @@ while [ "$attempt" -lt "$RETRIES" ]; do
       # The right build, and a reachable engine: both are required before the
       # success exit. Either failing means the deploy is not verified.
       if ! check_commit_identity; then
+        exit 1
+      fi
+      if ! check_required_health; then
         exit 1
       fi
       if ! check_engine_health; then
