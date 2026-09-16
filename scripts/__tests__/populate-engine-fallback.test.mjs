@@ -68,23 +68,31 @@ test('production CLI rejects corrupt artifacts without touching the destination'
 });
 
 const workflow = readFileSync(new URL('../../.github/workflows/cd.yml', import.meta.url), 'utf8');
-for (const target of ['staging', 'production']) {
-  test(target + ' cannot skip artifact download, packaging, or upload validation', () => {
-    const job = workflow.split('  deploy-' + target + ':')[1].split(/\n  [a-z][a-z0-9-]*:\n/)[0];
-    for (const name of ['Download WASM artifacts for same-origin fallback', 'Populate same-origin WASM fallback', 'Verify ' + target + ' upload contains the engine']) {
-      const step = job.split('      - name: ' + name + '\n')[1]?.split(/\n      - /)[0];
-      assert.ok(step, 'missing step: ' + name);
-      assert.doesNotMatch(step, /\n        (if:|continue-on-error:)/);
-    }
-    assert.match(job, /^          node scripts\/populate-engine-fallback[.]mjs engine web\/public$/m);
-    const download = job.split('      - name: Download WASM artifacts for same-origin fallback\n')[1].split(/\n      - /)[0];
-    assert.match(download, /^        uses: actions\/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8$/m);
-    assert.match(download, /^          name: wasm-binaries$/m);
-    assert.match(download, /^          path: engine\/$/m);
-    const verify = job.split('      - name: Verify ' + target + ' upload contains the engine\n')[1].split(/\n      - /)[0];
-    assert.match(verify, /^          bash scripts\/assert-vercel-engine-manifest[.]sh vercel-upload[.]json$/m);
-    assert.match(verify, /^          vercel deploy --dry --prod --yes --format=json /m);
-    assert.ok(job.indexOf('Populate same-origin') < job.indexOf('Verify ' + target + ' upload'));
-    assert.ok(job.indexOf('Verify ' + target + ' upload') < job.indexOf('Deploy to ' + target + ' (remote build)'));
-  });
+function deploymentJob(source, target) {
+  // Windows checkouts may use CRLF; preserve strict YAML line assertions.
+  source = source.replaceAll('\r\n', '\n');
+  return source.split('  deploy-' + target + ':')[1].split(/\n  [a-z][a-z0-9-]*:\n/)[0];
+}
+for (const lineEnding of ['LF', 'CRLF']) {
+  for (const target of ['staging', 'production']) {
+    test(target + ' cannot skip artifact download, packaging, or upload validation (' + lineEnding + ')', () => {
+      const raw = workflow.replace(/\r?\n/g, lineEnding === 'LF' ? '\n' : '\r\n');
+      const job = deploymentJob(raw, target);
+      for (const name of ['Download WASM artifacts for same-origin fallback', 'Populate same-origin WASM fallback', 'Verify ' + target + ' upload contains the engine']) {
+        const step = job.split('      - name: ' + name + '\n')[1]?.split(/\n      - /)[0];
+        assert.ok(step, 'missing step: ' + name);
+        assert.doesNotMatch(step, /\n        (if:|continue-on-error:)/);
+      }
+      assert.match(job, /^          node scripts\/populate-engine-fallback[.]mjs engine web\/public$/m);
+      const download = job.split('      - name: Download WASM artifacts for same-origin fallback\n')[1].split(/\n      - /)[0];
+      assert.match(download, /^        uses: actions\/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8$/m);
+      assert.match(download, /^          name: wasm-binaries$/m);
+      assert.match(download, /^          path: engine\/$/m);
+      const verify = job.split('      - name: Verify ' + target + ' upload contains the engine\n')[1].split(/\n      - /)[0];
+      assert.match(verify, /^          bash scripts\/assert-vercel-engine-manifest[.]sh vercel-upload[.]json$/m);
+      assert.match(verify, /^          vercel deploy --dry --prod --yes --format=json /m);
+      assert.ok(job.indexOf('Populate same-origin') < job.indexOf('Verify ' + target + ' upload'));
+      assert.ok(job.indexOf('Verify ' + target + ' upload') < job.indexOf('Deploy to ' + target + ' (remote build)'));
+    });
+  }
 }
