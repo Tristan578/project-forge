@@ -310,7 +310,7 @@ describe('PixelArtEditor', () => {
 
   it('enables undo after clear', () => {
     render(<PixelArtEditor open={true} onClose={vi.fn()} />);
-    const clearBtn = screen.getByTitle('Clear canvas');
+    const clearBtn = screen.getByTitle('Clear layer');
     fireEvent.click(clearBtn);
     const undoBtn = screen.getByTitle('Undo (Ctrl+Z)');
     expect(undoBtn.hasAttribute('disabled')).toBe(false);
