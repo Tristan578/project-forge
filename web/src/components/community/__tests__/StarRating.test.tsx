@@ -34,6 +34,31 @@ describe('StarRating', () => {
     expect(changed).toHaveBeenCalledExactlyOnceWith(4);
   });
 
+
+  it.each([
+    { value: NaN, expected: 0 }, { value: Infinity, expected: 0 },
+    { value: -Infinity, expected: 0 }, { value: -2, expected: 0 },
+    { value: 8, expected: 5 }, { value: 3.14, expected: 3.1 },
+  ])('announces a safe average for value $value', ({ value, expected }) => {
+    render(<StarRating value={value} count={1} />);
+    expect(screen.getByRole('img', { name: `Average rating: ${expected} out of 5 stars, 1 rating` })).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { value: NaN, selected: null }, { value: Infinity, selected: null },
+    { value: -Infinity, selected: null }, { value: -2, selected: null },
+    { value: 8, selected: 5 }, { value: 3.14, selected: null },
+  ])('keeps invalid interactive value $value safe and choices actionable', ({ value, selected }) => {
+    const changed = vi.fn();
+    render(<StarRating value={value} interactive onChange={changed} />);
+    const checked = screen.getAllByRole('radio').filter(radio => (radio as HTMLInputElement).checked);
+    expect(checked).toHaveLength(selected === null ? 0 : 1);
+    if (selected !== null) expect(checked[0]).toHaveAccessibleName('Rate 5 stars');
+    fireEvent.click(screen.getByRole('radio', { name: 'Rate 2 stars' }));
+    expect(changed).toHaveBeenCalledExactlyOnceWith(2);
+  });
+
   it('renders five decorative stars without controls for a read-only average', () => {
     render(<StarRating value={3} />);
     expect(screen.getAllByTestId('star-icon')).toHaveLength(5);

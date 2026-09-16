@@ -74,6 +74,13 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   const dismiss = useCallback(() => onCloseRef.current(), []);
+  // Save the gallery invoker before the dialog hook moves focus to Close.
+  useEffect(() => {
+    const invoker = document.activeElement;
+    return () => {
+      if (invoker instanceof HTMLElement && invoker.isConnected) invoker.focus();
+    };
+  }, []);
   const dialogRef = useDialogA11y(dismiss);
   const [game, setGame] = useState<GameDetail | null>(null);
   const [loading, setLoading] = useState(true);

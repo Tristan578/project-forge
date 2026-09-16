@@ -20,7 +20,8 @@ interface StarRatingProps {
 
 /**
  * Show an average once to assistive technology or expose five named native radios.
- * Exactly one integer rating is checked; native arrow keys change the choice.
+ * At most one integer rating is checked; zero means no selection.
+ * Native arrow keys change the choice; interactive values are zero or integers 1..5.
  * Pointer hover previews filled stars without changing the caller-owned value.
  * @param props Rating value, optional count/size, and selection callback.
  * @returns Stars with read-only or single-choice semantics.

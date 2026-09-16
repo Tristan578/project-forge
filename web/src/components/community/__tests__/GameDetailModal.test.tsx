@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, act } from '@/test/utils/componentTestUtils';
 import { GameDetailModal } from '../GameDetailModal';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 
 vi.mock('lucide-react', () => ({
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
@@ -91,6 +92,38 @@ describe('GameDetailModal', () => {
     await userEvent.setup().keyboard('{Escape}');
     expect(latestClose).toHaveBeenCalledExactlyOnceWith();
     expect(firstClose).not.toHaveBeenCalled();
+  });
+
+
+  it.each([
+    { state: 'loading', action: 'Escape' }, { state: 'loading', action: 'Close' },
+    { state: 'success', action: 'Escape' }, { state: 'success', action: 'Close' },
+    { state: 'failure', action: 'Escape' }, { state: 'failure', action: 'Close' },
+  ])('returns focus to the keyboard invoker after $action in $state', async ({ state, action }) => {
+    if (state === 'loading') mockFetch.mockReturnValueOnce(new Promise(() => {}));
+    else if (state === 'failure') mockFetch.mockResolvedValueOnce({ ok: false });
+    else mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ game: {
+      id: 'game-1', title: 'Focus Game', description: null,
+      authorName: 'Author', authorId: 'author-1', playCount: 0, likeCount: 0,
+      avgRating: 3, ratingCount: 1, ratingBreakdown: [], tags: [], cdnUrl: null,
+      createdAt: '2024-01-01', comments: [],
+    } }) });
+    function GalleryInvoker() {
+      const [open, setOpen] = useState(false);
+      return <><button onClick={() => setOpen(true)}>View Focus Game</button>
+        {open && <GameDetailModal gameId="game-1" onClose={() => setOpen(false)} />}</>;
+    }
+    render(<GalleryInvoker />);
+    const user = userEvent.setup();
+    const view = screen.getByRole('button', { name: 'View Focus Game' });
+    await user.tab(); expect(view).toHaveFocus();
+    await user.keyboard('{Enter}');
+    if (state !== 'loading') await screen.findByRole('heading', { name: state === 'success' ? 'Focus Game' : 'Game unavailable' });
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus();
+    if (action === 'Escape') await user.keyboard('{Escape}');
+    else await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(view).toHaveFocus();
   });
 
   it('shows loading state initially', () => {
