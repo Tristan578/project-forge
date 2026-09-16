@@ -42,7 +42,7 @@ export function NumberField({ label, value, onChange, min, max, step = 0.1, clas
     return (_jsxs("div", { className: cn('flex items-center gap-2', className), children: [_jsx("label", { htmlFor: id, className: "w-20 shrink-0 text-xs font-medium", style: { color: 'var(--sf-text-secondary)' }, children: label }), _jsx("input", { id: id, type: "number", value: displayValue, min: min, max: max, step: step, disabled: disabled, onChange: handleChange, onBlur: (event) => {
                     setDraft(null);
                     onBlur?.(event);
-                }, className: cn('flex-1 min-w-0 rounded px-2 py-1 text-xs outline-none focus:ring-1', 'disabled:opacity-50 disabled:cursor-not-allowed'), style: {
+                }, className: cn('flex-1 min-w-0 min-h-[44px] sm:min-h-0 rounded px-2 py-1 text-xs outline-none focus:ring-1', 'disabled:opacity-50 disabled:cursor-not-allowed'), style: {
                     backgroundColor: 'var(--sf-bg-elevated)',
                     color: 'var(--sf-text)',
                     borderRadius: 'var(--sf-radius-sm)',

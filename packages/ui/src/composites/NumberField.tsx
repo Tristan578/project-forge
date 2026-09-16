@@ -95,7 +95,7 @@ export function NumberField({
           onBlur?.(event);
         }}
         className={cn(
-          'flex-1 min-w-0 rounded px-2 py-1 text-xs outline-none focus:ring-1',
+          'flex-1 min-w-0 min-h-[44px] sm:min-h-0 rounded px-2 py-1 text-xs outline-none focus:ring-1',
           'disabled:opacity-50 disabled:cursor-not-allowed',
         )}
         style={{

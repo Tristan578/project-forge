@@ -42,7 +42,7 @@ export function SliderInput({
         {showValue && (
           <span
             className="text-xs tabular-nums"
-            style={{ color: 'var(--sf-text-muted)' }}
+            style={{ color: 'var(--sf-text-secondary)' }}
             aria-live="polite"
           >
             {displayValue}
@@ -59,14 +59,22 @@ export function SliderInput({
         onChange={(e) => onChange(Number(e.target.value))}
         disabled={disabled}
         className={cn(
-          'w-full h-1.5 rounded-full appearance-none cursor-pointer',
+          'w-full h-11 sm:h-1.5 rounded-full appearance-none cursor-pointer',
           'disabled:opacity-50 disabled:cursor-not-allowed',
           '[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5',
           '[&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full',
-          '[&::-webkit-slider-thumb]:cursor-pointer',
+          '[&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:bg-[var(--sf-text)]',
+          '[&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-3.5',
+          '[&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:rounded-full',
+          '[&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[var(--sf-text)]',
+          '[&::-moz-range-thumb]:cursor-pointer',
         )}
         style={{
-          backgroundColor: 'var(--sf-bg-elevated)',
+          backgroundColor: 'transparent',
+          backgroundImage: 'linear-gradient(var(--sf-bg-elevated), var(--sf-bg-elevated))',
+          backgroundSize: '100% 6px',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
           accentColor: 'var(--sf-accent)',
         }}
         {...props}

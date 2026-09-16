@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import '@spawnforge/ui/tokens/theme.css';
+@source "../../../packages/ui/src";
 
 :root {
   --background: #09090b;
