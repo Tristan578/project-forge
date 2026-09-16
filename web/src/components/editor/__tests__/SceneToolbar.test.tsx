@@ -264,7 +264,9 @@ describe('SceneToolbar', () => {
 
       emitExport({ json: JSON.stringify(FOLDED_SCENE), name: 'S', requestId });
 
-      expect(mockSaveSceneToCloud).toHaveBeenCalledExactlyOnceWith('proj_1', 'S', JSON.stringify(FOLDED_SCENE));
+      // 4th arg is the serialized music arrangement (#9854) — null here since
+      // this test never seeds one, matching `serialize()`'s "null when empty".
+      expect(mockSaveSceneToCloud).toHaveBeenCalledExactlyOnceWith('proj_1', 'S', JSON.stringify(FOLDED_SCENE), null);
     });
   });
 

@@ -208,7 +208,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       });
     }
     // Bottom panels go with assets
-    else if (['audio-mixer'].includes(panelId) && assets) {
+    else if (['audio-mixer', 'music-arrangement'].includes(panelId) && assets) {
       api.addPanel({
         id: panelId,
         component: def.component,
