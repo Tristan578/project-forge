@@ -519,7 +519,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
                 node={node}
                 depth={0}
                 onContextMenu={handleContextMenu}
-                isEditing={editingEntityId === rootId}
+                editingEntityId={editingEntityId}
                 onEditComplete={(newName) => {
                   const editedId = editingEntityId;
                   if (newName && editedId) {

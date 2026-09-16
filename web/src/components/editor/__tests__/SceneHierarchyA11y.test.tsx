@@ -236,6 +236,77 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     expect(renameEntity).toHaveBeenCalledWith('cam', 'Ca');
   });
 
+
+  it.each(['sword', 'gem'])('F2 renames nested entity %s without navigating or dispatching other commands', async (entityId) => {
+    const renameEntity = vi.fn();
+    const deleteSelectedEntities = vi.fn();
+    const toggleVisibility = vi.fn();
+    const graph = {
+      rootIds: ['player'],
+      nodes: {
+        player: { entityId: 'player', name: 'Player', visible: true, parentId: null, children: ['sword'], components: [] },
+        sword: { entityId: 'sword', name: 'Sword', visible: true, parentId: 'player', children: ['gem'], components: [] },
+        gem: { entityId: 'gem', name: 'Gem', visible: true, parentId: 'sword', children: [], components: [] },
+      },
+    };
+    mockStore({ sceneGraph: graph, renameEntity, deleteSelectedEntities, toggleVisibility, selectedIds: new Set([entityId]) });
+    const user = userEvent.setup();
+    render(<SceneHierarchy />);
+    const name = entityId === 'sword' ? 'Sword' : 'Gem';
+    const row = screen.getByRole('treeitem', { name });
+    row.focus();
+    await user.keyboard('{F2}');
+    const input = await within(row).findByRole('textbox');
+    await waitFor(() => expect(input).toHaveFocus());
+    await user.clear(input);
+    await user.type(input, 'New visible name');
+    await user.keyboard('{ArrowDown}{ArrowUp}{Home}{End}{ArrowLeft}{ArrowRight}{Delete}');
+    expect(input).toHaveFocus();
+    expect(renameEntity).not.toHaveBeenCalled();
+    expect(deleteSelectedEntities).not.toHaveBeenCalled();
+    expect(toggleVisibility).not.toHaveBeenCalled();
+    mockSelectEntity.mockClear();
+    await user.keyboard('{Enter}');
+    expect(renameEntity).toHaveBeenCalledExactlyOnceWith(entityId, 'New visible name');
+    expect(mockSelectEntity).not.toHaveBeenCalled();
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(within(row).queryByRole('textbox')).toBeNull();
+  });
+
+  it('Escape cancels a child rename and restores focus without committing on blur', async () => {
+    const renameEntity = vi.fn();
+    mockStore({ renameEntity });
+    const user = userEvent.setup();
+    render(<SceneHierarchy />);
+    const row = screen.getByRole('treeitem', { name: 'Sword' });
+    row.focus();
+    await user.keyboard('{F2}');
+    const input = await within(row).findByRole('textbox');
+    await waitFor(() => expect(input).toHaveFocus());
+    await user.clear(input);
+    await user.type(input, 'Discard me');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(within(row).queryByRole('textbox')).toBeNull();
+    expect(renameEntity).not.toHaveBeenCalled();
+  });
+
+  it('context-menu Rename opens the child input and commits to that child', async () => {
+    const renameEntity = vi.fn();
+    mockStore({ renameEntity });
+    const user = userEvent.setup();
+    render(<SceneHierarchy />);
+    const row = screen.getByRole('treeitem', { name: 'Sword' });
+    await user.pointer({ target: within(row).getByText('Sword'), keys: '[MouseRight]' });
+    await user.click(screen.getByText('Rename'));
+    const input = await within(row).findByRole('textbox');
+    await waitFor(() => expect(input).toHaveFocus());
+    await user.clear(input);
+    await user.type(input, 'Context name{Enter}');
+    expect(renameEntity).toHaveBeenCalledExactlyOnceWith('sword', 'Context name');
+    await waitFor(() => expect(row).toHaveFocus());
+  });
+
   it('renders a childless, axe-valid tree when the scene is empty', async () => {
     // The empty-scene UI must live OUTSIDE role="tree": a tree that CONTAINS a
     // non-treeitem child trips aria-required-children (critical). An empty tree

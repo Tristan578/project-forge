@@ -21,7 +21,10 @@ interface SceneNodeProps {
     entityName: string;
     position: { x: number; y: number };
   }) => void;
+  /** Enables editing when this row is rendered without a shared edit target. */
   isEditing?: boolean;
+  /** Shared rename target, propagated through every descendant row. */
+  editingEntityId?: string | null;
   onEditComplete?: (newName: string | null) => void;
   // Drag-related props
   isDragging?: boolean;
@@ -80,7 +83,8 @@ export function SceneNode({
   node,
   depth,
   onContextMenu,
-  isEditing = false,
+  isEditing: standaloneIsEditing = false,
+  editingEntityId,
   onEditComplete,
   isDragging,
   draggedEntityId,
@@ -106,7 +110,10 @@ export function SceneNode({
   const rowRef = useRef<HTMLDivElement>(null);
   // Use a lazy initializer to avoid the linter warning
   const [editValue, setEditValue] = useState(() => node.name);
-  const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
+  const [editSessionEntityId, setEditSessionEntityId] = useState<string | null>(null);
+  const isEditing = editingEntityId !== undefined
+    ? editingEntityId === node.entityId
+    : standaloneIsEditing;
 
   const selectedIds = useEditorStore((s) => s.selectedIds);
   const primaryId = useEditorStore((s) => s.primaryId);
@@ -153,11 +160,11 @@ export function SceneNode({
   const isDropTarget = dropTarget?.entityId === node.entityId;
 
   // Track when editing starts for a specific entity
-  if (isEditing && editingEntityId !== node.entityId) {
-    setEditingEntityId(node.entityId);
+  if (isEditing && editSessionEntityId !== node.entityId) {
+    setEditSessionEntityId(node.entityId);
     setEditValue(node.name);
-  } else if (!isEditing && editingEntityId === node.entityId) {
-    setEditingEntityId(null);
+  } else if (!isEditing && editSessionEntityId === node.entityId) {
+    setEditSessionEntityId(null);
   }
 
   // Focus input when editing starts
@@ -233,6 +240,9 @@ export function SceneNode({
 
   const handleEditKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Text editing owns its keys; Delete, Enter and context-menu shortcuts
+      // must not bubble into the hierarchy's entity commands.
+      e.stopPropagation();
       if (e.key === 'Enter') {
         e.preventDefault();
         onEditComplete?.(editValue.trim() || null);
@@ -411,6 +421,7 @@ export function SceneNode({
           <input
             ref={inputRef}
             type="text"
+            aria-label={`Rename ${node.name}`}
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={handleEditKeyDown}
@@ -455,7 +466,7 @@ export function SceneNode({
                   node={childNode}
                   depth={depth + 1}
                   onContextMenu={onContextMenu}
-                  isEditing={editingEntityId === childId}
+                  editingEntityId={editingEntityId}
                   onEditComplete={onEditComplete}
                   isDragging={isDragging}
                   draggedEntityId={draggedEntityId}
