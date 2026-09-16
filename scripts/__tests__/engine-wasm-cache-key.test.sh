@@ -457,15 +457,16 @@ else
       fi
     done
 
-    # The guard total pins the whole set at once: nine build steps above plus the
-    # Persist save below = 10. A guard silently dropped from any one of them
-    # takes this count off 10 even if a step was also renamed past the per-step
-    # checks above, so this catches the drop the per-step loop would miss.
+    # The guard total pins the whole set at once: nine build steps above, the
+    # Persist save below, and the reuse-miss notice just after the restore = 11.
+    # A guard silently dropped from any one of them takes this count off 11 even
+    # if a step was also renamed past the per-step checks above, so this catches
+    # the drop the per-step loop would miss.
     guard_count="$(grep -cF "$guard" <<<"$buildwasm")"
-    if [ "$guard_count" -eq 10 ]; then
-      pass "build-wasm carries exactly 10 cache-miss guards (9 build steps + the Persist save)"
+    if [ "$guard_count" -eq 11 ]; then
+      pass "build-wasm carries exactly 11 cache-miss guards (9 build steps + the Persist save + the reuse-miss notice)"
     else
-      fail "build-wasm has $guard_count cache-miss guards (expected 10) — a guard was added or dropped; a dropped one silently reverts build-wasm to rebuilding on every run"
+      fail "build-wasm has $guard_count cache-miss guards (expected 11) — a guard was added or dropped; a dropped one silently reverts build-wasm to rebuilding on every run"
     fi
 
     # 6. The `Persist all 4 WASM variants` save step exists, is itself gated on a
@@ -505,6 +506,80 @@ else
       else
         fail "the Persist step does not key on steps.engine-key-all4.outputs.key — a save under any other key can never be restored, so the reuse never hits"
       fi
+    fi
+
+    # 7. A cache MISS must be an explicit line in the log (#9525 item 2).
+    #    Removing continue-on-error did NOT make a reuse miss loud:
+    #    actions/cache/restore suppresses every non-validation error (a 5xx is a
+    #    core.error annotation, everything else a core.warning) and returns with
+    #    cache-hit unset without failing the step. So a cache-service outage is a
+    #    warned, silent rebuild. The reuse-miss notice, gated on the miss, is the
+    #    one line that names the fall-through to a rebuild.
+    miss_step="$(awk '
+      /^      - / { instep = (index($0, "Note engine WASM reuse miss") > 0) }
+      instep { print }
+    ' <<<"$buildwasm")"
+    if [ -z "$miss_step" ]; then
+      fail "build-wasm has no 'Note engine WASM reuse miss' step — a cold key or a suppressed cache-service error is a silent rebuild with nothing in the log naming it (#9525)"
+    else
+      pass "build-wasm has the reuse-miss notice step"
+      if grep -qF "$guard" <<<"$miss_step"; then
+        pass "the reuse-miss notice is gated on a cache miss (it fires only when reuse did not hit)"
+      else
+        fail "the reuse-miss notice is not gated on '$guard' — it would fire on every run, including a genuine hit"
+      fi
+      if grep -q '::notice::' <<<"$miss_step"; then
+        pass "the reuse-miss notice emits a ::notice:: line naming the miss"
+      else
+        fail "the reuse-miss notice does not emit a ::notice:: line — the miss stays invisible in the log"
+      fi
+    fi
+
+    # 8. The completeness gate must run BEFORE every cache save and the upload
+    #    (#9525 item 3). Saving pkg-webgl2 (or the all4 set) under a
+    #    content-addressed, IMMUTABLE key and verifying afterwards let a
+    #    truncated binary reach the cache; engine-smoke on every PR whose engine
+    #    tree hashes to that key then restores it and goes red with no self-heal,
+    #    since a cache/save cannot overwrite an existing key. Line numbers are
+    #    relative to the build-wasm block, which is all the ordering needs.
+    verify_ln="$(grep -nF 'Verify all 4 WASM variants' <<<"$buildwasm" | head -1 | cut -d: -f1)"
+    upload_ln="$(grep -nE '^[[:space:]]*uses:[[:space:]]*actions/upload-artifact' <<<"$buildwasm" | head -1 | cut -d: -f1)"
+    save_lns="$(grep -nE '^[[:space:]]*uses:[[:space:]]*actions/cache/save' <<<"$buildwasm" | cut -d: -f1)"
+    if [ -z "$verify_ln" ]; then
+      fail "no 'Verify all 4 WASM variants' step in build-wasm — cannot check its ordering against the saves"
+    elif [ -z "$save_lns" ]; then
+      fail "no actions/cache/save step in build-wasm — the ordering assertion would pass vacuously"
+    elif [ -z "$upload_ln" ]; then
+      fail "no actions/upload-artifact step in build-wasm — the ordering assertion would pass vacuously"
+    else
+      order_ok=1
+      while IFS= read -r s; do
+        if [ -z "$s" ]; then continue; fi
+        if [ "$verify_ln" -ge "$s" ]; then order_ok=0; fi
+      done <<<"$save_lns"
+      if [ "$verify_ln" -ge "$upload_ln" ]; then order_ok=0; fi
+      if [ "$order_ok" -eq 1 ]; then
+        pass "the completeness gate precedes every actions/cache/save and the upload (a corrupt set is caught before it is persisted under an immutable key)"
+      else
+        fail "the completeness gate (line $verify_ln in build-wasm) does not precede every cache save ($(echo "$save_lns" | tr '\n' ' ')) and the upload ($upload_ln) — a truncated variant can be saved under an immutable key before the gate runs (#9525)"
+      fi
+    fi
+
+    # 9. The completeness gate must check the wasm-bindgen JS glue, not only the
+    #    raw module (#9525 item 4). The browser loads engine-pkg-*/forge_engine.js;
+    #    a variant dir carrying only forge_engine_bg.wasm passes a wasm-only check
+    #    yet 404s in production (the #9525 symptom was a 404 on
+    #    engine-pkg-webgl2/forge_engine.js).
+    verify_step="$(awk '
+      /^      - / { instep = (index($0, "Verify all 4 WASM variants") > 0) }
+      instep { print }
+    ' <<<"$buildwasm")"
+    if [ -z "$verify_step" ]; then
+      fail "no Verify step to check for the glue-file assertion"
+    elif grep -q 'forge_engine\.js' <<<"$verify_step"; then
+      pass "the completeness gate also requires forge_engine.js (the wasm-bindgen glue the browser actually loads)"
+    else
+      fail "the completeness gate checks only *.wasm, never forge_engine.js — a variant missing the glue passes the gate and 404s in production (#9525)"
     fi
   fi
 fi

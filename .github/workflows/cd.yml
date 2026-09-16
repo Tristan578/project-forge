@@ -531,8 +531,16 @@ jobs:
       # segments a cache by (key, hash(paths)), so mixing path lists under one
       # key makes the other caller's restore silently miss.
       #
-      # No continue-on-error: a genuine restore failure is now a RED step, never a
-      # silent rebuild.
+      # continue-on-error is gone, but removing it does NOT by itself make a
+      # reuse miss loud: actions/cache/restore suppresses every non-validation
+      # error (a 5xx cache-service failure surfaces as a core.error annotation,
+      # anything else as a core.warning) and returns with cache-hit unset rather
+      # than failing the step -- "caching should be optional" is its documented
+      # contract, unlike the download-artifact step it replaced, which failed
+      # hard. So a cache-service outage degrades to a WARNED rebuild, not a red
+      # step. The "reuse MISS" notice step just after the restore is what makes
+      # every miss -- a cold key or a suppressed service error -- an explicit
+      # line in the log instead of a silent fall-through into the build.
       - name: Resolve the 4-variant engine cache key
         id: engine-key-all4
         run: |
@@ -550,6 +558,18 @@ jobs:
             engine/pkg-webgl2-runtime
             engine/pkg-webgpu-runtime
           key: ${{ steps.engine-key-all4.outputs.key }}
+
+      # A restore that does not hit -- a cold key for a newly merged engine tree,
+      # or a cache-service error actions/cache swallowed -- leaves cache-hit
+      # unset, and every build step below then runs. actions/cache fails the step
+      # for neither case, so this notice is the one line that names the
+      # fall-through to a rebuild in the log; without it a service outage is
+      # indistinguishable from a clean run that simply built.
+      - name: Note engine WASM reuse miss
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        env:
+          KEY: ${{ steps.engine-key-all4.outputs.key }}
+        run: echo "::notice::engine WASM reuse MISS for key ${KEY} -- rebuilding all four variants"
 
       # The Rust toolchain and cargo target cache are only needed to BUILD. On an
       # all4 cache hit every build step below is skipped, so gate these on the
@@ -622,6 +642,67 @@ jobs:
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
+      # Assert the artifact set is COMPLETE here -- immediately after the last
+      # bindgen step and BEFORE anything persists it (#9525). Every actions/cache
+      # save and the artifact upload are downstream of this gate, so a
+      # present-but-truncated or partial set is caught before it is written under
+      # a content-addressed, immutable cache key. The earlier ordering saved
+      # pkg-webgl2 FIRST and verified afterwards: on a miss a corrupt binary
+      # reached the single-path webgl2 key, and engine-smoke on every PR whose
+      # engine tree hashes to that key then restored the corrupt binary and went
+      # red with no self-heal -- a cache/save cannot overwrite an existing key.
+      # This runs whether the four variants were just built or restored, so a
+      # stale/partial reuse cannot dress itself up as a full set either.
+      # build-wasm always runs on a fresh runner with a fresh checkout, so
+      # nothing but this run's build/restore output can be present.
+      - name: Verify all 4 WASM variants are present and non-empty
+        run: |
+          set -euo pipefail
+          variants="pkg-webgl2 pkg-webgpu pkg-webgl2-runtime pkg-webgpu-runtime"
+          found=0
+          for v in $variants; do
+            dir="engine/$v"
+            if [ ! -d "$dir" ]; then
+              echo "::error::WASM variant '$v' is missing ($dir not a directory)" >&2
+              exit 1
+            fi
+            # Glob loop, not `find | head`: under `pipefail`, head closing the
+            # pipe early can leave find killed by SIGPIPE (141) and fail the
+            # step spuriously. `-s` is true only for a file that exists AND is
+            # non-empty, so a literal unmatched glob (nullglob is off) fails it.
+            wasm=""
+            for f in "$dir"/*.wasm; do
+              if [ -s "$f" ]; then
+                wasm="$f"
+                break
+              fi
+            done
+            if [ -z "$wasm" ]; then
+              echo "::error::WASM variant '$v' has no non-empty *.wasm file in $dir" >&2
+              ls -la "$dir" >&2 || true
+              exit 1
+            fi
+            # The browser loads the wasm-bindgen JS glue, not the raw module:
+            # engine-pkg-*/forge_engine.js is what the runtime imports, and a
+            # variant dir carrying only forge_engine_bg.wasm passes a wasm-only
+            # check yet 404s in production -- the #9525 symptom was exactly a 404
+            # on engine-pkg-webgl2/forge_engine.js. Require the glue too, or a
+            # partial bindgen output reaches the CDN under an immutable key.
+            glue="$dir/forge_engine.js"
+            if [ ! -s "$glue" ]; then
+              echo "::error::WASM variant '$v' has no non-empty forge_engine.js (wasm-bindgen glue) in $dir" >&2
+              ls -la "$dir" >&2 || true
+              exit 1
+            fi
+            echo "ok: $v -> $wasm ($(wc -c < "$wasm") bytes) + $glue ($(wc -c < "$glue") bytes)"
+            found=$((found + 1))
+          done
+          if [ "$found" -ne 4 ]; then
+            echo "::error::expected exactly 4 WASM variants, verified $found" >&2
+            exit 1
+          fi
+          echo "All 4 WASM variants present and non-empty (wasm + glue)."
+
       # Publish the WebGL2 build so CI's engine-smoke gate can restore it
       # instead of spending ~321s rebuilding an identical binary on every
       # web-only PR (#9574).
@@ -652,50 +733,6 @@ jobs:
         with:
           path: engine/pkg-webgl2
           key: ${{ steps.engine-key.outputs.key }}
-
-      # Assert the artifact set is COMPLETE before it is cached or uploaded
-      # (#9525). This runs whether the four variants were just built or restored
-      # from the content-addressed cache, so it is the single gate that a reuse
-      # can never dress up a partial set as a full one — a stale-variant reuse
-      # served to the CDN is worse than a duplicate build. build-wasm always runs
-      # on a fresh runner with a fresh checkout, so nothing but this run's
-      # build/restore output can be present; the check cannot be satisfied by
-      # leftovers from a previous run.
-      - name: Verify all 4 WASM variants are present and non-empty
-        run: |
-          set -euo pipefail
-          variants="pkg-webgl2 pkg-webgpu pkg-webgl2-runtime pkg-webgpu-runtime"
-          found=0
-          for v in $variants; do
-            dir="engine/$v"
-            if [ ! -d "$dir" ]; then
-              echo "::error::WASM variant '$v' is missing ($dir not a directory)" >&2
-              exit 1
-            fi
-            # Glob loop, not `find | head`: under `pipefail`, head closing the
-            # pipe early can leave find killed by SIGPIPE (141) and fail the
-            # step spuriously. `-s` is true only for a file that exists AND is
-            # non-empty, so a literal unmatched glob (nullglob is off) fails it.
-            wasm=""
-            for f in "$dir"/*.wasm; do
-              if [ -s "$f" ]; then
-                wasm="$f"
-                break
-              fi
-            done
-            if [ -z "$wasm" ]; then
-              echo "::error::WASM variant '$v' has no non-empty *.wasm file in $dir" >&2
-              ls -la "$dir" >&2 || true
-              exit 1
-            fi
-            echo "ok: $v -> $wasm ($(wc -c < "$wasm") bytes)"
-            found=$((found + 1))
-          done
-          if [ "$found" -ne 4 ]; then
-            echo "::error::expected exactly 4 WASM variants, verified $found" >&2
-            exit 1
-          fi
-          echo "All 4 WASM variants present and non-empty."
 
       # Persist the whole four-variant set under the content-addressed all4 key
       # so a later run on the same engine tree (a CD re-run, a workflow_dispatch,
