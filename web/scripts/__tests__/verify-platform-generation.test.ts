@@ -77,11 +77,11 @@ describe('buildPlan', () => {
     }
   });
 
-  it('grades exactly the resolver-gateway-routed capabilities on the gateway key (#9523)', () => {
+  it('grades exactly the advertised gateway capabilities on the gateway key (#9523)', () => {
     // The route the script assigns each capability must match the routing table
-    // the resolver reads (isGatewayRoutedCapability → GATEWAY_CAPABILITIES), so
+    // the gateway backend advertises (isGatewayRoutedCapability → GATEWAY_CAPABILITIES), so
     // AI_GATEWAY_API_KEY is evidence for image and embedding — not chat alone —
-    // and the script and resolver cannot disagree about who owns the gateway.
+    // The resolver uses a narrower list that excludes direct localization/pacing.
     const r = rows({ AI_GATEWAY_API_KEY: 'gw' });
     for (const cap of PROVIDER_CAPABILITIES) {
       const expected = isGatewayRoutedCapability(cap) ? 'gateway' : 'platform-key';
