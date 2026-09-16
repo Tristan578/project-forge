@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { populateEngineFallback } from '../populate-engine-fallback.mjs';
 
 const VARIANTS = ['pkg-webgl2', 'pkg-webgpu', 'pkg-webgl2-runtime', 'pkg-webgpu-runtime'];
@@ -45,6 +47,26 @@ for (const failure of ['missing variant', 'corrupt module', 'missing glue']) {
     assert.equal(existsSync(resolve(publicRoot, 'engine-pkg-webgpu')), false);
   });
 }
+
+const CLI = fileURLToPath(new URL('../populate-engine-fallback.mjs', import.meta.url));
+test('production CLI packages complete cached artifacts successfully', (t) => {
+  const { engine, publicRoot } = fixture(t);
+  const result = spawnSync(process.execPath, [CLI, engine, publicRoot], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  for (const variant of VARIANTS) {
+    assert.deepEqual(readFileSync(resolve(publicRoot, 'engine-' + variant, 'forge_engine_bg.wasm')), MODULE);
+    assert.equal(readFileSync(resolve(publicRoot, 'engine-' + variant, 'forge_engine.js'), 'utf8'), 'export const ready = true;');
+  }
+});
+test('production CLI rejects corrupt artifacts without touching the destination', (t) => {
+  const { engine, publicRoot } = fixture(t);
+  writeFileSync(resolve(engine, 'pkg-webgpu-runtime', 'forge_engine_bg.wasm'), MODULE.subarray(0, 7));
+  const result = spawnSync(process.execPath, [CLI, engine, publicRoot], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /pkg-webgpu-runtime: invalid or truncated forge_engine_bg.wasm/);
+  assert.equal(existsSync(publicRoot), false);
+});
+
 const workflow = readFileSync(new URL('../../.github/workflows/cd.yml', import.meta.url), 'utf8');
 for (const target of ['staging', 'production']) {
   test(target + ' cannot skip artifact download, packaging, or upload validation', () => {
@@ -54,7 +76,14 @@ for (const target of ['staging', 'production']) {
       assert.ok(step, 'missing step: ' + name);
       assert.doesNotMatch(step, /\n        (if:|continue-on-error:)/);
     }
-    assert.match(job, /node scripts\/populate-engine-fallback[.]mjs engine web\/public/);
+    assert.match(job, /^          node scripts\/populate-engine-fallback[.]mjs engine web\/public$/m);
+    const download = job.split('      - name: Download WASM artifacts for same-origin fallback\n')[1].split(/\n      - /)[0];
+    assert.match(download, /^        uses: actions\/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8$/m);
+    assert.match(download, /^          name: wasm-binaries$/m);
+    assert.match(download, /^          path: engine\/$/m);
+    const verify = job.split('      - name: Verify ' + target + ' upload contains the engine\n')[1].split(/\n      - /)[0];
+    assert.match(verify, /^          bash scripts\/assert-vercel-engine-manifest[.]sh vercel-upload[.]json$/m);
+    assert.match(verify, /^          vercel deploy --dry --prod --yes --format=json /m);
     assert.ok(job.indexOf('Populate same-origin') < job.indexOf('Verify ' + target + ' upload'));
     assert.ok(job.indexOf('Verify ' + target + ' upload') < job.indexOf('Deploy to ' + target + ' (remote build)'));
   });

@@ -305,22 +305,16 @@ jobs:
         run: bash scripts/ci-tree-already-validated.sh
   # Keep main's WebGL2 engine cache warm for CI's engine-smoke gate (#9574).
   #
-  # The save inside build-wasm is not enough on its own: that job is gated on
-  # engine-changed, and measured across the last 12 CD runs it ran ONCE and
-  # skipped eleven times. So a cache seeded only there would be absent right
-  # after this lands and would stay absent until an engine change happened to
-  # merge -- every PR in between restoring nothing and rebuilding for no
-  # benefit. The feature would look installed and do nothing.
+  # build-wasm runs for engine changes, web changes, and manual dispatch.
+  # This complementary job keeps the WebGL2 cache warm on the remaining main
+  # pushes, including documentation-only merges. It restores the entry and
+  # compiles only when the cache was genuinely evicted or never populated.
+  # The two jobs never build the same cold key concurrently.
   #
-  # This job runs on every push to main and is a no-op on a hit: restore, and
-  # build only when the entry is genuinely missing. Cost is a checkout plus a
-  # cache probe (~15s) against the ~5 min it saves each PR that would otherwise
-  # rebuild. It also covers eviction -- GitHub drops caches untouched for 7 days,
-  # and while PR restores normally keep this one alive, an engine-quiet stretch
-  # would otherwise lose it with nothing to rewrite it.
+  # Cache probes cost about15s; a cold WebGL2 build costs about5minutes.
+  # GitHub evicts entries untouched for7days, so covering every main push
+  # avoids an unnecessary rebuild in the next PR engine-smoke gate.
   #
-  # Deliberately NOT in any deploy job's needs: this is a cache warmer. If it
-  # fails, PRs rebuild exactly as they do today and nothing else changes.
   publish-engine-cache:
     name: Publish Engine Cache
     runs-on: ubuntu-latest
@@ -945,7 +939,7 @@ jobs:
           unzip -q awscliv2.zip
           sudo ./aws/install --update
 
-      # --- Path A: the engine changed, so upload what build-wasm produced -----
+      # --- Path A: build-wasm prepared a verified artifact for this deploy -----
       - name: Download WASM artifacts
         if: needs.build-wasm.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -980,7 +974,7 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.ASSET_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ vars.R2_BUCKET || 'spawnforge-engine' }}
 
-      # --- Path B: the engine did NOT change -----------------------------------
+      # --- Path B: no engine or web deploy needed an artifact ------------------
       # The bytes already at latest/ ARE this commit's engine, so copy them
       # server-side onto the stamped prefix. No build, no download, and the
       # deploy keeps its immutable version pin.
