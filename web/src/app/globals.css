@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import '@spawnforge/ui/tokens/theme.css';
 
+/* Shared UI utilities live outside the web source tree. */
+@source "../../../packages/ui/src";
+
 :root {
   --background: #09090b;
   --foreground: #fafafa;

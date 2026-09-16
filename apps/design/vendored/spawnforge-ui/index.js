@@ -24,6 +24,7 @@ export { Avatar } from './primitives/Avatar';
 export { Progress } from './primitives/Progress';
 export { Skeleton } from './primitives/Skeleton';
 export { Toast } from './primitives/Toast';
+export { InlineAlert, } from './primitives/InlineAlert';
 // Ambient theme effects
 export { ThemeAmbient } from './effects/ThemeAmbient';
 // Tier 2 Composites

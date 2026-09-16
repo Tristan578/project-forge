@@ -41,6 +41,11 @@ export { Avatar, type AvatarProps } from './primitives/Avatar';
 export { Progress, type ProgressProps } from './primitives/Progress';
 export { Skeleton, type SkeletonProps } from './primitives/Skeleton';
 export { Toast, type ToastProps, type ToastVariant } from './primitives/Toast';
+export {
+  InlineAlert,
+  type InlineAlertProps,
+  type InlineAlertVariant,
+} from './primitives/InlineAlert';
 
 // Ambient theme effects
 export { ThemeAmbient } from './effects/ThemeAmbient';
