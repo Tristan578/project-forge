@@ -59,6 +59,7 @@ function AxisInput({ axis, value, onChange, step, precision, min, max, disabled,
 }
 /**
  * Edits XYZ axes while retaining raw drafts, including empty intermediate edits.
+ * External axis changes replace stale drafts; echoes of local commits retain raw text.
  * Only finite edits commit; optional bounds clamp the edited axis. Blur discards
  * the draft and restores the parent value, rounded for display to precision
  * (default 3), without changing its committed precision. The default step is 0.1.
