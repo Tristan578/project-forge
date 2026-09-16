@@ -569,7 +569,19 @@ export function createGenerationHandler<TParams, TResult>(
             // Cache miss — deduct tokens and execute provider call
             // This runs only on cache miss — deduct tokens and execute
             const metadata = billingMetadataFn ? billingMetadataFn(params) : (params as Record<string, unknown>);
-            const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
+            // Pass the resolved capability (#9523) so gateway-routed capabilities
+            // (image/embedding) resolve AI_GATEWAY_API_KEY instead of the
+            // provider's PLATFORM_* var. `effectiveCapability` is the same value
+            // the unavailability gate computed above (step 1a); `?? undefined`
+            // keeps the direct 5-arg route for a route with no declared capability.
+            const resolved = await resolveApiKey(
+              userId,
+              resolvedProvider,
+              tokenCost,
+              resolvedOperation,
+              metadata,
+              effectiveCapability ?? undefined
+            );
             const apiKey = resolved.key;
             const usageId = resolved.usageId;
             // Charged for real (see the note at mctx.provider) — cache MISS only.
@@ -651,7 +663,17 @@ export function createGenerationHandler<TParams, TResult>(
 
     try {
       const metadata = billingMetadataFn ? billingMetadataFn(params) : (params as Record<string, unknown>);
-      const resolved = await resolveApiKey(userId, resolvedProvider, tokenCost, resolvedOperation, metadata);
+      // Pass the resolved capability (#9523) — see the cached path above. Same
+      // `effectiveCapability ?? undefined` so gateway-routed capabilities resolve
+      // AI_GATEWAY_API_KEY and capability-less routes keep the direct route.
+      const resolved = await resolveApiKey(
+        userId,
+        resolvedProvider,
+        tokenCost,
+        resolvedOperation,
+        metadata,
+        effectiveCapability ?? undefined
+      );
       apiKey = resolved.key;
       usageId = resolved.usageId;
       // Charged for real (see the note at mctx.provider) — uncached path.
