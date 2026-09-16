@@ -41,6 +41,9 @@ test.describe('Play Published Game — data route @api', () => {
 });
 
 test.describe('Play Published Game — DB-less public page @ui', () => {
+  test.beforeEach(() => {
+    test.skip(!!process.env.DATABASE_URL, 'DB-backed runs assert exact404 separately; this suite requires the deliberate DB-less server');
+  });
   test('database-unavailable page returns literal HTTP503 before any response streaming', async ({ request }) => {
     const response = await request.get(PAGE_PATH, { maxRedirects: 0 });
     expect(response.status()).toBe(503);
