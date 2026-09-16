@@ -1,5 +1,6 @@
 'use client';
 
+import { InlineAlert } from '@spawnforge/ui';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 interface GenerationUnavailableNoticeProps {
@@ -44,9 +45,8 @@ interface GenerationUnavailableNoticeProps {
  * session and the scene along with it (#9725 p8).
  *
  * Icon-free because the dialog tests stub `lucide-react` to the icons each
- * dialog imports. The inline amber styling mirrors the editor's existing
- * warning boxes; extracting a shared `InlineAlert` primitive into
- * `packages/ui` is tracked in #9726.
+ * dialog imports. Rendered through the shared `InlineAlert` warning primitive
+ * (#9726) so the notice colours are token-driven and themed once.
  */
 export function GenerationUnavailableNotice({
   id,
@@ -57,11 +57,7 @@ export function GenerationUnavailableNotice({
   const openSettings = useWorkspaceStore((s) => s.openSettings);
   const canFixInSettings = unprovisionable === false && byokConfigurable === true;
   return (
-    <div
-      id={id}
-      role="status"
-      className="rounded border border-amber-700/40 bg-amber-900/20 px-3 py-2 text-xs text-amber-300"
-    >
+    <InlineAlert id={id} variant="warning">
       <span className="font-semibold">Unavailable. </span>
       <span>{reason ?? 'This generation feature is not available yet.'}</span>
       {canFixInSettings && (
@@ -70,12 +66,12 @@ export function GenerationUnavailableNotice({
           <button
             type="button"
             onClick={() => openSettings('keys')}
-            className="font-semibold underline underline-offset-2 hover:text-amber-200"
+            className="font-semibold underline underline-offset-2 hover:opacity-80"
           >
             Open Settings
           </button>
         </>
       )}
-    </div>
+    </InlineAlert>
   );
 }
