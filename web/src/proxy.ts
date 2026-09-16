@@ -438,8 +438,23 @@ const authProxy = buildProxy();
  * @returns Existing proxy response, a missing-game404, or a temporary-failure503.
  */
 export async function proxy(req: NextRequest): Promise<NextResponse> {
-  const response = await authProxy(req);
-  if (response.status !== 200 || response.headers.get('x-middleware-next') !== '1'
+  return preflightPublishedGame(req, await authProxy(req));
+}
+
+/**
+ * Apply published-game preflight to the completed authentication response.
+ * @param req Incoming request whose original document is being forwarded.
+ * @param response Authentication/CORS/security response from the proxy.
+ * @returns Forwarding response, a missing-game404, or a temporary-failure503.
+ */
+export async function preflightPublishedGame(req: NextRequest, response: NextResponse): Promise<NextResponse> {
+  const rewrite = response.headers.get('x-middleware-rewrite');
+  // Clerk forwards auth headers by replacing next() with a same-URL rewrite.
+  // A different destination is a routing/auth decision and must be preserved.
+  const forwardsOriginal = rewrite !== null
+    ? rewrite === req.url
+    : response.headers.get('x-middleware-next') === '1';
+  if (response.status !== 200 || !forwardsOriginal
       || (req.method !== 'GET' && req.method !== 'HEAD')) return response;
   const match = /^\/play\/([^/]+)\/([^/]+)\/?$/.exec(req.nextUrl.pathname);
   if (!match) return response;

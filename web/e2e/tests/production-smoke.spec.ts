@@ -116,6 +116,22 @@ test.describe('Production Smoke Tests @smoke @production', () => {
     expect(integrityErrors).toEqual([]);
   });
 
+  for (const method of ['GET', 'HEAD'] as const) {
+    test('missing published game returns404 for ' + method, async ({ request }) => {
+      const res = await request.fetch(PROD_URL + '/play/user_release_smoke_absent_20260916/no-such-published-game', {
+        method, maxRedirects: 0,
+      });
+      expect(res.status()).toBe(404);
+      expect(res.headers()['x-robots-tag']).toBe('noindex');
+      expect(res.headers()['cache-control']).toContain('no-store');
+      if (method === 'GET') {
+        expect(await res.text()).toContain('<h1>Game Not Found</h1>');
+      } else {
+        expect((await res.body()).length).toBe(0);
+      }
+    });
+  }
+
   test('community page loads', async ({ request }) => {
     const res = await request.get(`${PROD_URL}/community`);
     expect(res.status()).toBe(200);
