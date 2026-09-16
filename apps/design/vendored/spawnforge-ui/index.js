@@ -32,6 +32,7 @@ export { ThemeImportExport } from './composites/ThemeImportExport';
 export { SettingsPanel } from './composites/SettingsPanel';
 export { Vec3Input } from './composites/Vec3Input';
 export { SliderInput } from './composites/SliderInput';
+export { NumberField } from './composites/NumberField';
 export { ColorPicker } from './composites/ColorPicker';
 export { TreeView } from './composites/TreeView';
 export { PropertyGrid } from './composites/PropertyGrid';

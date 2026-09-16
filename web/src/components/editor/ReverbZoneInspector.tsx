@@ -2,120 +2,10 @@
 
 import { useCallback, useId } from 'react';
 import { HelpCircle } from 'lucide-react';
+import { SliderInput, Vec3Input, NumberField } from '@spawnforge/ui';
 import { useEditorStore, type ReverbZoneData } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
-
-interface SliderRowProps {
-  label: string;
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  precision?: number;
-  onChange: (v: number) => void;
-}
-
-function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange }: SliderRowProps) {
-  const id = useId();
-  return (
-    <div className="flex items-center gap-2">
-      <label htmlFor={id} className="w-20 shrink-0 text-xs text-zinc-400">{label}</label>
-      <input
-        id={id}
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
-          [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
-          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
-          [&::-webkit-slider-thumb]:bg-zinc-300"
-      />
-      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
-        {value.toFixed(precision)}
-      </span>
-    </div>
-  );
-}
-
-interface NumberInputRowProps {
-  label: string;
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  onChange: (v: number) => void;
-}
-
-function NumberInputRow({ label, value, min, max, step = 0.1, onChange }: NumberInputRowProps) {
-  const id = useId();
-  return (
-    <div className="flex items-center gap-2">
-      <label htmlFor={id} className="w-20 shrink-0 text-xs text-zinc-400">{label}</label>
-      <input
-        id={id}
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-          focus:ring-1 focus:ring-blue-500"
-      />
-    </div>
-  );
-}
-
-interface Vec3InputProps {
-  label: string;
-  value: [number, number, number];
-  onChange: (value: [number, number, number]) => void;
-}
-
-function Vec3Input({ label, value, onChange }: Vec3InputProps) {
-  const id = useId();
-  // Three controls under one visual label, so the label cannot be `htmlFor`'d to
-  // any single one of them. The group carries the label and each axis carries
-  // its own accessible name — without that, all three read as "Size".
-  return (
-    <div className="flex items-center gap-2" role="group" aria-labelledby={`${id}-label`}>
-      <span id={`${id}-label`} className="w-20 shrink-0 text-xs text-zinc-400">{label}</span>
-      <div className="flex flex-1 gap-1">
-        <input
-          type="number"
-          aria-label={`${label} X`}
-          value={value[0]}
-          step={0.1}
-          onChange={(e) => onChange([parseFloat(e.target.value), value[1], value[2]])}
-          className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-            focus:ring-1 focus:ring-blue-500"
-        />
-        <input
-          type="number"
-          aria-label={`${label} Y`}
-          value={value[1]}
-          step={0.1}
-          onChange={(e) => onChange([value[0], parseFloat(e.target.value), value[2]])}
-          className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-            focus:ring-1 focus:ring-blue-500"
-        />
-        <input
-          type="number"
-          aria-label={`${label} Z`}
-          value={value[2]}
-          step={0.1}
-          onChange={(e) => onChange([value[0], value[1], parseFloat(e.target.value)])}
-          className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-            focus:ring-1 focus:ring-blue-500"
-        />
-      </div>
-    </div>
-  );
-}
 
 export function ReverbZoneInspector({ entityId }: { entityId: string }) {
   const fieldId = useId();
@@ -231,10 +121,12 @@ export function ReverbZoneInspector({ entityId }: { entityId: string }) {
             <Vec3Input
               label="Size"
               value={reverbZone.shape.size}
+              step={0.1}
+              precision={1}
               onChange={handleSizeChange}
             />
           ) : (
-            <NumberInputRow
+            <NumberField
               label="Radius"
               value={reverbZone.shape.radius}
               min={0.1}
@@ -262,40 +154,40 @@ export function ReverbZoneInspector({ entityId }: { entityId: string }) {
           </div>
 
           {/* Wet Mix */}
-          <SliderRow
+          <SliderInput
             label="Wet Mix"
             value={reverbZone.wetMix * 100}
             min={0}
             max={100}
             step={1}
-            precision={0}
+            formatValue={(v) => v.toFixed(0)}
             onChange={(v) => handleUpdate({ wetMix: v / 100 })}
           />
 
           {/* Decay Time */}
-          <SliderRow
+          <SliderInput
             label="Decay Time"
             value={reverbZone.decayTime}
             min={0.1}
             max={10}
             step={0.1}
-            precision={1}
+            formatValue={(v) => v.toFixed(1)}
             onChange={(v) => handleUpdate({ decayTime: v })}
           />
 
           {/* Pre-Delay */}
-          <SliderRow
+          <SliderInput
             label="Pre-Delay"
             value={reverbZone.preDelay}
             min={0}
             max={100}
             step={1}
-            precision={0}
+            formatValue={(v) => v.toFixed(0)}
             onChange={(v) => handleUpdate({ preDelay: v })}
           />
 
           {/* Priority */}
-          <NumberInputRow
+          <NumberField
             label="Priority"
             value={reverbZone.priority}
             step={1}
