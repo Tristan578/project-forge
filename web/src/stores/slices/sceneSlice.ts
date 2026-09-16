@@ -739,6 +739,23 @@ export const createSceneSlice: StateCreator<
     } catch (error) {
       rollbackAudio();
       savePrefabInstancesToStorage(previousInstances);
+      // Mirrors `loadScene`'s `strandOnThrow` default (Sentry, #10079): a
+      // THROWN `new_scene` dispatch can have despawned the outgoing scene
+      // mid-apply, same as a thrown `load_scene`, so the viewport can no
+      // longer be trusted and saving must lock until reload. Both
+      // `switchScene` (above) and its chat-handler mirror
+      // `sceneManagementHandlers.switch_scene` fall back to calling this
+      // function when the target scene's stored `data` is null, and both
+      // already assume — and TELL THE USER — that saving is locked when this
+      // throws. Before this fix that was false: no lockout was ever set on
+      // this path, so autosave could silently overwrite the previous scene
+      // with the wrecked engine viewport's corrupted state.
+      set({
+        sceneLoadError: {
+          reason: `${ENGINE_LOAD_THREW} ${error instanceof Error ? error.message : String(error)}`,
+          at: Date.now(),
+        },
+      });
       throw error;
     }
   },
@@ -1027,14 +1044,16 @@ export const createSceneSlice: StateCreator<
         // makes the catch below honest: a clean rejection leaves the outgoing
         // scene intact and non-stranding, but a THROWN dispatch sets
         // `sceneLoadError(ENGINE_LOAD_THREW)` so saving locks over the wrecked
-        // viewport rather than being folded into a no-op (#10079).
+        // viewport rather than being folded into a no-op (#10079). `newScene()`
+        // sets the same lockout on its own throw path, so both branches below
+        // leave saving locked identically (#10079 follow-up, Sentry).
         ? get().loadScene(JSON.stringify(result.sceneToLoad), { rejectionStrandsEditor: false, strandOnThrow: true })
         : get().newScene();
     } catch (error) {
       // `loadScene`/`newScene` already rolled back their OWN state (audio,
       // prefab registry) before rethrowing — see `dispatchSceneLoad`'s catch —
-      // and `loadScene` has already set `sceneLoadError(ENGINE_LOAD_THREW)`
-      // (via `strandOnThrow`), so every save path is now locked. What they
+      // and both have already set `sceneLoadError(ENGINE_LOAD_THREW)` on this
+      // throw, so every save path is now locked. What they
       // cannot roll back is this function's own outgoing capture: without the
       // `saveProjectScenes` below, a thrown dispatch error skips both persists
       // and the scene captured at the top of this function — the user's unsaved

@@ -209,7 +209,10 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     // (the default, restated): a THROWN dispatch can have wrecked the outgoing
     // scene mid-apply, so it DOES set `sceneLoadError(ENGINE_LOAD_THREW)` and
     // lock saving, and the message below tells the user to reload rather than
-    // claiming the scene is unchanged (#10079), parity with the store.
+    // claiming the scene is unchanged (#10079), parity with the store. When
+    // `sceneToLoad` is null the fallback `newScene()` throw sets the same
+    // lockout itself (#10079 follow-up, Sentry), so both branches lock saving
+    // identically.
     let accepted: boolean;
     try {
       accepted = result.sceneToLoad
@@ -223,7 +226,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       // outgoing scene's unsaved work, parity with the store's `switchScene`.
       // The persist writes the already-captured outgoing data, not a fresh
       // export of the wrecked engine scene, so it is safe under the lockout
-      // `loadScene` has by now set.
+      // both `loadScene` and `newScene` have by now set.
       saveProjectScenes(project, ctx.store.projectId);
       return {
         success: false,

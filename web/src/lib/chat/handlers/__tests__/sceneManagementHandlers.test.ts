@@ -705,6 +705,32 @@ describe('switch_scene', () => {
     // The pre-switch (outgoing) project is persisted rather than discarded.
     expect(mockSaveProjectScenes).toHaveBeenCalledWith(baseProject, undefined);
   });
+
+  // Sentry (#10079 follow-up): when `sceneToLoad` is null this handler falls
+  // back to `store.newScene()` instead of `store.loadScene()`. The message
+  // below claims saving is locked no matter which one threw, but the real
+  // `newScene()` never actually set `sceneLoadError` on its throw path before
+  // the store-level fix — this test pins the handler's OWN catch behavior
+  // (persist-then-report) at parity with the `loadScene`-throws case above,
+  // so a regression in either branch is caught here.
+  it('persists the outgoing scene when the newScene() fallback throws (#10079 follow-up, Sentry)', async () => {
+    mockSwitchScene.mockReturnValue({ project: { ...baseProject, activeSceneId: 'scene_2' }, sceneToLoad: null });
+
+    const { result, store } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' },
+      { newScene: vi.fn(() => { throw new Error('engine unreachable'); }) }
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Reload the editor');
+    expect(result.error).not.toContain('unchanged');
+    expect(store.newScene).toHaveBeenCalled();
+    expect(store.loadScene).not.toHaveBeenCalled();
+    // The pre-switch (outgoing) project is persisted rather than discarded.
+    expect(mockSaveProjectScenes).toHaveBeenCalledWith(baseProject, undefined);
+  });
 });
 
 // ---------------------------------------------------------------------------
