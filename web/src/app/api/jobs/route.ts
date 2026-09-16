@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { generationResultUrlSchema } from '@/lib/generation/resultUrl';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
-import { eq, and, inArray, desc } from 'drizzle-orm';
+import { eq, and, inArray, desc, sql } from 'drizzle-orm';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
@@ -16,12 +17,22 @@ const createJobSchema = z.object({
   type: z.enum(['sprite', 'texture', 'model', 'sfx', 'voice', 'skybox', 'music', 'sprite_sheet', 'tileset']),
   prompt: z.string().min(1).max(2000),
   parameters: z.record(z.string(), z.unknown()).optional(),
+  resultUrl: generationResultUrlSchema.optional(),
   tokenCost: z.number().int().min(0).optional(),
   tokenUsageId: z.string().max(100).nullish(),
   entityId: z.string().max(100).nullish(),
 });
 
-// POST: Create a job record (called by client after generation API returns)
+/**
+ * POST: Persist an authenticated user's generation job after submission.
+ * Requires providerJobId (1–200 chars), provider (1–100), supported type, and
+ * prompt (1–2000; stored at most 500). Optional parameters store placement and
+ * metadata; tokenCost defaults to 0, tokenUsageId/entityId may be null.
+ * Optional resultUrl preserves an inline synchronous artifact: HTTP URL at
+ * most 2000 chars or non-empty PNG data URL at most 4 MiB characters.
+ * Returns HTTP 201 {job:{id}}; auth/rate/validation errors use middleware,
+ * and persistence failures return a fixed 500 response.
+ */
 async function POST_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, {
@@ -32,7 +43,7 @@ async function POST_impl(req: NextRequest) {
     });
     if (mid.error) return mid.error;
 
-    const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId } =
+    const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId, resultUrl } =
       mid.body as z.infer<typeof createJobSchema>;
 
     const [job] = await queryWithResilience(() =>
@@ -48,6 +59,7 @@ async function POST_impl(req: NextRequest) {
           tokenCost: tokenCost ?? 0,
           tokenUsageId: tokenUsageId ?? null,
           entityId: entityId ?? null,
+          resultUrl: resultUrl ?? null,
         })
         .returning()
     );
@@ -62,7 +74,14 @@ async function POST_impl(req: NextRequest) {
   }
 }
 
-// GET: Fetch user's active (in-progress) jobs for hydration on page load
+/**
+ * GET: List up to 50 owned jobs, newest first. status=active selects pending,
+ * processing and downloading; all or an absent status includes every state.
+ * HTTP 200 {jobs} retains HTTP resultUrl values, but inline artifacts are
+ * excluded in SQL and represented by resultUrl:null, hasInlineResult:true.
+ * Fetch each flagged artifact with GET /api/jobs/{id} during recovery.
+ * Authentication errors use middleware; query failures return fixed HTTP 500.
+ */
 async function GET_impl(req: NextRequest) {
   try {
     const mid = await withApiMiddleware(req, { requireAuth: true });
@@ -88,7 +107,20 @@ async function GET_impl(req: NextRequest) {
 
     const jobs = await queryWithResilience(() =>
       getDb()
-        .select()
+        .select({
+          id: generationJobs.id, providerJobId: generationJobs.providerJobId,
+          provider: generationJobs.provider, type: generationJobs.type,
+          prompt: generationJobs.prompt, parameters: generationJobs.parameters,
+          status: generationJobs.status, progress: generationJobs.progress,
+          errorMessage: generationJobs.errorMessage,
+          // Keep potentially multi-MB PNGs inside the database, not this list.
+          resultUrl: sql<string | null>`CASE WHEN ${generationJobs.resultUrl} LIKE 'data:%' THEN NULL ELSE ${generationJobs.resultUrl} END`,
+          hasInlineResult: sql<boolean>`COALESCE(${generationJobs.resultUrl} LIKE 'data:%', FALSE)`,
+          resultMeta: generationJobs.resultMeta, imported: generationJobs.imported,
+          tokenCost: generationJobs.tokenCost, tokenUsageId: generationJobs.tokenUsageId,
+          entityId: generationJobs.entityId, createdAt: generationJobs.createdAt,
+          updatedAt: generationJobs.updatedAt, completedAt: generationJobs.completedAt,
+        })
         .from(generationJobs)
         .where(conditions)
         .orderBy(desc(generationJobs.createdAt))
@@ -113,7 +145,10 @@ async function GET_impl(req: NextRequest) {
         status: j.status,
         progress: j.progress,
         errorMessage: j.errorMessage,
-        resultUrl: j.resultUrl,
+        // Inline artifacts are fetched individually; multiple PNGs would exceed
+        // the host response limit in this list (for example character poses).
+        resultUrl: j.resultUrl?.startsWith('data:') ? null : j.resultUrl,
+        hasInlineResult: j.hasInlineResult,
         resultMeta: j.resultMeta,
         imported: j.imported === 1,
         tokenCost: j.tokenCost,

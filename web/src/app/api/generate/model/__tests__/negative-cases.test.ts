@@ -268,6 +268,7 @@ describe('POST /api/generate/model — negative cases', () => {
         expect.any(Number),
         '3d_generation_standard',
         expect.objectContaining({ prompt: 'test', mode: 'text-to-3d', quality: 'standard' }),
+        'model3d', // capability forwarded for gateway/direct routing (#9523)
       );
     });
 
@@ -279,6 +280,7 @@ describe('POST /api/generate/model — negative cases', () => {
         expect.any(Number),
         '3d_generation_high',
         expect.objectContaining({ quality: 'high' }),
+        'model3d', // capability forwarded for gateway/direct routing (#9523)
       );
     });
 
@@ -294,6 +296,7 @@ describe('POST /api/generate/model — negative cases', () => {
         expect.any(Number),
         'image_to_3d',
         expect.objectContaining({ mode: 'image-to-3d' }),
+        'model3d', // capability forwarded for gateway/direct routing (#9523)
       );
     });
   });

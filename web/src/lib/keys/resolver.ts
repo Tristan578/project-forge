@@ -4,7 +4,15 @@ import { users, providerKeys } from '../db/schema';
 import type { Provider } from '../db/schema';
 import { decryptProviderKey } from './encryption';
 import { deductTokens } from '../tokens/service';
-import { PLATFORM_KEY_ENV, getPlatformKeyEnvVar, type RetiredByokProvider } from '../config/providers';
+import {
+  PLATFORM_KEY_ENV,
+  getPlatformKeyEnvVar,
+  GATEWAY_KEY_ENV,
+  isResolverGatewayCapability,
+  isVercelRuntime,
+  type ProviderCapability,
+  type RetiredByokProvider,
+} from '../config/providers';
 import { TIER_DISPLAY_NAMES } from '../billing/tierPlans';
 
 export interface ResolvedKey {
@@ -39,7 +47,32 @@ const _PLATFORM_KEY_ENV_COMPLETE = PLATFORM_KEY_ENV satisfies Record<
 >;
 void _PLATFORM_KEY_ENV_COMPLETE;
 
-function getPlatformKey(provider: Provider): string {
+function getPlatformKey(provider: Provider, capability?: ProviderCapability): string {
+  // A resolver-gateway capability (image/embedding, #9523) resolves the single
+  // AI_GATEWAY_API_KEY instead of the provider's PLATFORM_* var, and never
+  // falls back to it: those capabilities have no direct platform path anymore,
+  // so a direct key present but the gateway key absent must still fail rather
+  // than silently route around the gateway. `isResolverGatewayCapability` reads
+  // RESOLVER_GATEWAY_CAPABILITIES — the SAME routing the availability gates
+  // apply through CAPABILITY_ENV_VARS — so key resolution and feature gating
+  // cannot disagree (lesson 1). `chat` is deliberately NOT in that set: it is
+  // gateway-served but also has direct/OpenRouter/GitHub-Models backends, so
+  // forcing it here 500'd every direct-Anthropic deployment when the gateway
+  // key was unset (#10074). Only the platform path is affected; the BYOK check
+  // in resolveApiKey runs first and is keyed on the provider, so a user's own
+  // OpenAI key still wins.
+  if (capability && isResolverGatewayCapability(capability)) {
+    const gatewayKey = process.env[GATEWAY_KEY_ENV.vercelGateway];
+    if (gatewayKey) return gatewayKey;
+    // Vercel OIDC auto-auth: on a Vercel runtime the AI Gateway needs no
+    // explicit key — the runtime injects an OIDC token — so return the empty
+    // key the gateway client reads as "use OIDC" (mirroring
+    // vercelGatewayBackend.isConfigured()/getApiKey()), rather than 500ing an
+    // OIDC-only deployment the gateway backend would have served (#10074).
+    if (isVercelRuntime()) return '';
+    throw new Error(`Platform key not configured: ${GATEWAY_KEY_ENV.vercelGateway}`);
+  }
+
   // getPlatformKeyEnvVar returns null for a retired/keyless provider (Suno):
   // its platform path is gone, so resolving one throws the same "not
   // configured" error a genuinely-unset key would.
@@ -62,13 +95,34 @@ function getPlatformKey(provider: Provider): string {
  *    charged for a call that can't run (#8597).
  * 3. No key available (starter tier, zero balance, or unconfigured platform
  *    key) → throw with guidance.
+ *
+ * `capability` is optional and affects only the platform path: when it is a
+ * resolver-gateway capability (image/embedding, #9523 — NOT chat, see
+ * `RESOLVER_GATEWAY_CAPABILITIES`) the platform key resolves to
+ * AI_GATEWAY_API_KEY rather than the provider's PLATFORM_* var, or to the empty
+ * key on a Vercel OIDC runtime. BYOK precedence, tier gating, token deduction
+ * and the ResolvedKey shape are identical on both routes — the gateway changes
+ * only WHICH platform secret is read, so token accounting and the circuit
+ * breaker (both keyed on `provider`) behave the same. Existing 5-arg callers
+ * omit it and keep the direct route. An empty key is an OIDC sentinel; a future
+ * consumer must use a gateway endpoint/model adapter and OIDC-aware SDK.
+ * This function does not authenticate an upstream HTTP request.
+ * @param userId Internal user whose stored credentials and balance are checked.
+ * @param provider Provider used for BYOK lookup and ledger attribution.
+ * @param tokenCost Platform token charge, applied after credential resolution.
+ * @param operation Ledger operation name.
+ * @param metadata Optional server-derived billing metadata.
+ * @param capability Optional server-derived capability selecting credential policy.
+ * @returns Stored unmetered BYOK credential or metered platform credential and usage ID.
+ * @throws ApiKeyError for tier or balance restrictions; Error for missing user or credentials.
  */
 export async function resolveApiKey(
   userId: string,
   provider: Provider,
   tokenCost: number,
   operation: string,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
+  capability?: ProviderCapability
 ): Promise<ResolvedKey> {
   // 1. Check for BYOK key
   const [byokKey] = await queryWithResilience(() =>
@@ -119,7 +173,7 @@ export async function resolveApiKey(
   // happened after deductTokens, the user would be charged for a call that can
   // never run and never gets refunded — silent token loss (#8597). Validate the
   // key is present first so a missing key fails before any balance changes.
-  const platformKey = getPlatformKey(provider);
+  const platformKey = getPlatformKey(provider, capability);
 
   const deduction = await deductTokens(userId, operation, tokenCost, provider, metadata);
   if (!deduction.success) {
@@ -135,6 +189,43 @@ export async function resolveApiKey(
     metered: true,
     usageId: deduction.usageId,
   };
+}
+
+/**
+ * Resolve a provider key WITHOUT deducting tokens, applying the same
+ * BYOK-then-platform precedence as {@link resolveApiKey} — the user's own key
+ * first, else the platform env key, else `null`.
+ *
+ * For a SECONDARY, bundled provider step whose cost is already covered by the
+ * primary generation the user paid for: `/api/generate/sprite` resolves the
+ * remove.bg key this way to fold background removal into a sprite it already
+ * charged for (#9734). It never charges, never checks tier/balance, and returns
+ * `null` (rather than throwing) when no key exists, so a deployment or user
+ * without a remove.bg key still gets a sprite instead of a failed generation.
+ * Do NOT use it for a primary, billable capability — that is `resolveApiKey`.
+ * @param userId Internal user ID whose encrypted BYOK key is queried.
+ * @param provider Secondary provider to resolve.
+ * @returns Decrypted BYOK or platform key, or null when neither is configured.
+ * @throws Lookup and decryption errors; callers choose whether to degrade.
+ */
+export async function resolveByokOrPlatformKey(
+  userId: string,
+  provider: Provider,
+): Promise<string | null> {
+  const [byokKey] = await queryWithResilience(() =>
+    getDb()
+      .select()
+      .from(providerKeys)
+      .where(and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)))
+      .limit(1)
+  );
+  if (byokKey) {
+    return decryptProviderKey(byokKey.encryptedKey, byokKey.iv);
+  }
+
+  const envVar = getPlatformKeyEnvVar(provider);
+  const platformKey = envVar ? process.env[envVar] : undefined;
+  return platformKey ?? null;
 }
 
 /** Store (or update) a BYOK key for a provider */

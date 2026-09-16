@@ -337,7 +337,8 @@ describe('POST /api/generate/voice', () => {
         'elevenlabs',
         75,
         'voice_generation',
-        expect.objectContaining({ text, textLength: text.length })
+        expect.objectContaining({ text, textLength: text.length }),
+        'voice', // capability forwarded for gateway/direct routing (#9523)
       );
     });
 

@@ -1,6 +1,7 @@
+/** Async community game details in a persistent keyboard-accessible modal. */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, Play, Heart, GitFork, ExternalLink, Share2, Check } from 'lucide-react';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { StarRating } from './StarRating';
@@ -8,37 +9,79 @@ import { CommentSection } from './CommentSection';
 import { useCommunityStore } from '@/stores/communityStore';
 import { useRouter } from 'next/navigation';
 
+/** Public game details returned by the community endpoint. */
 interface GameDetail {
+  /** Game identifier. */
   id: string;
+  /** Display title. */
   title: string;
+  /** Optional game description. */
   description: string | null;
+  /** Public author display name. */
   authorName: string;
+  /** Public author identifier. */
   authorId: string;
+  /** Recorded play count. */
   playCount: number;
+  /** Recorded like count. */
   likeCount: number;
+  /** Average rating from zero to five. */
   avgRating: number;
+  /** Number of submitted ratings. */
   ratingCount: number;
+  /** Counts grouped by integer star rating. */
   ratingBreakdown: { rating: number; count: number }[];
+  /** Public gallery tags. */
   tags: string[];
+  /** Optional playable public page URL. */
   cdnUrl: string | null;
+  /** Creation timestamp. */
   createdAt: string;
+  /** Public threaded comments. */
   comments: Array<{
+    /** Comment identifier. */
     id: string;
+    /** Comment text. */
     content: string;
+    /** Parent comment ID or null for a root comment. */
     parentId: string | null;
+    /** Comment author identifier. */
     authorId: string;
+    /** Comment author display name. */
     authorName: string;
+    /** Comment creation timestamp. */
     createdAt: string;
   }>;
 }
 
+/** Requested game and caller-owned modal dismissal. */
 interface GameDetailModalProps {
+  /** Community game to fetch and display. */
   gameId: string;
+  /** Dismiss the modal when Close or Escape is activated. */
   onClose: () => void;
 }
 
+/**
+ * Fetch public details while keeping the dialog and its Close control mounted.
+ * Loading and failure remain named, dismissible dialogs; the stable root lets
+ * useDialogA11y install autofocus, Escape handling, and Tab trapping on mount.
+ * @param props Community game identifier and dismissal callback.
+ * @returns A persistent modal showing loading, unavailable, or fetched content.
+ */
 export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
-  const dialogRef = useDialogA11y(onClose);
+  // Caller rerenders must not rerun dialog autofocus while rating a game.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  const dismiss = useCallback(() => onCloseRef.current(), []);
+  // Save the gallery invoker before the dialog hook moves focus to Close.
+  useEffect(() => {
+    const invoker = document.activeElement;
+    return () => {
+      if (invoker instanceof HTMLElement && invoker.isConnected) invoker.focus();
+    };
+  }, []);
+  const dialogRef = useDialogA11y(dismiss);
   const [game, setGame] = useState<GameDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -127,36 +170,30 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-        <div className="text-zinc-400">Loading...</div>
-      </div>
-    );
-  }
-
-  if (!game) {
-    return null;
-  }
-
   return (
-    <div ref={dialogRef} className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="game-detail-title">
+    <div ref={dialogRef} className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="game-detail-title" tabIndex={-1}>
       <div className="bg-zinc-900 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-zinc-900 border-b border-zinc-800 p-4 flex justify-between items-start z-10">
           <div>
-            <h2 id="game-detail-title" className="text-2xl font-bold text-zinc-100">{game.title}</h2>
-            <p className="text-sm text-zinc-400">by {game.authorName}</p>
+            <h2 id="game-detail-title" className="text-2xl font-bold text-zinc-100">{game?.title ?? (loading ? 'Loading game' : 'Game unavailable')}</h2>
+            {game && <p className="text-sm text-zinc-400">by {game.authorName}</p>}
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="text-zinc-400 hover:text-zinc-100"
+            aria-label="Close"
+            className="flex min-h-11 min-w-11 items-center justify-center text-zinc-400 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 rounded"
           >
-            <X className="w-6 h-6" />
+            <X aria-hidden="true" className="w-6 h-6" />
           </button>
         </div>
 
-        {/* Content */}
+        {loading ? (
+          <p role="status" className="p-6 text-zinc-400">Loading...</p>
+        ) : !game ? (
+          <p role="alert" className="p-6 text-zinc-300">This game could not be loaded. Close this dialog and try again.</p>
+        ) : (
         <div className="p-6 space-y-6">
           {/* Game preview */}
           <div className="aspect-video bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 rounded flex items-center justify-center">
@@ -177,10 +214,10 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <button
               onClick={handleLike}
-              className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+              className={`flex min-h-11 items-center gap-2 px-4 py-2 rounded transition-colors ${
                 likedGameIds.has(gameId)
                   ? 'bg-red-500 text-white'
                   : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
@@ -193,19 +230,19 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
             </button>
             <button
               onClick={handleFork}
-              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded hover:bg-zinc-700"
+              className="flex min-h-11 items-center gap-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded hover:bg-zinc-700"
             >
               <GitFork className="w-5 h-5" />
               Fork
             </button>
             <button
               onClick={handleShare}
-              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded hover:bg-zinc-700"
+              className="flex min-h-11 items-center gap-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded hover:bg-zinc-700"
             >
               {copied ? <Check className="w-5 h-5 text-green-400" /> : <Share2 className="w-5 h-5" />}
               {copied ? 'Copied!' : 'Share'}
             </button>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="flex w-full flex-col gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center">
               <span className="text-sm text-zinc-400">Your rating:</span>
               <StarRating
                 value={userRatings[gameId] || 0}
@@ -280,6 +317,7 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
             onAddComment={handleAddComment}
           />
         </div>
+        )}
       </div>
     </div>
   );

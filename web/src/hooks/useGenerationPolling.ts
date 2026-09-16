@@ -140,6 +140,28 @@ export function useGenerationPolling() {
       if (inFlightPollsRef.current[id]) return;
       inFlightPollsRef.current[id] = true;
       try {
+      // Synchronous providers (the DALL-E sprite path, #9734) return the
+      // finished image in the POST response body, which the dialog stores as
+      // the job's `resultUrl`. Import it directly and skip the status
+      // round-trip entirely: a base64 `data:` URL (post background-removal, up
+      // to several MB) must never be threaded through the `?jobId=` query
+      // string, where `+` decodes to a space and the request-line size limit is
+      // exceeded. A normal pollable job carries no `resultUrl` until it
+      // completes, so its presence on a still-`pending` job is the marker for
+      // an inline synchronous result.
+      const inlineJob = useGenerationStore.getState().jobs[id];
+      if (inlineJob && inlineJob.status === 'pending' && inlineJob.resultUrl) {
+        updateJob(id, { status: 'downloading', progress: 100 });
+        await handleCompletion(id, type, {
+          jobId,
+          status: 'completed',
+          progress: 100,
+          resultUrl: inlineJob.resultUrl,
+        });
+        stopPolling(id);
+        return;
+      }
+
       const startedAt = startedAtRef.current[id] ?? Date.now();
       startedAtRef.current[id] = startedAt;
       // Keep the existing five-minute overall cap independent of focus events
@@ -167,7 +189,12 @@ export function useGenerationPolling() {
 
       try {
         const endpoint = getStatusEndpoint(type);
-        const response = await fetch(`${endpoint}?jobId=${jobId}`);
+        // Encode the jobId: the status route reads it via
+        // `searchParams.get('jobId')`, which decodes `application/x-www-form-
+        // urlencoded`, so a raw `+`/`&`/`#`/space in a provider id would be
+        // corrupted or truncated. Provider prediction ids are url-safe today,
+        // but encoding is the correct contract and defends any id shape (#9734).
+        const response = await fetch(`${endpoint}?jobId=${encodeURIComponent(jobId)}`);
 
         if (!response.ok) {
           // Read the body BEFORE throwing. The route's message is written for

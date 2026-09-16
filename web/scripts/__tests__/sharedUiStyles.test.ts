@@ -6,7 +6,7 @@ import postcss from 'postcss';
 import tailwindcss from '@tailwindcss/postcss';
 import { expect, it } from 'vitest';
 
-it('emits shared Button outline, pressed and disabled styles', async () => {
+it('emits shared Button interactions and all InlineAlert severity styles', async () => {
   const webRoot = path.resolve(__dirname, '../..');
   const cssPath = path.join(webRoot, 'src/app/globals.css');
   const result = await postcss([tailwindcss({ base: webRoot })]).process(
@@ -26,4 +26,16 @@ it('emits shared Button outline, pressed and disabled styles', async () => {
   expect(rules.get('.active:scale-[0.97]:active')).toContain('scale:0.97');
   expect(rules.get('.shadow-[0_1px_2px_rgba(0,0,0,0.2)]')).toContain('--tw-shadow:01px2pxvar(--tw-shadow-color,rgba(0,0,0,0.2))');
   expect(rules.get('.focus-visible:ring-2:focus-visible')).toContain('--tw-ring-shadow:var(--tw-ring-inset,)000calc(2px+var(--tw-ring-offset-width))var(--tw-ring-color,currentcolor)');
+  const declarations: string[] = [];
+  result.root.walkDecls((declaration) => {
+    declarations.push((declaration.prop + ':' + declaration.value).replace(/\s/g, ''));
+  });
+  for (const token of ['--sf-warning', '--sf-destructive', '--sf-accent']) {
+    expect(declarations).toContain(
+      'background-color:color-mix(insrgb,var(' + token + ')12%,var(--sf-bg-surface))',
+    );
+    expect(declarations).toContain(
+      'border-color:color-mix(insrgb,var(' + token + ')40%,transparent)',
+    );
+  }
 });

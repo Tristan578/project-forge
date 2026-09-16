@@ -1,15 +1,17 @@
 # Platform generation keys — provisioning and verification runbook (#9117)
 
 SpawnForge serves AI generation on two paths. **BYOK** users supply their own
-provider key in Settings and are never charged tokens. **Platform** users
+provider key in Settings for Anthropic, Meshy, Hyper3D or ElevenLabs and are
+never charged tokens. OpenAI, Replicate and remove.bg have no Settings key option. **Platform** users
 (Pro, or a paid tier with add-on tokens) are served by SpawnForge's own key
 for the provider and charged tokens per call. This runbook is about the
 second path: which keys exist, how to mint and set each one, and how to prove
 a key works before anyone is charged against it.
 
 Production status as of 2026-09-05: **no `PLATFORM_*` key is set**. Chat works
-because it routes through the Vercel AI Gateway (`AI_GATEWAY_API_KEY`). Every
-other platform-path generation request fails before charging. The owner has
+because editor chat routes through the Vercel AI Gateway (`AI_GATEWAY_API_KEY`).
+That observation is historical and does not verify current deployment credentials
+or generation output. Existing direct-provider generation needs its own keys. The owner has
 deliberately deferred provisioning until the rest of the launch checklist is
 green (#9117 comment, 2026-09-03), so this document is the ready-to-run
 procedure for that day, not a request to act now.
@@ -65,17 +67,29 @@ to mint" columns are this runbook's; keep them in step when the tables change.
 
 | Capability | Provider | Route | Env var | Decision | Where to mint |
 |---|---|---|---|---|---|
-| `chat`, `embedding`, `image` | Vercel AI Gateway | gateway | `AI_GATEWAY_API_KEY` | **Gateway** — already set in production | Vercel dashboard → AI Gateway |
+| `chat`, `embedding`, `image` | Vercel AI Gateway | gateway | `AI_GATEWAY_API_KEY` | **Gateway credentials** — recorded in production on 2026-09-05; image/embedding consumer transport is not verified | Vercel dashboard → AI Gateway |
 | `model3d`, `texture` (also skybox) | Meshy | platform-key | `PLATFORM_MESHY_KEY` | **Platform key** (owner) | https://www.meshy.ai/settings/api — shown once, prefix `msy_` |
 | `sfx`, `voice`, `music` | ElevenLabs | platform-key | `PLATFORM_ELEVENLABS_KEY` | **Platform key** (owner) — set a credit quota on the key; the one key covers all three | https://elevenlabs.io/app/settings/api-keys |
-| `sprite` (and pixel art) | Replicate or OpenAI, per operation | platform-key | `PLATFORM_REPLICATE_KEY` or `PLATFORM_OPENAI_KEY` | Pixel-art sprites, sprite sheets and tilesets use Replicate. Other single-sprite styles use OpenAI. Either enables the aggregate capability; the dialog gates each selected operation independently. Provision both to support every operation. OpenAI and Replicate are not currently supported by user key setup; unavailable operations do not offer a Settings link. | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
+| `sprite` (and pixel art) | Replicate or OpenAI, per operation | platform-key | `PLATFORM_REPLICATE_KEY` or `PLATFORM_OPENAI_KEY` | Pixel-art sprites, sprite sheets and tilesets use Replicate. Other single-sprite styles use OpenAI. The aggregate capability requires both; the dialog gates each selected operation independently. Provision both to support every operation. OpenAI and Replicate are not currently supported by user key setup; unavailable operations do not offer a Settings link. | https://replicate.com/account/api-tokens and https://platform.openai.com/api-keys |
 | `bg_removal` | remove.bg | platform-key | `PLATFORM_REMOVEBG_KEY` | **Platform key** (owner) | https://www.remove.bg/dashboard#api-key |
 
-Not in the table: `ANTHROPIC_API_KEY` is only a chat fallback when the gateway
-is bypassed (https://console.anthropic.com/settings/keys); `PLATFORM_HYPER3D_KEY`
+The table describes the operator verification script, which grades advertised
+`GATEWAY_CAPABILITIES`. The resolver forces only image/embedding credentials
+through its narrower `RESOLVER_GATEWAY_CAPABILITIES`. This is credential
+preparation: no production image/embedding consumer uses the new resolver path
+yet. A future consumer must pair the key with a gateway endpoint/model adapter
+and use an OIDC-aware SDK for the empty-key sentinel; image integration remains
+tracked in #9818. A configured gate does not establish successful generation.
+
+`ANTHROPIC_API_KEY` serves a direct editor-chat backend and ALWAYS serves
+localization/pacing, even when a gateway key is present
+(https://console.anthropic.com/settings/keys); `PLATFORM_HYPER3D_KEY`
 is BYOK-only and never read on the platform path.
 
-The gateway rows are graded on `AI_GATEWAY_API_KEY` alone: if that key were
+The local operator script grades gateway rows on an explicit `AI_GATEWAY_API_KEY`.
+Unlike the Vercel runtime capability gate, its credit-free account probe does not
+use OIDC authentication: an OIDC-only deployment can have credential readiness
+while this explicit-key probe reports `missing`. If the explicit key were
 ever removed from production the script reports them `missing` and never
 substitutes a direct Anthropic/OpenAI key, because the decision above is the
 gateway and a silent fallback would hide its absence.

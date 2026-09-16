@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useMemo, memo } from 'react';
+import { InlineAlert } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import {
   generateAnimation,
@@ -224,9 +225,9 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
         </label>
 
         {boneSource === 'default' && primaryId && (
-          <div className="mb-2 rounded bg-amber-900/30 px-2 py-1.5 text-[11px] text-amber-300" role="alert">
+          <InlineAlert variant="warning" className="mb-2">
             Using default humanoid bones. For GLTF models, paste your actual bone names below.
-          </div>
+          </InlineAlert>
         )}
 
         <div className="flex max-h-20 flex-wrap gap-1 overflow-y-auto">
