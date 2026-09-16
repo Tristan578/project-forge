@@ -10,6 +10,8 @@ import { SpriteClient } from '@/lib/generate/spriteClient';
 import { SPRITE_SIZES, SPRITE_ESTIMATED_SECONDS, resolveSpriteProvider, spriteTokenCost } from '@/lib/config/providers';
 import type { SpriteStyle } from '@/lib/config/providers';
 import type { SpriteSize } from '@/lib/config/providers';
+import { resolveByokOrPlatformKey } from '@/lib/keys/resolver';
+import { captureException } from '@/lib/monitoring/sentry-server';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 
 type SpriteProvider = 'dalle3' | 'sdxl';
@@ -29,6 +31,13 @@ const POST_impl = createGenerationHandler<
     status: string;
     estimatedSeconds: number;
     usageId: string | undefined;
+    // Present only for a SYNCHRONOUSLY completed DALL-E generation. The finished
+    // image (a base64 `data:` URL after background removal, or a provider URL)
+    // rides here in the response body so the client imports it directly — it is
+    // NEVER embedded in `jobId`, which travels through the status-poll query
+    // string where a base64 payload corrupts and exceeds request-line limits
+    // (#9734).
+    resultUrl?: string;
   }
 >({
   route: '/api/generate/sprite',
@@ -88,22 +97,59 @@ const POST_impl = createGenerationHandler<
   },
   execute: async (params, apiKey, ctx) => {
     const client = new SpriteClient(apiKey, params.provider);
+
+    // Background removal (#9734) needs the remove.bg key, NOT the sprite
+    // provider key `apiKey`, so it is resolved separately with the same
+    // BYOK-then-platform precedence (PLATFORM_REMOVEBG_KEY). Only the DALL-E
+    // path is synchronous — SDXL returns a pending prediction id with no
+    // resolved URL to post to remove.bg inline — so the lookup is skipped for
+    // it. Resolution never charges and yields `null` when no key exists, in
+    // which case `generateSprite` returns the sprite unchanged rather than
+    // failing the generation the user paid for. A lookup error must not sink a
+    // successful sprite either, so it degrades to "no background removal".
+    let removeBackgroundKey: string | undefined;
+    if (params.removeBackground && params.provider === 'dalle3') {
+      try {
+        removeBackgroundKey =
+          (await resolveByokOrPlatformKey(ctx.userId, 'removebg')) ?? undefined;
+      } catch (err) {
+        captureException(err, { route: '/api/generate/sprite', action: 'resolve_removebg_key' });
+      }
+    }
+
     const result = await client.generateSprite({
       prompt: params.prompt,
       style: params.style,
       size: params.size,
       provider: params.provider,
       removeBackground: params.removeBackground,
+      removeBackgroundKey,
       signal: ctx.abortSignal,
     });
 
-    let finalJobId = result.taskId;
+    // DALL-E completes synchronously: the finished image is in hand now.
+    // Deliver it in the response BODY as `resultUrl` and hand the client a
+    // short, opaque, NON-pollable jobId. The image — a base64 `data:` URL after
+    // background removal, up to several MB — must never be threaded through
+    // `jobId` and the `/status?jobId=` query string, where `+` decodes to a
+    // space and the request-line size limit is exceeded, breaking the very
+    // background-removal path #9734 wires up. The client detects synchronous
+    // completion by `status === 'completed'` + a `resultUrl` in the body and
+    // imports it directly instead of polling.
     if (params.provider === 'dalle3' && result.status === 'completed') {
-      finalJobId = `dalle3:${result.taskId}`;
+      return {
+        jobId: `dalle3-sync:${ctx.usageId ?? crypto.randomUUID()}`,
+        provider: params.provider,
+        status: 'completed',
+        estimatedSeconds: SPRITE_ESTIMATED_SECONDS[params.provider],
+        usageId: ctx.usageId,
+        resultUrl: result.resultUrl ?? result.taskId,
+      };
     }
 
+    // SDXL returns a short, url-safe prediction id the client polls.
     return {
-      jobId: finalJobId,
+      jobId: result.taskId,
       provider: params.provider,
       status: result.status,
       estimatedSeconds: SPRITE_ESTIMATED_SECONDS[params.provider],

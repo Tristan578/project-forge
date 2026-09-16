@@ -31,6 +31,9 @@ describe('SpriteClient', () => {
 
       expect(result.taskId).toBe('https://image.url');
       expect(result.status).toBe('completed');
+      // The finished image also rides in `resultUrl` (delivered in the POST
+      // response body), so the route never has to embed it in the jobId (#9734).
+      expect(result.resultUrl).toBe('https://image.url');
       expect(fetch).toHaveBeenCalledWith(
         expect.stringContaining('openai.com'),
         expect.objectContaining({
@@ -232,7 +235,10 @@ describe('SpriteClient', () => {
         'https://api.remove.bg/v1.0/removebg',
         expect.objectContaining({
           method: 'POST',
-          headers: expect.objectContaining({ 'X-Api-Key': mockApiKey }),
+          headers: expect.objectContaining({
+            'X-Api-Key': mockApiKey,
+            'Content-Type': 'application/json',
+          }),
         })
       );
     });
@@ -247,6 +253,145 @@ describe('SpriteClient', () => {
 
       await expect(client.removeBackground('https://example.com/image.png'))
         .rejects.toThrow('remove.bg API error (402)');
+    });
+  });
+
+  describe('generateSprite background removal (#9734)', () => {
+    it('chains a remove.bg request on the DALL-E path when removeBackground is set and a key is provided', async () => {
+      const removeBgBlob = new Blob(['transparent-png'], { type: 'image/png' });
+      vi.mocked(fetch)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ data: [{ url: 'https://image.url/sprite.png' }] }),
+        } as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          blob: () => Promise.resolve(removeBgBlob),
+        } as Response);
+
+      const client = new SpriteClient(mockApiKey, 'dalle3');
+      const result = await client.generateSprite({
+        prompt: 'a red cat',
+        size: '512x512',
+        removeBackground: true,
+        removeBackgroundKey: 'removebg-key-xyz',
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(2);
+      // The follow-up posts to remove.bg, keyed by the RESOLVED remove.bg key —
+      // not the sprite provider key the client was constructed with.
+      expect(fetch).toHaveBeenLastCalledWith(
+        'https://api.remove.bg/v1.0/removebg',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'X-Api-Key': 'removebg-key-xyz' }),
+        }),
+      );
+      expect(fetch).toHaveBeenLastCalledWith(
+        'https://api.remove.bg/v1.0/removebg',
+        expect.not.objectContaining({
+          headers: expect.objectContaining({ 'X-Api-Key': mockApiKey }),
+        }),
+      );
+      // The transparent PNG (a base64 data URL, potentially multi-MB) rides ONLY
+      // in `resultUrl`, delivered in the POST response body. `taskId` stays the
+      // SHORT DALL-E URL so it never becomes a base64 `jobId` in the status-poll
+      // query string, where it would corrupt and exceed request-line limits
+      // (#9734).
+      expect(result.resultUrl).toContain('data:image/png;base64,');
+      expect(result.taskId).toBe('https://image.url/sprite.png');
+      expect(result.taskId).not.toContain('data:');
+      expect(result.status).toBe('completed');
+    });
+
+    it('does NOT call remove.bg when removeBackground is false', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ url: 'https://image.url/sprite.png' }] }),
+      } as Response);
+
+      const client = new SpriteClient(mockApiKey, 'dalle3');
+      const result = await client.generateSprite({
+        prompt: 'a red cat',
+        size: '512x512',
+        removeBackground: false,
+        removeBackgroundKey: 'removebg-key-xyz',
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch).not.toHaveBeenCalledWith(
+        'https://api.remove.bg/v1.0/removebg',
+        expect.anything(),
+      );
+      expect(result.taskId).toBe('https://image.url/sprite.png');
+    });
+
+    it('returns the sprite unchanged when removeBackground is set but no key resolves', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ url: 'https://image.url/sprite.png' }] }),
+      } as Response);
+
+      const client = new SpriteClient(mockApiKey, 'dalle3');
+      const result = await client.generateSprite({
+        prompt: 'a red cat',
+        size: '512x512',
+        removeBackground: true,
+        // No removeBackgroundKey: unconfigured deployment / user. The paid
+        // sprite must survive rather than fail on a missing secondary key.
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch).not.toHaveBeenCalledWith(
+        'https://api.remove.bg/v1.0/removebg',
+        expect.anything(),
+      );
+      expect(result.taskId).toBe('https://image.url/sprite.png');
+    });
+
+    it('propagates a remove.bg failure so createGenerationHandler can refund', async () => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ data: [{ url: 'https://image.url/sprite.png' }] }),
+        } as Response)
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 402,
+          text: () => Promise.resolve('Insufficient credits'),
+        } as Response);
+
+      const client = new SpriteClient(mockApiKey, 'dalle3');
+      await expect(
+        client.generateSprite({
+          prompt: 'a red cat',
+          size: '512x512',
+          removeBackground: true,
+          removeBackgroundKey: 'removebg-key-xyz',
+        }),
+      ).rejects.toThrow('remove.bg API error (402)');
+    });
+
+    it('does not attempt remove.bg on the SDXL path (no synchronous image URL)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 'pred_bg', status: 'starting' }),
+      } as Response);
+
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      const result = await client.generateSprite({
+        prompt: 'a red cat',
+        size: '512x512',
+        removeBackground: true,
+        removeBackgroundKey: 'removebg-key-xyz',
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch).not.toHaveBeenCalledWith(
+        'https://api.remove.bg/v1.0/removebg',
+        expect.anything(),
+      );
+      expect(result.taskId).toBe('pred_bg');
     });
   });
 

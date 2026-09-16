@@ -114,6 +114,18 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
 
       const data = await response.json();
 
+      // A synchronously completed generation (the DALL-E sprite path) returns
+      // the finished image in the response body as `resultUrl` and a short,
+      // non-pollable jobId (#9734). Carry that `resultUrl` onto the job so the
+      // poller imports it directly instead of round-tripping a (possibly
+      // multi-MB base64) data URL through the status-poll query string. The job
+      // is still queued as `pending` so `useGenerationPolling` picks it up on
+      // the next render; its immediate poll short-circuits on the inline result.
+      const inlineResultUrl =
+        data.status === 'completed' && typeof data.resultUrl === 'string'
+          ? data.resultUrl
+          : undefined;
+
       // Add job to generation store
       addJob({
         id: crypto.randomUUID(),
@@ -126,6 +138,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
         createdAt: Date.now(),
         usageId: data.usageId,
         durable: data.durable === true,
+        resultUrl: inlineResultUrl,
         metadata: activeTab === 'sheet'
           ? { frameCount, frameSize: size.split('x')[0] }
           : undefined,
