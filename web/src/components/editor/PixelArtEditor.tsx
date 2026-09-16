@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect, memo } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, memo } from 'react';
 import {
   Pencil,
   Eraser,
@@ -16,8 +16,30 @@ import {
   Trash2,
   X,
   Grid3X3,
+  Plus,
+  Eye,
+  EyeOff,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
+import {
+  type RGBA,
+  type Layer,
+  TRANSPARENT,
+  createGrid,
+  cloneGrid,
+  colorsEqual,
+  createLayer,
+  addLayer,
+  deleteLayer,
+  moveLayerUp,
+  moveLayerDown,
+  toggleLayerVisibility,
+  renameLayer,
+  setLayerOpacity,
+  compositeLayers,
+} from '@/lib/sprites/pixelLayers';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
@@ -30,7 +52,11 @@ interface PixelArtEditorProps {
   entityId?: string | null;
 }
 
-type RGBA = [number, number, number, number];
+/** Undo/redo snapshot: the whole layer stack plus which layer was active. */
+interface LayerSnapshot {
+  layers: Layer[];
+  activeLayerIndex: number;
+}
 
 /* ─── Constants ──────────────────────────────────────────────────────────── */
 
@@ -44,21 +70,9 @@ const DEFAULT_PALETTE: string[] = [
   '#29adff', '#83769c', '#ff77a8', '#ffccaa',
 ];
 
-const TRANSPARENT: RGBA = [0, 0, 0, 0];
-
 const MAX_HISTORY = 50;
 
 /* ─── Pixel Grid Helpers ─────────────────────────────────────────────────── */
-
-function createGrid(size: number): RGBA[][] {
-  return Array.from({ length: size }, () =>
-    Array.from({ length: size }, () => [...TRANSPARENT] as RGBA)
-  );
-}
-
-function cloneGrid(grid: RGBA[][]): RGBA[][] {
-  return grid.map((row) => row.map((px) => [...px] as RGBA));
-}
 
 function hexToRgba(hex: string, alpha = 255): RGBA {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -69,10 +83,6 @@ function hexToRgba(hex: string, alpha = 255): RGBA {
 
 function rgbaToHex(c: RGBA): string {
   return `#${c[0].toString(16).padStart(2, '0')}${c[1].toString(16).padStart(2, '0')}${c[2].toString(16).padStart(2, '0')}`;
-}
-
-function colorsEqual(a: RGBA, b: RGBA): boolean {
-  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
 }
 
 /** Flood fill from (x,y) replacing targetColor with fillColor. */
@@ -133,6 +143,11 @@ function gridToDataUrl(grid: RGBA[][]): string {
   return canvas.toDataURL('image/png');
 }
 
+/** Deep-clone a layer including its grid, for undo snapshots. */
+function cloneLayer(layer: Layer): Layer {
+  return { ...layer, grid: cloneGrid(layer.grid) };
+}
+
 /* ─── Component ──────────────────────────────────────────────────────────── */
 
 export const PixelArtEditor = memo(function PixelArtEditor({
@@ -144,7 +159,10 @@ export const PixelArtEditor = memo(function PixelArtEditor({
 
   // Canvas state
   const [canvasSize, setCanvasSize] = useState<CanvasSize>(16);
-  const [grid, setGrid] = useState<RGBA[][]>(() => createGrid(16));
+  const [layers, setLayers] = useState<Layer[]>(() => [
+    createLayer(16, { name: 'Layer 1' }),
+  ]);
+  const [activeLayerIndex, setActiveLayerIndex] = useState(0);
   const [zoom, setZoom] = useState(16);
   const [showGrid, setShowGrid] = useState(true);
 
@@ -159,20 +177,51 @@ export const PixelArtEditor = memo(function PixelArtEditor({
   const [previewGrid, setPreviewGrid] = useState<RGBA[][] | null>(null);
 
   // History
-  const [undoStack, setUndoStack] = useState<RGBA[][][]>([]);
-  const [redoStack, setRedoStack] = useState<RGBA[][][]>([]);
+  const [undoStack, setUndoStack] = useState<LayerSnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<LayerSnapshot[]>([]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Push to undo stack
-  const pushHistory = useCallback((currentGrid: RGBA[][]) => {
+  // Active layer, clamped so a shrunk stack never dangles the index.
+  const activeIndex = Math.min(activeLayerIndex, layers.length - 1);
+  const activeLayer = layers[activeIndex];
+  const activeGrid = activeLayer.grid;
+
+  // Composite of every visible layer — what the canvas and export both use.
+  // While previewing a line/rect the active layer is swapped for the preview.
+  const composited = useMemo(() => {
+    const src = previewGrid
+      ? layers.map((l, i) => (i === activeIndex ? { ...l, grid: previewGrid } : l))
+      : layers;
+    return compositeLayers(src, canvasSize);
+  }, [layers, previewGrid, activeIndex, canvasSize]);
+
+  // Snapshot current layer state onto the undo stack.
+  const pushHistory = useCallback(() => {
     setUndoStack((prev) => {
-      const next = [...prev, cloneGrid(currentGrid)];
+      const next = [
+        ...prev,
+        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex },
+      ];
       if (next.length > MAX_HISTORY) next.shift();
       return next;
     });
     setRedoStack([]);
-  }, []);
+  }, [layers, activeIndex]);
+
+  // Replace the active layer's grid (draw/erase/fill/clear).
+  const setActiveGrid = useCallback(
+    (updater: RGBA[][] | ((prev: RGBA[][]) => RGBA[][])) => {
+      setLayers((prev) =>
+        prev.map((l, i) => {
+          if (i !== activeIndex) return l;
+          const nextGrid = typeof updater === 'function' ? updater(l.grid) : updater;
+          return { ...l, grid: nextGrid };
+        })
+      );
+    },
+    [activeIndex]
+  );
 
   // Undo
   const handleUndo = useCallback(() => {
@@ -180,11 +229,15 @@ export const PixelArtEditor = memo(function PixelArtEditor({
       if (prev.length === 0) return prev;
       const newStack = [...prev];
       const last = newStack.pop()!;
-      setRedoStack((r) => [...r, cloneGrid(grid)]);
-      setGrid(last);
+      setRedoStack((r) => [
+        ...r,
+        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex },
+      ]);
+      setLayers(last.layers);
+      setActiveLayerIndex(Math.min(last.activeLayerIndex, last.layers.length - 1));
       return newStack;
     });
-  }, [grid]);
+  }, [layers, activeIndex]);
 
   // Redo
   const handleRedo = useCallback(() => {
@@ -192,25 +245,82 @@ export const PixelArtEditor = memo(function PixelArtEditor({
       if (prev.length === 0) return prev;
       const newStack = [...prev];
       const last = newStack.pop()!;
-      setUndoStack((u) => [...u, cloneGrid(grid)]);
-      setGrid(last);
+      setUndoStack((u) => [
+        ...u,
+        { layers: layers.map(cloneLayer), activeLayerIndex: activeIndex },
+      ]);
+      setLayers(last.layers);
+      setActiveLayerIndex(Math.min(last.activeLayerIndex, last.layers.length - 1));
       return newStack;
     });
-  }, [grid]);
+  }, [layers, activeIndex]);
 
-  // Resize canvas
+  // Resize canvas — replaces the stack with a single fresh layer.
   const handleResize = useCallback((newSize: CanvasSize) => {
-    pushHistory(grid);
+    pushHistory();
     setCanvasSize(newSize);
-    setGrid(createGrid(newSize));
+    setLayers([createLayer(newSize, { name: 'Layer 1' })]);
+    setActiveLayerIndex(0);
     setZoom(Math.max(4, Math.floor(256 / newSize)));
-  }, [grid, pushHistory]);
+  }, [pushHistory]);
 
-  // Clear canvas
+  // Clear the active layer.
   const handleClear = useCallback(() => {
-    pushHistory(grid);
-    setGrid(createGrid(canvasSize));
-  }, [grid, canvasSize, pushHistory]);
+    pushHistory();
+    setActiveGrid(createGrid(canvasSize));
+  }, [canvasSize, pushHistory, setActiveGrid]);
+
+  /* ─── Layer panel actions ──────────────────────────────────────────────── */
+
+  const handleAddLayer = useCallback(() => {
+    pushHistory();
+    const next = addLayer(layers, canvasSize);
+    setLayers(next);
+    setActiveLayerIndex(next.length - 1);
+  }, [layers, canvasSize, pushHistory]);
+
+  const handleDeleteLayer = useCallback(() => {
+    if (layers.length <= 1) return;
+    pushHistory();
+    const next = deleteLayer(layers, activeIndex);
+    setLayers(next);
+    setActiveLayerIndex((i) => Math.min(i, next.length - 1));
+  }, [layers, activeIndex, pushHistory]);
+
+  const handleMoveLayerUp = useCallback(() => {
+    const next = moveLayerUp(layers, activeIndex);
+    if (next === layers) return;
+    pushHistory();
+    setLayers(next);
+    setActiveLayerIndex(activeIndex + 1);
+  }, [layers, activeIndex, pushHistory]);
+
+  const handleMoveLayerDown = useCallback(() => {
+    const next = moveLayerDown(layers, activeIndex);
+    if (next === layers) return;
+    pushHistory();
+    setLayers(next);
+    setActiveLayerIndex(activeIndex - 1);
+  }, [layers, activeIndex, pushHistory]);
+
+  const handleToggleVisibility = useCallback(
+    (index: number) => {
+      pushHistory();
+      setLayers((prev) => toggleLayerVisibility(prev, index));
+    },
+    [pushHistory]
+  );
+
+  const handleRenameLayer = useCallback((index: number, name: string) => {
+    setLayers((prev) => renameLayer(prev, index, name));
+  }, []);
+
+  const handleSetOpacity = useCallback(
+    (index: number, opacity: number) => {
+      setLayers((prev) => setLayerOpacity(prev, index, opacity));
+    },
+    []
+  );
 
   // Get pixel coords from mouse event
   const getPixelCoords = useCallback(
@@ -226,7 +336,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
     [zoom, canvasSize]
   );
 
-  // Apply a pixel to the grid
+  // Apply a pixel to a grid (writes to the active layer's data).
   const applyPixel = useCallback(
     (x: number, y: number, targetGrid: RGBA[][]): RGBA[][] => {
       const newGrid = cloneGrid(targetGrid);
@@ -248,7 +358,8 @@ export const PixelArtEditor = memo(function PixelArtEditor({
       const [x, y] = coords;
 
       if (tool === 'eyedropper') {
-        const px = grid[y][x];
+        // Sample the composited pixel the user actually sees.
+        const px = composited[y][x];
         if (px[3] > 0) {
           setColor(rgbaToHex(px));
         }
@@ -257,9 +368,9 @@ export const PixelArtEditor = memo(function PixelArtEditor({
       }
 
       if (tool === 'fill') {
-        pushHistory(grid);
+        pushHistory();
         const fillColor = hexToRgba(color);
-        setGrid(floodFill(grid, x, y, fillColor));
+        setActiveGrid(floodFill(activeGrid, x, y, fillColor));
         return;
       }
 
@@ -270,11 +381,11 @@ export const PixelArtEditor = memo(function PixelArtEditor({
       }
 
       // Pencil / eraser
-      pushHistory(grid);
-      setGrid(applyPixel(x, y, grid));
+      pushHistory();
+      setActiveGrid(applyPixel(x, y, activeGrid));
       setIsDrawing(true);
     },
-    [getPixelCoords, tool, grid, pushHistory, color, applyPixel]
+    [getPixelCoords, tool, composited, activeGrid, pushHistory, color, applyPixel, setActiveGrid]
   );
 
   // Mouse move
@@ -286,8 +397,8 @@ export const PixelArtEditor = memo(function PixelArtEditor({
       const [x, y] = coords;
 
       if ((tool === 'line' || tool === 'rect') && lineStart) {
-        // Preview
-        const preview = cloneGrid(grid);
+        // Preview against the active layer only.
+        const preview = cloneGrid(activeGrid);
         const drawColor = hexToRgba(color);
         if (tool === 'line') {
           const points = bresenhamLine(lineStart[0], lineStart[1], x, y);
@@ -318,22 +429,22 @@ export const PixelArtEditor = memo(function PixelArtEditor({
 
       // Pencil / eraser continuous drawing
       if (tool === 'pencil' || tool === 'eraser') {
-        setGrid((prev) => applyPixel(x, y, prev));
+        setActiveGrid((prev) => applyPixel(x, y, prev));
       }
     },
-    [isDrawing, getPixelCoords, tool, lineStart, grid, color, canvasSize, applyPixel]
+    [isDrawing, getPixelCoords, tool, lineStart, activeGrid, color, canvasSize, applyPixel, setActiveGrid]
   );
 
   // Mouse up
   const handleMouseUp = useCallback(() => {
     if ((tool === 'line' || tool === 'rect') && previewGrid) {
-      pushHistory(grid);
-      setGrid(previewGrid);
+      pushHistory();
+      setActiveGrid(previewGrid);
       setPreviewGrid(null);
     }
     setIsDrawing(false);
     setLineStart(null);
-  }, [tool, previewGrid, grid, pushHistory]);
+  }, [tool, previewGrid, pushHistory, setActiveGrid]);
 
   // Render canvas
   useEffect(() => {
@@ -342,7 +453,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const displayGrid = previewGrid ?? grid;
+    const displayGrid = composited;
     const w = canvasSize * zoom;
     const h = canvasSize * zoom;
     canvas.width = w;
@@ -391,12 +502,22 @@ export const PixelArtEditor = memo(function PixelArtEditor({
         ctx.stroke();
       }
     }
-  }, [grid, previewGrid, canvasSize, zoom, showGrid]);
+  }, [composited, canvasSize, zoom, showGrid]);
 
   // Keyboard shortcuts
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
+      // Don't hijack keys while the user is typing in a field (e.g. renaming a layer).
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
       if (e.ctrlKey && e.key === 'z') { e.preventDefault(); handleUndo(); }
       else if (e.ctrlKey && e.key === 'y') { e.preventDefault(); handleRedo(); }
       else if (e.key === 'b') setTool('pencil');
@@ -410,23 +531,23 @@ export const PixelArtEditor = memo(function PixelArtEditor({
     return () => window.removeEventListener('keydown', handler);
   }, [open, handleUndo, handleRedo]);
 
-  // Export as PNG download
+  // Export as PNG download (flattened composite of every visible layer).
   const handleExport = useCallback(() => {
-    const dataUrl = gridToDataUrl(grid);
+    const dataUrl = gridToDataUrl(compositeLayers(layers, canvasSize));
     const link = document.createElement('a');
     link.download = `pixel-art-${canvasSize}x${canvasSize}.png`;
     link.href = dataUrl;
     link.click();
-  }, [grid, canvasSize]);
+  }, [layers, canvasSize]);
 
-  // Apply to entity sprite
+  // Apply to entity sprite (flattened composite).
   const handleApply = useCallback(() => {
     if (!entityId) return;
-    const dataUrl = gridToDataUrl(grid);
+    const dataUrl = gridToDataUrl(compositeLayers(layers, canvasSize));
     const base64 = dataUrl.split(',')[1];
     loadTexture(base64, `pixel-art-${canvasSize}x${canvasSize}.png`, entityId, 'base_color');
     onClose();
-  }, [entityId, grid, canvasSize, loadTexture, onClose]);
+  }, [entityId, layers, canvasSize, loadTexture, onClose]);
 
   // Add color to custom palette
   const handleAddToPalette = useCallback(() => {
@@ -448,7 +569,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="flex max-h-[90vh] w-[800px] max-w-[95vw] flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl">
+      <div className="flex max-h-[90vh] w-[900px] max-w-[95vw] flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
           <h2 className="text-sm font-semibold text-zinc-200">Pixel Art Editor</h2>
@@ -536,7 +657,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
             <button
               onClick={handleClear}
               className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
-              title="Clear canvas"
+              title="Clear layer"
             >
               <Trash2 size={14} />
             </button>
@@ -637,10 +758,10 @@ export const PixelArtEditor = memo(function PixelArtEditor({
                     for (let y = 0; y < canvasSize; y++) {
                       for (let x = 0; x < canvasSize; x++) {
                         const idx = (y * canvasSize + x) * 4;
-                        imgData.data[idx] = grid[y][x][0];
-                        imgData.data[idx + 1] = grid[y][x][1];
-                        imgData.data[idx + 2] = grid[y][x][2];
-                        imgData.data[idx + 3] = grid[y][x][3];
+                        imgData.data[idx] = composited[y][x][0];
+                        imgData.data[idx + 1] = composited[y][x][1];
+                        imgData.data[idx + 2] = composited[y][x][2];
+                        imgData.data[idx + 3] = composited[y][x][3];
                       }
                     }
                     ctx.putImageData(imgData, 0, 0);
@@ -653,6 +774,110 @@ export const PixelArtEditor = memo(function PixelArtEditor({
             <div className="mt-auto text-[10px] text-zinc-400">
               <p>{canvasSize}x{canvasSize}px</p>
               <p>Zoom: {zoom}x</p>
+            </div>
+          </div>
+
+          {/* Layers Panel */}
+          <div className="flex w-44 flex-col border-l border-zinc-800 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                Layers
+              </label>
+              <button
+                onClick={handleAddLayer}
+                className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                title="Add layer"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+
+            {/* Layer list — topmost layer first. */}
+            <div className="flex-1 space-y-1 overflow-auto">
+              {layers
+                .map((layer, index) => ({ layer, index }))
+                .slice()
+                .reverse()
+                .map(({ layer, index }) => (
+                  <div
+                    key={layer.id}
+                    className={`flex items-center gap-1 rounded border px-1 py-1 ${
+                      index === activeIndex
+                        ? 'border-blue-500 bg-blue-600/10'
+                        : 'border-zinc-800 hover:border-zinc-700'
+                    }`}
+                  >
+                    <button
+                      onClick={() => handleToggleVisibility(index)}
+                      className="rounded p-0.5 text-zinc-400 hover:text-zinc-200"
+                      title={`Toggle visibility of ${layer.name}`}
+                    >
+                      {layer.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+                    </button>
+                    <button
+                      onClick={() => setActiveLayerIndex(index)}
+                      className={`flex-1 truncate text-left text-[11px] ${
+                        index === activeIndex ? 'text-zinc-100' : 'text-zinc-400'
+                      } ${layer.visible ? '' : 'italic opacity-50'}`}
+                      title={`Select ${layer.name}`}
+                    >
+                      {layer.name}
+                    </button>
+                  </div>
+                ))}
+            </div>
+
+            {/* Active layer controls */}
+            <div className="mt-2 space-y-2 border-t border-zinc-800 pt-2">
+              <input
+                type="text"
+                value={activeLayer.name}
+                onChange={(e) => handleRenameLayer(activeIndex, e.target.value)}
+                aria-label="Layer name"
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300"
+              />
+              <div className="flex items-center gap-1">
+                <span className="text-[9px] uppercase tracking-wide text-zinc-500">Opacity</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={activeLayer.opacity}
+                  onChange={(e) => handleSetOpacity(activeIndex, Number(e.target.value))}
+                  aria-label="Layer opacity"
+                  className="flex-1 accent-blue-500"
+                />
+                <span className="w-6 text-right text-[9px] text-zinc-400">
+                  {Math.round(activeLayer.opacity * 100)}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleMoveLayerUp}
+                  disabled={activeIndex >= layers.length - 1}
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:text-zinc-200 disabled:opacity-30"
+                  title="Move layer up"
+                >
+                  <ChevronUp size={12} className="mx-auto" />
+                </button>
+                <button
+                  onClick={handleMoveLayerDown}
+                  disabled={activeIndex <= 0}
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:text-zinc-200 disabled:opacity-30"
+                  title="Move layer down"
+                >
+                  <ChevronDown size={12} className="mx-auto" />
+                </button>
+                <button
+                  onClick={handleDeleteLayer}
+                  disabled={layers.length <= 1}
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:text-red-400 disabled:opacity-30"
+                  title="Delete layer"
+                >
+                  <Trash2 size={12} className="mx-auto" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
