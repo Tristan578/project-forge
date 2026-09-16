@@ -1,3 +1,4 @@
+/** Persistent save-lockout notice and reload guidance for untrusted scene viewports. */
 'use client';
 
 import { AlertTriangle } from 'lucide-react';
