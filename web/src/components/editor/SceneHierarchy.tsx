@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useCallback, useRef, useMemo, memo, type MouseEvent, type KeyboardEvent } from 'react';
+import { useState, useCallback, useRef, useMemo, useLayoutEffect, memo, type MouseEvent, type KeyboardEvent } from 'react';
 import { Layers, PackagePlus } from 'lucide-react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useEditorStore, getCommandDispatcher, type SceneGraph } from '@/stores/editorStore';
@@ -88,6 +88,8 @@ export function computeNavIndex(
  * Renders the filtered scene tree with one roving row Tab stop (container only
  * when empty), visible-row arrow navigation and entity keyboard commands.
  * Inline rename owns its keys and restores row focus on completion/cancellation.
+ * Removing a focused row restores a visible row or the empty tree without
+ * stealing connected search/Inspector focus; only unmodified V changes visibility.
  * @returns The named hierarchy tree, search and entity context menu.
  */
 export const SceneHierarchy = memo(function SceneHierarchy() {
@@ -183,9 +185,31 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
     el?.focus();
   }, []);
 
+  const lastTreeFocus = useRef<HTMLElement | null>(null);
+  const previousVisibleIds = useRef<string[]>([]);
+
+  // Restore only focus lost by removing a focused row/control. A connected
+  // search/Inspector target keeps its focus when filtering changes the tree.
+  useLayoutEffect(() => {
+    const previousIds = previousVisibleIds.current;
+    previousVisibleIds.current = flatNodeIds;
+    const previousFocus = lastTreeFocus.current;
+    if (!focusedEntityId || indexMap.has(focusedEntityId) || !previousFocus ||
+        previousFocus.isConnected || document.activeElement !== document.body) return;
+    const previousIndex = Math.max(0, previousIds.indexOf(focusedEntityId));
+    const nextId = flatNodeIds[Math.min(previousIndex, flatNodeIds.length - 1)];
+    if (nextId) {
+      // The native focus event updates the roving state through onRowFocus.
+      focusRow(nextId);
+    } else {
+      containerRef.current?.querySelector<HTMLElement>('[role="tree"]')?.focus();
+    }
+  }, [flatNodeIds, indexMap, focusedEntityId, focusRow]);
+
   // Keep the roving index in sync when a row (or its icon-only control) is
   // focused by pointer or Tab, so keyboard navigation resumes from there.
   const handleRowFocus = useCallback((entityId: string) => {
+    lastTreeFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setFocusedEntityId((prev) => (prev === entityId ? prev : entityId));
   }, []);
 
@@ -279,7 +303,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
         // tabIndex=-1 (single-tab-stop tree), so this is how keyboard users
         // hide/show the focused entity. Skip while an inline rename is active
         // so the keystroke goes to the text field, not the toggle.
-        if (editingEntityId) return;
+        if (editingEntityId || e.ctrlKey || e.metaKey || e.altKey) return;
         if (focusedEntityId) {
           e.preventDefault();
           toggleVisibility(focusedEntityId);
@@ -519,6 +543,11 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
         className={`${hasEntities ? 'flex-1 ' : ''}overflow-y-auto py-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]`}
         data-editor-region="hierarchy"
         tabIndex={flatNodeIds.length === 0 ? 0 : -1}
+        onFocus={(event) => {
+          if (event.target === event.currentTarget && flatNodeIds.length === 0) {
+            setFocusedEntityId(null);
+          }
+        }}
         role="tree"
         aria-label="Scene hierarchy"
         onClick={handleBackgroundClick}

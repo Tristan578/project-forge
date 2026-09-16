@@ -12,8 +12,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, within, waitFor } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup, within, waitFor, act } from '@/test/utils/componentTestUtils';
 import userEvent from '@testing-library/user-event';
+import { useSyncExternalStore } from 'react';
 import { axe } from 'jest-axe';
 import { SceneHierarchy } from '@/components/editor/SceneHierarchy';
 import type { EditorState } from '@/stores/editorStore';
@@ -38,6 +39,18 @@ import { useEditorStore } from '@/stores/editorStore';
 
 const { useEditorStore: actualEditorStore } = await vi.importActual<typeof import('@/stores/editorStore')>('@/stores/editorStore');
 const mockSelectEntity = vi.fn();
+let fixtureState: EditorState = actualEditorStore.getInitialState();
+const fixtureListeners = new Set<() => void>();
+const subscribeFixture = (listener: () => void) => {
+  fixtureListeners.add(listener);
+  return () => { fixtureListeners.delete(listener); };
+};
+const getFixtureState = () => fixtureState;
+
+/** Read the typed fixture reactively so engine/store updates preserve component state. */
+function useFixtureEditorState<T>(selector: (state: EditorState) => T): T {
+  return selector(useSyncExternalStore(subscribeFixture, getFixtureState));
+}
 
 function makeFixtureGraph(): EditorState['sceneGraph'] {
   return {
@@ -70,7 +83,9 @@ function mockStore(overrides: Partial<EditorState> = {}) {
     clearHierarchyFilter: vi.fn(),
     ...overrides,
   };
-  vi.mocked(useEditorStore).mockImplementation(<T,>(selector: (state: EditorState) => T) => selector(state));
+  fixtureState = state;
+  vi.mocked(useEditorStore).mockImplementation(useFixtureEditorState);
+  act(() => { for (const listener of fixtureListeners) listener(); });
 }
 
 // jsdom does not implement scrollIntoView; the focus effect calls it.
@@ -353,6 +368,73 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     await user.clear(input);
     await user.type(input, 'Visible target{Enter}');
     expect(renameEntity).toHaveBeenCalledExactlyOnceWith('sword', 'Visible target');
+  });
+
+
+  it.each([
+    { removed: 'cam', name: 'Camera', next: 'Player' },
+    { removed: 'ground', name: 'Ground', next: 'Sword' },
+    { removed: 'sword', name: 'Sword', next: 'Ground' },
+  ])('restores focus after deleting $name and keeps entity keyboard commands working', async ({ removed, name, next }) => {
+    const deleteSelectedEntities = vi.fn();
+    const graph = makeFixtureGraph();
+    mockStore({ sceneGraph: graph, selectedIds: new Set([removed]), deleteSelectedEntities });
+    const user = userEvent.setup();
+    const { rerender } = render(<SceneHierarchy />);
+    screen.getByRole('treeitem', { name }).focus();
+    await user.keyboard('{Delete}');
+    expect(deleteSelectedEntities).toHaveBeenCalledTimes(1);
+    const remaining = { rootIds: graph.rootIds.filter((id) => id !== removed), nodes: { ...graph.nodes } };
+    delete remaining.nodes[removed];
+    remaining.nodes.player = { ...graph.nodes.player, children: graph.nodes.player.children.filter((id) => id !== removed) };
+    mockStore({ sceneGraph: remaining, deleteSelectedEntities });
+    rerender(<SceneHierarchy />);
+    const row = screen.getByRole('treeitem', { name: next });
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(row).toHaveAttribute('tabindex', '0');
+    mockSelectEntity.mockClear();
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(mockSelectEntity).toHaveBeenCalledTimes(1);
+    const selectedId = mockSelectEntity.mock.calls[0][0];
+    expect(remaining.nodes[selectedId]).toBeDefined();
+    expect(selectedId).not.toBe(removed);
+    expect(document.activeElement).toHaveAttribute('data-tree-entity-id', selectedId);
+  });
+
+  it('returns focus to the empty tree after deleting its last row', async () => {
+    const graph = makeFixtureGraph();
+    mockStore({ sceneGraph: { rootIds: ['cam'], nodes: { cam: graph.nodes.cam } }, selectedIds: new Set(['cam']) });
+    const user = userEvent.setup();
+    const { rerender } = render(<SceneHierarchy />);
+    screen.getByRole('treeitem', { name: 'Camera' }).focus();
+    await user.keyboard('{Delete}');
+    mockStore({ sceneGraph: { rootIds: [], nodes: {} } });
+    rerender(<SceneHierarchy />);
+    await waitFor(() => expect(screen.getByRole('tree')).toHaveFocus());
+    expect(screen.getByRole('tree')).toHaveAttribute('tabindex', '0');
+  });
+
+  it('keeps search focus when filtering removes the previously focused row', () => {
+    const { rerender } = render(<SceneHierarchy />);
+    screen.getByRole('treeitem', { name: 'Camera' }).focus();
+    const search = screen.getByRole('textbox', { name: 'Search entities' });
+    search.focus();
+    mockStore({ hierarchyFilter: 'Sword' });
+    rerender(<SceneHierarchy />);
+    expect(screen.queryByRole('treeitem', { name: 'Camera' })).toBeNull();
+    expect(search).toHaveFocus();
+  });
+
+  it('reserves visibility for unmodified V and preserves paste shortcuts', async () => {
+    const toggleVisibility = vi.fn();
+    mockStore({ toggleVisibility });
+    const user = userEvent.setup();
+    render(<SceneHierarchy />);
+    screen.getByRole('treeitem', { name: 'Camera' }).focus();
+    await user.keyboard('{Control>}v{/Control}{Meta>}v{/Meta}{Alt>}v{/Alt}');
+    expect(toggleVisibility).not.toHaveBeenCalled();
+    await user.keyboard('v{Shift>}V{/Shift}');
+    expect(toggleVisibility.mock.calls).toEqual([['cam'], ['cam']]);
   });
 
   it('renders a childless, axe-valid tree when the scene is empty', async () => {
