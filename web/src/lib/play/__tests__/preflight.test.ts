@@ -6,7 +6,7 @@ import { gameNotFoundResponse, gameUnavailableResponse } from '../notFoundDocume
 const { lookup } = vi.hoisted(() => ({ lookup: vi.fn() }));
 vi.mock('@/lib/play/gameMetadata', () => ({ loadPublishedGameMetadata: lookup }));
 
-/** Load the actual proxy in its supported credential-free branch for each test. */
+/** Load the actual proxy under each test's configured environment. */
 async function invoke(path: string, method = 'GET', headers?: Record<string, string>) {
   const { proxy } = await import('@/proxy');
   return proxy(new NextRequest('http://localhost:3000' + path, { method, headers }));
