@@ -40,4 +40,42 @@ describe('StarRating', () => {
     const stars = screen.getAllByRole('button');
     expect(stars[0].hasAttribute('disabled')).toBe(true);
   });
+
+  // a11y (#9048)
+  it('names each interactive star button', () => {
+    render(<StarRating value={2} interactive onChange={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Rate 1 star' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Rate 3 stars' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Rate 5 stars' })).toBeDefined();
+  });
+
+  it('groups interactive stars in a labelled radiogroup', () => {
+    render(<StarRating value={2} interactive onChange={vi.fn()} />);
+    expect(screen.getByRole('radiogroup', { name: 'Rate this game' })).toBeDefined();
+  });
+
+  it('reflects the selected rating with aria-pressed on interactive stars', () => {
+    render(<StarRating value={3} interactive onChange={vi.fn()} />);
+    expect(
+      screen.getByRole('button', { name: 'Rate 2 stars' }).getAttribute('aria-pressed')
+    ).toBe('true');
+    expect(
+      screen.getByRole('button', { name: 'Rate 4 stars' }).getAttribute('aria-pressed')
+    ).toBe('false');
+  });
+
+  it('announces non-interactive stars as a single labelled image', () => {
+    render(<StarRating value={4.5} count={12} />);
+    const img = screen.getByRole('img', {
+      name: 'Average rating: 4.5 out of 5 stars, 12 ratings',
+    });
+    expect(img).toBeDefined();
+  });
+
+  it('omits the rating count from the label when not provided', () => {
+    render(<StarRating value={3} />);
+    expect(
+      screen.getByRole('img', { name: 'Average rating: 3 out of 5 stars' })
+    ).toBeDefined();
+  });
 });

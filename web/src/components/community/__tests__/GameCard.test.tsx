@@ -70,4 +70,68 @@ describe('GameCard', () => {
     expect(screen.getByText('42')).toBeDefined();
     expect(screen.getByText('10')).toBeDefined();
   });
+
+  // a11y (#9048): the card must be a real, keyboard-operable control.
+  it('exposes the card as a focusable button reachable by Tab', () => {
+    render(
+      <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={vi.fn()} />
+    );
+    const card = screen.getByRole('button', { name: 'View Test Game' });
+    expect(card.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('activates onClick when Enter is pressed on the card', () => {
+    const onClick = vi.fn();
+    render(
+      <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={onClick} />
+    );
+    const card = screen.getByRole('button', { name: 'View Test Game' });
+    fireEvent.keyDown(card, { key: 'Enter' });
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('activates onClick when Space is pressed on the card', () => {
+    const onClick = vi.fn();
+    render(
+      <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={onClick} />
+    );
+    const card = screen.getByRole('button', { name: 'View Test Game' });
+    fireEvent.keyDown(card, { key: ' ' });
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not activate the card when a key is pressed on the nested like button', () => {
+    const onClick = vi.fn();
+    render(
+      <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={onClick} />
+    );
+    const likeButton = screen.getByRole('button', { name: 'Like' });
+    fireEvent.keyDown(likeButton, { key: 'Enter' });
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('gives the like button an accessible name and aria-pressed reflecting state', () => {
+    const { rerender } = render(
+      <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={vi.fn()} />
+    );
+    const likeButton = screen.getByRole('button', { name: 'Like' });
+    expect(likeButton.getAttribute('aria-pressed')).toBe('false');
+
+    rerender(
+      <GameCard game={mockGame} isLiked={true} onLike={vi.fn()} onClick={vi.fn()} />
+    );
+    const pressed = screen.getByRole('button', { name: 'Unlike' });
+    expect(pressed.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('does not fire onClick for the card when the like button is clicked', () => {
+    const onClick = vi.fn();
+    const onLike = vi.fn();
+    render(
+      <GameCard game={mockGame} isLiked={false} onLike={onLike} onClick={onClick} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Like' }));
+    expect(onLike).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+  });
 });

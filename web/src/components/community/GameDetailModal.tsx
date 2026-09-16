@@ -149,8 +149,10 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
             <p className="text-sm text-zinc-400">by {game.authorName}</p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="text-zinc-400 hover:text-zinc-100"
+            aria-label="Close"
+            className="text-zinc-400 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 rounded"
           >
             <X className="w-6 h-6" />
           </button>
