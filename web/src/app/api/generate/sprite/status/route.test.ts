@@ -225,4 +225,12 @@ describe('GET /api/generate/sprite/status', () => {
     expect(data.error).not.toContain('Network timeout');
     expect(data.error).toBe('Could not read the Sprite generation status. Please try again.');
   });
+  it('rejects nonpollable synchronous ids without a secondary key lookup or provider request', async () => {
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
+    const response = await GET(makeRequest({ jobId: 'dalle3-sync:usage-1' }));
+    expect(response.status).toBe(400);
+    expect(resolveApiKey).not.toHaveBeenCalled();
+    expect(mockGetReplicateStatus).not.toHaveBeenCalled();
+  });
+
 });

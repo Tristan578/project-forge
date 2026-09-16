@@ -886,18 +886,12 @@ describe('generationHandlers', () => {
   // Utility commands
   // =========================================================================
   describe('remove_background', () => {
-    it('returns guidance when API fails', async () => {
-      mockFetchFailure('Not supported');
+    it('explains the limitation without generating, charging, or tracking an unrelated image', async () => {
       const { result } = await invoke('remove_background', { assetId: 'asset-1' });
       expect(result.success).toBe(true);
-      expect((result.result as Record<string, unknown>).message).toContain('generate_sprite');
-    });
-
-    it('returns jobId when API succeeds', async () => {
-      mockFetchSuccess();
-      const { result } = await invoke('remove_background', { assetId: 'asset-1' });
-      expect(result.success).toBe(true);
-      expect((result.result as Record<string, unknown>).jobId).toBe('job-123');
+      expect(result.result).toEqual({ message: expect.stringContaining('existing asset is not available') });
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockAddJob).not.toHaveBeenCalled();
     });
 
     it('fails without assetId', async () => {
@@ -936,5 +930,42 @@ describe('generationHandlers', () => {
       const { result } = await invoke('set_project_style', {});
       expect(result.success).toBe(false);
     });
+  });
+});
+
+
+describe('synchronous sprite results', () => {
+  it.each(['generate_sprite', 'generate_character'])('carries completed inline images through %s', async (command) => {
+    const resultUrl = 'data:image/png;base64,dHJhbnNwYXJlbnQtcG5n';
+    mockFetchSuccess({ jobId: 'dalle3-sync:usage-1', status: 'completed', resultUrl, backgroundRemoval: 'removed' });
+    const { result } = await invoke(command, { prompt: 'hero', poses: ['idle'] });
+    expect(result.success).toBe(true);
+    expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+      jobId: 'dalle3-sync:usage-1', status: 'pending', resultUrl,
+      metadata: { backgroundRemoval: 'removed' },
+    }));
+  });
+
+  it.each(['get_sprite_generation_status', 'get_generation_status'])('answers %s locally for an inline job', async (command) => {
+    mockGenJobs['local'] = { id: 'local', jobId: 'dalle3-sync:usage-1', status: 'pending', type: 'sprite', resultUrl: 'https://example.com/hero.png' };
+    const { result } = await invoke(command, { jobId: 'dalle3-sync:usage-1', type: 'sprite' });
+    expect(result).toEqual({ success: true, result: { jobId: 'dalle3-sync:usage-1', status: 'completed', progress: 100, resultUrl: 'https://example.com/hero.png' } });
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockUpdateJob).not.toHaveBeenCalled(); // Poller still owns the asset import.
+  });
+
+  it('reports a missing synchronous artifact without polling other providers', async () => {
+    const { result } = await invoke('get_generation_status', { jobId: 'dalle3-sync:unknown' });
+    expect(result.success).toBe(false);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('skipped background removal disclosure', () => {
+  it.each(['generate_sprite', 'generate_character'])('reports retained backgrounds through %s', async (command) => {
+    mockFetchSuccess({ status: 'completed', resultUrl: 'https://example.com/original.png', backgroundRemoval: 'unavailable' });
+    const { result } = await invoke(command, { prompt: 'hero', poses: ['idle'] });
+    expect(result.result).toEqual(expect.objectContaining({ message: expect.stringContaining('keeps its background') }));
   });
 });

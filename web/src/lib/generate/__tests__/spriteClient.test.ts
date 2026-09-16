@@ -229,8 +229,8 @@ describe('SpriteClient', () => {
       const client = new SpriteClient(mockApiKey, 'removebg');
       const result = await client.removeBackground('https://example.com/image.png');
 
-      // FileReader in jsdom converts blob to data URL
-      expect(result.resultUrl).toContain('data:');
+      expect(result.resultUrl).toBe('data:image/png;base64,cG5nLWRhdGE=');
+      expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual({ image_url: 'https://example.com/image.png', size: 'auto' });
       expect(fetch).toHaveBeenCalledWith(
         'https://api.remove.bg/v1.0/removebg',
         expect.objectContaining({
@@ -241,6 +241,11 @@ describe('SpriteClient', () => {
           }),
         })
       );
+    });
+
+    it('rejects an empty removed image so the caller can refund', async () => {
+      vi.mocked(fetch).mockResolvedValue({ ok: true, blob: async () => new Blob([], { type: 'image/png' }) } as Response);
+      await expect(new SpriteClient(mockApiKey, 'removebg').removeBackground('https://example.com/image.png')).rejects.toThrow();
     });
 
     it('throws on API failure', async () => {
@@ -298,7 +303,9 @@ describe('SpriteClient', () => {
       // SHORT DALL-E URL so it never becomes a base64 `jobId` in the status-poll
       // query string, where it would corrupt and exceed request-line limits
       // (#9734).
-      expect(result.resultUrl).toContain('data:image/png;base64,');
+      expect(result.resultUrl).toBe('data:image/png;base64,dHJhbnNwYXJlbnQtcG5n');
+      expect(result.backgroundRemoval).toBe('removed');
+      expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string)).toEqual({ image_url: 'https://image.url/sprite.png', size: 'auto' });
       expect(result.taskId).toBe('https://image.url/sprite.png');
       expect(result.taskId).not.toContain('data:');
       expect(result.status).toBe('completed');
@@ -347,6 +354,7 @@ describe('SpriteClient', () => {
         expect.anything(),
       );
       expect(result.taskId).toBe('https://image.url/sprite.png');
+      expect(result.backgroundRemoval).toBe('unavailable');
     });
 
     it('propagates a remove.bg failure so createGenerationHandler can refund', async () => {

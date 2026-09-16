@@ -149,6 +149,10 @@ export async function resolveApiKey(
  * `null` (rather than throwing) when no key exists, so a deployment or user
  * without a remove.bg key still gets a sprite instead of a failed generation.
  * Do NOT use it for a primary, billable capability — that is `resolveApiKey`.
+ * @param userId Internal user ID whose encrypted BYOK key is queried.
+ * @param provider Secondary provider to resolve.
+ * @returns Decrypted BYOK or platform key, or null when neither is configured.
+ * @throws Lookup and decryption errors; callers choose whether to degrade.
  */
 export async function resolveByokOrPlatformKey(
   userId: string,

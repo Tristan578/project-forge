@@ -1,6 +1,11 @@
 /**
  * POST /api/generate/sprite — generate a sprite image via DALL-E or SDXL.
- * Returns a data URL and `usageId` for client-side refund on failure.
+ * Accepts prompt (3–500 chars), optional style, size (default 64x64), provider
+ * (auto by default), and removeBackground (true by default). HTTP 201 delivers
+ * a completed DALL-E resultUrl with an opaque nonpollable jobId, or an SDXL
+ * prediction jobId for polling. backgroundRemoval reports removed, not-requested,
+ * unavailable (missing/failed key lookup), or unsupported (SDXL). usageId supports
+ * client-side import-failure refunds; provider failures refund server-side.
  */
 
 export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
@@ -38,9 +43,11 @@ const POST_impl = createGenerationHandler<
     // string where a base64 payload corrupts and exceeds request-line limits
     // (#9734).
     resultUrl?: string;
+    backgroundRemoval: 'removed' | 'not-requested' | 'unavailable' | 'unsupported';
   }
 >({
   route: '/api/generate/sprite',
+  enforceRequestDeadline: true,
   provider: (params) => params.serviceName,
   operation: 'sprite_generation',
   rateLimitKey: 'gen-sprite',
@@ -144,6 +151,7 @@ const POST_impl = createGenerationHandler<
         estimatedSeconds: SPRITE_ESTIMATED_SECONDS[params.provider],
         usageId: ctx.usageId,
         resultUrl: result.resultUrl ?? result.taskId,
+        backgroundRemoval: result.backgroundRemoval ?? (params.removeBackground ? 'unavailable' : 'not-requested'),
       };
     }
 
@@ -152,6 +160,7 @@ const POST_impl = createGenerationHandler<
       jobId: result.taskId,
       provider: params.provider,
       status: result.status,
+      backgroundRemoval: params.removeBackground ? 'unsupported' : 'not-requested',
       estimatedSeconds: SPRITE_ESTIMATED_SECONDS[params.provider],
       usageId: ctx.usageId,
     };

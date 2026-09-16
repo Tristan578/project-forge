@@ -694,4 +694,30 @@ describe('generationStore', () => {
       });
     });
   });
+  describe('inline sprite persistence', () => {
+    const resultUrl = 'data:image/png;base64,' + 'A'.repeat(4096);
+    it('persists inline results and removal outcomes in the initial record', () => {
+      useGenerationStore.getState().addJob({ ...mockJob, jobId: 'dalle3-sync:usage-1', type: 'sprite', resultUrl, metadata: { backgroundRemoval: 'removed' } });
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string);
+      expect(body.resultUrl).toBe(resultUrl);
+      expect(body.parameters.metadata).toEqual({ backgroundRemoval: 'removed' });
+    });
+    it.each(['pending', 'processing', 'downloading'])('restores %s synchronous results as pending imports', async (status) => {
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ jobs: [{ id: 'sync-db', providerJobId: 'dalle3-sync:usage-1', provider: 'dalle3', type: 'sprite', prompt: 'hero', status, progress: 0, createdAt: '2026-09-16T00:00:00Z', hasInlineResult: true, parameters: { metadata: { backgroundRemoval: 'removed' } } }] }) } as Response);
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ resultUrl }) } as Response);
+      await useGenerationStore.getState().hydrateFromServer();
+      expect(fetch).toHaveBeenCalledWith('/api/jobs/sync-db');
+      expect(useGenerationStore.getState().jobs['hydrated_sync-db']).toEqual(expect.objectContaining({ status: 'pending', resultUrl, metadata: { backgroundRemoval: 'removed' } }));
+    });
+    it('syncs completion that finishes before creation supplies the database id', async () => {
+      let finish!: (response: Response) => void;
+      vi.mocked(fetch).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+      useGenerationStore.getState().addJob({ ...mockJob, resultUrl });
+      useGenerationStore.getState().updateJob(mockJob.id, { status: 'completed', progress: 100, resultUrl });
+      finish({ ok: true, json: async () => ({ job: { id: 'late-db' } }) } as Response);
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/jobs/late-db', expect.objectContaining({ method: 'PATCH' })));
+      expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string)).toEqual(expect.objectContaining({ status: 'completed', progress: 100, resultUrl, imported: true }));
+    });
+  });
+
 });

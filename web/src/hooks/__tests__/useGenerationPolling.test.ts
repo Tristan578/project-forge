@@ -1789,16 +1789,14 @@ describe('useGenerationPolling', () => {
         prompt: 'a hero',
       });
 
-      const origFileReader = globalThis.FileReader;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (globalThis as any).FileReader = class {
+      vi.stubGlobal('FileReader', class {
         onloadend: (() => void) | null = null;
         onerror: (() => void) | null = null;
         result = 'data:image/png;base64,SYNC';
         readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
           if (this.onloadend) this.onloadend();
         });
-      };
+      });
 
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
         ok: true,
@@ -1829,7 +1827,7 @@ describe('useGenerationPolling', () => {
         resultUrl: BASE64,
       }));
 
-      globalThis.FileReader = origFileReader;
+      vi.unstubAllGlobals();
       fetchSpy.mockRestore();
     });
   });

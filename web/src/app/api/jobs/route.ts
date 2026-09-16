@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { generationResultUrlSchema } from '@/lib/generation/resultUrl';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
 import { eq, and, inArray, desc } from 'drizzle-orm';
@@ -16,6 +17,7 @@ const createJobSchema = z.object({
   type: z.enum(['sprite', 'texture', 'model', 'sfx', 'voice', 'skybox', 'music', 'sprite_sheet', 'tileset']),
   prompt: z.string().min(1).max(2000),
   parameters: z.record(z.string(), z.unknown()).optional(),
+  resultUrl: generationResultUrlSchema.optional(),
   tokenCost: z.number().int().min(0).optional(),
   tokenUsageId: z.string().max(100).nullish(),
   entityId: z.string().max(100).nullish(),
@@ -32,7 +34,7 @@ async function POST_impl(req: NextRequest) {
     });
     if (mid.error) return mid.error;
 
-    const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId } =
+    const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId, resultUrl } =
       mid.body as z.infer<typeof createJobSchema>;
 
     const [job] = await queryWithResilience(() =>
@@ -48,6 +50,7 @@ async function POST_impl(req: NextRequest) {
           tokenCost: tokenCost ?? 0,
           tokenUsageId: tokenUsageId ?? null,
           entityId: entityId ?? null,
+          resultUrl: resultUrl ?? null,
         })
         .returning()
     );
@@ -113,7 +116,10 @@ async function GET_impl(req: NextRequest) {
         status: j.status,
         progress: j.progress,
         errorMessage: j.errorMessage,
-        resultUrl: j.resultUrl,
+        // Inline artifacts are fetched individually; multiple PNGs would exceed
+        // the host response limit in this list (for example character poses).
+        resultUrl: j.resultUrl?.startsWith('data:') ? null : j.resultUrl,
+        hasInlineResult: j.resultUrl?.startsWith('data:') ?? false,
         resultMeta: j.resultMeta,
         imported: j.imported === 1,
         tokenCost: j.tokenCost,

@@ -186,4 +186,51 @@ describe('PATCH /api/jobs/[id]', () => {
     expect(res.status).toBe(500);
     expect(body.error).toBe('Failed to update job');
   });
+  it('syncs large bounded PNG artifacts after import', async () => {
+    const set = vi.fn().mockReturnThis();
+    vi.mocked(getDb).mockReturnValue({
+      select: vi.fn(() => ({ from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'sync-job' }]) })),
+      update: vi.fn(() => ({ set, where: vi.fn().mockResolvedValue(undefined) })),
+    } as never);
+    const { PATCH } = await import('./route');
+    const resultUrl = 'data:image/png;base64,' + 'A'.repeat(4096);
+    const res = await PATCH(new NextRequest('http://localhost/api/jobs/sync-job', { method: 'PATCH', body: JSON.stringify({ status: 'completed', resultUrl, imported: true }) }), { params: Promise.resolve({ id: 'sync-job' }) });
+    expect(res.status).toBe(200);
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ resultUrl, imported: 1 }));
+  });
+
+  it('returns one owned inline artifact and constrains the ownership query', async () => {
+    const resultUrl = 'data:image/png;base64,' + 'A'.repeat(4096);
+    const where = vi.fn().mockReturnThis();
+    const select = vi.fn(() => ({ from: vi.fn().mockReturnThis(), where, limit: vi.fn().mockResolvedValue([{ resultUrl }]) }));
+    vi.mocked(getDb).mockReturnValue({ select } as never);
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/jobs/sync-job'), { params: Promise.resolve({ id: 'sync-job' }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ resultUrl });
+    // Both the requested id and authenticated internal user must constrain SQL.
+    const condition = JSON.stringify(where.mock.calls[0][0]);
+    expect(condition).toContain('sync-job');
+    expect(condition).toContain('user_1');
+  });
+
+  it("does not return another user's or missing artifact", async () => {
+    vi.mocked(getDb).mockReturnValue({ select: vi.fn(() => ({ from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([]) })) } as never);
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/jobs/other-job'), { params: Promise.resolve({ id: 'other-job' }) });
+    expect(response.status).toBe(404);
+  });
+
+  it('requires authentication before retrieving saved image data', async () => {
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: false, response: new Response('{}', { status: 401 }) as never });
+    const { GET } = await import('./route');
+    expect((await GET(new NextRequest('http://localhost/api/jobs/sync-job'), { params: Promise.resolve({ id: 'sync-job' }) })).status).toBe(401);
+  });
+
+  it('rejects an oversized historical artifact before returning it', async () => {
+    vi.mocked(getDb).mockReturnValue({ select: vi.fn(() => ({ from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ resultUrl: 'data:image/png;base64,' + 'A'.repeat(4 * 1024 * 1024) }]) })) } as never);
+    const { GET } = await import('./route');
+    expect((await GET(new NextRequest('http://localhost/api/jobs/sync-job'), { params: Promise.resolve({ id: 'sync-job' }) })).status).toBe(422);
+  });
+
 });

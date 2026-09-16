@@ -1,6 +1,6 @@
 vi.mock('server-only', () => ({}));
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
@@ -257,6 +257,21 @@ describe('POST /api/generate/sprite', () => {
     });
   });
 
+  it.each(['missing', 'lookup-error'])('reports unavailable removal when its key is %s', async (mode) => {
+    if (mode === 'lookup-error') vi.mocked(resolveByokOrPlatformKey).mockRejectedValue(new Error('lookup failed'));
+    vi.mocked(SpriteClient).mockImplementation(function (this: InstanceType<typeof SpriteClient>) {
+      this.generateSprite = vi.fn().mockResolvedValue({ taskId: 'https://example.com/original.png', resultUrl: 'https://example.com/original.png', status: 'completed', backgroundRemoval: 'unavailable' });
+    } as unknown as typeof SpriteClient);
+    const response = await POST(makeRequest({ prompt: 'a hero', provider: 'dalle3', removeBackground: true }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(expect.objectContaining({ backgroundRemoval: 'unavailable', resultUrl: 'https://example.com/original.png' }));
+  });
+
+  it('reports unsupported removal for an asynchronous SDXL sprite', async () => {
+    const response = await POST(makeRequest({ prompt: 'a hero', provider: 'sdxl', removeBackground: true }));
+    expect(await response.json()).toEqual(expect.objectContaining({ backgroundRemoval: 'unsupported', jobId: 'task-1' }));
+  });
+
   // Synchronous DALL-E completion contract (#9734): the finished image is
   // delivered in the response BODY as `resultUrl`, and the jobId is a short,
   // opaque, non-pollable id — NEVER the (possibly multi-MB base64) image, which
@@ -298,5 +313,43 @@ describe('POST /api/generate/sprite', () => {
       expect(data.jobId.length).toBeLessThan(128);
       expect(data.jobId.startsWith('dalle3-sync:')).toBe(true);
     });
+  });
+});
+
+
+describe('shared synchronous request deadline', () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
+
+  it('aborts secondary processing and refunds before the 60 second host limit with the agent flag off', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('USE_GENERATION_AGENT', 'false');
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as unknown as User } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-deadline' });
+    vi.mocked(resolveByokOrPlatformKey).mockResolvedValue('removebg-key');
+    vi.mocked(refundTokens).mockClear();
+    let signal: AbortSignal | undefined;
+    let secondaryStarted = false;
+    let finishDalle!: () => void;
+    vi.mocked(SpriteClient).mockImplementation(function (this: InstanceType<typeof SpriteClient>) {
+      this.generateSprite = vi.fn(async (params) => {
+        signal = params.signal;
+        await new Promise<void>((resolve) => { finishDalle = resolve; });
+        secondaryStarted = true;
+        await new Promise<void>(() => {}); // remove.bg is still pending at the shared deadline.
+        return { taskId: 'https://example.com/hero.png', status: 'completed' };
+      });
+    } as unknown as typeof SpriteClient);
+    const response = POST(makeRequest({ prompt: 'a hero', provider: 'dalle3', removeBackground: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(signal).toBeDefined();
+    await vi.advanceTimersByTimeAsync(40000);
+    finishDalle();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(secondaryStarted).toBe(true);
+    await vi.advanceTimersByTimeAsync(15000);
+    expect((await response).status).toBe(500);
+    expect(signal?.aborted).toBe(true);
+    expect(refundTokens).toHaveBeenCalledWith('user_1', 'usage-deadline');
+    vi.clearAllTimers();
   });
 });

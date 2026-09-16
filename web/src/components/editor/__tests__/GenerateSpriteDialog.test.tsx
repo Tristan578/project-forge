@@ -5,6 +5,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestUtils';
+import { toast } from 'sonner';
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), warning: vi.fn() } }));
 import { GenerateSpriteDialog } from '../GenerateSpriteDialog';
 import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
@@ -227,6 +229,7 @@ describe('GenerateSpriteDialog', () => {
         JSON.stringify({
           jobId: 'sprite-pending',
           status: 'pending',
+          resultUrl: 'https://example.com/partial.png',
           provider: 'replicate',
           usageId: 'usage-pending',
         }),
@@ -243,4 +246,25 @@ describe('GenerateSpriteDialog', () => {
 
     fetchMock.mockRestore();
   });
+  it.each(['unavailable', 'unsupported'])('warns when requested removal is %s and persists the outcome', async (backgroundRemoval) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ jobId: 'sprite-fallback', status: 'completed', resultUrl: 'https://example.com/original.png', provider: 'dalle3', backgroundRemoval })));
+    render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'A wizard' } });
+    fireEvent.click(screen.getByText('Generate'));
+    await waitFor(() => expect(mockAddJob).toHaveBeenCalledTimes(1));
+    expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({ metadata: { backgroundRemoval } }));
+    expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/background/));
+    fetchMock.mockRestore();
+  });
+
+  it('does not treat a malformed completed result as an inline artifact', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ jobId: 'sprite-malformed', status: 'completed', resultUrl: 123, provider: 'dalle3' })));
+    render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'A wizard' } });
+    fireEvent.click(screen.getByText('Generate'));
+    await waitFor(() => expect(mockAddJob).toHaveBeenCalledTimes(1));
+    expect(mockAddJob.mock.calls[0][0].resultUrl).toBeUndefined();
+    fetchMock.mockRestore();
+  });
+
 });

@@ -23,9 +23,13 @@ async function GET_impl(request: NextRequest) {
     return NextResponse.json({ error: 'Missing jobId parameter' }, { status: 400 });
   }
 
-  // DALL-E 3 jobs use a "dalle3:" prefix to signal synchronous completion.
-  // Contract: the /generate/sprite POST route sets jobId = "dalle3:<result-url>"
-  // when the provider returns an image URL synchronously (no async polling needed).
+  // Current synchronous results arrive in the POST body and saved jobs, not a
+  // provider prediction. Never send their opaque ids to Replicate.
+  if (jobId.startsWith('dalle3-sync:')) {
+    return NextResponse.json({ error: 'This sprite completed synchronously. Import its result from the generation response or saved job.' }, { status: 400 });
+  }
+
+  // Compatibility for older jobs whose id contained the DALL-E image URL.
   if (jobId.startsWith('dalle3:')) {
     const resultUrl = jobId.slice('dalle3:'.length);
     return NextResponse.json({

@@ -391,16 +391,16 @@ describe('listConfiguredProviders', () => {
 describe('resolveByokOrPlatformKey', () => {
   beforeEach(() => {
     resetMocks();
-    delete process.env['PLATFORM_REMOVEBG_KEY'];
+    vi.stubEnv('PLATFORM_REMOVEBG_KEY', undefined);
   });
 
   afterEach(() => {
-    delete process.env['PLATFORM_REMOVEBG_KEY'];
+    vi.unstubAllEnvs();
   });
 
   it('returns the decrypted BYOK key first and never deducts tokens', async () => {
     wireDb([{ userId: 'user-1', provider: 'removebg', encryptedKey: 'enc-removebg', iv: 'iv-1' }]);
-    process.env['PLATFORM_REMOVEBG_KEY'] = 'platform-removebg-secret';
+    vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'platform-removebg-secret');
 
     const key = await resolveByokOrPlatformKey('user-1', 'removebg');
 
@@ -410,7 +410,7 @@ describe('resolveByokOrPlatformKey', () => {
 
   it('falls back to PLATFORM_REMOVEBG_KEY when no BYOK key exists', async () => {
     wireDb([]);
-    process.env['PLATFORM_REMOVEBG_KEY'] = 'platform-removebg-secret';
+    vi.stubEnv('PLATFORM_REMOVEBG_KEY', 'platform-removebg-secret');
 
     const key = await resolveByokOrPlatformKey('user-1', 'removebg');
 

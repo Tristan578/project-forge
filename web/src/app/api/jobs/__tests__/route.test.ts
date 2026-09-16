@@ -163,6 +163,16 @@ describe('/api/jobs', () => {
       );
     });
 
+    it('stores a synchronous PNG larger than the old URL limit on creation', async () => {
+      mockAuth(true);
+      const { insertChain } = setupDb();
+      mockInsertReturning.mockResolvedValueOnce([{ id: 'sync-job' }]);
+      const resultUrl = 'data:image/png;base64,' + 'A'.repeat(4096);
+      const response = await POST(new NextRequest('http://localhost/api/jobs', { method: 'POST', body: JSON.stringify({ providerJobId: 'dalle3-sync:usage-1', provider: 'dalle3', type: 'sprite', prompt: 'hero', resultUrl }) }));
+      expect(response.status).toBe(201);
+      expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({ resultUrl }));
+    });
+
     it('truncates prompt to 500 chars', async () => {
       mockAuth(true);
       const { insertChain } = setupDb();
@@ -293,4 +303,20 @@ describe('/api/jobs', () => {
       expect(body.error).toBe('Failed to fetch jobs');
     });
   });
+  it('keeps the active jobs list below the body limit when multiple inline PNGs exist', async () => {
+    mockAuth(true);
+    setupDb();
+    const resultUrl = 'data:image/png;base64,' + 'A'.repeat(3 * 1024 * 1024);
+    const now = new Date();
+    mockSelectFrom.mockResolvedValueOnce(['one', 'two'].map((id) => ({ id, providerJobId: 'dalle3-sync:' + id, provider: 'dalle3', type: 'sprite', prompt: 'hero', parameters: {}, status: 'downloading', progress: 100, resultUrl, createdAt: now, updatedAt: now })));
+    const response = await GET(new NextRequest('http://localhost/api/jobs?status=active'));
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text.length).toBeLessThan(4096);
+    expect(JSON.parse(text).jobs).toEqual([
+      expect.objectContaining({ id: 'one', resultUrl: null, hasInlineResult: true }),
+      expect.objectContaining({ id: 'two', resultUrl: null, hasInlineResult: true }),
+    ]);
+  });
+
 });

@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { backgroundRemovalWarning } from '@/lib/generation/backgroundRemoval';
 import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
@@ -139,11 +140,15 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
         usageId: data.usageId,
         durable: data.durable === true,
         resultUrl: inlineResultUrl,
-        metadata: activeTab === 'sheet'
+        metadata: activeTab === 'single'
+          ? { backgroundRemoval: data.backgroundRemoval }
+          : activeTab === 'sheet'
           ? { frameCount, frameSize: size.split('x')[0] }
           : undefined,
       });
 
+      const warning = backgroundRemovalWarning(data.backgroundRemoval);
+      if (warning) toast.warning(warning);
       return true;
     });
 

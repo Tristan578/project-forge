@@ -6,6 +6,7 @@
 
 import { validateResourceId } from '@/lib/validation/resourceId';
 import { REPLICATE_MODEL_SDXL } from '@/lib/ai/models';
+import { generationResultUrlSchema } from '@/lib/generation/resultUrl';
 import { composeAbortSignal } from '@/lib/generate/abortComposition';
 
 export interface SpriteGenerateParams {
@@ -63,6 +64,7 @@ export interface GenerationResult {
    * produced a large data URL.
    */
   resultUrl?: string;
+  backgroundRemoval?: 'removed' | 'not-requested' | 'unavailable' | 'unsupported';
 }
 
 function requireProviderArtifact(value: unknown, artifact: string): string {
@@ -138,6 +140,7 @@ export class SpriteClient {
         taskId: imageUrl,
         status: 'completed',
         resultUrl,
+        backgroundRemoval: 'removed',
       };
     }
 
@@ -149,6 +152,7 @@ export class SpriteClient {
       taskId: imageUrl,
       status: 'completed',
       resultUrl: imageUrl,
+      backgroundRemoval: params.removeBackground ? 'unavailable' : 'not-requested',
     };
   }
 
@@ -275,6 +279,14 @@ export class SpriteClient {
     };
   }
 
+  /**
+   * Remove an image background with remove.bg in the server request runtime.
+   * @param imageUrl Provider image URL sent in the JSON request body.
+   * @param opts Optional abort signal and remove.bg key override; absent key
+   * falls back to the constructor key for standalone provider clients.
+   * @returns A non-empty PNG data URL bounded for JSON responses and job storage.
+   * @throws Request, conversion, or artifact validation failures for caller refund.
+   */
   async removeBackground(
     imageUrl: string,
     opts?: { signal?: AbortSignal; key?: string },
@@ -305,7 +317,7 @@ export class SpriteClient {
     const blob = await response.blob();
     // Convert to data URL
     const base64 = await this.blobToBase64(blob);
-    return { resultUrl: base64 };
+    return { resultUrl: generationResultUrlSchema.parse(base64) };
   }
 
   private enhanceSpriteSheetPrompt(prompt: string, style: string | undefined, frameCount: number): string {
@@ -346,11 +358,11 @@ export class SpriteClient {
   }
 
   private async blobToBase64(blob: Blob): Promise<string> {
-    // Runtime-agnostic (#9734). `FileReader` is a browser/worker API absent from
+    // Server-side Node conversion (#9734). `FileReader` is a browser/worker API absent from
     // the Node request runtime this client actually runs in — it only ever
     // "worked" under jsdom in tests, and would have thrown the first time
     // `generateSprite` chained background removal server-side. `Blob.arrayBuffer`
-    // + `Buffer` produces the same `data:<mime>;base64,...` URL in both.
+    // + Node `Buffer` produces the PNG data URL in the request runtime.
     const arrayBuffer = await blob.arrayBuffer();
     const base64 = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = blob.type || 'image/png';
