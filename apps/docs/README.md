@@ -8,9 +8,6 @@ Fumadocs-based documentation site for the SpawnForge platform API and MCP comman
 # From the monorepo root — install all dependencies:
 npm ci
 
-# Build the design system first (docs imports @spawnforge/ui):
-cd packages/ui && npm run build
-
 # Run the docs dev server (port 3001):
 cd apps/docs && npm run dev
 ```
@@ -30,7 +27,6 @@ All three must stay byte-identical; `scripts/check-manifest-sync.ts` asserts the
 ## Build Prerequisites
 
 - **Node 24** — same as the rest of the monorepo (`.node-version`, `engines.node` `>=24.15 <25`)
-- **`@spawnforge/ui` built** — `packages/ui/dist/` must exist before `next build` runs
 - **`apps/docs/data/commands.json` in sync** — see the table above; `scripts/check-manifest-sync.ts` fails **CI's Docs Internal Gate** if any copy has drifted. It is *not* wired into `npm run build` or `vercel.json`'s `buildCommand`, and the gate is path-filtered (it runs only when `apps/docs/`, `mcp-server/manifest/` or `web/src/data/commands.json` changed), so a build can succeed on a drifted copy — the gate is the enforcement point, not the build
 
 ## Environment Variables
@@ -41,12 +37,36 @@ generated: `app/layout.tsx` exports `dynamic = 'force-dynamic'`, so every route 
 function. That is why the commit stamp below reflects the deployment actually
 serving the page.
 
-A production build reads the variables below. Only the first is one you set:
+Origin and deployment identity use the variables below. Authentication is optional
+and configured separately. Public docs remain available without Clerk credentials.
 
 | Variable | Purpose |
 |----------|---------|
-| `NEXT_PUBLIC_SITE_URL` | **Set this** on the Vercel project. Canonical origin for sitemap and OG tags |
+| `NEXT_PUBLIC_DOCS_URL` | **Set this** on the Vercel project. Canonical origin for sitemap and OG tags, resolved by `lib/site.ts` |
 | `VERCEL_GIT_COMMIT_SHA` | **Do NOT set this — Vercel supplies it per build, and only if the project is configured to expose it.** Adding it as a project env var hardcodes one SHA into every future build, so the deploy gate would report a "DIFFERENT build" forever. `app/layout.tsx` stamps it into every page as `<meta name="spawnforge-docs-commit">` (`lib/commit.ts`), and `scripts/post-deploy-docs-check.sh` refuses any page that does not carry the commit the deploy just published. See the prerequisite below |
+
+### Optional authentication
+
+Set `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` from the matching
+Clerk instance to enable authentication. The publishable key is inlined into the
+browser build; the secret stays server-side and enables Clerk request middleware.
+Omitting both is supported for local development and CI: public docs render,
+authentication controls show an unavailable message, and middleware passes through.
+A usable publishable key without a secret retains the existing provider behavior,
+but middleware protection is inactive; configure the matching pair for authentication.
+
+`next.config.ts` fails builds when the publishable key is malformed or a secret is
+set without a publishable key. Remove both to disable authentication, or correct
+the pair. These checks validate configuration shape, not live Clerk connectivity.
+
+### Build switches
+
+`MANIFEST_PATH` selects the build-time command manifest; Vercel uses
+`./data/commands.json`, while a local unset value reads the canonical repository
+copy. `INCLUDE_INTERNAL=true` is for the protected internal deployment and requires
+`IS_INTERNAL_DOCS_BUILD`; the public site must not enable internal content.
+These switches control generated content, independently of origin, commit stamp,
+and optional authentication.
 
 ### Required Vercel project setting: expose system environment variables
 
