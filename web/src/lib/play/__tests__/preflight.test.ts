@@ -52,6 +52,7 @@ describe('published-game pre-stream response', () => {
     source.headers.append('Set-Cookie', 'refresh=second; Path=/; HttpOnly; Secure');
     source.headers.set('Content-Security-Policy', "default-src 'self'; script-src 'nonce-trusted'");
     source.headers.set('X-Frame-Options', 'DENY');
+    source.headers.set('X-Robots-Tag', 'noindex');
     source.headers.set('x-middleware-request-x-nonce', 'trusted');
     source.headers.set('x-middleware-override-headers', 'x-nonce');
     const cookies = source.headers.getSetCookie();
@@ -61,6 +62,8 @@ describe('published-game pre-stream response', () => {
     expect(result.headers.getSetCookie()).toEqual(cookies);
     expect(result.headers.get('content-security-policy')).toBe(source.headers.get('content-security-policy'));
     expect(result.headers.get('x-frame-options')).toBe('DENY');
+    expect(result.headers.get('x-robots-tag')).toBe(status === 503 ? null : 'noindex');
+    expect(source.headers.get('x-robots-tag')).toBe('noindex');
     expect([...result.headers.keys()].filter(name => name.startsWith('x-middleware-'))).toEqual([]);
     expect(source.headers.get('x-middleware-next')).toBe('1');
   });
@@ -91,7 +94,9 @@ describe('published-game pre-stream response', () => {
       expect(response.body).toBeNull();
       expect(html).toBe('');
     } else {
-      expect(html).toContain('Game Temporarily Unavailable');
+      expect(html).toContain('<title>Game Temporarily Unavailable - SpawnForge</title>');
+      expect(html).toContain('<h1>Game Temporarily Unavailable</h1>');
+      expect(html).not.toContain('<h1>Game Not Found</h1>');
       expect(html).toContain('Please try again shortly.');
       expect(html).not.toContain('noindex');
       expect(html).not.toContain('secret database');

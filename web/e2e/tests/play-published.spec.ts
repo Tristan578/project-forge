@@ -5,11 +5,9 @@ import {
 } from '../constants';
 
 /**
- * Published-game data errors and missing-page documents in DB-less PR gates.
- * The server checks published metadata before streaming and returns a direct404
- * document. These @ui tests pin wire status, real error presentation, and absence
- * of player/VideoGame metadata. Published rendering is also guarded by page unit
- * tests; the seeded playable canvas remains in the existing @engine suite.
+ * DB-less PR gates verify exact temporary-failure503 documents. Missing published
+ * data is separately covered through actual proxy/Neon/Drizzle transport fixtures
+ * and database-backed browser cases; the seeded player stays in its engine suite.
  */
 
 const FAKE_USER = 'user_e2e_nonexistent_8603';
@@ -42,26 +40,28 @@ test.describe('Play Published Game — data route @api', () => {
   });
 });
 
-test.describe('Play Published Game — public page @ui', () => {
-  test('missing page returns literal HTTP404 before any response streaming', async ({ request }) => {
+test.describe('Play Published Game — DB-less public page @ui', () => {
+  test('database-unavailable page returns literal HTTP503 before any response streaming', async ({ request }) => {
     const response = await request.get(PAGE_PATH, { maxRedirects: 0 });
-    expect(response.status()).toBe(404);
+    expect(response.status()).toBe(503);
     expect(response.headers()['content-type']).toContain('text/html');
     expect(response.headers()['cache-control']).toBe('no-store');
-    expect(response.headers()['x-robots-tag']).toBe('noindex');
+    expect(response.headers()['x-robots-tag']).toBeUndefined();
+    expect(response.headers()['retry-after']).toBe('60');
     const html = await response.text();
-    expect(html).toContain('<title>Game Not Found - SpawnForge</title>');
+    expect(html).toContain('<title>Game Temporarily Unavailable - SpawnForge</title>');
     expect(html).not.toContain('VideoGame');
+    expect(html).not.toContain('noindex');
   });
 
-  test('renders the actual missing-game alert and reachable home link', async ({ page }) => {
+  test('renders the actual temporary-failure alert and reachable home link', async ({ page }) => {
     const response = await page.goto(PAGE_PATH);
-    expect(response?.status()).toBe(404);
+    expect(response?.status()).toBe(503);
     const alert = page.getByRole('alert');
-    await expect(alert.getByRole('heading', { name: 'Game Not Found' })).toBeVisible({
+    await expect(alert.getByRole('heading', { name: 'Game Temporarily Unavailable' })).toBeVisible({
       timeout: E2E_TIMEOUT_LOAD_MS,
     });
-    await expect(alert).toContainText('This game is unavailable right now. It may be missing, unpublished, or temporarily unreachable.');
+    await expect(alert).toContainText('Please try again shortly.');
     const home = alert.getByRole('link', { name: 'Back to SpawnForge' });
     await expect(home).toHaveAttribute('href', '/');
     await page.keyboard.press('Tab');
@@ -71,13 +71,32 @@ test.describe('Play Published Game — public page @ui', () => {
     await expect(page.locator('script[type="application/ld+json"]')).toHaveCount(0);
   });
 
-  test('HEAD and crawler requests also receive404 without a player document', async ({ request }) => {
+  test('HEAD and crawler requests also receive503 without a player document', async ({ request }) => {
+    const head = await request.head(PAGE_PATH, { maxRedirects: 0 });
+    expect(head.status()).toBe(503);
+    expect(await head.body()).toHaveLength(0);
+    const bot = await request.get(PAGE_PATH, { maxRedirects: 0, headers: { 'user-agent': 'Twitterbot' } });
+    expect(bot.status()).toBe(503);
+    expect(await bot.text()).toContain('Game Temporarily Unavailable');
+  });
+});
+
+test.describe('Play Published Game — database-backed absence @api', () => {
+  test.beforeEach(() => {
+    test.skip(!process.env.DATABASE_URL, 'Requires an available database; DB-less gates assert exact503 separately');
+  });
+
+  test('an absent author has literal404 for GET, HEAD and crawlers', async ({ request }) => {
+    const response = await request.get(PAGE_PATH, { maxRedirects: 0 });
+    expect(response.status()).toBe(404);
+    expect(response.headers()['x-robots-tag']).toBe('noindex');
+    expect(await response.text()).toContain('<h1>Game Not Found</h1>');
     const head = await request.head(PAGE_PATH, { maxRedirects: 0 });
     expect(head.status()).toBe(404);
     expect(await head.body()).toHaveLength(0);
-    const bot = await request.get(PAGE_PATH, { maxRedirects: 0, headers: { 'user-agent': 'Twitterbot' } });
-    expect(bot.status()).toBe(404);
-    expect(await bot.text()).toContain('Game Not Found');
+    const crawler = await request.get(PAGE_PATH, { maxRedirects: 0, headers: { 'user-agent': 'Twitterbot' } });
+    expect(crawler.status()).toBe(404);
+    expect(await crawler.text()).not.toContain('VideoGame');
   });
 });
 
