@@ -508,25 +508,87 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # CONTENT-ADDRESSED REUSE OF ALL FOUR VARIANTS (#9525).
+      #
+      # This replaces a `download-artifact` step named "Try downloading WASM
+      # from CI (same SHA)" that passed no run-id and no github-token, so it
+      # could only ever see the CURRENT run's artifacts — of which build-wasm,
+      # the first job to build, has none. It failed on every run and
+      # `continue-on-error: true` reported that failure as success, so the build
+      # steps gated on `outcome != success` always ran and the reuse never
+      # happened (owner's diagnosis, #9525 comment thread).
+      #
+      # Reuse is CONTENT-ADDRESSED, not SHA-addressed: the key is a hash over
+      # engine/ + .transform-gizmo-fork/ + the wasm-bindgen version, from the
+      # SAME scripts/engine-wasm-cache-key.sh that ci.yml and publish-engine-cache
+      # use. SHA reuse is unsafe on this squash-only repo — the merged main SHA
+      # is new and its squashed tree only equals the PR head tree if main did not
+      # move between that PR's CI run and the merge, which is frequently false and
+      # would publish a binary built from different sources than main.
+      #
+      # `all4` gives a distinct key prefix so this four-path entry cannot collide
+      # with the single-path webgl2 entry engine-smoke restores: actions/cache
+      # segments a cache by (key, hash(paths)), so mixing path lists under one
+      # key makes the other caller's restore silently miss.
+      #
+      # continue-on-error is gone, but removing it does NOT by itself make a
+      # reuse miss loud: actions/cache/restore suppresses every non-validation
+      # error (a 5xx cache-service failure surfaces as a core.error annotation,
+      # anything else as a core.warning) and returns with cache-hit unset rather
+      # than failing the step -- "caching should be optional" is its documented
+      # contract, unlike the download-artifact step it replaced, which failed
+      # hard. So a cache-service outage degrades to a WARNED rebuild, not a red
+      # step. The "reuse MISS" notice step just after the restore is what makes
+      # every miss -- a cold key or a suppressed service error -- an explicit
+      # line in the log instead of a silent fall-through into the build.
+      - name: Resolve the 4-variant engine cache key
+        id: engine-key-all4
+        run: |
+          key="$(bash scripts/engine-wasm-cache-key.sh all4)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "Engine WASM (all 4 variants) cache key: $key"
+
+      - name: Restore all 4 WASM variants from content-addressed cache
+        id: engine-cache-all4
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            engine/pkg-webgl2
+            engine/pkg-webgpu
+            engine/pkg-webgl2-runtime
+            engine/pkg-webgpu-runtime
+          key: ${{ steps.engine-key-all4.outputs.key }}
+
+      # A restore that does not hit -- a cold key for a newly merged engine tree,
+      # or a cache-service error actions/cache swallowed -- leaves cache-hit
+      # unset, and every build step below then runs. actions/cache fails the step
+      # for neither case, so this notice is the one line that names the
+      # fall-through to a rebuild in the log; without it a service outage is
+      # indistinguishable from a clean run that simply built.
+      - name: Note engine WASM reuse miss
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        env:
+          KEY: ${{ steps.engine-key-all4.outputs.key }}
+        run: echo "::notice::engine WASM reuse MISS for key ${KEY} -- rebuilding all four variants"
+
+      # The Rust toolchain and cargo target cache are only needed to BUILD. On an
+      # all4 cache hit every build step below is skipped, so gate these on the
+      # miss too — otherwise a hit still pays ~30s installing a toolchain it never
+      # uses, eating into the very time this reuse buys (mirrors
+      # publish-engine-cache).
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         with:
           workspaces: engine -> target
 
-      - name: Try downloading WASM from CI (same SHA)
-        id: ci-wasm
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: wasm-binaries
-          path: engine/
-        continue-on-error: true
-
       - name: Install wasm-bindgen-cli
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         run: cargo install wasm-bindgen-cli --version 0.2.127
 
       # BUILD AND BINDGEN TOGETHER, ONE VARIANT AT A TIME (#9579).
@@ -547,38 +609,99 @@ jobs:
       # quality-gates.yml:339-349 has always done it this way. Keep all three
       # workflows in the same shape.
       - name: Build WebGL2 + wasm-bindgen
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         working-directory: engine
         run: |
           cargo build --target wasm32-unknown-unknown --release --features webgl2
           wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGPU + wasm-bindgen
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         working-directory: engine
         run: |
           cargo build --target wasm32-unknown-unknown --release --features webgpu
           wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGL2 Runtime (stripped editor)
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgl2,runtime
 
       - name: Run wasm-bindgen (WebGL2 Runtime)
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgl2-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGPU Runtime (stripped editor)
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgpu,runtime
 
       - name: Run wasm-bindgen (WebGPU Runtime)
-        if: steps.ci-wasm.outcome != 'success'
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      # Assert the artifact set is COMPLETE here -- immediately after the last
+      # bindgen step and BEFORE anything persists it (#9525). Every actions/cache
+      # save and the artifact upload are downstream of this gate, so a
+      # present-but-truncated or partial set is caught before it is written under
+      # a content-addressed, immutable cache key. The earlier ordering saved
+      # pkg-webgl2 FIRST and verified afterwards: on a miss a corrupt binary
+      # reached the single-path webgl2 key, and engine-smoke on every PR whose
+      # engine tree hashes to that key then restored the corrupt binary and went
+      # red with no self-heal -- a cache/save cannot overwrite an existing key.
+      # This runs whether the four variants were just built or restored, so a
+      # stale/partial reuse cannot dress itself up as a full set either.
+      # build-wasm always runs on a fresh runner with a fresh checkout, so
+      # nothing but this run's build/restore output can be present.
+      - name: Verify all 4 WASM variants are present and non-empty
+        run: |
+          set -euo pipefail
+          variants="pkg-webgl2 pkg-webgpu pkg-webgl2-runtime pkg-webgpu-runtime"
+          found=0
+          for v in $variants; do
+            dir="engine/$v"
+            if [ ! -d "$dir" ]; then
+              echo "::error::WASM variant '$v' is missing ($dir not a directory)" >&2
+              exit 1
+            fi
+            # Glob loop, not `find | head`: under `pipefail`, head closing the
+            # pipe early can leave find killed by SIGPIPE (141) and fail the
+            # step spuriously. `-s` is true only for a file that exists AND is
+            # non-empty, so a literal unmatched glob (nullglob is off) fails it.
+            wasm=""
+            for f in "$dir"/*.wasm; do
+              if [ -s "$f" ]; then
+                wasm="$f"
+                break
+              fi
+            done
+            if [ -z "$wasm" ]; then
+              echo "::error::WASM variant '$v' has no non-empty *.wasm file in $dir" >&2
+              ls -la "$dir" >&2 || true
+              exit 1
+            fi
+            # The browser loads the wasm-bindgen JS glue, not the raw module:
+            # engine-pkg-*/forge_engine.js is what the runtime imports, and a
+            # variant dir carrying only forge_engine_bg.wasm passes a wasm-only
+            # check yet 404s in production -- the #9525 symptom was exactly a 404
+            # on engine-pkg-webgl2/forge_engine.js. Require the glue too, or a
+            # partial bindgen output reaches the CDN under an immutable key.
+            glue="$dir/forge_engine.js"
+            if [ ! -s "$glue" ]; then
+              echo "::error::WASM variant '$v' has no non-empty forge_engine.js (wasm-bindgen glue) in $dir" >&2
+              ls -la "$dir" >&2 || true
+              exit 1
+            fi
+            echo "ok: $v -> $wasm ($(wc -c < "$wasm") bytes) + $glue ($(wc -c < "$glue") bytes)"
+            found=$((found + 1))
+          done
+          if [ "$found" -ne 4 ]; then
+            echo "::error::expected exactly 4 WASM variants, verified $found" >&2
+            exit 1
+          fi
+          echo "All 4 WASM variants present and non-empty (wasm + glue)."
 
       # Publish the WebGL2 build so CI's engine-smoke gate can restore it
       # instead of spending ~321s rebuilding an identical binary on every
@@ -596,7 +719,8 @@ jobs:
       # workflows call the shared script.
       #
       # Unconditional on purpose: pkg-webgl2 exists whether it was built above or
-      # restored by the download step, and both are the same artifact.
+      # restored from the content-addressed all-4 cache, and both are the same
+      # artifact.
       - name: Resolve the engine build key
         id: engine-key
         run: |
@@ -609,6 +733,22 @@ jobs:
         with:
           path: engine/pkg-webgl2
           key: ${{ steps.engine-key.outputs.key }}
+
+      # Persist the whole four-variant set under the content-addressed all4 key
+      # so a later run on the same engine tree (a CD re-run, a workflow_dispatch,
+      # or an engine revert to a prior tree) reuses it instead of rebuilding.
+      # Only on a miss: re-saving an existing key warns and no-ops, and on a hit
+      # the set came from this same cache.
+      - name: Persist all 4 WASM variants for reuse
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            engine/pkg-webgl2
+            engine/pkg-webgpu
+            engine/pkg-webgl2-runtime
+            engine/pkg-webgpu-runtime
+          key: ${{ steps.engine-key-all4.outputs.key }}
 
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

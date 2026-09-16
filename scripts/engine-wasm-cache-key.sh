@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Emit the cache key that identifies a built WebGL2 engine binary.
+# Emit the cache key that identifies a built engine WASM binary set.
+#
+# A positional mode selects the set: `webgl2` (default) for the single WebGL2
+# editor binary, or `all4` for all four build-wasm variants. Both hash the same
+# tree inputs and differ only by prefix — see "WHICH BINARY SET" near the bottom.
 #
 # WHY THIS IS A SCRIPT AND NOT TWO INLINE `run:` BLOCKS
 #
@@ -56,7 +60,35 @@ resolve_tree() {
   printf '%s' "$tree"
 }
 
+# WHICH BINARY SET DOES THIS KEY IDENTIFY? (positional arg, default 'webgl2')
+#
+#   webgl2 (default)  the single WebGL2 editor binary. ci.yml's engine-smoke
+#                     RESTORES this and cd.yml's publish-engine-cache WARMS it,
+#                     both listing exactly `engine/pkg-webgl2`. Left as the
+#                     default so those two callers keep working untouched.
+#   all4              all four variants cd.yml's build-wasm produces: pkg-webgl2,
+#                     pkg-webgpu, pkg-webgl2-runtime, pkg-webgpu-runtime.
+#
+# The content hash is IDENTICAL for both modes: all four variants are built from
+# the same engine/ tree, the same .transform-gizmo-fork/ path dependency, and
+# the same wasm-bindgen version — they differ only by cargo feature flags, which
+# live in the workflow, not the tree. Only the prefix distinguishes the two
+# cache entries, and it MUST distinguish them: actions/cache segments an entry
+# by (key, hash(paths)), so the webgl2 entry (one path) and the all4 entry (four
+# paths) are already different versions of the same key and could otherwise
+# collide semantically — the prefix keeps the two intents legible and the
+# anti-drift suite honest.
+MODE="${1:-webgl2}"
+case "$MODE" in
+  webgl2) PREFIX='engine-wasm-webgl2' ;;
+  all4)   PREFIX='engine-wasm-all4' ;;
+  *)
+    echo "::error::engine-wasm-cache-key: unknown mode '${MODE}' (expected 'webgl2' or 'all4')" >&2
+    exit 1
+    ;;
+esac
+
 ENGINE_TREE="$(resolve_tree engine)"
 FORK_TREE="$(resolve_tree .transform-gizmo-fork)"
 
-printf 'engine-wasm-webgl2-%s-%s-wb%s\n' "$ENGINE_TREE" "$FORK_TREE" "$WASM_BINDGEN_VERSION"
+printf '%s-%s-%s-wb%s\n' "$PREFIX" "$ENGINE_TREE" "$FORK_TREE" "$WASM_BINDGEN_VERSION"
