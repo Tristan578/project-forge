@@ -285,6 +285,8 @@ export interface SceneSlice {
    * load of the outgoing scene follows the same contract — except it will NOT
    * clear a lockout raised by the THREW branch, since the capture it re-applies
    * was taken from a viewport that throw may already have wrecked (#10079).
+   * Non-replacing rejections preserve throw provenance across retries; recovery
+   * of an untrusted prior capture explicitly restores its original throw lockout.
    */
   restoreCheckpoint: (checkpointId: string) => Promise<boolean>;
   /** Delete a checkpoint by ID. */
@@ -651,7 +653,9 @@ export const createSceneSlice: StateCreator<
     const strandOnThrow = opts?.strandOnThrow ?? true;
     const setLockout = (reason: string) => set({ sceneLoadError: { reason, at: Date.now() } });
     const rejectEditor = (reason: string) => {
-      if (strandOnReject) setLockout(reason);
+      // A non-replacing rejection cannot make a previously wrecked viewport
+      // trustworthy or downgrade the provenance used by checkpoint retries.
+      if (strandOnReject && !isEngineLoadThrewLockout(get().sceneLoadError)) setLockout(reason);
     };
     // The engine reveals a loaded scene's audio one selection at a time
     // (`emit_audio_on_selection`), and SCENE_LOADED carries only a name — so
@@ -1240,7 +1244,9 @@ export const createSceneSlice: StateCreator<
         });
         throw error;
       }
-      if (!accepted) {
+      if (!accepted && !isEngineLoadThrewLockout(get().sceneLoadError)) {
+        // Keep an existing throw lockout across failed retries: a later
+        // recovery must still know that its prior capture is untrusted.
         set({ sceneLoadError: { reason: ENGINE_LOAD_REJECTION, at: Date.now() } });
       }
       return accepted;
@@ -1321,7 +1327,7 @@ export const createSceneSlice: StateCreator<
           set({
             sceneName: before.sceneName,
             sceneModified: before.sceneModified,
-            ...(priorCapturedUnderThrowLockout ? {} : { sceneLoadError: null }),
+            sceneLoadError: priorCapturedUnderThrowLockout ? before.sceneLoadError : null,
           });
         } catch {
           message += ' The previous save is intact, but the viewport could not be recovered. Reload the project before editing.';

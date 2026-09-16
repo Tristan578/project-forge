@@ -98,6 +98,35 @@ describe('sceneSlice', () => {
       }
     });
 
+    it.each([
+      { opts: { rejectionStrandsEditor: false }, prior: null, locks: true },
+      { opts: { rejectionStrandsEditor: false, strandOnThrow: false }, prior: null, locks: false },
+      { opts: { strandOnThrow: false }, prior: { reason: 'Standing lockout', at: 12 }, locks: false },
+    ])('respects throw policy $opts while rethrowing the original engine failure', ({ opts, prior, locks }) => {
+      store.setState({ sceneLoadError: prior });
+      const failure = new Error('engine failed mid-apply');
+      setSceneDispatcher((command) => {
+        if (command === 'load_scene') throw failure;
+        return { success: true };
+      });
+      expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Target')), opts)).toThrow(failure);
+      if (locks) expect(store.getState().sceneLoadError?.reason).toContain(failure.message);
+      else expect(store.getState().sceneLoadError).toEqual(prior);
+    });
+
+    it('keeps the original throw lockout when a later direct load is cleanly rejected', () => {
+      const failure = new Error('viewport may be wrecked');
+      setSceneDispatcher((command) => {
+        if (command === 'load_scene') throw failure;
+        return { success: true };
+      });
+      expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Throwing load')))).toThrow(failure);
+      const prior = store.getState().sceneLoadError;
+      setSceneDispatcher(() => ({ success: false }));
+      expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected load')))).toBe(false);
+      expect(store.getState().sceneLoadError).toEqual(prior);
+    });
+
     // #10058: newScene()/loadScene() used to leave whatever music arrangement
     // was in the store from the PREVIOUS scene — stale tracks/clips that then
     // rode along into the new scene's next cloud save.

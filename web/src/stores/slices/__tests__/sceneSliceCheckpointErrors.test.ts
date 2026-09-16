@@ -154,9 +154,17 @@ describe('checkpoint recovery transaction', () => {
     // Reattach the confirming engine and make the checkpoint restore FAIL its
     // readback ('wrong'), so the recovery branch runs and re-applies `prior`.
     setSceneDispatcher(engine.dispatch);
+    engine.dispatch.mockClear();
+    const previousSave = localStorage.getItem('forge-project-scenes');
     engine.setMode('wrong');
 
     await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    const loads = engine.dispatch.mock.calls.filter(([command]) => command === 'load_scene');
+    expect(loads.map(([, payload]) => JSON.parse((payload as { json: string }).json))).toEqual([
+      projectFixture('Recovered').scenes[0].data, sceneFixture('Unsaved live work'),
+    ]);
+    expect(engine.getScene()).toEqual(sceneFixture('Unsaved live work'));
+    expect(localStorage.getItem('forge-project-scenes')).toBe(previousSave);
 
     // The recovery re-applied and SCENE_LOADED-confirmed `prior`, but that
     // capture came from a viewport the throw may have wrecked. Confirming
@@ -168,6 +176,60 @@ describe('checkpoint recovery transaction', () => {
     // The consequence the lockout gates: saving still refuses.
     store.getState().saveScene('after-untrusted-recovery');
     expect(exported('after-untrusted-recovery')).toBe(false);
+  });
+
+  it('preserves throw provenance across a rejected restore and a later failed recovery retry', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    const saved = localStorage.getItem('forge-project-scenes');
+    const thrown = new Error('engine despawned mid-apply');
+    setSceneDispatcher((command) => {
+      if (command === 'load_scene') throw thrown;
+      return { success: true };
+    });
+    expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Wrecking load')))).toThrow(thrown);
+    const lockout = store.getState().sceneLoadError;
+    setSceneDispatcher(engine.dispatch);
+    engine.setMode('reject');
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    expect(store.getState().sceneLoadError).toEqual(lockout);
+    engine.dispatch.mockClear();
+    engine.setMode('wrong');
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    const loads = engine.dispatch.mock.calls.filter(([command]) => command === 'load_scene');
+    expect(loads.map(([, payload]) => JSON.parse((payload as { json: string }).json))).toEqual([
+      projectFixture('Recovered').scenes[0].data,
+      sceneFixture('Unsaved live work'),
+    ]);
+    expect(engine.getScene()).toEqual(sceneFixture('Unsaved live work'));
+    expect(localStorage.getItem('forge-project-scenes')).toBe(saved);
+    expect(store.getState().sceneLoadError).toEqual(lockout);
+    store.getState().saveScene('after-repeated-untrusted-recovery');
+    expect(exported('after-repeated-untrusted-recovery')).toBe(false);
+    // A confirmed replacement is still a recovery route out of the lockout.
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(true);
+    expect(store.getState().sceneLoadError).toBeNull();
+    expect(engine.getScene().metadata?.name).toBe('Recovered');
+  });
+
+  it('clears a clean-rejection lockout after confirming recovery of the trusted prior capture', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    const saved = localStorage.getItem('forge-project-scenes');
+    engine.setMode('reject');
+    expect(store.getState().loadScene(JSON.stringify(sceneFixture('Refused load')))).toBe(false);
+    expect(store.getState().sceneLoadError?.reason).toContain('the engine refused to load it');
+    engine.dispatch.mockClear();
+    engine.setMode('wrong');
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    const loads = engine.dispatch.mock.calls.filter(([command]) => command === 'load_scene');
+    expect(loads.map(([, payload]) => JSON.parse((payload as { json: string }).json))).toEqual([
+      projectFixture('Recovered').scenes[0].data,
+      sceneFixture('Unsaved live work'),
+    ]);
+    expect(engine.getScene()).toEqual(sceneFixture('Unsaved live work'));
+    expect(localStorage.getItem('forge-project-scenes')).toBe(saved);
+    expect(store.getState().sceneLoadError).toBeNull();
+    store.getState().saveScene('after-trusted-prior-recovery');
+    expect(exported('after-trusted-prior-recovery')).toBe(true);
   });
 
   // The rollback on a rejected restore must NOT clear the arrangement: `prior`
