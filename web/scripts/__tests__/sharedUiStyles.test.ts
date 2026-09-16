@@ -15,9 +15,9 @@ it('emits shared Button outline, pressed and disabled styles', async () => {
   const rules = new Map<string, string[]>();
   result.root.walkRules((rule) => {
     const declarations: string[] = [];
-    rule.walkDecls((declaration) => declarations.push(
-      (declaration.prop + ':' + declaration.value).replace(/\s/g, ''),
-    ));
+    rule.walkDecls((declaration) => {
+      declarations.push((declaration.prop + ':' + declaration.value).replace(/\s/g, ''));
+    });
     const selector = rule.selector.replaceAll('\\', '');
     rules.set(selector, [...(rules.get(selector) ?? []), ...declarations]);
   });

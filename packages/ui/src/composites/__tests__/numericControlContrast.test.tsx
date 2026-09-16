@@ -41,13 +41,11 @@ describe('numeric control contrast', () => {
     const slider = screen.getByRole('slider');
     expect(slider.className).toContain('h-11');
     expect(slider.className).toContain('sm:h-1.5');
-    expect(slider).toHaveStyle({
-      backgroundColor: 'transparent',
-      backgroundImage: 'linear-gradient(var(--sf-bg-elevated), var(--sf-bg-elevated))',
-      backgroundSize: '100% 6px',
-      backgroundPosition: 'center',
-      backgroundRepeat: 'no-repeat',
-    });
+    expect(slider.style.backgroundColor).toBe('transparent');
+    expect(slider.style.backgroundImage).toBe('linear-gradient(var(--sf-bg-elevated), var(--sf-bg-elevated))');
+    expect(slider.style.backgroundSize).toBe('100% 6px');
+    expect(slider.style.backgroundPosition).toBe('center');
+    expect(slider.style.backgroundRepeat).toBe('no-repeat');
   });
   it.each(Object.entries(THEME_DEFINITIONS))('%s labels, readouts and handles meet their contrast floors', (_name, tokens) => {
     render(<><Vec3Input label="Size" value={[1,2,3]} onChange={() => {}} /><SliderInput label="Mix" value={50} onChange={() => {}} /></>);
