@@ -26,6 +26,9 @@ import { DocsPanel } from './DocsPanel';
 const AudioMixerPanel = lazy(() =>
   import('./AudioMixerPanel').then((m) => ({ default: m.AudioMixerPanel }))
 );
+const MusicArrangementPanel = lazy(() =>
+  import('./MusicArrangementPanel').then((m) => ({ default: m.MusicArrangementPanel }))
+);
 
 // ---- AI / advanced panels — lazy imports (opened on demand) ----
 const UIBuilderPanel = lazy(() =>
@@ -286,6 +289,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'asset-browser': AssetPanelWrapper,
   // Heavy supplemental — lazy
   'audio-mixer': withSuspense(AudioMixerPanel),
+  'music-arrangement': withSuspense(MusicArrangementPanel),
   docs: DocsPanelWrapper,
   // AI / advanced — lazy, no tier restriction
   'ui-builder': withSuspense(UIBuilderPanel),
