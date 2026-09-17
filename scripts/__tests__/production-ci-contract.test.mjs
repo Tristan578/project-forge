@@ -36,7 +36,7 @@ test('ratchet consumes only the completed successful trusted main push producer'
   assert.ok(selection.run.indexOf('current_main') < selection.run.indexOf('artifact_id'));
   const ci = read('.github/workflows/ci.yml');
   const suiteJob = Object.values(ci.jobs).find(j => j.steps?.some(s => s.run === 'node --test scripts/__tests__/production-ci-contract.test.mjs'));
-  assert.ok(suiteJob.steps.findIndex(s => s.run === 'npm ci') < suiteJob.steps.findIndex(s => s.run === 'node --test scripts/__tests__/production-ci-contract.test.mjs')); 
+  assert.ok(suiteJob.steps.findIndex(s => s.run === 'npm ci') < suiteJob.steps.findIndex(s => s.run === 'node --test scripts/__tests__/production-ci-contract.test.mjs'));
   assert.ok(!job.steps.some(s => /\bvitest(?:\s+(?:run|--))|\bnpm\s+ci\b/.test(s.run ?? '')));
 });
 test('trusted coverage upload requires summary plus producer identity files', () => {

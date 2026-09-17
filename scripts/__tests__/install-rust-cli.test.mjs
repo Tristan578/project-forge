@@ -20,11 +20,15 @@ for (const [binary, expected, script] of cases) {
         '#!/usr/bin/env bash', 'set -euo pipefail',
         'if [[ "$1" == audit ]]; then exec "$CARGO_TEST_BIN/cargo-audit" --version; fi',
         '[[ "$1" == install ]]', 'printf "%s\\n" "$*" >> "$CARGO_TEST_LOG"',
+        '[[ "${CARGO_TEST_INSTALL_MODE:-ok}" != fail ]] || exit 88',
         'case "$*" in',
         '  *cargo-audit*) tool=cargo-audit; expected=0.22.2 ;;',
         '  *wasm-bindgen-cli*) tool=wasm-bindgen; expected="$CARGO_TEST_EXPECTED" ;;',
         '  *) exit 7 ;;', 'esac',
-        'printf "#!/usr/bin/env bash\\necho \'%s %s\'\\n" "$tool" "$expected" > "$CARGO_TEST_BIN/$tool"',
+        'if [[ "${CARGO_TEST_INSTALL_MODE:-ok}" == crash ]]; then printf "#!/usr/bin/env bash\\nexit 89\\n" > "$CARGO_TEST_BIN/$tool"; else',
+        '  [[ "${CARGO_TEST_INSTALL_MODE:-ok}" != wrong ]] || expected=0.0.1',
+        '  printf "#!/usr/bin/env bash\\necho \'%s %s\'\\n" "$tool" "$expected" > "$CARGO_TEST_BIN/$tool"',
+        'fi',
         'chmod +x "$CARGO_TEST_BIN/$tool"',
       ].join('\n') + '\n');
       chmodSync(cargo, 0o755);
@@ -44,6 +48,33 @@ for (const [binary, expected, script] of cases) {
         }
         const output = execFileSync(bash, [executable, '--version'], { encoding: 'utf8' }).trim();
         assert.equal(output, binary === 'cargo-audit' ? 'cargo-audit ' + expected : 'wasm-bindgen ' + expected);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+  }
+
+  for (const mode of ['wrong', 'crash', 'fail']) {
+    test(binary + ' rejects a ' + mode + ' post-install result', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'forge rust cli reject '));
+      const slash = p => p.replaceAll('\\', '/');
+      const log = join(dir, 'install.log');
+      const cargo = join(dir, 'cargo');
+      writeFileSync(cargo, [
+        '#!/usr/bin/env bash', 'set -euo pipefail',
+        'if [[ "$1" == audit ]]; then exec "$CARGO_TEST_BIN/cargo-audit" --version; fi',
+        '[[ "$1" == install ]]', 'printf "%s\\n" "$*" >> "$CARGO_TEST_LOG"',
+        '[[ "$CARGO_TEST_INSTALL_MODE" != fail ]] || exit 88',
+        binary === 'cargo-audit' ? 'tool=cargo-audit; expected=0.22.2' : 'tool=wasm-bindgen; expected="$CARGO_TEST_EXPECTED"',
+        'if [[ "$CARGO_TEST_INSTALL_MODE" == crash ]]; then printf "#!/usr/bin/env bash\\nexit 89\\n" > "$CARGO_TEST_BIN/$tool"; else expected=0.0.1; printf "#!/usr/bin/env bash\\necho \'%s %s\'\\n" "$tool" "$expected" > "$CARGO_TEST_BIN/$tool"; fi',
+        'chmod +x "$CARGO_TEST_BIN/$tool"',
+      ].join('\n') + '\n');
+      chmodSync(cargo, 0o755);
+      try {
+        assert.throws(() => execFileSync(bash, [join(root, 'scripts', script)], {
+          cwd: root,
+          env: { ...process.env, PATH: slash(dir) + (process.platform === 'win32' ? ';' : ':') + process.env.PATH, CARGO_TEST_BIN: slash(dir), CARGO_TEST_LOG: slash(log), CARGO_TEST_EXPECTED: locked, CARGO_TEST_INSTALL_MODE: mode },
+          timeout: 30000, stdio: 'pipe',
+        }));
+        assert.ok(existsSync(log), 'the installer must reach cargo install before rejecting its result');
       } finally { rmSync(dir, { recursive: true, force: true }); }
     });
   }

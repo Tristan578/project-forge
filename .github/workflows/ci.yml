@@ -115,7 +115,7 @@ jobs:
           # docs site ships is guarded by the docs gate below.
           echo "$CHANGED" | grep -qE '^web/|^docs/capability-matrix\.md$' && web=true
           # Every source/configuration input that can alter the web production build.
-          echo "$CHANGED" | grep -qE '^web/|^packages/ui/|^package\.json$|^package-lock\.json$|^\.node-version$' && web_build_inputs=true
+          echo "$CHANGED" | grep -qE '^web/|^packages/ui/|(^|/)package\.json$|^package-lock\.json$|^\.node-version$' && web_build_inputs=true
           # .transform-gizmo-fork is a PATH DEPENDENCY of the engine
           # (engine/Cargo.toml: path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"),
           # so it compiles into every shipped WASM binary. It is a local patch we

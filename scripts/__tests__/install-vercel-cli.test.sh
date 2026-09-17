@@ -8,6 +8,9 @@ cat > "$fixture/tools/npm" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'install\n' >> "$INSTALL_LOG"
+case "${NPM_FIXTURE_MODE:-ok}" in
+  fail) exit 71 ;;
+esac
 prefix=""; version=""
 while (( $# )); do
   case "$1" in
@@ -18,7 +21,11 @@ while (( $# )); do
 done
 [[ -n "$prefix" && -n "$version" ]]
 mkdir -p "$prefix/node_modules/.bin"
-printf '#!/usr/bin/env bash\necho "%s"\n' "$version" > "$prefix/node_modules/.bin/vercel"
+case "${NPM_FIXTURE_MODE:-ok}" in
+  wrong) printf '#!/usr/bin/env bash\necho "0.0.0"\n' > "$prefix/node_modules/.bin/vercel" ;;
+  crash) printf '#!/usr/bin/env bash\nexit 72\n' > "$prefix/node_modules/.bin/vercel" ;;
+  *) printf '#!/usr/bin/env bash\necho "%s"\n' "$version" > "$prefix/node_modules/.bin/vercel" ;;
+esac
 chmod +x "$prefix/node_modules/.bin/vercel"
 EOF
 chmod +x "$fixture/tools/npm"
@@ -46,4 +53,17 @@ printf '#!/usr/bin/env bash\nexit 3\n' > "$VERCEL_CLI_PREFIX/node_modules/.bin/v
 bash "$forge_repo/scripts/install-vercel-cli.sh"
 [[ $(wc -l < "$INSTALL_LOG") -eq 3 ]]
 [[ $("$VERCEL_CLI_PREFIX/node_modules/.bin/vercel" --version) == "$VERCEL_CLI_VERSION" ]]
+
+# A post-install verification failure must reject the job before publishing a
+# path. The fake npm succeeds in wrong/crash modes, reproducing corrupted or
+# mismatched artifacts rather than merely a failed installer invocation.
+for mode in wrong crash fail; do
+  rm -rf "$VERCEL_CLI_PREFIX"
+  before_path="$(cat "$GITHUB_PATH")"
+  if NPM_FIXTURE_MODE="$mode" bash "$forge_repo/scripts/install-vercel-cli.sh" >/dev/null 2>&1; then
+    echo "FAIL: Vercel installer accepted $mode result" >&2
+    exit 1
+  fi
+  [[ "$(cat "$GITHUB_PATH")" == "$before_path" ]]
+done
 echo 'PASS: Vercel cache cold install, valid hit, stale and corrupt repair'
