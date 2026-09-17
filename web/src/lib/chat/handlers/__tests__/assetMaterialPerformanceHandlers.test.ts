@@ -288,6 +288,17 @@ describe('materialHandlers — update_material', () => {
     // override applied
     expect(call[1]).toMatchObject({ metallic: 1.0 });
   });
+
+  it('does not copy a prototype-key material field into the merged store payload', async () => {
+    const args = JSON.parse('{"entityId":"ent-1","metallic":0.4,"__proto__":{"polluted":true}}');
+    const { result, store } = await invokeHandler(materialHandlers, 'update_material', args);
+    const material = vi.mocked(store.updateMaterial).mock.calls[0][1] as object;
+
+    expect(result.success).toBe(true);
+    expect(Object.getPrototypeOf(material)).toBe(Object.prototype);
+    expect((material as Record<string, unknown>).polluted).toBeUndefined();
+    expect((material as Record<string, unknown>).metallic).toBe(0.4);
+  });
 });
 
 describe('materialHandlers — apply_material_preset', () => {

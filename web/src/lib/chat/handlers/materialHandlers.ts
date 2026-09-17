@@ -48,7 +48,9 @@ export const materialHandlers: Record<string, ToolHandler> = {
 
     const merged: MaterialData = { ...baseMaterial };
     for (const [key, value] of Object.entries(matInput)) {
-      (merged as unknown as Record<string, unknown>)[key] = value;
+      if (Object.hasOwn(baseMaterial, key)) {
+        (merged as unknown as Record<string, unknown>)[key] = value;
+      }
     }
 
     store.updateMaterial(p.data.entityId, merged);
@@ -119,7 +121,7 @@ export const materialHandlers: Record<string, ToolHandler> = {
 
     const merged: LightData = { ...baseLight };
     for (const [key, value] of Object.entries(lightInput)) {
-      if (key in merged) {
+      if (Object.hasOwn(baseLight, key)) {
         (merged as unknown as Record<string, unknown>)[key] = value;
       }
     }
