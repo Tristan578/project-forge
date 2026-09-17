@@ -537,7 +537,14 @@ function formatInline(text: string): React.ReactNode {
   while (remaining) {
     // Links: [text](url)
     const linkMatch = remaining.match(/^(.*?)\[([^\]]+)\]\(([^)]+)\)(.*)/);
-    if (linkMatch) {
+    const codeMatch = remaining.match(/^(.*?)`([^`]+)`(.*)/);
+    const boldMatch = remaining.match(/^(.*?)\*\*([^*]+)\*\*(.*)/);
+    const tokenStart = Math.min(
+      linkMatch?.[1].length ?? Infinity,
+      codeMatch?.[1].length ?? Infinity,
+      boldMatch?.[1].length ?? Infinity,
+    );
+    if (linkMatch && linkMatch[1].length === tokenStart) {
       if (linkMatch[1]) parts.push(linkMatch[1]);
       parts.push(
         <a
@@ -555,8 +562,7 @@ function formatInline(text: string): React.ReactNode {
     }
 
     // Inline code
-    const codeMatch = remaining.match(/^(.*?)`([^`]+)`(.*)/);
-    if (codeMatch) {
+    if (codeMatch && codeMatch[1].length === tokenStart) {
       if (codeMatch[1]) parts.push(codeMatch[1]);
       parts.push(
         <code
@@ -571,8 +577,7 @@ function formatInline(text: string): React.ReactNode {
     }
 
     // Bold
-    const boldMatch = remaining.match(/^(.*?)\*\*([^*]+)\*\*(.*)/);
-    if (boldMatch) {
+    if (boldMatch && boldMatch[1].length === tokenStart) {
       if (boldMatch[1]) parts.push(boldMatch[1]);
       parts.push(
         <strong key={key++} className="font-semibold text-zinc-200">
