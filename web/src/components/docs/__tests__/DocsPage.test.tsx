@@ -273,6 +273,7 @@ describe('DocsPage', () => {
     expect(externalLink.textContent).toBe('link');
     expect(externalLink.target).toBe('_blank');
     expect(externalLink.rel).toBe('noopener noreferrer');
+    expect(externalLink).toHaveClass('min-h-[44px]', 'sm:inline');
 
     const localLink = pane.querySelector('a[href="/docs/other"]') as HTMLAnchorElement;
     expect(localLink.textContent).toBe('link');
