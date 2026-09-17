@@ -14,8 +14,8 @@ export default defineConfig({
     teardownTimeout: 5000,
     isolate: true,
     retry: process.env.CI ? 1 : 0,
-    include: NODE_TEST_INCLUDE,
-    exclude: NODE_TEST_EXCLUDE,
+    include: [...NODE_TEST_INCLUDE],
+    exclude: [...NODE_TEST_EXCLUDE],
     setupFiles: ['./vitest.setup.ts'],
   },
   resolve: {

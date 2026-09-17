@@ -22,8 +22,8 @@ export default defineConfig({
         inline: [/@sentry\/nextjs/],
       },
     },
-    include: JSDOM_TEST_INCLUDE,
-    exclude: JSDOM_TEST_EXCLUDE,
+    include: [...JSDOM_TEST_INCLUDE],
+    exclude: [...JSDOM_TEST_EXCLUDE],
     setupFiles: ['./vitest.setup.ts'],
   },
   resolve: {
