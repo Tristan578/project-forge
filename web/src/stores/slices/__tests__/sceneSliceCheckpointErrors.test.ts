@@ -25,10 +25,10 @@ describe('checkpoint recovery transaction', () => {
   });
 
   it('preserves the active save when checkpoint storage exceeds quota', async () => {
-    const before = localStorage.getItem('forge-project-scenes');
+    const before = localStorage.getItem('forge-project-scenes:v2:unsaved');
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError'); });
     await expect(store.getState().createCheckpoint('Before changes')).resolves.toBeNull();
-    expect(localStorage.getItem('forge-project-scenes')).toBe(before);
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(before);
     expect(store.getState().checkpointError).toContain('Full');
   });
 
@@ -155,7 +155,7 @@ describe('checkpoint recovery transaction', () => {
     // readback ('wrong'), so the recovery branch runs and re-applies `prior`.
     setSceneDispatcher(engine.dispatch);
     engine.dispatch.mockClear();
-    const previousSave = localStorage.getItem('forge-project-scenes');
+    const previousSave = localStorage.getItem('forge-project-scenes:v2:unsaved');
     engine.setMode('wrong');
 
     await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
@@ -164,7 +164,7 @@ describe('checkpoint recovery transaction', () => {
       projectFixture('Recovered').scenes[0].data, sceneFixture('Unsaved live work'),
     ]);
     expect(engine.getScene()).toEqual(sceneFixture('Unsaved live work'));
-    expect(localStorage.getItem('forge-project-scenes')).toBe(previousSave);
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(previousSave);
 
     // The recovery re-applied and SCENE_LOADED-confirmed `prior`, but that
     // capture came from a viewport the throw may have wrecked. Confirming
@@ -180,7 +180,7 @@ describe('checkpoint recovery transaction', () => {
 
   it('preserves throw provenance across a rejected restore and a later failed recovery retry', async () => {
     const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
-    const saved = localStorage.getItem('forge-project-scenes');
+    const saved = localStorage.getItem('forge-project-scenes:v2:unsaved');
     const thrown = new Error('engine despawned mid-apply');
     setSceneDispatcher((command) => {
       if (command === 'load_scene') throw thrown;
@@ -201,7 +201,7 @@ describe('checkpoint recovery transaction', () => {
       sceneFixture('Unsaved live work'),
     ]);
     expect(engine.getScene()).toEqual(sceneFixture('Unsaved live work'));
-    expect(localStorage.getItem('forge-project-scenes')).toBe(saved);
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(saved);
     expect(store.getState().sceneLoadError).toEqual(lockout);
     store.getState().saveScene('after-repeated-untrusted-recovery');
     expect(exported('after-repeated-untrusted-recovery')).toBe(false);
@@ -213,7 +213,7 @@ describe('checkpoint recovery transaction', () => {
 
   it('clears a clean-rejection lockout after confirming recovery of the trusted prior capture', async () => {
     const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
-    const saved = localStorage.getItem('forge-project-scenes');
+    const saved = localStorage.getItem('forge-project-scenes:v2:unsaved');
     engine.setMode('reject');
     expect(store.getState().loadScene(JSON.stringify(sceneFixture('Refused load')))).toBe(false);
     expect(store.getState().sceneLoadError?.reason).toContain('the engine refused to load it');
@@ -226,7 +226,7 @@ describe('checkpoint recovery transaction', () => {
       sceneFixture('Unsaved live work'),
     ]);
     expect(engine.getScene()).toEqual(sceneFixture('Unsaved live work'));
-    expect(localStorage.getItem('forge-project-scenes')).toBe(saved);
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(saved);
     expect(store.getState().sceneLoadError).toBeNull();
     store.getState().saveScene('after-trusted-prior-recovery');
     expect(exported('after-trusted-prior-recovery')).toBe(true);
@@ -307,7 +307,7 @@ describe('checkpoint recovery transaction', () => {
     setSceneDispatcher(null);
     await expect(store.getState().createCheckpoint()).resolves.toBeNull();
     await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
-    expect(localStorage.getItem('forge-project-scenes')).toContain('Previous save');
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toContain('Previous save');
   });
 
   it('restores null scene data as a confirmed empty scene', async () => {
@@ -347,12 +347,12 @@ describe('checkpoint recovery transaction', () => {
     '%s leaves scene storage and the browser mirror unchanged while disconnected', async (action) => {
     store.getState().createNewScene('Second');
     const second = store.getState().scenes.find((scene) => scene.name === 'Second')!;
-    const before = localStorage.getItem('forge-project-scenes');
+    const before = localStorage.getItem('forge-project-scenes:v2:unsaved');
     const scenes = store.getState().scenes;
     const activeId = store.getState().activeSceneId;
     setSceneDispatcher(null);
     await expect((async () => store.getState()[action](second.id))()).resolves.toBeUndefined();
-    expect(localStorage.getItem('forge-project-scenes')).toBe(before);
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(before);
     expect(store.getState().scenes).toBe(scenes);
     expect(store.getState().activeSceneId).toBe(activeId);
   });
@@ -361,12 +361,12 @@ describe('checkpoint recovery transaction', () => {
     'preserves storage when the engine disconnects during %s capture', async (action) => {
       store.getState().createNewScene('Second');
       const second = store.getState().scenes.find((scene) => scene.name === 'Second')!;
-      const before = localStorage.getItem('forge-project-scenes');
+      const before = localStorage.getItem('forge-project-scenes:v2:unsaved');
       const scenes = store.getState().scenes;
       const pending = store.getState()[action](second.id);
       setSceneDispatcher(null);
       await expect(pending).resolves.toBeUndefined();
-      expect(localStorage.getItem('forge-project-scenes')).toBe(before);
+      expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(before);
       expect(store.getState().scenes).toBe(scenes);
     },
   );

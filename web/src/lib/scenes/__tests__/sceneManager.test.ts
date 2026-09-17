@@ -22,8 +22,8 @@ import {
   type ProjectScenes,
 } from '../sceneManager';
 
-const SCENES_STORAGE_KEY = 'forge-project-scenes';
-const CHECKPOINTS_STORAGE_KEY = 'forge-project-scene-checkpoints:v2';
+const SCENES_STORAGE_KEY = 'forge-project-scenes:v2:unsaved';
+const CHECKPOINTS_STORAGE_KEY = 'forge-project-scene-checkpoints:v3:unsaved';
 
 function makeProject(activeName: string, sceneCount = 1): ProjectScenes {
   const scenes = Array.from({ length: sceneCount }, (_, i) => ({
@@ -43,6 +43,37 @@ function makeProject(activeName: string, sceneCount = 1): ProjectScenes {
 beforeEach(() => {
   attachFixtureValidator();
   localStorage.clear();
+});
+
+describe('project-scoped browser persistence (PF-375)', () => {
+  it('keeps scene buffers and recovery points separate when switching cloud projects', () => {
+    const projectA = makeProject('Project A');
+    const projectB = makeProject('Project B');
+    saveProjectScenes(projectA, 'A');
+    saveProjectScenes(projectB, 'B');
+    const checkpointA = createCheckpoint(projectA, 'A checkpoint', 'A').checkpoint;
+    const checkpointB = createCheckpoint(projectB, 'B checkpoint', 'B').checkpoint;
+
+    expect(loadProjectScenes('A').scenes[0].name).toBe('Project A');
+    expect(loadProjectScenes('B').scenes[0].name).toBe('Project B');
+    expect(listCheckpoints('A').map((checkpoint) => checkpoint.id)).toEqual([checkpointA.id]);
+    expect(listCheckpoints('B').map((checkpoint) => checkpoint.id)).toEqual([checkpointB.id]);
+    expect(restoreCheckpoint(checkpointA.id, 'B')).toEqual({ error: 'Checkpoint not found' });
+  });
+
+  it('migrates only anonymous legacy checkpoints into the explicit unsaved scope', () => {
+    const anonymous = {
+      id: 'anonymous', projectId: null, label: 'Local draft', createdAt: '2026-01-01T00:00:00.000Z', snapshot: makeProject('Local draft'),
+    };
+    const cloudTagged = {
+      id: 'cloud-tagged', projectId: 'A', label: 'Do not attribute', createdAt: '2026-01-01T00:00:00.000Z', snapshot: makeProject('Untrusted'),
+    };
+    localStorage.setItem('forge-project-scene-checkpoints:v2', JSON.stringify([anonymous, cloudTagged]));
+
+    expect(listCheckpoints('A')).toEqual([]);
+    expect(listCheckpoints().map((checkpoint) => checkpoint.id)).toEqual(['anonymous']);
+    expect(JSON.parse(localStorage.getItem(CHECKPOINTS_STORAGE_KEY) ?? '[]')).toHaveLength(1);
+  });
 });
 
 afterEach(() => {

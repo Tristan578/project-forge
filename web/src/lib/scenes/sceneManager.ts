@@ -67,14 +67,21 @@ export interface SceneCheckpoint {
   snapshot: ProjectScenes;
 }
 
-const SCENES_STORAGE_KEY = 'forge-project-scenes';
-const CHECKPOINTS_STORAGE_KEY = 'forge-project-scene-checkpoints:v2';
+/** Legacy browser-global scene buffer. It is read only for an unsaved migration. */
+const LEGACY_SCENES_STORAGE_KEY = 'forge-project-scenes';
+/** Legacy browser-global checkpoint list. It is never assigned to a cloud project. */
+const LEGACY_CHECKPOINTS_STORAGE_KEY = 'forge-project-scene-checkpoints:v2';
+const SCENES_STORAGE_KEY = 'forge-project-scenes:v2';
+const CHECKPOINTS_STORAGE_KEY = 'forge-project-scene-checkpoints:v3';
+const UNSAVED_STORAGE_SCOPE = 'unsaved';
 
 function storageKey(base: string, projectId: string | null): string {
   if (projectId !== null && (typeof projectId !== 'string' || !projectId.trim())) {
     throw new Error('A valid project identity is required.');
   }
-  return projectId === null ? base : `${base}:project:${encodeURIComponent(projectId)}`;
+  return projectId === null
+    ? `${base}:${UNSAVED_STORAGE_SCOPE}`
+    : `${base}:project:${encodeURIComponent(projectId)}`;
 }
 
 function isTimestamp(value: unknown): value is string {
@@ -155,7 +162,13 @@ function isValidProjectScenes(value: unknown, requireEngine = true): value is Pr
  * @throws On storage access failure or unsupported/damaged stored data; existing bytes are never rewritten.
  */
 export function loadProjectScenes(projectId: string | null = null): ProjectScenes {
-  const stored = localStorage.getItem(storageKey(SCENES_STORAGE_KEY, projectId));
+  const key = storageKey(SCENES_STORAGE_KEY, projectId);
+  let stored = localStorage.getItem(key);
+  // Browser-global data predates project identity. It can only be retained for
+  // the explicit unsaved workspace: assigning it to whichever cloud project
+  // happens to open first would recreate the cross-project overwrite hazard.
+  const migratingUnsavedLegacy = stored === null && projectId === null;
+  if (migratingUnsavedLegacy) stored = localStorage.getItem(LEGACY_SCENES_STORAGE_KEY);
   if (!stored) return createInitialProject();
   let parsed: unknown;
   try {
@@ -183,6 +196,11 @@ export function loadProjectScenes(projectId: string | null = null): ProjectScene
   }
   if (!isValidProjectScenes(parsed, false)) {
     throw new Error('The saved project uses unsupported or invalid scene data. Its stored data has been preserved; open a supported backup.');
+  }
+  if (migratingUnsavedLegacy) {
+    // Preserve the legacy bytes until the scoped write succeeds. A quota or
+    // privacy-mode error must leave the old recovery data intact.
+    localStorage.setItem(key, JSON.stringify(parsed));
   }
   return parsed;
 }
@@ -469,16 +487,26 @@ export function readPrefabDefinitions(sceneData: SceneFileData | null | undefine
  */
 export function listCheckpoints(projectId: string | null = null): SceneCheckpoint[] {
   try {
-    const stored = localStorage.getItem(storageKey(CHECKPOINTS_STORAGE_KEY, projectId));
+    const key = storageKey(CHECKPOINTS_STORAGE_KEY, projectId);
+    let stored = localStorage.getItem(key);
+    // A legacy list was browser-global. Only records explicitly marked as
+    // unsaved can cross this boundary; a record tagged with a cloud ID is not
+    // trustworthy enough to attach to a project that opens later.
+    const migratingUnsavedLegacy = stored === null && projectId === null;
+    if (migratingUnsavedLegacy) stored = localStorage.getItem(LEGACY_CHECKPOINTS_STORAGE_KEY);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     if (Array.isArray(parsed)) {
-      return parsed.filter(
+      const checkpoints = parsed.filter(
         (c): c is SceneCheckpoint =>
           !!c && typeof c.id === 'string' && c.id.length > 0 &&
           c.projectId === projectId && typeof c.label === 'string' && c.label.trim().length > 0 &&
           isTimestamp(c.createdAt) && isValidProjectScenes(c.snapshot, false)
       );
+      if (migratingUnsavedLegacy && checkpoints.length > 0) {
+        localStorage.setItem(key, JSON.stringify(checkpoints));
+      }
+      return checkpoints;
     }
   } catch { /* ignore corrupt checkpoint store */ }
   return [];
