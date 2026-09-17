@@ -44,3 +44,22 @@ test('@ui mobile cookie consent accepts optional analytics via keyboard', async 
     expect.objectContaining({ name: 'forge-cookie-consent', value: 'true', sameSite: 'Lax' }),
   ]));
 });
+
+
+test('@ui cookie consent remains dismissible when browser storage is blocked', async ({ page }) => {
+  await page.addInitScript(() => {
+    for (const method of ['getItem', 'setItem'] as const) {
+      Object.defineProperty(Storage.prototype, method, {
+        configurable: true,
+        value: () => { throw new DOMException('Storage blocked', 'SecurityError'); },
+      });
+    }
+  });
+  await page.goto('/docs');
+  const banner = await expectMobileConsentTargets(page);
+  await banner.getByRole('button', { name: 'Decline', exact: true }).click();
+  await expect(banner).toBeHidden();
+  expect(await page.context().cookies()).toEqual(expect.arrayContaining([
+    expect.objectContaining({ name: 'forge-cookie-consent', value: 'false' }),
+  ]));
+});

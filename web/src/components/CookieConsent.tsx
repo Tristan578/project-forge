@@ -2,7 +2,7 @@
 
 /** Collect an explicit analytics consent choice with accessible shared controls. */
 
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 import { Button } from '@spawnforge/ui';
 import { initPostHog } from '@/lib/analytics/posthog';
 
@@ -66,11 +66,14 @@ function getServerSnapshot(): boolean {
  * writes a denial without initializing analytics.
  */
 export function CookieConsent() {
-  const hasInteracted = useSyncExternalStore(subscribeToStorage, getConsentSnapshot, getServerSnapshot);
+  const hasStoredChoice = useSyncExternalStore(subscribeToStorage, getConsentSnapshot, getServerSnapshot);
+  // Keep an explicit choice for this mount even when browser storage is blocked.
+  const [hasSessionChoice, setHasSessionChoice] = useState(false);
 
   const handleAccept = useCallback(() => {
     safeLocalStorage.setItem(STORAGE_KEY, 'true');
     setConsentCookie(true);
+    setHasSessionChoice(true);
     initPostHog();
     // Force re-render via storage event won't fire in same tab — trigger
     // by dispatching a synthetic event so useSyncExternalStore picks it up.
@@ -80,11 +83,12 @@ export function CookieConsent() {
   const handleDecline = useCallback(() => {
     safeLocalStorage.setItem(STORAGE_KEY, 'false');
     setConsentCookie(false);
+    setHasSessionChoice(true);
     window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
   }, []);
 
   // Already interacted → hide banner
-  if (hasInteracted) return null;
+  if (hasStoredChoice || hasSessionChoice) return null;
 
   return (
     <div

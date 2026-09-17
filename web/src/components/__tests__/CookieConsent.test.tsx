@@ -80,6 +80,17 @@ describe('CookieConsent', () => {
     expect(() => fireEvent.click(screen.getByRole('button', { name: 'Decline' }))).not.toThrow();
     expect(document.cookie).toContain(STORAGE_KEY + '=false');
     expect(initPostHog).not.toHaveBeenCalled();
+    expect(screen.queryByRole('region', { name: 'Cookie consent' })).toBeNull();
+  });
+
+  it.each(['Accept', 'Decline'])('dismisses %s with both storage operations blocked', choice => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Blocked'); });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Blocked'); });
+    render(<CookieConsent />);
+    fireEvent.click(screen.getByRole('button', { name: choice }));
+    expect(screen.queryByRole('region', { name: 'Cookie consent' })).toBeNull();
+    expect(document.cookie).toContain(STORAGE_KEY + '=' + (choice === 'Accept' ? 'true' : 'false'));
+    expect(initPostHog).toHaveBeenCalledTimes(choice === 'Accept' ? 1 : 0);
   });
 
   it('has correct ARIA attributes', () => {
