@@ -1,5 +1,7 @@
 # Engine CDN cache verification
 
+> **Last updated:** 2026-09-16
+
 The engine worker binds only the public spawnforge-engine R2 bucket. SHA-addressed known engine artifacts advertise a one-year immutable lifetime; mutable aliases, root paths and other files use no-store. Workers Cache is enabled in Wrangler ahead of the handler. The compatibility date is pinned to 2026-07-30 without Node compatibility flags.
 
 Run npm ci --prefix infra/engine-cdn --workspaces=false --ignore-scripts, then npm test --prefix infra/engine-cdn. The unit suite proves the handler does not list or mutate R2. The workerd suite reads the actual Wrangler configuration, validates the exact bucket binding and seeds real local R2 objects. It checks WASM bytes/MIME, JavaScript metadata, HEAD, cross-origin isolation, mutable alias replacement and rejected methods. Local tests do not prove a production edge cache hit.
