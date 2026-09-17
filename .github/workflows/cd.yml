@@ -82,8 +82,16 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@55.0.0
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/cd.yml') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # Instant Rollback, not `vercel promote`: with Rolling Releases enabled a
       # promote of the old build starts a staged rollout of it when nothing is
@@ -1058,7 +1066,16 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@55.0.0
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/cd.yml') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # spawnforge-staging is a separate Vercel project, so its Production target
       # is the stable staging environment. A Preview target creates an ephemeral
@@ -1176,7 +1193,16 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@55.0.0
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/cd.yml') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # The rollback target. Read from the Vercel API, not `vercel ls`: the
       # previous grep for `READY` matched nothing (the CLI prints `● Ready`),
@@ -1788,7 +1814,16 @@ jobs:
         run: cd packages/ui && npm run build
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@55.0.0
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/cd.yml') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # Run from repo root — Vercel rootDirectory=apps/docs handles the subdirectory.
       # Same pattern as the main web deploy. Do NOT cd into apps/docs — that causes
@@ -1881,7 +1916,16 @@ jobs:
         run: cd packages/ui && npm run build
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@55.0.0
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/cd.yml') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # Run from repo root — Vercel rootDirectory=apps/design handles the subdirectory.
       # Same pattern as the main web deploy. Do NOT cd into apps/design — that causes
