@@ -9,6 +9,13 @@ vi.mock('@clerk/nextjs/server', async (importOriginal) => {
 import proxy from '../../proxy';
 const event = { waitUntil: vi.fn() } as unknown as NextFetchEvent;
 const request = (path: string) => new NextRequest('https://docs.spawnforge.ai' + path);
+const responseFor = async (path: string) => {
+  const response = await proxy(request(path), event);
+  expect(response).toBeInstanceOf(Response);
+  if (!response) throw new Error('Proxy returned no response');
+  return response;
+};
+
 beforeEach(() => {
   vi.stubEnv('NODE_ENV', 'production');
   vi.stubEnv('CLERK_SECRET_KEY', 'test-server-credential');
@@ -19,7 +26,7 @@ describe('docs authentication failure policy (#10044)', () => {
   it.each(['/guides/setup', '/api/internal', '/mcpadmin', '/sign-internal'])('denies protected %s when Clerk throws', async (path) => {
     authMocks.middleware.mockRejectedValue(new Error('upstream token=private-provider-detail'));
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const response = await proxy(request(path), event);
+    const response = await responseFor(path);
     expect(response.status).toBe(503);
     expect(response.headers.get('x-middleware-next')).toBeNull();
     expect(response.headers.get('cache-control')).toBe('no-store');
@@ -28,7 +35,7 @@ describe('docs authentication failure policy (#10044)', () => {
   it.each(['/', '/mcp/commands', '/sign-in', '/robots.txt'])('keeps public %s available on an auth exception', async (path) => {
     authMocks.middleware.mockRejectedValue(new Error('secret=do-not-log'));
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const response = await proxy(request(path), event);
+    const response = await responseFor(path);
     expect(response.headers.get('x-middleware-next')).toBe('1');
   });
   it('reports a fixed diagnostic without raw provider errors', async () => {
@@ -45,18 +52,18 @@ describe('docs authentication failure policy (#10044)', () => {
   });
   it('does not expose protected production content when the server key is missing', async () => {
     vi.stubEnv('CLERK_SECRET_KEY', '');
-    const response = await proxy(request('/guides/setup'), event);
+    const response = await responseFor('/guides/setup');
     expect(response.status).toBe(503);
     expect(authMocks.middleware).not.toHaveBeenCalled();
   });
   it('keeps public production content available without Clerk', async () => {
     vi.stubEnv('CLERK_SECRET_KEY', '');
-    expect((await proxy(request('/mcp'), event)).headers.get('x-middleware-next')).toBe('1');
+    expect((await responseFor('/mcp')).headers.get('x-middleware-next')).toBe('1');
   });
   it('retains the explicitly supported unauthenticated development mode', async () => {
     vi.stubEnv('NODE_ENV', 'development');
     vi.stubEnv('CLERK_SECRET_KEY', '');
-    expect((await proxy(request('/guides/setup'), event)).headers.get('x-middleware-next')).toBe('1');
+    expect((await responseFor('/guides/setup')).headers.get('x-middleware-next')).toBe('1');
     expect(authMocks.middleware).not.toHaveBeenCalled();
   });
 });
