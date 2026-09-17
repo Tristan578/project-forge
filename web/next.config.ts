@@ -101,11 +101,13 @@ const nextConfig: NextConfig = {
     // a deployed function never relies on the tracer inferring that helper.
     '/play/**/opengraph-image': [
       './src/assets/fonts/NotoSans-Regular.ttf',
+      './src/assets/fonts/NotoSans-Bold.ttf',
       './src/assets/fonts/SpawnForgeArabic-Regular.ttf',
       './src/assets/fonts/NotoSansCJKjp-Regular.otf',
     ],
     '/play/**/opengraph-image/**': [
       './src/assets/fonts/NotoSans-Regular.ttf',
+      './src/assets/fonts/NotoSans-Bold.ttf',
       './src/assets/fonts/SpawnForgeArabic-Regular.ttf',
       './src/assets/fonts/NotoSansCJKjp-Regular.otf',
     ],

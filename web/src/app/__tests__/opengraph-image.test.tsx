@@ -304,6 +304,79 @@ describe('play OG route renders supported multilingual text offline', () => {
   });
 });
 
+describe('play OG title font selection', () => {
+  it('prefers the declared Latin 700 face before regular CJK coverage', () => {
+    const route = readFileSync(join(__dirname, '..', 'play', '[userId]', '[slug]', 'opengraph-image.tsx'), 'utf8');
+    expect(route).toContain("fontFamily: 'SpawnForge OG Latin, SpawnForge OG Arabic, SpawnForge OG CJK'");
+    expect(route).toContain('fontWeight: 700');
+  });
+});
+
+describe('play OG route survives custom font read failures', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doUnmock('node:fs/promises');
+    vi.doUnmock('@/lib/db/client');
+  });
+
+  it('renders a native PNG with the bundled Next font when one custom asset cannot be read', async () => {
+    // Reject just the first traced asset. Other local reads, including Next's
+    // built-in renderer resources, retain their native implementation.
+    vi.doMock('node:fs/promises', async (importActual) => {
+      const actual = await importActual<typeof import('node:fs/promises')>();
+      return {
+        ...actual,
+        readFile: vi.fn((...args: Parameters<typeof actual.readFile>) => {
+          const [file] = args;
+          if (String(file).includes('NotoSans-Regular.ttf')) {
+            return Promise.reject(new Error('simulated traced font read failure'));
+          }
+          return actual.readFile(...args);
+        }),
+      };
+    });
+    const rows = [
+      [{ id: 'u1', displayName: 'Ada' }],
+      [{ title: 'Space Game', description: 'A locally rendered game' }],
+    ];
+    let call = 0;
+    vi.doMock('@/lib/db/client', () => ({
+      getDb: () => { throw new Error('Unused'); },
+      queryWithResilience: async () => rows[call++],
+    }));
+
+    const mod = await import('../play/[userId]/[slug]/opengraph-image');
+    const { remote, bytes } = await renderOffline(() =>
+      mod.default({ params: Promise.resolve({ userId: 'clerk_1', slug: 'space-game' }) })
+    );
+
+    expect(call).toBe(2);
+    expect(remote).toEqual([]);
+    expect(bytes).toBeGreaterThan(0);
+  });
+
+  it('uses the normal custom-font card when every traced asset is readable', async () => {
+    const rows = [
+      [{ id: 'u1', displayName: 'Ada' }],
+      [{ title: 'Space Game', description: 'A locally rendered game' }],
+    ];
+    let call = 0;
+    vi.doMock('@/lib/db/client', () => ({
+      getDb: () => { throw new Error('Unused'); },
+      queryWithResilience: async () => rows[call++],
+    }));
+
+    const mod = await import('../play/[userId]/[slug]/opengraph-image');
+    const { remote, bytes } = await renderOffline(() =>
+      mod.default({ params: Promise.resolve({ userId: 'clerk_1', slug: 'space-game' }) })
+    );
+
+    expect(call).toBe(2);
+    expect(remote).toEqual([]);
+    expect(bytes).toBeGreaterThan(0);
+  });
+});
+
 const APP_DIR = join(__dirname, '..');
 const OG_LIB_DIR = join(__dirname, '..', '..', 'lib', 'og');
 

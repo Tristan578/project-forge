@@ -2,6 +2,7 @@
 // Exact Unicode cmap union of the bundled OG fonts, plus layout whitespace.
 export const PLAY_CARD_FONT_SHA256 = {
   'NotoSans-Regular.ttf': 'b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5',
+  'NotoSans-Bold.ttf': 'c976e4b1b99edc88775377fcc21692ca4bfa46b6d6ca6522bfda505b28ff9d6a',
   'SpawnForgeArabic-Regular.ttf': '011125aa73e53c068f67a24760eb8da9621c287af1f2ed3954fbec65fd32da17',
   'NotoSansCJKjp-Regular.otf': '68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5',
 } as const;

@@ -6,7 +6,7 @@ from fontTools.ttLib import TTFont
 
 root = Path(__file__).resolve().parents[1]
 assets = root / 'src/assets/fonts'
-files = ['NotoSans-Regular.ttf', 'SpawnForgeArabic-Regular.ttf', 'NotoSansCJKjp-Regular.otf']
+files = ['NotoSans-Regular.ttf', 'NotoSans-Bold.ttf', 'SpawnForgeArabic-Regular.ttf', 'NotoSansCJKjp-Regular.otf']
 points = {9, 10, 13}  # Satori handles these layout controls without font glyphs.
 hashes = {}
 for name in files:

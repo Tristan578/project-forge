@@ -14,6 +14,7 @@ const picomatch = createRequire(import.meta.url)('next/dist/compiled/picomatch')
   (pattern: string) => (path: string) => boolean;
 const fonts = [
   './src/assets/fonts/NotoSans-Regular.ttf',
+  './src/assets/fonts/NotoSans-Bold.ttf',
   './src/assets/fonts/SpawnForgeArabic-Regular.ttf',
   './src/assets/fonts/NotoSansCJKjp-Regular.otf',
 ];

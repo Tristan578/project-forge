@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { PLAY_CARD_FONT_SHA256, PLAY_CARD_GLYPH_RANGES } from '../play-card-glyphs';
@@ -166,5 +166,39 @@ describe('exact checked-in OG glyph coverage', () => {
   });
   it.each(['星の冒険', '별의 모험', '星际冒险', 'Звёздное приключение', 'مغامرة النجوم', '\u{2000b}', 'Title\nline'])('accepts covered text %s', text => {
     expect(isPlayCardTextCovered(text)).toBe(true);
+  });
+});
+
+describe('play-card custom font loading', () => {
+  it('registers the local Latin Bold face at the title weight', async () => {
+    vi.resetModules();
+    const readFile = vi.fn().mockResolvedValue(new Uint8Array([0, 1, 2]));
+    vi.doMock('node:fs/promises', () => ({ readFile }));
+
+    const { loadPlayCardFonts } = await import('../play-card-fonts');
+    const fonts = await loadPlayCardFonts();
+
+    expect(readFile).toHaveBeenCalledTimes(4);
+    expect(fonts?.map(({ name, weight }) => ({ name, weight }))).toEqual([
+      { name: 'SpawnForge OG Latin', weight: 400 },
+      { name: 'SpawnForge OG Latin', weight: 700 },
+      { name: 'SpawnForge OG Arabic', weight: 400 },
+      { name: 'SpawnForge OG CJK', weight: 400 },
+    ]);
+
+    vi.doUnmock('node:fs/promises');
+  });
+
+  it('does not start a permanently rejecting read during module evaluation', async () => {
+    vi.resetModules();
+    const readFile = vi.fn().mockRejectedValue(new Error('simulated asset failure'));
+    vi.doMock('node:fs/promises', () => ({ readFile }));
+
+    const { loadPlayCardFonts } = await import('../play-card-fonts');
+    expect(readFile).not.toHaveBeenCalled();
+    await expect(loadPlayCardFonts()).resolves.toBeNull();
+    expect(readFile).toHaveBeenCalledTimes(4);
+
+    vi.doUnmock('node:fs/promises');
   });
 });

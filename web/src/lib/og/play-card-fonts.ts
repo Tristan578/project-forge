@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { PLAY_CARD_GLYPH_RANGES } from './play-card-glyphs';
 
-type OgFont = {
+export type OgFont = {
   name: string;
   data: ArrayBuffer;
   weight: 400 | 700;
@@ -14,19 +14,46 @@ function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
+let pendingFonts: Promise<OgFont[]> | undefined;
+
 /**
- * These assets are traced as Node route files rather than bundled into an Edge
- * function. Their source URLs and OFL-1.1 terms live beside the artifacts.
+ * Read the traced custom fonts on demand. A failed read is deliberately not a
+ * module-level rejected promise: image routes may load before the function
+ * bundle is complete, and an eager rejection otherwise turns every later
+ * request into an unhandled failure. The next request may recover after a
+ * transient deployment read failure.
  */
-export const playCardFonts: Promise<OgFont[]> = Promise.all([
-  readFile(fontAsset('NotoSans-Regular.ttf')),
-  readFile(fontAsset('SpawnForgeArabic-Regular.ttf')),
-  readFile(fontAsset('NotoSansCJKjp-Regular.otf')),
-]).then(([latin, arabic, cjk]) => [
-  { name: 'SpawnForge OG Latin', data: asArrayBuffer(latin), weight: 400 },
-  { name: 'SpawnForge OG Arabic', data: asArrayBuffer(arabic), weight: 400 },
-  { name: 'SpawnForge OG CJK', data: asArrayBuffer(cjk), weight: 400 },
-]);
+async function readPlayCardFonts(): Promise<OgFont[]> {
+  const [latin, latinBold, arabic, cjk] = await Promise.all([
+    readFile(fontAsset('NotoSans-Regular.ttf')),
+    readFile(fontAsset('NotoSans-Bold.ttf')),
+    readFile(fontAsset('SpawnForgeArabic-Regular.ttf')),
+    readFile(fontAsset('NotoSansCJKjp-Regular.otf')),
+  ]);
+  return [
+    { name: 'SpawnForge OG Latin', data: asArrayBuffer(latin), weight: 400 },
+    // Satori resolves a face only when its requested weight is explicitly
+    // registered. This local Bold face preserves the prior 700 Latin title.
+    { name: 'SpawnForge OG Latin', data: asArrayBuffer(latinBold), weight: 700 },
+    { name: 'SpawnForge OG Arabic', data: asArrayBuffer(arabic), weight: 400 },
+    { name: 'SpawnForge OG CJK', data: asArrayBuffer(cjk), weight: 400 },
+  ];
+}
+
+/**
+ * Return custom fonts when every local asset is readable, otherwise null.
+ * Callers must omit ImageResponse's `fonts` option for null and render only
+ * neutral ASCII text with Next's bundled local fallback font.
+ */
+export async function loadPlayCardFonts(): Promise<OgFont[] | null> {
+  pendingFonts ??= readPlayCardFonts();
+  try {
+    return await pendingFonts;
+  } catch {
+    pendingFonts = undefined;
+    return null;
+  }
+}
 
 /**
  * Reject missing glyphs before Next's automatic fallback can transmit user text.

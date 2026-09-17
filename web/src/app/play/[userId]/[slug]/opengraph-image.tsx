@@ -5,7 +5,7 @@ import { publishedGames, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { BrandMark } from '@/lib/og/BrandMark';
 import { initialFor, stripEmoji, truncateChars } from '@/lib/og/text';
-import { isPlayCardTextCovered, playCardFonts } from '@/lib/og/play-card-fonts';
+import { isPlayCardTextCovered, loadPlayCardFonts } from '@/lib/og/play-card-fonts';
 import { renderPlayCardText } from '@/lib/og/play-card-text';
 
 export const alt = 'SpawnForge Game';
@@ -34,7 +34,8 @@ function getGradient(slug: string): string {
   return `linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 50%, ${colors[2]} 100%)`;
 }
 
-async function renderFallback(message = 'Game not found') {
+/** Render neutral ASCII through Next's bundled local fallback font. */
+function renderFallback(message = 'Game not found') {
   return new ImageResponse(
     (
       <div
@@ -47,10 +48,9 @@ async function renderFallback(message = 'Game not found') {
           justifyContent: 'center',
           background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0f3460 100%)',
           padding: 60,
-          fontFamily: 'SpawnForge OG CJK, SpawnForge OG Arabic, SpawnForge OG Latin',
         }}
       >
-        <div style={{ fontSize: 64, fontWeight: 800, color: '#ffffff' }}>
+        <div style={{ fontSize: 64, fontWeight: 700, color: '#ffffff' }}>
           SpawnForge
         </div>
         <div style={{ fontSize: 24, color: 'rgba(255,255,255,0.6)', marginTop: 16 }}>
@@ -58,7 +58,9 @@ async function renderFallback(message = 'Game not found') {
         </div>
       </div>
     ),
-    { ...size, fonts: await playCardFonts }
+    // Do not pass `fonts: []`: Satori treats that as an invalid custom-font
+    // configuration. With the option absent it uses Next's local built-in font.
+    { ...size }
   );
 }
 
@@ -133,7 +135,7 @@ async function loadCard(clerkId: string, slug: string): Promise<CardData | 'text
  * Render a published game share card, or a generic card for missing or uncovered text.
  * @param props.params Asynchronous Clerk user ID and published game slug route parameters.
  * @returns A 1200 by 630 PNG ImageResponse using traced local font files; database
- * lookup failures produce the generic card and local font/render failures propagate.
+ * lookup and custom-font read failures produce the ASCII-only generic card.
  */
 export default async function Image({ params }: Props) {
   const { userId: clerkId, slug } = await params;
@@ -141,6 +143,12 @@ export default async function Image({ params }: Props) {
   const card = await loadCard(clerkId, slug);
   if (card === 'text-unavailable') return renderFallback('Play on SpawnForge');
   if (!card) return renderFallback();
+
+  const fonts = await loadPlayCardFonts();
+  // A custom-font failure must never send user-controlled multilingual text to
+  // Satori's remote fallback resolver. The fallback has no `fonts` option and
+  // contains ASCII literals only, so Next renders it with its bundled font.
+  if (!fonts) return renderFallback('Play on SpawnForge');
 
   const { title, creatorName, description: truncatedDesc } = card;
 
@@ -155,7 +163,9 @@ export default async function Image({ params }: Props) {
           justifyContent: 'space-between',
           background: getGradient(slug),
           padding: 60,
-          fontFamily: 'SpawnForge OG CJK, SpawnForge OG Arabic, SpawnForge OG Latin',
+          // Latin must be first: CJK also covers ASCII but has no declared
+          // 700 face, which would silently turn the English title regular.
+          fontFamily: 'SpawnForge OG Latin, SpawnForge OG Arabic, SpawnForge OG CJK',
         }}
       >
         {/* Top: game info */}
@@ -164,7 +174,7 @@ export default async function Image({ params }: Props) {
             style={{
               display: 'flex',
               fontSize: 56,
-              fontWeight: 800,
+              fontWeight: 700,
               color: '#ffffff',
               letterSpacing: -1,
               lineHeight: 1.1,
@@ -253,6 +263,6 @@ export default async function Image({ params }: Props) {
         </div>
       </div>
     ),
-    { ...size, fonts: await playCardFonts }
+    { ...size, fonts }
   );
 }
