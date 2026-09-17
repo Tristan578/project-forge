@@ -19,7 +19,7 @@ export function renderPlayCardText(text: string, fontSize: number): ReactNode {
     <div style={{ display: 'flex', flexDirection: 'row-reverse', flexWrap: 'wrap',
       width: '100%', alignItems: 'baseline', columnGap: fontSize * 0.28 }}>
       {text.trim().split(/\s+/u).map((word, index) => (
-        <span key={index} style={{ display: 'flex', whiteSpace: 'pre', flexShrink: 0 }}>{word}</span>
+        <span key={index} style={{ display: 'flex', whiteSpace: 'normal', wordBreak: 'break-all', maxWidth: '100%', flexShrink: 0 }}>{word}</span>
       ))}
     </div>
   );
