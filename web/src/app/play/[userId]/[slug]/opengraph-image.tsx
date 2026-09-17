@@ -6,6 +6,7 @@ import { eq, and } from 'drizzle-orm';
 import { BrandMark } from '@/lib/og/BrandMark';
 import { initialFor, stripEmoji, truncateChars } from '@/lib/og/text';
 import { isPlayCardTextCovered, playCardFonts } from '@/lib/og/play-card-fonts';
+import { renderPlayCardText } from '@/lib/og/play-card-text';
 
 export const alt = 'SpawnForge Game';
 export const size = { width: 1200, height: 630 };
@@ -162,6 +163,7 @@ export default async function Image({ params }: Props) {
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div
             style={{
+              display: 'flex',
               fontSize: 56,
               fontWeight: 800,
               color: '#ffffff',
@@ -170,10 +172,11 @@ export default async function Image({ params }: Props) {
               maxWidth: 900,
             }}
           >
-            {title}
+            {renderPlayCardText(title, 56)}
           </div>
           <div
             style={{
+              display: 'flex',
               fontSize: 24,
               color: 'rgba(255, 255, 255, 0.65)',
               marginTop: 20,
@@ -181,7 +184,7 @@ export default async function Image({ params }: Props) {
               lineHeight: 1.4,
             }}
           >
-            {truncatedDesc}
+            {renderPlayCardText(truncatedDesc, 24)}
           </div>
         </div>
 
@@ -215,7 +218,7 @@ export default async function Image({ params }: Props) {
             >
               {initialFor(creatorName)}
             </div>
-            <div style={{ fontSize: 22, color: 'rgba(255,255,255,0.8)' }}>{creatorName}</div>
+            <div style={{ display: 'flex', fontSize: 22, color: 'rgba(255,255,255,0.8)' }}>{renderPlayCardText(creatorName, 22)}</div>
           </div>
 
           <div

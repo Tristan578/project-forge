@@ -17,7 +17,9 @@ the traced runtime font directory. Its SHA-256 is pinned by the preparation
 script. The renamed derivative retains encoded initial, medial, and final Arabic
 forms. Advanced ligatures resolving to unencoded glyphs are excluded because
 Next's bundled Satori fallback resolver cannot handle them. This font adaptation
-does not add full bidirectional layout support for mixed Arabic and Latin text.
+retains per-word shaping. The card lays pure Arabic paragraphs out as wrapping
+right-to-left flex rows, preserving logical word and line order. Mixed Arabic
+and Latin paragraphs still require a full bidirectional layout renderer.
 
 With fontTools 4.61.1 installed, run these commands from the repository root:
 

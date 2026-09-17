@@ -376,6 +376,7 @@ describe('OG sources carry no emoji codepoints', () => {
       'lib/og/BrandMark.tsx',
       'lib/og/play-card-fonts.ts',
       'lib/og/play-card-glyphs.ts',
+      'lib/og/play-card-text.tsx',
       'lib/og/text.ts',
     ]);
   });
