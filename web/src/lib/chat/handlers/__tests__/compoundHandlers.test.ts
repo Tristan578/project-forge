@@ -1543,4 +1543,40 @@ describe('PF-235 compound record maps', () => {
     expect(Object.hasOwn(entityIds, '__proto__')).toBe(true);
     expect(JSON.parse(JSON.stringify(entityIds)).__proto__).toBe('id-__proto__');
   });
+
+  it('does not read inherited script, component, or terrain records for an own scene node', async () => {
+    const hero = makeSceneNode({ entityId: 'hero', name: 'Hero', components: ['Mesh3d'] });
+    const inheritedComponents = [{ type: 'characterController' }];
+    const inheritedTerrain = { noiseType: 'perlin', heightScale: 10 };
+    const inheritedStore = {
+      sceneGraph: { nodes: { hero }, rootIds: ['hero'] },
+      allScripts: Object.create({ hero: 'inherited-script' }),
+      allGameComponents: Object.create({ hero: inheritedComponents }),
+      terrainData: Object.create({ hero: inheritedTerrain }),
+      inputBindings: [], physicsEnabled: false, environment: { fogEnabled: false },
+    };
+    const summary = await invoke('describe_scene', { detail: 'summary' }, inheritedStore);
+    expect(summary.result.result).toMatchObject({ entityCount: 1, hasScripts: false });
+    const detail = await invoke('describe_scene', { detail: 'full' }, inheritedStore);
+    expect(detail.result.result).toMatchObject({ entities: [{
+      id: 'hero', hasScript: false, gameComponents: [], terrain: null,
+    }] });
+    const analysis = await invoke('analyze_gameplay', {}, inheritedStore);
+    expect(analysis.result.result).toMatchObject({
+      entityRoles: [{ id: 'hero', name: 'Hero', role: 'decoration' }], mechanics: [],
+    });
+
+    const ownStore = {
+      ...inheritedStore,
+      allScripts: { hero: 'own-script' },
+      allGameComponents: { hero: inheritedComponents },
+      terrainData: { hero: inheritedTerrain },
+    };
+    const ownDetail = await invoke('describe_scene', { detail: 'full' }, ownStore);
+    expect(ownDetail.result.result).toMatchObject({ entities: [{
+      id: 'hero', hasScript: true, gameComponents: inheritedComponents, terrain: inheritedTerrain,
+    }] });
+    const ownAnalysis = await invoke('analyze_gameplay', {}, ownStore);
+    expect(ownAnalysis.result.result).toMatchObject({ mechanics: expect.arrayContaining(['player_character', 'scripting']) });
+  });
 });
