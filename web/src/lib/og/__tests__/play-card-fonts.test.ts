@@ -98,7 +98,7 @@ describe('exact checked-in OG glyph coverage', () => {
     }
     expect([...generated].sort((a, b) => a - b)).toEqual([...actual].sort((a, b) => a - b));
   });
-  it.each(['\u03e2', '\u9ff0', '\u{1d400}', '\ud800'])('rejects uncovered glyph %s', text => {
+  it.each(['', '\u03e2', '\u9ff0', '\u{1d400}', '\ud800'])('rejects uncovered glyph %s', text => {
     expect(isPlayCardTextCovered(text)).toBe(false);
   });
   it.each(['星の冒険', '별의 모험', '星际冒险', 'Звёздное приключение', 'مغامرة النجوم', '\u{2000b}', 'Title\nline'])('accepts covered text %s', text => {
