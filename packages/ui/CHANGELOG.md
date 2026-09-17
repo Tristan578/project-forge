@@ -1,5 +1,11 @@
 # @spawnforge/ui
 
+## 0.3.1
+
+### Patch Changes
+
+- [#10113](https://github.com/Tristan578/project-forge/pull/10113) [`d0f8cbc`](https://github.com/Tristan578/project-forge/commit/d0f8cbc915e7ffc579e09fbf03a88bacf435cf67) Thanks [@Tristan578](https://github.com/Tristan578)! - Use semantic theme colours for health status cards and documentation, with readable status indicators and accessible shared controls.
+
 ## 0.3.0
 
 ### Minor Changes

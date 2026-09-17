@@ -1,5 +1,11 @@
 # @spawnforge/docs
 
+## 0.2.4
+
+### Patch Changes
+
+- [#10110](https://github.com/Tristan578/project-forge/pull/10110) [`58037f4`](https://github.com/Tristan578/project-forge/commit/58037f439ec5365616e01e086f3569bdf7858be6) Thanks [@Tristan578](https://github.com/Tristan578)! - Deny protected docs requests during authentication failures without exposing provider errors; retain public documentation access.
+
 ## 0.2.3
 
 ### Patch Changes
