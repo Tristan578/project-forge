@@ -9,6 +9,8 @@ import { isPlayCardTextCovered, playCardFonts } from '@/lib/og/play-card-fonts';
 export const alt = 'SpawnForge Game';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
+// Font binaries are traced local files, so this route must not be promoted to Edge.
+export const runtime = 'nodejs';
 
 interface Props {
   params: Promise<{ userId: string; slug: string }>;
