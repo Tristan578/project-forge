@@ -305,22 +305,16 @@ jobs:
         run: bash scripts/ci-tree-already-validated.sh
   # Keep main's WebGL2 engine cache warm for CI's engine-smoke gate (#9574).
   #
-  # The save inside build-wasm is not enough on its own: that job is gated on
-  # engine-changed, and measured across the last 12 CD runs it ran ONCE and
-  # skipped eleven times. So a cache seeded only there would be absent right
-  # after this lands and would stay absent until an engine change happened to
-  # merge -- every PR in between restoring nothing and rebuilding for no
-  # benefit. The feature would look installed and do nothing.
+  # build-wasm runs for engine changes, web changes, and manual dispatch.
+  # This complementary job keeps the WebGL2 cache warm on the remaining main
+  # pushes, including documentation-only merges. It restores the entry and
+  # compiles only when the cache was genuinely evicted or never populated.
+  # The two jobs never build the same cold key concurrently.
   #
-  # This job runs on every push to main and is a no-op on a hit: restore, and
-  # build only when the entry is genuinely missing. Cost is a checkout plus a
-  # cache probe (~15s) against the ~5 min it saves each PR that would otherwise
-  # rebuild. It also covers eviction -- GitHub drops caches untouched for 7 days,
-  # and while PR restores normally keep this one alive, an engine-quiet stretch
-  # would otherwise lose it with nothing to rewrite it.
+  # Cache probes cost about15s; a cold WebGL2 build costs about5minutes.
+  # GitHub evicts entries untouched for7days, so covering every main push
+  # avoids an unnecessary rebuild in the next PR engine-smoke gate.
   #
-  # Deliberately NOT in any deploy job's needs: this is a cache warmer. If it
-  # fails, PRs rebuild exactly as they do today and nothing else changes.
   publish-engine-cache:
     name: Publish Engine Cache
     runs-on: ubuntu-latest
@@ -341,7 +335,7 @@ jobs:
     # and build the engine CONCURRENTLY, paying for the expensive build twice on
     # exactly the pushes that are already the slowest.
     needs: [check-changes]
-    if: needs.check-changes.outputs.engine-changed != 'true' && github.event_name != 'workflow_dispatch'
+    if: needs.check-changes.outputs.engine-changed != 'true' && needs.check-changes.outputs.web-changed != 'true' && github.event_name != 'workflow_dispatch'
     permissions:
       contents: read
     steps:
@@ -507,8 +501,10 @@ jobs:
     name: WASM Build
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Every web deployment needs a current-run artifact for its same-origin
+    # fallback. Exact all4 cache hits skip compilation; misses rebuild visibly.
     needs: [check-changes]
-    if: ${{ needs.check-changes.outputs.engine-changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.check-changes.outputs.engine-changed == 'true' || needs.check-changes.outputs.web-changed == 'true' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
     steps:
@@ -943,7 +939,7 @@ jobs:
           unzip -q awscliv2.zip
           sudo ./aws/install --update
 
-      # --- Path A: the engine changed, so upload what build-wasm produced -----
+      # --- Path A: build-wasm prepared a verified artifact for this deploy -----
       - name: Download WASM artifacts
         if: needs.build-wasm.result == 'success'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -978,7 +974,7 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.ASSET_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ vars.R2_BUCKET || 'spawnforge-engine' }}
 
-      # --- Path B: the engine did NOT change -----------------------------------
+      # --- Path B: no engine or web deploy needed an artifact ------------------
       # The bytes already at latest/ ARE this commit's engine, so copy them
       # server-side onto the stamped prefix. No build, no download, and the
       # deploy keeps its immutable version pin.
@@ -1071,23 +1067,13 @@ jobs:
         with:
           name: wasm-binaries
           path: engine/
-        continue-on-error: true
 
       - name: Populate same-origin WASM fallback
-        if: steps.download-wasm-staging.outcome == 'success'
         run: |
-          for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
-            src="engine/pkg-${variant}"
-            dest="web/public/engine-pkg-${variant}"
-            if [ -d "$src" ]; then
-              mkdir -p "$dest"
-              cp "$src"/* "$dest"/
-            fi
-          done
+          node scripts/populate-engine-fallback.mjs engine web/public
           bash scripts/generate-wasm-manifests.sh web/public
 
       - name: Verify staging upload contains the engine
-        if: steps.download-wasm-staging.outcome == 'success'
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
@@ -1465,23 +1451,13 @@ jobs:
         with:
           name: wasm-binaries
           path: engine/
-        continue-on-error: true
 
       - name: Populate same-origin WASM fallback
-        if: steps.download-wasm-production.outcome == 'success'
         run: |
-          for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
-            src="engine/pkg-${variant}"
-            dest="web/public/engine-pkg-${variant}"
-            if [ -d "$src" ]; then
-              mkdir -p "$dest"
-              cp "$src"/* "$dest"/
-            fi
-          done
+          node scripts/populate-engine-fallback.mjs engine web/public
           bash scripts/generate-wasm-manifests.sh web/public
 
       - name: Verify production upload contains the engine
-        if: steps.download-wasm-production.outcome == 'success'
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
