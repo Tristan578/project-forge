@@ -200,7 +200,7 @@ export function DocsPage() {
                     {result.matchSection && (
                       <span className="text-xs text-[var(--sf-text)]">in: {result.matchSection}</span>
                     )}
-                    <span className="mt-0.5 text-xs text-[var(--sf-text)]">
+                    <span className="mt-0.5 line-clamp-2 text-xs text-[var(--sf-text)]">
                       {result.snippet}
                     </span>
                   </Button>
@@ -292,7 +292,7 @@ export function DocsPage() {
                     <FileText size={12} className="text-[var(--sf-text)]" />
                     <span className="text-sm font-medium text-[var(--sf-text)]">{result.title}</span>
                   </div>
-                  <span className="mt-1 text-xs text-[var(--sf-text)]">{result.snippet}</span>
+                  <span className="mt-1 line-clamp-2 text-xs text-[var(--sf-text)]">{result.snippet}</span>
                 </Button>
               ))}
             </div>
