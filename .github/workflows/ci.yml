@@ -1154,6 +1154,9 @@ jobs:
       - name: Run agentic-config gate test suite
         run: bash scripts/__tests__/check-agentic-sync.test.sh
 
+      - name: Run provider skill resolver fixtures
+        run: bash scripts/__tests__/resolve-skill-path.test.sh
+
       - name: Run taskboard onboarding-hygiene gate test suite
         run: bash scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh
 
