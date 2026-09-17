@@ -27,7 +27,7 @@ it('enforces all four aggregate thresholds after a successful fixture test', () 
       'export default { ...base, test: { ...base.test, projects: undefined, environment: "node",',
       'include: [' + JSON.stringify(relative + '/subject.test.ts') + '],',
       'coverage: { ...base.test.coverage, include: [' + JSON.stringify(relative + '/subject.ts') + '], exclude: [],',
-      'reportsDirectory: ' + JSON.stringify(join(directory, 'coverage')) + ', reporter: ["json-summary"] } } };',
+      'reportsDirectory: ' + JSON.stringify(join(directory, 'coverage')) + ' } } };',
     ].join('\n'));
     const require = createRequire(import.meta.url);
     const cli = resolve(dirname(require.resolve('vitest/package.json')), 'vitest.mjs');

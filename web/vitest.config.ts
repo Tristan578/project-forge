@@ -13,6 +13,7 @@ export default defineConfig({
     retry: process.env.CI ? 1 : 0,
     coverage: {
       provider: 'v8',
+      reporter: ['text', 'html', 'clover', 'json', 'json-summary'],
       include: ['src/**/*.ts', 'src/**/*.tsx'],
       exclude: [
         'src/**/*.test.ts',
