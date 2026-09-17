@@ -1,5 +1,33 @@
 # web
 
+## 0.10.1
+
+### Patch Changes
+
+- [#10100](https://github.com/Tristan578/project-forge/pull/10100) [`c29f5bb`](https://github.com/Tristan578/project-forge/commit/c29f5bb498edc8ab0c86ed2b687a66eb4f46096c) Thanks [@Tristan578](https://github.com/Tristan578)! - Return accurate missing-game404 and temporary-failure503 responses when Clerk forwards published-game requests through a rewrite to the original URL.
+
+- [#10125](https://github.com/Tristan578/project-forge/pull/10125) [`a25b770`](https://github.com/Tristan578/project-forge/commit/a25b770fde0ff0ae77ee35c8f334157145a32d06) Thanks [@Tristan578](https://github.com/Tristan578)! - Render supported inline Markdown in source order and keep link-shaped code examples literal.
+
+- [#10119](https://github.com/Tristan578/project-forge/pull/10119) [`16a3db3`](https://github.com/Tristan578/project-forge/commit/16a3db3b207f04f80c0541ebf801ac764daaca2a) Thanks [@Tristan578](https://github.com/Tristan578)! - Run server-only web tests in Node during the production coverage gate while preserving jsdom coverage for browser-facing suites.
+
+- [#10117](https://github.com/Tristan578/project-forge/pull/10117) [`d1347b2`](https://github.com/Tristan578/project-forge/commit/d1347b204c9981eb71b51b5c99d9c4a057a85db8) Thanks [@Tristan578](https://github.com/Tristan578)! - Use accessible shared consent buttons with 44px touch targets and explicit optional analytics copy.
+
+- [#10115](https://github.com/Tristan578/project-forge/pull/10115) [`f9f82a9`](https://github.com/Tristan578/project-forge/commit/f9f82a9c354f6b0fb9c02c4bc416802ef17072dd) Thanks [@Tristan578](https://github.com/Tristan578)! - Render play-card multilingual text from bundled fonts without sending creator content to Google Fonts.
+
+- [#10112](https://github.com/Tristan578/project-forge/pull/10112) [`1265d72`](https://github.com/Tristan578/project-forge/commit/1265d720c6cee4deaff81e1c65244b7d17f43488) Thanks [@Tristan578](https://github.com/Tristan578)! - Prevent chat handlers and game-component wire parsing from treating inherited record properties as creator data.
+
+- [#10109](https://github.com/Tristan578/project-forge/pull/10109) [`be8bb21`](https://github.com/Tristan578/project-forge/commit/be8bb211cec80bd3c7be92dd5b715f66d170c028) Thanks [@Tristan578](https://github.com/Tristan578)! - Verify cached deployment tools, trusted coverage artifacts and documentation routes in CI, and check same-origin engine fallback assets using response bytes.
+
+- [#10104](https://github.com/Tristan578/project-forge/pull/10104) [`4d378b7`](https://github.com/Tristan578/project-forge/commit/4d378b75ae4d3391498f8eeeeb2f35b9e8e45a3d) Thanks [@Tristan578](https://github.com/Tristan578)! - Include verified same-origin engine fallback packages in web-only releases and require deployment upload validation.
+
+- [#10111](https://github.com/Tristan578/project-forge/pull/10111) [`02290b0`](https://github.com/Tristan578/project-forge/commit/02290b0b1d17bf21ea362e12a0cb1e19a9564bcd) Thanks [@Tristan578](https://github.com/Tristan578)! - Scope local scene buffers and recovery checkpoints to the current project, with a separate unsaved workspace and safe migration of anonymous browser data.
+
+- [#10113](https://github.com/Tristan578/project-forge/pull/10113) [`d0f8cbc`](https://github.com/Tristan578/project-forge/commit/d0f8cbc915e7ffc579e09fbf03a88bacf435cf67) Thanks [@Tristan578](https://github.com/Tristan578)! - Use semantic theme colours for health status cards and documentation, with readable status indicators and accessible shared controls.
+
+- [#10105](https://github.com/Tristan578/project-forge/pull/10105) [`a105d3a`](https://github.com/Tristan578/project-forge/commit/a105d3a7eb122b12c9e6e18db7520ff3861b76cd) Thanks [@Tristan578](https://github.com/Tristan578)! - Verify staging and preview runtime health behind Deployment Protection, preserve staging Stripe test mode, and reject live payment keys on staging.
+- Updated dependencies [[`d0f8cbc`](https://github.com/Tristan578/project-forge/commit/d0f8cbc915e7ffc579e09fbf03a88bacf435cf67)]:
+  - @spawnforge/ui@0.3.1
+
 ## 0.10.0
 
 ### Minor Changes
