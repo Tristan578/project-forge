@@ -111,10 +111,21 @@ const auditMutations = {
   duplicateRun: text => text.replace(auditBlock, auditBlock + '        run: echo skipped\n'),
   movedAfterRuntime: text => text.replace(auditBlock, '').replace('        run: npm test\n', '        run: npm test\n\n' + auditBlock),
 };
-for (const [name, mutate] of Object.entries(auditMutations)) {
-  test('standalone audit contract rejects ' + name, () => {
-    const mutated = mutate(cdnWorkflowText);
-    assert.notEqual(mutated, cdnWorkflowText, 'negative control must actually mutate the workflow');
-    assert.throws(() => assertStandaloneAudit(mutated));
+// Validate the checkout above as-is; normalize only the paired mutation fixtures.
+const cdnWorkflowLF = cdnWorkflowText.replace(/\r\n/g, '\n');
+for (const [lineEnding, fixture] of [
+  ['LF', cdnWorkflowLF],
+  ['CRLF', cdnWorkflowLF.replace(/\n/g, '\r\n')],
+]) {
+  test('standalone audit contract accepts ' + lineEnding + ' checkout text', () => {
+    assertStandaloneAudit(fixture);
   });
+  for (const [name, mutate] of Object.entries(auditMutations)) {
+    test('standalone audit contract rejects ' + name + ' with ' + lineEnding + ' input', () => {
+      const mutationInput = fixture.replace(/\r\n/g, '\n');
+      const mutated = mutate(mutationInput);
+      assert.notEqual(mutated, mutationInput, 'negative control must actually mutate the workflow');
+      assert.throws(() => assertStandaloneAudit(mutated));
+    });
+  }
 }
