@@ -172,7 +172,7 @@ export function DocsPage() {
           <nav className="w-64 shrink-0" aria-label="Documentation navigation">
             {/* Search */}
             <div className="mb-4">
-              <div className="flex items-center gap-2 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-3 py-2">
+              <div className="flex items-center gap-2 rounded-lg bg-[var(--sf-bg-surface)] px-3 py-2">
                 <Search size={14} className="text-[var(--sf-text)]" />
                 <Input aria-label="Search documentation"
                   type="text"
@@ -268,7 +268,7 @@ export function DocsPage() {
         <div className="md:hidden">
           {/* Search */}
           <div className="mb-4">
-            <div className="flex items-center gap-2 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-3 py-2">
+            <div className="flex items-center gap-2 rounded-lg bg-[var(--sf-bg-surface)] px-3 py-2">
               <Search size={14} className="text-[var(--sf-text)]" />
               <Input aria-label="Search documentation"
                 type="text"
