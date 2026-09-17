@@ -1768,6 +1768,10 @@ on:
         description: 'Whether web/** or package*.json changed (defaults to true when unset)'
         type: boolean
         default: true
+      web-build-inputs-changed:
+        description: 'Whether any source or configuration input of the web production build changed'
+        type: boolean
+        default: true
       mcp-changed:
         description: 'Whether mcp-server/** changed (defaults to true when unset)'
         type: boolean
@@ -2643,6 +2647,7 @@ STEPS_EOF
   test-e2e-engine-smoke:
   test-e2e-crossbrowser:
   merge-e2e-reports:
+  docs-e2e:
   ci-success:"
 
   # Same top-level jobs: key count pin as quality-gates (rationale there).
@@ -2725,6 +2730,7 @@ STEPS_EOF
   IFS= read -r -d '' expected_ci_gate_outputs <<'OUTPUTS_EOF' || true
     outputs:
       needs-web: ${{ steps.changes.outputs.web }}
+      needs-web-build-inputs: ${{ steps.changes.outputs.web-build-inputs }}
       needs-engine: ${{ steps.changes.outputs.engine }}
       needs-mcp: ${{ steps.changes.outputs.mcp }}
       needs-ci: ${{ steps.changes.outputs.ci }}
@@ -3386,7 +3392,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=630
+readonly SELF_EXEC_EXPECTED_DROP=650
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3636,8 +3642,13 @@ IFS= read -r -d '' expected_steps_1 <<'STEPS_EOF' || true
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: engine -> target
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
+      - name: Cache cargo-audit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
+      - name: Install verified cargo-audit
+        run: bash scripts/install-cargo-audit.sh
       - name: cargo audit (engine)
         working-directory: engine
         run: cargo audit
@@ -3668,8 +3679,13 @@ IFS= read -r -d '' expected_steps_2 <<'STEPS_EOF' || true
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: engine -> target
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
+      - name: Cache cargo-audit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
+      - name: Install verified cargo-audit
+        run: bash scripts/install-cargo-audit.sh
       - name: cargo audit (engine)
         working-directory: engine
         run: cargo audit
@@ -3736,6 +3752,10 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
       - name: Run deploy-drift dispatcher test suite
         run: bash scripts/__tests__/deploy-drift-dispatch.test.sh
+      - name: Verify executable cache and coverage artifact contracts
+        run: |
+          bash scripts/__tests__/install-vercel-cli.test.sh
+          node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
       - name: Run agentic-config gate test suite
@@ -3919,8 +3939,9 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           HEAD_SHA: ${{ steps.refs.outputs.head-sha }}
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false; observatory=false
+          web=false; web_build_inputs=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false; observatory=false
           echo "$CHANGED" | grep -qE '^web/|^docs/capability-matrix\.md$' && web=true
+          echo "$CHANGED" | grep -qE '^web/|^packages/ui/|(^|/)package\.json$|^package-lock\.json$|^\.node-version$' && web_build_inputs=true
           echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
           echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
@@ -3941,6 +3962,7 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           fi
           {
             echo "web=$web"
+            echo "web-build-inputs=$web_build_inputs"
             echo "engine=$engine"
             echo "mcp=$mcp"
             echo "ci=$ci"
@@ -4325,4 +4347,3 @@ else
   echo "$FAILURES test(s) failed."
   exit 1
 fi
-

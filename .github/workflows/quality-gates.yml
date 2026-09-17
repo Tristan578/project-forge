@@ -11,6 +11,10 @@ on:
         description: 'Whether web/** or package*.json changed (defaults to true when unset)'
         type: boolean
         default: true
+      web-build-inputs-changed:
+        description: 'Whether any source or configuration input of the web production build changed'
+        type: boolean
+        default: true
       mcp-changed:
         description: 'Whether mcp-server/** changed (defaults to true when unset)'
         type: boolean
@@ -201,6 +205,20 @@ jobs:
           # because this step runs with working-directory: web.
           bash "$GITHUB_WORKSPACE/scripts/check-vitest-exit.sh" "$EXIT_CODE" /tmp/vitest-output.txt --coverage
 
+      - name: Record coverage artifact identity
+        run: |
+          jq -n --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" '{sha: $sha, run_id: $run}' > web/coverage/coverage-artifact.json
+
+      - name: Upload trusted coverage summary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-summary-${{ github.sha }}
+          path: |
+            web/coverage/coverage-summary.json
+            web/coverage/coverage-artifact.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -339,8 +357,14 @@ jobs:
         working-directory: engine
         run: cargo check --target wasm32-unknown-unknown --all-targets --features webgl2,runtime
 
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.127
+      - name: Cache wasm-bindgen CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine/Cargo.lock') }}
+
+      - name: Install verified wasm-bindgen CLI
+        run: bash scripts/install-wasm-bindgen-cli.sh
 
       - name: Install wasm-opt (binaryen)
         run: sudo apt-get install -y binaryen
@@ -520,7 +544,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -598,8 +622,14 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
+      - name: Cache cargo-audit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install verified cargo-audit
+        run: bash scripts/install-cargo-audit.sh
 
       - name: cargo audit (engine)
         working-directory: engine
@@ -607,6 +637,7 @@ jobs:
 
   lighthouse-delta:
     name: Lighthouse Effects Delta Gate
+    if: inputs.web-build-inputs-changed
     runs-on: ubuntu-latest
     # 25, not 15: this job does TWO full Next.js production builds and six
     # Lighthouse runs on top of a cold npm install. On run 33820181562 the
@@ -617,25 +648,11 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-    # NO `if:` — this job runs whenever quality-gates is called.
-    #
-    # It used to read `github.event_name == 'pull_request'`. That is not a
-    # meaningful axis: the job compares effects-off against effects-on for the
-    # SAME commit and reads no pull_request payload at all. What the condition
-    # actually did was silently skip the job on the workflow_dispatch runs that
-    # unblock bot-authored PRs (#9161), while the reusable workflow — and so
-    # "CI Success" — still reported green. Removing it restores the invariant
-    # the required check depends on: CI Success means the same thing on every
-    # event.
-    #
-    # It is deliberately NOT re-gated on `inputs.web-changed`. That would be a
-    # COVERAGE REGRESSION, not an optimisation: `needs-web` is `^web/` only, so
-    # a `packages/ui/**` change (a runtime dependency of the web build via
-    # @spawnforge/ui) or a root `package-lock.json` bump would skip the
-    # performance gate entirely. Path-gating this job is #9526's work and needs
-    # a signal covering the whole web-build input set — web/, packages/ui/,
-    # package.json at any depth, package-lock.json, .node-version — which
-    # ci-gate does not currently emit as a single output.
+    # Run on every supported event when ci-gate reports a web build input:
+    # web/**, packages/ui/**, any package.json, root package-lock.json or
+    # .node-version. The signal is broader than needs-web and is passed through
+    # the reusable workflow input; pull_request and workflow_dispatch share
+    # the same path policy. Unrelated docs/hooks changes skip both costly builds.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

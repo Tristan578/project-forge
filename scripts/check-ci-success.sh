@@ -175,6 +175,9 @@ check_triggered "quality-gates"             "needs-any-code"
 # The docs gate is the only required PR proof that the docs Vitest suite,
 # internal-command MDX gate, and manifest sync ran for docs changes.
 check_triggered "docs-internal-gate"        "needs-docs"
+# docs-e2e builds the Vercel-root docs app and smokes its real routes. It must
+# run both for docs inputs and when its workflow contract is changed.
+check_triggered "docs-e2e"                  "needs-docs" "needs-ci"
 # The design gate (PF-1003) is the ONLY per-PR job that runs the @spawnforge/ui
 # unit suite for a packages/ui-only PR — quality-gates' test-web runs that suite
 # only when web/ci changed, so a UI-only PR relies entirely on this gate for its

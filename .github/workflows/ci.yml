@@ -54,6 +54,7 @@ jobs:
       contents: read
     outputs:
       needs-web: ${{ steps.changes.outputs.web }}
+      needs-web-build-inputs: ${{ steps.changes.outputs.web-build-inputs }}
       needs-engine: ${{ steps.changes.outputs.engine }}
       needs-mcp: ${{ steps.changes.outputs.mcp }}
       needs-ci: ${{ steps.changes.outputs.ci }}
@@ -102,7 +103,7 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false; observatory=false
+          web=false; web_build_inputs=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false; observatory=false
 
           # docs/capability-matrix.md is prose, but its ONLY gate is a web unit
           # test (web/src/lib/config/__tests__/capabilityMatrix.test.ts): the
@@ -113,6 +114,8 @@ jobs:
           # that exists to catch exactly that (#9720, lesson #1). The copy the
           # docs site ships is guarded by the docs gate below.
           echo "$CHANGED" | grep -qE '^web/|^docs/capability-matrix\.md$' && web=true
+          # Every source/configuration input that can alter the web production build.
+          echo "$CHANGED" | grep -qE '^web/|^packages/ui/|(^|/)package\.json$|^package-lock\.json$|^\.node-version$' && web_build_inputs=true
           # .transform-gizmo-fork is a PATH DEPENDENCY of the engine
           # (engine/Cargo.toml: path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"),
           # so it compiles into every shipped WASM binary. It is a local patch we
@@ -237,6 +240,7 @@ jobs:
 
           {
             echo "web=$web"
+            echo "web-build-inputs=$web_build_inputs"
             echo "engine=$engine"
             echo "mcp=$mcp"
             echo "ci=$ci"
@@ -268,6 +272,7 @@ jobs:
     uses: ./.github/workflows/quality-gates.yml
     with:
       web-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-web) }}
+      web-build-inputs-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-web-build-inputs) }}
       engine-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-engine) }}
       mcp-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-mcp) }}
       ci-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-ci) }}
@@ -1138,6 +1143,11 @@ jobs:
       - name: Run deploy-drift dispatcher test suite
         run: bash scripts/__tests__/deploy-drift-dispatch.test.sh
 
+      - name: Verify executable cache and coverage artifact contracts
+        run: |
+          bash scripts/__tests__/install-vercel-cli.test.sh
+          node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs
+
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
 
@@ -1579,7 +1589,7 @@ jobs:
           # `playwright-` key that never invalidated, leaving stale browser
           # caches that intermittently failed with "Executable doesn't exist"
           # when Playwright's required browser revision changed. (#8589)
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -1759,7 +1769,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -1935,9 +1945,16 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Install wasm-bindgen-cli
+      - name: Cache wasm-bindgen CLI
         if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
-        run: cargo install wasm-bindgen-cli --version 0.2.127
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine/Cargo.lock') }}
+
+      - name: Install verified wasm-bindgen CLI
+        if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
+        run: bash scripts/install-wasm-bindgen-cli.sh
 
       - name: Build WebGL2 WASM + wasm-bindgen
         if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
@@ -1975,7 +1992,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -2109,7 +2126,7 @@ jobs:
           # A browser-set segment in the key: the chromium-only jobs cache
           # under `playwright-<os>-<lockfile>`, and restoring THAT here would
           # report cache-hit and skip the Firefox/WebKit install (#9610).
-          key: playwright-all-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-all-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers (chromium, firefox, webkit)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -2202,6 +2219,70 @@ jobs:
           path: web/playwright-report/
           retention-days: 14
 
+  # The docs deploy has its own Next app and deploy root. A web build cannot
+  # prove that its production manifest copy is traced or that its documented
+  # routes render, so build and exercise the actual docs artifact on every docs
+  # or workflow change.
+  docs-e2e:
+    name: Docs Build and Route Smoke
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-docs == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Verify production workflow contracts
+        run: node --test scripts/__tests__/production-ci-contract.test.mjs
+
+      - name: Verify every manifest copy
+        run: npm run check:manifest-sync
+
+      - name: Build docs production artifact
+        working-directory: apps/docs
+        run: npm run build
+
+      - name: Cache docs Playwright browser
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-docs-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install docs Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: apps/docs
+        run: npx playwright install --with-deps chromium
+
+      - name: Install docs Playwright OS dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: apps/docs
+        run: npx playwright install-deps chromium
+
+      - name: Smoke-test docs routes
+        working-directory: apps/docs
+        env:
+          CI: 'true'
+        run: npm run test:e2e
+
+      - name: Upload docs Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: docs-playwright-report
+          path: apps/docs/playwright-report/
+          retention-days: 14
+
   # ---- CI Success (aggregating required check) ----
   # Audit 2026-05-30 (F01): branch protection previously required ONLY ci-gate,
   # a no-op path detector that always passes — so a PR could merge with failing
@@ -2226,6 +2307,7 @@ jobs:
       - observatory-tests
       - build-nextjs
       - docs-internal-gate
+      - docs-e2e
       - design-internal-gate
       - hook-tests
       - hook-tests-windows
