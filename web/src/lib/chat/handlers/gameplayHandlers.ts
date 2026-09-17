@@ -5,7 +5,7 @@
 
 import { z } from 'zod';
 import type { ToolHandler } from './types';
-import { zEntityId, zVec3, parseArgs } from './types';
+import { ownEntry, zEntityId, zVec3, parseArgs } from './types';
 import type { GameCameraData, EntityType } from '@/stores/editorStore';
 import { MATERIAL_PRESETS, getPresetsByCategory, saveCustomMaterial, deleteCustomMaterial, loadCustomMaterials } from '@/lib/materialPresets';
 import { buildStoreComponent, ENGINE_COMPONENT_TYPES, ENGINE_COMPONENT_CATALOG } from '@/lib/engine/gameComponentWire';
@@ -239,7 +239,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       particle: ctx.store.primaryParticle ?? undefined,
     };
 
-    const node = ctx.store.sceneGraph.nodes[entityId];
+    const node = ownEntry(ctx.store.sceneGraph.nodes, entityId);
     if (node) {
       const components = node.components || [];
       if (components.includes('PointLight') || components.includes('DirectionalLight') || components.includes('SpotLight')) {
