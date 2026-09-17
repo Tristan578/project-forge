@@ -57,6 +57,8 @@ export const JSDOM_TEST_INCLUDE = [
 
 /** API and top-level metadata/server suites are Node tests under app/. */
 export const JSDOM_TEST_EXCLUDE = [
+  'src/app/__tests__/**/*.test.ts',
+  'src/app/__tests__/**/*.test.tsx',
   'src/app/api/**/*.test.ts',
   'src/app/api/**/*.test.tsx',
 ] as const;
