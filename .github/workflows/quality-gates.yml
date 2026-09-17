@@ -205,6 +205,17 @@ jobs:
           # because this step runs with working-directory: web.
           bash "$GITHUB_WORKSPACE/scripts/check-vitest-exit.sh" "$EXIT_CODE" /tmp/vitest-output.txt --coverage
 
+      - name: Record coverage artifact identity
+        run: |
+          jq -n --arg sha "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" '{sha: $sha, run_id: $run}' > web/coverage/coverage-artifact.json
+
+      - name: Upload trusted coverage summary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-summary-${{ github.sha }}
+          path: web/coverage/
+          retention-days: 14
+
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

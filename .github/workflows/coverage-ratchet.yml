@@ -55,22 +55,18 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests with coverage
-        working-directory: web
-        id: vitest
-        # timeout 600: vitest+coverage can hang in CI (jsdom open handles,
-        # vitest#3077) — fail fast at 10 min instead of burning the 20-min job
-        # timeout. Exit 124 surfaces through the warning step below.
+      - name: Download coverage from the successful same-SHA CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
         run: |
-          timeout 600 npx vitest run --coverage --coverage.reporter=json-summary --pool=threads
-        continue-on-error: true
-
-      - name: Check vitest exit
-        if: steps.vitest.outcome == 'failure'
-        run: echo "::warning::vitest exited non-zero — coverage may be incomplete"
+          run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&status=completed" --jq '.workflow_runs[] | select(.conclusion == "success") | .id' | head -n 1)"
+          test -n "$run_id" || { echo "::error::No successful CI run produced coverage for $SHA"; exit 1; }
+          mkdir -p web/coverage
+          gh run download "$run_id" --name "coverage-summary-${SHA}" --dir web/coverage
+          test -f web/coverage/coverage-summary.json
+          test "$(jq -r .sha web/coverage/coverage-artifact.json)" = "$SHA" || { echo "::error::Rejected coverage artifact for a different SHA"; exit 1; }
+          test "$(jq -r .run_id web/coverage/coverage-artifact.json)" = "$run_id" || { echo "::error::Rejected coverage artifact from a different run"; exit 1; }
 
       - name: Run ratchet script
         run: bash .claude/skills/testing/scripts/ratchet-coverage.sh web/coverage
