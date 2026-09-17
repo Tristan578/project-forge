@@ -441,7 +441,9 @@ const spriteAnimHandlers: Record<string, ToolHandler> = {
         frames = [];
       }
 
-      const clips: Record<string, SpriteAnimClip> = {};
+      // Clip names are creator data. A normal object treats an own
+      // `__proto__` clip name as a prototype setter and silently drops it.
+      const clips: Record<string, SpriteAnimClip> = Object.create(null) as Record<string, SpriteAnimClip>;
       if (clipsArg) {
         for (const clip of clipsArg) {
           const fps = clip.fps ?? 12;

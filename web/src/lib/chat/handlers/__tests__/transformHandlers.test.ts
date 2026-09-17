@@ -217,6 +217,25 @@ describe('transformHandlers', () => {
     expect(store.toggleVisibility).not.toHaveBeenCalled();
   });
 
+  it('ignores inherited visibility but honors an own constructor entity node', async () => {
+    const inherited = await invokeHandler(transformHandlers, 'set_visibility', {
+      entityId: 'constructor', visible: true,
+    }, {
+      sceneGraph: { nodes: Object.create({ constructor: { visible: false } }), rootIds: [] },
+    });
+    expect(inherited.result.success).toBe(true);
+    expect(inherited.store.toggleVisibility).not.toHaveBeenCalled();
+    expect(inherited.dispatchCommand).not.toHaveBeenCalled();
+
+    const own = await invokeHandler(transformHandlers, 'set_visibility', {
+      entityId: 'constructor', visible: true,
+    }, {
+      sceneGraph: { nodes: { constructor: { visible: false } }, rootIds: [] },
+    });
+    expect(own.result.success).toBe(true);
+    expect(own.store.toggleVisibility).toHaveBeenCalledWith('constructor');
+  });
+
   it('set_visibility rejects missing visible param', async () => {
     const { result } = await invokeHandler(transformHandlers, 'set_visibility', {
       entityId: 'ent6',

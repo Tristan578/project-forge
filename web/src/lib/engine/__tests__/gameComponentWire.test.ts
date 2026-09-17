@@ -1288,4 +1288,27 @@ describe('parseGameComponentWire properties handling', () => {
     expect(buildStoreComponent('grappleHook')).toBeNull();
     expect(buildStoreComponent('')).toBeNull();
   });
+
+  it('ignores inherited component fields while preserving own fields (PF-235)', () => {
+    const inherited = { speed: 999, canDoubleJump: true };
+    const properties = Object.create(inherited) as Record<string, unknown>;
+    properties.jumpHeight = 12;
+
+    expect(buildStoreComponent('characterController', properties)).toEqual({
+      type: 'characterController',
+      characterController: { speed: 5, jumpHeight: 12, gravityScale: 1, canDoubleJump: false },
+    });
+  });
+
+  it('ignores inherited dialogue wire aliases while retaining own renamed fields (PF-235)', () => {
+    const inherited = { dialogueTreeId: 'inherited-tree', autoStart: true, interactionRadius: 99 };
+    const properties = Object.create(inherited) as Record<string, unknown>;
+    properties.interactionKey = 'use';
+    properties.oneShot = true;
+
+    expect(parseGameComponentWire({ componentType: 'dialogue_trigger', properties })).toEqual({
+      type: 'dialogueTrigger',
+      dialogueTrigger: { treeId: '', triggerRadius: 3, requireInteract: true, interactKey: 'use', oneShot: true },
+    });
+  });
 });

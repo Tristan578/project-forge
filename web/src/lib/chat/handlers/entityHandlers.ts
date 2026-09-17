@@ -6,7 +6,7 @@
  * are in transformHandlers.ts to avoid double-registration.
  */
 
-import type { ToolHandler, ExecutionResult } from './types';
+import { ownEntry, type ToolHandler, type ExecutionResult } from './types';
 import { validateWinnability, formatWinnabilityMessage } from '@/lib/playMode/winnabilityValidator';
 
 export const entityHandlers: Record<string, ToolHandler> = {
@@ -27,7 +27,7 @@ export const entityHandlers: Record<string, ToolHandler> = {
     if (typeof entityId !== 'string' || !entityId) {
       return { success: false, error: 'Missing required parameter: entityId' };
     }
-    const node = ctx.store.sceneGraph.nodes[entityId];
+    const node = ownEntry(ctx.store.sceneGraph.nodes, entityId);
     if (!node) return { success: false, error: `Entity not found: ${entityId}` };
     return {
       success: true,

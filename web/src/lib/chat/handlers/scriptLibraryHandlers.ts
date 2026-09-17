@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 import type { ToolHandler } from './types';
-import { zEntityId, parseArgs } from './types';
+import { ownEntry, zEntityId, parseArgs } from './types';
 
 export const scriptLibraryHandlers: Record<string, ToolHandler> = {
   create_script: async (args, ctx) => {
@@ -43,10 +43,10 @@ export const scriptLibraryHandlers: Record<string, ToolHandler> = {
   get_script: async (args, ctx) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;
-    if (!Object.hasOwn(ctx.store.allScripts, p.data.entityId)) {
+    const script = ownEntry(ctx.store.allScripts, p.data.entityId);
+    if (!script) {
       return { success: true, result: { hasScript: false } };
     }
-    const script = ctx.store.allScripts[p.data.entityId];
     return { success: true, result: { hasScript: true, source: script.source, enabled: script.enabled, template: script.template } };
   },
 

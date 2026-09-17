@@ -9,6 +9,57 @@ import { parseHandlerArgs } from '@/lib/validation/parseArgs';
 import { entityId, boundedString } from '@/lib/validation/validators';
 import { getPresetById } from '@/lib/materialPresets';
 
+// Accepted update keys follow the declared engine schema, even for partial snapshots.
+const MATERIAL_UPDATE_FIELDS = {
+  baseColor: true,
+  metallic: true,
+  perceptualRoughness: true,
+  reflectance: true,
+  emissive: true,
+  emissiveExposureWeight: true,
+  alphaMode: true,
+  alphaCutoff: true,
+  doubleSided: true,
+  unlit: true,
+  baseColorTexture: true,
+  normalMapTexture: true,
+  metallicRoughnessTexture: true,
+  emissiveTexture: true,
+  occlusionTexture: true,
+  uvOffset: true,
+  uvScale: true,
+  uvRotation: true,
+  depthMapTexture: true,
+  parallaxDepthScale: true,
+  parallaxMappingMethod: true,
+  maxParallaxLayerCount: true,
+  parallaxReliefMaxSteps: true,
+  clearcoat: true,
+  clearcoatPerceptualRoughness: true,
+  clearcoatTexture: true,
+  clearcoatRoughnessTexture: true,
+  clearcoatNormalTexture: true,
+  specularTransmission: true,
+  diffuseTransmission: true,
+  ior: true,
+  thickness: true,
+  attenuationDistance: true,
+  attenuationColor: true,
+} satisfies Record<keyof MaterialData, true>;
+
+const LIGHT_UPDATE_FIELDS = {
+  lightType: true,
+  color: true,
+  intensity: true,
+  shadowsEnabled: true,
+  shadowDepthBias: true,
+  shadowNormalBias: true,
+  range: true,
+  radius: true,
+  innerAngle: true,
+  outerAngle: true,
+} satisfies Record<keyof LightData, true>;
+
 export const materialHandlers: Record<string, ToolHandler> = {
   update_material: async (args, { store }) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
@@ -48,7 +99,9 @@ export const materialHandlers: Record<string, ToolHandler> = {
 
     const merged: MaterialData = { ...baseMaterial };
     for (const [key, value] of Object.entries(matInput)) {
-      (merged as unknown as Record<string, unknown>)[key] = value;
+      if (Object.hasOwn(MATERIAL_UPDATE_FIELDS, key)) {
+        (merged as unknown as Record<string, unknown>)[key] = value;
+      }
     }
 
     store.updateMaterial(p.data.entityId, merged);
@@ -119,7 +172,7 @@ export const materialHandlers: Record<string, ToolHandler> = {
 
     const merged: LightData = { ...baseLight };
     for (const [key, value] of Object.entries(lightInput)) {
-      if (key in merged) {
+      if (Object.hasOwn(LIGHT_UPDATE_FIELDS, key)) {
         (merged as unknown as Record<string, unknown>)[key] = value;
       }
     }

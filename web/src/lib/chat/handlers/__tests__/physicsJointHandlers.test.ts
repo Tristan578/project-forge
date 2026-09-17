@@ -512,6 +512,26 @@ describe('update_terrain', () => {
     expect(updated.heightScale).toBe(25);
     expect(updated.octaves).toBe(4); // preserved
   });
+
+  it('rejects inherited terrain data without dispatching an update, while accepting an own record', async () => {
+    const terrain = {
+      noiseType: 'perlin', octaves: 4, frequency: 0.02, amplitude: 1,
+      heightScale: 10, seed: 0, resolution: 64, size: 50,
+    };
+    const inherited = Object.create({ ghost: terrain }) as Record<string, typeof terrain>;
+    const missing = await invokeHandler(physicsJointHandlers, 'update_terrain', {
+      entityId: 'ghost', heightScale: 25,
+    }, { terrainData: inherited });
+    expect(missing.result).toEqual({ success: false, error: 'Entity is not a terrain' });
+    expect(missing.store.updateTerrain).not.toHaveBeenCalled();
+    expect(missing.dispatchCommand).not.toHaveBeenCalled();
+
+    const own = await invokeHandler(physicsJointHandlers, 'update_terrain', {
+      entityId: 'ghost', heightScale: 25,
+    }, { terrainData: { ghost: terrain } });
+    expect(own.result.success).toBe(true);
+    expect(own.store.updateTerrain).toHaveBeenCalledWith('ghost', { ...terrain, heightScale: 25 });
+  });
 });
 
 // ===========================================================================
@@ -561,6 +581,20 @@ describe('get_terrain', () => {
     expect(result.success).toBe(true);
     const data = result.result as { terrainData: unknown };
     expect(data.terrainData).toEqual(terrainData);
+  });
+
+  it('does not return inherited terrain data, but returns the same own-key control', async () => {
+    const terrainData = { noiseType: 'simplex', heightScale: 15 };
+    const inherited = await invokeHandler(physicsJointHandlers, 'get_terrain', {
+      entityId: 'constructor',
+    }, { terrainData: Object.create({ constructor: terrainData }) });
+    expect(inherited.result).toEqual({ success: false, error: 'Entity is not a terrain' });
+    expect(inherited.dispatchCommand).not.toHaveBeenCalled();
+
+    const own = await invokeHandler(physicsJointHandlers, 'get_terrain', {
+      entityId: 'constructor',
+    }, { terrainData: { constructor: terrainData } });
+    expect(own.result).toEqual({ success: true, result: { terrainData } });
   });
 });
 

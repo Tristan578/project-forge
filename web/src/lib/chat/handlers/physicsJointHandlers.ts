@@ -3,7 +3,7 @@
  */
 
 import { z } from 'zod';
-import { zEntityId, zVec3, zVec2, parseArgs } from './types';
+import { ownEntry, zEntityId, zVec3, zVec2, parseArgs } from './types';
 import type { ToolHandler } from './types';
 import { buildPhysicsPatch } from '@/lib/physics/updatePhysicsPayload';
 import type { JointData } from '@/stores/editorStore';
@@ -246,7 +246,7 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const { entityId, ...fields } = p.data;
-    const terrainData = ctx.store.terrainData[entityId];
+    const terrainData = ownEntry(ctx.store.terrainData, entityId);
     if (!terrainData) return { success: false, error: 'Entity is not a terrain' };
 
     const updated = {
@@ -282,7 +282,7 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
   get_terrain: async (args, ctx) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;
-    const terrainData = ctx.store.terrainData[p.data.entityId];
+    const terrainData = ownEntry(ctx.store.terrainData, p.data.entityId);
     if (!terrainData) return { success: false, error: 'Entity is not a terrain' };
     return { success: true, result: { terrainData } };
   },
