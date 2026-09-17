@@ -57,6 +57,16 @@ describe('ServiceStatusCard', () => {
     expect(screen.getByText('Down')).toBeDefined();
   });
 
+  it.each([
+    ['healthy', 'Healthy'], ['degraded', 'Degraded'], ['down', 'Down'], ['unexpected', 'Unknown'],
+  ])('uses the semantic text and dot tokens for %s', (status, label) => {
+    const service = makeService({ status: status as ServiceHealth['status'] });
+    render(<ServiceStatusCard service={service} />);
+    const token = status === 'unexpected' ? 'unknown' : status;
+    expect(screen.getByText(label)).toHaveClass('text-[var(--sf-status-' + token + '-indicator)]');
+    expect(screen.getByTestId('service-status-indicator')).toHaveClass('bg-[var(--sf-status-' + token + '-indicator)]');
+  });
+
   // ── Latency ────────────────────────────────────────────────────────────
 
   it('displays latency when greater than 0', () => {

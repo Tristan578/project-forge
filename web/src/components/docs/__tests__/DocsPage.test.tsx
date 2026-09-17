@@ -244,6 +244,8 @@ describe('DocsPage', () => {
     const nav = getNav();
 
     fireEvent.click(within(nav).getByText('Setup Guide'));
+    expect(within(nav).getByRole('button', { name: 'Setup Guide' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('button', { name: 'Feature Alpha' })).not.toHaveAttribute('aria-current');
 
     const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
     const content = within(pane);
@@ -306,6 +308,7 @@ describe('DocsPage', () => {
     fireEvent.click(within(pane).getByTitle('Back to docs home'));
 
     expect(mockRouterReplace).toHaveBeenCalledWith('/docs', { scroll: false });
+    expect(nav.querySelector('[aria-current]')).toBeNull();
     expect(within(pane).getByText('Welcome to SpawnForge')).toBeInTheDocument();
   });
 
@@ -320,5 +323,23 @@ describe('DocsPage', () => {
     rerender(<DocsPage />);
 
     expect(within(pane).getByText('Feature Alpha')).toBeInTheDocument();
+    expect(within(getNav()).getByRole('button', { name: 'Feature Alpha' })).toHaveAttribute('aria-current', 'page');
+    expect(within(getNav()).getByRole('button', { name: 'Setup Guide' })).not.toHaveAttribute('aria-current');
+    currentPathParam = 'features/b';
+    rerender(<DocsPage />);
+    expect(within(getNav()).getByRole('button', { name: 'Feature Beta' })).toHaveAttribute('aria-current', 'page');
+    expect(within(getNav()).getByRole('button', { name: 'Feature Alpha' })).not.toHaveAttribute('aria-current');
+    currentPathParam = null;
+    rerender(<DocsPage />);
+    expect(getNav().querySelector('[aria-current]')).toBeNull();
+  });
+  it('moves the selected marker when another navigation item is clicked', async () => {
+    await renderLoaded();
+    const nav = getNav();
+    fireEvent.click(within(nav).getByRole('button', { name: 'Feature Alpha' }));
+    expect(within(nav).getByRole('button', { name: 'Feature Alpha' })).toHaveAttribute('aria-current', 'page');
+    fireEvent.click(within(nav).getByRole('button', { name: 'Feature Beta' }));
+    expect(within(nav).getByRole('button', { name: 'Feature Beta' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('button', { name: 'Feature Alpha' })).not.toHaveAttribute('aria-current');
   });
 });

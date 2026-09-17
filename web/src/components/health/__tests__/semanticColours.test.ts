@@ -19,13 +19,32 @@ describe('health and docs semantic colour guard', () => {
   });
 });
 
+function readRootDefaults(css: string): Record<string, string> {
+  const executable = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const roots = [...executable.matchAll(/:root\s*\{([^}]*)\}/g)];
+  if (roots.length !== 1) throw new Error('Expected one executable root declaration');
+  return Object.fromEntries([...roots[0][1].matchAll(/(--sf-[a-z-]+):\s*([^;]+);/g)].map(match => [match[1], match[2].trim()]));
+}
+
+function assertRootDefaults(css: string) {
+  const defaults = readRootDefaults(css);
+  for (const [token, value] of Object.entries(THEME_DEFINITIONS.dark)) {
+    expect(defaults[token], token + ' SSR default must match shared dark theme').toBe(value);
+  }
+}
+
 describe('public route SSR theme defaults', () => {
   it('defines every dark theme token before a useTheme consumer mounts', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/app/globals.css'), 'utf8');
-    const root = css.slice(css.indexOf(':root {'), css.indexOf('@theme inline'));
-    const defaults = Object.fromEntries([...root.matchAll(/(--sf-[a-z-]+):\s*([^;]+);/g)].map(match => [match[1], match[2].trim()]));
-    for (const [token, value] of Object.entries(THEME_DEFINITIONS.dark)) {
-      expect(defaults[token], token + ' SSR default must match shared dark theme').toBe(value);
-    }
+    assertRootDefaults(css);
+  });
+  it.each(['missing', 'commented'])('rejects a %s executable indicator declaration', (mode) => {
+    const css = readFileSync(resolve(process.cwd(), 'src/app/globals.css'), 'utf8');
+    const mutated = css.replace(/--sf-status-healthy-indicator:\s*[^;]+;/, declaration => mode === 'commented' ? '/* ' + declaration + ' */' : '');
+    expect(mutated).not.toBe(css);
+    expect(() => assertRootDefaults(mutated)).toThrow();
+  });
+  it('rejects a commented-out root block', () => {
+    expect(() => readRootDefaults('/* :root { --sf-status-healthy-indicator: #4ade80; } */')).toThrow('executable root');
   });
 });
