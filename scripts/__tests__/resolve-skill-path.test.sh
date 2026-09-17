@@ -71,13 +71,16 @@ grep -Fq 'fixture agent: all 2 skills resolve' "$fixture/audit-positive.log"
 grep -Fq 'frontend skill exists' "$fixture/audit-positive.log"
 grep -Fq 'design skill exists' "$fixture/audit-positive.log"
 checks=$((checks + 3))
-rm "$audit_project/.agents/skills/frontend/SKILL.md"
+# Use a random skill absent from user providers: an installed user frontend
+# is a valid fallback and must never make this negative fixture fail spuriously.
+missing_fixture_skill="audit-$(basename "$fixture")"
+mkdir -p "$audit_project/.claude/skills/$missing_fixture_skill" "$audit_project/.agents/skills/$missing_fixture_skill"
+printf 'model: sonnet\nskills: [%s, design]\n' "$missing_fixture_skill" > "$audit_project/.claude/agents/fixture.md"
 if bash "$audit_project/.claude/tools/dx-audit.sh" > "$fixture/audit-negative.log"; then
   echo 'Actual audit accepted a malformed skill directory' >&2; exit 1
 fi
-grep -Fq 'fixture agent: skills do not resolve: frontend' "$fixture/audit-negative.log"
-grep -Fq 'frontend skill missing' "$fixture/audit-negative.log"
-checks=$((checks + 2))
+grep -Fq "fixture agent: skills do not resolve: $missing_fixture_skill" "$fixture/audit-negative.log"
+checks=$((checks + 1))
 # Pin the executable fixture step and its owning job, rather than accepting a
 # comment containing the command or a disabled sibling with the same name.
 workflow="$repo_root/.github/workflows/ci.yml"
