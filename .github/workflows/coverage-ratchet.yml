@@ -15,14 +15,10 @@ name: Coverage Ratchet
 # stacking new ones.
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths:
-      - 'web/src/**'
-      - 'web/vitest.config.ts'
-      - 'web/vitest.config.node.ts'
-      - 'web/vitest.config.jsdom.ts'
-      - 'web/package.json'
 
 # Least privilege: labeling a PR rides the issues REST endpoint, but GitHub's
 # permission engine accepts pull-requests: write when the target is a PR
@@ -43,11 +39,20 @@ jobs:
   ratchet:
     name: Ratchet Coverage Thresholds
     # Skip ratchet commits from github-actions[bot] to prevent retrigger loops
-    if: github.actor != 'github-actions[bot]'
+    # Only trusted main push runs may hand measurements to this write-capable job.
+    # PR and fork artifacts are never consumed, even when their SHA matches.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.actor.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -55,20 +60,49 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Download coverage from the successful same-SHA CI run
+      - name: Select coverage from this successful main CI run
+        id: coverage
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.sha }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
-          run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&status=completed" --jq '.workflow_runs[] | select(.conclusion == "success") | .id' | head -n 1)"
-          test -n "$run_id" || { echo "::error::No successful CI run produced coverage for $SHA"; exit 1; }
-          mkdir -p web/coverage
-          gh run download "$run_id" --name "coverage-summary-${SHA}" --dir web/coverage
-          test -f web/coverage/coverage-summary.json
-          test "$(jq -r .sha web/coverage/coverage-artifact.json)" = "$SHA" || { echo "::error::Rejected coverage artifact for a different SHA"; exit 1; }
-          test "$(jq -r .run_id web/coverage/coverage-artifact.json)" = "$run_id" || { echo "::error::Rejected coverage artifact from a different run"; exit 1; }
+          [[ "$SHA" =~ ^[a-f0-9]{40}$ && "$RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$current_main" != "$SHA" ]]; then
+            echo "Main has advanced beyond this producer; skip stale measurements."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          artifact_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" --paginate --jq ".artifacts[] | select(.name == \"coverage-summary-$SHA\" and .expired == false) | .id")"
+          if [[ -z "$artifact_id" ]]; then
+            echo "No coverage producer ran for this path slice; nothing to ratchet."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]]
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "artifact-id=$artifact_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download the exact immutable coverage artifact
+        if: steps.coverage.outputs.available == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          artifact-ids: ${{ steps.coverage.outputs.artifact-id }}
+          path: web/coverage
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          digest-mismatch: error
+
+      - name: Validate artifact identity and measurements
+        if: steps.coverage.outputs.available == 'true'
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: node scripts/validate-coverage-artifact.mjs web/coverage/coverage-artifact.json web/coverage/coverage-summary.json "$SHA" "$RUN_ID"
 
       - name: Run ratchet script
+        if: steps.coverage.outputs.available == 'true'
         run: bash .claude/skills/testing/scripts/ratchet-coverage.sh web/coverage
 
       # Keep the agentic-sync source of truth in lockstep: canonical.json feeds
@@ -78,6 +112,7 @@ jobs:
       # leaves stale numbers advertised as authoritative (found by review on
       # #8942). Threshold keys are extracted from the thresholds block only.
       - name: Sync onboarding coverage facts
+        if: steps.coverage.outputs.available == 'true'
         run: |
           if git diff --quiet web/vitest.config.ts web/vitest.config.node.ts; then
             echo "No threshold changes — nothing to sync."
@@ -128,6 +163,7 @@ jobs:
       #     unmergeable on every push. The dispatch step below is the fix; see
       #     the workflow_dispatch comment at the top of ci.yml.
       - name: Open or update ratchet PR
+        if: steps.coverage.outputs.available == 'true'
         id: ratchet-pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

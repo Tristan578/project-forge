@@ -213,7 +213,10 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-summary-${{ github.sha }}
-          path: web/coverage/
+          path: |
+            web/coverage/coverage-summary.json
+            web/coverage/coverage-artifact.json
+          if-no-files-found: error
           retention-days: 14
 
       - name: Upload coverage artifact
