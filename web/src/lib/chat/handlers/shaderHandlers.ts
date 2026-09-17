@@ -5,7 +5,7 @@
 
 import { z } from 'zod';
 import type { ToolHandler } from './types';
-import { zEntityId, parseArgs } from './types';
+import { ownEntry, zEntityId, parseArgs } from './types';
 import { useShaderEditorStore } from '@/stores/shaderEditorStore';
 import { SHADER_NODE_DEFINITIONS } from '@/lib/shaders/shaderNodeTypes';
 import { compileToWgsl, compileToMegaShaderSlot } from '@/lib/shaders/wgslCompiler';
@@ -94,7 +94,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const store = useShaderEditorStore.getState();
-    const activeGraph = store.activeGraphId ? store.graphs[store.activeGraphId] : null;
+    const activeGraph = store.activeGraphId ? ownEntry(store.graphs, store.activeGraphId) : null;
 
     if (!activeGraph) {
       return { success: false, error: 'No active shader graph' };
@@ -130,7 +130,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
       return { success: false, error: 'No active shader graph' };
     }
 
-    const graph = store.graphs[targetGraphId];
+    const graph = ownEntry(store.graphs, targetGraphId);
     if (!graph) {
       return { success: false, error: `Shader graph not found: ${targetGraphId}` };
     }
@@ -171,7 +171,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
       return { success: false, error: 'No shader graph specified' };
     }
 
-    const graph = store.graphs[targetGraphId];
+    const graph = ownEntry(store.graphs, targetGraphId);
     if (!graph) {
       return { success: false, error: `Shader graph not found: ${targetGraphId}` };
     }

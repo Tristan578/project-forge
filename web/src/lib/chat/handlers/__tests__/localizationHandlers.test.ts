@@ -297,4 +297,31 @@ describe('localizationHandlers — list_locales', () => {
     expect(data.supportedLocales.length).toBeGreaterThanOrEqual(50);
     expect(data.supportedLocales.find((l) => l.code === 'ja')).toBeDefined();
   });
+
+  it('does not count an inherited locale bundle, while retaining an own toString bundle', async () => {
+    const bundle: LocaleBundle = {
+      locale: 'toString',
+      translations: { 'entity.e1.name': 'Own locale' },
+    };
+    const inheritedCtx = buildCtx({
+      getAvailableLocales: vi.fn().mockReturnValue(['toString']),
+      locales: Object.create({ toString: bundle }),
+    });
+    const inherited = await localizationHandlers['list_locales']({}, inheritedCtx);
+    expect(inherited.success).toBe(true);
+    expect((inherited.result as { locales: Array<{ stringCount: number }> }).locales).toEqual([
+      expect.objectContaining({ code: 'toString', stringCount: 0 }),
+    ]);
+    expect(inheritedCtx.dispatchCommand).not.toHaveBeenCalled();
+    expect(inheritedCtx.store.setLocaleBundle).not.toHaveBeenCalled();
+
+    const ownCtx = buildCtx({
+      getAvailableLocales: vi.fn().mockReturnValue(['toString']),
+      locales: { toString: bundle },
+    });
+    const own = await localizationHandlers['list_locales']({}, ownCtx);
+    expect((own.result as { locales: Array<{ stringCount: number }> }).locales).toEqual([
+      expect.objectContaining({ code: 'toString', stringCount: 1 }),
+    ]);
+  });
 });
