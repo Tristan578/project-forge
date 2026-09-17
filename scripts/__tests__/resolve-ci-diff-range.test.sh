@@ -251,7 +251,7 @@ else
   pin "ci.yml forwards web-build-inputs into quality-gates" \
     "$CI_YML" 'web-build-inputs-changed: \$\{\{ fromJSON\(needs\.ci-gate\.outputs\.needs-web-build-inputs\) \}\}'
 
-  matcher_line="$(grep -E 'grep -qE .*web_build_inputs=true' "$CI_YML" || true)"
+  matcher_line="$(grep -v '^[[:space:]]*#' "$CI_YML" | grep -E 'grep -qE .*web_build_inputs=true' || true)"
   matcher="$(sed -nE "s/.*grep -qE '([^']+)'.*/\\1/p" <<<"$matcher_line")"
   if [ -z "$matcher" ]; then
     fail "could not extract the ci.yml web-build-inputs matcher (fail closed)"
