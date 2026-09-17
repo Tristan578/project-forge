@@ -123,9 +123,6 @@ const reports = [
   ['invalid completion', c => { c.build.completedAt = 'not-a-date'; }],
   ['zero tests', c => { c.build.testCount = 0; }],
   ['invalid test count', c => { c.build.testCount = '27'; }],
-  ['zero snapshots', c => { c.build.actualCaptureCount = 0; }],
-  ['missing captures', c => { delete c.build.actualCaptureCount; }],
-  ['invalid captures', c => { c.build.actualCaptureCount = -1; }],
 ];
 for (const [name, mutate] of reports) {
   test('results verification rejects ' + name, () => {
@@ -154,4 +151,12 @@ test('results CLI fails safely on unreadable, malformed and publish-only reports
       if (index !== 3) assert.match(result.stderr, /Visual results are incomplete/);
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+// The producer refreshes completion fields after testing, not its early capture counters.
+test('completed passing builds do not rely on stale capture counters', () => {
+  const report = structuredClone(passing);
+  report.build.actualCaptureCount = 0;
+  report.build.inheritedCaptureCount = 0;
+  validateVisualResults(report);
 });

@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-09-16
 
-Design system and Storybook changes run Chromatic as part of the required CI result. Uploading a build is not a passing test: CI waits for completed rendering and accepted snapshots, then checks the fresh diagnostics report for enabled visual tests, an unlimited passing build, and captured or inherited snapshots. Publish-only success is rejected. Changes outside those paths retain the normal visual-job skip.
+Design system and Storybook changes run Chromatic as part of the required CI result. Uploading a build is not a passing test: CI waits for completed rendering and accepted snapshots, then checks the fresh diagnostics report for enabled visual tests, an unlimited passing build, completed tests, and no errors or unaccepted changes. Publish-only success is rejected. Changes outside those paths retain the normal visual-job skip.
 
 A missing `CHROMATIC_PROJECT_TOKEN` fails the design-change job with a safe diagnostic. Quota, payment, rendering, cancellation, and unaccepted-difference failures propagate through the action to CI Success; do not bypass the gate or print project tokens.
 
