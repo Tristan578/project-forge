@@ -5,6 +5,7 @@ on:
     paths:
       - 'infra/engine-cdn/**'
       - '.github/workflows/engine-cdn-test.yml'
+      - '.node-version'
 
 concurrency:
   group: engine-cdn-test-${{ github.ref }}
@@ -28,5 +29,9 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: Run engine-cdn worker tests
-        run: node --test infra/engine-cdn/worker.test.mjs
+      - name: Install pinned local Workers runtime
+        run: npm ci --prefix infra/engine-cdn --workspaces=false --ignore-scripts
+
+      - name: Run configured worker and binding regressions
+        working-directory: infra/engine-cdn
+        run: npm test
