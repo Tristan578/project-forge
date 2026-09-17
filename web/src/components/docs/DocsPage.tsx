@@ -153,7 +153,7 @@ export function DocsPage() {
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-6 py-4">
           <Button variant="ghost" size="sm"
             onClick={() => router.push('/dashboard')}
-            className="min-h-[44px] min-w-[44px] rounded p-1.5 text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
+            className="min-h-[44px] sm:min-h-[44px] min-w-[44px] rounded p-1.5 text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
             aria-label="Back to dashboard"
           >
             <ArrowLeft size={20} />
@@ -191,7 +191,7 @@ export function DocsPage() {
                   <Button variant="ghost" size="sm"
                     key={result.path}
                     onClick={() => navigateTo(result.path)}
-                    className="h-auto min-h-[44px] items-start justify-start whitespace-normal flex w-full flex-col rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--sf-bg-elevated)]"
+                    className="h-auto min-h-[44px] sm:min-h-[44px] items-start justify-start whitespace-normal flex w-full flex-col rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--sf-bg-elevated)]"
                   >
                     <div className="flex items-center gap-1.5">
                       <FileText size={12} className="text-[var(--sf-text)]" />
@@ -222,7 +222,7 @@ export function DocsPage() {
                       <Button variant="ghost" size="sm"
                         aria-expanded={isExpanded}
                         onClick={() => toggleCategory(cat)}
-                        className="h-auto min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-left text-sm font-semibold text-[var(--sf-text)] transition-colors hover:text-[var(--sf-text)]"
+                        className="h-auto min-h-[44px] sm:min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-left text-sm font-semibold text-[var(--sf-text)] transition-colors hover:text-[var(--sf-text)]"
                       >
                         {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         {CATEGORY_LABELS[cat] ?? cat}
@@ -235,7 +235,7 @@ export function DocsPage() {
                               key={doc.path}
                               aria-current={activePath === doc.path ? 'page' : undefined}
                               onClick={() => navigateTo(doc.path)}
-                              className={cn('h-auto min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm transition-colors',
+                              className={cn('h-auto min-h-[44px] sm:min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm transition-colors',
                                 activePath === doc.path
                                   ? 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text)]'
                                   : 'text-[var(--sf-text)] hover:bg-[var(--sf-bg-elevated)]/50 hover:text-[var(--sf-text)]'
@@ -286,7 +286,7 @@ export function DocsPage() {
                 <Button variant="ghost" size="sm"
                   key={result.path}
                   onClick={() => navigateTo(result.path)}
-                  className="h-auto min-h-[44px] items-start justify-start whitespace-normal flex w-full flex-col rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-4 py-3 text-left"
+                  className="h-auto min-h-[44px] sm:min-h-[44px] items-start justify-start whitespace-normal flex w-full flex-col rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-4 py-3 text-left"
                 >
                   <div className="flex items-center gap-1.5">
                     <FileText size={12} className="text-[var(--sf-text)]" />
@@ -323,7 +323,7 @@ function DocContent({
       <div className="flex items-center gap-2 border-b border-[var(--sf-border)] px-6 py-3">
         <Button variant="ghost" size="sm"
           onClick={onBack}
-          className="min-h-[44px] min-w-[44px] rounded p-1 text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
+          className="min-h-[44px] sm:min-h-[44px] min-w-[44px] rounded p-1 text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
           aria-label="Back to docs home"
           title="Back to docs home"
         >
@@ -396,7 +396,7 @@ function DocsHome({
       {indexDoc && (
         <Button variant="ghost" size="sm"
           onClick={() => onNavigate('index')}
-          className="h-auto min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-3 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-6 py-4 text-left transition-colors hover:border-[var(--sf-accent)]/30"
+          className="h-auto min-h-[44px] sm:min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-3 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-6 py-4 text-left transition-colors hover:border-[var(--sf-accent)]/30"
         >
           <FileText size={20} className="text-[var(--sf-text)]" />
           <div>
@@ -427,7 +427,7 @@ function DocsHome({
                     <Button variant="ghost" size="sm"
                       key={doc.path}
                       onClick={() => onNavigate(doc.path)}
-                      className="h-auto min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
+                      className="h-auto min-h-[44px] sm:min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
                     >
                       <FileText size={12} className="shrink-0" />
                       <span className="min-w-0 break-words">{doc.title}</span>
