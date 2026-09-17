@@ -554,7 +554,7 @@ function formatInline(text: string): React.ReactNode {
         <a
           key={key++}
           href={linkMatch[3]}
-          className="inline-flex min-h-[44px] max-w-full items-center break-words text-[var(--sf-text)] underline underline-offset-2 hover:text-[var(--sf-text)] sm:inline sm:min-h-0"
+          className="inline break-words text-[var(--sf-text)] underline underline-offset-2 hover:text-[var(--sf-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
           target={linkMatch[3].startsWith('http') ? '_blank' : undefined}
           rel={linkMatch[3].startsWith('http') ? 'noopener noreferrer' : undefined}
         >
