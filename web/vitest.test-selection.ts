@@ -7,6 +7,7 @@
  * and app tests retain jsdom. These lists deliberately include the standalone
  * script and e2e-library suites that workspace-only globs previously missed.
  */
+/** The legacy root selection that production coverage must preserve exactly. */
 export const ROOT_TEST_INCLUDE = [
   'src/**/*.test.ts',
   'src/**/*.test.tsx',
@@ -14,6 +15,7 @@ export const ROOT_TEST_INCLUDE = [
   'scripts/__tests__/**/*.test.ts',
 ] as const;
 
+/** Server, utility, integration, and standalone-test paths that do not need a DOM. */
 export const NODE_TEST_INCLUDE = [
   'src/lib/**/*.test.ts',
   'src/lib/**/*.test.tsx',
@@ -33,6 +35,7 @@ export const NODE_TEST_INCLUDE = [
   'scripts/__tests__/**/*.test.ts',
 ] as const;
 
+/** Browser-facing paths whose default project environment is jsdom. */
 export const JSDOM_TEST_INCLUDE = [
   'src/components/**/*.test.ts',
   'src/components/**/*.test.tsx',
@@ -42,7 +45,7 @@ export const JSDOM_TEST_INCLUDE = [
   'src/app/**/*.test.tsx',
 ] as const;
 
-// API route tests are server tests even though their files live under app/.
+/** API route tests are server tests even though their files live under app/. */
 export const JSDOM_TEST_EXCLUDE = [
   'src/app/api/**/*.test.ts',
   'src/app/api/**/*.test.tsx',
