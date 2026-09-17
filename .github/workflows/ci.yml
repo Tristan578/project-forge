@@ -1581,7 +1581,7 @@ jobs:
           # `playwright-` key that never invalidated, leaving stale browser
           # caches that intermittently failed with "Executable doesn't exist"
           # when Playwright's required browser revision changed. (#8589)
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -1761,7 +1761,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -1984,7 +1984,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           # Same single-root-lockfile key as test-e2e-ui (#8589).
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -2118,7 +2118,7 @@ jobs:
           # A browser-set segment in the key: the chromium-only jobs cache
           # under `playwright-<os>-<lockfile>`, and restoring THAT here would
           # report cache-hit and skip the Firefox/WebKit install (#9610).
-          key: playwright-all-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-all-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers (chromium, firefox, webkit)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -2212,9 +2212,9 @@ jobs:
           retention-days: 14
 
   # The docs deploy has its own Next app and deploy root. A web build cannot
-  prove that its production manifest copy is traced or that its documented
-  routes render, so build and exercise the actual docs artifact on every docs
-  or workflow change.
+  # prove that its production manifest copy is traced or that its documented
+  # routes render, so build and exercise the actual docs artifact on every docs
+  # or workflow change.
   docs-e2e:
     name: Docs Build and Route Smoke
     needs: [ci-gate]
@@ -2246,7 +2246,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-docs-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-docs-chromium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install docs Playwright browser
         if: steps.playwright-cache.outputs.cache-hit != 'true'

@@ -5,12 +5,13 @@ set -euo pipefail
 
 version="${VERCEL_CLI_VERSION:?VERCEL_CLI_VERSION is required}"
 prefix="${VERCEL_CLI_PREFIX:?VERCEL_CLI_PREFIX is required}"
-bin="$prefix/bin/vercel"
+bin_dir="$prefix/node_modules/.bin"
+bin="$bin_dir/vercel"
 
 if [[ -x "$bin" ]]; then
-  actual="$($bin --version | awk '{print $NF}' | sed 's/^v//')"
+  actual="$("$bin" --version 2>/dev/null | awk '{print $NF}' | sed 's/^v//')" || actual=""
   if [[ "$actual" == "$version" ]]; then
-    echo "$prefix/bin" >> "$GITHUB_PATH"
+    echo "$bin_dir" >> "$GITHUB_PATH"
     exit 0
   fi
   echo "::warning::Rejecting cached Vercel CLI $actual; expected $version"
@@ -19,6 +20,6 @@ fi
 
 mkdir -p "$prefix"
 npm install --ignore-scripts --prefix "$prefix" "vercel@$version"
-actual="$($bin --version | awk '{print $NF}' | sed 's/^v//')"
+actual="$("$bin" --version 2>/dev/null | awk '{print $NF}' | sed 's/^v//')"
 [[ "$actual" == "$version" ]] || { echo "::error::Vercel CLI $actual does not match $version" >&2; exit 1; }
-echo "$prefix/bin" >> "$GITHUB_PATH"
+echo "$bin_dir" >> "$GITHUB_PATH"

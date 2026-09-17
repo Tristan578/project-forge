@@ -774,7 +774,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             playwright-${{ runner.os }}-
 
@@ -1065,7 +1065,6 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install Vercel CLI
       - name: Cache pinned Vercel CLI
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -1192,7 +1191,6 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install Vercel CLI
       - name: Cache pinned Vercel CLI
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -1813,7 +1811,6 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
-      - name: Install Vercel CLI
       - name: Cache pinned Vercel CLI
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -1915,7 +1912,6 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
-      - name: Install Vercel CLI
       - name: Cache pinned Vercel CLI
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
