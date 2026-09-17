@@ -201,7 +201,7 @@ describe('play OG card content', () => {
     const { text, options } = await playCardText([[{ id: 'u1', displayName: creator }], [{ title, description }]]);
 
     expect(selectiveRead.mock.calls.some(([file]) => String(file).includes('NotoSans-Regular.ttf'))).toBe(true);
-    expect(responseFonts(options)).toBeUndefined();
+    expect(options).not.toHaveProperty('fonts');
     expect(text).toBe('SpawnForge Play on SpawnForge');
     expect(text).not.toContain(creator);
     expect(text).not.toContain(title);
