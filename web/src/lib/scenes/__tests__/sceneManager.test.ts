@@ -22,8 +22,8 @@ import {
   type ProjectScenes,
 } from '../sceneManager';
 
-const SCENES_STORAGE_KEY = 'forge-project-scenes';
-const CHECKPOINTS_STORAGE_KEY = 'forge-project-scene-checkpoints:v2';
+const SCENES_STORAGE_KEY = 'forge-project-scenes:v2:unsaved';
+const CHECKPOINTS_STORAGE_KEY = 'forge-project-scene-checkpoints:v3:unsaved';
 
 function makeProject(activeName: string, sceneCount = 1): ProjectScenes {
   const scenes = Array.from({ length: sceneCount }, (_, i) => ({
@@ -43,6 +43,81 @@ function makeProject(activeName: string, sceneCount = 1): ProjectScenes {
 beforeEach(() => {
   attachFixtureValidator();
   localStorage.clear();
+});
+
+describe('project-scoped browser persistence (PF-375)', () => {
+  it.each(['QuotaExceededError', 'SecurityError'])('preserves legacy scene bytes on %s migration failure and retries', (errorName) => {
+    const legacy = makeProject('Legacy draft');
+    const bytes = JSON.stringify(legacy, null, 2);
+    localStorage.setItem('forge-project-scenes', bytes);
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Blocked', errorName); });
+    expect(() => loadProjectScenes()).toThrow();
+    expect(localStorage.getItem('forge-project-scenes')).toBe(bytes);
+    expect(localStorage.getItem(SCENES_STORAGE_KEY)).toBeNull();
+    expect(writes).toHaveBeenCalledTimes(1);
+    writes.mockRestore();
+    expect(loadProjectScenes()).toEqual(legacy);
+    expect(JSON.parse(localStorage.getItem(SCENES_STORAGE_KEY)!)).toEqual(legacy);
+    expect(localStorage.getItem('forge-project-scenes')).toBe(bytes);
+  });
+  it.each(['QuotaExceededError', 'SecurityError'])('preserves legacy checkpoint bytes on %s migration failure and retries', (errorName) => {
+    const checkpoint = { id: 'legacy-draft', projectId: null, label: 'Draft', createdAt: '2026-01-01T00:00:00.000Z', snapshot: makeProject('Draft') };
+    const bytes = JSON.stringify([checkpoint], null, 2);
+    localStorage.setItem('forge-project-scene-checkpoints:v2', bytes);
+    const writes = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Blocked', errorName); });
+    expect(listCheckpoints()).toEqual([]);
+    expect(localStorage.getItem('forge-project-scene-checkpoints:v2')).toBe(bytes);
+    expect(localStorage.getItem(CHECKPOINTS_STORAGE_KEY)).toBeNull();
+    expect(writes).toHaveBeenCalledTimes(1);
+    writes.mockRestore();
+    expect(listCheckpoints()).toEqual([checkpoint]);
+    expect(JSON.parse(localStorage.getItem(CHECKPOINTS_STORAGE_KEY)!)).toEqual([checkpoint]);
+    expect(localStorage.getItem('forge-project-scene-checkpoints:v2')).toBe(bytes);
+  });
+  it('gives existing scoped scenes and checkpoints precedence without rewriting either legacy buffer', () => {
+    const scoped = makeProject('Scoped draft');
+    saveProjectScenes(scoped);
+    const checkpoint = createCheckpoint(scoped, 'Scoped checkpoint').checkpoint;
+    const sceneBytes = JSON.stringify(makeProject('Stale legacy'), null, 2);
+    const checkpointBytes = JSON.stringify([{ ...checkpoint, id: 'stale-legacy' }], null, 2);
+    localStorage.setItem('forge-project-scenes', sceneBytes);
+    localStorage.setItem('forge-project-scene-checkpoints:v2', checkpointBytes);
+    const writes = vi.spyOn(Storage.prototype, 'setItem');
+    expect(loadProjectScenes()).toEqual(scoped);
+    expect(listCheckpoints()).toEqual([checkpoint]);
+    expect(writes).not.toHaveBeenCalled();
+    expect(localStorage.getItem('forge-project-scenes')).toBe(sceneBytes);
+    expect(localStorage.getItem('forge-project-scene-checkpoints:v2')).toBe(checkpointBytes);
+    writes.mockRestore();
+  });
+  it('keeps scene buffers and recovery points separate when switching cloud projects', () => {
+    const projectA = makeProject('Project A');
+    const projectB = makeProject('Project B');
+    saveProjectScenes(projectA, 'A');
+    saveProjectScenes(projectB, 'B');
+    const checkpointA = createCheckpoint(projectA, 'A checkpoint', 'A').checkpoint;
+    const checkpointB = createCheckpoint(projectB, 'B checkpoint', 'B').checkpoint;
+
+    expect(loadProjectScenes('A').scenes[0].name).toBe('Project A');
+    expect(loadProjectScenes('B').scenes[0].name).toBe('Project B');
+    expect(listCheckpoints('A').map((checkpoint) => checkpoint.id)).toEqual([checkpointA.id]);
+    expect(listCheckpoints('B').map((checkpoint) => checkpoint.id)).toEqual([checkpointB.id]);
+    expect(restoreCheckpoint(checkpointA.id, 'B')).toEqual({ error: 'Checkpoint not found' });
+  });
+
+  it('migrates only anonymous legacy checkpoints into the explicit unsaved scope', () => {
+    const anonymous = {
+      id: 'anonymous', projectId: null, label: 'Local draft', createdAt: '2026-01-01T00:00:00.000Z', snapshot: makeProject('Local draft'),
+    };
+    const cloudTagged = {
+      id: 'cloud-tagged', projectId: 'A', label: 'Do not attribute', createdAt: '2026-01-01T00:00:00.000Z', snapshot: makeProject('Untrusted'),
+    };
+    localStorage.setItem('forge-project-scene-checkpoints:v2', JSON.stringify([anonymous, cloudTagged]));
+
+    expect(listCheckpoints('A')).toEqual([]);
+    expect(listCheckpoints().map((checkpoint) => checkpoint.id)).toEqual(['anonymous']);
+    expect(JSON.parse(localStorage.getItem(CHECKPOINTS_STORAGE_KEY) ?? '[]')).toHaveLength(1);
+  });
 });
 
 afterEach(() => {
