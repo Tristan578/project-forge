@@ -906,7 +906,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     let targets: string[] = [];
     if (targetEntityIds) {
-      targets = targetEntityIds;
+      targets = targetEntityIds.filter((id) => ownEntry(ctx.store.sceneGraph.nodes, id) !== undefined);
     } else {
       const styleIndex = buildEntityIndex(ctx.store.sceneGraph);
       const meshSet = styleIndex.byComponent.get('Mesh3d');

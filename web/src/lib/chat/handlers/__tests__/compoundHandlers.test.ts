@@ -361,7 +361,7 @@ describe('compoundHandlers', () => {
   // create_scene_from_description
   // ===========================================================================
 
-  describe('create_scene_from_description', () => {
+describe('create_scene_from_description', () => {
     it('spawns entities from description', async () => {
       const { result, store } = await invoke('create_scene_from_description', {
         entities: [
@@ -1501,5 +1501,46 @@ describe('compoundHandlers', () => {
       const comp = lastCallArg(store.addGameComponent, 1) as { collectible: { value: number } };
       expect(comp.collectible.value).toBe(2);
     });
+  });
+});
+
+describe('PF-235 compound record maps', () => {
+  it('filters inherited scene records across describe, analyze, arrange, and style without mutations', async () => {
+    const inheritedNode = makeSceneNode({ entityId: 'ghost', name: 'Inherited ghost', components: ['Mesh3d'] });
+    const nodes = Object.create({ ghost: inheritedNode });
+    const sceneGraph = { nodes, rootIds: [] };
+
+    const described = await invoke('describe_scene', { detail: 'summary', filterEntityIds: ['ghost'] }, { sceneGraph });
+    expect((described.result.result as Record<string, unknown>).entityCount).toBe(0);
+
+    const analyzed = await invoke('analyze_gameplay', {}, {
+      sceneGraph,
+      allGameComponents: Object.create({ ghost: [{ type: 'characterController' }] }),
+      allScripts: Object.create({ ghost: 'inherited' }), inputBindings: [], physicsEnabled: false, environment: { fogEnabled: false },
+    });
+    expect((analyzed.result.result as Record<string, unknown>).entityCount).toBe(0);
+    expect((analyzed.result.result as Record<string, unknown>).mechanics).not.toContain('player_character');
+
+    const arranged = await invoke('arrange_entities', { entityIds: ['ghost'], pattern: 'line' }, { sceneGraph });
+    expect(arranged.store.updateTransform).not.toHaveBeenCalled();
+    expect((arranged.result.result as Record<string, unknown>).arranged).toBe(0);
+
+    const styled = await invoke('apply_style', { targetEntityIds: ['ghost'], palette: { primary: [1, 0, 0, 1] } }, { sceneGraph });
+    expect(styled.store.updateMaterial).not.toHaveBeenCalled();
+  });
+
+  it('retains an own __proto__ creation name and relationship in JSON output', async () => {
+    const { result, store } = await invoke('create_scene_from_description', {
+      entities: [
+        { type: 'cube', name: '__proto__' },
+        { type: 'sphere', name: 'Child', parentName: '__proto__' },
+      ],
+    }, { spawnEntity: vi.fn((_type: string, name: string) => `id-${name}`) });
+
+    expect(result.success).toBe(true);
+    expect(store.reparentEntity).toHaveBeenCalledWith('id-Child', 'id-__proto__');
+    const entityIds = (result.result as { entityIds: Record<string, string> }).entityIds;
+    expect(Object.hasOwn(entityIds, '__proto__')).toBe(true);
+    expect(JSON.parse(JSON.stringify(entityIds)).__proto__).toBe('id-__proto__');
   });
 });
