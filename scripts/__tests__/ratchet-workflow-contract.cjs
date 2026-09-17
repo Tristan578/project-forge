@@ -4,16 +4,23 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 // This CI self-defense job intentionally runs before npm installation. Parse
-// only its known block-style workflow shape, rejecting unsupported step/run
-// shapes and duplicate keys rather than introducing an undeclared dependency.
+// only its known block-style trusted-consumer workflow shape, rejecting
+// unsupported step/run shapes and duplicate keys without npm dependencies.
 function parse(source) {
   const trigger = source.match(/^on:\r?\n([\s\S]*?)(?=^\S)/m);
   assert(trigger, 'Missing block-style trigger');
-  const push = trigger[1].match(/^  push:\r?\n([\s\S]*?)(?=^  \S|$(?![\s\S]))/m);
-  assert(push, 'Missing push trigger');
-  const pathsBlock = push[1].match(/^    paths:\r?\n((?:^      - [^\r\n]+\r?\n)+)/m);
-  assert(pathsBlock, 'Missing push paths');
-  const paths = pathsBlock[1].trim().split(/\r?\n/).map(line => line.trim().replace(/^- ['"]?/, '').replace(/['"]$/, ''));
+  const producer = trigger[1].match(/^  workflow_run:\r?\n((?:^    [^\r\n]+\r?\n)+)/m);
+  assert(producer, 'Missing trusted workflow_run trigger');
+  assert(!/^  push:/m.test(trigger[1]), 'Duplicate push measurement trigger');
+  const workflowRun = {};
+  for (const key of ['workflows', 'types', 'branches']) {
+    const prefix = '    ' + key + ': [';
+    const fields = producer[1].split('\n').filter(line => line.startsWith(prefix));
+    assert.equal(fields.length, 1, 'Missing or duplicate workflow_run field: ' + key);
+    const field = fields[0].trimEnd();
+    assert(field.endsWith(']'), 'Unsupported workflow_run list: ' + key);
+    workflowRun[key] = field.slice(prefix.length, -1).split(',').map(item => item.trim());
+  }
   const job = source.match(/^  ratchet:\r?\n([\s\S]*?)(?=^  \S|$(?![\s\S]))/m);
   assert(job, 'Missing ratchet job');
   const chunks = job[1].split(/^      - /m).slice(1);
@@ -28,21 +35,19 @@ function parse(source) {
     assert(scalar && !owners.includes(name), 'Expected owning literal block run');
     return { name, run: scalar[1] };
   });
-  return { on: { push: { paths } }, jobs: { ratchet: { steps } } };
+  return { on: { workflow_run: workflowRun }, jobs: { ratchet: { steps } } };
 }
 function serialize(workflow) {
-  return 'on:\n  push:\n    paths:\n' + workflow.on.push.paths.map(path => "      - '" + path + "'\n").join('') +
+  return 'on:\n  workflow_run:\n' + ['workflows', 'types', 'branches'].map(key => '    ' + key + ': [' + (workflow.on.workflow_run[key] || []).join(', ') + ']\n').join('') +
     'jobs:\n  ratchet:\n    steps:\n' + workflow.jobs.ratchet.steps.map(step => '      - name: ' + (step.name || 'unnamed') + '\n' +
       (step.run === undefined ? '' : '        run: |\n' + step.run.split('\n').filter(Boolean).map(line => '          ' + line.trimStart() + '\n').join(''))).join('');
 }
-const rootConfig = 'web/vitest.config.ts';
 const owners = ['Sync onboarding coverage facts', 'Open or update ratchet PR'];
-const inputs = ['web/src/**', rootConfig, 'web/vitest.config.node.ts', 'web/vitest.config.jsdom.ts', 'web/vitest.test-selection.ts', 'web/package.json'];
+const triggerFields = { workflows: ['CI'], types: ['completed'], branches: ['main'] };
 const executable = run => run.split('\n').filter(line => !/^\s*#/.test(line)).join('\n').replace(/\\\r?\n\s*/g, ' ');
 function validate(source) {
   const workflow = parse(source);
-  const paths = workflow.on.push.paths;
-  for (const path of inputs) assert(paths.includes(path), 'Missing measurement trigger: ' + path);
+  for (const [key, expected] of Object.entries(triggerFields)) assert.deepEqual(workflow.on.workflow_run[key], expected, 'Untrusted measurement trigger: ' + key);
   const steps = workflow.jobs.ratchet.steps;
   for (const owner of owners) {
     const matches = steps.filter(step => step.name === owner);
@@ -82,8 +87,13 @@ for (const disabled of ['commented', 'removed', 'duplicate']) reject(disabled + 
   const command = 'git add web/vitest.config.ts';
   step.run = step.run.replace(command, disabled === 'commented' ? '# ' + command : disabled === 'removed' ? '' : command + '\n' + command);
 });
-for (const path of inputs) reject('missing trigger ' + path, workflow => { workflow.on.push.paths = workflow.on.push.paths.filter(input => input !== path); });
+for (const key of Object.keys(triggerFields)) {
+  reject('missing producer trigger ' + key, workflow => { workflow.on.workflow_run[key] = []; });
+  reject('wrong producer trigger ' + key, workflow => { workflow.on.workflow_run[key] = ['untrusted']; });
+}
 reject('child staged on a continuation line', workflow => { workflow.jobs.ratchet.steps.find(step => step.name === owners[1]).run = workflow.jobs.ratchet.steps.find(step => step.name === owners[1]).run.replace('git add web/vitest.config.ts', 'git add web/vitest.config.ts \\\n web/vitest.config.node.ts'); });
 reject('test-only seam', workflow => { workflow.jobs.ratchet.steps[0].run = 'RATCHET_PROJECT_ROOT=/tmp node ignored'; });
 assert.throws(() => validate(source.replace('run: |', 'run: echo duplicate\n        run: |')), undefined, 'duplicate YAML run key');
-console.log('Workflow contract passed; ' + (controls + 1) + ' disabled-command and trigger controls rejected.');
+assert.throws(() => validate(source.replace('workflows: [CI]', 'workflows: [CI]\n    workflows: [CI]')), undefined, 'duplicate producer list');
+assert.throws(() => validate(source.replace('on:\n', 'on:\n  push:\n    branches: [main]\n')), undefined, 'duplicate push measurement');
+console.log('Workflow contract passed; ' + (controls + 3) + ' disabled-command and trigger controls rejected.');

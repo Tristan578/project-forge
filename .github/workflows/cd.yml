@@ -82,8 +82,16 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@55.0.0
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # Instant Rollback, not `vercel promote`: with Rolling Releases enabled a
       # promote of the old build starts a staged rollout of it when nothing is
@@ -366,9 +374,15 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Install wasm-bindgen-cli
+      - name: Cache wasm-bindgen CLI
         if: steps.engine-cache.outputs.cache-hit != 'true'
-        run: cargo install wasm-bindgen-cli --version 0.2.127
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine/Cargo.lock') }}
+      - name: Install verified wasm-bindgen CLI
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        run: bash scripts/install-wasm-bindgen-cli.sh
 
       # Byte-identical to the build in build-wasm and in ci.yml's engine-smoke.
       # If these three ever diverge the key stops describing the artifact.
@@ -760,7 +774,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             playwright-${{ runner.os }}-
 
@@ -900,8 +914,13 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
+      - name: Cache cargo-audit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
+      - name: Install verified cargo-audit
+        run: bash scripts/install-cargo-audit.sh
 
       - name: cargo audit (engine)
         working-directory: engine
@@ -1046,8 +1065,16 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@55.0.0
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # spawnforge-staging is a separate Vercel project, so its Production target
       # is the stable staging environment. A Preview target creates an ephemeral
@@ -1164,8 +1191,16 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@55.0.0
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # The rollback target. Read from the Vercel API, not `vercel ls`: the
       # previous grep for `READY` matched nothing (the CLI prints `● Ready`),
@@ -1776,8 +1811,16 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@55.0.0
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # Run from repo root — Vercel rootDirectory=apps/docs handles the subdirectory.
       # Same pattern as the main web deploy. Do NOT cd into apps/docs — that causes
@@ -1869,8 +1912,16 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
-      - name: Install Vercel CLI
-        run: npm i -g vercel@55.0.0
+      - name: Cache pinned Vercel CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vercel-cli
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
+      - name: Install verified Vercel CLI
+        env:
+          VERCEL_CLI_VERSION: 55.0.0
+          VERCEL_CLI_PREFIX: ${{ runner.temp }}/vercel-cli
+        run: bash scripts/install-vercel-cli.sh
 
       # Run from repo root — Vercel rootDirectory=apps/design handles the subdirectory.
       # Same pattern as the main web deploy. Do NOT cd into apps/design — that causes
