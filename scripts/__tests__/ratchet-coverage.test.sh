@@ -76,7 +76,7 @@ fresh_root() {
   ROOT="$TMP/case-$((PASS + FAIL))"
   mkdir -p "$ROOT/web"
   write_config "$ROOT/web/vitest.config.ts" "$1" "$2" "$3" "$4"
-  write_config "$ROOT/web/vitest.config.node.ts" "$5" "$6" "$7" "$8"
+  printf "export default { test: { environment: 'node' } };\n" > "$ROOT/web/vitest.config.node.ts"
 }
 
 read_thresholds() {
@@ -101,7 +101,7 @@ run_ratchet() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Coverage exceeds thresholds → BOTH configs bumped to floored actuals
+# 1. Coverage exceeds aggregate thresholds → root config is bumped to floored actuals
 #    MINUS the 1-point margin (PF: coverage ratchet margin), not flush
 #    against the measurement.
 # ---------------------------------------------------------------------------
@@ -110,32 +110,31 @@ write_summary "$ROOT/web/coverage" 80.5 70.2 74.9 81.3
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "ratchet exits 0 on bump" 0 "$rc"
 check "main config bumped to floored actuals minus margin" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "node config bumped in lockstep" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check "child project config has no aggregate threshold block" "///" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
 main_notice=0
 grep -q '::notice::.*vitest.config.ts.*statements=79' "$ROOT/ratchet.log" && main_notice=1
 check "bump run emits a main-config notice" 1 "$main_notice"
 node_notice=0
 grep -q '::notice::.*vitest.config.node.ts.*statements=79' "$ROOT/ratchet.log" && node_notice=1
-check "bump run emits a node-config notice" 1 "$node_notice"
+check "bump run emits no child-config notice" 0 "$node_notice"
 
 # ---------------------------------------------------------------------------
-# 2. REGRESSION (#8934): main config already current, node config lagging →
-#    node config must still be synced up to match
+# 2. A child config cannot trigger a ratchet when aggregate root thresholds are current.
 # ---------------------------------------------------------------------------
 fresh_root 75 65 70 77  70 60 65 72
 write_summary "$ROOT/web/coverage" 75.4 65.1 70.0 77.9
 rc=0; run_ratchet "$ROOT" || rc=$?
-check "node-drift-only run exits 0" 0 "$rc"
+check "root-current run exits 0" 0 "$rc"
 check "main config unchanged when already current" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "lagging node config synced to main thresholds" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check "child config remains threshold-free" "///" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
 # Devin review on #8993: the summary notice must not claim a main-config bump
 # when only the node config was synced, and must name the node sync instead.
 false_bump=0
 grep -q '::notice::.*bumped' "$ROOT/ratchet.log" && false_bump=1
-check "node-drift-only run emits no main-config bump notice" 0 "$false_bump"
+check "root-current run emits no main-config bump notice" 0 "$false_bump"
 sync_notice=0
 grep -q '::notice::.*vitest.config.node.ts.*statements=75' "$ROOT/ratchet.log" && sync_notice=1
-check "node-drift-only run emits a node-sync notice" 1 "$sync_notice"
+check "root-current run emits no child-config notice" 0 "$sync_notice"
 
 # ---------------------------------------------------------------------------
 # 3. Everything already in sync and current → no modification
@@ -177,8 +176,7 @@ check "missing summary exits 0" 0 "$rc"
 check "missing summary modifies nothing" "70/60/65/72" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
 
 # ---------------------------------------------------------------------------
-# 7. Missing node config → warn, skip lockstep, main config still ratchets
-#    (the HAS_NODE_CONFIG=false fallback must not crash or block the ratchet)
+# 7. Missing child config does not affect the aggregate root ratchet.
 # ---------------------------------------------------------------------------
 fresh_root 75 65 70 77  70 60 65 72
 rm "$ROOT/web/vitest.config.node.ts"
@@ -188,7 +186,7 @@ check "missing node config exits 0" 0 "$rc"
 check "main config still bumped without node config" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
 skip_warned=0
 grep -q '::warning::.*vitest.config.node.ts.*node-config lockstep skipped' "$ROOT/ratchet.log" && skip_warned=1
-check "missing node config emits a lockstep-skipped warning" 1 "$skip_warned"
+check "missing child config emits no obsolete lockstep warning" 0 "$skip_warned"
 node_recreated=0
 [ -e "$ROOT/web/vitest.config.node.ts" ] && node_recreated=1
 check "missing node config is not recreated" 0 "$node_recreated"

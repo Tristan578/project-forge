@@ -17,7 +17,7 @@ The project has two Vitest configurations. Use them correctly:
 cd web && npx vitest run --config vitest.config.ts --coverage
 ```
 
-CI thresholds are auto-ratcheted upward by the coverage-ratchet workflow, which keeps `web/vitest.config.node.ts` in lockstep (PF-996) — read `web/vitest.config.ts` for the live values; any snapshot written here would go stale.
+CI thresholds are auto-ratcheted upward from aggregate root coverage — read `web/vitest.config.ts` for the live values.
 
 ## File Naming Conventions
 
@@ -164,6 +164,6 @@ Link to the PF ticket in the test name so future readers understand why this tes
 
 ## Coverage Thresholds
 
-CI thresholds live in `web/vitest.config.ts` and are auto-ratcheted upward (with `web/vitest.config.node.ts` kept in lockstep, PF-996) — read the config for the current values.
+CI thresholds live in `web/vitest.config.ts` and are auto-ratcheted upward from aggregate project coverage.
 
 Target: 100% across all metrics. Every uncovered branch is a bug waiting to happen in production WASM.
