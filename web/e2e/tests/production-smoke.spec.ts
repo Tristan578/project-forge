@@ -190,7 +190,20 @@ test.describe('Production Smoke Tests @smoke @production', () => {
           }
         } else {
           expect(res.headers()['content-type']).toMatch(dependency.endsWith('.wasm') ? /application\/wasm/ : /javascript/);
-          expect(Number(res.headers()['content-length'])).toBeGreaterThan(0);
+          // Vercel removes Content-Length for compressed HEAD responses. Prove the
+          // actual fallback asset exists with a bounded byte-range GET instead.
+          const range = await request.get(url, {
+            headers: { Range: 'bytes=0-7' },
+            maxRedirects: 0,
+          });
+          expect([200, 206]).toContain(range.status());
+          const bytes = await range.body();
+          expect(bytes.length).toBeGreaterThan(0);
+          if (dependency.endsWith('.wasm')) {
+            expect(bytes.subarray(0, 4)).toEqual(Buffer.from([0x00, 0x61, 0x73, 0x6d]));
+          } else {
+            expect(bytes.toString('utf8')).toMatch(/\S/);
+          }
         }
       });
     }
