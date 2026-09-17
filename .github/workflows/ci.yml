@@ -1143,6 +1143,11 @@ jobs:
       - name: Run deploy-drift dispatcher test suite
         run: bash scripts/__tests__/deploy-drift-dispatch.test.sh
 
+      - name: Verify executable cache and coverage artifact contracts
+        run: |
+          bash scripts/__tests__/install-vercel-cli.test.sh
+          node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs
+
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
 
@@ -2233,6 +2238,9 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - run: npm ci
+
+      - name: Verify production workflow contracts
+        run: node --test scripts/__tests__/production-ci-contract.test.mjs
 
       - name: Verify every manifest copy
         run: npm run check:manifest-sync

@@ -86,7 +86,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/vercel-cli
-          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/cd.yml') }}
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
       - name: Install verified Vercel CLI
         env:
           VERCEL_CLI_VERSION: 55.0.0
@@ -1069,7 +1069,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/vercel-cli
-          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/cd.yml') }}
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
       - name: Install verified Vercel CLI
         env:
           VERCEL_CLI_VERSION: 55.0.0
@@ -1195,7 +1195,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/vercel-cli
-          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/cd.yml') }}
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
       - name: Install verified Vercel CLI
         env:
           VERCEL_CLI_VERSION: 55.0.0
@@ -1815,7 +1815,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/vercel-cli
-          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/cd.yml') }}
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
       - name: Install verified Vercel CLI
         env:
           VERCEL_CLI_VERSION: 55.0.0
@@ -1916,7 +1916,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/vercel-cli
-          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/cd.yml') }}
+          key: vercel-cli-55.0.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/install-vercel-cli.sh', '.node-version') }}
       - name: Install verified Vercel CLI
         env:
           VERCEL_CLI_VERSION: 55.0.0
