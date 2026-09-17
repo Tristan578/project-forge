@@ -229,7 +229,7 @@ describe('DocsPage', () => {
     // "features" starts expanded by default.
     expect(within(nav).getByText('Feature Beta')).toBeInTheDocument();
     expect(within(nav).getByRole('button', { name: /Features/ })).toHaveAttribute('aria-expanded', 'true');
-    expect(within(nav).getByRole('textbox', { name: 'Search documentation' })).toHaveClass('focus-visible:ring-2');
+    expect(within(nav).getByRole('textbox', { name: 'Search documentation' })).toHaveClass('focus-visible:ring-2', 'min-h-[44px]');
 
     fireEvent.click(within(nav).getByRole('button', { name: /Features/ }));
     expect(within(nav).queryByText('Feature Beta')).not.toBeInTheDocument();
@@ -258,6 +258,7 @@ describe('DocsPage', () => {
     const hrefs = Array.from(toc).map((a) => a.getAttribute('href'));
     expect(hrefs).toContain('#setup-guide');
     expect(hrefs).toContain('#installation');
+    for (const link of toc) expect(link).toHaveClass('min-h-[44px]');
 
     // Headers get slugified ids.
     expect(pane.querySelector('h1#setup-guide')?.textContent).toBe('Setup Guide');

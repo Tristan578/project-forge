@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Button, Input } from '@spawnforge/ui';
+import { Button, Input, cn } from '@spawnforge/ui';
 import {
   BookOpen,
   Search,
@@ -146,7 +146,7 @@ export function DocsPage() {
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-6 py-4">
           <Button variant="ghost" size="sm"
             onClick={() => router.push('/dashboard')}
-            className="rounded p-1.5 text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
+            className="min-h-[44px] min-w-[44px] rounded p-1.5 text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
             aria-label="Back to dashboard"
           >
             <ArrowLeft size={20} />
@@ -172,7 +172,7 @@ export function DocsPage() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search docs..."
-                  className="min-w-0 flex-1 bg-transparent text-sm text-[var(--sf-text)] placeholder:text-[var(--sf-text)]"
+                  className="min-h-[44px] min-w-0 flex-1 bg-transparent text-sm text-[var(--sf-text)] placeholder:text-[var(--sf-text)]"
                 />
               </div>
             </div>
@@ -228,11 +228,11 @@ export function DocsPage() {
                               key={doc.path}
                               aria-current={activePath === doc.path ? 'page' : undefined}
                               onClick={() => navigateTo(doc.path)}
-                              className={`h-auto min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${
+                              className={cn('h-auto min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm transition-colors',
                                 activePath === doc.path
                                   ? 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text)]'
                                   : 'text-[var(--sf-text)] hover:bg-[var(--sf-bg-elevated)]/50 hover:text-[var(--sf-text)]'
-                              }`}
+                              )}
                             >
                               <FileText size={12} />
                               <span className="min-w-0 break-words">{doc.title}</span>
@@ -268,7 +268,7 @@ export function DocsPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search docs..."
-                className="min-w-0 flex-1 bg-transparent text-sm text-[var(--sf-text)] placeholder:text-[var(--sf-text)]"
+                className="min-h-[44px] min-w-0 flex-1 bg-transparent text-sm text-[var(--sf-text)] placeholder:text-[var(--sf-text)]"
               />
             </div>
           </div>
@@ -316,7 +316,7 @@ function DocContent({
       <div className="flex items-center gap-2 border-b border-[var(--sf-border)] px-6 py-3">
         <Button variant="ghost" size="sm"
           onClick={onBack}
-          className="rounded p-1 text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
+          className="min-h-[44px] min-w-[44px] rounded p-1 text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
           aria-label="Back to docs home"
           title="Back to docs home"
         >
@@ -341,7 +341,7 @@ function DocContent({
               <a
                 key={i}
                 href={`#${slugify(section.heading)}`}
-                className="block min-h-[24px] rounded text-sm text-[var(--sf-text)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
+                className="flex min-h-[44px] items-center rounded text-sm text-[var(--sf-text)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
               >
                 {section.heading}
               </a>

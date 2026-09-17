@@ -1,3 +1,4 @@
+import { cn } from '@spawnforge/ui';
 import type { ServiceHealth } from '@/lib/monitoring/healthChecks';
 
 interface ServiceStatusCardProps {
@@ -57,13 +58,13 @@ export function ServiceStatusCard({ service }: ServiceStatusCardProps) {
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <span
-            className={`mt-0.5 h-3 w-3 flex-shrink-0 rounded-full ${statusColor(service.status)}`}
+            className={cn('mt-0.5 h-3 w-3 flex-shrink-0 rounded-full', statusColor(service.status))}
             data-testid="service-status-indicator"
             aria-hidden="true"
           />
           <h3 className="text-sm font-medium text-[var(--sf-text)]">{service.name}</h3>
         </div>
-        <span className={`text-xs font-semibold ${statusTextColor(service.status)}`}>
+        <span className={cn('text-xs font-semibold', statusTextColor(service.status))}>
           {statusLabel(service.status)}
         </span>
       </div>

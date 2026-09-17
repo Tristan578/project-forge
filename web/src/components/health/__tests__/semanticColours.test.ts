@@ -36,7 +36,7 @@ function assertRootDefaults(css: string) {
 describe('public route SSR theme defaults', () => {
   it('defines every dark theme token before a useTheme consumer mounts', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/app/globals.css'), 'utf8');
-    assertRootDefaults(css);
+    expect(() => assertRootDefaults(css)).not.toThrow();
   });
   it.each(['missing', 'commented'])('rejects a %s executable indicator declaration', (mode) => {
     const css = readFileSync(resolve(process.cwd(), 'src/app/globals.css'), 'utf8');
