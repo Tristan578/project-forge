@@ -33,7 +33,7 @@ jobs:
         run: npm ci --prefix infra/engine-cdn --workspaces=false --ignore-scripts
 
       - name: Audit all standalone Workers dependencies
-        run: npm audit --prefix infra/engine-cdn --workspaces=false --audit-level=moderate
+        run: npm audit --prefix infra/engine-cdn --workspaces=false --include=dev --audit-level=moderate
 
       - name: Run configured worker and binding regressions
         working-directory: infra/engine-cdn
