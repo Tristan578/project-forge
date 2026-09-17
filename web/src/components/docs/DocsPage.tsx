@@ -235,10 +235,10 @@ export function DocsPage() {
                               key={doc.path}
                               aria-current={activePath === doc.path ? 'page' : undefined}
                               onClick={() => navigateTo(doc.path)}
-                              className={cn('h-auto min-h-[44px] sm:min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm transition-colors',
+                              className={cn('h-auto min-h-[44px] sm:min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-2 rounded-lg border-s-2 px-3 py-1.5 text-left text-sm transition-colors',
                                 activePath === doc.path
-                                  ? 'bg-[var(--sf-bg-elevated)] text-[var(--sf-text)]'
-                                  : 'text-[var(--sf-text)] hover:bg-[var(--sf-bg-elevated)]/50 hover:text-[var(--sf-text)]'
+                                  ? 'border-[var(--sf-text)] bg-[var(--sf-bg-elevated)] font-semibold text-[var(--sf-text)]'
+                                  : 'border-transparent text-[var(--sf-text)] hover:bg-[var(--sf-bg-elevated)]/50 hover:text-[var(--sf-text)]'
                               )}
                             >
                               <FileText size={12} />
