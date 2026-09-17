@@ -173,6 +173,27 @@ describe('shaderHandlers', () => {
       expect(result.success).toBe(false);
     });
 
+    it('rejects an inherited graph without compiling it (PF-235)', async () => {
+      const inheritedGraph = mockGraphState.graphs['graph-1'];
+      mockGraphState.graphs = Object.create({ 'graph-1': inheritedGraph });
+
+      const { result } = await invoke('compile_shader', { graphId: 'graph-1' });
+
+      expect(result).toEqual({ success: false, error: 'Shader graph not found: graph-1' });
+      expect(mockCompileToWgsl).not.toHaveBeenCalled();
+      expect(mockGraphState.setCompilationError).not.toHaveBeenCalled();
+    });
+
+    it('compiles an own graph from a prototype-free map (PF-235)', async () => {
+      const graph = mockGraphState.graphs['graph-1'];
+      mockGraphState.graphs = Object.assign(Object.create(null), { 'graph-1': graph });
+
+      const { result } = await invoke('compile_shader', { graphId: 'graph-1' });
+
+      expect(result.success).toBe(true);
+      expect(mockCompileToWgsl).toHaveBeenCalledWith(graph);
+    });
+
     it('sets compilationError on invalid graph', async () => {
       mockCompileToWgsl.mockReturnValueOnce({ code: '', error: 'No PBR Output node found.' });
       await invoke('compile_shader', {});
