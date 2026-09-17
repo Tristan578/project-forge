@@ -257,13 +257,13 @@ test.describe('Public Pages @ui', () => {
           }),
         }));
         await page.goto('/docs?path=getting-started%2Finline-context');
-        const sentenceLink = page.locator('a[href="https://example.com/guide"]');
-        const standaloneLink = page.locator('a[href="https://example.com/standalone"]');
+        const sentenceLink = page.locator('a[href="https://example.com/guide"]').filter({ visible: true });
+        const standaloneLink = page.locator('a[href="https://example.com/standalone"]').filter({ visible: true });
         await expect(sentenceLink).toBeVisible();
         await expect(standaloneLink).toBeVisible();
 
         // A nested link must not enlarge its sentence compared with identical plain bold text.
-        const sentenceParagraphs = page.locator('p').filter({ hasText: /^guide to begin\.$/ });
+        const sentenceParagraphs = page.locator('p').filter({ hasText: /^guide to begin\.$/ }).filter({ visible: true });
         await expect(sentenceParagraphs).toHaveCount(2);
         const heights = await sentenceParagraphs.evaluateAll((paragraphs) =>
           paragraphs.map((paragraph) => paragraph.getBoundingClientRect().height));
