@@ -57,6 +57,32 @@ describe('sceneManager', () => {
       expect(project.scenes).toHaveLength(1);
       expect(project.scenes[0].name).toBe('Main');
     });
+
+    it('keeps project scene buffers isolated across an editor switch (regression for PF-375)', () => {
+      const first = createInitialProject();
+      first.scenes[0].name = 'Project A';
+      const second = createInitialProject();
+      second.scenes[0].name = 'Project B';
+
+      saveProjectScenes(first, 'project/A');
+      saveProjectScenes(second, 'project B');
+
+      expect(loadProjectScenes('project/A').scenes[0].name).toBe('Project A');
+      expect(loadProjectScenes('project B').scenes[0].name).toBe('Project B');
+      expect(storage['forge-project-scenes:v2:project:project%2FA']).toBeDefined();
+      expect(storage['forge-project-scenes:v2:project:project%20B']).toBeDefined();
+    });
+
+    it('migrates browser-global scenes only into the explicit unsaved scope', () => {
+      const legacy = createInitialProject();
+      legacy.scenes[0].name = 'Legacy local work';
+      storage['forge-project-scenes'] = JSON.stringify(legacy);
+
+      expect(loadProjectScenes('cloud-project').scenes[0].name).toBe('Main');
+      expect(storage['forge-project-scenes:v2:project:cloud-project']).toBeUndefined();
+      expect(loadProjectScenes().scenes[0].name).toBe('Legacy local work');
+      expect(storage['forge-project-scenes:v2:unsaved']).toBeDefined();
+    });
   });
 
   describe('Create', () => {
