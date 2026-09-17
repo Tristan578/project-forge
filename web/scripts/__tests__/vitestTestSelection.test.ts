@@ -44,6 +44,12 @@ describe('production Vitest project selection', () => {
     expect([...jsdom].some(file => file.startsWith('src/hooks/'))).toBe(true);
     expect([...jsdom].some(file => file.startsWith('src/app/') && !file.startsWith('src/app/api/'))).toBe(true);
     expect([...jsdom].some(file => file.startsWith('src/app/api/'))).toBe(false);
+    const serverApp = await selectedFiles(['src/app/__tests__/**/*.test.ts', 'src/app/__tests__/**/*.test.tsx']);
+    expect(serverApp.size).toBeGreaterThan(0);
+    for (const file of serverApp) {
+      expect(node.has(file)).toBe(true);
+      expect(jsdom.has(file)).toBe(false);
+    }
     for (const file of ['src/lib/storage/__tests__/safeLocalStorage.test.ts', 'src/stores/slices/__tests__/sceneSlice.test.ts']) {
       expect(node.has(file)).toBe(false);
       expect(jsdom.has(file)).toBe(true);
