@@ -65,13 +65,26 @@ function validate(source) {
   }
 }
 const path = resolve(__dirname, '../../.github/workflows/coverage-ratchet.yml');
-const source = readFileSync(path, 'utf8');
+const originalSource = readFileSync(path, 'utf8');
+validate(originalSource);
+// Windows checkouts may use CRLF; canonicalize mutation inputs without
+// dropping coverage of the parser's actual LF and CRLF workflow behavior.
+const source = originalSource.replace(/\r\n/g, '\n');
 validate(source);
+validate(source.replace(/\n/g, '\r\n'));
+function assertRejected(input, label) {
+  const lf = input.replace(/\r\n/g, '\n');
+  assert.throws(() => validate(lf), undefined, label + ' (LF)');
+  assert.throws(() => validate(lf.replace(/\n/g, '\r\n')), undefined, label + ' (CRLF)');
+}
 let controls = 0;
 function reject(label, mutate) {
   const document = parse(source);
+  const before = serialize(document);
   mutate(document);
-  assert.throws(() => validate(serialize(document)), undefined, label);
+  const changed = serialize(document);
+  assert.notEqual(changed, before, label + ' must mutate its fixture');
+  assertRejected(changed, label);
   controls++;
 }
 for (const owner of owners) {
@@ -93,7 +106,13 @@ for (const key of Object.keys(triggerFields)) {
 }
 reject('child staged on a continuation line', workflow => { workflow.jobs.ratchet.steps.find(step => step.name === owners[1]).run = workflow.jobs.ratchet.steps.find(step => step.name === owners[1]).run.replace('git add web/vitest.config.ts', 'git add web/vitest.config.ts \\\n web/vitest.config.node.ts'); });
 reject('test-only seam', workflow => { workflow.jobs.ratchet.steps[0].run = 'RATCHET_PROJECT_ROOT=/tmp node ignored'; });
-assert.throws(() => validate(source.replace('run: |', 'run: echo duplicate\n        run: |')), undefined, 'duplicate YAML run key');
-assert.throws(() => validate(source.replace('workflows: [CI]', 'workflows: [CI]\n    workflows: [CI]')), undefined, 'duplicate producer list');
-assert.throws(() => validate(source.replace('on:\n', 'on:\n  push:\n    branches: [main]\n')), undefined, 'duplicate push measurement');
-console.log('Workflow contract passed; ' + (controls + 3) + ' disabled-command and trigger controls rejected.');
+function rejectSource(label, needle, replacement) {
+  const changed = source.replace(needle, replacement);
+  assert.notEqual(changed, source, label + ' must mutate its fixture');
+  assertRejected(changed, label);
+  controls++;
+}
+rejectSource('duplicate YAML run key', 'run: |', 'run: echo duplicate\n        run: |');
+rejectSource('duplicate producer list', 'workflows: [CI]', 'workflows: [CI]\n    workflows: [CI]');
+rejectSource('duplicate push measurement', 'on:\n', 'on:\n  push:\n    branches: [main]\n');
+console.log('Workflow contract passed; ' + controls + ' disabled-command and trigger controls rejected in both LF and CRLF.');
