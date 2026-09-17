@@ -191,7 +191,7 @@ export function DocsPage() {
                   <Button variant="ghost" size="sm"
                     key={result.path}
                     onClick={() => navigateTo(result.path)}
-                    className="h-auto min-h-[44px] justify-start whitespace-normal flex w-full flex-col rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--sf-bg-elevated)]"
+                    className="h-auto min-h-[44px] items-start justify-start whitespace-normal flex w-full flex-col rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--sf-bg-elevated)]"
                   >
                     <div className="flex items-center gap-1.5">
                       <FileText size={12} className="text-[var(--sf-text)]" />
@@ -286,7 +286,7 @@ export function DocsPage() {
                 <Button variant="ghost" size="sm"
                   key={result.path}
                   onClick={() => navigateTo(result.path)}
-                  className="h-auto min-h-[44px] justify-start whitespace-normal flex w-full flex-col rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-4 py-3 text-left"
+                  className="h-auto min-h-[44px] items-start justify-start whitespace-normal flex w-full flex-col rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-4 py-3 text-left"
                 >
                   <div className="flex items-center gap-1.5">
                     <FileText size={12} className="text-[var(--sf-text)]" />
