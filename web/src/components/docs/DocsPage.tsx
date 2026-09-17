@@ -528,10 +528,10 @@ function MarkdownContent({ content }: { content: string }) {
   return <>{elements}</>;
 }
 
-/** Format inline markdown (bold, code, links) */
-function formatInline(text: string): React.ReactNode {
+/** Format inline Markdown; retain original-line context for nested bold content. */
+function formatInline(text: string, inlineText: string = text): React.ReactNode {
   const parts: React.ReactNode[] = [];
-  let remaining = text;
+  let remaining = inlineText;
   let key = 0;
 
   while (remaining) {
@@ -581,7 +581,7 @@ function formatInline(text: string): React.ReactNode {
       if (boldMatch[1]) parts.push(boldMatch[1]);
       parts.push(
         <strong key={key++} className="font-semibold text-zinc-200">
-          {boldMatch[2]}
+          {formatInline(text, boldMatch[2])}
         </strong>
       );
       remaining = boldMatch[3];
