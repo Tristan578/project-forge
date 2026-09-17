@@ -1,3 +1,4 @@
+/** Verify complete production selection and preserve browser-dependent exceptions. */
 import { glob } from 'tinyglobby';
 import { describe, expect, it } from 'vitest';
 import {

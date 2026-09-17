@@ -1,23 +1,27 @@
 # Test Conventions — SpawnForge
 
-## Vitest Workspace Structure
+## Production Vitest configuration
 
-The project has two Vitest configurations. Use them correctly:
+`web/vitest.config.ts` runs both environment projects and enforces aggregate
+coverage thresholds across their combined results:
 
-### Workspace (local dev only)
-`web/vitest.workspace.ts` splits tests into two projects:
-- `web/vitest.config.node.ts` — `environment: 'node'` for lib, stores, API routes
-- `web/vitest.config.jsdom.ts` — `environment: 'jsdom'` for components, hooks
+- `web/vitest.config.node.ts` selects server and unit tests in Node.
+- `web/vitest.config.jsdom.ts` selects browser-dependent tests in jsdom.
+- `web/vitest.test-selection.ts` defines the complementary partition, including
+  browser-dependent storage and scene tests. Existing per-file environment
+  annotations continue to apply.
 
-### Standalone (CI + coverage)
-`web/vitest.config.ts` — standalone config with `environment: 'jsdom'`, used by CI.
+CI and coverage runs must use the root configuration:
 
-**Important:** `--workspace` ignores per-project coverage thresholds. CI MUST use the standalone config:
 ```bash
 cd web && npx vitest run --config vitest.config.ts --coverage
 ```
 
-CI thresholds are auto-ratcheted upward from aggregate root coverage — read `web/vitest.config.ts` for the live values.
+The environment selectors do not define independent coverage thresholds.
+The ratchet reads and updates only the aggregate thresholds in
+`web/vitest.config.ts`. Read that file for their current values. The legacy
+`web/vitest.workspace.ts` references the same environment selectors for local
+use; it is not the production coverage gate.
 
 ## File Naming Conventions
 
