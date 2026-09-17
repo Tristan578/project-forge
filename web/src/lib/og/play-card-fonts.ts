@@ -19,7 +19,7 @@ function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
  */
 export const playCardFonts: Promise<OgFont[]> = Promise.all([
   readFile(fontAsset('NotoSans-Regular.ttf')),
-  readFile(fontAsset('NotoSansArabic-Satori.ttf')),
+  readFile(fontAsset('SpawnForgeArabic-Regular.ttf')),
   readFile(fontAsset('NotoSansCJKjp-Regular.otf')),
 ]).then(([latin, arabic, cjk]) => [
   { name: 'SpawnForge OG Latin', data: asArrayBuffer(latin), weight: 400 },

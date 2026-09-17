@@ -48,6 +48,39 @@ function cmapPoints(font: Buffer): Set<number> {
 }
 
 describe('exact checked-in OG glyph coverage', () => {
+
+  it('retains nonempty initial, medial, and final Arabic substitutions', () => {
+    const font = readFileSync(new URL('../../../assets/fonts/SpawnForgeArabic-Regular.ttf', import.meta.url));
+    let gsub = -1;
+    for (let i = 0; i < font.readUInt16BE(4); i++) {
+      const record = 12 + i * 16;
+      if (font.toString('ascii', record, record + 4) === 'GSUB') gsub = font.readUInt32BE(record + 8);
+    }
+    expect(gsub).toBeGreaterThan(0);
+    const features = gsub + font.readUInt16BE(gsub + 6);
+    const lookups = gsub + font.readUInt16BE(gsub + 8);
+    const tags: string[] = [];
+    for (let i = 0; i < font.readUInt16BE(features); i++) {
+      const record = features + 2 + i * 6;
+      tags.push(font.toString('ascii', record, record + 4));
+      const feature = features + font.readUInt16BE(record + 4);
+      expect(font.readUInt16BE(feature + 2)).toBeGreaterThan(0);
+      for (let j = 0; j < font.readUInt16BE(feature + 2); j++) {
+        const index = font.readUInt16BE(feature + 4 + j * 2);
+        const lookup = lookups + font.readUInt16BE(lookups + 2 + index * 2);
+        expect(font.readUInt16BE(lookup)).toBe(1);
+        expect(font.readUInt16BE(lookup + 4)).toBeGreaterThan(0);
+        for (let k = 0; k < font.readUInt16BE(lookup + 4); k++) {
+          const subtable = lookup + font.readUInt16BE(lookup + 6 + k * 2);
+          const coverage = subtable + font.readUInt16BE(subtable + 2);
+          expect([1, 2]).toContain(font.readUInt16BE(coverage));
+          expect(font.readUInt16BE(coverage + 2)).toBeGreaterThan(0);
+        }
+      }
+    }
+    expect(tags.sort()).toEqual(['fina', 'init', 'medi']);
+  });
+
   it('matches the independent font cmap union and source hashes', () => {
     const actual = new Set([9, 10, 13]);
     for (const [file, digest] of Object.entries(PLAY_CARD_FONT_SHA256)) {

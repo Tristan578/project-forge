@@ -66,8 +66,6 @@ async function renderOffline(makeResponse: () => Response | Promise<Response>) {
   try {
     const bytes = (await (await makeResponse()).arrayBuffer()).byteLength;
     return { remote, bytes };
-  } catch {
-    return { remote, bytes: 0 };
   } finally {
     globalThis.fetch = realFetch;
   }
