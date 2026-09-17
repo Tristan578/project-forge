@@ -1,6 +1,9 @@
 'use client';
 
+/** Collect an explicit analytics consent choice with accessible shared controls. */
+
 import { useCallback, useSyncExternalStore } from 'react';
+import { Button } from '@spawnforge/ui';
 import { initPostHog } from '@/lib/analytics/posthog';
 
 const STORAGE_KEY = 'forge-cookie-consent';
@@ -58,6 +61,9 @@ function getServerSnapshot(): boolean {
  * hydration-safe: getServerSnapshot returns true (banner hidden), matching
  * the SSR output. After hydration the client snapshot takes over — if the
  * user hasn't interacted yet (no key in localStorage), the banner appears.
+ * @returns An accessible consent banner, or null after a stored choice. Accept
+ * writes storage/cookie consent and requests analytics initialization; Decline
+ * writes a denial without initializing analytics.
  */
 export function CookieConsent() {
   const hasInteracted = useSyncExternalStore(subscribeToStorage, getConsentSnapshot, getServerSnapshot);
@@ -87,21 +93,24 @@ export function CookieConsent() {
       aria-label="Cookie consent"
     >
       <p className="mb-3 text-sm text-zinc-300">
-        We use cookies to improve your experience. By continuing to use SpawnForge, you agree to our use of cookies.
+        Optional analytics cookies help us improve SpawnForge. You can accept or decline them.
       </p>
       <div className="flex gap-2">
-        <button
+        <Button
           onClick={handleAccept}
-          className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          size="sm"
+          className="min-h-[44px] min-w-[44px]"
         >
           Accept
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={handleDecline}
-          className="rounded bg-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          variant="secondary"
+          size="sm"
+          className="min-h-[44px] min-w-[44px]"
         >
           Decline
-        </button>
+        </Button>
       </div>
     </div>
   );
