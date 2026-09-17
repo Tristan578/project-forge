@@ -257,20 +257,9 @@ check_child_unchanged "margin never pulls node config below current"
 # ---------------------------------------------------------------------------
 # 12. Workflow gates and commits only aggregate root thresholds, never the test seam
 # ---------------------------------------------------------------------------
-diff_gates=$(grep -c 'git diff --quiet web/vitest.config.ts; then' "$WORKFLOW" || true)
-check "both workflow diff gates inspect aggregate root thresholds" 2 "$diff_gates"
-
-child_wired=0
-grep -E -A4 'git (diff|add).*web/vitest.config.ts' "$WORKFLOW" | grep -q 'web/vitest.config.node.ts' && child_wired=1
-check "workflow does not gate or commit child thresholds" 0 "$child_wired"
-
-root_staged=0
-grep -q 'git add web/vitest.config.ts' "$WORKFLOW" && root_staged=1
-check "workflow stages aggregate root thresholds" 1 "$root_staged"
-
-seam_wired=0
-grep -v '^\s*#' "$WORKFLOW" | grep -q 'RATCHET_PROJECT_ROOT' && seam_wired=1
-check "RATCHET_PROJECT_ROOT seam is not wired in the workflow" 0 "$seam_wired"
+workflow_contract=0
+node "$REPO_ROOT/scripts/__tests__/ratchet-workflow-contract.cjs" || workflow_contract=$?
+check "executable workflow gates, staging, triggers and disabled-command controls" 0 "$workflow_contract"
 
 echo ""
 echo "$PASS passed, $FAIL failed"

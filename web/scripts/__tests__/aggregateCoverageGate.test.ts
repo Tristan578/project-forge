@@ -1,5 +1,5 @@
 // @vitest-environment node
-/** Prove passing tests still fail when any aggregate root coverage metric is low. */
+/** Prove two real environments jointly pass coverage and fail below aggregate thresholds. */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -57,6 +57,22 @@ it('enforces all four aggregate thresholds across successful Node and DOM projec
       expect(coverage.total[metric].total).toBeGreaterThan(0);
       expect(Number.isFinite(coverage.total[metric].pct)).toBe(true);
       expect(coverage.total[metric].pct).toBeLessThan(75);
+    }
+    // Each project covers only one side of each branch; only their union clears
+    // the unchanged production thresholds.
+    writeFileSync(join(directory, 'node.test.ts'), "import { expect, it } from 'vitest'; import { reached, untouched } from './subject'; it('Node passing aggregation control', () => { expect(typeof document).toBe('undefined'); expect(reached(true)).toBe(1); expect(untouched(true)).toBe(3); });");
+    writeFileSync(join(directory, 'dom.test.ts'), "import { expect, it } from 'vitest'; import { reached, untouched } from './subject'; it('DOM passing aggregation control', () => { expect(typeof document).toBe('object'); expect(reached(false)).toBe(2); expect(untouched(false)).toBe(4); });");
+    execFileSync(process.execPath, [cli, 'run', '--config', join(directory, 'vitest.config.mjs'), '--coverage', '--reporter=json', '--outputFile', results], {
+      cwd: web, env: { ...process.env, CI: 'true' }, timeout: 60000,
+      maxBuffer: 2 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const passing = JSON.parse(readFileSync(results, 'utf8'));
+    expect(passing.numPassedTests).toBe(2);
+    expect(passing.numFailedTests).toBe(0);
+    const aggregate = JSON.parse(readFileSync(join(directory, 'coverage/coverage-summary.json'), 'utf8'));
+    for (const metric of ['statements', 'branches', 'functions', 'lines']) {
+      expect(aggregate.total[metric].total).toBeGreaterThan(0);
+      expect(aggregate.total[metric].pct).toBe(100);
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });

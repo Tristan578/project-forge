@@ -20,7 +20,9 @@ on:
     paths:
       - 'web/src/**'
       - 'web/vitest.config.ts'
+      - 'web/vitest.config.node.ts'
       - 'web/vitest.config.jsdom.ts'
+      - 'web/vitest.test-selection.ts'
       - 'web/package.json'
 
 # Least privilege: labeling a PR rides the issues REST endpoint, but GitHub's
