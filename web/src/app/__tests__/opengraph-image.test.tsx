@@ -244,6 +244,42 @@ describe('play OG route renders offline with emoji-laden user text', () => {
   });
 });
 
+describe('play OG route renders supported multilingual text offline', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doUnmock('@/lib/db/client');
+  });
+
+  it.each([
+    ['Japanese', '星の冒険'],
+    ['Korean', '별의 모험'],
+    ['Chinese', '星际冒险'],
+    ['Cyrillic', 'Звёздное приключение'],
+    ['Arabic', 'مغامرة النجوم'],
+  ])('draws a %s title without a network font request', async (_script, title) => {
+    const rows = [
+      [{ id: 'u1', displayName: title }],
+      [{ title, description: title }],
+    ];
+    let call = 0;
+    vi.doMock('@/lib/db/client', () => ({
+      getDb: () => {
+        throw new Error('getDb should not run: queryWithResilience is mocked');
+      },
+      queryWithResilience: async () => rows[call++],
+    }));
+
+    const mod = await import('../play/[userId]/[slug]/opengraph-image');
+    const { remote, bytes } = await renderOffline(() =>
+      mod.default({ params: Promise.resolve({ userId: 'clerk_1', slug: 'space-game' }) })
+    );
+
+    expect(call).toBe(2);
+    expect(remote).toEqual([]);
+    expect(bytes).toBeGreaterThan(0);
+  });
+});
+
 /*
  * Why the truncation guard is not an offline-render test.
  *
@@ -333,6 +369,7 @@ describe('OG sources carry no emoji codepoints', () => {
       'app/play/[userId]/[slug]/opengraph-image.tsx',
       'app/pricing/opengraph-image.tsx',
       'lib/og/BrandMark.tsx',
+      'lib/og/play-card-fonts.ts',
       'lib/og/text.ts',
     ]);
   });
