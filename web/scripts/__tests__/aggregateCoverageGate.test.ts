@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
 import { expect, it } from 'vitest';
 
-it('enforces all four aggregate thresholds after a successful fixture test', () => {
+it('enforces all four aggregate thresholds across successful Node and DOM projects', () => {
   const web = process.cwd();
   const directory = mkdtempSync(join(web, '.aggregate-coverage-negative-'));
   const relative = basename(directory);
@@ -21,11 +21,14 @@ it('enforces all four aggregate thresholds after a successful fixture test', () 
       '  return 4;',
       '}',
     ].join('\n'));
-    writeFileSync(join(directory, 'subject.test.ts'), "import { expect, it } from 'vitest'; import { reached } from './subject'; it('positive test control', () => expect(reached(true)).toBe(1));");
+    writeFileSync(join(directory, 'node.test.ts'), "import { expect, it } from 'vitest'; import { reached } from './subject'; it('Node positive control', () => { expect(typeof document).toBe('undefined'); expect(reached(true)).toBe(1); });");
+    writeFileSync(join(directory, 'dom.test.ts'), "import { expect, it } from 'vitest'; import { reached } from './subject'; it('DOM positive control', () => { expect(typeof document).toBe('object'); expect(reached(false)).toBe(2); });");
     writeFileSync(join(directory, 'vitest.config.mjs'), [
       "import base from '../vitest.config.ts';",
-      'export default { ...base, test: { ...base.test, projects: undefined, environment: "node",',
-      'include: [' + JSON.stringify(relative + '/subject.test.ts') + '],',
+      "import node from '../vitest.config.node.ts'; import dom from '../vitest.config.jsdom.ts';",
+      "const configs = { './vitest.config.node.ts': node, './vitest.config.jsdom.ts': dom };",
+      'export default { ...base, test: { ...base.test,',
+      'projects: base.test.projects.map(name => ({ ...configs[name], test: { ...configs[name].test, exclude: [], include: [' + JSON.stringify(relative) + ' + (configs[name].test.environment === "node" ? "/node.test.ts" : "/dom.test.ts")] } })),',
       'coverage: { ...base.test.coverage, include: [' + JSON.stringify(relative + '/subject.ts') + '], exclude: [],',
       'reportsDirectory: ' + JSON.stringify(join(directory, 'coverage')) + ' } } };',
     ].join('\n'));
@@ -46,7 +49,7 @@ it('enforces all four aggregate thresholds after a successful fixture test', () 
     }
     expect(status).toBe(1);
     const report = JSON.parse(readFileSync(results, 'utf8'));
-    expect(report.numPassedTests).toBe(1);
+    expect(report.numPassedTests).toBe(2);
     expect(report.numFailedTests).toBe(0);
     const coverage = JSON.parse(readFileSync(join(directory, 'coverage/coverage-summary.json'), 'utf8'));
     for (const metric of ['statements', 'branches', 'functions', 'lines']) {
