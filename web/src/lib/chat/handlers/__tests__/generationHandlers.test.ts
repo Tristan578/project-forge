@@ -20,6 +20,7 @@ vi.mock('@/lib/config/providers', async (importOriginal) => {
   return { ...actual, getCapabilityUnavailability: vi.fn(actual.getCapabilityUnavailability) };
 });
 import { getCapabilityUnavailability } from '@/lib/config/providers';
+import { enrichSfxPrompt } from '@/lib/generate/promptEnricher';
 
 const mockAddJob = vi.fn();
 const mockUpdateJob = vi.fn();
@@ -97,11 +98,12 @@ async function invoke(
   storeOverrides: Record<string, unknown> = {},
 ) {
   const store = createMockStore({ ...makeGenStore(), ...storeOverrides });
+  const dispatchCommand = vi.fn();
   const result = await generationHandlers[name](args, {
     store,
-    dispatchCommand: vi.fn(),
+    dispatchCommand,
   });
-  return { result, store };
+  return { result, store, dispatchCommand };
 }
 
 function mockFetchSuccess(data: Record<string, unknown> = {}) {
@@ -434,6 +436,29 @@ describe('generationHandlers', () => {
       await invoke('generate_sfx', { prompt: 'boom', durationSeconds: 10 });
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(body.durationSeconds).toBe(10);
+    });
+
+    it('ignores an inherited entity name but retains an own __proto__ entity name', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ audioBase64: 'inherited-audio' }) });
+      const inherited = await invoke('generate_sfx', {
+        prompt: 'boom', entityId: '__proto__',
+      }, {
+        sceneGraph: { nodes: Object.create({ __proto__: { name: 'Inherited name' } }), rootIds: [] },
+      });
+      expect(inherited.result.success).toBe(true);
+      expect(vi.mocked(enrichSfxPrompt)).toHaveBeenCalledWith('boom', undefined, inherited.store);
+      expect(inherited.dispatchCommand).not.toHaveBeenCalled();
+
+      vi.mocked(enrichSfxPrompt).mockClear();
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ audioBase64: 'own-audio' }) });
+      const nodes = Object.create(null) as Record<string, { name: string }>;
+      nodes.__proto__ = { name: 'Own prototype name' };
+      const own = await invoke('generate_sfx', {
+        prompt: 'boom', entityId: '__proto__',
+      }, { sceneGraph: { nodes, rootIds: [] } });
+      expect(own.result.success).toBe(true);
+      expect(vi.mocked(enrichSfxPrompt)).toHaveBeenCalledWith('boom', 'Own prototype name', own.store);
+      expect(own.store.setAudio).toHaveBeenCalledWith('__proto__', expect.any(Object));
     });
 
     it('returns error on API failure', async () => {
