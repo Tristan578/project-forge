@@ -4,6 +4,7 @@ import { publishedGames, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { BrandMark } from '@/lib/og/BrandMark';
 import { initialFor, stripEmoji, truncateChars } from '@/lib/og/text';
+import { isPlayCardTextCovered, playCardFonts } from '@/lib/og/play-card-fonts';
 
 export const alt = 'SpawnForge Game';
 export const size = { width: 1200, height: 630 };
@@ -28,7 +29,7 @@ function getGradient(slug: string): string {
   return `linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 50%, ${colors[2]} 100%)`;
 }
 
-function renderFallback() {
+async function renderFallback() {
   return new ImageResponse(
     (
       <div
@@ -41,6 +42,7 @@ function renderFallback() {
           justifyContent: 'center',
           background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0f3460 100%)',
           padding: 60,
+          fontFamily: 'SpawnForge OG CJK, SpawnForge OG Arabic, SpawnForge OG Latin',
         }}
       >
         <div style={{ fontSize: 64, fontWeight: 800, color: '#ffffff' }}>
@@ -51,7 +53,7 @@ function renderFallback() {
         </div>
       </div>
     ),
-    { ...size }
+    { ...size, fonts: await playCardFonts }
   );
 }
 
@@ -100,19 +102,8 @@ async function loadCard(clerkId: string, slug: string): Promise<CardData | null>
 
     if (!game) return null;
 
-    // Every string here reaches satori, and satori resolves emoji through a
-    // third-party CDN. These three are the only user-supplied text on the card.
-    //
-    // Stripping emoji closes that fetch, but it is not the only one: any
-    // codepoint outside `@vercel/og`'s Latin-only bundled font is resolved
-    // through `https://fonts.googleapis.com/css2?family=<font>&text=<the text
-    // itself>`, so a CJK, Cyrillic, Arabic or Thai title is sent to Google in a
-    // query string on every render. That is pre-existing and unchanged here,
-    // and unlike the emoji path it fails open — the card still renders, with
-    // the uncovered glyphs blank — which is why nothing has ever reported it.
-    // Closing it means bundling a wider font set; tracked as PF-1153.
     const description = stripEmoji(game.description ?? '') || 'Play this game on SpawnForge';
-    return {
+    const card = {
       title: stripEmoji(game.title) || 'Untitled Game',
       creatorName: stripEmoji(user.displayName ?? '') || 'Unknown Creator',
       // Truncate after stripping — the emoji are gone by now, so the cut can no
@@ -121,6 +112,12 @@ async function loadCard(clerkId: string, slug: string): Promise<CardData | null>
       // strip and would still be cut in half by `slice`).
       description: truncateChars(description, 120),
     };
+    // Satori otherwise falls back to a dynamic Google Fonts request for an
+    // uncovered glyph. Keep the unmodified multilingual card only when every
+    // visible character is represented by the checked-in local font assets.
+    return [card.title, card.creatorName, card.description].every(isPlayCardTextCovered)
+      ? card
+      : null;
   } catch {
     return null;
   }
@@ -145,6 +142,7 @@ export default async function Image({ params }: Props) {
           justifyContent: 'space-between',
           background: getGradient(slug),
           padding: 60,
+          fontFamily: 'SpawnForge OG CJK, SpawnForge OG Arabic, SpawnForge OG Latin',
         }}
       >
         {/* Top: game info */}
@@ -232,6 +230,6 @@ export default async function Image({ params }: Props) {
         </div>
       </div>
     ),
-    { ...size }
+    { ...size, fonts: await playCardFonts }
   );
 }
