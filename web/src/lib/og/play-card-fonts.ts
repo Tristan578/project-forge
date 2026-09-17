@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { PLAY_CARD_GLYPH_RANGES } from './play-card-glyphs';
 
+/** A local font face passed to Satori with its exact supported weight. */
 export type OgFont = {
   name: string;
   data: ArrayBuffer;
@@ -44,6 +45,7 @@ async function readPlayCardFonts(): Promise<OgFont[]> {
  * Return custom fonts when every local asset is readable, otherwise null.
  * Callers must omit ImageResponse's `fonts` option for null and render only
  * neutral ASCII text with Next's bundled local fallback font.
+ * @returns Cached local faces, or null after a failed read; the next call retries.
  */
 export async function loadPlayCardFonts(): Promise<OgFont[] | null> {
   pendingFonts ??= readPlayCardFonts();
