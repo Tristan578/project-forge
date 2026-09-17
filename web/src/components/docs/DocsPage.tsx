@@ -172,14 +172,14 @@ export function DocsPage() {
           <nav className="w-64 shrink-0" aria-label="Documentation navigation">
             {/* Search */}
             <div className="mb-4">
-              <div className="flex items-center gap-2 rounded-lg bg-[var(--sf-bg-surface)] px-3 py-2">
-                <Search size={14} className="text-[var(--sf-text)]" />
+              <div className="relative">
+                <Search size={14} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--sf-text)]" />
                 <Input aria-label="Search documentation"
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search docs..."
-                  className="min-h-[44px] min-w-0 flex-1 bg-transparent text-sm text-[var(--sf-text)] placeholder:text-[var(--sf-text)]"
+                  className="min-h-[44px] min-w-0 pl-9 text-sm text-[var(--sf-text)] placeholder:italic placeholder:text-[var(--sf-text)]"
                 />
               </div>
             </div>
@@ -268,14 +268,14 @@ export function DocsPage() {
         <div className="md:hidden">
           {/* Search */}
           <div className="mb-4">
-            <div className="flex items-center gap-2 rounded-lg bg-[var(--sf-bg-surface)] px-3 py-2">
-              <Search size={14} className="text-[var(--sf-text)]" />
+            <div className="relative">
+              <Search size={14} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--sf-text)]" />
               <Input aria-label="Search documentation"
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search docs..."
-                className="min-h-[44px] min-w-0 flex-1 bg-transparent text-sm text-[var(--sf-text)] placeholder:text-[var(--sf-text)]"
+                className="min-h-[44px] min-w-0 pl-9 text-sm text-[var(--sf-text)] placeholder:italic placeholder:text-[var(--sf-text)]"
               />
             </div>
           </div>
