@@ -45,6 +45,10 @@ const setupContent = [
   'Some `inline code` snippet.',
   'An external [link](https://example.com) reference.',
   'A local [link](/docs/other) reference.',
+  '  [Standalone paragraph](/docs/standalone)  ',
+  '- [Command Reference](../reference/commands.md)',
+  '3. [External resource](https://example.com/resource)',
+  '[First reference](/docs/first) | [Second reference](/docs/second)',
   '',
   '- bullet one',
   '- bullet two',
@@ -222,7 +226,7 @@ describe('DocsPage', () => {
 
   it('renders the docs home with a quick-start link and category grid', async () => {
     const { container } = await renderLoaded();
-    const pane = within(container.querySelector('.min-w-0.flex-1') as HTMLElement);
+    const pane = within(container.querySelector('[aria-label="Documentation content"]') as HTMLElement);
 
     // Quick-start button, from the "index" doc.
     expect(pane.getByText('Welcome to SpawnForge')).toBeInTheDocument();
@@ -268,9 +272,12 @@ describe('DocsPage', () => {
 
     // "features" starts expanded by default.
     expect(within(nav).getByText('Feature Beta')).toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: /Features/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(nav).getByRole('textbox', { name: 'Search documentation' })).toHaveClass('focus-visible:ring-2', 'min-h-[44px]');
 
     fireEvent.click(within(nav).getByRole('button', { name: /Features/ }));
     expect(within(nav).queryByText('Feature Beta')).not.toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: /Features/ })).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.click(within(nav).getByRole('button', { name: /Features/ }));
     expect(within(nav).getByText('Feature Beta')).toBeInTheDocument();
@@ -281,8 +288,10 @@ describe('DocsPage', () => {
     const nav = getNav();
 
     fireEvent.click(within(nav).getByText('Setup Guide'));
+    expect(within(nav).getByRole('button', { name: 'Setup Guide' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('button', { name: 'Feature Alpha' })).not.toHaveAttribute('aria-current');
 
-    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
+    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
     const content = within(pane);
 
     // Breadcrumb: category label + doc title.
@@ -293,6 +302,7 @@ describe('DocsPage', () => {
     const hrefs = Array.from(toc).map((a) => a.getAttribute('href'));
     expect(hrefs).toContain('#setup-guide');
     expect(hrefs).toContain('#installation');
+    for (const link of toc) expect(link).toHaveClass('min-h-[44px]');
 
     // Headers get slugified ids.
     expect(pane.querySelector('h1#setup-guide')?.textContent).toBe('Setup Guide');
@@ -307,6 +317,8 @@ describe('DocsPage', () => {
     expect(externalLink.textContent).toBe('link');
     expect(externalLink.target).toBe('_blank');
     expect(externalLink.rel).toBe('noopener noreferrer');
+    expect(externalLink).toHaveClass('inline', 'focus-visible:ring-2');
+    expect(externalLink).not.toHaveClass('inline-flex', 'min-h-[44px]');
 
     const localLink = pane.querySelector('a[href="/docs/other"]') as HTMLAnchorElement;
     expect(localLink.textContent).toBe('link');
@@ -332,23 +344,40 @@ describe('DocsPage', () => {
     expect(content.getByText('Final paragraph.')).toBeInTheDocument();
   });
 
+  it('keeps bare paragraph and list links as standalone controls while sentence links stay inline', async () => {
+    const { container } = await renderLoaded();
+    fireEvent.click(within(getNav()).getByText('Setup Guide'));
+    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
+    for (const href of ['/docs/standalone', '../reference/commands.md', 'https://example.com/resource', '/docs/first', '/docs/second']) {
+      const link = pane.querySelector(`a[href="${href}"]`) as HTMLAnchorElement;
+      expect(link).toHaveClass('inline-flex', 'min-h-[44px]', 'min-w-[44px]', 'focus-visible:ring-2');
+    }
+    const external = pane.querySelector('a[href="https://example.com/resource"]') as HTMLAnchorElement;
+    expect(external).toHaveAttribute('target', '_blank');
+    expect(external).toHaveAttribute('rel', 'noopener noreferrer');
+    const sentenceLink = pane.querySelector('a[href="https://example.com"]') as HTMLAnchorElement;
+    expect(sentenceLink).toHaveClass('inline');
+    expect(sentenceLink).not.toHaveClass('inline-flex', 'min-h-[44px]');
+  });
+
   it('returns to docs home via the breadcrumb back button', async () => {
     const { container } = await renderLoaded();
     const nav = getNav();
 
     fireEvent.click(within(nav).getByText('Setup Guide'));
-    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
+    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
     expect(within(pane).getByText('Getting Started')).toBeInTheDocument();
 
     fireEvent.click(within(pane).getByTitle('Back to docs home'));
 
     expect(mockRouterReplace).toHaveBeenCalledWith('/docs', { scroll: false });
+    expect(nav.querySelector('[aria-current]')).toBeNull();
     expect(within(pane).getByText('Welcome to SpawnForge')).toBeInTheDocument();
   });
 
   it('syncs activePath when the "path" search param changes after mount', async () => {
     const { container, rerender } = await renderLoaded();
-    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
+    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
 
     // No doc active yet — docs home is showing.
     expect(within(pane).getByText('Welcome to SpawnForge')).toBeInTheDocument();
@@ -357,5 +386,23 @@ describe('DocsPage', () => {
     rerender(<DocsPage />);
 
     expect(within(pane).getByText('Feature Alpha')).toBeInTheDocument();
+    expect(within(getNav()).getByRole('button', { name: 'Feature Alpha' })).toHaveAttribute('aria-current', 'page');
+    expect(within(getNav()).getByRole('button', { name: 'Setup Guide' })).not.toHaveAttribute('aria-current');
+    currentPathParam = 'features/b';
+    rerender(<DocsPage />);
+    expect(within(getNav()).getByRole('button', { name: 'Feature Beta' })).toHaveAttribute('aria-current', 'page');
+    expect(within(getNav()).getByRole('button', { name: 'Feature Alpha' })).not.toHaveAttribute('aria-current');
+    currentPathParam = null;
+    rerender(<DocsPage />);
+    expect(getNav().querySelector('[aria-current]')).toBeNull();
+  });
+  it('moves the selected marker when another navigation item is clicked', async () => {
+    await renderLoaded();
+    const nav = getNav();
+    fireEvent.click(within(nav).getByRole('button', { name: 'Feature Alpha' }));
+    expect(within(nav).getByRole('button', { name: 'Feature Alpha' })).toHaveAttribute('aria-current', 'page');
+    fireEvent.click(within(nav).getByRole('button', { name: 'Feature Beta' }));
+    expect(within(nav).getByRole('button', { name: 'Feature Beta' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('button', { name: 'Feature Alpha' })).not.toHaveAttribute('aria-current');
   });
 });

@@ -27,6 +27,8 @@ const COLOR_TOKEN_KEYS = new Set([
     '--sf-status-degraded-bg', '--sf-status-degraded-fg',
     '--sf-status-down-bg', '--sf-status-down-fg',
     '--sf-status-unknown-bg', '--sf-status-unknown-fg',
+    '--sf-status-healthy-indicator', '--sf-status-degraded-indicator',
+    '--sf-status-down-indicator', '--sf-status-unknown-indicator',
     '--sf-bg-app', '--sf-bg-surface', '--sf-bg-elevated', '--sf-bg-overlay',
     '--sf-text', '--sf-text-secondary', '--sf-text-muted', '--sf-text-disabled',
     '--sf-border', '--sf-border-strong',

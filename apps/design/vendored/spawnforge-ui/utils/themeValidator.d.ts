@@ -1,3 +1,4 @@
+/** Validate imported custom theme metadata and allowlisted CSS token values. */
 import type { ThemeTokens } from '../tokens';
 declare const _validated: unique symbol;
 export interface ValidatedTheme {

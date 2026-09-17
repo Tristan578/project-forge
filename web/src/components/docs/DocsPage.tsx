@@ -1,7 +1,10 @@
 'use client';
 
+/** Search and browse documentation with theme-aware, keyboard-accessible controls. */
+
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Button, Input, cn } from '@spawnforge/ui';
 import {
   BookOpen,
   Search,
@@ -30,6 +33,11 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CATEGORY_ORDER = ['root', 'getting-started', 'features', 'guides', 'reference'];
 
+/**
+ * Load the docs index and synchronize the selected article with the URL path query.
+ * @returns Search, category navigation, and the selected documentation article;
+ * loading and fetch failures render their corresponding visible states.
+ */
 export function DocsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -120,7 +128,7 @@ export function DocsPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--sf-bg-app)] text-[var(--sf-text)]">
         Loading documentation...
       </div>
     );
@@ -128,10 +136,10 @@ export function DocsPage() {
 
   if (error) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 p-4">
-        <BookOpen size={32} className="mb-3 text-zinc-400" />
-        <p className="text-sm text-red-400">{error}</p>
-        <p className="mt-2 text-xs text-zinc-400">
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[var(--sf-bg-app)] p-4">
+        <BookOpen size={32} className="mb-3 text-[var(--sf-text)]" />
+        <p className="text-sm text-[var(--sf-status-down-indicator)]">{error}</p>
+        <p className="mt-2 text-xs text-[var(--sf-text)]">
           Documentation is available when running the dev server.
         </p>
       </div>
@@ -139,19 +147,19 @@ export function DocsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-200">
+    <div className="min-h-screen bg-[var(--sf-bg-app)] text-[var(--sf-text)]">
       {/* Header */}
-      <div className="border-b border-zinc-800 bg-zinc-900">
+      <div className="border-b border-[var(--sf-border)] bg-[var(--sf-bg-surface)]">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-6 py-4">
-          <button
+          <Button variant="ghost" size="sm"
             onClick={() => router.push('/dashboard')}
-            className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+            className="min-h-[44px] sm:min-h-[44px] min-w-[44px] rounded p-1.5 text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
             aria-label="Back to dashboard"
           >
             <ArrowLeft size={20} />
-          </button>
+          </Button>
           <div className="flex items-center gap-2">
-            <BookOpen size={20} className="text-blue-400" />
+            <BookOpen size={20} className="text-[var(--sf-text)]" />
             <h1 className="text-xl font-semibold">Documentation</h1>
           </div>
         </div>
@@ -164,14 +172,14 @@ export function DocsPage() {
           <nav className="w-64 shrink-0" aria-label="Documentation navigation">
             {/* Search */}
             <div className="mb-4">
-              <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-                <Search size={14} className="text-zinc-400" />
-                <input
+              <div className="relative">
+                <Search size={14} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--sf-text)]" />
+                <Input aria-label="Search documentation"
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search docs..."
-                  className="flex-1 bg-transparent text-sm text-zinc-300 outline-none placeholder:text-zinc-400"
+                  className="min-h-[44px] min-w-0 pl-9 text-sm text-[var(--sf-text)] placeholder:italic placeholder:text-[var(--sf-text)]"
                 />
               </div>
             </div>
@@ -180,26 +188,26 @@ export function DocsPage() {
             {searchResults.length > 0 ? (
               <div className="space-y-1">
                 {searchResults.map((result) => (
-                  <button
+                  <Button variant="ghost" size="sm"
                     key={result.path}
                     onClick={() => navigateTo(result.path)}
-                    className="flex w-full flex-col rounded-lg px-3 py-2 text-left transition-colors hover:bg-zinc-800"
+                    className="h-auto min-h-[44px] sm:min-h-[44px] items-start justify-start whitespace-normal flex w-full flex-col rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--sf-bg-elevated)]"
                   >
                     <div className="flex items-center gap-1.5">
-                      <FileText size={12} className="text-blue-400" />
-                      <span className="text-sm font-medium text-zinc-300">{result.title}</span>
+                      <FileText size={12} className="text-[var(--sf-text)]" />
+                      <span className="text-sm font-medium text-[var(--sf-text)]">{result.title}</span>
                     </div>
                     {result.matchSection && (
-                      <span className="text-xs text-zinc-400">in: {result.matchSection}</span>
+                      <span className="text-xs text-[var(--sf-text)]">in: {result.matchSection}</span>
                     )}
-                    <span className="mt-0.5 text-xs text-zinc-400 line-clamp-2">
+                    <span className="mt-0.5 line-clamp-2 text-xs text-[var(--sf-text)]">
                       {result.snippet}
                     </span>
-                  </button>
+                  </Button>
                 ))}
               </div>
             ) : searchQuery ? (
-              <div className="flex flex-col items-center gap-2 py-8 text-zinc-400">
+              <div className="flex flex-col items-center gap-2 py-8 text-[var(--sf-text)]">
                 <Search size={20} />
                 <span className="text-sm">No results</span>
               </div>
@@ -211,29 +219,31 @@ export function DocsPage() {
                   const isExpanded = expandedCategories.has(cat);
                   return (
                     <div key={cat}>
-                      <button
+                      <Button variant="ghost" size="sm"
+                        aria-expanded={isExpanded}
                         onClick={() => toggleCategory(cat)}
-                        className="flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-left text-sm font-semibold text-zinc-400 transition-colors hover:text-zinc-300"
+                        className="h-auto min-h-[44px] sm:min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-left text-sm font-semibold text-[var(--sf-text)] transition-colors hover:text-[var(--sf-text)]"
                       >
                         {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         {CATEGORY_LABELS[cat] ?? cat}
-                        <span className="text-xs text-zinc-400">({catDocs.length})</span>
-                      </button>
+                        <span className="text-xs text-[var(--sf-text)]">({catDocs.length})</span>
+                      </Button>
                       {isExpanded && (
                         <div className="ml-2 space-y-0.5">
                           {catDocs.map((doc) => (
-                            <button
+                            <Button variant="ghost" size="sm"
                               key={doc.path}
+                              aria-current={activePath === doc.path ? 'page' : undefined}
                               onClick={() => navigateTo(doc.path)}
-                              className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${
+                              className={cn('h-auto min-h-[44px] sm:min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-2 rounded-lg border-s-2 px-3 py-1.5 text-left text-sm transition-colors',
                                 activePath === doc.path
-                                  ? 'bg-zinc-800 text-blue-400'
-                                  : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-300'
-                              }`}
+                                  ? 'border-[var(--sf-text)] bg-[var(--sf-bg-elevated)] font-semibold text-[var(--sf-text)]'
+                                  : 'border-transparent text-[var(--sf-text)] hover:bg-[var(--sf-bg-elevated)]/50 hover:text-[var(--sf-text)]'
+                              )}
                             >
                               <FileText size={12} />
-                              <span className="truncate">{doc.title}</span>
-                            </button>
+                              <span className="min-w-0 break-words">{doc.title}</span>
+                            </Button>
                           ))}
                         </div>
                       )}
@@ -245,7 +255,7 @@ export function DocsPage() {
           </nav>
 
           {/* Content */}
-          <div className="min-w-0 flex-1">
+          <div role="region" aria-label="Documentation content" className="min-w-0 flex-1">
             {activeDoc ? (
               <DocContent doc={activeDoc} onNavigate={navigateTo} onBack={goHome} />
             ) : (
@@ -258,14 +268,14 @@ export function DocsPage() {
         <div className="md:hidden">
           {/* Search */}
           <div className="mb-4">
-            <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-              <Search size={14} className="text-zinc-400" />
-              <input
+            <div className="relative">
+              <Search size={14} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--sf-text)]" />
+              <Input aria-label="Search documentation"
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search docs..."
-                className="flex-1 bg-transparent text-sm text-zinc-300 outline-none placeholder:text-zinc-400"
+                className="min-h-[44px] min-w-0 pl-9 text-sm text-[var(--sf-text)] placeholder:italic placeholder:text-[var(--sf-text)]"
               />
             </div>
           </div>
@@ -273,17 +283,17 @@ export function DocsPage() {
           {searchResults.length > 0 ? (
             <div className="space-y-1">
               {searchResults.map((result) => (
-                <button
+                <Button variant="ghost" size="sm"
                   key={result.path}
                   onClick={() => navigateTo(result.path)}
-                  className="flex w-full flex-col rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-left"
+                  className="h-auto min-h-[44px] sm:min-h-[44px] items-start justify-start whitespace-normal flex w-full flex-col rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-4 py-3 text-left"
                 >
                   <div className="flex items-center gap-1.5">
-                    <FileText size={12} className="text-blue-400" />
-                    <span className="text-sm font-medium text-zinc-300">{result.title}</span>
+                    <FileText size={12} className="text-[var(--sf-text)]" />
+                    <span className="text-sm font-medium text-[var(--sf-text)]">{result.title}</span>
                   </div>
-                  <span className="mt-1 text-xs text-zinc-400 line-clamp-2">{result.snippet}</span>
-                </button>
+                  <span className="mt-1 line-clamp-2 text-xs text-[var(--sf-text)]">{result.snippet}</span>
+                </Button>
               ))}
             </div>
           ) : activeDoc ? (
@@ -308,28 +318,29 @@ function DocContent({
   onBack: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900">
+    <div className="rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)]">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 border-b border-zinc-800 px-6 py-3">
-        <button
+      <div className="flex items-center gap-2 border-b border-[var(--sf-border)] px-6 py-3">
+        <Button variant="ghost" size="sm"
           onClick={onBack}
-          className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+          className="min-h-[44px] sm:min-h-[44px] min-w-[44px] rounded p-1 text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
+          aria-label="Back to docs home"
           title="Back to docs home"
         >
           <Home size={14} />
-        </button>
-        <ChevronRight size={12} className="text-zinc-700" />
-        <span className="text-xs text-zinc-400">
+        </Button>
+        <ChevronRight size={12} className="text-[var(--sf-text)]" />
+        <span className="text-xs text-[var(--sf-text)]">
           {CATEGORY_LABELS[doc.category] ?? doc.category}
         </span>
-        <ChevronRight size={12} className="text-zinc-700" />
-        <span className="text-sm font-medium text-zinc-300">{doc.title}</span>
+        <ChevronRight size={12} className="text-[var(--sf-text)]" />
+        <span className="text-sm font-medium text-[var(--sf-text)]">{doc.title}</span>
       </div>
 
       {/* Table of contents (if sections exist) */}
       {doc.sections.length > 1 && (
-        <div className="border-b border-zinc-800 px-6 py-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+        <div className="border-b border-[var(--sf-border)] px-6 py-3">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--sf-text)]">
             On this page
           </h3>
           <div className="space-y-1">
@@ -337,7 +348,7 @@ function DocContent({
               <a
                 key={i}
                 href={`#${slugify(section.heading)}`}
-                className="block text-sm text-zinc-400 transition-colors hover:text-blue-400"
+                className="flex min-h-[44px] items-center rounded text-sm text-[var(--sf-text)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
               >
                 {section.heading}
               </a>
@@ -348,7 +359,7 @@ function DocContent({
 
       {/* Markdown content */}
       <div className="px-6 py-6">
-        <div className="prose prose-invert max-w-none">
+        <div className="max-w-none break-words">
           <MarkdownContent content={doc.content} />
         </div>
       </div>
@@ -372,10 +383,10 @@ function DocsHome({
   return (
     <div className="space-y-8">
       {/* Welcome */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-6 py-8 text-center">
-        <BookOpen size={36} className="mx-auto mb-3 text-blue-400" />
-        <h2 className="text-2xl font-bold text-zinc-100">SpawnForge Documentation</h2>
-        <p className="mx-auto mt-2 max-w-lg text-sm text-zinc-400">
+      <div className="rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-6 py-8 text-center">
+        <BookOpen size={36} className="mx-auto mb-3 text-[var(--sf-text)]" />
+        <h2 className="text-2xl font-bold text-[var(--sf-text)]">SpawnForge Documentation</h2>
+        <p className="mx-auto mt-2 max-w-lg text-sm text-[var(--sf-text)]">
           Learn how to create games with SpawnForge. Browse guides, explore features, and reference
           the scripting API.
         </p>
@@ -383,18 +394,18 @@ function DocsHome({
 
       {/* Quick start from index doc */}
       {indexDoc && (
-        <button
+        <Button variant="ghost" size="sm"
           onClick={() => onNavigate('index')}
-          className="flex w-full items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-6 py-4 text-left transition-colors hover:border-blue-500/30"
+          className="h-auto min-h-[44px] sm:min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-3 rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-6 py-4 text-left transition-colors hover:border-[var(--sf-accent)]/30"
         >
-          <FileText size={20} className="text-blue-400" />
+          <FileText size={20} className="text-[var(--sf-text)]" />
           <div>
-            <div className="text-sm font-semibold text-zinc-200">{indexDoc.title}</div>
-            <div className="text-xs text-zinc-400">
+            <div className="text-sm font-semibold text-[var(--sf-text)]">{indexDoc.title}</div>
+            <div className="text-xs text-[var(--sf-text)]">
               Start here for an overview of SpawnForge
             </div>
           </div>
-        </button>
+        </Button>
       )}
 
       {/* Category grid */}
@@ -406,24 +417,24 @@ function DocsHome({
             return (
               <div
                 key={cat}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4"
+                className="rounded-lg border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-5 py-4"
               >
-                <h3 className="mb-3 text-sm font-semibold text-zinc-200">
+                <h3 className="mb-3 text-sm font-semibold text-[var(--sf-text)]">
                   {CATEGORY_LABELS[cat] ?? cat}
                 </h3>
                 <div className="space-y-1">
                   {catDocs.slice(0, 5).map((doc) => (
-                    <button
+                    <Button variant="ghost" size="sm"
                       key={doc.path}
                       onClick={() => onNavigate(doc.path)}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+                      className="h-auto min-h-[44px] sm:min-h-[44px] justify-start whitespace-normal flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
                     >
                       <FileText size={12} className="shrink-0" />
-                      <span className="truncate">{doc.title}</span>
-                    </button>
+                      <span className="min-w-0 break-words">{doc.title}</span>
+                    </Button>
                   ))}
                   {catDocs.length > 5 && (
-                    <p className="px-2 text-xs text-zinc-400">
+                    <p className="px-2 text-xs text-[var(--sf-text)]">
                       + {catDocs.length - 5} more
                     </p>
                   )}
@@ -460,7 +471,7 @@ function MarkdownContent({ content }: { content: string }) {
         elements.push(
           <pre
             key={`code-${codeKey++}`}
-            className="my-3 overflow-x-auto rounded-lg bg-zinc-800 p-4 text-sm text-zinc-400"
+            className="my-3 overflow-x-auto rounded-lg bg-[var(--sf-bg-elevated)] p-4 text-sm text-[var(--sf-text)]"
           >
             <code>{codeLines.join('\n')}</code>
           </pre>
@@ -481,36 +492,36 @@ function MarkdownContent({ content }: { content: string }) {
     if (line.startsWith('# ')) {
       const text = line.slice(2);
       elements.push(
-        <h1 key={i} id={slugify(text)} className="mb-4 mt-8 text-2xl font-bold text-zinc-100">
+        <h1 key={i} id={slugify(text)} className="mb-4 mt-8 text-2xl font-bold text-[var(--sf-text)]">
           {text}
         </h1>
       );
     } else if (line.startsWith('## ')) {
       const text = line.slice(3);
       elements.push(
-        <h2 key={i} id={slugify(text)} className="mb-3 mt-6 text-xl font-semibold text-zinc-200">
+        <h2 key={i} id={slugify(text)} className="mb-3 mt-6 text-xl font-semibold text-[var(--sf-text)]">
           {text}
         </h2>
       );
     } else if (line.startsWith('### ')) {
       const text = line.slice(4);
       elements.push(
-        <h3 key={i} id={slugify(text)} className="mb-2 mt-4 text-base font-semibold text-zinc-300">
+        <h3 key={i} id={slugify(text)} className="mb-2 mt-4 text-base font-semibold text-[var(--sf-text)]">
           {text}
         </h3>
       );
     } else if (line.startsWith('- ') || line.startsWith('* ')) {
       elements.push(
-        <div key={i} className="ml-4 flex gap-2 text-zinc-400">
-          <span className="text-zinc-400">&#8226;</span>
+        <div key={i} className="ml-4 flex gap-2 text-[var(--sf-text)]">
+          <span className="text-[var(--sf-text)]">&#8226;</span>
           <span>{formatInline(line.slice(2))}</span>
         </div>
       );
     } else if (line.match(/^\d+\.\s/)) {
       const num = line.match(/^(\d+)\.\s(.*)/)!;
       elements.push(
-        <div key={i} className="ml-4 flex gap-2 text-zinc-400">
-          <span className="text-zinc-400">{num[1]}.</span>
+        <div key={i} className="ml-4 flex gap-2 text-[var(--sf-text)]">
+          <span className="text-[var(--sf-text)]">{num[1]}.</span>
           <span>{formatInline(num[2])}</span>
         </div>
       );
@@ -518,7 +529,7 @@ function MarkdownContent({ content }: { content: string }) {
       elements.push(<div key={i} className="h-3" />);
     } else {
       elements.push(
-        <p key={i} className="leading-relaxed text-zinc-400">
+        <p key={i} className="leading-relaxed text-[var(--sf-text)]">
           {formatInline(line)}
         </p>
       );
@@ -530,6 +541,8 @@ function MarkdownContent({ content }: { content: string }) {
 
 /** Format inline Markdown; retain original-line context for nested bold content. */
 function formatInline(text: string, inlineText: string = text): React.ReactNode {
+  // Sentence links keep normal line boxes; bare link groups are standalone controls.
+  const hasSurroundingProse = /[\p{L}\p{N}]/u.test(text.replace(/\[[^\]]+\]\([^)]+\)/g, ''));
   const parts: React.ReactNode[] = [];
   let remaining = inlineText;
   let key = 0;
@@ -550,7 +563,10 @@ function formatInline(text: string, inlineText: string = text): React.ReactNode 
         <a
           key={key++}
           href={linkMatch[3]}
-          className="text-blue-400 underline underline-offset-2 hover:text-blue-300"
+          className={cn(
+            hasSurroundingProse ? 'inline' : 'inline-flex min-h-[44px] min-w-[44px] items-center',
+            'break-words text-[var(--sf-text)] underline underline-offset-2 hover:text-[var(--sf-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]',
+          )}
           target={linkMatch[3].startsWith('http') ? '_blank' : undefined}
           rel={linkMatch[3].startsWith('http') ? 'noopener noreferrer' : undefined}
         >
@@ -567,7 +583,7 @@ function formatInline(text: string, inlineText: string = text): React.ReactNode 
       parts.push(
         <code
           key={key++}
-          className="rounded bg-zinc-800 px-1.5 py-0.5 text-sm text-blue-400"
+          className="rounded bg-[var(--sf-bg-elevated)] px-1.5 py-0.5 text-sm text-[var(--sf-text)]"
         >
           {codeMatch[2]}
         </code>
@@ -580,7 +596,7 @@ function formatInline(text: string, inlineText: string = text): React.ReactNode 
     if (boldMatch && boldMatch[1].length === tokenStart) {
       if (boldMatch[1]) parts.push(boldMatch[1]);
       parts.push(
-        <strong key={key++} className="font-semibold text-zinc-200">
+        <strong key={key++} className="font-semibold text-[var(--sf-text)]">
           {formatInline(text, boldMatch[2])}
         </strong>
       );

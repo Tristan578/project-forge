@@ -18,6 +18,8 @@ describe('Token backward compatibility', () => {
     '--sf-status-degraded-bg', '--sf-status-degraded-fg',
     '--sf-status-down-bg', '--sf-status-down-fg',
     '--sf-status-unknown-bg', '--sf-status-unknown-fg',
+    '--sf-status-healthy-indicator', '--sf-status-degraded-indicator',
+    '--sf-status-down-indicator', '--sf-status-unknown-indicator',
     '--sf-radius-sm', '--sf-radius-md', '--sf-radius-lg', '--sf-radius-xl', '--sf-radius-full',
     '--sf-border-width', '--sf-font-ui', '--sf-font-mono', '--sf-transition',
   ];

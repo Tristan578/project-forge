@@ -1,19 +1,23 @@
+/** Render one service health result using accessible semantic theme colors. */
+import { cn } from '@spawnforge/ui';
 import type { ServiceHealth } from '@/lib/monitoring/healthChecks';
 
+/** Inputs for a service status card. */
 interface ServiceStatusCardProps {
+  /** Latest health result, including status, latency, timestamp, and optional message. */
   service: ServiceHealth;
 }
 
 function statusColor(status: ServiceHealth['status']): string {
   switch (status) {
     case 'healthy':
-      return 'bg-green-500';
+      return 'bg-[var(--sf-status-healthy-indicator)]';
     case 'degraded':
-      return 'bg-yellow-500';
+      return 'bg-[var(--sf-status-degraded-indicator)]';
     case 'down':
-      return 'bg-red-500';
+      return 'bg-[var(--sf-status-down-indicator)]';
     default:
-      return 'bg-zinc-500';
+      return 'bg-[var(--sf-status-unknown-indicator)]';
   }
 }
 
@@ -33,13 +37,13 @@ function statusLabel(status: ServiceHealth['status']): string {
 function statusTextColor(status: ServiceHealth['status']): string {
   switch (status) {
     case 'healthy':
-      return 'text-green-500';
+      return 'text-[var(--sf-status-healthy-indicator)]';
     case 'degraded':
-      return 'text-yellow-500';
+      return 'text-[var(--sf-status-degraded-indicator)]';
     case 'down':
-      return 'text-red-500';
+      return 'text-[var(--sf-status-down-indicator)]';
     default:
-      return 'text-zinc-400';
+      return 'text-[var(--sf-status-unknown-indicator)]';
   }
 }
 
@@ -51,30 +55,36 @@ function formatTimestamp(iso: string): string {
   }
 }
 
+/**
+ * Render a service health summary with a text label alongside its status indicator.
+ * @param props.service Latest service health result; unrecognized statuses display Unknown.
+ * @returns A themed card containing status and diagnostic details.
+ */
 export function ServiceStatusCard({ service }: ServiceStatusCardProps) {
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4 dark:border-zinc-700 dark:bg-zinc-800">
+    <div className="rounded-[var(--sf-radius-lg)] border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <span
-            className={`mt-0.5 h-3 w-3 flex-shrink-0 rounded-full ${statusColor(service.status)}`}
+            className={cn('mt-0.5 h-3 w-3 flex-shrink-0 rounded-full', statusColor(service.status))}
+            data-testid="service-status-indicator"
             aria-hidden="true"
           />
-          <h3 className="text-sm font-medium text-zinc-100">{service.name}</h3>
+          <h3 className="text-sm font-medium text-[var(--sf-text)]">{service.name}</h3>
         </div>
-        <span className={`text-xs font-semibold ${statusTextColor(service.status)}`}>
+        <span className={cn('text-xs font-semibold', statusTextColor(service.status))}>
           {statusLabel(service.status)}
         </span>
       </div>
 
-      <div className="mt-3 space-y-1 text-xs text-zinc-400">
+      <div className="mt-3 space-y-1 text-xs text-[var(--sf-text-secondary)]">
         {service.latencyMs > 0 && (
           <p>
-            <span className="font-medium text-zinc-300">Latency:</span> {service.latencyMs}ms
+            <span className="font-medium text-[var(--sf-text)]">Latency:</span> {service.latencyMs}ms
           </p>
         )}
         <p>
-          <span className="font-medium text-zinc-300">Last checked:</span>{' '}
+          <span className="font-medium text-[var(--sf-text)]">Last checked:</span>{' '}
           {formatTimestamp(service.lastChecked)}
         </p>
         {/*
@@ -87,10 +97,10 @@ export function ServiceStatusCard({ service }: ServiceStatusCardProps) {
           today's rendering: it is then the only line there is.
         */}
         {service.summary ? (
-          <p className="mt-2 rounded bg-zinc-700 px-2 py-1 text-zinc-200">{service.summary}</p>
+          <p data-testid="service-status-message" className="mt-2 rounded bg-[var(--sf-bg-elevated)] px-2 py-1 text-[var(--sf-text)]">{service.summary}</p>
         ) : (
           service.error && (
-            <p className="mt-2 rounded bg-zinc-700 px-2 py-1 text-zinc-300">{service.error}</p>
+            <p data-testid="service-status-message" className="mt-2 rounded bg-[var(--sf-bg-elevated)] px-2 py-1 text-[var(--sf-text)]">{service.error}</p>
           )
         )}
       </div>
