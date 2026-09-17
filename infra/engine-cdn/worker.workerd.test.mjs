@@ -79,6 +79,7 @@ describe('canonical Wrangler config in real workerd', () => {
     assert.deepEqual(new Uint8Array(await (await bucket.get(wasm)).arrayBuffer()), magic);
     const preflight = await server.fetch('/' + wasm, { method: 'OPTIONS' });
     assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('cache-control'), 'no-store');
     assert.equal(preflight.headers.get('access-control-allow-methods'), 'GET, HEAD, OPTIONS');
   });
 });
