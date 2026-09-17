@@ -539,18 +539,25 @@ function MarkdownContent({ content }: { content: string }) {
   return <>{elements}</>;
 }
 
-/** Format inline markdown (bold, code, links) */
-function formatInline(text: string): React.ReactNode {
+/** Format inline Markdown; retain original-line context for nested bold content. */
+function formatInline(text: string, inlineText: string = text): React.ReactNode {
   // Sentence links keep normal line boxes; bare link groups are standalone controls.
   const hasSurroundingProse = /[\p{L}\p{N}]/u.test(text.replace(/\[[^\]]+\]\([^)]+\)/g, ''));
   const parts: React.ReactNode[] = [];
-  let remaining = text;
+  let remaining = inlineText;
   let key = 0;
 
   while (remaining) {
     // Links: [text](url)
     const linkMatch = remaining.match(/^(.*?)\[([^\]]+)\]\(([^)]+)\)(.*)/);
-    if (linkMatch) {
+    const codeMatch = remaining.match(/^(.*?)`([^`]+)`(.*)/);
+    const boldMatch = remaining.match(/^(.*?)\*\*([^*]+)\*\*(.*)/);
+    const tokenStart = Math.min(
+      linkMatch?.[1].length ?? Infinity,
+      codeMatch?.[1].length ?? Infinity,
+      boldMatch?.[1].length ?? Infinity,
+    );
+    if (linkMatch && linkMatch[1].length === tokenStart) {
       if (linkMatch[1]) parts.push(linkMatch[1]);
       parts.push(
         <a
@@ -571,8 +578,7 @@ function formatInline(text: string): React.ReactNode {
     }
 
     // Inline code
-    const codeMatch = remaining.match(/^(.*?)`([^`]+)`(.*)/);
-    if (codeMatch) {
+    if (codeMatch && codeMatch[1].length === tokenStart) {
       if (codeMatch[1]) parts.push(codeMatch[1]);
       parts.push(
         <code
@@ -587,12 +593,11 @@ function formatInline(text: string): React.ReactNode {
     }
 
     // Bold
-    const boldMatch = remaining.match(/^(.*?)\*\*([^*]+)\*\*(.*)/);
-    if (boldMatch) {
+    if (boldMatch && boldMatch[1].length === tokenStart) {
       if (boldMatch[1]) parts.push(boldMatch[1]);
       parts.push(
         <strong key={key++} className="font-semibold text-[var(--sf-text)]">
-          {boldMatch[2]}
+          {formatInline(text, boldMatch[2])}
         </strong>
       );
       remaining = boldMatch[3];
