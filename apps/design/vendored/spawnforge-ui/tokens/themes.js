@@ -24,11 +24,25 @@ const STATUS_COLORS = {
     '--sf-status-unknown-bg': '#52525b',
     '--sf-status-unknown-fg': '#ffffff',
 };
+/** Status foregrounds for unfilled labels and dots on card surfaces. */
+const DARK_STATUS_INDICATORS = {
+    '--sf-status-healthy-indicator': '#4ade80',
+    '--sf-status-degraded-indicator': '#facc15',
+    '--sf-status-down-indicator': '#f87171',
+    '--sf-status-unknown-indicator': '#a1a1aa',
+};
+const LIGHT_STATUS_INDICATORS = {
+    '--sf-status-healthy-indicator': '#15803d',
+    '--sf-status-degraded-indicator': '#854d0e',
+    '--sf-status-down-indicator': '#b91c1c',
+    '--sf-status-unknown-indicator': '#52525b',
+};
 /** Complete built-in palettes; every theme includes the shared readable status pairs. */
 export const THEME_DEFINITIONS = {
     dark: {
         ...BASE_STRUCTURE,
         ...STATUS_COLORS,
+        ...DARK_STATUS_INDICATORS,
         '--sf-bg-app': '#09090b',
         '--sf-bg-surface': '#18181b',
         '--sf-bg-elevated': '#27272a',
@@ -56,6 +70,7 @@ export const THEME_DEFINITIONS = {
     light: {
         ...BASE_STRUCTURE,
         ...STATUS_COLORS,
+        ...LIGHT_STATUS_INDICATORS,
         '--sf-bg-app': '#fafafa',
         '--sf-bg-surface': '#ffffff',
         '--sf-bg-elevated': '#f4f4f5',
@@ -83,6 +98,7 @@ export const THEME_DEFINITIONS = {
     ember: {
         ...BASE_STRUCTURE,
         ...STATUS_COLORS,
+        ...DARK_STATUS_INDICATORS,
         '--sf-bg-app': '#1a0f05',
         '--sf-bg-surface': '#2a1a0a',
         '--sf-bg-elevated': '#3d2814',
@@ -110,6 +126,7 @@ export const THEME_DEFINITIONS = {
     rust: {
         ...BASE_STRUCTURE,
         ...STATUS_COLORS,
+        ...DARK_STATUS_INDICATORS,
         '--sf-bg-app': '#1c1917',
         '--sf-bg-surface': '#292524',
         '--sf-bg-elevated': '#44403c',
@@ -137,6 +154,7 @@ export const THEME_DEFINITIONS = {
     ice: {
         ...BASE_STRUCTURE,
         ...STATUS_COLORS,
+        ...DARK_STATUS_INDICATORS,
         '--sf-bg-app': '#0f172a',
         '--sf-bg-surface': '#1e293b',
         '--sf-bg-elevated': '#334155',
@@ -164,6 +182,7 @@ export const THEME_DEFINITIONS = {
     leaf: {
         ...BASE_STRUCTURE,
         ...STATUS_COLORS,
+        ...DARK_STATUS_INDICATORS,
         '--sf-bg-app': '#0a1a0f',
         '--sf-bg-surface': '#132a1a',
         '--sf-bg-elevated': '#1e3d24',
@@ -194,6 +213,7 @@ export const THEME_DEFINITIONS = {
     mech: {
         ...BASE_STRUCTURE,
         ...STATUS_COLORS,
+        ...DARK_STATUS_INDICATORS,
         '--sf-bg-app': '#0c0c0e',
         '--sf-bg-surface': '#141418',
         '--sf-bg-elevated': '#1e1e24',

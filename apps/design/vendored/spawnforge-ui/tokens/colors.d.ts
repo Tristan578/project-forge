@@ -45,6 +45,11 @@ export interface ThemeColorTokens {
     '--sf-status-down-fg': string;
     '--sf-status-unknown-bg': string;
     '--sf-status-unknown-fg': string;
+    /** Unfilled status labels and dots on --sf-bg-surface; >=4.5:1 in every built-in theme. */
+    '--sf-status-healthy-indicator': string;
+    '--sf-status-degraded-indicator': string;
+    '--sf-status-down-indicator': string;
+    '--sf-status-unknown-indicator': string;
 }
 /** Non-color tokens that vary per theme */
 export interface ThemeStructureTokens {
