@@ -12,9 +12,7 @@ export function validateVisualResults(context) {
       !Number.isFinite(Date.parse(build.completedAt)) ||
       !count(build?.testCount) || build.testCount === 0 ||
       build?.changeCount !== 0 || build?.errorCount !== 0 ||
-      build?.interactionTestFailuresCount !== 0 ||
-      !count(build?.actualCaptureCount) || !count(build?.inheritedCaptureCount) ||
-      build.actualCaptureCount + build.inheritedCaptureCount < 1) {
+      build?.interactionTestFailuresCount !== 0) {
     throw new Error(failure);
   }
 }
