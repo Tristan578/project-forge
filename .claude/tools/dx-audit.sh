@@ -138,7 +138,8 @@ fi
 section "Agent Profiles"
 
 AGENTS_DIR="$PROJECT_ROOT/.claude/agents"
-SKILLS_ROOT="$PROJECT_ROOT/.claude/skills"
+# Shared provider resolver requires actual SKILL.md files, not just directories.
+source "$PROJECT_ROOT/.claude/tools/resolve-skill-path.sh"
 # Accept the Agent SDK short aliases AND the canonical full IDs currently in
 # use. When a new model ships, add the full ID here so this audit catches
 # drift instead of giving every agent a green pass on any unknown string.
@@ -165,8 +166,8 @@ if [ -d "$AGENTS_DIR" ]; then
       warn "$name agent: no model specified"
     fi
 
-    # Check skills reference existing dirs.
-    # This asserts the SKILL DIRECTORY RESOLVES — not merely that a `skills:`
+    # Check that skill references resolve to actual SKILL.md files.
+    # This asserts the SKILL FILE RESOLVES — not merely that a `skills:`
     # line is present. The weaker check passed dx-guardian and ux-reviewer for
     # their whole life while 8 of their skills were dangling, and the agents
     # were being told to run audit scripts that do not exist (#9605 family,
@@ -188,7 +189,7 @@ if [ -d "$AGENTS_DIR" ]; then
       for s in ${skill_names[@]+"${skill_names[@]}"}; do
         [ -z "$s" ] && continue
         checked=$((checked + 1))
-        if [ ! -d "$SKILLS_ROOT/$s" ] && [ ! -d "$HOME/.claude/skills/$s" ]; then
+        if ! resolve_skill_path "$s" "$PROJECT_ROOT" >/dev/null; then
           missing_skills="$missing_skills $s"
         fi
       done
@@ -214,10 +215,8 @@ fi
 # ============================================
 section "Domain Skills"
 
-SKILLS_DIR="$PROJECT_ROOT/.claude/skills"
 for skill in rust-engine frontend mcp-commands testing docs design developer-experience; do
-  skill_file="$SKILLS_DIR/$skill/SKILL.md"
-  if [ -f "$skill_file" ]; then
+  if skill_file=$(resolve_skill_path "$skill" "$PROJECT_ROOT"); then
     pass "$skill skill exists"
     # Check for validation tool references
     if grep -q "validate-\|\.claude/tools/" "$skill_file" 2>/dev/null; then
