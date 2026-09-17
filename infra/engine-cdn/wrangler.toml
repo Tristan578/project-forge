@@ -8,7 +8,10 @@
 name = "engine-cdn"
 account_id = "0b949ff499d179e24dde841f71d6134f"
 main = "worker.js"
-compatibility_date = "2025-06-01"
+compatibility_date = "2026-07-30"
+
+[cache]
+enabled = true
 
 # Route the engine CDN custom domain to this worker. The zone owns
 # spawnforge.ai; the worker handles every path under engine.spawnforge.ai.

@@ -52,8 +52,8 @@ function req(method, path) {
   return new Request(`https://engine.spawnforge.ai${path}`, { method });
 }
 
-const WASM_KEY = 'abc123/engine-pkg-webgpu/forge_engine_bg.wasm';
-const JS_KEY = 'abc123/engine-pkg-webgpu/forge_engine.js';
+const WASM_KEY = 'abc12345/engine-pkg-webgpu/forge_engine_bg.wasm';
+const JS_KEY = 'abc12345/engine-pkg-webgpu/forge_engine.js';
 
 function fakeObject({ contentType, etag } = {}) {
   return {
@@ -87,6 +87,11 @@ describe('pathToKey', () => {
 });
 
 describe('buildObjectHeaders', () => {
+  for (const key of ['latest/engine-pkg-webgpu/forge_engine.js', 'engine-pkg-webgpu/forge_engine_bg.wasm', 'abcdef/engine-pkg-webgpu/forge_engine.js', 'abc12345/secrets.json']) {
+    test(key + ' is not an immutable artifact', () => {
+      assert.equal(buildObjectHeaders(key, {}).get('Cache-Control'), 'no-store');
+    });
+  }
   test('*.wasm forces application/wasm and carries CORS + isolation', () => {
     const h = buildObjectHeaders(WASM_KEY, { contentType: 'text/plain' });
     assert.equal(h.get('Content-Type'), 'application/wasm');

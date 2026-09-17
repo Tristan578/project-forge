@@ -76,8 +76,12 @@ export function buildObjectHeaders(key, httpMetadata) {
   headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');
 
-  // Immutable, content-addressed assets (keyed by sha or pinned version).
-  headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  // Only SHA-addressed engine artifacts are immutable. Mutable aliases such as
+  // /latest must never strand an editor on a stale engine release.
+  const first = String(key).split('/')[0] || '';
+  const knownFile = /^(forge_engine(?:_bg)?\.(?:js|wasm)|wasm-manifest\.json)$/;
+  const immutable = /^[0-9a-f]{7,40}$/i.test(first) && knownFile.test(String(key).split('/').at(-1));
+  headers.set('Cache-Control', immutable ? 'public, max-age=31536000, immutable' : 'no-store');
 
   return headers;
 }
