@@ -61,7 +61,7 @@ function getServerSnapshot(): boolean {
  * hydration-safe: getServerSnapshot returns true (banner hidden), matching
  * the SSR output. After hydration the client snapshot takes over — if the
  * user hasn't interacted yet (no key in localStorage), the banner appears.
- * @returns An accessible consent banner, or null after a stored choice. Accept
+ * @returns An accessible consent banner, or null after a stored or session choice. Accept
  * writes storage/cookie consent and requests analytics initialization; Decline
  * writes a denial without initializing analytics.
  */
