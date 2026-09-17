@@ -26,7 +26,7 @@ function parse(source) {
     if (run) return { name, run: run[1] };
     const scalar = chunk.match(/^        run: (?![>|])([^\r\n]+)$/m);
     assert(scalar && !owners.includes(name), 'Expected owning literal block run');
-    return { name, run: scalar[1] }; 
+    return { name, run: scalar[1] };
   });
   return { on: { push: { paths } }, jobs: { ratchet: { steps } } };
 }
