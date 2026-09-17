@@ -4,7 +4,7 @@
 
 Design system and Storybook changes run Chromatic as part of the required CI result. Uploading a build is not a passing test: CI waits for completed rendering and accepted snapshots, then checks the fresh diagnostics report for enabled visual tests, an unlimited passing build, completed tests, and no errors or unaccepted changes. Publish-only success is rejected. Changes outside those paths retain the normal visual-job skip.
 
-A missing `CHROMATIC_PROJECT_TOKEN` fails the design-change job with a safe diagnostic. Quota, payment, rendering, cancellation, and unaccepted-difference failures propagate through the action to CI Success; do not bypass the gate or print project tokens.
+A missing `CHROMATIC_PROJECT_TOKEN` fails the design-change job with a safe diagnostic. The action and mandatory results verifier reject quota, payment, rendering, cancellation, and unaccepted-difference failures through CI Success; do not bypass the gate or print project tokens.
 
 If a build is paused for account quota, restore the account snapshot allowance through its administrator. Confirm visual tests are enabled for the project, then rerun the failed Chromatic job. Inspect and accept intended visual differences in Chromatic before rerunning; reject unintended changes and fix their source. Previously passing Windows and other jobs do not need to be repeated just to retry the failed visual job.
 
