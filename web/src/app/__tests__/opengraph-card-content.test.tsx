@@ -105,7 +105,8 @@ describe('play OG card content', () => {
     if (field === 'displayName') user.displayName += '\u03E2';
     else game[field as 'title' | 'description'] += '\u9FF0';
     const { text } = await playCardText([[user], [game]]);
-    expect(text).toContain('Game not found');
+    expect(text).toContain('Play on SpawnForge');
+    expect(text).not.toContain('Game not found');
     expect(text).not.toContain('Private');
   });
 
@@ -114,7 +115,8 @@ describe('play OG card content', () => {
       [{ id: 'u1', displayName: initial + 'PrivateCreator' }],
       [{ title: 'PrivateTitle', description: 'PrivateDescription' }],
     ]);
-    expect(text).toContain('Game not found');
+    expect(text).toContain('Play on SpawnForge');
+    expect(text).not.toContain('Game not found');
     expect(text).not.toContain('Private');
     expect(text).not.toContain(initial.toUpperCase());
   });

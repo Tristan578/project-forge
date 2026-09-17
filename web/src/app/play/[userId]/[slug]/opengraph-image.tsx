@@ -34,7 +34,7 @@ function getGradient(slug: string): string {
   return `linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 50%, ${colors[2]} 100%)`;
 }
 
-async function renderFallback() {
+async function renderFallback(message = 'Game not found') {
   return new ImageResponse(
     (
       <div
@@ -54,7 +54,7 @@ async function renderFallback() {
           SpawnForge
         </div>
         <div style={{ fontSize: 24, color: 'rgba(255,255,255,0.6)', marginTop: 16 }}>
-          Game not found
+          {message}
         </div>
       </div>
     ),
@@ -69,14 +69,15 @@ interface CardData {
 }
 
 /**
- * Loads the card's text, or `null` when there is nothing to show.
+ * Load card text, null for missing/failed lookups, or text-unavailable when
+ * the local fonts cannot safely display the card.
  *
  * The try/catch stays around the query and nothing else: constructing JSX
  * inside one is misleading (React renders lazily, so a render error is never
  * caught there) and `react-hooks/error-boundaries` rejects it outright once the
  * tree contains a component rather than only host elements.
  */
-async function loadCard(clerkId: string, slug: string): Promise<CardData | null> {
+async function loadCard(clerkId: string, slug: string): Promise<CardData | 'text-unavailable' | null> {
   try {
     const [user] = await queryWithResilience(() =>
       getDb()
@@ -122,7 +123,7 @@ async function loadCard(clerkId: string, slug: string): Promise<CardData | null>
     // visible character is represented by the checked-in local font assets.
     return [card.title, card.creatorName, card.description, initialFor(card.creatorName)].every(isPlayCardTextCovered)
       ? card
-      : null;
+      : 'text-unavailable';
   } catch {
     return null;
   }
@@ -138,6 +139,7 @@ export default async function Image({ params }: Props) {
   const { userId: clerkId, slug } = await params;
 
   const card = await loadCard(clerkId, slug);
+  if (card === 'text-unavailable') return renderFallback('Play on SpawnForge');
   if (!card) return renderFallback();
 
   const { title, creatorName, description: truncatedDesc } = card;
