@@ -3,6 +3,13 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const failure = 'Visual results are incomplete or unverified. Restore Chromatic allowance/settings, review snapshots, and rerun the failed job.';
+/**
+ * Require verified visual tests from a freshly generated Chromatic report.
+ * @param {unknown} context Parsed Chromatic diagnostics context.
+ * @returns {void} After enabled, unlimited, completed passing tests with no
+ * visual changes, rendering errors, or interaction failures.
+ * @throws {Error} When results are incomplete or unverified.
+ */
 export function validateVisualResults(context) {
   const build = context?.build;
   const count = value => Number.isSafeInteger(value) && value >= 0;
