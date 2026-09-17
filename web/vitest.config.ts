@@ -6,6 +6,10 @@ export default defineConfig({
     // The root remains the production coverage gate. Projects make the
     // environment choice without weakening aggregate coverage enforcement.
     projects: ['./vitest.config.node.ts', './vitest.config.jsdom.ts'],
+    // Keep the production gate's isolation and CI retry policy explicit even
+    // though execution is delegated to projects.
+    isolate: true,
+    retry: process.env.CI ? 1 : 0,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts', 'src/**/*.tsx'],

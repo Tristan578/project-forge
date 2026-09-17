@@ -35,6 +35,12 @@ export const NODE_TEST_INCLUDE = [
   'scripts/__tests__/**/*.test.ts',
 ] as const;
 
+/** Browser APIs used by a small number of otherwise server-side test paths. */
+export const NODE_TEST_EXCLUDE = [
+  'src/lib/storage/__tests__/safeLocalStorage.test.ts',
+  'src/stores/slices/__tests__/sceneSlice.test.ts',
+] as const;
+
 /** Browser-facing paths whose default project environment is jsdom. */
 export const JSDOM_TEST_INCLUDE = [
   'src/components/**/*.test.ts',
@@ -43,6 +49,8 @@ export const JSDOM_TEST_INCLUDE = [
   'src/hooks/**/*.test.tsx',
   'src/app/**/*.test.ts',
   'src/app/**/*.test.tsx',
+  'src/lib/storage/__tests__/safeLocalStorage.test.ts',
+  'src/stores/slices/__tests__/sceneSlice.test.ts',
 ] as const;
 
 /** API route tests are server tests even though their files live under app/. */
