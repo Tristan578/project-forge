@@ -1,3 +1,4 @@
+/** Run both production test projects and enforce the sole aggregate coverage thresholds. */
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 

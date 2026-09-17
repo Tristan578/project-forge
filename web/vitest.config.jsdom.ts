@@ -1,3 +1,4 @@
+/** Select browser-dependent suites in jsdom while the root enforces aggregate coverage. */
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 import { VITEST_TEST_TIMEOUT_MS, VITEST_HOOK_TIMEOUT_MS } from './src/lib/config/timeouts';
