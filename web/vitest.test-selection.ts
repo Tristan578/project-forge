@@ -25,6 +25,8 @@ export const NODE_TEST_INCLUDE = [
   'src/data/**/*.test.tsx',
   'src/test/**/*.test.ts',
   'src/test/**/*.test.tsx',
+  'src/app/__tests__/**/*.test.ts',
+  'src/app/__tests__/**/*.test.tsx',
   'src/app/api/**/*.test.ts',
   'src/app/api/**/*.test.tsx',
   'src/__integration__/**/*.test.ts',
@@ -53,7 +55,7 @@ export const JSDOM_TEST_INCLUDE = [
   'src/stores/slices/__tests__/sceneSlice.test.ts',
 ] as const;
 
-/** API route tests are server tests even though their files live under app/. */
+/** API and top-level metadata/server suites are Node tests under app/. */
 export const JSDOM_TEST_EXCLUDE = [
   'src/app/api/**/*.test.ts',
   'src/app/api/**/*.test.tsx',
