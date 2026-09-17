@@ -88,7 +88,8 @@ export const COMMAND_INDEX_PATH = 'web/src/data/commandIndex.json';
  * Every full-manifest replica, including the copy Vercel builds from.
  * `apps/docs/vercel.json` sets MANIFEST_PATH=./data/commands.json, so this
  * in-root copy is the production documentation source. Keep this registry
- * explicit: a new manifest replica must be added here or CI fails closed.
+ * explicit: unregistered replicas are unguarded, so every new replica must be
+ * registered here before CI can compare it with the canonical manifest.
  */
 export const MANIFEST_COPY_PATHS = [
   'web/src/data/commands.json',

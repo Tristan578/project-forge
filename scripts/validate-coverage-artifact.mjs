@@ -2,6 +2,16 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+/**
+ * Reject an untrusted coverage artifact before the privileged ratchet consumes it.
+ *
+ * @param {{ sha?: unknown, run_id?: unknown }} metadata Producer identity bundled with the artifact.
+ * @param {{ total?: Record<string, { pct?: unknown, total?: unknown, covered?: unknown }> }} summary Coverage-summary payload.
+ * @param {string} expectedSha Full commit SHA of the successful coverage producer.
+ * @param {string} expectedRunId Numeric workflow run identifier of that producer.
+ * @returns {void}
+ * @throws {Error} When producer identity or coverage measurements are invalid.
+ */
 export function validateCoverageArtifact(metadata, summary, expectedSha, expectedRunId) {
   if (!/^[a-f0-9]{40}$/.test(expectedSha) || !/^[1-9][0-9]*$/.test(expectedRunId)) {
     throw new Error('Invalid coverage producer identity');

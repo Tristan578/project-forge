@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
+/** Playwright configuration for the docs app's isolated Chromium smoke suite. */
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
