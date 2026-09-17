@@ -169,7 +169,9 @@ export default async function Image({ params }: Props) {
               color: '#ffffff',
               letterSpacing: -1,
               lineHeight: 1.1,
-              maxWidth: 900,
+              width: 900,
+              maxWidth: '100%',
+              minWidth: 0,
             }}
           >
             {renderPlayCardText(title, 56)}
@@ -180,7 +182,9 @@ export default async function Image({ params }: Props) {
               fontSize: 24,
               color: 'rgba(255, 255, 255, 0.65)',
               marginTop: 20,
-              maxWidth: 800,
+              width: 800,
+              maxWidth: '100%',
+              minWidth: 0,
               lineHeight: 1.4,
             }}
           >
@@ -201,6 +205,9 @@ export default async function Image({ params }: Props) {
               display: 'flex',
               alignItems: 'center',
               gap: 12,
+              width: 760,
+              minWidth: 0,
+              flexShrink: 1,
             }}
           >
             <div
@@ -218,7 +225,7 @@ export default async function Image({ params }: Props) {
             >
               {initialFor(creatorName)}
             </div>
-            <div style={{ display: 'flex', fontSize: 22, color: 'rgba(255,255,255,0.8)' }}>{renderPlayCardText(creatorName, 22)}</div>
+            <div style={{ display: 'flex', width: 680, minWidth: 0, flexShrink: 1, fontSize: 22, color: 'rgba(255,255,255,0.8)' }}>{renderPlayCardText(creatorName, 22)}</div>
           </div>
 
           <div
@@ -226,6 +233,7 @@ export default async function Image({ params }: Props) {
               display: 'flex',
               alignItems: 'center',
               gap: 8,
+              flexShrink: 0,
             }}
           >
             <div
