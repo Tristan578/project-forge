@@ -60,10 +60,13 @@ bash "$forge_repo/scripts/install-vercel-cli.sh"
 for mode in wrong crash fail; do
   rm -rf "$VERCEL_CLI_PREFIX"
   before_path="$(cat "$GITHUB_PATH")"
-  if NPM_FIXTURE_MODE="$mode" bash "$forge_repo/scripts/install-vercel-cli.sh" >/dev/null 2>&1; then
+  if NPM_FIXTURE_MODE="$mode" bash "$forge_repo/scripts/install-vercel-cli.sh" >"$fixture/verification.log" 2>&1; then
     echo "FAIL: Vercel installer accepted $mode result" >&2
     exit 1
   fi
   [[ "$(cat "$GITHUB_PATH")" == "$before_path" ]]
+  if [[ "$mode" != fail ]]; then
+    grep -Fq "::error::Vercel CLI" "$fixture/verification.log"
+  fi
 done
 echo 'PASS: Vercel cache cold install, valid hit, stale and corrupt repair'

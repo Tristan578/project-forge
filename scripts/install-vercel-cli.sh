@@ -20,6 +20,6 @@ fi
 
 mkdir -p "$prefix"
 npm install --ignore-scripts --prefix "$prefix" "vercel@$version"
-actual="$("$bin" --version 2>/dev/null | awk '{print $NF}' | sed 's/^v//')"
+actual="$("$bin" --version 2>/dev/null | awk '{print $NF}' | sed 's/^v//')" || actual=""
 [[ "$actual" == "$version" ]] || { echo "::error::Vercel CLI $actual does not match $version" >&2; exit 1; }
 echo "$bin_dir" >> "$GITHUB_PATH"
