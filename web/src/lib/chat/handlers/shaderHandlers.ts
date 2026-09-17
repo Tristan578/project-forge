@@ -94,7 +94,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const store = useShaderEditorStore.getState();
-    const activeGraph = store.activeGraphId ? store.graphs[store.activeGraphId] : null;
+    const activeGraph = store.activeGraphId ? ownEntry(store.graphs, store.activeGraphId) : null;
 
     if (!activeGraph) {
       return { success: false, error: 'No active shader graph' };
