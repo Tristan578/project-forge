@@ -17,7 +17,6 @@ done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$REPO_ROOT/.claude/skills/testing/scripts/ratchet-coverage.sh"
-WORKFLOW="$REPO_ROOT/.github/workflows/coverage-ratchet.yml"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
