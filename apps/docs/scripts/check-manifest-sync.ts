@@ -85,6 +85,17 @@ export const CANONICAL_MANIFEST_PATH = 'mcp-server/manifest/commands.json';
 export const COMMAND_INDEX_PATH = 'web/src/data/commandIndex.json';
 
 /**
+ * Every full-manifest replica, including the copy Vercel builds from.
+ * `apps/docs/vercel.json` sets MANIFEST_PATH=./data/commands.json, so this
+ * in-root copy is the production documentation source. Keep this registry
+ * explicit: a new manifest replica must be added here or CI fails closed.
+ */
+export const MANIFEST_COPY_PATHS = [
+  'web/src/data/commands.json',
+  'apps/docs/data/commands.json',
+] as const;
+
+/**
  * The ONLY fields the command index carries, and this list is a bundle budget.
  *
  * `web/src/lib/mcp/bridgeAllowlist.ts` runs in the editor tab and needs exactly
@@ -227,10 +238,7 @@ if (isMainModule) {
    * Guarding the copy that gets deployed is the whole point. Adding a copy
    * without adding it here recreates exactly this bug.
    */
-  const copies = [
-    path.join(repoRoot, 'web/src/data/commands.json'),
-    path.join(repoRoot, 'apps/docs/data/commands.json'),
-  ];
+  const copies = MANIFEST_COPY_PATHS.map((copy) => path.join(repoRoot, copy));
 
   let failed = false;
   for (const copy of copies) {

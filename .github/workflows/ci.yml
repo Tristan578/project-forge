@@ -2199,6 +2199,67 @@ jobs:
           path: web/playwright-report/
           retention-days: 14
 
+  # The docs deploy has its own Next app and deploy root. A web build cannot
+  prove that its production manifest copy is traced or that its documented
+  routes render, so build and exercise the actual docs artifact on every docs
+  or workflow change.
+  docs-e2e:
+    name: Docs Build and Route Smoke
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-docs == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Verify every manifest copy
+        run: npm run check:manifest-sync
+
+      - name: Build docs production artifact
+        working-directory: apps/docs
+        run: npm run build
+
+      - name: Cache docs Playwright browser
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-docs-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install docs Playwright browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: apps/docs
+        run: npx playwright install --with-deps chromium
+
+      - name: Install docs Playwright OS dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: apps/docs
+        run: npx playwright install-deps chromium
+
+      - name: Smoke-test docs routes
+        working-directory: apps/docs
+        env:
+          CI: 'true'
+        run: npm run test:e2e
+
+      - name: Upload docs Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: docs-playwright-report
+          path: apps/docs/playwright-report/
+          retention-days: 14
+
   # ---- CI Success (aggregating required check) ----
   # Audit 2026-05-30 (F01): branch protection previously required ONLY ci-gate,
   # a no-op path detector that always passes — so a PR could merge with failing
@@ -2223,6 +2284,7 @@ jobs:
       - observatory-tests
       - build-nextjs
       - docs-internal-gate
+      - docs-e2e
       - design-internal-gate
       - hook-tests
       - hook-tests-windows
