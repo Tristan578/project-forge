@@ -1,7 +1,10 @@
+/** Render one service health result using accessible semantic theme colors. */
 import { cn } from '@spawnforge/ui';
 import type { ServiceHealth } from '@/lib/monitoring/healthChecks';
 
+/** Inputs for a service status card. */
 interface ServiceStatusCardProps {
+  /** Latest health result, including status, latency, timestamp, and optional message. */
   service: ServiceHealth;
 }
 
@@ -52,6 +55,11 @@ function formatTimestamp(iso: string): string {
   }
 }
 
+/**
+ * Render a service health summary with a text label alongside its status indicator.
+ * @param props.service Latest service health result; unrecognized statuses display Unknown.
+ * @returns A themed card containing status and diagnostic details.
+ */
 export function ServiceStatusCard({ service }: ServiceStatusCardProps) {
   return (
     <div className="rounded-[var(--sf-radius-lg)] border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] p-4">

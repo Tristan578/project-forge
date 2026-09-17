@@ -1,5 +1,7 @@
 'use client';
 
+/** Search and browse documentation with theme-aware, keyboard-accessible controls. */
+
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Input, cn } from '@spawnforge/ui';
@@ -31,6 +33,11 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CATEGORY_ORDER = ['root', 'getting-started', 'features', 'guides', 'reference'];
 
+/**
+ * Load the docs index and synchronize the selected article with the URL path query.
+ * @returns Search, category navigation, and the selected documentation article;
+ * loading and fetch failures render their corresponding visible states.
+ */
 export function DocsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
