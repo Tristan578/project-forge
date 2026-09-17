@@ -120,7 +120,7 @@ async function loadCard(clerkId: string, slug: string): Promise<CardData | null>
     // Satori otherwise falls back to a dynamic Google Fonts request for an
     // uncovered glyph. Keep the unmodified multilingual card only when every
     // visible character is represented by the checked-in local font assets.
-    return [card.title, card.creatorName, card.description].every(isPlayCardTextCovered)
+    return [card.title, card.creatorName, card.description, initialFor(card.creatorName)].every(isPlayCardTextCovered)
       ? card
       : null;
   } catch {

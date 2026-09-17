@@ -243,6 +243,18 @@ describe('play OG route renders offline with emoji-laden user text', () => {
 });
 
 describe('play OG route rejects gaps in the bundled font cmaps', () => {
+
+  it.each(['\u019B', '\u0264', '\u2184'])('never transmits an uncovered uppercased creator initial %s', async (initial) => {
+    let call = 0;
+    const rows = [[{ id: 'u1', displayName: initial + 'PrivateCreator' }], [{ title: 'PrivateTitle', description: 'PrivateDescription' }]];
+    vi.doMock('@/lib/db/client', () => ({ getDb: () => { throw new Error('Unused'); }, queryWithResilience: async () => rows[call++] }));
+    const mod = await import('../play/[userId]/[slug]/opengraph-image');
+    const { remote, bytes } = await renderOffline(() => mod.default({ params: Promise.resolve({ userId: 'clerk_1', slug: 'space-game' }) }));
+    expect(call).toBe(2);
+    expect(remote).toEqual([]);
+    expect(bytes).toBeGreaterThan(0);
+  });
+
   beforeEach(() => { vi.resetModules(); vi.doUnmock('@/lib/db/client'); });
   it.each(['\u03E2', '\u9FF0'])('never transmits uncovered user glyph %s', async (glyph) => {
     let call = 0;

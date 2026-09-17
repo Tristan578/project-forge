@@ -109,6 +109,16 @@ describe('play OG card content', () => {
     expect(text).not.toContain('Private');
   });
 
+  it.each(['\u019B', '\u0264', '\u2184'])('uses generic text when uppercasing creator initial %s yields a missing glyph', async (initial) => {
+    const { text } = await playCardText([
+      [{ id: 'u1', displayName: initial + 'PrivateCreator' }],
+      [{ title: 'PrivateTitle', description: 'PrivateDescription' }],
+    ]);
+    expect(text).toContain('Game not found');
+    expect(text).not.toContain('Private');
+    expect(text).not.toContain(initial.toUpperCase());
+  });
+
   it('strips emoji from every user-supplied field', async () => {
     const { text } = await playCardText(FOUND);
     expect([...text].filter((c) => /\p{Extended_Pictographic}/u.test(c))).toEqual([]);
