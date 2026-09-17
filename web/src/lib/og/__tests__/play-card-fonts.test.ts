@@ -5,8 +5,8 @@ import { createHash } from 'node:crypto';
 import { PLAY_CARD_FONT_SHA256, PLAY_CARD_GLYPH_RANGES } from '../play-card-glyphs';
 import { isPlayCardTextCovered } from '../play-card-fonts';
 
-/** Independently read the preferred Unicode cmap from each actual SFNT asset. */
-function cmapPoints(font: Buffer): Set<number> {
+/** Independently read the preferred Unicode cmap from an actual SFNT asset. */
+function unicodeCmap(font: Buffer): Map<number, number> {
   let cmap = -1;
   for (let i = 0; i < font.readUInt16BE(4); i++) {
     const record = 12 + i * 16;
@@ -24,12 +24,15 @@ function cmapPoints(font: Buffer): Set<number> {
   }
   if (offset < 0) throw new Error('Missing Unicode cmap');
   const format = font.readUInt16BE(offset);
-  const points = new Set<number>();
+  const glyphs = new Map<number, number>();
   if (format === 12) {
     for (let i = 0; i < font.readUInt32BE(offset + 12); i++) {
       const group = offset + 16 + i * 12;
       const start = font.readUInt32BE(group), end = font.readUInt32BE(group + 4), glyph = font.readUInt32BE(group + 8);
-      for (let point = start; point <= end; point++) if (glyph + point - start !== 0) points.add(point);
+      for (let point = start; point <= end; point++) {
+        const glyphId = glyph + point - start;
+        if (glyphId !== 0) glyphs.set(point, glyphId);
+      }
     }
   } else if (format === 4) {
     const count = font.readUInt16BE(offset + 6) / 2;
@@ -40,45 +43,105 @@ function cmapPoints(font: Buffer): Set<number> {
       for (let point = start; point <= end && point !== 0xffff; point++) {
         const raw = range ? font.readUInt16BE(ranges + i * 2 + range + (point - start) * 2) : point;
         const glyph = range && raw === 0 ? 0 : (raw + delta) & 0xffff;
-        if (glyph) points.add(point);
+        if (glyph) glyphs.set(point, glyph);
       }
     }
   } else throw new Error('Unsupported Unicode cmap format ' + format);
-  return points;
+  return glyphs;
+}
+
+/** Read glyph IDs from either OpenType coverage-table encoding. */
+function coverageGlyphIds(font: Buffer, coverage: number): number[] {
+  const format = font.readUInt16BE(coverage);
+  if (format === 1) {
+    const count = font.readUInt16BE(coverage + 2);
+    return Array.from({ length: count }, (_, index) => font.readUInt16BE(coverage + 4 + index * 2));
+  }
+  if (format === 2) {
+    const count = font.readUInt16BE(coverage + 2);
+    const glyphs: number[] = [];
+    for (let index = 0; index < count; index++) {
+      const range = coverage + 4 + index * 6;
+      const start = font.readUInt16BE(range);
+      const end = font.readUInt16BE(range + 2);
+      for (let glyph = start; glyph <= end; glyph++) glyphs.push(glyph);
+    }
+    return glyphs;
+  }
+  throw new Error('Unsupported GSUB coverage format ' + format);
+}
+
+/**
+ * Read every replacement glyph from init/medi/fina type-1 single substitutions.
+ * The optional mutator supplies a deterministic corrupted-target fixture without
+ * changing the checked-in font bytes or weakening their SHA pin.
+ */
+function arabicReplacementGlyphIds(font: Buffer, mutate = (glyph: number) => glyph): number[] {
+  let gsub = -1;
+  for (let i = 0; i < font.readUInt16BE(4); i++) {
+    const record = 12 + i * 16;
+    if (font.toString('ascii', record, record + 4) === 'GSUB') gsub = font.readUInt32BE(record + 8);
+  }
+  if (gsub < 0) throw new Error('Missing GSUB');
+  const features = gsub + font.readUInt16BE(gsub + 6);
+  const lookups = gsub + font.readUInt16BE(gsub + 8);
+  const tags: string[] = [];
+  const replacements: number[] = [];
+  for (let i = 0; i < font.readUInt16BE(features); i++) {
+    const record = features + 2 + i * 6;
+    const tag = font.toString('ascii', record, record + 4);
+    tags.push(tag);
+    const feature = features + font.readUInt16BE(record + 4);
+    const lookupCount = font.readUInt16BE(feature + 2);
+    if (lookupCount === 0) throw new Error('Empty ' + tag + ' substitution feature');
+    for (let j = 0; j < lookupCount; j++) {
+      const index = font.readUInt16BE(feature + 4 + j * 2);
+      const lookup = lookups + font.readUInt16BE(lookups + 2 + index * 2);
+      if (font.readUInt16BE(lookup) !== 1) throw new Error(tag + ' is not a type-1 substitution');
+      const subtableCount = font.readUInt16BE(lookup + 4);
+      if (subtableCount === 0) throw new Error('Empty ' + tag + ' lookup');
+      for (let k = 0; k < subtableCount; k++) {
+        const subtable = lookup + font.readUInt16BE(lookup + 6 + k * 2);
+        const coverage = coverageGlyphIds(font, subtable + font.readUInt16BE(subtable + 2));
+        if (coverage.length === 0) throw new Error('Empty ' + tag + ' coverage');
+        const format = font.readUInt16BE(subtable);
+        if (format === 1) {
+          const delta = font.readInt16BE(subtable + 4);
+          replacements.push(...coverage.map(glyph => mutate((glyph + delta) & 0xffff)));
+        } else if (format === 2) {
+          const count = font.readUInt16BE(subtable + 4);
+          if (count !== coverage.length) throw new Error(tag + ' coverage and substitute counts differ');
+          for (let glyph = 0; glyph < count; glyph++) replacements.push(mutate(font.readUInt16BE(subtable + 6 + glyph * 2)));
+        } else {
+          throw new Error('Unsupported type-1 GSUB format ' + format);
+        }
+      }
+    }
+  }
+  expect(tags.sort()).toEqual(['fina', 'init', 'medi']);
+  return replacements;
+}
+
+function assertArabicReplacementGlyphsEncoded(font: Buffer, mutate?: (glyph: number) => number): number[] {
+  const encodedGlyphs = new Set(unicodeCmap(font).values());
+  const replacements = arabicReplacementGlyphIds(font, mutate);
+  if (replacements.length === 0) throw new Error('Arabic GSUB has no replacement glyphs');
+  for (const glyph of replacements) {
+    if (!encodedGlyphs.has(glyph)) throw new Error('Arabic GSUB replacement glyph ' + glyph + ' is not encoded in cmap');
+  }
+  return replacements;
 }
 
 describe('exact checked-in OG glyph coverage', () => {
 
-  it('retains nonempty initial, medial, and final Arabic substitutions', () => {
+  it('retains initial, medial, and final Arabic replacement glyphs in the actual cmap', () => {
     const font = readFileSync(new URL('../../../assets/fonts/SpawnForgeArabic-Regular.ttf', import.meta.url));
-    let gsub = -1;
-    for (let i = 0; i < font.readUInt16BE(4); i++) {
-      const record = 12 + i * 16;
-      if (font.toString('ascii', record, record + 4) === 'GSUB') gsub = font.readUInt32BE(record + 8);
-    }
-    expect(gsub).toBeGreaterThan(0);
-    const features = gsub + font.readUInt16BE(gsub + 6);
-    const lookups = gsub + font.readUInt16BE(gsub + 8);
-    const tags: string[] = [];
-    for (let i = 0; i < font.readUInt16BE(features); i++) {
-      const record = features + 2 + i * 6;
-      tags.push(font.toString('ascii', record, record + 4));
-      const feature = features + font.readUInt16BE(record + 4);
-      expect(font.readUInt16BE(feature + 2)).toBeGreaterThan(0);
-      for (let j = 0; j < font.readUInt16BE(feature + 2); j++) {
-        const index = font.readUInt16BE(feature + 4 + j * 2);
-        const lookup = lookups + font.readUInt16BE(lookups + 2 + index * 2);
-        expect(font.readUInt16BE(lookup)).toBe(1);
-        expect(font.readUInt16BE(lookup + 4)).toBeGreaterThan(0);
-        for (let k = 0; k < font.readUInt16BE(lookup + 4); k++) {
-          const subtable = lookup + font.readUInt16BE(lookup + 6 + k * 2);
-          const coverage = subtable + font.readUInt16BE(subtable + 2);
-          expect([1, 2]).toContain(font.readUInt16BE(coverage));
-          expect(font.readUInt16BE(coverage + 2)).toBeGreaterThan(0);
-        }
-      }
-    }
-    expect(tags.sort()).toEqual(['fina', 'init', 'medi']);
+    expect(assertArabicReplacementGlyphsEncoded(font)).not.toEqual([]);
+  });
+
+  it('rejects a mutated Arabic replacement target that resolves to .notdef', () => {
+    const font = readFileSync(new URL('../../../assets/fonts/SpawnForgeArabic-Regular.ttf', import.meta.url));
+    expect(() => assertArabicReplacementGlyphsEncoded(font, () => 0)).toThrow('Arabic GSUB replacement glyph 0');
   });
 
   it('matches the independent font cmap union and source hashes', () => {
@@ -86,7 +149,7 @@ describe('exact checked-in OG glyph coverage', () => {
     for (const [file, digest] of Object.entries(PLAY_CARD_FONT_SHA256)) {
       const font = readFileSync(new URL('../../../assets/fonts/' + file, import.meta.url));
       expect(createHash('sha256').update(font).digest('hex'), file + ' requires regeneration').toBe(digest);
-      for (const point of cmapPoints(font)) actual.add(point);
+      for (const point of unicodeCmap(font).keys()) actual.add(point);
     }
     const generated = new Set<number>();
     let previous = -1;
