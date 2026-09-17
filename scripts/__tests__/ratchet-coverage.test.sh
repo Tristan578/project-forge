@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
-# Tests for .claude/skills/testing/scripts/ratchet-coverage.sh
-#
-# The ratchet must keep web/vitest.config.ts AND web/vitest.config.node.ts in
-# lockstep: the node config documents that its thresholds must match
-# vitest.config.ts, but the original script only rewrote vitest.config.ts, so
-# the node config drifted further behind on every ratchet cycle (Sentry review
-# on #8934, PF-996).
-#
-# Hermetic via the test-only RATCHET_PROJECT_ROOT seam (never set in CI — the
-# workflow assertion below enforces that), so no real coverage run is needed.
+# Exercise the production aggregate ratchet against hermetic root configs.
+# Child environment selectors must remain byte-for-byte unchanged.
+# The test-only RATCHET_PROJECT_ROOT seam is never wired into CI.
 
 set -euo pipefail
 
@@ -24,7 +17,6 @@ done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$REPO_ROOT/.claude/skills/testing/scripts/ratchet-coverage.sh"
-WORKFLOW="$REPO_ROOT/.github/workflows/coverage-ratchet.yml"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -72,11 +64,12 @@ write_summary() {
 }
 
 fresh_root() {
-  # fresh_root <main s/b/f/l...> <node s/b/f/l...>
+  # fresh_root <aggregate statements/branches/functions/lines>
   ROOT="$TMP/case-$((PASS + FAIL))"
   mkdir -p "$ROOT/web"
   write_config "$ROOT/web/vitest.config.ts" "$1" "$2" "$3" "$4"
-  write_config "$ROOT/web/vitest.config.node.ts" "$5" "$6" "$7" "$8"
+  printf "export default { test: { environment: 'node' } };\n" > "$ROOT/web/vitest.config.node.ts"
+  cp "$ROOT/web/vitest.config.node.ts" "$ROOT/child-before.ts"
 }
 
 read_thresholds() {
@@ -87,6 +80,13 @@ read_thresholds() {
   f=$(sed -nE 's/.*functions:[[:space:]]*([0-9]+).*/\1/p' "$1" | head -1)
   l=$(sed -nE 's/.*lines:[[:space:]]*([0-9]+).*/\1/p' "$1" | head -1)
   echo "$s/$b/$f/$l"
+}
+
+# Require unchanged child bytes, including non-threshold project settings.
+check_child_unchanged() {
+  local changed=1
+  cmp -s "$ROOT/child-before.ts" "$ROOT/web/vitest.config.node.ts" && changed=0
+  check "$1" 0 "$changed"
 }
 
 run_ratchet() {
@@ -101,86 +101,83 @@ run_ratchet() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Coverage exceeds thresholds → BOTH configs bumped to floored actuals
+# 1. Coverage exceeds aggregate thresholds → root config is bumped to floored actuals
 #    MINUS the 1-point margin (PF: coverage ratchet margin), not flush
 #    against the measurement.
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  70 60 65 72
+fresh_root 75 65 70 77
 write_summary "$ROOT/web/coverage" 80.5 70.2 74.9 81.3
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "ratchet exits 0 on bump" 0 "$rc"
 check "main config bumped to floored actuals minus margin" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "node config bumped in lockstep" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check "child project config has no aggregate threshold block" "///" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
 main_notice=0
 grep -q '::notice::.*vitest.config.ts.*statements=79' "$ROOT/ratchet.log" && main_notice=1
 check "bump run emits a main-config notice" 1 "$main_notice"
 node_notice=0
 grep -q '::notice::.*vitest.config.node.ts.*statements=79' "$ROOT/ratchet.log" && node_notice=1
-check "bump run emits a node-config notice" 1 "$node_notice"
+check "bump run emits no child-config notice" 0 "$node_notice"
 
 # ---------------------------------------------------------------------------
-# 2. REGRESSION (#8934): main config already current, node config lagging →
-#    node config must still be synced up to match
+# 2. A child config cannot trigger a ratchet when aggregate root thresholds are current.
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  70 60 65 72
+fresh_root 75 65 70 77
 write_summary "$ROOT/web/coverage" 75.4 65.1 70.0 77.9
 rc=0; run_ratchet "$ROOT" || rc=$?
-check "node-drift-only run exits 0" 0 "$rc"
+check "root-current run exits 0" 0 "$rc"
 check "main config unchanged when already current" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "lagging node config synced to main thresholds" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
-# Devin review on #8993: the summary notice must not claim a main-config bump
-# when only the node config was synced, and must name the node sync instead.
+check "child config remains threshold-free" "///" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+# A root-current report must not claim any obsolete child-config synchronization.
 false_bump=0
 grep -q '::notice::.*bumped' "$ROOT/ratchet.log" && false_bump=1
-check "node-drift-only run emits no main-config bump notice" 0 "$false_bump"
+check "root-current run emits no main-config bump notice" 0 "$false_bump"
 sync_notice=0
 grep -q '::notice::.*vitest.config.node.ts.*statements=75' "$ROOT/ratchet.log" && sync_notice=1
-check "node-drift-only run emits a node-sync notice" 1 "$sync_notice"
+check "root-current run emits no child-config notice" 0 "$sync_notice"
 
 # ---------------------------------------------------------------------------
 # 3. Everything already in sync and current → no modification
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  75 65 70 77
+fresh_root 75 65 70 77
 write_summary "$ROOT/web/coverage" 75.4 65.1 70.0 77.9
 before_main="$(read_thresholds "$ROOT/web/vitest.config.ts")"
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "no-op run exits 0" 0 "$rc"
 check "main config untouched on no-op" "$before_main" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "node config untouched on no-op" "$before_main" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check_child_unchanged "node config untouched on no-op"
 
 # ---------------------------------------------------------------------------
-# 4. Never ratchet DOWN: actual below thresholds leaves both configs alone
+# 4. Never ratchet DOWN: actual below thresholds leaves root and child alone
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  75 65 70 77
+fresh_root 75 65 70 77
 write_summary "$ROOT/web/coverage" 60.0 50.0 55.0 62.0
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "below-threshold run exits 0" 0 "$rc"
 check "main config never decreased" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "node config never decreased" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check_child_unchanged "node config never decreased"
 
 # ---------------------------------------------------------------------------
 # 5. PR mode (CI, non-main ref) → report only, no modification even w/ drift
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  70 60 65 72
+fresh_root 75 65 70 77
 write_summary "$ROOT/web/coverage" 80.5 70.2 74.9 81.3
 rc=0; run_ratchet "$ROOT" GITHUB_ACTIONS=true GITHUB_REF=refs/heads/feature-x || rc=$?
 check "PR mode exits 0" 0 "$rc"
 check "PR mode leaves main config alone" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "PR mode leaves node config alone" "70/60/65/72" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check_child_unchanged "PR mode leaves node config alone"
 
 # ---------------------------------------------------------------------------
 # 6. Missing coverage summary → graceful skip, nothing modified
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  70 60 65 72
+fresh_root 75 65 70 77
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "missing summary exits 0" 0 "$rc"
-check "missing summary modifies nothing" "70/60/65/72" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check_child_unchanged "missing summary modifies nothing"
 
 # ---------------------------------------------------------------------------
-# 7. Missing node config → warn, skip lockstep, main config still ratchets
-#    (the HAS_NODE_CONFIG=false fallback must not crash or block the ratchet)
+# 7. Missing child config does not affect the aggregate root ratchet.
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  70 60 65 72
+fresh_root 75 65 70 77
 rm "$ROOT/web/vitest.config.node.ts"
 write_summary "$ROOT/web/coverage" 80.5 70.2 74.9 81.3
 rc=0; run_ratchet "$ROOT" || rc=$?
@@ -188,7 +185,7 @@ check "missing node config exits 0" 0 "$rc"
 check "main config still bumped without node config" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
 skip_warned=0
 grep -q '::warning::.*vitest.config.node.ts.*node-config lockstep skipped' "$ROOT/ratchet.log" && skip_warned=1
-check "missing node config emits a lockstep-skipped warning" 1 "$skip_warned"
+check "missing child config emits no obsolete lockstep warning" 0 "$skip_warned"
 node_recreated=0
 [ -e "$ROOT/web/vitest.config.node.ts" ] && node_recreated=1
 check "missing node config is not recreated" 0 "$node_recreated"
@@ -197,15 +194,16 @@ grep -q '::notice::.*vitest.config.node.ts' "$ROOT/ratchet.log" && phantom_sync=
 check "missing node config emits no node-sync notice" 0 "$phantom_sync"
 
 # ---------------------------------------------------------------------------
-# 8. Node config AHEAD of main's new value → never decreased, no sync notice
-#    (node_target keeps the higher current value per metric)
+# 8. Legacy child threshold blocks cannot influence the root aggregate ratchet.
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  90 80 85 92
+fresh_root 75 65 70 77
+write_config "$ROOT/web/vitest.config.node.ts" 90 80 85 92
+cp "$ROOT/web/vitest.config.node.ts" "$ROOT/child-before.ts"
 write_summary "$ROOT/web/coverage" 80.5 70.2 74.9 81.3
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "node-ahead run exits 0" 0 "$rc"
 check "main config bumped while node is ahead" "79/69/73/80" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "node config ahead of main is never decreased" "90/80/85/92" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check_child_unchanged "node config ahead of main is never decreased"
 ahead_sync=0
 grep -q '::notice::.*vitest.config.node.ts' "$ROOT/ratchet.log" && ahead_sync=1
 check "node-ahead run emits no node-sync notice" 0 "$ahead_sync"
@@ -219,12 +217,12 @@ check "node-ahead run emits no node-sync notice" 0 "$ahead_sync"
 #    margin rule computes 76 - 1 = 75, which is not > current (75), so the
 #    threshold is left alone instead of being set with zero headroom.
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  75 65 70 77
+fresh_root 75 65 70 77
 write_summary "$ROOT/web/coverage" 76.4 66.4 71.4 78.4
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "sub-margin run exits 0" 0 "$rc"
 check "sub-margin measurement does NOT bump main config" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "sub-margin measurement does NOT bump node config" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check_child_unchanged "sub-margin measurement does NOT bump node config"
 sub_margin_notice=0
 grep -q '::notice::.*bumped' "$ROOT/ratchet.log" && sub_margin_notice=1
 check "sub-margin run emits no bump notice" 0 "$sub_margin_notice"
@@ -234,12 +232,12 @@ check "sub-margin run emits no bump notice" 0 "$sub_margin_notice"
 #     threshold by more than the margin still ratchets up, to the
 #     margin-adjusted value (not to the raw floored actual).
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  75 65 70 77
+fresh_root 75 65 70 77
 write_summary "$ROOT/web/coverage" 85.4 75.4 80.4 87.4
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "clears-margin run exits 0" 0 "$rc"
 check "clears-margin measurement bumps main config to actual minus margin" "84/74/79/86" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "clears-margin measurement bumps node config in lockstep" "84/74/79/86" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check_child_unchanged "clears-margin measurement bumps node config leaves the child unchanged"
 
 # ---------------------------------------------------------------------------
 # 11. Never-ratchet-down still holds with the margin in play: a measurement
@@ -248,27 +246,19 @@ check "clears-margin measurement bumps node config in lockstep" "84/74/79/86" "$
 #     margin-adjusted 76, which is BELOW current and must be rejected, not
 #     adopted).
 # ---------------------------------------------------------------------------
-fresh_root 75 65 70 77  75 65 70 77
+fresh_root 75 65 70 77
 write_summary "$ROOT/web/coverage" 75.4 65.4 70.4 77.4
 rc=0; run_ratchet "$ROOT" || rc=$?
 check "margin-adjusted-below-current run exits 0" 0 "$rc"
 check "margin never pulls main config below current" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.ts")"
-check "margin never pulls node config below current" "75/65/70/77" "$(read_thresholds "$ROOT/web/vitest.config.node.ts")"
+check_child_unchanged "margin never pulls node config below current"
 
 # ---------------------------------------------------------------------------
-# 12. Workflow contract: coverage-ratchet.yml must gate AND commit the node
-#    config alongside vitest.config.ts, and must never wire the test seam
+# 12. Workflow gates and commits only aggregate root thresholds, never the test seam
 # ---------------------------------------------------------------------------
-diff_gates=$(grep -c 'git diff --quiet web/vitest.config.ts web/vitest.config.node.ts' "$WORKFLOW" || true)
-check "both workflow diff gates include the node config" 2 "$diff_gates"
-
-git_add_has_node=0
-grep -A2 'git add web/vitest.config.ts' "$WORKFLOW" | grep -q 'web/vitest.config.node.ts' && git_add_has_node=1
-check "workflow git add includes the node config" 1 "$git_add_has_node"
-
-seam_wired=0
-grep -v '^\s*#' "$WORKFLOW" | grep -q 'RATCHET_PROJECT_ROOT' && seam_wired=1
-check "RATCHET_PROJECT_ROOT seam is not wired in the workflow" 0 "$seam_wired"
+workflow_contract=0
+node "$REPO_ROOT/scripts/__tests__/ratchet-workflow-contract.cjs" || workflow_contract=$?
+check "executable workflow gates, staging, triggers and disabled-command controls" 0 "$workflow_contract"
 
 echo ""
 echo "$PASS passed, $FAIL failed"

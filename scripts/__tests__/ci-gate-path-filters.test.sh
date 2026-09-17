@@ -226,6 +226,14 @@ assert_output "empty diff leaves Observatory false" "" observatory false
 assert_output "workflow change triggers CI arm" ".github/workflows/ci.yml" ci true
 assert_output "root lockfile triggers dependencies arm" "package-lock.json" deps true
 
+# All aggregate measurement inputs must reach the successful CI producer.
+echo "--- aggregate coverage measurement inputs ---"
+for path in web/vitest.config.ts web/vitest.config.node.ts web/vitest.config.jsdom.ts web/vitest.test-selection.ts web/vitest.setup.ts; do
+  assert_output "coverage input reaches web producer" "$path" web true
+  assert_output "coverage input reaches required fan-out" "$path" any-code true
+done
+assert_output "lookalike outside web does not fire producer" "other/web/vitest.test-selection.ts" web false
+
 # ---- Empty diff -------------------------------------------------------------
 echo "--- empty diff ---"
 assert_output "empty diff leaves docs false" "" docs false
