@@ -80,6 +80,11 @@ describe('/health page', () => {
     vi.resetModules();
   });
 
+  it('executes server page checks without browser globals', () => {
+    expect(typeof window).toBe('undefined');
+    expect(typeof document).toBe('undefined');
+  });
+
   it('reads the health report through the shared cache', async () => {
     const { default: HealthPage } = await import('../health/page');
     await HealthPage();
