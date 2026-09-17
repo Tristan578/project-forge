@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 import { VITEST_TEST_TIMEOUT_MS, VITEST_HOOK_TIMEOUT_MS } from './src/lib/config/timeouts';
+import { JSDOM_TEST_EXCLUDE, JSDOM_TEST_INCLUDE } from './vitest.test-selection';
 
 export default defineConfig({
   test: {
@@ -20,26 +21,9 @@ export default defineConfig({
         inline: [/@sentry\/nextjs/],
       },
     },
-    include: [
-      'src/components/**/*.test.ts',
-      'src/components/**/*.test.tsx',
-      'src/hooks/**/*.test.ts',
-      'src/hooks/**/*.test.tsx',
-    ],
+    include: JSDOM_TEST_INCLUDE,
+    exclude: JSDOM_TEST_EXCLUDE,
     setupFiles: ['./vitest.setup.ts'],
-    coverage: {
-      provider: 'v8',
-      include: ['src/components/**/*.ts', 'src/components/**/*.tsx', 'src/hooks/**/*.ts', 'src/hooks/**/*.tsx'],
-      exclude: [
-        'src/**/*.test.ts',
-        'src/**/*.test.tsx',
-        'src/**/*.spec.ts',
-        'src/**/__tests__/**',
-        // Guard fixtures: run only by vitest.mockOnceGuard.fixtures.config.ts (#9542)
-        'src/**/__fixtures__/**',
-        'src/**/*.d.ts',
-      ],
-    },
   },
   resolve: {
     alias: {

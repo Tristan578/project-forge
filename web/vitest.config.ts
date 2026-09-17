@@ -1,28 +1,11 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
-import { VITEST_TEST_TIMEOUT_MS, VITEST_HOOK_TIMEOUT_MS } from './src/lib/config/timeouts';
 
 export default defineConfig({
   test: {
-    environment: 'jsdom',
-    testTimeout: VITEST_TEST_TIMEOUT_MS,
-    hookTimeout: VITEST_HOOK_TIMEOUT_MS,
-    // 'threads' is safe now that all test files use vi.stubEnv() / vi.unstubAllEnvs()
-    // instead of directly reassigning process.env. Direct reassignment raced across
-    // workers sharing the same process object under 'threads'.
-    pool: 'threads',
-    teardownTimeout: 5000,
-    isolate: true,
-    retry: process.env.CI ? 1 : 0,
-    include: [
-      'src/**/*.test.ts',
-      'src/**/*.test.tsx',
-      // Pure-function unit tests for e2e lib utilities (no browser required)
-      'e2e/lib/__tests__/**/*.test.ts',
-      // Unit tests for standalone build/provisioning scripts (not under src/)
-      'scripts/__tests__/**/*.test.ts',
-    ],
-    setupFiles: ['./vitest.setup.ts'],
+    // The root remains the production coverage gate. Projects make the
+    // environment choice without weakening aggregate coverage enforcement.
+    projects: ['./vitest.config.node.ts', './vitest.config.jsdom.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts', 'src/**/*.tsx'],
