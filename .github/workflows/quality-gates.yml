@@ -924,25 +924,32 @@ jobs:
         if: steps.check-design.outputs.changed == 'true'
         run: bash apps/design/scripts/sync-vendored-ui.sh
 
-      - name: Check Chromatic token
-        id: check-token
+      - name: Require Chromatic token
         if: steps.check-design.outputs.changed == 'true'
         env:
           CHROMATIC_TOKEN: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
         run: |
-          if [ -n "$CHROMATIC_TOKEN" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "CHROMATIC_PROJECT_TOKEN not set — skipping Chromatic"
+          if [ -z "$CHROMATIC_TOKEN" ]; then
+            echo "::error::Chromatic project token is required for design changes"
+            exit 1
           fi
 
+      - name: Clear stale visual diagnostics
+        if: steps.check-design.outputs.changed == 'true'
+        run: rm -f apps/design/chromatic-diagnostics.json
+
       - name: Run Chromatic
-        if: steps.check-design.outputs.changed == 'true' && steps.check-token.outputs.available == 'true'
+        if: steps.check-design.outputs.changed == 'true'
         uses: chromaui/action@259eda5f0e44c0c1eab38b672f1c4c967cc969b7 # v18.8.1
         with:
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
           workingDir: apps/design
-          exitZeroOnChanges: true
-          exitOnceUploaded: true
+          exitZeroOnChanges: false
+          exitOnceUploaded: false
+          autoAcceptChanges: false
           onlyChanged: true
+          diagnosticsFile: chromatic-diagnostics.json
+
+      - name: Verify completed visual results
+        if: steps.check-design.outputs.changed == 'true'
+        run: node scripts/check-visual-results.mjs apps/design/chromatic-diagnostics.json

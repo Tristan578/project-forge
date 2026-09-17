@@ -1,3 +1,4 @@
+import './visual-ci-contract.test.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -61,3 +62,59 @@ test('every Vercel deployment uses the verified cached local CLI', () => {
   }
   assert.equal(installs, 5);
 });
+
+// Keep the standalone audit executable in its owning job, before real runtime tests.
+const cdnAuditCommand = 'npm audit --prefix infra/engine-cdn --workspaces=false --include=dev --audit-level=moderate';
+const cdnWorkflowPath = '.github/workflows/engine-cdn-test.yml';
+const cdnWorkflowText = readFileSync(fileURLToPath(new URL('../../' + cdnWorkflowPath, import.meta.url)), 'utf8');
+function assertStandaloneAudit(text) {
+  const workflow = YAML.parse(text, { uniqueKeys: true });
+  assert.deepEqual(workflow.on.pull_request, { paths: ['infra/engine-cdn/**', cdnWorkflowPath, '.node-version'] });
+  const job = workflow.jobs.test;
+  assert.equal(job.if, undefined);
+  assert.equal(job['continue-on-error'], undefined);
+  const audits = job.steps.filter(step => step.name === 'Audit all standalone Workers dependencies');
+  assert.equal(audits.length, 1);
+  const audit = audits[0];
+  assert.equal(audit.run, cdnAuditCommand);
+  assert.equal(audit.uses, undefined);
+  assert.equal(audit.if, undefined);
+  assert.equal(audit['continue-on-error'], undefined);
+  assert.equal(audit['working-directory'], undefined);
+  const install = job.steps.findIndex(step => step.run === 'npm ci --prefix infra/engine-cdn --workspaces=false --ignore-scripts');
+  const runtime = job.steps.findIndex(step => step.run === 'npm test' && step['working-directory'] === 'infra/engine-cdn');
+  assert.ok(install >= 0 && install < job.steps.indexOf(audit));
+  assert.ok(runtime > job.steps.indexOf(audit));
+}
+test('standalone CDN audit includes dev dependencies and executes before runtime tests', () => {
+  assertStandaloneAudit(cdnWorkflowText);
+  const ci = read('.github/workflows/ci.yml');
+  assert.ok(ci.jobs['ci-success'].needs.includes('docs-e2e'));
+  assert.match(ci.jobs['docs-e2e'].if, /needs-ci == 'true'/);
+  const steps = ci.jobs['docs-e2e'].steps;
+  const suite = steps.filter(step => step.run === 'node --test scripts/__tests__/production-ci-contract.test.mjs');
+  assert.equal(suite.length, 1);
+  assert.equal(suite[0].if, undefined);
+  assert.equal(suite[0]['continue-on-error'], undefined);
+  assert.ok(steps.findIndex(step => step.run === 'npm ci') < steps.indexOf(suite[0]));
+});
+const auditBlock = '      - name: Audit all standalone Workers dependencies\n        run: ' + cdnAuditCommand + '\n';
+const auditMutations = {
+  removed: text => text.replace(auditBlock, ''),
+  commented: text => text.replace(auditBlock, auditBlock.split('\n').filter(Boolean).map(line => '#' + line).join('\n') + '\n'),
+  disabledStep: text => text.replace(auditBlock, auditBlock.replace('        run:', '        if: false\n        run:')),
+  disabledJob: text => text.replace('  test:\n', '  test:\n    if: false\n'),
+  ignoredError: text => text.replace(auditBlock, auditBlock.replace('        run:', '        continue-on-error: true\n        run:')),
+  omitDev: text => text.replace('--include=dev', '--omit=dev'),
+  highOnly: text => text.replace('--audit-level=moderate', '--audit-level=high'),
+  duplicateStep: text => text.replace(auditBlock, auditBlock + auditBlock),
+  duplicateRun: text => text.replace(auditBlock, auditBlock + '        run: echo skipped\n'),
+  movedAfterRuntime: text => text.replace(auditBlock, '').replace('        run: npm test\n', '        run: npm test\n\n' + auditBlock),
+};
+for (const [name, mutate] of Object.entries(auditMutations)) {
+  test('standalone audit contract rejects ' + name, () => {
+    const mutated = mutate(cdnWorkflowText);
+    assert.notEqual(mutated, cdnWorkflowText, 'negative control must actually mutate the workflow');
+    assert.throws(() => assertStandaloneAudit(mutated));
+  });
+}
