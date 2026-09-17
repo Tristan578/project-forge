@@ -11,8 +11,7 @@ import { renderPlayCardText } from '@/lib/og/play-card-text';
 export const alt = 'SpawnForge Game';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
-// Font binaries are traced local files, so this route must not be promoted to Edge.
-export const runtime = 'nodejs';
+// Cache Components use the default Node.js runtime for traced local font files.
 
 /** Next image-route inputs identifying the published game owner and slug. */
 interface Props {
