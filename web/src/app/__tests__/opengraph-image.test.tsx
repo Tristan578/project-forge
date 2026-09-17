@@ -304,14 +304,6 @@ describe('play OG route renders supported multilingual text offline', () => {
   });
 });
 
-describe('play OG title font selection', () => {
-  it('prefers the declared Latin 700 face before regular CJK coverage', () => {
-    const route = readFileSync(join(__dirname, '..', 'play', '[userId]', '[slug]', 'opengraph-image.tsx'), 'utf8');
-    expect(route).toContain("fontFamily: 'SpawnForge OG Latin, SpawnForge OG Arabic, SpawnForge OG CJK'");
-    expect(route).toContain('fontWeight: 700');
-  });
-});
-
 describe('play OG route survives custom font read failures', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -322,22 +314,24 @@ describe('play OG route survives custom font read failures', () => {
   it('renders a native PNG with the bundled Next font when one custom asset cannot be read', async () => {
     // Reject just the first traced asset. Other local reads, including Next's
     // built-in renderer resources, retain their native implementation.
+    const selectiveRead = vi.fn();
     vi.doMock('node:fs/promises', async (importActual) => {
       const actual = await importActual<typeof import('node:fs/promises')>();
+      selectiveRead.mockImplementation((...args: Parameters<typeof actual.readFile>) => {
+        const [file] = args;
+        if (String(file).includes('NotoSans-Regular.ttf')) {
+          return Promise.reject(new Error('simulated traced font read failure'));
+        }
+        return actual.readFile(...args);
+      });
       return {
         ...actual,
-        readFile: vi.fn((...args: Parameters<typeof actual.readFile>) => {
-          const [file] = args;
-          if (String(file).includes('NotoSans-Regular.ttf')) {
-            return Promise.reject(new Error('simulated traced font read failure'));
-          }
-          return actual.readFile(...args);
-        }),
+        readFile: selectiveRead,
       };
     });
     const rows = [
-      [{ id: 'u1', displayName: 'Ada' }],
-      [{ title: 'Space Game', description: 'A locally rendered game' }],
+      [{ id: 'u1', displayName: 'صانع خاص' }],
+      [{ title: '秘密のゲーム', description: 'وصف سري' }],
     ];
     let call = 0;
     vi.doMock('@/lib/db/client', () => ({
@@ -351,6 +345,7 @@ describe('play OG route survives custom font read failures', () => {
     );
 
     expect(call).toBe(2);
+    expect(selectiveRead.mock.calls.some(([file]) => String(file).includes('NotoSans-Regular.ttf'))).toBe(true);
     expect(remote).toEqual([]);
     expect(bytes).toBeGreaterThan(0);
   });

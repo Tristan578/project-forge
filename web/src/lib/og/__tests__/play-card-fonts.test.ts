@@ -1,9 +1,10 @@
 // @vitest-environment node
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { PLAY_CARD_FONT_SHA256, PLAY_CARD_GLYPH_RANGES } from '../play-card-glyphs';
 import { isPlayCardTextCovered } from '../play-card-fonts';
+import type { OgFont } from '../play-card-fonts';
 
 /** Independently read the preferred Unicode cmap from an actual SFNT asset. */
 function unicodeCmap(font: Buffer): Map<number, number> {
@@ -170,35 +171,50 @@ describe('exact checked-in OG glyph coverage', () => {
 });
 
 describe('play-card custom font loading', () => {
-  it('registers the local Latin Bold face at the title weight', async () => {
+  afterEach(() => {
+    vi.doUnmock('node:fs/promises');
     vi.resetModules();
-    const readFile = vi.fn().mockResolvedValue(new Uint8Array([0, 1, 2]));
-    vi.doMock('node:fs/promises', () => ({ readFile }));
+  });
 
-    const { loadPlayCardFonts } = await import('../play-card-fonts');
-    const fonts = await loadPlayCardFonts();
-
-    expect(readFile).toHaveBeenCalledTimes(4);
+  /** Assert the exact family and declared weights passed to Satori. */
+  const expectFaces = (fonts: OgFont[] | null) => {
     expect(fonts?.map(({ name, weight }) => ({ name, weight }))).toEqual([
       { name: 'SpawnForge OG Latin', weight: 400 },
       { name: 'SpawnForge OG Latin', weight: 700 },
       { name: 'SpawnForge OG Arabic', weight: 400 },
       { name: 'SpawnForge OG CJK', weight: 400 },
     ]);
+  };
 
-    vi.doUnmock('node:fs/promises');
+  it('retries a failed four-asset batch and then caches the recovered faces', async () => {
+    vi.resetModules();
+    let recover = false;
+    const readFile = vi.fn(() => recover
+      ? Promise.resolve(new Uint8Array([0, 1, 2]))
+      : Promise.reject(new Error('simulated asset failure')));
+    vi.doMock('node:fs/promises', () => ({ readFile }));
+
+    const { loadPlayCardFonts } = await import('../play-card-fonts');
+    await expect(loadPlayCardFonts()).resolves.toBeNull();
+    expect(readFile).toHaveBeenCalledTimes(4);
+    recover = true;
+    const fonts = await loadPlayCardFonts();
+    expect(readFile).toHaveBeenCalledTimes(8);
+    expectFaces(fonts);
+    expect(await loadPlayCardFonts()).toBe(fonts);
+    expect(readFile).toHaveBeenCalledTimes(8);
   });
 
-  it('does not start a permanently rejecting read during module evaluation', async () => {
+  it('coalesces overlapping callers into one four-asset read batch', async () => {
     vi.resetModules();
-    const readFile = vi.fn().mockRejectedValue(new Error('simulated asset failure'));
+    const readFile = vi.fn().mockResolvedValue(new Uint8Array([0, 1, 2]));
     vi.doMock('node:fs/promises', () => ({ readFile }));
 
     const { loadPlayCardFonts } = await import('../play-card-fonts');
     expect(readFile).not.toHaveBeenCalled();
-    await expect(loadPlayCardFonts()).resolves.toBeNull();
+    const [first, second] = await Promise.all([loadPlayCardFonts(), loadPlayCardFonts()]);
     expect(readFile).toHaveBeenCalledTimes(4);
-
-    vi.doUnmock('node:fs/promises');
+    expect(first).toBe(second);
+    expectFaces(first);
   });
 });

@@ -14,14 +14,19 @@
  *
  * @vitest-environment node
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 
-const captured: unknown[] = [];
+interface CapturedResponse {
+  element: unknown;
+  options: unknown;
+}
+
+const captured: CapturedResponse[] = [];
 
 vi.mock('next/og', () => ({
   ImageResponse: class {
-    constructor(element: unknown) {
-      captured.push(element);
+    constructor(element: unknown, options: unknown) {
+      captured.push({ element, options });
     }
   },
 }));
@@ -57,6 +62,14 @@ function directElements(children: unknown): CapturedElement[] {
   if (Array.isArray(children)) return children.flatMap(directElements);
   const element = capturedElement(children);
   return element ? [element] : [];
+}
+
+/** Read the custom-font list passed to ImageResponse, if the route supplied it. */
+function responseFonts(options: unknown): Array<{ name: string; weight: number }> | undefined {
+  if (options === null || typeof options !== 'object' || !('fonts' in options)) return undefined;
+  const fonts = (options as { fonts?: unknown }).fonts;
+  if (!Array.isArray(fonts)) return undefined;
+  return fonts.map(({ name, weight }) => ({ name, weight }));
 }
 
 interface LocatedElement {
@@ -128,7 +141,7 @@ async function playCardText(rows: unknown[]) {
   await mod.default({ params: Promise.resolve({ userId: 'clerk_1', slug: 'space-game' }) });
 
   expect(captured).toHaveLength(1);
-  return { text: textOf(captured[0]), tree: captured[0], queries: call };
+  return { text: textOf(captured[0].element), tree: captured[0].element, options: captured[0].options, queries: call };
 }
 
 const FOUND = [
@@ -137,13 +150,20 @@ const FOUND = [
 ];
 
 describe('play OG card content', () => {
+  afterEach(() => {
+    vi.doUnmock('@/lib/db/client');
+    vi.doUnmock('node:fs/promises');
+    vi.resetModules();
+  });
+
   beforeEach(() => {
     vi.resetModules();
     vi.doUnmock('@/lib/db/client');
+    vi.doUnmock('node:fs/promises');
   });
 
   it('renders the real card, not the fallback', async () => {
-    const { text, queries } = await playCardText(FOUND);
+    const { text, tree, options, queries } = await playCardText(FOUND);
     expect(queries).toBe(2);
     // The distinguishing assertion. `expect(call).toBe(2)` alone cannot make it:
     // everything after the second query — three `stripEmoji` calls and the
@@ -153,6 +173,39 @@ describe('play OG card content', () => {
     expect(text).toContain('Space Game');
     expect(text).toContain('Blast off');
     expect(text).toContain('Ada');
+    expect(capturedElement(tree)?.style.fontFamily).toBe('SpawnForge OG Latin, SpawnForge OG Arabic, SpawnForge OG CJK');
+    expect(findRenderedText(tree, 'Space Game').element.style.fontWeight).toBe(700);
+    expect(responseFonts(options)).toEqual([
+      { name: 'SpawnForge OG Latin', weight: 400 },
+      { name: 'SpawnForge OG Latin', weight: 700 },
+      { name: 'SpawnForge OG Arabic', weight: 400 },
+      { name: 'SpawnForge OG CJK', weight: 400 },
+    ]);
+  });
+
+  it('omits custom fonts and private covered text after a traced asset read failure', async () => {
+    const selectiveRead = vi.fn();
+    vi.doMock('node:fs/promises', async (importActual) => {
+      const actual = await importActual<typeof import('node:fs/promises')>();
+      selectiveRead.mockImplementation((...args: Parameters<typeof actual.readFile>) => {
+        if (String(args[0]).includes('NotoSans-Regular.ttf')) {
+          return Promise.reject(new Error('simulated traced font read failure'));
+        }
+        return actual.readFile(...args);
+      });
+      return { ...actual, readFile: selectiveRead };
+    });
+    const creator = 'صانع خاص';
+    const title = '秘密のゲーム';
+    const description = 'وصف سري';
+    const { text, options } = await playCardText([[{ id: 'u1', displayName: creator }], [{ title, description }]]);
+
+    expect(selectiveRead.mock.calls.some(([file]) => String(file).includes('NotoSans-Regular.ttf'))).toBe(true);
+    expect(responseFonts(options)).toBeUndefined();
+    expect(text).toBe('SpawnForge Play on SpawnForge');
+    expect(text).not.toContain(creator);
+    expect(text).not.toContain(title);
+    expect(text).not.toContain(description);
   });
 
   it.each(['星の冒険', '별의 모험', '星际冒险', 'Звёздное приключение', 'مغامرة النجوم'])('retains supported text %s in the actual card', async (title) => {
