@@ -160,6 +160,7 @@ describe('worker.fetch — write methods are refused (read-only edge)', () => {
       const bucket = makeBucket({ [WASM_KEY]: fakeObject() });
       const res = await worker.fetch(req(method, `/${WASM_KEY}`), { ENGINE_BUCKET: bucket });
       assert.equal(res.status, 405);
+    assert.equal(res.headers.get('Cache-Control'), 'no-store');
       assert.equal(res.headers.get('Allow'), 'GET, HEAD');
       // Negative: never offers a write method.
       assert.doesNotMatch(res.headers.get('Allow'), /PUT|POST|DELETE|PATCH/);
@@ -223,6 +224,7 @@ describe('helper response builders', () => {
 
   test('notFoundResponse is 404', () => {
     assert.equal(notFoundResponse().status, 404);
+    assert.equal(notFoundResponse().headers.get('Cache-Control'), 'no-store');
   });
 
   test('preflightResponse is 204', () => {

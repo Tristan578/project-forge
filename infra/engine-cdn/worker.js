@@ -96,6 +96,7 @@ export function preflightResponse() {
   headers.set('Access-Control-Allow-Methods', CORS_METHODS);
   headers.set('Access-Control-Allow-Headers', '*');
   headers.set('Access-Control-Max-Age', '86400');
+  headers.set('Cache-Control', 'no-store');
   headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
   return new Response(null, { status: 204, headers });
 }
@@ -110,6 +111,7 @@ export function methodNotAllowedResponse() {
     status: 405,
     headers: {
       Allow: ALLOWED_METHODS,
+      'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': CORS_METHODS,
     },
@@ -124,6 +126,7 @@ export function notFoundResponse() {
   return new Response('Not Found', {
     status: 404,
     headers: {
+      'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': CORS_METHODS,
     },

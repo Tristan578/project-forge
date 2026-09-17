@@ -49,6 +49,9 @@ describe('canonical Wrangler config in real workerd', () => {
   });
   it('does not freeze mutable aliases after their object is replaced', async () => {
     const alias = 'latest/engine-pkg-webgpu/forge_engine.js';
+    const missing = await server.fetch('/' + alias);
+    assert.equal(missing.status, 404);
+    assert.equal(missing.headers.get('cache-control'), 'no-store');
     await bucket.put(alias, 'first');
     const first = await server.fetch('/' + alias);
     assert.equal(first.headers.get('cache-control'), 'no-store');
@@ -63,11 +66,13 @@ describe('canonical Wrangler config in real workerd', () => {
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
       const response = await server.fetch('/' + wasm, { method });
       assert.equal(response.status, 405);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
       assert.equal(response.headers.get('allow'), 'GET, HEAD');
     }
     for (const path of ['/', '/a105d3a7/', '/missing.wasm']) {
       const response = await server.fetch(path);
       assert.equal(response.status, 404);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
       assert.equal(await response.text(), 'Not Found');
     }
     assert.deepEqual((await bucket.list()).objects.map(object => object.key), beforeKeys);
