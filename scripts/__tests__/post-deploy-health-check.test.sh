@@ -222,7 +222,7 @@ else
   fail "cookie jar written ('$JAR_WRITTEN') and read ('$JAR_READ') differ — the canary cookie would never be replayed"
 fi
 
-OUT="$(VERCEL_AUTOMATION_BYPASS=s3cret e2e 200 "$HEALTHY")"; RC=$?
+OUT="$(VERCEL_AUTOMATION_BYPASS=s3cret VERCEL_AUTOMATION_BYPASS_ORIGIN=https://www.example.test e2e 200 "$HEALTHY")"; RC=$?
 if [ "$RC" = 0 ] && grep -qx 'x-vercel-protection-bypass: s3cret' "$TMP/args"; then
   pass "a bypass secret is sent as the x-vercel-protection-bypass HEADER"
 else
@@ -292,6 +292,57 @@ else
 fi
 
 echo ""
+
+echo ""
+echo "=== staging identity, payment verification, and credential scope ==="
+STAGING_HEALTHY='{"status":"ok","commit":"abcdef12","environment":"staging","services":[{"name":"Engine CDN","status":"up"},{"name":"Payments (Stripe)","status":"up"}]}'
+OUT="$(HEALTH_CHECK_EXPECT_ENVIRONMENT=staging HEALTH_CHECK_REQUIRE_SERVICES='Payments (Stripe)' e2e 200 "$STAGING_HEALTHY")"; RC=$?
+if [ "$RC" = 0 ]; then
+  pass "expected staging identity and verified Stripe connectivity pass"
+else
+  fail "valid staging health was rejected: $OUT"
+fi
+for state in degraded down absent; do
+  BODY="$(printf '%s' "$STAGING_HEALTHY" | python3 -c 'import json,sys; d=json.load(sys.stdin); state=sys.argv[1]; d["services"]=[s for s in d["services"] if not(state=="absent" and s["name"]=="Payments (Stripe)")]; [(s.update(status=state)) for s in d["services"] if s["name"]=="Payments (Stripe)"]; print(json.dumps(d))' "$state")"
+  OUT="$(HEALTH_CHECK_REQUIRE_SERVICES='Payments (Stripe)' e2e 200 "$BODY")"; RC=$?
+  if [ "$RC" != 0 ] && grep -q "Required service is not verified healthy" <<<"$OUT"; then
+    pass "Stripe $state cannot pass as verified staging health"
+  else
+    fail "Stripe $state passed or lacked a safe diagnosis: $OUT"
+  fi
+done
+OUT="$(HEALTH_CHECK_EXPECT_ENVIRONMENT=production e2e 200 "$STAGING_HEALTHY")"; RC=$?
+if [ "$RC" != 0 ] && grep -q "environment does not match" <<<"$OUT"; then
+  pass "wrong application environment fails"
+else
+  fail "wrong environment was accepted: $OUT"
+fi
+for scope in '' 'https://different.example.test' 'http://www.example.test' 'https://user:password@www.example.test' 'https://www.example.test/path' 'https://www.example.test?token=unsafe'; do
+  OUT="$(VERCEL_AUTOMATION_BYPASS=fixture-only VERCEL_AUTOMATION_BYPASS_ORIGIN="$scope" e2e 200 "$HEALTHY")"; RC=$?
+  if [ "$RC" != 0 ] && [ ! -s "$TMP/args" ]; then
+    pass "invalid or mismatched bypass origin is refused before curl"
+  else
+    fail "an unsafe bypass scope reached curl: $OUT"
+  fi
+done
+OUT="$(PYTHONOPTIMIZE=1 VERCEL_AUTOMATION_BYPASS=fixture-only VERCEL_AUTOMATION_BYPASS_ORIGIN=https://different.example.test e2e 200 "$HEALTHY")"; RC=$?
+if [ "$RC" != 0 ] && [ ! -s "$TMP/args" ]; then
+  pass "optimized Python still rejects an unauthorized credential origin before curl"
+else
+  fail "optimized Python disabled credential origin validation: $OUT"
+fi
+OUT="$(VERCEL_AUTOMATION_BYPASS=fixture-only VERCEL_AUTOMATION_BYPASS_ORIGIN=https://www.example.test e2e 302 '' $'HTTP/2 302\nlocation: https://untrusted.example.test')"; RC=$?
+if [ "$RC" = 0 ] || grep -qE -- '^--location($|=|-)|^-[^-]*L' "$TMP/args"; then
+  fail "health probe follows redirects and could forward its scoped credential"
+else
+  pass "health probe does not follow redirects"
+fi
+if node --test "$HERE/staging-env-wiring.test.mjs"; then
+  pass "staging and preview workflow health contracts pass"
+else
+  fail "staging/preview workflow health wiring is broken"
+fi
+
 echo "  PASS=$PASS FAIL=$FAIL"
 if [ "$FAIL" -eq 0 ]; then
   echo "SUITE PASSED"

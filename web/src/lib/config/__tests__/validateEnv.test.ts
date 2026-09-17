@@ -145,6 +145,7 @@ describe('validateEnv', () => {
     it('accepts test Clerk keys in the explicitly identified staging environment', async () => {
       stubAllRequired();
       vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'staging');
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_staging');
       vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_staging');
       vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_staging');
 
@@ -154,6 +155,34 @@ describe('validateEnv', () => {
       expect(result.valid).toBe(true);
       expect(result.missing).not.toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
       expect(result.warnings.every((warning) => !warning.includes('Clerk'))).toBe(true);
+    });
+
+    it.each([
+      ['sk_test_fixture', true], ['rk_test_fixture', true],
+      ['sk_live_fixture', false], ['rk_live_fixture', false], ['invalid_fixture', false],
+    ] as const)('requires a staging test-mode Stripe key: %s', async (key, valid) => {
+      stubAllRequired();
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'staging');
+      vi.stubEnv('STRIPE_SECRET_KEY', key);
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+      expect(result.valid).toBe(valid);
+      expect(result.missing.includes('STRIPE_SECRET_KEY')).toBe(!valid);
+    });
+
+    it('still requires payment and encryption secrets in an explicitly identified preview', async () => {
+      stubAllRequired();
+      vi.stubEnv('VERCEL_ENV', 'preview');
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'staging');
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_preview');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_preview');
+      vi.stubEnv('STRIPE_SECRET_KEY', '');
+      vi.stubEnv('STRIPE_WEBHOOK_SECRET', '');
+      vi.stubEnv('ENCRYPTION_MASTER_KEY', '');
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+      expect(result.valid).toBe(false);
+      expect(result.missing).toEqual(['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'ENCRYPTION_MASTER_KEY']);
     });
 
     it('flags pk_test_ Clerk key as invalid in production', async () => {

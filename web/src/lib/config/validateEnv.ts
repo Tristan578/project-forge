@@ -113,10 +113,14 @@ export interface EnvValidationResult {
  *
  * - In development (`NODE_ENV === 'development'`), validation is skipped and
  *   always returns `{ valid: true }` so local dev works without full config.
- * - In production/staging, missing required vars are reported as errors.
+ * - Outside development, unset required vars and invalid present credentials
+ *   are reported in `missing`. Staging requires a Stripe secret or restricted
+ *   key beginning with sk_test_ or rk_test_; live or malformed keys are invalid.
+ *   The development early return skips these credential checks.
  * - Optional vars with missing values produce warnings (informational only).
  *
- * @returns Validation result with lists of missing required and optional vars.
+ * @returns Validation result with unset or invalid required fields in `missing`
+ *   and optional configuration notices in `warnings`.
  */
 export function validateEnvironment(): EnvValidationResult {
   const isDev = process.env.NODE_ENV === 'development';
@@ -152,6 +156,14 @@ export function validateEnvironment(): EnvValidationResult {
     const msg = 'CLERK_SECRET_KEY is a TEST key (sk_test_*) in production. Use sk_live_* for production.';
     warnings.push(msg);
     console.warn(`[validateEnvironment] WARNING: ${msg}`);
+  }
+
+  // Staging and preview must never charge a live payment account. Secrets can
+  // remain opaque in Vercel; the running deployment proves their mode at boot.
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  if (isStaging && stripeKey && !/^(sk|rk)_test_/.test(stripeKey)) {
+    missing.push('STRIPE_SECRET_KEY');
+    console.error('[validateEnvironment] CRITICAL: Staging requires a Stripe test-mode secret or restricted key.');
   }
 
   // Encryption key charset validation: a present-but-malformed key (right length,

@@ -314,7 +314,9 @@ export async function checkPayments(): Promise<ServiceHealth> {
       status === 403
         ? { ...details, probeResult: 'key accepted; balance not readable by this key (403)' }
         : details;
-    if (mode === 'test' && process.env.VERCEL_ENV === 'production') {
+    if (mode === 'test' && process.env.VERCEL_ENV === 'production' && process.env.NEXT_PUBLIC_ENVIRONMENT !== 'staging') {
+      // A dedicated staging project uses Vercel's Production target with test
+      // credentials. Keep the live-production guard tied to application identity.
       // No `summary`: it reaches the unauthenticated body, and announcing that
       // production checkout is in test mode is an invitation. The degraded
       // badge is the public signal; the reason stays operator-side.

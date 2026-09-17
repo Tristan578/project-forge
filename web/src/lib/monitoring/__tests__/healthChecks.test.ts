@@ -409,10 +409,32 @@ describe('healthChecks', () => {
     // A test-mode key in production accepts every request and charges nobody.
     // Stripe accepts it (200), so only the key prefix can reveal the mismatch
     // (https://docs.stripe.com/keys#test-live-modes).
+    it.each([
+      [200, 'healthy'],
+      [401, 'down'],
+      [403, 'degraded'],
+    ] as const)('grades Stripe HTTP %s in stable staging running on the Production target as %s', async (status, expected) => {
+      vi.resetModules();
+      vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_staging_fixture');
+      vi.stubEnv('VERCEL_ENV', 'production');
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'production');
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'staging');
+      const fetchMock = vi.fn(async () => new Response('{}', { status }));
+      vi.stubGlobal('fetch', fetchMock);
+      const { checkPayments } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkPayments();
+      expect(result.status).toBe(expected);
+      expect(result.details?.mode).toBe('test');
+      expect(fetchMock).toHaveBeenCalledWith('https://api.stripe.com/v1/balance', expect.objectContaining({ method: 'GET' }));
+      if (status === 403) expect(result.error).toContain('balance:read');
+      expect(result.error ?? '').not.toContain('sk_test_staging_fixture');
+    });
+
     it('returns degraded when a test-mode key is running in production', async () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_abc');
       vi.stubEnv('VERCEL_ENV', 'production');
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'production');
       vi.stubGlobal('fetch', vi.fn(async () => new Response('{"object":"balance","livemode":false}', { status: 200 })));
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
@@ -432,6 +454,7 @@ describe('healthChecks', () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'rk_test_restricted');
       vi.stubEnv('VERCEL_ENV', 'production');
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'production');
       vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{}}', { status: 403 })));
       const { checkPayments } = await import('@/lib/monitoring/healthChecks');
       const result = await checkPayments();
@@ -446,6 +469,7 @@ describe('healthChecks', () => {
       vi.resetModules();
       vi.stubEnv('STRIPE_SECRET_KEY', 'sk_live_abc');
       vi.stubEnv('VERCEL_ENV', 'production');
+      vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'production');
       let { checkPayments } = await import('@/lib/monitoring/healthChecks');
       let result = await checkPayments();
       expect(result.status).toBe('healthy');
