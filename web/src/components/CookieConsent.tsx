@@ -105,7 +105,7 @@ export function CookieConsent() {
         </Button>
         <Button
           onClick={handleDecline}
-          variant="secondary"
+          variant="outline"
           size="sm"
           className="min-h-[44px] min-w-[44px]"
         >
