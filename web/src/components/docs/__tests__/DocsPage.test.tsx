@@ -163,6 +163,46 @@ describe('DocsPage', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    { name: 'bold and code before a link', markdown: 'Use **bold** and `code` before [the guide](/docs/guide).', text: 'Use bold and code before the guide.', tokens: ['strong:bold', 'code:code', 'a:the guide'], links: ['/docs/guide'] },
+    { name: 'bold and code after a link', markdown: 'Read [the guide](/docs/guide), then **bold** and `code`.', text: 'Read the guide, then bold and code.', tokens: ['a:the guide', 'strong:bold', 'code:code'], links: ['/docs/guide'] },
+    { name: 'repeated tokens and multiple links', markdown: '`first` and **second** [alpha](/docs/a), then `third` [beta](https://example.com/b).', text: 'first and second alpha, then third beta.', tokens: ['code:first', 'strong:second', 'a:alpha', 'code:third', 'a:beta'], links: ['/docs/a', 'https://example.com/b'] },
+    { name: 'link-shaped text inside literal code', markdown: '`[not a link](https://example.com/code)` then [real](/docs/real).', text: '[not a link](https://example.com/code) then real.', tokens: ['code:[not a link](https://example.com/code)', 'a:real'], links: ['/docs/real'] },
+    { name: 'consecutive tokens of the same type', markdown: '**one** **two** `three` [four](/docs/four).', text: 'one two three four.', tokens: ['strong:one', 'strong:two', 'code:three', 'a:four'], links: ['/docs/four'] },
+    { name: 'links nested in bold prose', markdown: '**Read [guide](/docs/guide) to begin**.', text: 'Read guide to begin.', tokens: ['strong:Read guide to begin', 'a:guide'], links: ['/docs/guide'] },
+    { name: 'code and links nested in bold prose', markdown: '**Use `npm install` then [guide](/docs/guide)**.', text: 'Use npm install then guide.', tokens: ['strong:Use npm install then guide', 'code:npm install', 'a:guide'], links: ['/docs/guide'] },
+    { name: 'bold link followed by surrounding prose', markdown: '**[guide](/docs/guide)** to begin.', text: 'guide to begin.', tokens: ['strong:guide', 'a:guide'], links: ['/docs/guide'] },
+    { name: 'standalone link nested in bold', markdown: '**[guide](/docs/guide)**', text: 'guide', tokens: ['strong:guide', 'a:guide'], links: ['/docs/guide'] },
+    { name: 'unclosed syntax and escaped literal HTML', markdown: 'Literal <img src=x onerror=boom> and unclosed `code plus **bold.', text: 'Literal <img src=x onerror=boom> and unclosed `code plus **bold.', tokens: [], links: [] },
+  ])('renders mixed inline Markdown in source order: $name (PF-390)', async (fixture) => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        docs: docs.map((doc) => doc.path === 'getting-started/setup'
+          ? { ...doc, content: fixture.markdown, sections: [] } : doc),
+        meta: {},
+      }),
+    });
+    const { container } = render(<DocsPage />);
+    await waitFor(() => expect(screen.queryByText('Loading documentation...')).not.toBeInTheDocument());
+    fireEvent.click(within(getNav()).getByText('Setup Guide'));
+    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
+    const paragraph = pane.querySelector('p') as HTMLParagraphElement;
+    expect(paragraph).not.toBeNull();
+    expect(paragraph.textContent).toBe(fixture.text);
+    expect(Array.from(paragraph.querySelectorAll('strong, code, a'))
+      .map((node) => node.tagName.toLowerCase() + ':' + node.textContent)).toEqual(fixture.tokens);
+    const links = Array.from(paragraph.querySelectorAll('a'));
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(fixture.links);
+    for (const link of links) {
+      const external = link.getAttribute('href')?.startsWith('http');
+      expect(link.getAttribute('target')).toBe(external ? '_blank' : null);
+      expect(link.getAttribute('rel')).toBe(external ? 'noopener noreferrer' : null);
+    }
+    expect(paragraph.querySelector('img')).toBeNull();
+  });
+
   it('shows a loading state before the docs index resolves', () => {
     mockFetch.mockReturnValue(new Promise(() => {})); // never resolves
     render(<DocsPage />);
