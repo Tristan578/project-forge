@@ -1,3 +1,4 @@
+/** Keep public Docs available while protected routes require working authentication. */
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import type { NextRequest, NextFetchEvent } from 'next/server';
@@ -76,6 +77,10 @@ const clerkHandler = clerkMiddleware(
  * never fall through: missing production credentials and middleware exceptions
  * return a non-cacheable 503. Only local development/CI with NODE_ENV other than
  * production supports unrestricted no-Clerk access.
+ * @param request Incoming Docs request used to identify the public-route boundary.
+ * @param event Next fetch event forwarded to Clerk for middleware lifecycle handling.
+ * @returns Clerk authentication response, public/development pass-through, or
+ * a non-cacheable 503 when protected production authentication is unavailable.
  */
 export default async function proxy(request: NextRequest, event: NextFetchEvent) {
   const authenticationUnavailable = () => NextResponse.json(
