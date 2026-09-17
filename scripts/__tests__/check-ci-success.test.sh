@@ -108,6 +108,7 @@ mk() {
       "observatory-tests":    { result: "success" },
       "build-nextjs":         { result: "success" },
       "docs-internal-gate":   { result: "success" },
+      "docs-e2e":             { result: "success" },
       "design-internal-gate": { result: $dig },
       "hook-tests":           { result: $ht },
       "hook-tests-windows":   { result: "success" },
@@ -1423,6 +1424,22 @@ else
 fi
 
 echo ""
+
+# Docs production routes are gated on docs inputs and on edits to CI itself.
+for trigger in needs-docs needs-ci; do
+  baseline="$(mk false false success success)"
+  tampered="$(jq -c --arg trigger "$trigger" '."ci-gate".outputs[$trigger]="true" | ."docs-e2e".result="skipped"' <<< "$baseline")"
+  res="$(run_verify "$tampered")"
+  if [[ "$res" == 1\|* && "$res" == *docs-e2e* ]]; then
+    pass "docs-e2e skip rejected when $trigger fires"
+  else
+    fail "docs-e2e skip allowed when $trigger fires"
+  fi
+done
+legitimate="$(mk false false success success | jq -c '."docs-e2e".result="skipped"')"
+res="$(run_verify "$legitimate")"
+if [[ "$res" == 0\|* ]]; then pass "docs-e2e legitimate path skip allowed"; else fail "docs-e2e legitimate path skip rejected"; fi
+
 if [ "$FAILURES" -eq 0 ]; then
   echo "All tests passed."
   exit 0
