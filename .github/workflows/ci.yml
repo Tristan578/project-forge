@@ -1937,9 +1937,16 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Install wasm-bindgen-cli
+      - name: Cache wasm-bindgen CLI
         if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
-        run: cargo install wasm-bindgen-cli --version 0.2.127
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine/Cargo.lock') }}
+
+      - name: Install verified wasm-bindgen CLI
+        if: steps.engine-wasm-cache.outputs.cache-hit != 'true'
+        run: bash scripts/install-wasm-bindgen-cli.sh
 
       - name: Build WebGL2 WASM + wasm-bindgen
         if: steps.engine-wasm-cache.outputs.cache-hit != 'true'

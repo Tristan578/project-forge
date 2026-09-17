@@ -343,8 +343,14 @@ jobs:
         working-directory: engine
         run: cargo check --target wasm32-unknown-unknown --all-targets --features webgl2,runtime
 
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.127
+      - name: Cache wasm-bindgen CLI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('engine/Cargo.lock') }}
+
+      - name: Install verified wasm-bindgen CLI
+        run: bash scripts/install-wasm-bindgen-cli.sh
 
       - name: Install wasm-opt (binaryen)
         run: sudo apt-get install -y binaryen
@@ -602,8 +608,14 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
+      - name: Cache cargo-audit
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install verified cargo-audit
+        run: bash scripts/install-cargo-audit.sh
 
       - name: cargo audit (engine)
         working-directory: engine
