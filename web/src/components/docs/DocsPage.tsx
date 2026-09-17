@@ -541,11 +541,12 @@ function MarkdownContent({ content }: { content: string }) {
 
 /** Format inline Markdown; retain original-line context for nested bold content. */
 function formatInline(text: string, inlineText: string = text): React.ReactNode {
-  // Sentence links keep normal line boxes; bare link groups are standalone controls.
-  const hasSurroundingProse = /[\p{L}\p{N}]/u.test(text.replace(/\[[^\]]+\]\([^)]+\)/g, ''));
   const parts: React.ReactNode[] = [];
   let remaining = inlineText;
   let key = 0;
+
+  // Sentence links keep normal line boxes; bare link groups are standalone controls.
+  const hasSurroundingProse = /[\p{L}\p{N}]/u.test(text.replace(/\[[^\]]+\]\([^)]+\)/g, ''));
 
   while (remaining) {
     // Links: [text](url)
