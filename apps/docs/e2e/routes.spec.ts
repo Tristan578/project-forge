@@ -1,3 +1,4 @@
+/** Verify the production-built Docs home, command index, and manifest category routes. */
 import { expect, test } from '@playwright/test';
 
 test('serves the docs home page', async ({ page }) => {
@@ -13,6 +14,6 @@ test('serves the MCP index with published commands', async ({ page }) => {
 
 test('serves a manifest-backed MCP category', async ({ page }) => {
   await page.goto('/mcp/scene');
-  await expect(page.getByRole('heading', { name: 'scene' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'scene', level: 1, exact: true })).toBeVisible();
   await expect(page.locator('li h2').first()).toBeVisible();
 });
