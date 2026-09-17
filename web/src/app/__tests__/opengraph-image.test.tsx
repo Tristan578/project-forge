@@ -244,6 +244,20 @@ describe('play OG route renders offline with emoji-laden user text', () => {
   });
 });
 
+describe('play OG route rejects gaps in the bundled font cmaps', () => {
+  beforeEach(() => { vi.resetModules(); vi.doUnmock('@/lib/db/client'); });
+  it.each(['\u03E2', '\u9FF0'])('never transmits uncovered user glyph %s', async (glyph) => {
+    let call = 0;
+    const rows = [[{ id: 'u1', displayName: 'Ada' }], [{ title: 'PrivateTitle' + glyph, description: 'PrivateDescription' }]];
+    vi.doMock('@/lib/db/client', () => ({ getDb: () => { throw new Error('Unused'); }, queryWithResilience: async () => rows[call++] }));
+    const mod = await import('../play/[userId]/[slug]/opengraph-image');
+    const { remote, bytes } = await renderOffline(() => mod.default({ params: Promise.resolve({ userId: 'clerk_1', slug: 'space-game' }) }));
+    expect(call).toBe(2);
+    expect(remote).toEqual([]);
+    expect(bytes).toBeGreaterThan(0);
+  });
+});
+
 describe('play OG route renders supported multilingual text offline', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -279,25 +293,6 @@ describe('play OG route renders supported multilingual text offline', () => {
     expect(bytes).toBeGreaterThan(0);
   });
 });
-
-/*
- * Why the truncation guard is not an offline-render test.
- *
- * The obvious case — an astral non-emoji astride the cut — cannot be asserted
- * here. Satori fetched `fonts.googleapis.com/css2?family=Noto+Sans+Math` for
- * U+1D400 even when the pair arrived whole: `@vercel/og`'s bundled font is
- * Latin-only, so ANY codepoint outside its coverage is resolved remotely,
- * whether or not our truncation damaged it. Both spellings fail this suite
- * identically, so it can discriminate nothing.
- *
- * That remote font fetch is pre-existing and outside this change: it is the
- * documented behaviour of `@vercel/og` for non-Latin text, it affects only the
- * on-demand play card (never `next build`), and it is the same for a CJK title
- * today as it was before. What it does mean is that codepoint-safe truncation
- * has to be pinned structurally instead — `opengraph-card-content.test.tsx`
- * reads the rendered element tree for a lone surrogate, and `lib/og/text` tests
- * `truncateChars` directly.
- */
 
 const APP_DIR = join(__dirname, '..');
 const OG_LIB_DIR = join(__dirname, '..', '..', 'lib', 'og');
@@ -370,6 +365,7 @@ describe('OG sources carry no emoji codepoints', () => {
       'app/pricing/opengraph-image.tsx',
       'lib/og/BrandMark.tsx',
       'lib/og/play-card-fonts.ts',
+      'lib/og/play-card-glyphs.ts',
       'lib/og/text.ts',
     ]);
   });

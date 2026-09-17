@@ -38,8 +38,8 @@ function textOf(node: unknown): string {
 }
 
 const ROCKET = String.fromCodePoint(0x1f680);
-/** U+1D400 MATHEMATICAL BOLD CAPITAL A — astral, but not emoji. */
-const BOLD_A = String.fromCodePoint(0x1d400);
+/** U+2000B CJK ideograph — covered by the local CJK font and not emoji. */
+const BOLD_A = String.fromCodePoint(0x2000b);
 
 /**
  * Renders the play card against canned query results and returns its text.
@@ -94,6 +94,21 @@ describe('play OG card content', () => {
     expect(text).toContain('Ada');
   });
 
+  it.each(['星の冒険', '별의 모험', '星际冒险', 'Звёздное приключение', 'مغامرة النجوم'])('retains supported text %s in the actual card', async (title) => {
+    const { text } = await playCardText([[{ id: 'u1', displayName: title }], [{ title, description: title }]]);
+    expect(text).toContain(title);
+    expect(text).not.toContain('Game not found');
+  });
+  it.each(['title', 'description', 'displayName'])('uses only generic text when %s has an uncovered glyph', async (field) => {
+    const user = { id: 'u1', displayName: 'PrivateCreator' };
+    const game = { title: 'PrivateTitle', description: 'PrivateDescription' };
+    if (field === 'displayName') user.displayName += '\u03E2';
+    else game[field as 'title' | 'description'] += '\u9FF0';
+    const { text } = await playCardText([[user], [game]]);
+    expect(text).toContain('Game not found');
+    expect(text).not.toContain('Private');
+  });
+
   it('strips emoji from every user-supplied field', async () => {
     const { text } = await playCardText(FOUND);
     expect([...text].filter((c) => /\p{Extended_Pictographic}/u.test(c))).toEqual([]);
@@ -115,6 +130,8 @@ describe('play OG card content', () => {
     // well-formed string never has.
     const lone = text.match(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g);
     expect(lone).toBeNull();
+    expect(text).toContain(BOLD_A);
+    expect(text).not.toContain('Game not found');
   });
 
   it('truncates after stripping, so the slice cannot cut an emoji in half', async () => {

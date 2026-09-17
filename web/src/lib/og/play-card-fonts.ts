@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { PLAY_CARD_GLYPH_RANGES } from './play-card-glyphs';
 
 type OgFont = {
   name: string;
@@ -26,11 +27,22 @@ export const playCardFonts: Promise<OgFont[]> = Promise.all([
   { name: 'SpawnForge OG CJK', data: asArrayBuffer(cjk), weight: 400 },
 ]);
 
-// These Unicode blocks are present in the three bundled fonts. Deliberately
-// reject every other script before Satori gets the text: Satori's fallback for
-// a missing code point is a Google Fonts request containing that text.
-const COVERED_TEXT = /^[\u0009\u000A\u000D\u0020-\u024F\u0370-\u052F\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u2000-\u206F\u3000-\u30FF\u3100-\u312F\u3130-\u318F\u31A0-\u31BF\u3200-\u32FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]+$/u;
-
+/** Reject missing glyphs before Next's automatic fallback can transmit user text. */
 export function isPlayCardTextCovered(text: string): boolean {
-  return COVERED_TEXT.test(text);
+  if (text.length === 0) return false;
+  for (const character of text) {
+    const point = character.codePointAt(0)!;
+    let low = 0;
+    let high = PLAY_CARD_GLYPH_RANGES.length - 1;
+    let covered = false;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      const [start, end] = PLAY_CARD_GLYPH_RANGES[middle];
+      if (point < start) high = middle - 1;
+      else if (point > end) low = middle + 1;
+      else { covered = true; break; }
+    }
+    if (!covered) return false;
+  }
+  return true;
 }
