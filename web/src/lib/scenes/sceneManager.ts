@@ -480,7 +480,8 @@ export function readPrefabDefinitions(sceneData: SceneFileData | null | undefine
  * Read this project's recovery points without requiring the engine to be ready.
  * Invalid metadata, project references, and scene envelopes are filtered out.
  * Restore and write paths additionally validate every component with Rust.
- * Anonymous records from the old shared checkpoint key are never adopted.
+ * Only legacy records explicitly marked with a null project ID migrate to the
+ * unsaved namespace; legacy cloud-project records are never adopted.
  *
  * @param projectId Project namespace; null selects local unassigned recovery points.
  * @returns Stored records in newest-first order with invalid records filtered out; an unreadable store yields an empty list.
