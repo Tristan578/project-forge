@@ -14,7 +14,7 @@
  */
 
 import type { ToolHandler, ExecutionResult } from './types';
-import type { EntityType, InputBinding } from './types';
+import type { EntityType, InputBinding, SceneNode } from './types';
 import { ownEntry, parseArgs, zSetupGameFromDescription } from './types';
 import { getPresetById } from '@/lib/materialPresets';
 import { getCapabilityUnavailability } from '@/lib/config/providers';
@@ -132,7 +132,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const { sceneGraph } = ctx.store;
 
     const nodes = filterIds
-      ? filterIds.map((id) => ownEntry(sceneGraph.nodes, id)).filter(Boolean)
+      ? filterIds.map((id) => ownEntry(sceneGraph.nodes, id)).filter((node): node is SceneNode => node !== undefined)
       : Object.values(sceneGraph.nodes);
 
     if (detail === 'summary') {
@@ -164,9 +164,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         parentId: node.parentId,
         childCount: node.children.length,
         hasPhysics: node.components.some((c) => c.includes('Physics')),
-        hasScript: !!ctx.store.allScripts[node.entityId],
+        hasScript: !!ownEntry(ctx.store.allScripts, node.entityId),
         hasAudio: node.components.some((c) => c.includes('Audio')),
-        gameComponents: (ctx.store.allGameComponents?.[node.entityId] ?? []).map((c) => c.type),
+        gameComponents: ((ctx.store.allGameComponents ? ownEntry(ctx.store.allGameComponents, node.entityId) : undefined) ?? []).map((c) => c.type),
       }));
       return {
         success: true,
@@ -194,11 +194,11 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       parentId: node.parentId,
       children: node.children,
       hasPhysics: node.components.some((c) => c.includes('Physics')),
-      hasScript: !!ctx.store.allScripts[node.entityId],
+      hasScript: !!ownEntry(ctx.store.allScripts, node.entityId),
       hasAudio: node.components.some((c) => c.includes('Audio')),
       hasParticles: node.components.some((c) => c.includes('Particle')),
-      gameComponents: ctx.store.allGameComponents?.[node.entityId] ?? [],
-      terrain: ctx.store.terrainData?.[node.entityId] ?? null,
+      gameComponents: (ctx.store.allGameComponents ? ownEntry(ctx.store.allGameComponents, node.entityId) : undefined) ?? [],
+      terrain: (ctx.store.terrainData ? ownEntry(ctx.store.terrainData, node.entityId) : undefined) ?? null,
     }));
 
     return {
@@ -233,9 +233,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     };
 
     for (const node of allNodes) {
-      const components = ctx.store.allGameComponents?.[node.entityId] ?? [];
+      const components = (ctx.store.allGameComponents ? ownEntry(ctx.store.allGameComponents, node.entityId) : undefined) ?? [];
       const hasPhysics = node.components.some((c) => c.includes('Physics'));
-      const hasScript = !!ctx.store.allScripts[node.entityId];
+      const hasScript = !!ownEntry(ctx.store.allScripts, node.entityId);
 
       const role = identifyRole(node, components, hasPhysics, hasScript);
       analysis.entityRoles.push({ name: node.name, id: node.entityId, role });
@@ -264,7 +264,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     const collectibles = analysis.entityRoles.filter((e) => e.role === 'collectible');
     const winConditions = allNodes.filter((n) =>
-      (ctx.store.allGameComponents?.[n.entityId] ?? []).some((c) => c.type === 'winCondition')
+      ((ctx.store.allGameComponents ? ownEntry(ctx.store.allGameComponents, n.entityId) : undefined) ?? []).some((c) => c.type === 'winCondition')
     );
     if (collectibles.length > 0 && winConditions.length === 0) {
       analysis.suggestions.push(
@@ -510,7 +510,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     for (const ent of entities) {
       const childId = ownEntry(nameToId, ent.name as string);
-      const parentId = ent.parentName ? ownEntry(nameToId, ent.parentName) : undefined;
+      const parentId = typeof ent.parentName === 'string' ? ownEntry(nameToId, ent.parentName) : undefined;
       if (childId && parentId) {
         ctx.store.reparentEntity(childId, parentId);
       }

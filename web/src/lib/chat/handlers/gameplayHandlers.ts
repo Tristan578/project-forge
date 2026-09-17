@@ -72,7 +72,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
   get_game_components: async (args, ctx) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
     if (p.error) return p.error;
-    const components = ctx.store.allGameComponents[p.data.entityId] ?? [];
+    const components = ownEntry(ctx.store.allGameComponents, p.data.entityId) ?? [];
     return { success: true, result: { components, count: components.length } };
   },
 
@@ -137,7 +137,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     // a loaded scene file, and the translator owns which of its fields hold a
     // number. `Object.hasOwn` on the map because `entityId` is LLM-chosen.
     if (Object.hasOwn(ctx.store.allGameCameras, d.entityId)) {
-      const existing = ctx.store.allGameCameras[d.entityId];
+      const existing = ownEntry(ctx.store.allGameCameras, d.entityId);
       if (existing) {
         // The follow target is the field that decides whether the camera moves
         // AT ALL — `cameraModeNeedsTarget` lists five of the six modes as inert
@@ -202,7 +202,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     // `toString`/`constructor` walks the prototype chain and would report an
     // inherited function as this entity's camera.
     const camera = Object.hasOwn(ctx.store.allGameCameras, p.data.entityId)
-      ? ctx.store.allGameCameras[p.data.entityId]
+      ? ownEntry(ctx.store.allGameCameras, p.data.entityId)
       : undefined;
     const isActive = ctx.store.activeGameCameraId === p.data.entityId;
     return { success: true, result: { camera: camera ?? null, isActive } };
@@ -235,7 +235,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       // `Object.hasOwn` for the same reason as `get_audio`: `entityId` reaches
       // here from a tool call, and a bare index on a name like `"constructor"`
       // would put an inherited function into the snapshot.
-      audio: Object.hasOwn(ctx.store.entityAudio, entityId) ? ctx.store.entityAudio[entityId] : undefined,
+      audio: ownEntry(ctx.store.entityAudio, entityId),
       particle: ctx.store.primaryParticle ?? undefined,
     };
 

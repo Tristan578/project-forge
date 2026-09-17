@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import { backgroundRemovalWarning } from '@/lib/generation/backgroundRemoval';
 import type { ToolHandler, ExecutionResult } from './types';
-import { parseArgs } from './types';
+import { ownEntry, parseArgs } from './types';
 import { useGenerationStore } from '@/stores/generationStore';
 import type { GenerationType } from '@/stores/generationStore';
 import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } from '@/lib/generate/promptEnricher';
@@ -337,7 +337,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     // Find entity name for SFX context enrichment
-    const entityName = p.data.entityId ? ctx.store.sceneGraph.nodes[p.data.entityId]?.name : undefined;
+    const entityName = p.data.entityId ? ownEntry(ctx.store.sceneGraph.nodes, p.data.entityId)?.name : undefined;
     const result = await generateFetch('/api/generate/sfx', {
       prompt: enrichSfxPrompt(p.data.prompt, entityName, ctx.store),
       durationSeconds: p.data.durationSeconds ?? 5,
