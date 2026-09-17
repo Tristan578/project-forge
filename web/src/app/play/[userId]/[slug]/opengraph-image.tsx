@@ -1,3 +1,4 @@
+/** Render published-game share cards from local fonts without external text requests. */
 import { ImageResponse } from 'next/og';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { publishedGames, users } from '@/lib/db/schema';
@@ -12,7 +13,9 @@ export const contentType = 'image/png';
 // Font binaries are traced local files, so this route must not be promoted to Edge.
 export const runtime = 'nodejs';
 
+/** Next image-route inputs identifying the published game owner and slug. */
 interface Props {
+  /** Asynchronous route parameters: Clerk user ID and published game slug. */
   params: Promise<{ userId: string; slug: string }>;
 }
 
@@ -125,6 +128,12 @@ async function loadCard(clerkId: string, slug: string): Promise<CardData | null>
   }
 }
 
+/**
+ * Render a published game share card, or a generic card for missing or uncovered text.
+ * @param props.params Asynchronous Clerk user ID and published game slug route parameters.
+ * @returns A 1200 by 630 PNG ImageResponse using traced local font files; database
+ * lookup failures produce the generic card and local font/render failures propagate.
+ */
 export default async function Image({ params }: Props) {
   const { userId: clerkId, slug } = await params;
 

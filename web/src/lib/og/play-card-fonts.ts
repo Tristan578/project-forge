@@ -1,3 +1,4 @@
+/** Load traced OG fonts and reject text not covered by their exact glyph maps. */
 import { readFile } from 'node:fs/promises';
 import { PLAY_CARD_GLYPH_RANGES } from './play-card-glyphs';
 
@@ -27,7 +28,12 @@ export const playCardFonts: Promise<OgFont[]> = Promise.all([
   { name: 'SpawnForge OG CJK', data: asArrayBuffer(cjk), weight: 400 },
 ]);
 
-/** Reject missing glyphs before Next's automatic fallback can transmit user text. */
+/**
+ * Reject missing glyphs before Next's automatic fallback can transmit user text.
+ * @param text Card text to check, iterated as Unicode code points.
+ * @returns True when all characters have local glyphs or are supported layout
+ * whitespace; false for empty text or any missing glyph, including lone surrogates.
+ */
 export function isPlayCardTextCovered(text: string): boolean {
   if (text.length === 0) return false;
   for (const character of text) {

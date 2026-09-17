@@ -1,5 +1,7 @@
 # Play-card font assets
 
+> **Last updated:** 2026-09-16
+
 The Node.js play OG image route reads these local files through Next's output
 file tracing. Font requests do not include user text or leave the application.
 

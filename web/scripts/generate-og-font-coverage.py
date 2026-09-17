@@ -1,4 +1,4 @@
-"""Regenerate the OG guard from exact bundled cmap coverage; use --check in CI."""
+"""Regenerate the OG guard from exact bundled cmap coverage; use --check for local freshness."""
 from pathlib import Path
 import hashlib
 import sys
