@@ -648,25 +648,11 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-    # NO `if:` — this job runs whenever quality-gates is called.
-    #
-    # It used to read `github.event_name == 'pull_request'`. That is not a
-    # meaningful axis: the job compares effects-off against effects-on for the
-    # SAME commit and reads no pull_request payload at all. What the condition
-    # actually did was silently skip the job on the workflow_dispatch runs that
-    # unblock bot-authored PRs (#9161), while the reusable workflow — and so
-    # "CI Success" — still reported green. Removing it restores the invariant
-    # the required check depends on: CI Success means the same thing on every
-    # event.
-    #
-    # It is deliberately NOT re-gated on `inputs.web-changed`. That would be a
-    # COVERAGE REGRESSION, not an optimisation: `needs-web` is `^web/` only, so
-    # a `packages/ui/**` change (a runtime dependency of the web build via
-    # @spawnforge/ui) or a root `package-lock.json` bump would skip the
-    # performance gate entirely. Path-gating this job is #9526's work and needs
-    # a signal covering the whole web-build input set — web/, packages/ui/,
-    # package.json at any depth, package-lock.json, .node-version — which
-    # ci-gate does not currently emit as a single output.
+    # Run on every supported event when ci-gate reports a web build input:
+    # web/**, packages/ui/**, any package.json, root package-lock.json or
+    # .node-version. The signal is broader than needs-web and is passed through
+    # the reusable workflow input; pull_request and workflow_dispatch share
+    # the same path policy. Unrelated docs/hooks changes skip both costly builds.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
