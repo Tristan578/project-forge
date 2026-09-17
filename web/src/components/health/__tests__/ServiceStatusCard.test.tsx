@@ -105,7 +105,7 @@ describe('ServiceStatusCard', () => {
         })}
       />,
     );
-    const box = container.querySelector('.bg-zinc-700');
+    const box = container.querySelector('[data-testid="service-status-message"]');
     expect(box).not.toBeNull();
     expect(box?.textContent).toBe('Available only with your own API key: 3D Model Generation');
     expect(screen.queryByText('AI Providers is degraded')).toBeNull();
@@ -117,7 +117,7 @@ describe('ServiceStatusCard', () => {
         service={makeService({ status: 'down', error: 'Payments (Stripe) is down' })}
       />,
     );
-    expect(container.querySelector('.bg-zinc-700')?.textContent).toBe('Payments (Stripe) is down');
+    expect(container.querySelector('[data-testid="service-status-message"]')?.textContent).toBe('Payments (Stripe) is down');
   });
 
   it('shows error message when service has error', () => {
@@ -130,7 +130,7 @@ describe('ServiceStatusCard', () => {
   it('does not show error block when no error', () => {
     const { container } = render(<ServiceStatusCard service={makeService({ error: undefined })} />);
     // The only possible error message would be some kind of error-styled block
-    expect(container.querySelector('.bg-zinc-700')).toBeNull();
+    expect(container.querySelector('[data-testid="service-status-message"]')).toBeNull();
   });
 
   // ── Timestamp ──────────────────────────────────────────────────────────
@@ -144,19 +144,20 @@ describe('ServiceStatusCard', () => {
 
   it('applies green indicator for healthy status', () => {
     const { container } = render(<ServiceStatusCard service={makeService({ status: 'healthy' })} />);
-    const indicator = container.querySelector('.bg-green-500');
+    const indicator = container.querySelector('[data-testid="service-status-indicator"]');
     expect(indicator).not.toBeNull();
+    expect(indicator?.className).toContain('--sf-status-healthy-indicator');
   });
 
   it('applies yellow indicator for degraded status', () => {
     const { container } = render(
       <ServiceStatusCard service={makeService({ status: 'degraded' })} />
     );
-    expect(container.querySelector('.bg-yellow-500')).not.toBeNull();
+    expect(container.querySelector('[data-testid="service-status-indicator"]')?.className).toContain('--sf-status-degraded-indicator');
   });
 
   it('applies red indicator for down status', () => {
     const { container } = render(<ServiceStatusCard service={makeService({ status: 'down' })} />);
-    expect(container.querySelector('.bg-red-500')).not.toBeNull();
+    expect(container.querySelector('[data-testid="service-status-indicator"]')?.className).toContain('--sf-status-down-indicator');
   });
 });

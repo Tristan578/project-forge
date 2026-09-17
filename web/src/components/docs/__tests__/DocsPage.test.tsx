@@ -182,7 +182,7 @@ describe('DocsPage', () => {
 
   it('renders the docs home with a quick-start link and category grid', async () => {
     const { container } = await renderLoaded();
-    const pane = within(container.querySelector('.min-w-0.flex-1') as HTMLElement);
+    const pane = within(container.querySelector('[aria-label="Documentation content"]') as HTMLElement);
 
     // Quick-start button, from the "index" doc.
     expect(pane.getByText('Welcome to SpawnForge')).toBeInTheDocument();
@@ -228,9 +228,12 @@ describe('DocsPage', () => {
 
     // "features" starts expanded by default.
     expect(within(nav).getByText('Feature Beta')).toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: /Features/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(nav).getByRole('textbox', { name: 'Search documentation' })).toHaveClass('focus-visible:ring-2');
 
     fireEvent.click(within(nav).getByRole('button', { name: /Features/ }));
     expect(within(nav).queryByText('Feature Beta')).not.toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: /Features/ })).toHaveAttribute('aria-expanded', 'false');
 
     fireEvent.click(within(nav).getByRole('button', { name: /Features/ }));
     expect(within(nav).getByText('Feature Beta')).toBeInTheDocument();
@@ -242,7 +245,7 @@ describe('DocsPage', () => {
 
     fireEvent.click(within(nav).getByText('Setup Guide'));
 
-    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
+    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
     const content = within(pane);
 
     // Breadcrumb: category label + doc title.
@@ -297,7 +300,7 @@ describe('DocsPage', () => {
     const nav = getNav();
 
     fireEvent.click(within(nav).getByText('Setup Guide'));
-    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
+    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
     expect(within(pane).getByText('Getting Started')).toBeInTheDocument();
 
     fireEvent.click(within(pane).getByTitle('Back to docs home'));
@@ -308,7 +311,7 @@ describe('DocsPage', () => {
 
   it('syncs activePath when the "path" search param changes after mount', async () => {
     const { container, rerender } = await renderLoaded();
-    const pane = container.querySelector('.min-w-0.flex-1') as HTMLElement;
+    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
 
     // No doc active yet — docs home is showing.
     expect(within(pane).getByText('Welcome to SpawnForge')).toBeInTheDocument();
