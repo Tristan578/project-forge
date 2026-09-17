@@ -54,6 +54,7 @@ jobs:
       contents: read
     outputs:
       needs-web: ${{ steps.changes.outputs.web }}
+      needs-web-build-inputs: ${{ steps.changes.outputs.web-build-inputs }}
       needs-engine: ${{ steps.changes.outputs.engine }}
       needs-mcp: ${{ steps.changes.outputs.mcp }}
       needs-ci: ${{ steps.changes.outputs.ci }}
@@ -102,7 +103,7 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
-          web=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false; observatory=false
+          web=false; web_build_inputs=false; engine=false; mcp=false; ci=false; docs=false; design=false; hooks=false; deps=false; agentic=false; onboarding=false; codex=false; ghaw=false; api=false; skills=false; observatory=false
 
           # docs/capability-matrix.md is prose, but its ONLY gate is a web unit
           # test (web/src/lib/config/__tests__/capabilityMatrix.test.ts): the
@@ -113,6 +114,8 @@ jobs:
           # that exists to catch exactly that (#9720, lesson #1). The copy the
           # docs site ships is guarded by the docs gate below.
           echo "$CHANGED" | grep -qE '^web/|^docs/capability-matrix\.md$' && web=true
+          # Every source/configuration input that can alter the web production build.
+          echo "$CHANGED" | grep -qE '^web/|^packages/ui/|^package\.json$|^package-lock\.json$|^\.node-version$' && web_build_inputs=true
           # .transform-gizmo-fork is a PATH DEPENDENCY of the engine
           # (engine/Cargo.toml: path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"),
           # so it compiles into every shipped WASM binary. It is a local patch we
@@ -237,6 +240,7 @@ jobs:
 
           {
             echo "web=$web"
+            echo "web-build-inputs=$web_build_inputs"
             echo "engine=$engine"
             echo "mcp=$mcp"
             echo "ci=$ci"
@@ -268,6 +272,7 @@ jobs:
     uses: ./.github/workflows/quality-gates.yml
     with:
       web-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-web) }}
+      web-build-inputs-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-web-build-inputs) }}
       engine-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-engine) }}
       mcp-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-mcp) }}
       ci-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-ci) }}

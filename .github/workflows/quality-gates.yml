@@ -11,6 +11,10 @@ on:
         description: 'Whether web/** or package*.json changed (defaults to true when unset)'
         type: boolean
         default: true
+      web-build-inputs-changed:
+        description: 'Whether any source or configuration input of the web production build changed'
+        type: boolean
+        default: true
       mcp-changed:
         description: 'Whether mcp-server/** changed (defaults to true when unset)'
         type: boolean
@@ -607,6 +611,7 @@ jobs:
 
   lighthouse-delta:
     name: Lighthouse Effects Delta Gate
+    if: inputs.web-build-inputs-changed
     runs-on: ubuntu-latest
     # 25, not 15: this job does TWO full Next.js production builds and six
     # Lighthouse runs on top of a cold npm install. On run 33820181562 the
