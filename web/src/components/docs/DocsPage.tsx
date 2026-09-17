@@ -541,6 +541,8 @@ function MarkdownContent({ content }: { content: string }) {
 
 /** Format inline markdown (bold, code, links) */
 function formatInline(text: string): React.ReactNode {
+  // Sentence links keep normal line boxes; bare link groups are standalone controls.
+  const hasSurroundingProse = /[\p{L}\p{N}]/u.test(text.replace(/\[[^\]]+\]\([^)]+\)/g, ''));
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -554,7 +556,7 @@ function formatInline(text: string): React.ReactNode {
         <a
           key={key++}
           href={linkMatch[3]}
-          className="inline break-words text-[var(--sf-text)] underline underline-offset-2 hover:text-[var(--sf-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
+          className={`${hasSurroundingProse ? 'inline' : 'inline-flex min-h-[44px] min-w-[44px] items-center'} break-words text-[var(--sf-text)] underline underline-offset-2 hover:text-[var(--sf-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]`}
           target={linkMatch[3].startsWith('http') ? '_blank' : undefined}
           rel={linkMatch[3].startsWith('http') ? 'noopener noreferrer' : undefined}
         >

@@ -45,6 +45,10 @@ const setupContent = [
   'Some `inline code` snippet.',
   'An external [link](https://example.com) reference.',
   'A local [link](/docs/other) reference.',
+  '  [Standalone paragraph](/docs/standalone)  ',
+  '- [Command Reference](../reference/commands.md)',
+  '3. [External resource](https://example.com/resource)',
+  '[First reference](/docs/first) | [Second reference](/docs/second)',
   '',
   '- bullet one',
   '- bullet two',
@@ -298,6 +302,22 @@ describe('DocsPage', () => {
     );
 
     expect(content.getByText('Final paragraph.')).toBeInTheDocument();
+  });
+
+  it('keeps bare paragraph and list links as standalone controls while sentence links stay inline', async () => {
+    const { container } = await renderLoaded();
+    fireEvent.click(within(getNav()).getByText('Setup Guide'));
+    const pane = container.querySelector('[aria-label="Documentation content"]') as HTMLElement;
+    for (const href of ['/docs/standalone', '../reference/commands.md', 'https://example.com/resource', '/docs/first', '/docs/second']) {
+      const link = pane.querySelector(`a[href="${href}"]`) as HTMLAnchorElement;
+      expect(link).toHaveClass('inline-flex', 'min-h-[44px]', 'min-w-[44px]', 'focus-visible:ring-2');
+    }
+    const external = pane.querySelector('a[href="https://example.com/resource"]') as HTMLAnchorElement;
+    expect(external).toHaveAttribute('target', '_blank');
+    expect(external).toHaveAttribute('rel', 'noopener noreferrer');
+    const sentenceLink = pane.querySelector('a[href="https://example.com"]') as HTMLAnchorElement;
+    expect(sentenceLink).toHaveClass('inline');
+    expect(sentenceLink).not.toHaveClass('inline-flex', 'min-h-[44px]');
   });
 
   it('returns to docs home via the breadcrumb back button', async () => {
