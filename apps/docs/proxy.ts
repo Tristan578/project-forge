@@ -1,6 +1,7 @@
+/** Keep public Docs available while protected routes require working authentication. */
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+import type { NextRequest, NextFetchEvent } from 'next/server';
 import { DOCS_URL, resolveDocsUrl } from './lib/site';
 
 /**
@@ -71,18 +72,34 @@ const clerkHandler = clerkMiddleware(
   { authorizedParties: buildAuthorizedParties() },
 );
 
-export default async function proxy(request: NextRequest) {
-  // Without Clerk keys, allow all access (dev/CI)
+/**
+ * Keep public docs available during an authentication outage. Protected routes
+ * never fall through: missing production credentials and middleware exceptions
+ * return a non-cacheable 503. Only local development/CI with NODE_ENV other than
+ * production supports unrestricted no-Clerk access.
+ * @param request Incoming Docs request used to identify the public-route boundary.
+ * @param event Next fetch event forwarded to Clerk for middleware lifecycle handling.
+ * @returns Clerk authentication response, public/development pass-through, or
+ * a non-cacheable 503 when protected production authentication is unavailable.
+ */
+export default async function proxy(request: NextRequest, event: NextFetchEvent) {
+  const authenticationUnavailable = () => NextResponse.json(
+    { error: 'Authentication temporarily unavailable' },
+    { status: 503, headers: { 'Cache-Control': 'no-store' } },
+  );
   if (!process.env.CLERK_SECRET_KEY) {
-    return passThrough();
+    return process.env.NODE_ENV !== 'production' || isPublicRoute(request)
+      ? passThrough()
+      : authenticationUnavailable();
   }
 
-  // Wrap clerkMiddleware so a misconfigured Clerk instance doesn't 500 the entire site
   try {
-    return await clerkHandler(request, {} as any);
-  } catch (err) {
-    console.error('[proxy] clerkMiddleware threw — allowing request through:', err);
-    return passThrough();
+    return await clerkHandler(request, event);
+  } catch {
+    // Provider exceptions may contain tokens or connection details. Emit only
+    // a fixed identifier; never stringify or pass the raw exception to logs.
+    console.error('[docs-auth] middleware_unavailable');
+    return isPublicRoute(request) ? passThrough() : authenticationUnavailable();
   }
 }
 

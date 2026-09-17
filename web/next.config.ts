@@ -96,6 +96,22 @@ const nextConfig: NextConfig = {
   // Top-level in Next.js 15+ (moved out of experimental).
   outputFileTracingIncludes: {
     '/changelog': ['../CHANGELOG.md'],
+    // The play share-card route reads font files through a dynamic URL helper.
+    // Include the exact assets explicitly, including metadata-ID variants, so
+    // a deployed function never relies on the tracer inferring that helper.
+    '/play/**/opengraph-image': [
+      './src/assets/fonts/NotoSans-Regular.ttf',
+      './src/assets/fonts/NotoSans-Bold.ttf',
+      './src/assets/fonts/SpawnForgeArabic-Regular.ttf',
+      './src/assets/fonts/NotoSansCJKjp-Regular.otf',
+    ],
+    '/play/**/opengraph-image/**': [
+      './src/assets/fonts/NotoSans-Regular.ttf',
+      './src/assets/fonts/NotoSans-Bold.ttf',
+      './src/assets/fonts/SpawnForgeArabic-Regular.ttf',
+      './src/assets/fonts/NotoSansCJKjp-Regular.otf',
+    ],
+
   },
   // No server function ever reads the browser engine bundles from disk: they are
   // public assets served through the rewrites/headers below and the R2 CDN.
