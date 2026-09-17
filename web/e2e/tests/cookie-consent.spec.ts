@@ -1,3 +1,4 @@
+/** Verify mobile cookie consent touch targets and explicit keyboard choices. */
 import { expect, test, type Page } from '@playwright/test';
 
 /** Assert actual mobile consent geometry instead of depending on CSS class names. */
