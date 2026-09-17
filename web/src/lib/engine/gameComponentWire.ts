@@ -58,6 +58,19 @@ export interface GameComponentWirePayload {
 }
 
 /**
+ * Copy only own enumerable wire fields into a prototype-free record.
+ *
+ * Component payloads can arrive from imported scenes and model tool calls. A
+ * direct `props.field` read would otherwise accept values inherited from a
+ * polluted prototype as though the sender supplied them.
+ */
+function ownEnumerableSnapshot(source: Record<string, unknown>): Record<string, unknown> {
+  const snapshot = Object.create(null) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(source)) snapshot[key] = value;
+  return snapshot;
+}
+
+/**
  * The component's own data object, keyed by its discriminant.
  *
  * Written as an exhaustive switch rather than an index into the union so that adding
@@ -166,7 +179,7 @@ export function parseGameComponentWire(payload: {
   if (properties === undefined) return buildStoreComponent(storeType);
   if (properties === null || typeof properties !== 'object' || Array.isArray(properties)) return null;
 
-  const props = properties as Record<string, unknown>;
+  const props = ownEnumerableSnapshot(properties as Record<string, unknown>);
   if (storeType !== 'dialogueTrigger') return buildStoreComponent(storeType, props);
 
   return buildStoreComponent(storeType, {
@@ -579,8 +592,9 @@ const nullableInt = (v: unknown, fallback: number | null, max: number): number |
  */
 export function buildStoreComponent(
   name: string,
-  props: Record<string, unknown> = {},
+  rawProps: Record<string, unknown> = {},
 ): GameComponentData | null {
+  const props = ownEnumerableSnapshot(rawProps);
   switch (toStoreComponentType(name)) {
     case 'characterController':
       return {

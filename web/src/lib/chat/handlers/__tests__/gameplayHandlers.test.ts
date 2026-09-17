@@ -329,6 +329,58 @@ describe('get_game_components', () => {
     expect(data.components).toHaveLength(2);
     expect(data.count).toBe(2);
   });
+
+  it('does not expose inherited components, while preserving an own prototype-named entity', async () => {
+    const components = [{ type: 'health' }];
+    const inherited = await invokeHandler(gameplayHandlers, 'get_game_components', {
+      entityId: 'toString',
+    }, { allGameComponents: Object.create({ toString: components }) });
+    expect(inherited.result).toEqual({ success: true, result: { components: [], count: 0 } });
+    expect(inherited.dispatchCommand).not.toHaveBeenCalled();
+    expect(inherited.store.addGameComponent).not.toHaveBeenCalled();
+
+    const own = await invokeHandler(gameplayHandlers, 'get_game_components', {
+      entityId: 'toString',
+    }, { allGameComponents: { toString: components } });
+    expect(own.result).toEqual({ success: true, result: { components, count: 1 } });
+  });
+});
+
+// ===========================================================================
+// save_as_prefab
+// ===========================================================================
+
+describe('save_as_prefab', () => {
+  it('does not serialize inherited scene or audio records, while preserving own records', async () => {
+    const audio = { volume: 0.75 };
+    const lightNode = { components: ['PointLight'] };
+    const inherited = await invokeHandler(gameplayHandlers, 'save_as_prefab', {
+      entityId: 'ghost', name: 'Ghost prefab',
+    }, {
+      sceneGraph: { nodes: Object.create({ ghost: lightNode }), rootIds: [] },
+      entityAudio: Object.create({ ghost: audio }),
+      primaryLight: { lightType: 'point' },
+    });
+    expect(inherited.result.success).toBe(true);
+    expect(mockSavePrefab).toHaveBeenCalledWith('Ghost prefab', 'uncategorized', '', expect.objectContaining({
+      entityType: 'cube', audio: undefined,
+    }));
+    expect(inherited.dispatchCommand).not.toHaveBeenCalled();
+    expect(inherited.store.updateMaterial).not.toHaveBeenCalled();
+
+    mockSavePrefab.mockClear();
+    const own = await invokeHandler(gameplayHandlers, 'save_as_prefab', {
+      entityId: 'ghost', name: 'Own prefab',
+    }, {
+      sceneGraph: { nodes: { ghost: lightNode }, rootIds: [] },
+      entityAudio: { ghost: audio },
+      primaryLight: { lightType: 'point' },
+    });
+    expect(own.result.success).toBe(true);
+    expect(mockSavePrefab).toHaveBeenCalledWith('Own prefab', 'uncategorized', '', expect.objectContaining({
+      entityType: 'point_light', audio,
+    }));
+  });
 });
 
 // ===========================================================================

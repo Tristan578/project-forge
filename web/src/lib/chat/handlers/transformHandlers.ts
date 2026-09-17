@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 import type { ToolHandler } from './types';
-import { zEntityId, zXYZ, zSelectionMode, zGizmoMode, zCameraPreset, parseArgs } from './types';
+import { ownEntry, zEntityId, zXYZ, zSelectionMode, zGizmoMode, zCameraPreset, parseArgs } from './types';
 import { parseHandlerArgs } from '@/lib/validation/parseArgs';
 import { entityId, enumValue, boundedString, vec3 } from '@/lib/validation/validators';
 import { SPAWNABLE_ENTITY_TYPES } from '@/stores/slices/sceneGraphSlice';
@@ -105,7 +105,7 @@ export const transformHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
     const { entityId, visible } = p.data;
     // Idempotent set — only toggle if current state differs from requested
-    const node = store.sceneGraph?.nodes?.[entityId];
+    const node = store.sceneGraph?.nodes ? ownEntry(store.sceneGraph.nodes, entityId) : undefined;
     const currentVisible = node?.visible ?? true;
     if (currentVisible !== visible) {
       store.toggleVisibility(entityId);

@@ -62,10 +62,11 @@ async function invoke(
   name: string,
   args: Record<string, unknown> = {},
   storeOverrides: Record<string, unknown> = {},
-): Promise<{ result: ExecutionResult; store: ToolCallContext['store'] }> {
+): Promise<{ result: ExecutionResult; store: ToolCallContext['store']; dispatchCommand: ReturnType<typeof vi.fn> }> {
   const store = createMockStore(storeOverrides);
-  const result = await handlers[name](args, { store, dispatchCommand: vi.fn() });
-  return { result, store };
+  const dispatchCommand = vi.fn();
+  const result = await handlers[name](args, { store, dispatchCommand });
+  return { result, store, dispatchCommand };
 }
 
 beforeEach(async () => {
@@ -148,6 +149,24 @@ describe('shaderHandlers', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
     });
+
+    it('rejects an inherited active graph without adding an edge, while allowing an own graph', async () => {
+      const graph = mockGraphState.graphs['graph-1'];
+      mockGraphState.graphs = Object.create({ 'graph-1': graph });
+      const inherited = await invoke('connect_shader_nodes', {
+        sourceNodeId: 'n2', sourceHandle: 'color', targetNodeId: 'n1', targetHandle: 'color',
+      });
+      expect(inherited.result).toEqual({ success: false, error: 'No active shader graph' });
+      expect(mockGraphState.addEdge).not.toHaveBeenCalled();
+      expect(inherited.dispatchCommand).not.toHaveBeenCalled();
+
+      mockGraphState.graphs = Object.assign(Object.create(null), { 'graph-1': graph });
+      const own = await invoke('connect_shader_nodes', {
+        sourceNodeId: 'n2', sourceHandle: 'color', targetNodeId: 'n1', targetHandle: 'color',
+      });
+      expect(own.result.success).toBe(true);
+      expect(mockGraphState.addEdge).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('compile_shader', () => {
@@ -171,6 +190,27 @@ describe('shaderHandlers', () => {
     it('fails for nonexistent graph', async () => {
       const { result } = await invoke('compile_shader', { graphId: 'nonexistent' });
       expect(result.success).toBe(false);
+    });
+
+    it('rejects an inherited graph without compiling it (PF-235)', async () => {
+      const inheritedGraph = mockGraphState.graphs['graph-1'];
+      mockGraphState.graphs = Object.create({ 'graph-1': inheritedGraph });
+
+      const { result } = await invoke('compile_shader', { graphId: 'graph-1' });
+
+      expect(result).toEqual({ success: false, error: 'Shader graph not found: graph-1' });
+      expect(mockCompileToWgsl).not.toHaveBeenCalled();
+      expect(mockGraphState.setCompilationError).not.toHaveBeenCalled();
+    });
+
+    it('compiles an own graph from a prototype-free map (PF-235)', async () => {
+      const graph = mockGraphState.graphs['graph-1'];
+      mockGraphState.graphs = Object.assign(Object.create(null), { 'graph-1': graph });
+
+      const { result } = await invoke('compile_shader', { graphId: 'graph-1' });
+
+      expect(result.success).toBe(true);
+      expect(mockCompileToWgsl).toHaveBeenCalledWith(graph);
     });
 
     it('sets compilationError on invalid graph', async () => {
@@ -217,6 +257,23 @@ describe('shaderHandlers', () => {
         entityId: 'e1',
       });
       expect(result.success).toBe(false);
+    });
+
+    it('rejects an inherited graph without compiling or applying it, while allowing an own graph', async () => {
+      const graph = mockGraphState.graphs['graph-1'];
+      mockGraphState.graphs = Object.create({ 'graph-1': graph });
+      const inherited = await invoke('apply_shader_to_entity', { entityId: 'e1', graphId: 'graph-1' });
+      expect(inherited.result).toEqual({ success: false, error: 'Shader graph not found: graph-1' });
+      expect(mockCompileToWgsl).not.toHaveBeenCalled();
+      expect(mockGraphState.setCompilationError).not.toHaveBeenCalled();
+      expect(inherited.store.updateShaderEffect).not.toHaveBeenCalled();
+      expect(inherited.dispatchCommand).not.toHaveBeenCalled();
+
+      mockGraphState.graphs = Object.assign(Object.create(null), { 'graph-1': graph });
+      const own = await invoke('apply_shader_to_entity', { entityId: 'e1', graphId: 'graph-1' });
+      expect(own.result.success).toBe(true);
+      expect(mockCompileToWgsl).toHaveBeenCalledWith(graph);
+      expect(own.store.updateShaderEffect).toHaveBeenCalledWith('e1', { shaderType: 'dissolve' });
     });
 
     it('sets compilationError and returns error result when WGSL compilation fails', async () => {

@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import type { ToolHandler, ExecutionResult } from './types';
-import { parseArgs } from './types';
+import { ownEntry, parseArgs } from './types';
 import {
   extractTranslatableStrings,
   SUPPORTED_LOCALES,
@@ -234,7 +234,7 @@ export const localizationHandlers: Record<string, ToolHandler> = {
 
     const localeDetails = available.map((code) => {
       const def = LOCALE_MAP.get(code);
-      const bundle = store.locales[code];
+      const bundle = ownEntry(store.locales, code);
       return {
         code,
         displayName: def?.displayName ?? code,

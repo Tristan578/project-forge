@@ -288,6 +288,17 @@ describe('materialHandlers — update_material', () => {
     // override applied
     expect(call[1]).toMatchObject({ metallic: 1.0 });
   });
+
+  it('does not copy a prototype-key material field into the merged store payload', async () => {
+    const args = JSON.parse('{"entityId":"ent-1","metallic":0.4,"__proto__":{"polluted":true}}');
+    const { result, store } = await invokeHandler(materialHandlers, 'update_material', args);
+    const material = vi.mocked(store.updateMaterial).mock.calls[0][1] as object;
+
+    expect(result.success).toBe(true);
+    expect(Object.getPrototypeOf(material)).toBe(Object.prototype);
+    expect((material as Record<string, unknown>).polluted).toBeUndefined();
+    expect((material as Record<string, unknown>).metallic).toBe(0.4);
+  });
 });
 
 describe('materialHandlers — apply_material_preset', () => {
@@ -701,4 +712,48 @@ describe('performanceHandlers — set_simplification_backend', () => {
     );
     expect(dispatchCommand).toHaveBeenCalledWith('set_simplification_backend', { backend: 'fast' });
   });
+});
+
+// Partial engine snapshots must not restrict the declared field vocabulary.
+describe('materialHandlers — partial snapshot updates', () => {
+
+  it('adds material fields missing from a partial engine snapshot', async () => {
+    const { result, store } = await invokeHandler(materialHandlers, 'update_material',
+      { entityId: 'ent-1', clearcoat: 0.7, attenuationDistance: null, uvScale: [2, 3] },
+      { primaryMaterial: { metallic: 0.2 } });
+    expect(result.success).toBe(true);
+    expect(vi.mocked(store.updateMaterial)).toHaveBeenCalledWith('ent-1',
+      { metallic: 0.2, clearcoat: 0.7, attenuationDistance: null, uvScale: [2, 3] });
+  });
+
+  it('adds optional textures absent from the material defaults', async () => {
+    const { result, store } = await invokeHandler(materialHandlers, 'update_material',
+      { entityId: 'ent-1', baseColorTexture: 'base.png', clearcoatNormalTexture: 'coat.png' });
+    expect(result.success).toBe(true);
+    expect(vi.mocked(store.updateMaterial).mock.calls[0][1]).toMatchObject(
+      { baseColorTexture: 'base.png', clearcoatNormalTexture: 'coat.png' });
+  });
+
+  it('adds light fields missing from a partial engine snapshot', async () => {
+    const { result, store } = await invokeHandler(materialHandlers, 'update_light',
+      { entityId: 'ent-1', intensity: 900, shadowsEnabled: true },
+      { primaryLight: { lightType: 'point' } });
+    expect(result.success).toBe(true);
+    expect(vi.mocked(store.updateLight)).toHaveBeenCalledWith('ent-1',
+      { lightType: 'point', intensity: 900, shadowsEnabled: true });
+  });
+
+  it.each(['update_material', 'update_light'])('rejects prototype and unknown update keys for %s', async (handler) => {
+    const args = JSON.parse('{"entityId":"ent-1","__proto__":{"polluted":true},"constructor":"bad","prototype":"bad","unknownField":"bad"}');
+    const { result, store } = await invokeHandler(materialHandlers, handler, args);
+    const update = handler === 'update_material' ? store.updateMaterial : store.updateLight;
+    const payload = vi.mocked(update).mock.calls[0][1];
+    expect(result.success).toBe(true);
+    expect(Object.getPrototypeOf(payload)).toBe(Object.prototype);
+    for (const key of ['__proto__', 'constructor', 'prototype', 'unknownField']) {
+      expect(Object.hasOwn(payload, key)).toBe(false);
+    }
+    expect((payload as unknown as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
 });
