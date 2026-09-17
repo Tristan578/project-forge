@@ -7,6 +7,10 @@ if [[ ! "$expected" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "::error::Could not derive a wasm-bindgen version from $LOCKFILE" >&2
   exit 1
 fi
+if [[ "${VALIDATE_ONLY:-false}" == true ]]; then
+  echo "$expected"
+  exit 0
+fi
 if command -v wasm-bindgen >/dev/null 2>&1; then
   actual="$(wasm-bindgen --version | awk '{print $2}')"
   if [[ "$actual" == "$expected" ]]; then exit 0; fi
