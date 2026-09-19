@@ -113,6 +113,6 @@ All hooks in `.claude/hooks/` must:
 |---------|------|---------|
 | Session start | audit | `bash .claude/skills/developer-experience/scripts/run-dx-audit.sh` |
 | Feature completed | dod | `bash .claude/tools/validate-all.sh` |
-| New skill added | refresh | Update the hand-written IDE configs, then `node tools/agentic-sync/port.mjs --write` and commit the mirror it generates under `.agents/skills/` |
+| New skill added | refresh | Update the hand-written IDE configs, `git add` the new skill's files (only tracked files are mirrored — an unstaged one is reported as `untracked:` and `--write` exits 1), then `node tools/agentic-sync/port.mjs --write` and commit the mirror it generates under `.agents/skills/` |
 | New contributor | onboard | `bash .claude/tools/dx-audit.sh onboard` |
 | PR before merge | full | `bash .claude/tools/validate-all.sh` |

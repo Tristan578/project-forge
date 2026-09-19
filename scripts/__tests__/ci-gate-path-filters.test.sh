@@ -273,6 +273,9 @@ assert_output "a docs file does NOT fire agentic" "docs/known-limitations.md" ag
 assert_output "the hook adapter fires hooks (so the Windows hook job runs)" ".codex/hooks/run-claude-hook.mjs" hooks true
 assert_output "the generator fires hooks (so the Windows hook job runs)" "tools/agentic-sync/port.mjs" hooks true
 assert_output "the generator manifest fires hooks" "tools/agentic-sync/port.json" hooks true
+assert_output "the GENERATED lock beside them does NOT fire hooks (it changes with every skill edit)" "tools/agentic-sync/port.lock.json" hooks false
+assert_output "…but it still fires agentic, where its drift is checked" "tools/agentic-sync/port.lock.json" agentic true
+assert_output "a near-miss of the manifest does NOT fire hooks" "tools/agentic-sync/port.json.bak" hooks false
 assert_output "the OTHER agentic generator does NOT fire hooks" "tools/agentic-sync/sync.mjs" hooks false
 assert_output "a generated agent does NOT fire hooks" ".codex/agents/security-reviewer.toml" hooks false
 

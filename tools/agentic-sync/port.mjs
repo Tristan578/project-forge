@@ -43,6 +43,12 @@
 //
 // MODES
 //   --write   regenerate everything, delete orphans named by the previous lock.
+//             It can still EXIT 1: regenerating does not fix everything it
+//             checks. A new source file git does not track yet (`untracked:`),
+//             a mirrored script whose executable bit is not staged on a
+//             core.fileMode=false checkout (`mode: … not staged`), and
+//             `modified:` / `ref:` / `mcp:` problems are reported by --write
+//             too. For the first two the fix is `git add`, then --write again.
 //   --check   exit 1 on any difference. Never writes. Also validates that every
 //             repo path named inside a `.codex/` file resolves, CASE-EXACTLY —
 //             `existsSync('.Codex/rules')` is TRUE on a case-insensitive
@@ -485,10 +491,16 @@ function planHooks(m, plan) {
           commandWindows: `node ${h.adapter} ${name} ${perRun} ${budget}${editOnly ? ' edit' : ''}`,
         };
         if (budget) handler.timeout = budget;
-        // Not on an edit-only hook: it is now matched for every shell command too
-        // (to see a carried patch), where "Checking sanitization patterns" on an
-        // `ls` would be a lie. Codex has one status line per handler, not per tool.
-        if (hook.statusMessage && !editOnly) handler.statusMessage = hook.statusMessage;
+        // Codex shows one status line per MATCHED handler, and matching is all it
+        // does — it has no `if`. So a handler that is matched far more widely
+        // than it acts would announce work it is not doing on every shell command:
+        //   - an edit-only hook, matched for `Bash` to see a carried patch
+        //     ("Checking sanitization patterns" on an `ls`);
+        //   - a hook whose group carries an `if`, which moved into the adapter
+        //     ("Checking for unreplied review comments" on every command, where
+        //     Claude Code shows it on `git push` alone).
+        const conditional = typeof group.if === 'string' && group.if !== '';
+        if (hook.statusMessage && !editOnly && !conditional) handler.statusMessage = hook.statusMessage;
         handlers.push(handler);
         report.ported += 1;
         // Codex has no `if`. The adapter applies it, reading this file. A script
@@ -938,9 +950,20 @@ function main() {
   if (problems.length) {
     console.error('::error::codex-port: the generated Codex surface is out of date or invalid:');
     for (const p of problems) console.error(`  ${p}`);
-    console.error('Fix `missing`/`stale`/`orphan`/`mode`: node tools/agentic-sync/port.mjs --write   (then commit the result)');
-    console.error('Fix `ref`: correct the path in the SOURCE under .claude/ (or the hand-authored .codex/ file) — the generator copies text, it does not invent paths.');
-    console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files.');
+    // Only the recipes for what is actually listed above, and never "run
+    // --write" as the fix for something --write has just reported.
+    const has = (re) => problems.some((p) => re.test(p));
+    if (has(/^(missing|stale|orphan):/) || has(/^mode: .* source /)) {
+      console.error('Fix `missing`/`stale`/`orphan`/`mode`: node tools/agentic-sync/port.mjs --write   (then commit the result)');
+    }
+    if (has(/^untracked:/) || has(/^mode: .* is not staged/)) {
+      console.error('Fix `untracked` / `mode … not staged`: `git add` the files named above, THEN run node tools/agentic-sync/port.mjs --write again. Running it again without staging prints this same report.');
+    }
+    if (has(/^(extra|modified):/)) {
+      console.error('Fix `extra`/`modified`: --write never deletes a file it cannot prove it wrote; each line above says what to do with that file.');
+    }
+    if (has(/^ref:/)) console.error('Fix `ref`: correct the path in the SOURCE under .claude/ (or the hand-authored .codex/ file) — the generator copies text, it does not invent paths.');
+    if (has(/^mcp:/)) console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files.');
     process.exit(1);
   }
   console.log('codex-port: generated Codex surface is in sync with .claude/.');

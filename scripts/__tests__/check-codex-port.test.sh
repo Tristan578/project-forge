@@ -436,6 +436,18 @@ if [ "$(json_get "$CJ" '@has:PostToolUse')" = "false" ]; then
 else
   bad "an unconditional wiring was narrowed by a conditional one: $(cat "$CJ")"
 fi
+# The same rule has a SECOND code site: the unconditional group comes FIRST and
+# a later conditional one must not turn its `null` back into a list. Only the
+# other order was tested, so deleting that guard left the suite green while the
+# adapter skipped an always-run hook for every non-matching command.
+F2="$(mkfix)"
+json_set "$F2/.claude/settings.json" hooks.PostToolUse '[{"matcher":"Bash","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]},{"matcher":"Bash","if":"Bash(gh api *)","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]'
+gen "$F2" --write; expect_rc 0 "unconditional group first, conditional second: accepted"
+if [ "$(json_get "$F2/.codex/hook-conditions.json" '@has:PostToolUse')" = "false" ]; then
+  ok "…and in THAT order too the script is never narrowed"
+else
+  bad "a later conditional group narrowed an unconditional wiring: $(cat "$F2/.codex/hook-conditions.json")"
+fi
 if [ "$(json_get "$F/.codex/hooks.json" 'hooks.PreToolUse.0.hooks.0.@has:async')" = "false" ] \
    && [ "$(json_get "$F/.codex/hooks.json" 'hooks.PreToolUse.0.@has:if')" = "false" ]; then
   ok "neither key reaches hooks.json (Codex skips an async handler outright, and has no \`if\`)"
@@ -476,6 +488,20 @@ if [ "$(json_get "$F/.codex/hooks.json" 'hooks.PreToolUse.0.hooks.0.@has:statusM
   ok "an edit-ONLY hook drops its status line: it now matches every shell command too, where that line would be false"
 else
   bad "statusMessage leaked onto an edit-only handler"
+fi
+# The same falsehood, second source: a group with an `if`. Codex has no `if`, so
+# the handler is matched for EVERY shell command and the adapter exits 0 for
+# most of them — "Checking for unreplied review comments" on an `ls`.
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks.PostToolUse '[{"matcher":"Bash","if":"Bash(git push *)","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh","statusMessage":"Checking for unreplied review comments"}]},{"matcher":"Bash","hooks":[{"type":"command","command":"bash .claude/hooks/warn.sh","statusMessage":"Always runs"}]}]'
+printf '#!/usr/bin/env bash\nexit 0\n' > "$F/.claude/hooks/warn.sh"
+git -C "$F" add -A >/dev/null 2>&1 || true
+gen "$F" --write
+if [ "$(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0.hooks.0.@has:statusMessage')" = "false" ] \
+   && [ "$(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.1.hooks.0.statusMessage')" = "Always runs" ]; then
+  ok "a CONDITIONAL hook drops its status line (it is matched for every command, acts on few); an unconditional one beside it keeps its own"
+else
+  bad "statusMessage on conditional/unconditional handlers is wrong: $(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse')"
 fi
 F="$(mkfix)"; json_set "$F/.claude/settings.json" hooks.PreToolUse.0.if '"Edit(web/**)"'
 gen "$F" --check; expect_rc 2 "an \`if\` written for a tool other than Bash stops the generator — it would be silently skipped for a carried patch"
@@ -1215,7 +1241,7 @@ sleep 1
 ST
 ADAPT_ARGS="1 30"
 adapt slow.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: a.ts\n@@\n+x\n*** End Patch')"
-if [ "$RC" -eq 2 ] && grep -qF 'timed out' <<<"$ERR" && grep -qF 'NOT checked' <<<"$ERR"; then
+if [ "$RC" -eq 2 ] && grep -qF 'timed out' <<<"$ERR" && grep -qF 'NOT checked' <<<"$ERR" && grep -qF '.claude/settings.json' <<<"$ERR" && grep -qF 'port.mjs --write' <<<"$ERR"; then
   ok "PreToolUse: a script that outruns its per-file timeout BLOCKS, saying the file was not checked"
 else
   bad "per-file timeout: exit $RC (2 wanted), stderr: $ERR"
@@ -1346,6 +1372,10 @@ echo "== adapter: Codex's SECOND edit channel — a patch carried in a shell com
 carried_payload() { printf '{"cwd":"%s","hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$CWD_NATIVE" "$1" "$2"; }
 # heredoc <prefix> <patch-body-with-\n-escapes> — one of the two intercepted forms.
 heredoc() { printf '%s' "${1}apply_patch <<'EOF'\n*** Begin Patch\n${2}\n*** End Patch\nEOF"; }
+# heredoc_as <invocation-up-to-and-including-the-delimiter> <closing-line> <patch-body>
+# — the same patch under ANOTHER spelling. Everything is JSON-escaped text: a
+# backslash is `\\`, a double quote `\"`, a tab `\t`.
+heredoc_as() { printf '%s' "${1}\n*** Begin Patch\n${3}\n*** End Patch\n${2}"; }
 # Files the patches below UPDATE must exist: an update of a file that is not
 # there is how the adapter detects a base directory it cannot see.
 mkdir -p "$TMP_ROOT/protected" "$TMP_ROOT/docs" "$TMP_ROOT/web/src/lib"
@@ -1378,6 +1408,71 @@ else
   bad "cd into a protected directory was not seen: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
 fi
 
+# Codex's query puts NO constraint on the heredoc delimiter, and the bash grammar
+# takes any word. Every case below is a sole top-level apply_patch heredoc, so
+# Codex intercepts it. With `EOF` as the only delimiter in this suite, a
+# recogniser that accepted identifiers alone passed — and each of these spellings
+# then went past all four edit hooks with exit 0.
+UPD='*** Update File: protected/x.ts\n@@\n+evil'
+SPELLED=0
+while IFS='|' read -r LABEL OPEN CLOSE; do
+  SPELLED=$((SPELLED + 1))
+  rm -f "$LOG"
+  adapt guard.sh "$(carried_payload PreToolUse "$(heredoc_as "$OPEN" "$CLOSE" "$UPD")")"
+  if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
+    ok "intercepted spelling is inspected: $LABEL"
+  else
+    bad "spelling went unchecked ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+  fi
+done <<'SPELLINGS'
+a hyphenated delimiter|apply_patch <<'END-PATCH'|END-PATCH
+a delimiter that starts with a digit|apply_patch <<'1EOF'|1EOF
+a dotted delimiter|apply_patch <<'PATCH.END'|PATCH.END
+a delimiter with a space in it|apply_patch <<'END PATCH'|END PATCH
+a backslash-escaped delimiter|apply_patch <<\\EOF|EOF
+a double-quoted delimiter|apply_patch <<\"EOF\"|EOF
+an unquoted delimiter|apply_patch <<EOF|EOF
+no space before the redirect, space after it|apply_patch<< 'EOF'|EOF
+<<- with a tab-indented closing line|apply_patch <<-'EOF'|\tEOF
+the applypatch alias|applypatch <<'EOF'|EOF
+a double-quoted cd path|cd \".\" && apply_patch <<'EOF'|EOF
+SPELLINGS
+# The loop must have walked its table, or eleven spellings read as zero problems.
+if [ "$SPELLED" -eq 11 ]; then ok "all 11 delimiter/alias spellings were driven"; else bad "the spelling table was not walked: $SPELLED of 11"; fi
+
+# Statements AFTER the closing delimiter: Codex would not intercept this, but the
+# shell then runs `apply_patch` from PATH on the same patch — so it is inspected.
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' "$UPD")\necho done")"
+if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
+  ok "a command that STARTS with the invocation is inspected even with statements after the heredoc (a superset of Codex, in the enforcing direction)"
+else
+  bad "trailing statements hid the patch: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no)"
+fi
+
+# What starts like the invocation but cannot be parsed here BLOCKS. Codex's
+# matcher is a tree-sitter query and this is not; where they might disagree the
+# answer is "not checked, so not allowed" — never exit 0.
+UNPARSED_DRIVEN=0
+while IFS='|' read -r LABEL CMD; do
+  UNPARSED_DRIVEN=$((UNPARSED_DRIVEN + 1))
+  rm -f "$LOG"
+  adapt guard.sh "$(carried_payload PreToolUse "$CMD")"
+  if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'cannot be checked' <<<"$ERR" && grep -qF 'apply_patch tool' <<<"$ERR"; then
+    ok "unparseable apply_patch heredoc BLOCKS with a way out: $LABEL"
+  else
+    bad "unparseable invocation did not block ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+  fi
+done <<'UNPARSED'
+a variable assignment before it|FOO=1 apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
+an argument before the heredoc|apply_patch --x <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
+a second redirect on the line|apply_patch <<'EOF' > out.txt\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
+a cd path the shell must expand|cd $HOME/protected && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: x.ts\n@@\n+evil\n*** End Patch\nEOF
+a heredoc that is never closed|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch
+a closing line indented with spaces (bash does not close on it)|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\n  EOF
+UNPARSED
+if [ "$UNPARSED_DRIVEN" -eq 6 ]; then ok "all 6 unparseable shapes were driven"; else bad "the unparseable table was not walked: $UNPARSED_DRIVEN of 6"; fi
+
 # The heredoc BODY is the patch. Cutting at the first `*** End Patch` text let an
 # added line containing those words hide every file after it.
 rm -f "$LOG"
@@ -1407,16 +1502,35 @@ fi
 rm -f "$LOG"
 adapt probe.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Update File: docs/a.md\n*** Move to: docs/renamed.md\n@@\n+z')")"
 if [ "$RC" -eq 0 ] && [ "$(runs ENV)" = "2" ]; then
-  ok "a move's DESTINATION need not exist either; its source must"
+  ok "a move's DESTINATION need not exist"
 else
   bad "move handling under the existence check: exit $RC, saw: $(cat "$LOG" 2>/dev/null) stderr: $ERR"
+fi
+# …but its SOURCE must, and so must a deleted file. Both are removed from a
+# place a hook may protect; narrowing the existence check to Update alone would
+# resolve them against a base this hook cannot see, and nothing else notices.
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Update File: docs/missing.md\n*** Move to: docs/renamed.md\n@@\n+z')")"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'docs/missing.md, which does not exist under' <<<"$ERR"; then
+  ok "a move whose SOURCE does not exist where the paths resolve blocks"
+else
+  bad "missing move source: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Delete File: docs/missing.md')")"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'removes docs/missing.md, which does not exist under' <<<"$ERR"; then
+  ok "a DELETE of a file that does not exist where the paths resolve blocks"
+else
+  bad "missing delete target: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
 fi
 
 # What Codex does NOT intercept is an ordinary shell command here too.
 for CMD in "grep -cF '*** Begin Patch' a.sh; grep -cF '*** End Patch' a.sh" \
            "ls -la protected/" \
            "echo start; $(heredoc '' '*** Update File: protected/x.ts\n@@\n+evil')" \
-           "$(heredoc '' '*** Update File: protected/x.ts\n@@\n+evil') && echo done"; do
+           "apply_patch --help" \
+           "apply_patch_helper <<'EOF'\nx\nEOF" \
+           "./apply_patch.sh <<'EOF'\nx\nEOF"; do
   rm -f "$LOG"
   adapt guard.sh "$(carried_payload PreToolUse "$CMD")"
   if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then

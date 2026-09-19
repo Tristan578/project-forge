@@ -36,16 +36,21 @@
 //     edit. So the generator wires the PreToolUse edit hooks for `Bash` as well
 //     and passes mode `edit`.
 //
-//     What is recognised is EXACTLY what Codex intercepts, no more
-//     (apply-patch/src/invocation.rs — "must be the only top-level statement"):
+//     Codex intercepts two forms (apply-patch/src/invocation.rs — "must be the
+//     only top-level statement"), with ANY heredoc delimiter the bash grammar
+//     allows:
 //         apply_patch <<'EOF' … EOF
 //         cd <path> && apply_patch <<'EOF' … EOF        (also `applypatch`)
-//     The heredoc BODY is the patch, so a `*** End Patch` inside an added line
-//     cannot cut it short, and `cd <path>` moves the base the hunk paths resolve
-//     against, as it does in Codex. Any other command — one that merely mentions
-//     the markers, a script that runs apply_patch among other statements — is an
-//     ordinary shell command: a shell can write files a hundred ways, none of
-//     which an Edit/Write hook sees under Claude Code either.
+//     Its matcher is a tree-sitter query and this file is not, so the rule here
+//     is about the START of the command: one that begins with that invocation
+//     and a heredoc is either parsed — the heredoc BODY is the patch, so a
+//     `*** End Patch` inside an added line cannot cut it short, and `cd <path>`
+//     moves the base, as in Codex — or, if this parser cannot read it, BLOCKED.
+//     It is never waved through as an ordinary command. A command that does not
+//     start that way — one that merely mentions the markers, a script that runs
+//     apply_patch after other statements — is an ordinary shell command: a
+//     shell can write files a hundred ways, none of which an Edit/Write hook
+//     sees under Claude Code either.
 //
 //     ONE THING THIS CANNOT SEE: the exec tool's `workdir` argument also moves
 //     the base, and the hook payload does not carry it. So for a carried patch
@@ -196,15 +201,50 @@ function parsePatch(patch) {
   return files;
 }
 
-// Is this shell command one of the two forms Codex intercepts and applies as a
-// patch? Returns { dir, body } or null. The delimiter may be quoted or not:
-// Codex requires the quotes, and accepting the unquoted spelling too only means
-// inspecting a patch the shell would then apply through `apply_patch` on PATH.
+// Does this shell command carry a patch? Three answers:
+//   null               — an ordinary command; nothing for a file hook to see.
+//   { dir, body }      — a patch, with the directory a leading `cd` moved to.
+//   { unparsed: why }  — it STARTS like the invocation Codex intercepts and has
+//                        a heredoc, but this parser cannot read it. The caller
+//                        blocks: Codex's matcher is a tree-sitter query over the
+//                        bash grammar, this is not, and where the two might
+//                        disagree the answer must be "not checked → not
+//                        allowed", never "ordinary command → exit 0".
+// Codex's query puts NO constraint on the heredoc delimiter, and the bash
+// grammar takes any word: quoted up to the closing quote (spaces included),
+// backslash-escaped, or a bare run of non-blank characters — `'END-PATCH'`,
+// `'1EOF'`, `\EOF` are all intercepted. An earlier version of this function
+// accepted identifiers only, and every other spelling sailed past the edit
+// hooks.
+//
+// Deliberately a SUPERSET of what Codex intercepts, in the enforcing direction:
+// statements after the closing delimiter do not stop the patch being inspected
+// (Codex would not intercept that command, but the shell would then run
+// `apply_patch` from PATH and apply the same patch).
 function carriedInvocation(command) {
-  const m = /^\s*(?:cd\s+("[^"]*"|'[^']*'|[^\s;&|'"]+)\s*&&\s*)?(?:apply_patch|applypatch)\s*<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\2[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*\3\s*$/.exec(command);
-  if (!m) return null;
-  const dir = m[1] ? m[1].replace(/^(["'])([\s\S]*)\1$/, '$2') : '';
-  return { dir, body: m[4] };
+  const head = /^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:cd\s+("[^"\n]*"|'[^'\n]*'|[^\s;&|'"]+)\s*&&\s*)?(?:apply_patch|applypatch)(?![\w.-])([^\n]*)(?:\r?\n|$)/.exec(command);
+  if (!head) return null;
+  const restOfLine = head[2];
+  if (!restOfLine.includes('<<')) return null; // `apply_patch --help`, `apply_patch "$P"`: no heredoc, nothing Codex intercepts
+  const unparsed = (why) => ({ unparsed: why });
+  if (/^\s*[A-Za-z_][A-Za-z0-9_]*=/.test(command)) return unparsed('it sets a variable before apply_patch');
+  let dir = '';
+  if (head[1]) {
+    dir = head[1].replace(/^(["'])([\s\S]*)\1$/, '$2');
+    // '…' is literal. "…" may still expand; a bare word may expand, glob or escape.
+    const expands = head[1].startsWith('"') ? /[$`]|\\[$`"\\]/ : /[$`~*?[\]{}\\]/;
+    if (!head[1].startsWith("'") && expands.test(dir)) return unparsed(`its cd path (${head[1]}) needs the shell to expand it`);
+  }
+  const redirect = /^\s*<<(-?)\s*('[^'\n]*'|"[^"\n]*"|[^\s<>|&;()]+)[ \t]*\r?$/.exec(restOfLine);
+  if (!redirect) return unparsed('apply_patch is followed by something other than a single heredoc');
+  // Quote removal, as the shell does it, gives the line that closes the body.
+  const closing = redirect[2].replace(/['"\\]/g, '');
+  if (!closing) return unparsed('its heredoc delimiter is empty');
+  const lines = command.slice(head[0].length).split(/\r?\n/);
+  const stripTabs = redirect[1] === '-';
+  const end = lines.findIndex((l) => (stripTabs ? l.replace(/^\t+/, '') : l) === closing);
+  if (end === -1) return unparsed(`its heredoc is never closed by a line reading ${closing}`);
+  return { dir, body: lines.slice(0, end).join('\n') };
 }
 
 // `Bash(git push *)` → should the script run for this command?
@@ -306,6 +346,12 @@ function main() {
     ? carriedInvocation(input.tool_input.command)
     : null;
   if (editMode && toolName === 'Bash' && !carried) process.exit(0); // an ordinary command: nothing for a file hook to see
+  if (carried?.unparsed) {
+    fault(
+      `${name}: this command starts an apply_patch heredoc, but ${carried.unparsed}, so the files it edits cannot be checked. ` +
+        `Send the patch through the apply_patch tool, or as the whole command in the form: apply_patch <<'EOF' … EOF`,
+    );
+  }
 
   // `if` conditions are written for shell commands (`Bash(git push *)`) and gate
   // a hook that inspects the COMMAND. They never apply to a file hook looking
@@ -385,7 +431,11 @@ function main() {
       ...(Number.isFinite(timeout) ? { timeout, killSignal: 'SIGKILL' } : {}),
     });
     if (res.error && res.error.code === 'ETIMEDOUT') {
-      fault(`${name}: timed out after ${Math.round(timeout / 1000)}s on ${run.env.TOOL_INPUT_file_path || 'this command'} — it was NOT checked`);
+      fault(
+        `${name}: timed out after ${Math.round(timeout / 1000)}s on ${run.env.TOOL_INPUT_file_path || 'this command'} — it was NOT checked. ` +
+          `The bound is this hook's \`timeout\` in .claude/settings.json ` +
+          `(where there is none, hooks.defaultTimeoutSeconds in tools/agentic-sync/port.json): raise it, then run node tools/agentic-sync/port.mjs --write.`,
+      );
     }
     if (res.error) fault(`${name}: could not start bash (${res.error.message})`);
     if (res.status === 2) {

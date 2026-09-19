@@ -11,7 +11,9 @@ from `.claude/`; `scripts/check-codex-port.sh` fails a PR when the two differ.
 Four Codex-facing files are **hand-written** and reviewed like any other code:
 `.codex/config.toml`, `.codex/AGENTS.md`, `.codex/agents/code-architect.toml`
 and the hook adapter `.codex/hooks/run-claude-hook.mjs`. To change an agent,
-a skill or a hook: edit the source under `.claude/`, run
+a skill or a hook: edit the source under `.claude/`, **`git add` any file that
+is new** (only files git tracks are mirrored, so `--write` reports a new one as
+`untracked:` and exits 1 until it is staged), run
 `node tools/agentic-sync/port.mjs --write`, commit both.
 
 ## Status: wired and tested outside Codex; not yet run inside it
@@ -37,7 +39,7 @@ supported version moves. Nothing is claimed about any other version.
 | Hook events: `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `SessionStart`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `Stop`. Unknown event keys are ignored, not rejected | `config/src/hook_config.rs` |
 | Handler fields `type`, `command`, `commandWindows`, `timeout` (seconds), `statusMessage`, `async`. A handler marked `async` is **skipped** ("async hooks are not supported yet"). Matchers are ignored for `UserPromptSubmit` and `Stop` | `config/src/hook_config.rs`, `hooks/src/engine/discovery.rs` |
 | A file edit is reported as tool `apply_patch`; `Edit`/`Write` are matcher aliases only. Shell is `Bash` | `core/src/tools/hook_names.rs` |
-| **There is a second edit channel.** The exec tool reports a shell command to `PreToolUse` as tool `Bash` with the command text, and only afterwards checks whether it is a patch and applies it as one. It intercepts exactly two forms, each only as the sole top-level statement: `apply_patch <<'EOF' … EOF` and `cd <path> && apply_patch <<'EOF' … EOF` (also `applypatch`); hunk paths resolve against `cwd`, moved by that `cd` **and by the exec tool's `workdir` argument, which the hook payload does not carry**. The `PostToolUse` call for such an edit carries no command at all | `core/src/tools/handlers/unified_exec/exec_command.rs`, `apply-patch/src/invocation.rs` |
+| **There is a second edit channel.** The exec tool reports a shell command to `PreToolUse` as tool `Bash` with the command text, and only afterwards checks whether it is a patch and applies it as one. It intercepts exactly two forms, each only as the sole top-level statement: `apply_patch <<'EOF' … EOF` and `cd <path> && apply_patch <<'EOF' … EOF` (also `applypatch`). The query puts **no constraint on the heredoc delimiter** — `'END-PATCH'`, `'1EOF'`, `\EOF` and an unquoted word are all intercepted; hunk paths resolve against `cwd`, moved by that `cd` **and by the exec tool's `workdir` argument, which the hook payload does not carry**. The `PostToolUse` call for such an edit carries no command at all | `core/src/tools/handlers/unified_exec/exec_command.rs`, `apply-patch/src/invocation.rs` |
 | Hook stdin carries `tool_name`, `tool_input`, `cwd`, `hook_event_name`, … — and **no** `file_path`; no `TOOL_INPUT_*` environment variables | `hooks/src/events/pre_tool_use.rs` |
 | **Only exit 2 with non-empty stderr blocks.** Any other non-zero exit marks the run Failed and the action proceeds | `hooks/src/events/pre_tool_use.rs` |
 | Plain (non-JSON) stdout is dropped. Each event accepts its own `deny_unknown_fields` JSON shape: `additionalContext` on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`; top-level `decision`/`reason` on `UserPromptSubmit`, `PostToolUse`, `SubagentStop`, `Stop`; **`PreCompact` and `PostCompact` accept neither** | `hooks/src/schema.rs`, `hooks/src/events/compact.rs` |
@@ -86,13 +88,22 @@ table above fail *silently* if ignored:
   stdout is forwarded as the reason.
 - **Two edit channels.** Because of the contract row above, the four
   `PreToolUse` edit hooks are wired for `Bash` as well as `apply_patch`, in mode
-  `edit`. On a shell command they act only when it is one of the **two forms
-  Codex itself intercepts**; the heredoc body is the patch and a leading
-  `cd <path>` moves the base, as in Codex. Anything else — a command that merely
-  mentions the markers, a script that runs `apply_patch` among other statements
-  — is an ordinary shell command, exactly as a `sed -i` is under Claude Code.
-  An `if` condition never gates a file hook on this channel. The cost is one
-  short-lived `node` start per edit hook per shell command.
+  `edit`. On a shell command they act when it **starts with the invocation
+  Codex intercepts** — `apply_patch` or `applypatch`, optionally behind
+  `cd <path> &&`, followed by a heredoc with any delimiter the shell allows
+  (`'EOF'`, `'END-PATCH'`, `\EOF`, unquoted …). The heredoc body is the patch and
+  the `cd` moves the base, as in Codex. Codex's matcher is a tree-sitter query
+  and the adapter's is not, so the rule for a command that starts that way but
+  cannot be parsed here (an argument or a variable assignment before the
+  heredoc, a `cd` path the shell must expand, a heredoc that never closes) is
+  **block, with a message to use the patch tool** — never "ordinary command".
+  That makes it a superset of what Codex intercepts, in the enforcing
+  direction: statements after the closing delimiter do not stop the patch being
+  inspected. A command that does not start that way — one that merely mentions
+  the markers, a script that runs `apply_patch` after other statements — is an
+  ordinary shell command, as a `sed -i` is under Claude Code. An `if` condition
+  never gates a file hook on this channel. The cost is one short-lived `node`
+  start per edit hook per shell command.
 
 It also applies the `if` conditions from `.claude/settings.json`, which Codex has
 no key for, from the generated `.codex/hook-conditions.json`: six hooks carry

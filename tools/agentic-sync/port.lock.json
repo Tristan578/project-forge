@@ -39,7 +39,7 @@
     ".agents/skills/design/references/spec-template.md": "aa017bcf23e50a9513c492072f4958a76901e211ebbe6a9e0b51d9d607c447b9",
     ".agents/skills/design/scripts/validate-spec.sh": "dbd9129d518d7c078cf83a08600b487682196112b37ce86b5429b72d28ee9b01",
     ".agents/skills/developer-experience/SKILL.md": "635df7cf52fb3c18e22374d0c24a47e0ab2f0f85142cd964aa02490486b33380",
-    ".agents/skills/developer-experience/references/dx-standards.md": "1e6b10ff0a0430c5a97d32eaf1e1a8982c20404bb5b0cb10e1df94d38af48c4f",
+    ".agents/skills/developer-experience/references/dx-standards.md": "39240dbeccd7e5e8bbd1635464b2aae3e7c20f7a1d73f294908976fbb4e1468d",
     ".agents/skills/developer-experience/scripts/run-dx-audit.sh": "6535e9df3a0f9619ee8fde911fad04ce9682d04efe1ebc512ded20d89f1baff9",
     ".agents/skills/dispatch-builder/SKILL.md": "9150a062b11de81993793252ac70984922278f9a45d7d8e4ffaa80e2a9b70054",
     ".agents/skills/docs/SKILL.md": "78f0bc276b7aadaa53ca52a41935dffa912aa118f98a34941a103c59f80a8e16",
@@ -120,6 +120,6 @@
     ".codex/agents/ux-reviewer.toml": "58eca48f212dc7e1b4863be6ff56111b3a8661d739b30d64b961a143c889187e",
     ".codex/agents/validator.toml": "0e9b5c6332244c33bd9fa037eaee4242656d985180aae6176707b13dd7d05313",
     ".codex/hook-conditions.json": "c90905de766c32f0f90b26375e6a39a52ca6abc1e87f68e85ad8f2a8bb2cfe2f",
-    ".codex/hooks.json": "dd22beb53f55858ae4a5a1080347565eaef52c8f5f3b4c616b0337c2b6e8aff3"
+    ".codex/hooks.json": "9ccf584ccc0b58fa8062b031560bfb417ce7bc3a8b86255b558e17415cd797e7"
   }
 }

@@ -124,8 +124,7 @@
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" block-deferred-fixes.sh 5 10",
             "commandWindows": "node .codex/hooks/run-claude-hook.mjs block-deferred-fixes.sh 5 10",
-            "timeout": 10,
-            "statusMessage": "Checking for Boy Scout Rule violations"
+            "timeout": 10
           }
         ]
       },
@@ -239,8 +238,7 @@
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" post-push-resolve-comments.sh 30 35",
             "commandWindows": "node .codex/hooks/run-claude-hook.mjs post-push-resolve-comments.sh 30 35",
-            "timeout": 35,
-            "statusMessage": "Checking for unreplied review comments"
+            "timeout": 35
           }
         ]
       }
