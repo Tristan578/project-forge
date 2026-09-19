@@ -49,9 +49,10 @@ Windows) and `jq`, which most of the shared scripts use to read their input.
 - After `git worktree add` (Codex has no worktree-created event). The script
   reads the new worktree's path from a JSON payload on stdin — run bare, it
   prints "No worktree_path in event" and does nothing. From the MAIN checkout
-  (needs `jq`):
+  (needs `jq`; `node` builds the JSON so a Windows path with backslashes is
+  escaped correctly — a bare `printf` would produce invalid JSON for one):
   ```bash
-  printf '{"worktree_path":"%s"}' "/absolute/path/to/the/new/worktree" | bash .claude/hooks/worktree-setup.sh
+  node -e 'process.stdout.write(JSON.stringify({worktree_path: process.argv[1]}))' "/absolute/path/to/the/new/worktree" | bash .claude/hooks/worktree-setup.sh
   ```
 - After a compaction, re-read `.claude/rules/lessons-learned.md` and the rule
   file for the area you are in. Claude Code re-injects a digest at that point;

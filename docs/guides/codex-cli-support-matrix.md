@@ -37,11 +37,11 @@ supported version moves. Nothing is claimed about any other version.
 | Hook events: `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `SessionStart`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `Stop`. Unknown event keys are ignored, not rejected | `config/src/hook_config.rs` |
 | Handler fields `type`, `command`, `commandWindows`, `timeout` (seconds), `statusMessage`, `async`. A handler marked `async` is **skipped** ("async hooks are not supported yet"). Matchers are ignored for `UserPromptSubmit` and `Stop` | `config/src/hook_config.rs`, `hooks/src/engine/discovery.rs` |
 | A file edit is reported as tool `apply_patch`; `Edit`/`Write` are matcher aliases only. Shell is `Bash` | `core/src/tools/hook_names.rs` |
-| **There is a second edit channel.** The exec tool reports `apply_patch <<EOF … EOF` to `PreToolUse` as tool `Bash` with the command text, and only afterwards intercepts it and applies it as a real patch. The `PostToolUse` call for that edit carries no command at all | `core/src/tools/handlers/unified_exec/exec_command.rs` |
+| **There is a second edit channel.** The exec tool reports a shell command to `PreToolUse` as tool `Bash` with the command text, and only afterwards checks whether it is a patch and applies it as one. It intercepts exactly two forms, each only as the sole top-level statement: `apply_patch <<'EOF' … EOF` and `cd <path> && apply_patch <<'EOF' … EOF` (also `applypatch`); hunk paths resolve against `cwd`, moved by that `cd` **and by the exec tool's `workdir` argument, which the hook payload does not carry**. The `PostToolUse` call for such an edit carries no command at all | `core/src/tools/handlers/unified_exec/exec_command.rs`, `apply-patch/src/invocation.rs` |
 | Hook stdin carries `tool_name`, `tool_input`, `cwd`, `hook_event_name`, … — and **no** `file_path`; no `TOOL_INPUT_*` environment variables | `hooks/src/events/pre_tool_use.rs` |
 | **Only exit 2 with non-empty stderr blocks.** Any other non-zero exit marks the run Failed and the action proceeds | `hooks/src/events/pre_tool_use.rs` |
 | Plain (non-JSON) stdout is dropped. Each event accepts its own `deny_unknown_fields` JSON shape: `additionalContext` on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`; top-level `decision`/`reason` on `UserPromptSubmit`, `PostToolUse`, `SubagentStop`, `Stop`; **`PreCompact` and `PostCompact` accept neither** | `hooks/src/schema.rs`, `hooks/src/events/compact.rs` |
-| `permissionDecision: "allow"`/`"ask"`, `decision: "approve"` and `updatedInput` mark a `PreToolUse` run Failed | `hooks/src/events/pre_tool_use.rs` |
+| `permissionDecision: "allow"`/`"ask"` and `decision: "approve"` mark a `PreToolUse` run Failed. `updatedInput` is honoured only alongside a deny; the adapter never forwards it (no script here uses it) | `hooks/src/events/pre_tool_use.rs`, `hooks/src/engine/output_parser.rs` |
 | Patch file headers are matched on the **trimmed** line | `apply-patch/src/streaming_parser.rs` |
 | Subagents are `*.toml` under `.codex/agents/`; `name`, `description`, `developer_instructions` are required | `core/src/config/agent_roles.rs` |
 | Skills are discovered from `.agents/skills/` (and the project layer's `.codex/skills/`); there is no configurable extra directory | `core-skills/src/loader.rs` |
@@ -86,9 +86,13 @@ table above fail *silently* if ignored:
   stdout is forwarded as the reason.
 - **Two edit channels.** Because of the contract row above, the four
   `PreToolUse` edit hooks are wired for `Bash` as well as `apply_patch`, in mode
-  `edit`: on a shell command they do nothing unless it carries a
-  `*** Begin Patch` envelope, which is then checked path by path like any other
-  patch. The cost is one short-lived `node` start per hook per shell command.
+  `edit`. On a shell command they act only when it is one of the **two forms
+  Codex itself intercepts**; the heredoc body is the patch and a leading
+  `cd <path>` moves the base, as in Codex. Anything else — a command that merely
+  mentions the markers, a script that runs `apply_patch` among other statements
+  — is an ordinary shell command, exactly as a `sed -i` is under Claude Code.
+  An `if` condition never gates a file hook on this channel. The cost is one
+  short-lived `node` start per edit hook per shell command.
 
 It also applies the `if` conditions from `.claude/settings.json`, which Codex has
 no key for, from the generated `.codex/hook-conditions.json`: six hooks carry
@@ -106,7 +110,7 @@ that would have blocked is not.
 | `UserPromptSubmit` | `UserPromptSubmit` | `on-prompt-submit.sh` |
 | `PreToolUse` `Edit\|Write\|Bash` | `PreToolUse` `apply_patch\|Bash` | `inject-lessons-learned.sh` |
 | `PreToolUse` `Bash` | `PreToolUse` `Bash` | `pre-push-quality-gate.sh`, `block-main-commits.sh`, `check-pr-metadata.sh`, `check-docs-quality.sh`, `block-deferred-fixes.sh` (each with its `if` condition) |
-| `PreToolUse` `Edit\|Write` | `PreToolUse` `apply_patch` | `verify-branch.sh`, `check-db-transaction.sh`, `check-sanitization-patterns.sh`, `check-vercel-json.sh` |
+| `PreToolUse` `Edit\|Write` | `PreToolUse` `apply_patch\|Bash`, mode `edit` (see "Two edit channels") | `verify-branch.sh`, `check-db-transaction.sh`, `check-sanitization-patterns.sh`, `check-vercel-json.sh`. Their `statusMessage` is dropped: matched for every shell command, a line like "Checking sanitization patterns" would be false |
 | `PostToolUse` `Edit\|Write` | `PostToolUse` `apply_patch` | `auto-lockfile-sync.sh`, `post-edit-lint.sh`, `check-arch.sh`, `check-route-has-test.sh`, `cargo-check-wasm.sh` |
 | `PostToolUse` `Bash` | `PostToolUse` `Bash` | `post-commit-clean.sh`, `post-merge-doc-check.sh`, `post-push-resolve-comments.sh` (`if: Bash(git push *)`; `async` dropped, so it runs synchronously for up to 30 s after a push) |
 | `SubagentStart` / `SubagentStop` | same | `log-agent-start.sh`; `validate-agent-output.sh`, `reject-incomplete-review.sh` |
@@ -136,6 +140,14 @@ until someone decides where it belongs. That is deliberate: the first port wired
 
 ### Limits to know about
 
+- **A patch sent through the shell with a `workdir` cannot be located.** The
+  exec tool's `workdir` argument moves the directory the hunk paths resolve
+  against, and the hook payload carries only the command. The adapter fails
+  closed where that is detectable: a carried patch that UPDATES or DELETES a
+  file which does not exist where the paths resolve is blocked, with a message
+  to use the patch tool or root-relative paths. A carried patch that only ADDS
+  files under an unseen `workdir` is checked against the wrong path, and nothing
+  can tell. Item 7 of the checklist.
 - **`PostToolUse` cannot see a patch sent through the shell.** For the second
   edit channel the `PostToolUse` payload carries no command, so the five
   post-edit hooks (`post-edit-lint`, `check-arch`, `check-route-has-test`,
@@ -228,8 +240,10 @@ file, so "the lock names it" is not on its own a reason to delete anything.
   (`skills.independent`). For these three, what a Codex user loads is **not** the
   Claude Code copy.
 - **Only files git tracks are mirrored** — a stray `.env` or a `__pycache__`
-  beside a skill script does not ride into a tracked directory; `--write` lists
-  what it left out. A symlink inside a skill is dereferenced under the same
+  beside a skill script does not ride into a tracked directory. `--write` and
+  `--check` both list what was left out; a file git *ignores* is only listed,
+  while an untracked file it does not ignore is an `untracked:` problem, because
+  it is about to be committed and its mirror would first be missed in CI. A symlink inside a skill is dereferenced under the same
   rule: it may only point at a tracked file.
 - Executable bits follow the source: from the file's mode on disk where git
   trusts it (`core.fileMode=true`), from the index where it does not (Windows).
@@ -280,3 +294,6 @@ Unverified until someone does it; correct this file with what you find.
 6. Does an edit made as `apply_patch <<'EOF' … EOF` in a shell command reach the
    `PreToolUse` edit hooks (it should, as tool `Bash`), and is it true that the
    `PostToolUse` payload for it carries no command?
+7. Does the model ever send such a command with the exec tool's `workdir` set?
+   If it does, do updates get blocked with the "working directory this hook
+   cannot see" message, and how often — is that block a nuisance in practice?

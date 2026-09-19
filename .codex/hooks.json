@@ -158,8 +158,7 @@
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-sanitization-patterns.sh 3 30 edit",
             "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-sanitization-patterns.sh 3 30 edit",
-            "timeout": 30,
-            "statusMessage": "Checking sanitization patterns"
+            "timeout": 30
           }
         ]
       },

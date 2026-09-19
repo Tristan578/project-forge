@@ -50,9 +50,13 @@
 //             would pass the exact defect this gate is here to catch.
 //
 // DESIGN NOTES
-//  * Zero dependencies, like sync.mjs. `git` is used when present, only to learn
-//    which source files are symlinks (mode 120000) — on Windows those are text
-//    stubs and must be dereferenced by hand — and to compare executable bits.
+//  * Zero dependencies, like sync.mjs. `git` is used when present, and it
+//    decides four things: WHICH source files are mirrored at all (only tracked
+//    ones — see planSkills), which are symlinks (mode 120000; on Windows those
+//    are text stubs and must be dereferenced by hand), what the executable bit
+//    should be where the filesystem cannot say (core.fileMode=false), and what
+//    `.codex/config.toml` DECLARES (the committed blob, for MCP parity). With
+//    no repository — the hermetic fixtures — every file on disk is taken.
 //  * Deterministic: sorted traversal, no timestamps.
 //  * Fail-closed: a malformed manifest, a missing source directory, an empty
 //    skill set or an unclassified hook is exit 2, never "in sync".
@@ -96,8 +100,24 @@ const abs = (rel) => join(ROOT, ...rel.split('/'));
 
 // Filled by main() before any lookup: path -> git mode, when git is available.
 let INDEX_MODES = new Map();
-// Source files git does not track: not mirrored, and said so.
+// Source files git does not track: not mirrored, and said so. Two kinds. One
+// git IGNORES (`__pycache__`, an editor backup) is noise and only listed. One
+// it does not is a file somebody is about to commit: leaving it out of the plan
+// made a local --check green, and the first red appeared in CI once the file was
+// committed and the mirror was found missing. That one is a PROBLEM, now.
 const UNTRACKED_SOURCES = [];
+function unignoredUntracked(dir) {
+  try {
+    const out = execFileSync('git', ['-C', ROOT, 'ls-files', '--others', '--exclude-standard', '-z', '--', dir], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return new Set(out.split('\0').filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
 // Does git read the executable bit from the filesystem here?
 let FILEMODE_TRUSTED = process.platform !== 'win32';
 
@@ -465,13 +485,19 @@ function planHooks(m, plan) {
           commandWindows: `node ${h.adapter} ${name} ${perRun} ${budget}${editOnly ? ' edit' : ''}`,
         };
         if (budget) handler.timeout = budget;
-        if (hook.statusMessage) handler.statusMessage = hook.statusMessage;
+        // Not on an edit-only hook: it is now matched for every shell command too
+        // (to see a carried patch), where "Checking sanitization patterns" on an
+        // `ls` would be a lie. Codex has one status line per handler, not per tool.
+        if (hook.statusMessage && !editOnly) handler.statusMessage = hook.statusMessage;
         handlers.push(handler);
         report.ported += 1;
         // Codex has no `if`. The adapter applies it, reading this file. A script
         // wired once WITHOUT a condition always runs, so record `null` for it and
         // never let a later conditional group narrow it.
         const slot = (conditions[event] ||= {});
+        if (typeof group.if === 'string' && group.if && !/^Bash\(/.test(group.if)) {
+          die(`hooks: ${event} group has \`if: ${JSON.stringify(group.if)}\`. Only \`Bash(…)\` conditions are ported: the adapter applies them to shell commands, and a condition on another tool would be silently skipped for a patch carried in a shell command. Decide how it should behave under Codex and teach port.mjs.`);
+        }
         if (typeof group.if === 'string' && group.if) {
           if (slot[name] !== null) (slot[name] ||= []).push(group.if);
         } else {
@@ -862,16 +888,14 @@ function main() {
     console.log(
       `codex-port: wrote ${wrote} file(s), removed ${orphans.length} orphan(s), released ${released.length} path(s) now maintained by hand, fixed ${chmod} executable bit(s) in the index.`,
     );
-    const unstaged = unstagedExecutables(plan, modes);
-    if (unstaged.length) {
-      console.log(
-        `codex-port: ${unstaged.length} mirrored script(s) must be executable but are not in the index yet, and this checkout (core.fileMode=false) ` +
-          `cannot carry the bit on disk. \`git add\` them, then run --write AGAIN so the index entry can be repaired:\n  ${unstaged.join('\n  ')}`,
-      );
-    }
   }
 
   const problems = [];
+  // Reported in BOTH modes. --write used to print a hint about these and then
+  // finish with "in sync", which it was not.
+  for (const rel of unstagedExecutables(plan, modes)) {
+    problems.push(`mode:     ${rel} must be executable but is not staged — git add it, then run --write again (this checkout, core.fileMode=false, cannot carry the bit on disk)`);
+  }
   if (mode === '--check') {
     for (const [rel, { content, modeFrom }] of plan) {
       if (!existsExact(rel)) problems.push(`missing:  ${rel}`);
@@ -881,13 +905,16 @@ function main() {
       }
     }
     for (const rel of orphans) problems.push(`orphan:   ${rel} is no longer generated — --write will delete it`);
-    for (const rel of unstagedExecutables(plan, modes)) {
-      problems.push(`mode:     ${rel} must be executable but is not staged — git add it, then run --write again (this checkout cannot carry the bit on disk)`);
-    }
     for (const rel of extras) problems.push(`extra:    ${rel} is inside a generated location but is not generated — delete it, or add it to the source under .claude/`);
   }
   for (const rel of modified) {
     problems.push(`modified: ${rel} is no longer generated but differs from what this tool wrote (or the lock has no hash for it) — NOT deleted. Three ways out: delete the file; restore its source under .claude/; or, if it is now maintained by hand, declare it in port.json (skills.independent / agents.handAuthored), which releases it from the lock`);
+  }
+  const pendingAdds = unignoredUntracked(m.skills.source);
+  for (const rel of UNTRACKED_SOURCES) {
+    if (pendingAdds.has(rel)) {
+      problems.push(`untracked: ${rel} is not tracked by git, so it was not mirrored — \`git add\` it and run --write again, or delete it, or gitignore it`);
+    }
   }
   for (const r of refs) problems.push(`ref:      ${r}`);
   const mcp = mcpParity();
@@ -896,9 +923,12 @@ function main() {
   if (mcp.note) console.log(mcp.note.startsWith('::') ? mcp.note : `codex-port: ${mcp.note}`);
 
   if (UNTRACKED_SOURCES.length) {
+    const shown = UNTRACKED_SOURCES.slice(0, 20);
+    const more = UNTRACKED_SOURCES.length - shown.length;
     console.log(
       `codex-port: ${UNTRACKED_SOURCES.length} file(s) under ${m.skills.source} are not tracked by git and were NOT mirrored ` +
-        `(git add the ones that belong, then run --write again):\n  ${UNTRACKED_SOURCES.slice(0, 20).join('\n  ')}`,
+        `(git-ignored ones are only listed; the others are reported as \`untracked:\` problems):\n  ${shown.join('\n  ')}` +
+        (more > 0 ? `\n  … and ${more} more` : ''),
     );
   }
   console.log(

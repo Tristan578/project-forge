@@ -458,6 +458,29 @@ else
   bad "default timeout / PostToolUse matcher wrong: $(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0')"
 fi
 
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks.PreToolUse.0.matcher '"Edit|Write|Bash"'
+json_set "$F/.claude/settings.json" hooks.PreToolUse.0.hooks.0.statusMessage '"Checking things"'
+gen "$F" --write
+if [ "$(json_get "$F/.codex/hooks.json" 'hooks.PreToolUse.0.matcher')" = "apply_patch|Bash" ] \
+   && [ "$(json_get "$F/.codex/hooks.json" 'hooks.PreToolUse.0.hooks.0.commandWindows')" = "node .codex/hooks/run-claude-hook.mjs ok.sh 5 50" ] \
+   && [ "$(json_get "$F/.codex/hooks.json" 'hooks.PreToolUse.0.hooks.0.statusMessage')" = "Checking things" ]; then
+  ok "a hook ALREADY wired for Bash (Edit|Write|Bash) is not put in edit mode — it must see every shell command — and keeps its status line"
+else
+  bad "mixed matcher handling is wrong: $(json_get "$F/.codex/hooks.json" 'hooks.PreToolUse.0')"
+fi
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks.PreToolUse.0.hooks.0.statusMessage '"Checking sanitization patterns"'
+gen "$F" --write
+if [ "$(json_get "$F/.codex/hooks.json" 'hooks.PreToolUse.0.hooks.0.@has:statusMessage')" = "false" ]; then
+  ok "an edit-ONLY hook drops its status line: it now matches every shell command too, where that line would be false"
+else
+  bad "statusMessage leaked onto an edit-only handler"
+fi
+F="$(mkfix)"; json_set "$F/.claude/settings.json" hooks.PreToolUse.0.if '"Edit(web/**)"'
+gen "$F" --check; expect_rc 2 "an \`if\` written for a tool other than Bash stops the generator — it would be silently skipped for a carried patch"
+expect_out 'Edit(web/**)' "…naming the condition"
+
 echo "== generator: the emitted commands are exactly what Codex must execute =="
 F="$(mkfix)"; gen "$F" --write
 HJ="$F/.codex/hooks.json"
@@ -824,8 +847,17 @@ else
   git -C "$F" add -A
   printf 'SECRET=1\n' > "$F/.claude/skills/alpha/.env"
   mkdir -p "$F/.claude/skills/alpha/__pycache__"; printf 'bytecode\n' > "$F/.claude/skills/alpha/__pycache__/x.pyc"
-  gen "$F" --write; expect_rc 0 "--write succeeds with untracked files sitting in a skill directory"
-  expect_out "not tracked by git and were NOT mirrored" "…and says which files it left out"
+  printf '__pycache__/\n' > "$F/.gitignore"; git -C "$F" add .gitignore
+  gen "$F" --write; expect_rc 1 "an untracked file that git does NOT ignore is a problem in --write too — it is about to be committed, and the mirror would first be found missing in CI"
+  expect_out "untracked: .claude/skills/alpha/.env" "…named as \`untracked:\`"
+  if grep -qF 'untracked: .claude/skills/alpha/__pycache__' <<<"$OUT"; then
+    bad "a git-IGNORED file was reported as a problem; it should only be listed"
+  else
+    ok "a git-ignored file (__pycache__) is listed but is not a problem"
+  fi
+  expect_out "not tracked by git and were NOT mirrored" "…and says it left files out"
+  expect_out ".claude/skills/alpha/.env" "…naming the untracked .env"
+  expect_out ".claude/skills/alpha/__pycache__/x.pyc" "…and the untracked bytecode"
   if [ ! -e "$F/.agents/skills/alpha/.env" ] && [ ! -e "$F/.agents/skills/alpha/__pycache__" ] && [ -f "$F/.agents/skills/alpha/SKILL.md" ]; then
     ok "an untracked .env and a __pycache__ are NOT mirrored; the tracked files are"
   else
@@ -855,7 +887,8 @@ else
   else
     git -C "$F" update-index --chmod=+x .claude/skills/alpha/scripts/run.sh   # the only place the bit can live here
     gen "$F" --write
-    expect_out "must be executable but are not in the index yet" "core.fileMode=false: the FIRST --write says the mirrored script still needs staging — it is not silent"
+    expect_rc 1 "core.fileMode=false: the FIRST --write does not end by claiming 'in sync'"
+    expect_out "must be executable but is not staged" "…it says the mirrored script still needs staging"
     gen "$F" --check; expect_rc 1 "core.fileMode=false: and a local --check is RED until that is done (the drift must not first appear in CI)"
     expect_out "must be executable but is not staged" "…naming the reason"
     git -C "$F" add -A; gen "$F" --write
@@ -1288,31 +1321,111 @@ else
 fi
 
 echo "== adapter: Codex's SECOND edit channel — a patch carried in a shell command =="
-# Codex's exec tool reports `apply_patch <<EOF … EOF` to hooks as tool `Bash`
+# Codex's exec tool reports `apply_patch <<'EOF' … EOF` to hooks as tool `Bash`
 # and only AFTER the PreToolUse hooks have run does it intercept the command and
-# apply it as a real patch. A hook that looks only at tool `apply_patch` never
-# sees that edit (found by the fourth review board, verified in codex-rs
-# unified_exec/exec_command.rs). Mode `edit` is how a file hook is wired for it.
+# apply it as a real patch. It intercepts exactly two forms, each only as the
+# sole top-level statement (apply-patch/src/invocation.rs):
+#     apply_patch <<'EOF' … EOF          cd <path> && apply_patch <<'EOF' … EOF
+# Mode `edit` recognises those two and nothing else.
 carried_payload() { printf '{"cwd":"%s","hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$CWD_NATIVE" "$1" "$2"; }
-CARRIED="apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF"
+# heredoc <prefix> <patch-body-with-\n-escapes> — one of the two intercepted forms.
+heredoc() { printf '%s' "${1}apply_patch <<'EOF'\n*** Begin Patch\n${2}\n*** End Patch\nEOF"; }
+# Files the patches below UPDATE must exist: an update of a file that is not
+# there is how the adapter detects a base directory it cannot see.
+mkdir -p "$TMP_ROOT/protected" "$TMP_ROOT/docs" "$TMP_ROOT/web/src/lib"
+: > "$TMP_ROOT/protected/x.ts"; : > "$TMP_ROOT/docs/a.md"; : > "$TMP_ROOT/web/src/lib/x.ts"; : > "$TMP_ROOT/web/vercel.json"
 ADAPT_ARGS="5 50 edit"
+
 rm -f "$LOG"
-adapt guard.sh "$(carried_payload PreToolUse "$CARRIED")"
+adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Update File: protected/x.ts\n@@\n+evil')")"
 if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
-  ok "a patch carried in a Bash command is checked path by path, exactly like one sent through the patch tool"
+  ok "a patch carried in a shell command is checked path by path, like one sent through the patch tool"
 else
-  bad "carried patch was not inspected: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null)"
+  bad "carried patch was not inspected: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null) stderr: $ERR"
+fi
+
+# `cd <path> &&` moves the base the hunk paths resolve against, in Codex and here.
+# Ignoring it handed the scripts <root>/src/lib/x.ts for an edit to web/src/lib/x.ts,
+# which no `*/web/src/lib/*` glob matches — so the check skipped the file.
+rm -f "$LOG"
+adapt probe.sh "$(carried_payload PreToolUse "$(heredoc 'cd web && ' '*** Update File: src/lib/x.ts\n@@\n+y')")"
+if [ "$RC" -eq 0 ] && grep -qxF "ENV=$CWD_NATIVE/web/src/lib/x.ts" "$LOG"; then
+  ok "\`cd web && apply_patch\`: paths resolve under web/, the directory Codex applies them in"
+else
+  bad "cd prefix ignored: exit $RC, saw: $(cat "$LOG" 2>/dev/null) stderr: $ERR"
 fi
 rm -f "$LOG"
-adapt guard.sh "$(carried_payload PreToolUse 'ls -la protected/')"
-if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then
-  ok "an ordinary shell command is none of a file hook's business: it exits 0 without running the script"
+adapt guard.sh "$(carried_payload PreToolUse "$(heredoc "cd 'protected' && " '*** Update File: x.ts\n@@\n+evil')")"
+if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
+  ok "…so a guard on a directory still fires when the patch reaches it through cd (quoted path)"
 else
-  bad "edit-mode hook ran on a plain command: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no)"
+  bad "cd into a protected directory was not seen: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
 fi
+
+# The heredoc BODY is the patch. Cutting at the first `*** End Patch` text let an
+# added line containing those words hide every file after it.
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Update File: docs/a.md\n@@\n+the envelope ends with *** End Patch\n+*** End Patch\n*** Update File: protected/x.ts\n@@\n+evil')")"
+if [ "$RC" -eq 2 ] && [ "$(runs SAW)" = "2" ]; then
+  ok "an added line that SAYS '*** End Patch' does not end the patch: the file after it is still checked"
+else
+  bad "embedded terminator truncated the patch: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null)"
+fi
+
+# The payload never carries the exec tool's `workdir`, which moves the base too.
+# An UPDATE of a file that is not where the paths resolve is proof of that.
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Update File: src/lib/x.ts\n@@\n+y')")"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'does not exist under' <<<"$ERR" && grep -qF 'working directory this hook cannot see' <<<"$ERR"; then
+  ok "an updated file that does not exist where the paths resolve BLOCKS — the base is wrong, so nothing could be checked (the unseen-workdir case)"
+else
+  bad "unresolvable base: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+rm -f "$LOG"
+adapt probe.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Add File: brand/new.ts\n+x')")"
+if [ "$RC" -eq 0 ] && grep -qxF "ENV=$CWD_NATIVE/brand/new.ts" "$LOG"; then
+  ok "an ADDED file need not exist (it cannot be used to check the base — recorded as a limit)"
+else
+  bad "Add was blocked or mis-resolved: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
+fi
+rm -f "$LOG"
+adapt probe.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Update File: docs/a.md\n*** Move to: docs/renamed.md\n@@\n+z')")"
+if [ "$RC" -eq 0 ] && [ "$(runs ENV)" = "2" ]; then
+  ok "a move's DESTINATION need not exist either; its source must"
+else
+  bad "move handling under the existence check: exit $RC, saw: $(cat "$LOG" 2>/dev/null) stderr: $ERR"
+fi
+
+# What Codex does NOT intercept is an ordinary shell command here too.
+for CMD in "grep -cF '*** Begin Patch' a.sh; grep -cF '*** End Patch' a.sh" \
+           "ls -la protected/" \
+           "echo start; $(heredoc '' '*** Update File: protected/x.ts\n@@\n+evil')" \
+           "$(heredoc '' '*** Update File: protected/x.ts\n@@\n+evil') && echo done"; do
+  rm -f "$LOG"
+  adapt guard.sh "$(carried_payload PreToolUse "$CMD")"
+  if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then
+    ok "not an intercepted form, so an ordinary command (exit 0, script not run): $(printf '%s' "$CMD" | cut -c1-44)…"
+  else
+    bad "a non-invocation was treated as a patch: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no): $(printf '%s' "$CMD" | cut -c1-60)"
+  fi
+done
+
+# A file hook looking at a carried patch is not gated by an `if` written for
+# shell commands — otherwise the two edit channels disagree and this one fails open.
+COND_FILE="$H/edit-conditions.json"
+printf '{"PreToolUse":{"guard.sh":["Bash(git push *)"]}}' > "$COND_FILE"
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Update File: protected/x.ts\n@@\n+evil')")"
+if [ "$RC" -eq 2 ]; then
+  ok "an \`if\` condition does not switch a file hook off for a carried patch"
+else
+  bad "a Bash condition suppressed the check of a carried patch: exit $RC"
+fi
+unset COND_FILE
+
 ADAPT_ARGS="5 50"
 rm -f "$LOG"
-adapt guard.sh "$(carried_payload PreToolUse "$CARRIED")"
+adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Update File: protected/x.ts\n@@\n+evil')")"
 if [ "$RC" -eq 0 ] && grep -qxF 'SAW=<unset>' "$LOG"; then
   ok "WITHOUT mode edit the same payload is just a command (so the generator's \`edit\` argument is what closes the channel)"
 else
@@ -1399,6 +1512,39 @@ if [ "$(out_get hookSpecificOutput.permissionDecision)" = "deny" ] && [ "$(out_g
   ok "PreToolUse: the same JSON block becomes permissionDecision=deny"
 else
   bad "PreToolUse block translation is wrong: $OUT"
+fi
+
+cat > "$H/jsonctx.sh" <<'JC'
+#!/usr/bin/env bash
+printf '%s' '{"hookSpecificOutput":{"hookEventName":"whatever-the-script-says","additionalContext":"lint: 2 problems"}}'
+JC
+for EV in PostToolUse SessionStart UserPromptSubmit SubagentStart; do
+  adapt jsonctx.sh "{\"hook_event_name\":\"$EV\"}"
+  if [ "$(out_get hookSpecificOutput.additionalContext)" = "lint: 2 problems" ] && [ "$(out_get hookSpecificOutput.hookEventName)" = "$EV" ]; then
+    ok "$EV: JSON context is forwarded under hookEventName=$EV (the wire type is const per event, whatever the script wrote)"
+  else
+    bad "$EV: context translation is wrong: $OUT"
+  fi
+  adapt text.sh "{\"hook_event_name\":\"$EV\"}"
+  if [ "$(out_get hookSpecificOutput.additionalContext)" = "WARNING: db.transaction() detected" ] && [ "$(out_get @has:systemMessage)" = "false" ]; then
+    ok "$EV: plain text becomes additionalContext (not a systemMessage) — this event can reach the model"
+  else
+    bad "$EV: plain-text routing is wrong: $OUT"
+  fi
+done
+for EV in UserPromptSubmit PostToolUse SubagentStop; do
+  adapt stopblock.sh "{\"hook_event_name\":\"$EV\"}"
+  if [ "$(out_get decision)" = "block" ] && [ "$(out_get reason)" = "review is incomplete" ] && [ "$(out_get @has:hookSpecificOutput)" = "false" ]; then
+    ok "$EV: a JSON block is top-level decision/reason"
+  else
+    bad "$EV: block translation is wrong: $OUT"
+  fi
+done
+adapt stopblock.sh '{"hook_event_name":"SessionStart"}'
+if [ "$RC" -eq 0 ] && [ -z "$OUT" ]; then
+  ok "SessionStart cannot block: a JSON block there is dropped rather than sent in a shape Codex would reject"
+else
+  bad "SessionStart emitted a block: $OUT"
 fi
 
 echo "== adapter: \`if\` conditions from .claude/settings.json =="

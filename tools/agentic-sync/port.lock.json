@@ -120,6 +120,6 @@
     ".codex/agents/ux-reviewer.toml": "58eca48f212dc7e1b4863be6ff56111b3a8661d739b30d64b961a143c889187e",
     ".codex/agents/validator.toml": "0e9b5c6332244c33bd9fa037eaee4242656d985180aae6176707b13dd7d05313",
     ".codex/hook-conditions.json": "c90905de766c32f0f90b26375e6a39a52ca6abc1e87f68e85ad8f2a8bb2cfe2f",
-    ".codex/hooks.json": "943b793e0b6e84726869974ff13f1d1bac8a816237de1dbc6255b3fb256a9f4c"
+    ".codex/hooks.json": "dd22beb53f55858ae4a5a1080347565eaef52c8f5f3b4c616b0337c2b6e8aff3"
   }
 }
