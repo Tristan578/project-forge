@@ -1204,6 +1204,18 @@ else
   bad "an indented final End Patch lost the patch: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
 fi
 
+# …and lenient mode: Codex accepts the patch text wrapped in `<<'EOF'` … `EOF`
+# (some models send it that way) and strips the wrapper. The assertion is on the
+# ADDED LINES, not the path: if the port rejected this text the fallback would
+# still show the path, but with no content — the right exit code from the wrong guard.
+rm -f "$LOG"
+PROBE_LOG="$LOG" adapt newstring.sh "$(patch_payload PreToolUse "<<'EOF'\n*** Begin Patch\n*** Update File: docs/a.md\n@@\n+wrapped\n*** End Patch\nEOF")"
+if [ "$RC" -eq 0 ] && grep -qxF "PATH=$CWD_NATIVE/docs/a.md" "$LOG" && grep -qxF 'NEW="wrapped"' "$LOG"; then
+  ok "lenient mode: a patch wrapped in <<'EOF' … EOF is parsed by the port, added lines and all"
+else
+  bad "the lenient heredoc wrapper was not parsed by the port: exit $RC, saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
+fi
+
 # 2. Every member of Rust's White_Space, in front of a header. A trim set missing
 #    ANY of them is a header Codex sees and the hooks do not; five were pinned and
 #    a mutant that dropped TAB passed.
@@ -1601,9 +1613,10 @@ CRLF line endings throughout|apply_patch \\\r\n<<'EOF'\r\n*** Begin Patch\r\n***
 blank lines after the closing delimiter|apply_patch <<'EOF'\n@P@\nEOF\n\n
 an indented file header after Begin Patch (Codex trims there)|apply_patch <<'EOF'\n*** Begin Patch\n   *** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
 a NEL-prefixed file header (Rust trims it)|apply_patch <<'EOF'\n*** Begin Patch\n\u0085*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
+an INDENTED final End Patch inside an Update hunk (finish() trims the last line; here a parse failure would be a refusal)|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n   *** End Patch\nEOF
 SHAPES_TABLE
-# The loop must have walked its table, or 14 shapes read as zero problems.
-if [ "$SHAPES" -eq 14 ]; then ok "all 14 accepted shapes were driven"; else bad "the accepted table was not walked: $SHAPES of 14"; fi
+# The loop must have walked its table, or 15 shapes read as zero problems.
+if [ "$SHAPES" -eq 15 ]; then ok "all 15 accepted shapes were driven"; else bad "the accepted table was not walked: $SHAPES of 15"; fi
 
 # `cd <literal path> &&` is the one directory change accepted. @PX@ updates x.ts
 # RELATIVE to the cd, i.e. protected/x.ts.
