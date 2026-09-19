@@ -145,7 +145,10 @@ function main() {
       fail(`${name}: could not find a file path in the apply_patch payload — refusing to let the check pass on nothing`);
     }
     for (const f of files) {
-      const filePath = isAbsolute(f.path) ? f.path : resolve(cwd, f.path);
+      // Forward slashes on every platform: the consumers are bash scripts that
+      // match on globs like `*/web/src/lib/*`, which a Windows `D:\a\b` path
+      // never satisfies — the check would skip the file and exit 0.
+      const filePath = (isAbsolute(f.path) ? f.path : resolve(cwd, f.path)).replace(/\\/g, '/');
       const toolInput = { file_path: filePath };
       if (f.op === 'Add') toolInput.content = f.added.join('\n');
       else toolInput.new_string = f.added.join('\n');
