@@ -130,46 +130,46 @@
         ]
       },
       {
-        "matcher": "apply_patch",
+        "matcher": "apply_patch|Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" verify-branch.sh 5 50",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs verify-branch.sh 5 50",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" verify-branch.sh 5 50 edit",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs verify-branch.sh 5 50 edit",
             "timeout": 50
           }
         ]
       },
       {
-        "matcher": "apply_patch",
+        "matcher": "apply_patch|Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-db-transaction.sh 3 30",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-db-transaction.sh 3 30",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-db-transaction.sh 3 30 edit",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-db-transaction.sh 3 30 edit",
             "timeout": 30
           }
         ]
       },
       {
-        "matcher": "apply_patch",
+        "matcher": "apply_patch|Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-sanitization-patterns.sh 3 30",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-sanitization-patterns.sh 3 30",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-sanitization-patterns.sh 3 30 edit",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-sanitization-patterns.sh 3 30 edit",
             "timeout": 30,
             "statusMessage": "Checking sanitization patterns"
           }
         ]
       },
       {
-        "matcher": "apply_patch",
+        "matcher": "apply_patch|Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-vercel-json.sh 3 30",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-vercel-json.sh 3 30",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-vercel-json.sh 3 30 edit",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-vercel-json.sh 3 30 edit",
             "timeout": 30
           }
         ]

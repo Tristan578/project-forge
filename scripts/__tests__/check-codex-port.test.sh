@@ -219,10 +219,10 @@ fi
 
 echo "== generator: hooks.json =="
 HJ="$F/.codex/hooks.json"
-if [ "$(json_get "$HJ" 'hooks.PreToolUse.0.matcher')" = "apply_patch" ]; then
-  ok "matcher Edit|Write becomes apply_patch (the tool name Codex actually reports)"
+if [ "$(json_get "$HJ" 'hooks.PreToolUse.0.matcher')" = "apply_patch|Bash" ]; then
+  ok "a PreToolUse Edit|Write hook matches apply_patch AND Bash — Codex also applies a patch carried in a shell command"
 else
-  bad "Edit|Write was not mapped to apply_patch: $(json_get "$HJ" 'hooks.PreToolUse')"
+  bad "PreToolUse Edit|Write matcher is wrong: $(json_get "$HJ" 'hooks.PreToolUse')"
 fi
 if grep -qF 'auto-approve-safe-commands.sh' "$HJ"; then
   bad "a script listed under hooks.skipScripts was wired"
@@ -448,15 +448,25 @@ printf -- '---\nname: folded\ndescription: >\n  A folded\n  description\n---\n\n
 gen "$F" --check; expect_rc 2 "a YAML block-scalar description is refused rather than emitted as the description \">\""
 expect_out "block scalar" "…and the message says why"
 
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks.PostToolUse '[{"matcher":"Edit|Write","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]'
+gen "$F" --write
+if [ "$(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0.hooks.0.timeout')" = "100" ] \
+   && [ "$(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0.matcher')" = "apply_patch" ]; then
+  ok "a handler with NO timeout gets the manifest default (10 s per file, x10 for a patch) instead of no bound at all; a PostToolUse edit hook stays apply_patch-only"
+else
+  bad "default timeout / PostToolUse matcher wrong: $(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0')"
+fi
+
 echo "== generator: the emitted commands are exactly what Codex must execute =="
 F="$(mkfix)"; gen "$F" --write
 HJ="$F/.codex/hooks.json"
 # shellcheck disable=SC2016  # the $(...) is literal text Codex will hand to a shell
-WANT_POSIX='node "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs" ok.sh 5 50'
+WANT_POSIX='node "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs" ok.sh 5 50 edit'
 # shellcheck disable=SC2016  # as above: literal text for a shell Codex will start
 WANT_STOP='node "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs" ok.sh 3 8'
 if [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.command')" = "$WANT_POSIX" ] \
-   && [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.commandWindows')" = "node .codex/hooks/run-claude-hook.mjs ok.sh 5 50" ] \
+   && [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.commandWindows')" = "node .codex/hooks/run-claude-hook.mjs ok.sh 5 50 edit" ] \
    && [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.timeout')" = "50" ] \
    && [ "$(json_get "$HJ" 'hooks.Stop.0.hooks.0.command')" = "$WANT_STOP" ] \
    && [ "$(json_get "$HJ" 'hooks.Stop.0.hooks.0.timeout')" = "8" ]; then
@@ -509,15 +519,29 @@ else
 fi
 gen "$F" --check; expect_rc 0 "…and the tree is in sync afterwards, with the paths gone from the lock"
 
-F="$(mkfix)"; gen "$F" --write
+F="$(mkfix)"
+# A SECOND agent, so removing demo's source does not leave an empty agent set —
+# which the generator refuses with exit 2 before any release logic runs. Without
+# it this case "passed" on that early exit and exercised nothing.
+printf -- '---\nname: other\ndescription: stays generated\n---\n\nbody\n' > "$F/.claude/agents/other.md"
+gen "$F" --write
 json_set "$F/tools/agentic-sync/port.json" agents.handAuthored.demo '"taken over by hand"'
 rm "$F/.claude/agents/demo.md"
 gen "$F" --write
+expect_out "released 1 path(s)" "handing an agent over reaches the release logic, and --write reports the release"
 if [ -f "$F/.codex/agents/demo.toml" ]; then
   ok "an agent that became handAuthored is released, not deleted"
 else
   bad "--write deleted an agent that had been declared handAuthored"
 fi
+# The released file still opens with "GENERATED from .claude/agents/demo.md" —
+# a path that no longer exists, in a file a person now owns. The reference check
+# says so, which is the prompt to take the header over too.
+expect_rc 1 "…and the released file's stale 'GENERATED from' header is reported, not waved through"
+expect_out "unresolved path .claude/agents/demo.md" "…naming the dead source path"
+file_replace "$F/.codex/agents/demo.toml" '# GENERATED from .claude/agents/demo.md by tools/agentic-sync/port.mjs' '# HAND-AUTHORED (formerly generated); listed under agents.handAuthored in'
+file_replace "$F/.codex/agents/demo.toml" 'This role is generated from `.claude/agents/demo.md`.' 'This role is maintained by hand.'
+gen "$F" --check; expect_rc 0 "once the person takes the header over, the tree checks clean with the agent hand-authored"
 
 # A lock entry for a file in a target directory that this tool never wrote — a
 # third-party skill, say. The prefix test alone accepted it and --write deleted it.
@@ -782,6 +806,73 @@ else
   else
     bad "a plain file was marked executable"
   fi
+
+  # Only what git TRACKS is mirrored: a stray file beside a skill script must not
+  # ride into a tracked directory reviewers are told not to read line by line.
+  F="$(gitfix)"
+  git -C "$F" add -A
+  printf 'SECRET=1\n' > "$F/.claude/skills/alpha/.env"
+  mkdir -p "$F/.claude/skills/alpha/__pycache__"; printf 'bytecode\n' > "$F/.claude/skills/alpha/__pycache__/x.pyc"
+  gen "$F" --write; expect_rc 0 "--write succeeds with untracked files sitting in a skill directory"
+  expect_out "not tracked by git and were NOT mirrored" "…and says which files it left out"
+  if [ ! -e "$F/.agents/skills/alpha/.env" ] && [ ! -e "$F/.agents/skills/alpha/__pycache__" ] && [ -f "$F/.agents/skills/alpha/SKILL.md" ]; then
+    ok "an untracked .env and a __pycache__ are NOT mirrored; the tracked files are"
+  else
+    bad "an untracked file was mirrored: $(ls -A "$F/.agents/skills/alpha")"
+  fi
+
+  # Which mode is the truth depends on core.fileMode, and the two must be told
+  # apart: make DISK and INDEX disagree and see which one the mirror follows.
+  F="$(gitfix)"
+  git -C "$F" add -A
+  if [ "$(git -C "$F" config --get core.fileMode)" = "true" ]; then
+    chmod +x "$F/.claude/skills/alpha/scripts/run.sh"   # disk +x, index still 100644
+    gen "$F" --write
+    if [ -x "$F/.agents/skills/alpha/scripts/run.sh" ]; then
+      ok "core.fileMode=true: the DISK mode wins — a freshly chmod +x'ed source gives an executable mirror before anything is re-staged"
+    else
+      bad "core.fileMode=true: the mirror followed the stale index mode, not the disk"
+    fi
+    chmod -x "$F/.claude/skills/alpha/scripts/run.sh"
+    git -C "$F" update-index --chmod=+x .claude/skills/alpha/scripts/run.sh   # index +x, disk 0644
+    gen "$F" --write
+    if [ ! -x "$F/.agents/skills/alpha/scripts/run.sh" ]; then
+      ok "core.fileMode=true: an index-only +x that the next git add would revert does NOT make the mirror executable"
+    else
+      bad "core.fileMode=true: the mirror followed the index against the disk"
+    fi
+  else
+    git -C "$F" update-index --chmod=+x .claude/skills/alpha/scripts/run.sh   # the only place the bit can live here
+    gen "$F" --write
+    expect_out "must be executable but are not in the index yet" "core.fileMode=false: the FIRST --write says the mirrored script still needs staging — it is not silent"
+    gen "$F" --check; expect_rc 1 "core.fileMode=false: and a local --check is RED until that is done (the drift must not first appear in CI)"
+    expect_out "must be executable but is not staged" "…naming the reason"
+    git -C "$F" add -A; gen "$F" --write
+    if [ "$(git -C "$F" ls-files -s .agents/skills/alpha/scripts/run.sh | cut -c1-6)" = "100755" ]; then
+      ok "core.fileMode=false: the INDEX mode wins — after staging, the second --write repairs the mirror's index entry"
+    else
+      bad "core.fileMode=false: the mirror's index mode was not repaired"
+    fi
+    gen "$F" --check; expect_rc 0 "…and the check is clean"
+  fi
+
+  # A reference that passes THROUGH a symlink stub (core.symlinks=false). On this
+  # repository's Windows checkouts `.claude/skills/tdd` is a text file, so
+  # `.claude/skills/tdd/SKILL.md` resolves only if the stub is followed by hand.
+  F="$(gitfix)"
+  mkdir -p "$F/.agents/skills/native"
+  printf -- '---\nname: native\ndescription: lives on the agents side\n---\n' > "$F/.agents/skills/native/SKILL.md"
+  printf '../../.agents/skills/native' > "$F/.claude/skills/linked"
+  # shellcheck disable=SC2016  # literal Markdown backticks in fixture text
+  printf '\nRead `.claude/skills/linked/SKILL.md`.\n' >> "$F/.claude/agents/demo.md"
+  git -C "$F" add -A; as_symlink "$F" ".claude/skills/linked"
+  gen "$F" --write; git -C "$F" add -A
+  gen "$F" --check; expect_rc 0 "a reference THROUGH a symlink stub resolves (it is a real path wherever links are real)"
+  # shellcheck disable=SC2016
+  printf '\nRead `.claude/skills/linked/NOPE.md`.\n' >> "$F/.claude/agents/demo.md"
+  gen "$F" --write
+  gen "$F" --check; expect_rc 1 "…and a dead path through the same stub is still caught"
+  expect_out "unresolved path .claude/skills/linked/NOPE.md" "…by name"
 
   # MCP parity reads the COMMITTED config, like check-codex-config-safety.sh.
   F="$(gitfix)"; gen "$F" --write
@@ -1182,6 +1273,70 @@ else
   bad "large command: exit $RC, log: $(cut -c1-60 "$LOG" 2>/dev/null)"
 fi
 
+echo "== adapter: Codex's SECOND edit channel — a patch carried in a shell command =="
+# Codex's exec tool reports `apply_patch <<EOF … EOF` to hooks as tool `Bash`
+# and only AFTER the PreToolUse hooks have run does it intercept the command and
+# apply it as a real patch. A hook that looks only at tool `apply_patch` never
+# sees that edit (found by the fourth review board, verified in codex-rs
+# unified_exec/exec_command.rs). Mode `edit` is how a file hook is wired for it.
+carried_payload() { printf '{"cwd":"%s","hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$CWD_NATIVE" "$1" "$2"; }
+CARRIED="apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF"
+ADAPT_ARGS="5 50 edit"
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "$CARRIED")"
+if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
+  ok "a patch carried in a Bash command is checked path by path, exactly like one sent through the patch tool"
+else
+  bad "carried patch was not inspected: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null)"
+fi
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse 'ls -la protected/')"
+if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then
+  ok "an ordinary shell command is none of a file hook's business: it exits 0 without running the script"
+else
+  bad "edit-mode hook ran on a plain command: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no)"
+fi
+ADAPT_ARGS="5 50"
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "$CARRIED")"
+if [ "$RC" -eq 0 ] && grep -qxF 'SAW=<unset>' "$LOG"; then
+  ok "WITHOUT mode edit the same payload is just a command (so the generator's \`edit\` argument is what closes the channel)"
+else
+  bad "non-edit hook on a carried patch: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
+fi
+ADAPT_ARGS=""
+
+echo "== adapter: a block must carry its reason, wherever the script wrote it =="
+printf '#!/usr/bin/env bash\necho "REVIEW INCOMPLETE: end with VERDICT: PASS or FAIL"\nexit 2\n' > "$H/block-stdout.sh"
+adapt block-stdout.sh '{"hook_event_name":"SubagentStop"}'
+if [ "$RC" -eq 2 ] && grep -qF 'REVIEW INCOMPLETE: end with VERDICT' <<<"$ERR"; then
+  ok "exit 2 with the reason on STDOUT: the reason is forwarded on stderr (reject-incomplete-review.sh does exactly this)"
+else
+  bad "stdout reason was lost: exit $RC, stderr: $ERR"
+fi
+
+echo "== adapter: faults that were never driven =="
+# The top-level catch. A NUL byte in a patch path makes spawnSync throw
+# ERR_INVALID_ARG_VALUE — an exception nothing anticipates. Without the catch
+# node exits 1, Codex marks the run Failed, and the edit proceeds.
+NUL_PAYLOAD='{"cwd":"'"$CWD_NATIVE"'","hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Add File: a\u0000b.ts\n+x\n*** End Patch"}}'
+adapt probe.sh "$NUL_PAYLOAD"
+if [ "$RC" -eq 2 ] && grep -qF 'unexpected error' <<<"$ERR"; then
+  ok "an UNANTICIPATED adapter exception blocks on PreToolUse, through the top-level catch"
+else
+  bad "uncaught adapter exception: exit $RC (2 wanted), stderr: $ERR"
+fi
+adapt probe.sh "${NUL_PAYLOAD/PreToolUse/PostToolUse}"
+if [ "$RC" -eq 1 ]; then ok "…and is a reported failure on PostToolUse"; else bad "uncaught exception on PostToolUse: exit $RC (1 wanted)"; fi
+ERR_FILE="$H/err"
+OUT="$(printf '%s' "$(bash_payload PreToolUse 'ls')" | CODEX_HOOK_BASH="$TMP_ROOT/no-such-bash" CODEX_HOOK_SCRIPT_DIR="$H" CODEX_HOOK_CONDITIONS="$H/no-conditions.json" PROBE_LOG="$LOG" node "$ADAPTER" probe.sh 2>"$ERR_FILE")"; RC=$?
+ERR="$(cat "$ERR_FILE")"
+if [ "$RC" -eq 2 ] && grep -qF 'could not start bash' <<<"$ERR"; then
+  ok "PreToolUse: a bash that cannot be started blocks"
+else
+  bad "missing bash: exit $RC (2 wanted), stderr: $ERR"
+fi
+
 echo "== adapter: output is translated per event (each Codex wire type is deny_unknown_fields) =="
 adapt text.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: a.ts\n@@\n+x\n*** End Patch')"
 if [ "$RC" -eq 0 ] && [ "$(out_get hookSpecificOutput.additionalContext)" = "WARNING: db.transaction() detected" ] \
@@ -1190,12 +1345,15 @@ if [ "$RC" -eq 0 ] && [ "$(out_get hookSpecificOutput.additionalContext)" = "WAR
 else
   bad "plain text was not wrapped: exit $RC, stdout: $OUT"
 fi
-adapt text.sh '{"hook_event_name":"PostCompact"}'
-if [ "$RC" -eq 0 ] && [ -z "$OUT" ]; then
-  ok "PostCompact: nothing is emitted — that wire type accepts no context and rejects hookSpecificOutput"
-else
-  bad "PostCompact emitted output Codex would reject: $OUT"
-fi
+for EV in PostCompact PreCompact Stop SubagentStop; do
+  adapt text.sh "{\"hook_event_name\":\"$EV\"}"
+  if [ "$RC" -eq 0 ] && [ "$(out_get systemMessage)" = "WARNING: db.transaction() detected" ] \
+     && [ "$(out_get @has:hookSpecificOutput)" = "false" ] && [ "$(out_get @keys)" = "systemMessage" ]; then
+    ok "$EV: plain text becomes a systemMessage (the only field that event accepts) — shown to the person rather than reaching nobody"
+  else
+    bad "$EV: plain-text handling is wrong: exit $RC, stdout: $OUT"
+  fi
+done
 adapt ctx.sh "$PAYLOAD"
 CTX_OUT="$(out_get hookSpecificOutput.additionalContext)"
 if grep -qF 'ctx for new.ts' <<<"$CTX_OUT" && grep -qF 'ctx for old.ts' <<<"$CTX_OUT" && grep -qF 'ctx for gone.ts' <<<"$CTX_OUT"; then
@@ -1248,6 +1406,14 @@ fi
 rm -f "$LOG" "$LOG.stdin"
 adapt probe.sh "$(bash_payload PreToolUse 'git status')"
 if [ -e "$LOG" ]; then ok "a condition recorded for one event does not filter another"; else bad "a PostToolUse condition filtered a PreToolUse run"; fi
+rm -f "$LOG" "$LOG.stdin"
+printf '{"PostToolUse":{"probe.sh":["this is not a condition"]}}' > "$COND_FILE"
+adapt probe.sh "$(bash_payload PostToolUse 'git status')"
+if [ -e "$LOG" ]; then ok "a condition the adapter cannot parse means RUN, not skip"; else bad "an unparseable condition suppressed the script"; fi
+rm -f "$LOG" "$LOG.stdin"
+printf '{"PostToolUse":{"probe.sh":["Edit(src/*)"]}}' > "$COND_FILE"
+adapt probe.sh "$(bash_payload PostToolUse 'git status')"
+if [ ! -e "$LOG" ]; then ok "a well-formed condition written for ANOTHER tool does not match a Bash payload"; else bad "a condition for another tool matched Bash"; fi
 rm -f "$LOG" "$LOG.stdin"
 printf '{ broken' > "$COND_FILE"
 adapt probe.sh "$(bash_payload PostToolUse 'git status')"

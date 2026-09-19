@@ -96,6 +96,8 @@ const abs = (rel) => join(ROOT, ...rel.split('/'));
 
 // Filled by main() before any lookup: path -> git mode, when git is available.
 let INDEX_MODES = new Map();
+// Source files git does not track: not mirrored, and said so.
+const UNTRACKED_SOURCES = [];
 // Does git read the executable bit from the filesystem here?
 let FILEMODE_TRUSTED = process.platform !== 'win32';
 
@@ -236,6 +238,7 @@ function loadManifest() {
   need('hooks.patchTimeoutFactor', (v) => Number.isInteger(v) && v >= 1, 'a positive integer');
   need('hooks.maxTimeoutSeconds', (v) => Number.isInteger(v) && v >= 1, 'a positive integer');
   need('hooks.adapterOverheadSeconds', (v) => Number.isInteger(v) && v >= 2, 'an integer of at least 2');
+  need('hooks.defaultTimeoutSeconds', (v) => Number.isInteger(v) && v >= 1, 'a positive integer');
   return m;
 }
 
@@ -254,6 +257,16 @@ function planSkills(m, modes, plan) {
     if (Object.hasOwn(independent, name)) continue;
     if (!existsSync(join(abs(rel), 'SKILL.md'))) die(`${rel} has no SKILL.md — not a skill`);
     for (const file of walk(rel, modes)) {
+      // Only what git TRACKS is mirrored. The content lands in a tracked file in
+      // a directory reviewers are told not to read line by line, so a stray
+      // `.env`, an editor backup or a `__pycache__` left beside a skill script
+      // must not ride along — the same rule readSource() applies to link
+      // targets. With no index to consult (not a repository, or nothing staged
+      // yet) there is nothing to filter by, and every file is taken.
+      if (modes.size > 0 && !modes.has(file)) {
+        UNTRACKED_SOURCES.push(file);
+        continue;
+      }
       const out = `${target}/${file.slice(source.length + 1)}`;
       plan.set(out, { content: normalize(readSource(file, modes)), modeFrom: file });
     }
@@ -323,7 +336,13 @@ function renderAgent(rel, m) {
     `repository paths shared by every assistant — read them as written. Where the ` +
     `text names a Claude Code tool, use the Codex equivalent: a shell command for ` +
     `Bash/Grep/Glob/Read, \`apply_patch\` for Edit/Write, \`$skill-name\` for the ` +
-    `Skill tool, and \`spawn_agent\` for the Agent tool.`;
+    `Skill tool, and \`spawn_agent\` for the Agent tool. ` +
+    `Two things this text may assume do NOT hold under Codex. (1) Hooks scoped to this one agent do ` +
+    `not exist here: where it says a command "will be blocked" or is "enforced by a hook" for this ` +
+    `agent, nothing will stop you — keep the rule yourself. If the role is described as read-only, ` +
+    `do not write, even though Codex will let you. (2) An MCP server it tells you to use (a browser, ` +
+    `a docs lookup) may not be configured in this session; if it is not, say so in your answer ` +
+    `rather than skipping the step silently.`;
   lines.push(`developer_instructions = """`, tomlEscape(`${preface}\n\n${body}`, true), `"""`, '');
   return { name: fm.name, text: lines.join('\n') };
 }
@@ -418,8 +437,17 @@ function planHooks(m, plan) {
         // and the edit proceeded unchecked. The adapter gets both numbers: the
         // per-run bound, and the budget declared to Codex, which it must beat
         // so that running out of time is a BLOCK, not a silent pass.
-        const perRun = Number.isFinite(hook.timeout) && hook.timeout > 0 ? hook.timeout : 0;
-        const perPatch = String(group.matcher || '').split('|').some((tool) => h.toolAliases[tool] === 'apply_patch');
+        // A handler with NO timeout would get no per-file bound and no budget, so
+        // a large patch would simply run into Codex's own timeout — Failed, and
+        // the edit proceeds. It gets the manifest's default instead.
+        const perRun = Number.isFinite(hook.timeout) && hook.timeout > 0 ? hook.timeout : h.defaultTimeoutSeconds;
+        const aliases = String(group.matcher || '').split('|').map((tool) => h.toolAliases[tool]);
+        const perPatch = aliases.includes('apply_patch');
+        // A hook that inspects FILES and gates the action. Codex's exec tool
+        // reports `apply_patch <<EOF … EOF` to hooks as `Bash` and only then
+        // applies it as a patch, so such a hook must be offered Bash payloads
+        // too; the adapter (mode `edit`) acts only on one that carries a patch.
+        const editOnly = event === 'PreToolUse' && perPatch && !aliases.includes('Bash');
         // A single run still gets headroom for node and bash to start, or the
         // script's own bound could never be reached before the adapter's.
         const budget = !perRun
@@ -429,12 +457,12 @@ function planHooks(m, plan) {
           type: 'command',
           // POSIX: resolve from the git root so a session started in a
           // subdirectory still finds the adapter.
-          command: `node "$(git rev-parse --show-toplevel)/${h.adapter}" ${name} ${perRun} ${budget}`,
+          command: `node "$(git rev-parse --show-toplevel)/${h.adapter}" ${name} ${perRun} ${budget}${editOnly ? ' edit' : ''}`,
           // Windows: Codex runs hooks through the session shell, which may be
           // cmd or PowerShell; no quoting of $(...) survives both. A plain
           // relative path does — it requires Codex to be started at the repo
           // root (see docs/guides/codex-cli-support-matrix.md).
-          commandWindows: `node ${h.adapter} ${name} ${perRun} ${budget}`,
+          commandWindows: `node ${h.adapter} ${name} ${perRun} ${budget}${editOnly ? ' edit' : ''}`,
         };
         if (budget) handler.timeout = budget;
         if (hook.statusMessage) handler.statusMessage = hook.statusMessage;
@@ -452,7 +480,8 @@ function planHooks(m, plan) {
       }
       if (handlers.length === 0) continue;
       const entry = {};
-      const matcher = mapMatcher(group.matcher, event, h);
+      let matcher = mapMatcher(group.matcher, event, h);
+      if (matcher === 'apply_patch' && event === 'PreToolUse') matcher = 'apply_patch|Bash'; // see `editOnly` above
       if (matcher !== undefined) entry.matcher = matcher;
       entry.hooks = handlers;
       (out[event] ||= []).push(entry);
@@ -590,6 +619,18 @@ function extraFiles(m, plan) {
     }
   }
   return extra;
+}
+
+// Mirrored scripts whose source is executable but which have no index entry to
+// carry the bit — only a problem where the filesystem cannot (core.fileMode=false).
+// A plain `git add` would stage them 100644 and the drift would first show in CI.
+function unstagedExecutables(plan, modes) {
+  if (FILEMODE_TRUSTED || modes.size === 0) return [];
+  const out = [];
+  for (const [rel, { modeFrom }] of plan) {
+    if (modeFrom && modes.get(modeFrom) === '100755' && !modes.has(rel)) out.push(rel);
+  }
+  return out;
 }
 
 // Has this generated path been handed to a person? Then it is not an orphan.
@@ -821,6 +862,13 @@ function main() {
     console.log(
       `codex-port: wrote ${wrote} file(s), removed ${orphans.length} orphan(s), released ${released.length} path(s) now maintained by hand, fixed ${chmod} executable bit(s) in the index.`,
     );
+    const unstaged = unstagedExecutables(plan, modes);
+    if (unstaged.length) {
+      console.log(
+        `codex-port: ${unstaged.length} mirrored script(s) must be executable but are not in the index yet, and this checkout (core.fileMode=false) ` +
+          `cannot carry the bit on disk. \`git add\` them, then run --write AGAIN so the index entry can be repaired:\n  ${unstaged.join('\n  ')}`,
+      );
+    }
   }
 
   const problems = [];
@@ -833,10 +881,13 @@ function main() {
       }
     }
     for (const rel of orphans) problems.push(`orphan:   ${rel} is no longer generated — --write will delete it`);
+    for (const rel of unstagedExecutables(plan, modes)) {
+      problems.push(`mode:     ${rel} must be executable but is not staged — git add it, then run --write again (this checkout cannot carry the bit on disk)`);
+    }
     for (const rel of extras) problems.push(`extra:    ${rel} is inside a generated location but is not generated — delete it, or add it to the source under .claude/`);
   }
   for (const rel of modified) {
-    problems.push(`modified: ${rel} is no longer generated but differs from what this tool wrote (or the lock has no hash for it) — NOT deleted; remove it by hand, or restore it`);
+    problems.push(`modified: ${rel} is no longer generated but differs from what this tool wrote (or the lock has no hash for it) — NOT deleted. Three ways out: delete the file; restore its source under .claude/; or, if it is now maintained by hand, declare it in port.json (skills.independent / agents.handAuthored), which releases it from the lock`);
   }
   for (const r of refs) problems.push(`ref:      ${r}`);
   const mcp = mcpParity();
@@ -844,6 +895,12 @@ function main() {
   // A workflow command must START its line to be rendered as an annotation.
   if (mcp.note) console.log(mcp.note.startsWith('::') ? mcp.note : `codex-port: ${mcp.note}`);
 
+  if (UNTRACKED_SOURCES.length) {
+    console.log(
+      `codex-port: ${UNTRACKED_SOURCES.length} file(s) under ${m.skills.source} are not tracked by git and were NOT mirrored ` +
+        `(git add the ones that belong, then run --write again):\n  ${UNTRACKED_SOURCES.slice(0, 20).join('\n  ')}`,
+    );
+  }
   console.log(
     `codex-port: ${skills} skills, ${agents} agents, ${hooks.ported} hooks ported ` +
       `(${hooks.skipped.length} skipped by name, ${hooks.unsupported.length} on events Codex lacks).`,

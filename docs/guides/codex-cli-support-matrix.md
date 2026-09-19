@@ -133,10 +133,11 @@ until someone decides where it belongs. That is deliberate: the first port wired
   1, which Codex reports as Failed **and proceeds**. Blocking hooks then do not
   block. Start Codex at the root.
 - **`[features] shell_tool = false` is set in the committed `.codex/config.toml`.**
-  Nine of the 29 handlers match `Bash`, including the four policy hooks
-  (`block-main-commits`, `check-pr-metadata`, `pre-push-quality-gate`,
-  `block-deferred-fixes`), and every generated agent is told to use shell
-  commands. What that flag leaves available under 0.144.1, and therefore whether
+  Thirteen of the 29 handlers match `Bash` — nine shell hooks, including the
+  four policy hooks (`block-main-commits`, `check-pr-metadata`,
+  `pre-push-quality-gate`, `block-deferred-fixes`), plus the four `PreToolUse`
+  edit hooks, which are offered `Bash` payloads so they can see a patch carried
+  in a command — and every generated agent is told to use shell commands. What that flag leaves available under 0.144.1, and therefore whether
   those hooks can ever fire under this profile, was **not** established. It is
   item 5 of the checklist.
 - **Per-hook trust.** Codex stores a hash per hook under `[hooks.state]` in the
