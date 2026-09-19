@@ -47,8 +47,10 @@
 //             checks. A new source file git does not track yet (`untracked:`),
 //             a mirrored script whose executable bit is not staged on a
 //             core.fileMode=false checkout (`mode: … not staged`), and
-//             `modified:` / `ref:` / `mcp:` problems are reported by --write
-//             too. For the first two the fix is `git add`, then --write again.
+//             `extra:` / `modified:` / `ref:` / `mcp:` problems are reported by
+//             --write too (it never deletes a file it did not write, so an
+//             `extra:` file survives it). For `untracked:` and `mode: … not
+//             staged` the fix is `git add`, then --write again.
 //   --check   exit 1 on any difference. Never writes. Also validates that every
 //             repo path named inside a `.codex/` file resolves, CASE-EXACTLY —
 //             `existsSync('.Codex/rules')` is TRUE on a case-insensitive

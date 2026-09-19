@@ -1,5 +1,7 @@
 # SpawnForge — Codex CLI Instructions
 
+> **Codex does not load this file by itself.** It collects `AGENTS.md` only from the repository root down to the directory it started in, and `.codex/` is not on that path. The root `AGENTS.md` opens with a section telling a Codex session to read this file; if you are reading it, that worked. Anything that must reach Codex without that hop belongs in the root file.
+
 ## CRITICAL: No Code Without a Ticket
 
 **Before writing ANY code, you MUST have a ticket.** This is non-negotiable and applies to every contributor and every AI tool in this repo.

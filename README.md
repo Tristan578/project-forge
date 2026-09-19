@@ -345,7 +345,7 @@ Skills in `.agent/skills/` (singular — Antigravity uses `.agent/`, not `.agent
 
 ```bash
 cd project-forge   # start Codex at the repo root — on Windows the hook commands are relative to it
-codex              # reads .codex/config.toml, .codex/AGENTS.md, .codex/hooks.json, .codex/agents/
+codex              # reads AGENTS.md (root), .codex/config.toml, .codex/hooks.json, .codex/agents/ — NOT .codex/AGENTS.md; the root file points it there
 ```
 Hooks run the shared `.claude/hooks/` scripts, but only after a one-time approval: trust the project, then open `/hooks` and approve them (Codex re-asks whenever a hook's command changes). Config in `.codex/config.toml`. Subagents in `.codex/agents/`, skills in `.agents/skills/` — both **generated** from `.claude/` by `node tools/agentic-sync/port.mjs --write`, never hand-edited. What is wired, what Codex cannot express, and what was verified: `docs/guides/codex-cli-support-matrix.md`. Full enforcement rules in `.codex/AGENTS.md`.
 

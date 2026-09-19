@@ -174,120 +174,261 @@ function findBash() {
 
 // Rust's `str::trim()` strips the Unicode White_Space property; JavaScript's
 // `trim()` strips a DIFFERENT set (it keeps U+0085 NEL, it drops U+FEFF). Codex
-// matches patch headers on `line.trim()` (apply-patch/src/streaming_parser.rs),
-// so with JS trim a header behind a NEL was a header to Codex and plain text
-// here — the file was edited and no hook saw it. These two mirror Rust exactly.
+// is Rust, so every trim below is Rust's.
 const RUST_WS = '\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
 const RUST_TRIM = new RegExp(`^[${RUST_WS}]+|[${RUST_WS}]+$`, 'g');
 const RUST_TRIM_END = new RegExp(`[${RUST_WS}]+$`);
 const rustTrim = (s) => s.replace(RUST_TRIM, '');
 const rustTrimEnd = (s) => s.replace(RUST_TRIM_END, '');
+// Rust's `str::lines()`: split on \n, drop ONE trailing \r per line, and no
+// final empty line. Nothing else is a line break — not U+2028, not a lone \r —
+// so a PATH may contain those, and no regex with `.` may be used on a line.
+const rustLines = (s) => {
+  const parts = s.split('\n');
+  if (parts[parts.length - 1] === '') parts.pop();
+  return parts.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
+};
 
-// Every path a patch touches, read the way Codex's streaming parser reads it:
-//   * `*** Add|Update|Delete File: <path>` is matched on the line after Rust
-//     `trim()` — anchoring at column 0 would let an indented header hide its hunk
-//     from every hook while Codex applies it. The path is what follows the
-//     marker, NOT trimmed again (Codex does not).
-//   * `*** Move to: <path>` is matched after `trim_end()` ONLY — so not when
-//     indented — and only directly under its Update header, before any chunk,
-//     and once. Anywhere else Codex reads the same text as a context line, and
-//     treating it as a move would hand the hooks the added lines under the
-//     wrong path.
-function parsePatch(patch) {
+const M = {
+  begin: '*** Begin Patch',
+  end: '*** End Patch',
+  add: '*** Add File: ',
+  del: '*** Delete File: ',
+  update: '*** Update File: ',
+  move: '*** Move to: ',
+  eof: '*** End of File',
+  ctx: '@@ ',
+  ctxEmpty: '@@',
+  env: '*** Environment ID:',
+};
+
+// A LINE-FOR-LINE PORT of Codex's patch parser — apply-patch/src/parser.rs
+// (`parse_patch_text`, lenient mode, which is what Codex runs) feeding
+// apply-patch/src/streaming_parser.rs (`process_line`), read at rust-v0.144.1.
+//
+// It is a port and not an approximation because three approximations each
+// disagreed with Codex somewhere, and every disagreement was a file edited with
+// no hook shown it, or a hook shown the wrong path:
+//   * headers matched at column 0            → an indented header hid its hunk;
+//   * headers trimmed as JavaScript trims    → so did one behind U+0085;
+//   * headers trimmed in EVERY state         → inside an Update hunk Codex uses
+//     trim_end() only, so an indented `*** Update File: b` there is a CONTEXT
+//     line of file a (Codex pins this: keeps_indented_update_markers_as_
+//     context_lines); reading it as a header invented file b and handed the
+//     hooks a's added lines under b's name;
+//   * the path captured with `(.+)$`         → `.` stops at U+2028, so a header
+//     whose path contains one did not match at all.
+// Returns { ok: true, hunks } or { ok: false, error }. A patch Codex REJECTS is
+// not applied, so `ok: false` means "nothing will be edited by this text".
+// hunks: { op: 'Add'|'Delete'|'Update', path, movePath?, added: string[] }.
+function codexParse(text) {
+  let lines = rustLines(rustTrim(String(text)));
+  const boundariesOk = (ls) => ls.length > 0 && rustTrim(ls[0]) === M.begin && rustTrim(ls[ls.length - 1]) === M.end;
+  if (!boundariesOk(lines)) {
+    // Lenient mode: the whole text may be wrapped in a heredoc, exactly these
+    // three spellings, which Codex strips before checking again.
+    const first = lines[0];
+    const wrapped = lines.length >= 4 && (first === '<<EOF' || first === "<<'EOF'" || first === '<<"EOF"') && lines[lines.length - 1].endsWith('EOF');
+    if (!wrapped) return { ok: false, error: lines.length && rustTrim(lines[0]) !== M.begin ? "the first line of the patch must be '*** Begin Patch'" : "the last line of the patch must be '*** End Patch'" };
+    lines = lines.slice(1, -1);
+    if (!boundariesOk(lines)) return { ok: false, error: 'the heredoc body does not start with *** Begin Patch and end with *** End Patch' };
+  }
+
+  const hunks = [];
+  let mode = 'NotStarted';
+  let envSeen = false;
+  const last = () => hunks[hunks.length - 1];
+  const lastChunkEmpty = (h) => h.chunks.length > 0 && h.chunks[h.chunks.length - 1].lines === 0;
+  const newChunk = (h) => h.chunks.push({ lines: 0, eof: false });
+  const fail = (error) => ({ ok: false, error });
+
+  // ensure_update_hunk_is_not_empty
+  const updateHunkProblem = () => {
+    const h = last();
+    if (!h || h.op !== 'Update') return null;
+    if (h.chunks.length === 0 && mode === 'UpdateFile') return `update file hunk for path '${h.path}' is empty`;
+    if (lastChunkEmpty(h)) return 'update hunk does not contain any lines';
+    return null;
+  };
+  // handle_hunk_headers_and_end_patch → 'handled' | 'no' | { error }
+  const header = (line) => {
+    if (mode === 'StartedPatch' && line.startsWith(M.env)) {
+      if (envSeen) return { error: 'environment id given more than once' };
+      if (rustTrim(line.slice(M.env.length)) === '') return { error: 'environment id is empty' };
+      envSeen = true;
+      return 'handled';
+    }
+    const opens = line === M.end || line.startsWith(M.add) || line.startsWith(M.del) || line.startsWith(M.update);
+    if (!opens) return 'no';
+    const problem = updateHunkProblem();
+    if (problem) return { error: problem };
+    if (line === M.end) mode = 'EndedPatch';
+    else if (line.startsWith(M.add)) { hunks.push({ op: 'Add', path: line.slice(M.add.length), added: [] }); mode = 'AddFile'; }
+    else if (line.startsWith(M.del)) { hunks.push({ op: 'Delete', path: line.slice(M.del.length), added: [] }); mode = 'DeleteFile'; }
+    else { hunks.push({ op: 'Update', path: line.slice(M.update.length), movePath: null, chunks: [], added: [] }); mode = 'UpdateFile'; }
+    return 'handled';
+  };
+
+  // Codex joins the lines and streams them: every line but the LAST goes through
+  // process_line; the last has no newline after it and is handled by finish(),
+  // where a line that TRIMS to `*** End Patch` ends the patch in any state —
+  // even inside an Update hunk, where an indented header is otherwise context.
+  const finalLine = lines[lines.length - 1];
+  for (const line of lines.slice(0, -1)) {
+    const trimmed = rustTrim(line);
+    if (mode === 'NotStarted') {
+      if (trimmed !== M.begin) return fail("the first line of the patch must be '*** Begin Patch'");
+      mode = 'StartedPatch';
+      continue;
+    }
+    if (mode === 'EndedPatch') {
+      if (trimmed !== '') return fail("the last line of the patch must be '*** End Patch'");
+      continue;
+    }
+    if (mode === 'StartedPatch' || mode === 'AddFile' || mode === 'DeleteFile') {
+      const r = header(trimmed); // these three states match headers on trim()
+      if (r === 'handled') continue;
+      if (r !== 'no') return fail(r.error);
+      if (mode === 'AddFile' && line.startsWith('+')) { last().added.push(line.slice(1)); continue; }
+      return fail(`'${trimmed}' is not a valid hunk header`);
+    }
+    // UpdateFile: headers — and Move — are matched on trim_end() ONLY.
+    const updateLine = rustTrimEnd(line);
+    const r = header(updateLine);
+    if (r === 'handled') continue;
+    if (r !== 'no') return fail(r.error);
+    const h = last();
+    const lastChunk = h.chunks[h.chunks.length - 1];
+    const isCtx = updateLine === M.ctxEmpty || updateLine.startsWith(M.ctx);
+    if (lastChunk && lastChunk.eof) {
+      if (updateLine === '') continue;
+      if (!isCtx) return fail(`expected update hunk to start with a @@ context marker, got: '${line}'`);
+    }
+    if (h.chunks.length === 0 && h.movePath === null && updateLine.startsWith(M.move)) { h.movePath = updateLine.slice(M.move.length); continue; }
+    if (isCtx && lastChunkEmpty(h)) return fail(`unexpected line found in update hunk: '${line}'`);
+    if (isCtx) { newChunk(h); continue; }
+    if (updateLine === M.eof) {
+      if (lastChunkEmpty(h)) return fail('update hunk does not contain any lines');
+      if (lastChunk) lastChunk.eof = true;
+      continue;
+    }
+    const first = line === '' ? '' : line[0];
+    if (line === '' || first === ' ' || first === '+' || first === '-') {
+      if (h.chunks.length === 0) newChunk(h);
+      h.chunks[h.chunks.length - 1].lines += 1;
+      if (first === '+') h.added.push(line.slice(1));
+      continue;
+    }
+    if (lastChunk && lastChunk.lines > 0) return fail(`expected update hunk to start with a @@ context marker, got: '${line}'`);
+    return fail(`unexpected line found in update hunk: '${line}'`);
+  }
+  // finish(): the boundary check above already proved this line trims to the end marker.
+  if (rustTrim(finalLine) !== M.end) return fail("the last line of the patch must be '*** End Patch'");
+  const problem = updateHunkProblem();
+  if (problem) return fail(problem);
+  return { ok: true, hunks };
+}
+
+// The files a parsed patch touches, as the hooks are shown them. A move has two
+// ends and both matter: the source is removed from where a hook may protect it,
+// the destination is written where another may.
+function touchedFiles(hunks) {
   const files = [];
-  let current = null;
-  let moveAllowed = false; // true only between an Update header and its first chunk line
-  for (const rawLine of String(patch).split(/\r?\n/)) {
-    const line = rustTrim(rawLine);
-    const head = /^\*\*\* (Add|Update|Delete) File: (.+)$/.exec(line);
-    if (head) {
-      current = { op: head[1], path: head[2], added: [] };
-      files.push(current);
-      moveAllowed = head[1] === 'Update';
-      continue;
-    }
-    const move = moveAllowed ? /^\*\*\* Move to: (.+)$/.exec(rustTrimEnd(rawLine)) : null;
-    moveAllowed = false;
-    if (move) {
-      // Both ends matter: the source is removed from where a hook may protect
-      // it, the destination is written where another may.
-      const dest = { op: 'Update', path: move[1], added: current.added, isMoveDest: true };
-      current.op = 'Delete';
-      current.isMoveSource = true; // for messages: the author wrote a move, not a removal
-      current.added = [];
-      files.push(dest);
-      current = dest;
-      continue;
-    }
-    if (/^\*\*\* (Begin|End) Patch$/.test(line) || line === '*** End of File') continue;
-    if (current && rawLine.startsWith('+')) current.added.push(rawLine.slice(1));
+  for (const h of hunks) {
+    if (h.op === 'Update' && h.movePath !== null) {
+      files.push({ op: 'Delete', path: h.path, added: [], isMoveSource: true });
+      files.push({ op: 'Update', path: h.movePath, added: h.added, isMoveDest: true });
+    } else files.push({ op: h.op, path: h.path, added: h.added });
   }
   return files;
 }
 
-// Does this shell command carry a patch?
-//
-// THE QUESTION IS ASKED OF THE PATCH, NOT OF THE SHELL. Three earlier versions
-// asked "is this command one of the shapes Codex intercepts?" and answered with
-// a regex over shell syntax. Codex answers it with a tree-sitter query over the
-// bash grammar; each regex was narrower somewhere — an envelope cut short, an
-// identifier-only heredoc delimiter, then a backslash-newline continuation, a
-// quoted assignment, a leading redirect or comment — and each gap was an edit
-// Codex applied while every hook exited 0. Shell syntax is open-ended; a
-// recogniser for it is never finished (lessons-learned #21).
-//
-// A patch is not. Whatever the shell around it looks like, a patch that edits a
-// file must SAY so, on a line of its own: `*** Add|Update|Delete File: <path>`.
-// So the whole command is read with the same header matcher used for the patch
-// tool, and:
-//   no file header anywhere → null: an ordinary command. A patch with no file
-//                             header edits nothing. (`grep '*** Begin Patch' x`
-//                             lands here; so does `apply_patch --help`.)
-//   one or more             → every path is inspected or the command is
-//                             blocked; no shell syntax can make it neither.
-//
-// The shell still decides ONE thing — the directory the paths resolve in — and a
-// fourth version got that wrong the same way: it looked for `cd`/`pushd` with a
-// regex (a DENY-list over shell text), and an earlier `<<`, a `\cd`, `env -C`,
-// `bash -c '…'` or `d=cd; $d x` each moved the base unseen. So this is a closed
-// ALLOW-list instead. For a command that also contains the word apply_patch or
-// applypatch (`named`), the text before the patch — continuations joined, as the
-// shell joins them; never inside the patch, where joining `+x \` to the next
-// line could swallow a header — must be, in full, one of:
-//       apply_patch <<…
-//       cd <literal path> && apply_patch <<…          (also `applypatch`)
-// which are the two forms Codex itself intercepts. Then the base is known: the
-// hook's cwd, or that literal directory. ANYTHING else → `{ refused: why }` and
-// the caller BLOCKS: an assignment or redirect first, a statement or a comment
-// line before it, an argument before the heredoc, the patch as a quoted
-// argument, a cd that needs expanding, a subshell, `env -C` … none of them is
-// parsed, so none of them can mislead.
-//
-// The cost is a false block, and it is a real one: a how-to, a test fixture or a
-// commit message that QUOTES a whole patch next to the word apply_patch is
-// refused too. The message says so and gives both ways out. It is recorded as a
-// limit in docs/guides/codex-cli-support-matrix.md.
-//
-// NOT named (`a\pply_patch`, `$P`, a heredoc that only writes a patch file): the
-// paths are inspected against the hook's cwd and nothing is ever blocked. Codex
-// intercepts none of those; they are a shell writing files, which no Edit/Write
-// hook sees under Claude Code either.
-function carriedPatch(command) {
-  const files = parsePatch(command);
-  if (files.length === 0) return null;
-  const named = /(^|[^\w.-])(?:apply_patch|applypatch)(?![\w.-])/.test(command);
-  if (!named) return { files, named, dir: '' };
+// Does any line of this text LOOK like a file header, in any parser state? A
+// deliberate SUPERSET of what Codex can treat as one (trim() is the widest rule
+// it uses), and no regex touches the path, so nothing in a path can make a
+// header invisible. Used to decide that a shell command is patch-bearing, and
+// as the fallback when the port above rejects a patch sent through the tool.
+function looseHeaderPaths(text) {
+  const out = [];
+  for (const raw of rustLines(String(text))) {
+    const line = rustTrim(raw);
+    for (const [op, marker] of [['Add', M.add], ['Delete', M.del], ['Update', M.update]]) {
+      if (line.startsWith(marker)) out.push({ op, path: line.slice(marker.length), added: [] });
+    }
+  }
+  return out;
+}
 
-  const lines = command.split(/\r?\n/);
-  const firstMarker = lines.findIndex((l) => rustTrim(l).startsWith('*** '));
-  const prefix = lines.slice(0, firstMarker).join('\n').replace(/\\\r?\n/g, '');
-  const m = /^\s*(?:cd\s+('[^'\n]*'|"[^"\n]*"|[^\s;&|<>()'"]+)\s*&&\s*)?(?:apply_patch|applypatch)\s*<<[^\n]*\n?$/.exec(prefix);
-  if (!m) return { files, named, refused: 'the text before the patch is not one of the two forms whose working directory this hook can determine' };
-  if (m[1] === undefined) return { files, named, dir: '' };
-  // '…' is literal. "…" may still expand; a bare word may expand, glob or escape.
-  const expands = m[1].startsWith("'") ? null : m[1].startsWith('"') ? /[$`]|\\[$`"\\]/ : /[$`~*?[\]{}\\]/;
-  if (expands && expands.test(m[1])) return { files, named, refused: `its cd path (${m[1]}) needs the shell to expand it` };
-  return { files, named, dir: m[1].replace(/^(["'])([\s\S]*)\1$/, '$2') };
+// A patch carried in a shell command.
+//
+// Codex hands hooks the shell command BEFORE deciding whether it is a patch.
+// It intercepts `apply_patch <<'EOF'…EOF` and `cd <path> && apply_patch <<'EOF'
+// …EOF` as the sole statement (apply-patch/src/invocation.rs) and applies the
+// body itself. Everything else it hands to a REAL SHELL — in which `apply_patch`
+// is a real executable: Codex prepends a directory holding `apply_patch` and
+// `applypatch` to PATH (arg0/src/lib.rs). So any shell text that reaches that
+// executable edits files, from whatever directory the shell has reached by then,
+// after whatever expansion the shell has done. That is the threat model, and it
+// is why five attempts to READ the shell text each failed somewhere: shell
+// syntax is open-ended (lessons-learned #21) — an identifier-only delimiter, a
+// line continuation, an earlier `<<` hiding a cd, `env -C`, a decoy heredoc
+// before the real one, an unquoted delimiter letting `$(…)` rewrite a path.
+//
+// So the shell is not read. A command that is patch-bearing (any line looks
+// like a file header) has exactly TWO outcomes:
+//
+//   ACCEPTED — the WHOLE command, first byte to last, is one of
+//         apply_patch <<'D'\n<body>\nD
+//         cd <literal path> && apply_patch <<'D'\n<body>\nD      (or applypatch)
+//     with: only spaces/tabs as separators (a continuation may join the first
+//     line); the delimiter QUOTED, so the shell expands nothing in the body; a
+//     literal cd path (quoted, or a bare word of [A-Za-z0-9_./-]) that is not
+//     empty and does not start with `-` (`cd -` is $OLDPWD); nothing but blank
+//     space after the closing delimiter; and a body Codex's own parser accepts.
+//     Then both the base directory and every path are KNOWN, and each path is
+//     shown to the hook.
+//
+//   REFUSED — everything else, unparsed. Nothing in it is interpreted, so
+//     nothing in it can mislead. → { refused: why }, and the caller blocks.
+//
+// The cost is a false block: any shell command with a line that starts with a
+// patch file header is refused unless it is exactly the form above — including a
+// heredoc that only WRITES a patch file, a fixture, or a commit message quoting
+// a whole patch. The message gives the ways out; the support matrix records it
+// as a limit, together with the fact that the hooks on this path only advise
+// today, so what the refusal buys is a correctly-aimed warning.
+//
+// Not patch-bearing → null, an ordinary command. That includes a patch whose
+// text is not in the command (`apply_patch < fix.patch`) or is assembled by the
+// shell: a shell writing files, which no Edit/Write hook sees under Claude Code
+// either.
+const CD_LITERAL = String.raw`'[^'\n]*'|"[^"\n$` + '`' + String.raw`\\]*"|[A-Za-z0-9_./-]+`;
+const HEAD_LINE = new RegExp(String.raw`^[ \t]*(?:cd[ \t]+(${CD_LITERAL})[ \t]*&&[ \t]*)?(?:apply_patch|applypatch)[ \t]*$`);
+const HEREDOC_OPEN = new RegExp(String.raw`^<<[ \t]*(?:'([^'\n]+)'|"([^"\n$` + '`' + String.raw`\\]+)")[ \t]*\r?\n`);
+function carriedPatch(command) {
+  if (looseHeaderPaths(command).length === 0) return null;
+  const refused = (why) => ({ refused: why });
+
+  const at = command.indexOf('<<');
+  if (at === -1) return refused('it has no heredoc');
+  const head = HEAD_LINE.exec(command.slice(0, at).replace(/\\\r?\n/g, ''));
+  if (!head) return refused('the text before its heredoc is not exactly `apply_patch` or `cd <literal path> && apply_patch`');
+  const open = HEREDOC_OPEN.exec(command.slice(at));
+  if (!open) return refused('its heredoc delimiter is not a plain QUOTED word (unquoted, the shell would expand the patch before applying it)');
+  const delimiter = open[1] ?? open[2];
+  const bodyLines = command.slice(at + open[0].length).split('\n');
+  const close = bodyLines.findIndex((l) => (l.endsWith('\r') ? l.slice(0, -1) : l) === delimiter);
+  if (close === -1) return refused(`its heredoc is never closed by a line reading exactly ${delimiter}`);
+  if (bodyLines.slice(close + 1).join('\n').trim() !== '') return refused('something follows the closing heredoc delimiter');
+
+  let dir = '';
+  if (head[1] !== undefined) {
+    dir = head[1].replace(/^(["'])([\s\S]*)\1$/, '$2');
+    if (dir === '' || dir.startsWith('-')) return refused(`its cd target (${head[1]}) is empty or starts with "-"`);
+  }
+  const parsed = codexParse(bodyLines.slice(0, close).join('\n'));
+  if (!parsed.ok) return refused(`the patch in it does not parse the way Codex parses it (${parsed.error})`);
+  return { files: touchedFiles(parsed.hunks), dir };
 }
 
 // `Bash(git push *)` → should the script run for this command?
@@ -395,9 +536,9 @@ function main() {
   if (editMode && toolName === 'Bash' && !carried) process.exit(0); // no file header anywhere in it: nothing for a file hook to see
   if (carried?.refused) {
     fault(
-      `${name}: this command contains a patch and the word apply_patch, but ${carried.refused}, so the files it names cannot be located or checked. ` +
-        `If it APPLIES the patch: send it through the apply_patch tool, or make the command start with exactly \`apply_patch <<'EOF'\` or \`cd <literal path> && apply_patch <<'EOF'\`. ` +
-        `If it only WRITES text that quotes a patch (a how-to, a fixture, a commit message): create that file with the apply_patch tool, or pass the text from a file (git commit -F <file>), so the patch is not inside a shell command.`,
+      `${name}: this shell command contains a patch, but ${carried.refused}, so the files it names cannot be located or checked. ` +
+        `If it APPLIES the patch: send it through the apply_patch tool, or make it the WHOLE command, exactly \`apply_patch <<'EOF'\` … \`EOF\` or \`cd <literal path> && apply_patch <<'EOF'\` … \`EOF\`, with a quoted delimiter and nothing after it. ` +
+        `If it only WRITES text that quotes a patch (a patch file, a how-to, a fixture, a commit message): create that file with the apply_patch tool, or pass the text from a file (git commit -F <file>), so the patch is not inside a shell command.`,
     );
   }
 
@@ -414,7 +555,16 @@ function main() {
   if (toolName === 'apply_patch' || carried) {
     const patch = input.tool_input?.command ?? input.tool_input?.input ?? input.tool_input?.patch;
     const base = carried && carried.dir ? resolve(cwd, carried.dir) : cwd;
-    const files = carried ? carried.files : parsePatch(typeof patch === 'string' ? patch : '');
+    let files;
+    if (carried) files = carried.files;
+    else {
+      // The patch tool. Codex's own parser decides what is edited, so its port
+      // decides what is shown. If the port REJECTS the text, Codex applies
+      // nothing — but a bug in the port must not turn into a silent pass, so
+      // every line that even looks like a file header is shown instead.
+      const parsed = codexParse(typeof patch === 'string' ? patch : '');
+      files = parsed.ok ? touchedFiles(parsed.hunks) : looseHeaderPaths(typeof patch === 'string' ? patch : '');
+    }
     if (files.length === 0) {
       fault(`${name}: could not find a file path in the apply_patch payload — refusing to let the check pass on nothing`);
     }
@@ -424,9 +574,7 @@ function main() {
       // carry it. A file this patch UPDATES or DELETES must already exist; if
       // it does not exist where the path resolves, the base is wrong and every
       // check below would be looking at a file that is not the one being edited.
-      // Only for a NAMED patch: a heredoc that merely writes a patch file may
-      // well mention files that are not here, and blocking that would be wrong.
-      if (carried?.named && !f.isMoveDest && f.op !== 'Add' && !existsSync(resolved)) {
+      if (carried && !f.isMoveDest && f.op !== 'Add' && !existsSync(resolved)) {
         fault(
           `${name}: this patch ${f.isMoveSource ? 'moves' : f.op === 'Delete' ? 'removes' : 'updates'} ${f.path}, which does not exist under ${base.replace(/\\/g, '/')}. ` +
             `The command was probably run with a working directory this hook cannot see, so the edit cannot be checked. ` +

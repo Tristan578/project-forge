@@ -1174,10 +1174,89 @@ if [ "$RC" -eq 2 ]; then
 else
   bad "a Unicode-space-wrapped header hid a hunk: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null)"
 fi
-# `*** Move to:` is NOT matched the same way. Codex matches it after trim_end()
-# only, only directly under its Update header, before any chunk, and once
-# (streaming_parser.rs). Anywhere else the same text is a context line, and
-# treating it as a move would hand the hooks the added lines under the wrong path.
+# The adapter's parser is a PORT of Codex's (parser.rs + streaming_parser.rs at
+# rust-v0.144.1), not an approximation, because each approximation disagreed
+# with Codex somewhere. The rows below are the disagreements, one per rule.
+#
+# 1. Codex's OWN fixture (keeps_indented_update_markers_as_context_lines): inside
+#    an Update hunk headers are matched on trim_end() only, so an INDENTED header
+#    there is a context line of the current file. Reading it as a header invented
+#    a second file and handed the hooks the first file's added lines under it.
+cat > "$H/newstring.sh" <<'NS'
+#!/usr/bin/env bash
+payload="$(cat)"
+printf 'PATH=%s\n' "$TOOL_INPUT_file_path" >> "$PROBE_LOG"
+printf '%s' "$payload" | node -e 'let s="";process.stdin.on("data",(d)=>s+=d).on("end",()=>{const i=JSON.parse(s).tool_input;console.log("NEW="+JSON.stringify(i.new_string??i.content))})' >> "$PROBE_LOG"
+NS
+rm -f "$LOG"
+PROBE_LOG="$LOG" adapt newstring.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: a.txt\n@@\n-old a\n+new a\n *** Update File: b.txt\n@@\n-old b\n+new b\n*** End Patch')"
+if [ "$RC" -eq 0 ] && [ "$(runs PATH)" = "1" ] && grep -qxF "PATH=$CWD_NATIVE/a.txt" "$LOG" && grep -qxF 'NEW="new a\nnew b"' "$LOG"; then
+  ok "Codex's own fixture: an indented header INSIDE an Update hunk is a context line — ONE file, a.txt, carrying both added lines"
+else
+  bad "the adapter disagrees with Codex on Codex's own fixture: exit $RC, saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
+fi
+# …while the LAST line ends the patch in any state (Codex's finish() trims it).
+rm -f "$LOG"
+adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n   *** End Patch')"
+if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
+  ok "an indented FINAL '*** End Patch' still ends the patch (finish() trims the last line), so the hunk before it is seen"
+else
+  bad "an indented final End Patch lost the patch: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
+fi
+
+# 2. Every member of Rust's White_Space, in front of a header. A trim set missing
+#    ANY of them is a header Codex sees and the hooks do not; five were pinned and
+#    a mutant that dropped TAB passed.
+WS_MEMBERS=0
+for WS in '\t' '\u000b' '\u000c' ' ' '\u0085' '\u00a0' '\u1680' '\u2000' '\u2001' '\u2002' '\u2003' '\u2004' '\u2005' \
+          '\u2006' '\u2007' '\u2008' '\u2009' '\u200a' '\u2028' '\u2029' '\u202f' '\u205f' '\u3000'; do
+  WS_MEMBERS=$((WS_MEMBERS + 1))
+  rm -f "$LOG"
+  adapt guard.sh "$(patch_payload PreToolUse "*** Begin Patch\n*** Add File: ok/new.ts\n+fine\n${WS}*** Delete File: protected/x.ts${WS}\n*** End Patch")"
+  if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
+    ok "a header wrapped in White_Space member $WS is seen"
+  else
+    bad "White_Space member $WS hid a header: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null)"
+  fi
+done
+if [ "$WS_MEMBERS" -eq 23 ]; then ok "all 23 White_Space members outside CR/LF were driven"; else bad "the White_Space loop ran $WS_MEMBERS of 23 times"; fi
+# …and what Rust does NOT trim must not be trimmed either: U+FEFF and U+200B are
+# not White_Space (JavaScript's trim() strips U+FEFF). Codex rejects such a patch.
+for NOTWS in '\ufeff' '\u200b'; do
+  rm -f "$LOG"
+  adapt guard.sh "$(patch_payload PreToolUse "*** Begin Patch\n*** Add File: ok/new.ts\n+fine\n${NOTWS}*** Delete File: protected/x.ts\n*** End Patch")"
+  if [ "$RC" -eq 0 ] && ! grep -qF "protected" "$LOG"; then
+    ok "$NOTWS is not White_Space: that line is not a header to Codex, and is not made one here"
+  else
+    bad "$NOTWS was trimmed as if it were White_Space: exit $RC (0 wanted), saw: $(cat "$LOG" 2>/dev/null)"
+  fi
+done
+
+# 3. A PATH may contain anything but a line feed. JavaScript's `.` stops at U+2028,
+#    U+2029 and a lone CR, so a header whose path held one did not match at all.
+for ODD in '\u2028' '\u2029' '\r'; do
+  rm -f "$LOG"
+  adapt probe.sh "$(patch_payload PreToolUse "*** Begin Patch\n*** Add File: docs/ok.md\n+fine\n*** Add File: docs/od${ODD}d.md\n+bad\n*** End Patch")"
+  if [ "$RC" -eq 0 ] && [ "$(runs ENV)" = "2" ]; then
+    ok "a header whose PATH contains $ODD is still a header — both files are shown"
+  else
+    bad "a path containing $ODD hid its file: exit $RC, $(runs ENV) path(s) shown (2 wanted)"
+  fi
+done
+
+# 4. `*** Move to:` — trim_end only, directly under its Update header, before any
+#    chunk, once (streaming_parser.rs). First the POSITIVE half: trailing space IS
+#    trimmed, so the hook must be shown the exact destination Codex writes. guard.sh's
+#    containment glob cannot tell, so these use the exact ENV= line.
+for TRAIL in '  ' '\u0085' '\t'; do
+  rm -f "$LOG"
+  adapt probe.sh "$(patch_payload PreToolUse "*** Begin Patch\n*** Update File: docs/a.md\n*** Move to: docs/moved.json${TRAIL}\n@@\n+z\n*** End Patch")"
+  if [ "$RC" -eq 0 ] && grep -qxF "ENV=$CWD_NATIVE/docs/moved.json" "$LOG"; then
+    ok "a Move destination followed by '$TRAIL' is shown trimmed, as Codex writes it"
+  else
+    bad "trailing '$TRAIL' stayed on a Move destination: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
+  fi
+done
 rm -f "$LOG"
 adapt probe.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: docs/a.md\n *** Move to: protected/y.ts\n@@\n+z\n*** End Patch')"
 if [ "$RC" -eq 0 ] && [ "$(runs ENV)" = "1" ] && grep -qxF "ENV=$CWD_NATIVE/docs/a.md" "$LOG"; then
@@ -1194,8 +1273,8 @@ else
 fi
 rm -f "$LOG"
 adapt probe.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: docs/a.md\n*** Move to: docs/b.md\n*** Move to: protected/y.ts\n@@\n+z\n*** End Patch')"
-if [ "$RC" -eq 0 ] && [ "$(runs ENV)" = "2" ] && ! grep -qF "protected/y.ts" "$LOG"; then
-  ok "only the FIRST '*** Move to:' under a header is a move, as in Codex"
+if [ "$RC" -eq 0 ] && [ "$(runs ENV)" = "1" ] && ! grep -qF "protected/y.ts" "$LOG"; then
+  ok "a SECOND '*** Move to:' is not a move — Codex rejects that patch outright, and the fallback still shows its header path"
 else
   bad "a second Move line was treated as a move: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
 fi
@@ -1486,14 +1565,14 @@ else
   bad "cd into a protected directory was not seen: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
 fi
 
-# THE QUESTION IS ASKED OF THE PATCH, NOT OF THE SHELL. Three versions of the
-# recogniser asked "is this one of the shapes Codex intercepts?" with a regex,
-# and each was narrower than Codex's tree-sitter query somewhere: identifier-only
-# heredoc delimiters, then line continuations, quoted assignments, leading
-# redirects and comments. Each gap was an edit applied with every hook at exit 0.
-# Now a command whose text carries a file header can end only two ways —
-# INSPECTED or BLOCKED — and the tables below drive both. "exit 0, script not
-# run" is the one outcome no row may produce.
+# THE SHELL IS NOT READ. Codex hands hooks a shell command BEFORE deciding whether
+# it is a patch; what it does not intercept goes to a real shell in which
+# `apply_patch` is a real executable on PATH. Five attempts to read the shell text
+# each failed open somewhere (an identifier-only delimiter, a continuation, an
+# earlier `<<` hiding a cd, `env -C`, a decoy heredoc, an unquoted delimiter
+# letting `$(…)` rewrite a path). So a command with a line that looks like a file
+# header has exactly TWO outcomes — ACCEPTED as the whole-command form, or REFUSED
+# unparsed — and "exit 0, script not run" is the one result no row may produce.
 # Rows are JSON-escaped text: `\\` is one backslash, `\n` a newline. @P@ is the
 # patch (it updates protected/x.ts, which guard.sh blocks).
 PATCH='*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch'
@@ -1503,9 +1582,9 @@ while IFS='|' read -r LABEL CMD; do
   rm -f "$LOG"
   adapt guard.sh "$(carried_payload PreToolUse "${CMD//@P@/$PATCH}")"
   if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
-    ok "inspected: $LABEL"
+    ok "accepted and inspected: $LABEL"
   else
-    bad "a carried patch went unchecked ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+    bad "an accepted form went unchecked ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
   fi
 done <<'SHAPES_TABLE'
 the plain form (control)|apply_patch <<'EOF'\n@P@\nEOF
@@ -1513,30 +1592,21 @@ a hyphenated delimiter|apply_patch <<'END-PATCH'\n@P@\nEND-PATCH
 a delimiter that starts with a digit|apply_patch <<'1EOF'\n@P@\n1EOF
 a dotted delimiter|apply_patch <<'PATCH.END'\n@P@\nPATCH.END
 a delimiter with a space in it|apply_patch <<'END PATCH'\n@P@\nEND PATCH
-a backslash-escaped delimiter|apply_patch <<\\EOF\n@P@\nEOF
 a double-quoted delimiter|apply_patch <<\"EOF\"\n@P@\nEOF
-an unquoted delimiter|apply_patch <<EOF\n@P@\nEOF
-no space before the redirect|apply_patch<< 'EOF'\n@P@\nEOF
-<<- with a tab-indented closing line|apply_patch <<-'EOF'\n@P@\n\tEOF
+no space before the redirect, one after it|apply_patch<< 'EOF'\n@P@\nEOF
 the applypatch alias|applypatch <<'EOF'\n@P@\nEOF
 a line continuation before the heredoc|apply_patch \\\n<<'EOF'\n@P@\nEOF
 a line continuation with no space before it|apply_patch\\\n<<'EOF'\n@P@\nEOF
-a CRLF line continuation|apply_patch \\\r\n<<'EOF'\r\n@P@\r\nEOF
-a second redirect after the heredoc|apply_patch <<'EOF' > out.txt\n@P@\nEOF
-a statement after the closing line|apply_patch <<'EOF'\n@P@\nEOF\necho done
-a heredoc that is never closed|apply_patch <<'EOF'\n@P@
-a closing line indented with spaces|apply_patch <<'EOF'\n@P@\n  EOF
-an indented file header (Codex trims, so must this)|apply_patch <<'EOF'\n*** Begin Patch\n   *** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
-a NEL-prefixed file header (Rust trims it, so must this)|apply_patch <<'EOF'\n*** Begin Patch\n\u0085*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
-a heredoc delimiter that is the word cd (not a directory change)|apply_patch << cd\n@P@\ncd
-the command name obfuscated — no literal apply_patch word, so never blocked, still inspected|a\\pply_patch <<'EOF'\n@P@\nEOF
-a heredoc that only writes a patch file (no apply_patch word)|cat > fix.patch <<'EOF'\n@P@\nEOF
+CRLF line endings throughout|apply_patch \\\r\n<<'EOF'\r\n*** Begin Patch\r\n*** Update File: protected/x.ts\r\n@@\r\n+evil\r\n*** End Patch\r\nEOF\r\n
+blank lines after the closing delimiter|apply_patch <<'EOF'\n@P@\nEOF\n\n
+an indented file header after Begin Patch (Codex trims there)|apply_patch <<'EOF'\n*** Begin Patch\n   *** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
+a NEL-prefixed file header (Rust trims it)|apply_patch <<'EOF'\n*** Begin Patch\n\u0085*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
 SHAPES_TABLE
-# The loop must have walked its table, or 23 shapes read as zero problems.
-if [ "$SHAPES" -eq 23 ]; then ok "all 23 inspected shapes were driven"; else bad "the shape table was not walked: $SHAPES of 23"; fi
+# The loop must have walked its table, or 14 shapes read as zero problems.
+if [ "$SHAPES" -eq 14 ]; then ok "all 14 accepted shapes were driven"; else bad "the accepted table was not walked: $SHAPES of 14"; fi
 
-# The shell decides ONE thing: the directory the paths resolve in. `cd <literal> &&`
-# is followed. @PX@ updates x.ts RELATIVE to the cd, i.e. protected/x.ts.
+# `cd <literal path> &&` is the one directory change accepted. @PX@ updates x.ts
+# RELATIVE to the cd, i.e. protected/x.ts.
 PATCH_X='*** Begin Patch\n*** Update File: x.ts\n@@\n+evil\n*** End Patch'
 FOLLOWED=0
 while IFS='|' read -r LABEL CMD; do
@@ -1550,33 +1620,44 @@ while IFS='|' read -r LABEL CMD; do
   fi
 done <<'FOLLOWED_TABLE'
 a bare literal path|cd protected && apply_patch <<'EOF'\n@PX@\nEOF
+a bare path with a dot segment|cd ./protected && apply_patch <<'EOF'\n@PX@\nEOF
 a double-quoted literal path|cd \"protected\" && apply_patch <<'EOF'\n@PX@\nEOF
 a single-quoted path|cd 'protected' && apply_patch <<'EOF'\n@PX@\nEOF
+tabs as separators|cd\tprotected\t&&\tapply_patch\t<<'EOF'\n@PX@\nEOF
 a continuation before the &&|cd protected \\\n&& apply_patch <<'EOF'\n@PX@\nEOF
 a continuation after the &&|cd protected && \\\napply_patch <<'EOF'\n@PX@\nEOF
 FOLLOWED_TABLE
-if [ "$FOLLOWED" -eq 5 ]; then ok "all 5 followable cd forms were driven"; else bad "the followed-cd table was not walked: $FOLLOWED of 5"; fi
+if [ "$FOLLOWED" -eq 7 ]; then ok "all 7 followable cd forms were driven"; else bad "the followed-cd table was not walked: $FOLLOWED of 7"; fi
 
-# EVERYTHING ELSE that names apply_patch BLOCKS. This is a closed ALLOW-list: the
-# text before the patch must be, in full, `apply_patch <<…` or
-# `cd <literal> && apply_patch <<…`. The version before this looked for cd/pushd
-# with a regex — a deny-list over shell text — and an earlier `<<`, a `\cd`,
-# `env -C`, `bash -c` or `d=cd; $d x` each moved the base unseen and exited 0.
-# Nothing here is parsed, so nothing here can mislead. The last three rows are
-# the COST, recorded as a limit: text that only quotes a patch is refused too.
+# EVERYTHING ELSE that is patch-bearing is REFUSED, unparsed — so nothing in it
+# can mislead. @PA@ ADDS protected/new.ts relative to the cd: an Add can never be
+# caught by the does-not-exist check, so for these rows the refusal is the ONLY
+# thing between a wrong base and an exit 0.
+PATCH_A='*** Begin Patch\n*** Add File: new.ts\n+evil\n*** End Patch'
 REFUSED=0
 while IFS='|' read -r LABEL CMD; do
   REFUSED=$((REFUSED + 1))
   rm -f "$LOG"
-  CMD="${CMD//@PX@/$PATCH_X}"
+  CMD="${CMD//@PX@/$PATCH_X}"; CMD="${CMD//@PA@/$PATCH_A}"
   adapt guard.sh "$(carried_payload PreToolUse "${CMD//@P@/$PATCH}")"
   if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'cannot be located or checked' <<<"$ERR" \
      && grep -qF 'apply_patch tool' <<<"$ERR" && grep -qF 'only WRITES text' <<<"$ERR"; then
-    ok "BLOCKED, with both ways out: $LABEL"
+    ok "REFUSED, with both ways out: $LABEL"
   else
-    bad "a named patch outside the allow-list did not block ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+    bad "a patch-bearing command outside the accepted form did not block ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
   fi
 done <<'REFUSED_TABLE'
+an UNQUOTED delimiter — the shell would expand the body|apply_patch <<EOF\n@P@\nEOF
+an unquoted delimiter rewriting the path with a command substitution|apply_patch <<EOF ; true\n*** Begin Patch\n*** Add File: $(printf web/src/app/api/evil/route.ts)\n+x\n*** End Patch\nEOF
+a backslash-escaped delimiter|apply_patch <<\\EOF\n@P@\nEOF
+<<- with a tab-indented closing line|apply_patch <<-'EOF'\n@P@\n\tEOF
+a second redirect after the heredoc|apply_patch <<'EOF' > out.txt\n@P@\nEOF
+a statement joined on the heredoc line|apply_patch <<'EOF' ; true\n@P@\nEOF
+a statement after the closing line|apply_patch <<'EOF'\n@P@\nEOF\necho done
+a DECOY heredoc first, the real cd and patch after it|apply_patch <<'X'\n*** junk\nX\ncd protected && apply_patch <<'EOF'\n@PA@\nEOF
+a heredoc that is never closed|apply_patch <<'EOF'\n@P@
+a closing line indented with spaces|apply_patch <<'EOF'\n@P@\n  EOF
+an unquoted delimiter that is the word cd|apply_patch << cd\n@P@\ncd
 a variable assignment before it|FOO=1 apply_patch <<'EOF'\n@P@\nEOF
 an assignment whose value has a space|FOO=\"a b\" apply_patch <<'EOF'\n@P@\nEOF
 an assignment from a command substitution|FOO=$(echo a b) apply_patch <<'EOF'\n@P@\nEOF
@@ -1585,56 +1666,44 @@ a comment line before it|# note\napply_patch <<'EOF'\n@P@\nEOF
 an argument before the heredoc|apply_patch --x <<'EOF'\n@P@\nEOF
 a statement before it|echo start; apply_patch <<'EOF'\n@P@\nEOF
 the patch as a quoted argument, no heredoc|apply_patch '@P@'
-a bare cd path with a variable|cd $HOME/protected && apply_patch <<'EOF'\n@PX@\nEOF
-a DOUBLE-quoted cd path with a variable|cd \"$HOME/protected\" && apply_patch <<'EOF'\n@PX@\nEOF
-a double-quoted cd path with a command substitution|cd \"`pwd`/protected\" && apply_patch <<'EOF'\n@PX@\nEOF
-a bare cd path with an escaped space|cd pro\\ tected && apply_patch <<'EOF'\n@PX@\nEOF
-a bare cd path with a glob|cd prot* && apply_patch <<'EOF'\n@PX@\nEOF
-a tilde cd path|cd ~/protected && apply_patch <<'EOF'\n@PX@\nEOF
-cd joined with a semicolon|cd protected; apply_patch <<'EOF'\n@PX@\nEOF
-cd on its own line|cd protected\napply_patch <<'EOF'\n@PX@\nEOF
-two cds|cd . && cd protected && apply_patch <<'EOF'\n@PX@\nEOF
-a subshell|(cd protected && apply_patch <<'EOF'\n@PX@\nEOF\n)
-pushd|pushd protected && apply_patch <<'EOF'\n@PX@\nEOF
-an EARLIER here-string hiding the cd|read v <<< hi; cd protected && apply_patch <<'EOF'\n@PX@\nEOF
-an earlier arithmetic << hiding the cd|echo $((1<<2)); cd protected; apply_patch <<'EOF'\n@PX@\nEOF
-an earlier heredoc hiding the cd|cat <<X\nhello\nX\ncd protected && apply_patch <<'EOF'\n@PX@\nEOF
-a comment containing << before an expanding cd|# see a << b\ncd \"$D\" && apply_patch <<'EOF'\n@PX@\nEOF
-a backslash-escaped cd|\\cd protected && apply_patch <<'EOF'\n@PX@\nEOF
-a quoted cd|\"cd\" protected && apply_patch <<'EOF'\n@PX@\nEOF
-env -C|env -C protected apply_patch <<'EOF'\n@PX@\nEOF
-eval of a split cd|eval \"c\"\"d protected\" && apply_patch <<'EOF'\n@PX@\nEOF
-cd through a variable|d=cd; $d protected && apply_patch <<'EOF'\n@PX@\nEOF
-bash -c with the cd inside the string|bash -c 'cd protected; apply_patch' <<'EOF'\n@PX@\nEOF
-COST — a how-to that quotes a patch next to the word apply_patch|cd docs && cat > howto.md <<'DOC'\nUse apply_patch like this:\n@P@\nDOC
-COST — a test fixture that quotes one|printf '%s' 'apply_patch <<EOF' > fixture.txt; cat >> fixture.txt <<'DOC'\n@P@\nDOC
+the command name obfuscated|a\\pply_patch <<'EOF'\n@P@\nEOF
+a lookalike script name|./apply_patch.sh <<'EOF'\n@P@\nEOF
+a longer identifier|apply_patch_helper <<'EOF'\n@P@\nEOF
+a bare cd path with a variable|cd $HOME/protected && apply_patch <<'EOF'\n@PA@\nEOF
+a DOUBLE-quoted cd path with a variable|cd \"$HOME/protected\" && apply_patch <<'EOF'\n@PA@\nEOF
+a double-quoted cd path with a command substitution|cd \"`pwd`/protected\" && apply_patch <<'EOF'\n@PA@\nEOF
+a double-quoted cd path with a backslash|cd \"pro\\tected\" && apply_patch <<'EOF'\n@PA@\nEOF
+a bare cd path with an escaped space|cd pro\\ tected && apply_patch <<'EOF'\n@PA@\nEOF
+a bare cd path with a * glob|cd prot* && apply_patch <<'EOF'\n@PA@\nEOF
+a bare cd path with a ? glob|cd prot?cted && apply_patch <<'EOF'\n@PA@\nEOF
+a bare cd path with a [] glob|cd [p]rotected && apply_patch <<'EOF'\n@PA@\nEOF
+a bare cd path with a {} expansion|cd {protected,docs} && apply_patch <<'EOF'\n@PA@\nEOF
+a tilde cd path|cd ~/protected && apply_patch <<'EOF'\n@PA@\nEOF
+cd - (the previous directory)|cd - && apply_patch <<'EOF'\n@PA@\nEOF
+a quoted cd - |cd '-' && apply_patch <<'EOF'\n@PA@\nEOF
+an empty cd target|cd '' && apply_patch <<'EOF'\n@PA@\nEOF
+a NEWLINE between cd and its target (three commands to the shell)|cd\ntrue && apply_patch <<'EOF'\n@PA@\nEOF
+a no-break space after the cd target (part of the name, to bash)|cd protected\u00a0&& apply_patch <<'EOF'\n@PA@\nEOF
+cd joined with a semicolon|cd protected; apply_patch <<'EOF'\n@PA@\nEOF
+cd on its own line|cd protected\napply_patch <<'EOF'\n@PA@\nEOF
+two cds|cd . && cd protected && apply_patch <<'EOF'\n@PA@\nEOF
+a subshell|(cd protected && apply_patch <<'EOF'\n@PA@\nEOF\n)
+pushd|pushd protected && apply_patch <<'EOF'\n@PA@\nEOF
+an EARLIER here-string hiding the cd|read v <<< hi; cd protected && apply_patch <<'EOF'\n@PA@\nEOF
+an earlier arithmetic << hiding the cd|echo $((1<<2)); cd protected; apply_patch <<'EOF'\n@PA@\nEOF
+an earlier heredoc hiding the cd|cat <<X\nhello\nX\ncd protected && apply_patch <<'EOF'\n@PA@\nEOF
+a backslash-escaped cd|\\cd protected && apply_patch <<'EOF'\n@PA@\nEOF
+a quoted cd|\"cd\" protected && apply_patch <<'EOF'\n@PA@\nEOF
+env -C|env -C protected apply_patch <<'EOF'\n@PA@\nEOF
+eval of a split cd|eval \"c\"\"d protected\" && apply_patch <<'EOF'\n@PA@\nEOF
+cd through a variable|d=cd; $d protected && apply_patch <<'EOF'\n@PA@\nEOF
+bash -c with the cd inside the string|bash -c 'cd protected; apply_patch' <<'EOF'\n@PA@\nEOF
+a body Codex's parser rejects (a stray line in an Add hunk)|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: protected/new.ts\n+ok\nstray\n*** End Patch\nEOF
+COST — a heredoc that only WRITES a patch file|cat > fix.patch <<'EOF'\n@P@\nEOF
+COST — a how-to that quotes a patch|cd docs && cat > howto.md <<'DOC'\nUse apply_patch like this:\n@P@\nDOC
 COST — a multi-line commit message that quotes one|git commit -m \"fix: apply_patch handling\n\n@P@\"
 REFUSED_TABLE
-if [ "$REFUSED" -eq 32 ]; then ok "all 32 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 32"; fi
-
-# The word boundary of `named`. A LOOKALIKE name is not apply_patch, so it is
-# never blocked — these carry a file header naming a MISSING update target, which
-# a named patch would be blocked for. Exit 0 with the script run proves "unnamed";
-# without a header these rows would pass on the no-header rule instead (the right
-# exit code from the wrong guard).
-LOOKALIKES=0
-while IFS='|' read -r LABEL CMD; do
-  LOOKALIKES=$((LOOKALIKES + 1))
-  rm -f "$LOG"
-  adapt probe.sh "$(carried_payload PreToolUse "$CMD")"
-  if [ "$RC" -eq 0 ] && grep -qxF "ENV=$CWD_NATIVE/docs/not-here.md" "$LOG"; then
-    ok "a lookalike name is not apply_patch — inspected, never blocked: $LABEL"
-  else
-    bad "a lookalike was treated as apply_patch ($LABEL): exit $RC (0 wanted), saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
-  fi
-done <<'LOOKALIKE_TABLE'
-a script called apply_patch.sh|./apply_patch.sh <<'EOF'\n*** Begin Patch\n*** Update File: docs/not-here.md\n@@\n+z\n*** End Patch\nEOF
-a longer identifier|apply_patch_helper <<'EOF'\n*** Begin Patch\n*** Update File: docs/not-here.md\n@@\n+z\n*** End Patch\nEOF
-a hyphenated prefix|my-apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: docs/not-here.md\n@@\n+z\n*** End Patch\nEOF
-a dotted prefix|tools.apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: docs/not-here.md\n@@\n+z\n*** End Patch\nEOF
-no such word at all, behind a cd that could not be followed|cd $HOME && cat > fix.patch <<'EOF'\n*** Begin Patch\n*** Update File: docs/not-here.md\n@@\n+z\n*** End Patch\nEOF
-LOOKALIKE_TABLE
-if [ "$LOOKALIKES" -eq 5 ]; then ok "all 5 unnamed commands were driven"; else bad "the lookalike table was not walked: $LOOKALIKES of 5"; fi
+if [ "$REFUSED" -eq 55 ]; then ok "all 55 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 55"; fi
 
 # Codex sends the command as a string. If that shape ever changes, a file hook
 # that cannot read it must block, not exit 0 over a patch it never looked at.

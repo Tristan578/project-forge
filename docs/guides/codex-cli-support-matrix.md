@@ -24,7 +24,12 @@ command executed end to end. **No part of this has been observed in a live
 Codex session**, because hooks need a logged-in session and a per-hook approval
 in `/hooks`. Until someone completes the [first-run checklist](#first-run-checklist)
 and corrects this file, read "ported" below as "wired to the verified contract",
-not "seen working". `.codex/AGENTS.md` keeps the manual fallback for that reason.
+not "seen working". `.codex/AGENTS.md` keeps the manual fallback for that reason —
+but note where Codex gets its instructions: it loads `AGENTS.md` only from the
+repository root down to the directory it started in (`core/src/agents_md.rs`), so
+`.codex/AGENTS.md` is **not loaded automatically**. The root `AGENTS.md` is, and
+its first section tells a Codex session to read `.codex/AGENTS.md`. Every
+"instruction only" control below reaches the model through that one hop.
 
 ## What was verified, and how
 
@@ -44,7 +49,9 @@ supported version moves. Nothing is claimed about any other version.
 | **Only exit 2 with non-empty stderr blocks.** Any other non-zero exit marks the run Failed and the action proceeds | `hooks/src/events/pre_tool_use.rs` |
 | Plain (non-JSON) stdout is dropped. Each event accepts its own `deny_unknown_fields` JSON shape: `additionalContext` on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`; top-level `decision`/`reason` on `UserPromptSubmit`, `PostToolUse`, `SubagentStop`, `Stop`; **`PreCompact` and `PostCompact` accept neither** | `hooks/src/schema.rs`, `hooks/src/events/compact.rs` |
 | `permissionDecision: "allow"`/`"ask"` and `decision: "approve"` mark a `PreToolUse` run Failed. `updatedInput` is honoured only alongside a deny; the adapter never forwards it (no script here uses it) | `hooks/src/events/pre_tool_use.rs`, `hooks/src/engine/output_parser.rs` |
-| Patch file headers are matched on the **trimmed** line | `apply-patch/src/streaming_parser.rs` |
+| Patch file headers (`*** Add\|Update\|Delete File: `) are matched on the line after Rust `trim()` — which strips the Unicode White_Space property, U+0085 included, unlike JavaScript's — **except inside an Update hunk, where headers and `*** Move to: ` are matched after `trim_end()` only**, so an indented header there is a context line (`keeps_indented_update_markers_as_context_lines`). `Move to` counts only directly under its Update header, before any chunk, and once. The path is everything after the marker, unvalidated; lines split on `\n` alone. The last line ends the patch if it *trims* to `*** End Patch`, in any state. A patch the parser rejects is not applied | `apply-patch/src/parser.rs`, `apply-patch/src/streaming_parser.rs` |
+| What the exec tool does not intercept runs in a real shell, where `apply_patch` and `applypatch` are real executables: a directory holding them is prepended to `PATH` | `arg0/src/lib.rs` |
+| Project instructions are `AGENTS.md` files collected from the project root (nearest `.git`) down to the cwd. **`<repo>/.codex/AGENTS.md` is not on that path and is not loaded** | `core/src/agents_md.rs` |
 | Subagents are `*.toml` under `.codex/agents/`; `name`, `description`, `developer_instructions` are required | `core/src/config/agent_roles.rs` |
 | Skills are discovered from `.agents/skills/` (and the project layer's `.codex/skills/`); there is no configurable extra directory | `core-skills/src/loader.rs` |
 | `[mcp_servers.<name>]` accepts `command`, `args`, `env`, `env_vars`, `default_tools_approval_mode` (`auto` \| `prompt` \| `writes` \| `approve`), `enabled_tools`, `disabled_tools` | `config/src/mcp_types.rs` |
@@ -86,40 +93,36 @@ table above fail *silently* if ignored:
   the shape each event takes, and when a script blocks (exit 2) with its reason
   on stdout rather than stderr — `reject-incomplete-review.sh` does — that
   stdout is forwarded as the reason.
-- **Two edit channels.** Because of the contract row above, the four
+- **Two edit channels.** Because of the contract rows above, the four
   `PreToolUse` edit hooks are wired for `Bash` as well as `apply_patch`, in mode
-  `edit`. The adapter does **not** try to recognise the shell shapes Codex
-  intercepts: Codex decides that with a tree-sitter query over the bash
-  grammar, and three regex recognisers written here were each narrower than it
-  somewhere (an envelope cut short; identifier-only heredoc delimiters; line
-  continuations, quoted assignments, leading redirects) — every gap an edit
-  applied with all four hooks at exit 0. The question is asked of the **patch**
-  instead. A patch that edits a file must say so on a line of its own
-  (`*** Add|Update|Delete File: <path>`, matched after trimming whitespace
-  exactly as Rust's `trim()` does — JavaScript's differs, and a header behind a
-  U+0085 was a header to Codex and plain text here). A shell command whose text
-  contains such a line ends one of two ways, never a third:
-  - **inspected** — every path in it is handed to the hook; or
-  - **blocked**, with a message giving the ways out.
+  `edit`. The threat model is the exec tool's real-shell path: whatever Codex
+  does not intercept is run by a shell in which `apply_patch` is a real
+  executable, from whatever directory that shell has reached, after whatever
+  expansion it has done. Five attempts to READ the shell text each failed open
+  somewhere — an identifier-only heredoc delimiter, a line continuation, an
+  earlier `<<` hiding a `cd`, `env -C`, a decoy heredoc before the real one, an
+  unquoted delimiter letting `$(…)` rewrite a path. So **the shell is not read.**
+  A shell command is *patch-bearing* if any line of it looks like a file header
+  (the widest rule Codex uses, with no regex on the path), and a patch-bearing
+  command has exactly two outcomes:
+  - **accepted** — the WHOLE command, first byte to last, is
+    `apply_patch <<'D'` … `D` or `cd <literal path> && apply_patch <<'D'` … `D`
+    (or `applypatch`): spaces and tabs only as separators, the delimiter
+    **quoted** so the shell expands nothing in the body, a literal `cd` target
+    (quoted, or a bare word of `[A-Za-z0-9_./-]`) that is not empty and does not
+    start with `-`, nothing after the closing delimiter, and a body that the
+    port of Codex's own parser accepts. Then the base directory and every path
+    are known, and each path is shown to the hook;
+  - **refused** — everything else, without being parsed, so nothing in it can
+    mislead. The hook blocks with a message giving the ways out.
 
-  A command with no file header is an ordinary command — a patch that names no
-  file edits nothing — so a `grep` for the envelope markers is left alone.
-
-  The shell is read for one thing, the directory the paths resolve in, and that
-  is a closed **allow-list**, because a fourth attempt got it wrong as a
-  deny-list (it looked for `cd`/`pushd`, and an earlier `<<`, a `\cd`, `env -C`,
-  `bash -c '…'` or `d=cd; $d x` each moved the base unseen). For a command that
-  also contains the word `apply_patch` or `applypatch`, the text before the
-  patch — continuations joined — must be, in full, `apply_patch <<…` or
-  `cd <literal path> && apply_patch <<…`: the two forms Codex itself intercepts,
-  whose base is known. Anything else is blocked without being parsed. A command
-  that does not contain that word (an obfuscated name, a heredoc that only
-  writes a patch file) is inspected against the hook's working directory and
-  never blocked; Codex intercepts none of those, and they are a shell writing
-  files, which no Edit/Write hook sees under Claude Code either. An `if`
-  condition never gates a file hook on this channel. The cost in time is one
-  short-lived `node` start per edit hook per shell command; the cost in false
-  blocks is under "Limits to know about".
+  A command with no header line is an ordinary command: a patch that names no
+  file edits nothing, so a `grep` for the envelope markers is left alone. That
+  also covers a patch whose text is not in the command (`apply_patch < fix.patch`)
+  or is assembled by the shell — a shell writing files, which no Edit/Write hook
+  sees under Claude Code either. An `if` condition never gates a file hook on
+  this channel. The cost in time is one short-lived `node` start per edit hook
+  per shell command; the cost in false blocks is under "Limits to know about".
 
 It also applies the `if` conditions from `.claude/settings.json`, which Codex has
 no key for, from the generated `.codex/hook-conditions.json`: six hooks carry
@@ -168,7 +171,7 @@ the field, not because this port uses it.
 
 | Claude mechanism | Why Codex cannot run it | Compensating workflow |
 |---|---|---|
-| `PostCompact` → `restore-context-hints.sh`, `inject-post-compact.sh` | Both exist only to put context back in front of the model. Codex's `PostCompact` output accepts no context field and drops plain text, so they would run and change nothing | **Instruction only:** `.codex/AGENTS.md` tells the agent to re-read `.claude/rules/lessons-learned.md` after a compaction |
+| `PostCompact` → `restore-context-hints.sh`, `inject-post-compact.sh` | Both exist only to put context back in front of the model. Codex's `PostCompact` output accepts no context field and drops plain text, so they would run and change nothing | **Instruction only:** the root `AGENTS.md` (which Codex loads; `.codex/AGENTS.md` it does not) tells the agent to re-read `.claude/rules/lessons-learned.md` after a compaction |
 | `auto-approve-safe-commands.sh` (`PreToolUse` `Bash`) | Its entire output is `permissionDecision: "allow"`, which marks the run Failed. Codex has no hook-driven approval | Approvals come from `approval_policy` and the sandbox in `.codex/config.toml` |
 | `permissions.deny` (Edit/Write on `.claude/settings.json` and `.codex/config.toml`) | A Claude Code permission rule, not a hook; Codex has no equivalent this repository configures | **None.** Under the committed profile (`approval_policy = "never"`, workspace writes allowed) nothing in this repository stops a Codex session editing either file. Whether Codex's sandbox protects `.codex/` was not checked. Review any change to those two files |
 | `TaskCreated` → `validate-task-metadata.sh` | No such event | The taskboard validates tickets; `on-stop.sh` (ported) re-checks on `Stop` |
@@ -176,7 +179,7 @@ the field, not because this port uses it.
 | `WorktreeCreate` → `worktree-setup.sh` | No such event | By hand after `git worktree add`, **with its payload**: the script reads `{"worktree_path": …}` from stdin and does nothing when run bare. `.codex/AGENTS.md` has the exact command |
 | `SessionEnd` → `on-stop.sh` | Not an event 0.144.1 accepts; an unknown event key is silently ignored | The same script runs on `Stop` |
 | `ConfigChange` → `detect-settings-drift.sh` | No such event | Codex reviews hook changes itself: a changed hook loses its trusted hash and does not run until re-approved in `/hooks` |
-| `InstructionsLoaded`, `CwdChanged` → `inject-dynamic-context.sh` | No such events | The same context is reachable from `.codex/AGENTS.md` |
+| `InstructionsLoaded`, `CwdChanged` → `inject-dynamic-context.sh` | No such events | The same context is in `.codex/AGENTS.md`, which the root `AGENTS.md` tells a Codex session to read (Codex does not load it by itself) |
 | `FileChanged` (`.env`) → `env-change-warning.sh` | No such event | None. A `.env` edit made through Codex still passes the `apply_patch` hooks |
 | `StopFailure`, `PostToolUseFailure` → `rate-limit-backoff.sh` | No such events | None needed; the script only adds advisory context |
 
@@ -195,15 +198,20 @@ until someone decides where it belongs. That is deliberate: the first port wired
   to use the patch tool or root-relative paths. A carried patch that only ADDS
   files under an unseen `workdir` is checked against the wrong path, and nothing
   can tell. Item 7 of the checklist.
-- **Quoting a whole patch next to the word `apply_patch` is refused.** The
-  allow-list above cannot tell a command that APPLIES a patch from one that only
-  WRITES text containing one, so a how-to, a test fixture or a multi-line commit
-  message that carries a full `*** Update File:` line and says `apply_patch`
-  anywhere is blocked on `PreToolUse` like any other non-allow-listed form. The
-  message names both ways out: create the file with the patch tool, or pass the
-  text from a file (`git commit -F <file>`) so the patch is not inside a shell
-  command. It is a deliberate trade — a false block that explains itself, against
-  a base directory guessed wrong in silence. Item 8 of the checklist.
+- **Any shell command that contains a patch, other than the accepted form, is
+  refused.** The rule above cannot tell a command that APPLIES a patch from one
+  that only WRITES text containing one, so a heredoc that writes a patch file, a
+  test fixture, or a multi-line commit message quoting a whole patch is blocked
+  on `PreToolUse` — whenever a line of it starts with `*** Add File: `,
+  `*** Update File: ` or `*** Delete File: `. The message names the ways out:
+  create the file with the patch tool, or pass the text from a file
+  (`git commit -F <file>`) so the patch is not inside a shell command. **Weigh
+  it knowing what it buys today:** the four hooks on this path
+  (`verify-branch.sh`, `check-db-transaction.sh`, `check-sanitization-patterns.sh`,
+  `check-vercel-json.sh`) only ever advise — none exits 2 — so the refusal
+  currently protects a correctly-aimed *warning*, not a block. It is sized for
+  the blocking check this document tells authors to put on this path. Item 8 of
+  the checklist asks whether that is the right trade.
 - **`PostToolUse` cannot see a patch sent through the shell.** For the second
   edit channel the `PostToolUse` payload carries no command, so the five
   post-edit hooks (`post-edit-lint`, `check-arch`, `check-route-has-test`,

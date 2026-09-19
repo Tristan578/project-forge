@@ -63,7 +63,7 @@
       "TaskCompleted": "no Codex hook event; ticket completion is checked by .claude/hooks/on-stop.sh, which IS wired to Stop",
       "StopFailure": "no Codex hook event; rate-limit backoff is advisory context only",
       "ConfigChange": "no Codex hook event; Codex reviews hook changes itself (every changed hook loses its trusted_hash until re-approved in /hooks)",
-      "InstructionsLoaded": "no Codex hook event; the same context is reachable from .codex/AGENTS.md",
+      "InstructionsLoaded": "no Codex hook event; the same context is in .codex/AGENTS.md — which Codex does NOT load by itself; the root AGENTS.md tells a Codex session to read it",
       "FileChanged": "no Codex hook event",
       "WorktreeCreate": "no Codex hook event; after `git worktree add`, pipe `{\"worktree_path\": …}` into .claude/hooks/worktree-setup.sh from the main checkout — .codex/AGENTS.md has the exact command (run bare, the script does nothing)",
       "SessionEnd": "not among the events codex-cli 0.144.1 accepts (config/src/hook_config.rs); an unknown event key is silently ignored, so wiring it would do nothing. on-stop.sh already runs on Stop, so nothing is lost. Re-check this list against hook_config.rs whenever the supported Codex version is raised",
@@ -72,7 +72,7 @@
     },
     "skipScripts": {
       "restore-context-hints.sh": "exists only to put context back in front of the model after compaction. Codex's PostCompact output accepts neither additionalContext nor any hookSpecificOutput (hooks/src/schema.rs, PostCompactCommandOutputWire, deny_unknown_fields) and drops plain stdout, so under Codex it could run and change nothing. Not wired rather than wired-and-inert",
-      "inject-post-compact.sh": "same as restore-context-hints.sh: a PostCompact context injector, and Codex's PostCompact cannot carry context to the model. Compensating control: .codex/AGENTS.md instructs the agent to re-read .claude/rules/lessons-learned.md after a compaction — an instruction, not enforcement",
+      "inject-post-compact.sh": "same as restore-context-hints.sh: a PostCompact context injector, and Codex's PostCompact cannot carry context to the model. Compensating control: the root AGENTS.md (the file Codex actually loads; .codex/AGENTS.md it does not) instructs the agent to re-read .claude/rules/lessons-learned.md after a compaction — an instruction, not enforcement",
       "auto-approve-safe-commands.sh": "its whole output is permissionDecision=allow, which Codex rejects as unsupported (the hook run is marked Failed). Codex has no hook-driven approval; approvals come from approval_policy and the sandbox"
     }
   }
