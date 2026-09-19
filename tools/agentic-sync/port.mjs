@@ -397,6 +397,47 @@ function validateRefs(m, plan) {
   return bad;
 }
 
+// --- MCP server parity: .mcp.json <-> .codex/config.toml ----------------------
+
+// Codex never reads `.mcp.json`, so a server added there is simply absent for
+// Codex users until it is restated in `.codex/config.toml` — and nothing else
+// would notice. NAMES only: command/args are not compared, because Codex
+// forwards secrets by name through `env_vars` where `.mcp.json` interpolates
+// `${VAR}`, so the two are never byte-identical by design.
+//
+// config.toml is hand-authored (and guarded by a deny rule in
+// .claude/settings.json), so this is a check the generator cannot fix.
+function mcpParity() {
+  const out = { problems: [], note: '' };
+  if (!existsExact('.mcp.json') || !existsExact('.codex/config.toml')) {
+    out.note = 'MCP parity skipped — .mcp.json or .codex/config.toml is absent.';
+    return out;
+  }
+  let want;
+  try {
+    want = Object.keys(JSON.parse(readFileSync(abs('.mcp.json'), 'utf8')).mcpServers || {}).sort();
+  } catch (e) {
+    die(`.mcp.json is not valid JSON: ${e.message}`);
+  }
+  const have = [];
+  for (const line of readFileSync(abs('.codex/config.toml'), 'utf8').split(/\r?\n/)) {
+    // The table header of a server itself, not of a sub-table (`…sentry.env`).
+    const hit = /^\s*\[mcp_servers\.("[^"]+"|[A-Za-z0-9_-]+)\]\s*(#.*)?$/.exec(line);
+    if (hit) have.push(hit[1].replace(/^"|"$/g, ''));
+  }
+  if (have.length === 0) {
+    // Not an error: a profile with no MCP block is a legitimate state, and
+    // failing here would make this gate red on the tree it was introduced in.
+    // It is said out loud so "nothing declared" never reads as "in parity".
+    out.note = `::warning::.codex/config.toml declares no [mcp_servers.*] — Codex users have none of the ${want.length} servers in .mcp.json. Parity is enforced from the first declaration (#8767).`;
+    return out;
+  }
+  for (const n of want) if (!have.includes(n)) out.problems.push(`mcp:      ${n} is in .mcp.json but not in .codex/config.toml`);
+  for (const n of have) if (!want.includes(n)) out.problems.push(`mcp:      ${n} is in .codex/config.toml but not in .mcp.json`);
+  if (out.problems.length === 0) out.note = `${have.length} MCP servers declared for Codex, matching .mcp.json.`;
+  return out;
+}
+
 // --- main --------------------------------------------------------------------
 
 function main() {
@@ -486,6 +527,10 @@ function main() {
     for (const rel of orphans) problems.push(`orphan:   ${rel} (its source is gone)`);
   }
   for (const r of refs) problems.push(`ref:      ${r}`);
+  const mcp = mcpParity();
+  problems.push(...mcp.problems);
+  // A workflow command must START its line to be rendered as an annotation.
+  if (mcp.note) console.log(mcp.note.startsWith('::') ? mcp.note : `codex-port: ${mcp.note}`);
 
   console.log(
     `codex-port: ${skills} skills, ${agents} agents, ${hooks.ported} hooks ported ` +
@@ -494,7 +539,9 @@ function main() {
   if (problems.length) {
     console.error('::error::codex-port: the generated Codex surface is out of date or invalid:');
     for (const p of problems) console.error(`  ${p}`);
-    console.error('Fix: node tools/agentic-sync/port.mjs --write   (then commit the result)');
+    console.error('Fix `missing`/`stale`/`orphan`/`mode`: node tools/agentic-sync/port.mjs --write   (then commit the result)');
+    console.error('Fix `ref`: correct the path in the SOURCE under .claude/ (or the hand-authored .codex/ file) — the generator copies text, it does not invent paths.');
+    console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files.');
     process.exit(1);
   }
   console.log('codex-port: generated Codex surface is in sync with .claude/.');
