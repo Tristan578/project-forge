@@ -392,7 +392,7 @@ The `tb_validate_ticket()` function in `taskboard-state.sh` enforces:
 
 Skills are callable capabilities loaded on-demand. Each tool stores them in its own directory, but all reference the same shared hook scripts.
 
-The project's own skills are authored once, under `.claude/skills/`, and **mirrored** byte-for-byte into `.agents/skills/` by `node tools/agentic-sync/port.mjs --write` — the directory Codex, Gemini CLI and Copilot read. "Mirrored" below means the text is available there; it was written for Claude Code and names Claude's tools.
+The project's own skills are authored once, under `.claude/skills/`, and **mirrored** byte-for-byte into `.agents/skills/` by `node tools/agentic-sync/port.mjs --write` — the directory Codex, Gemini CLI and Copilot read. "Mirrored" below means the text is available there; it was written for Claude Code and names Claude's tools. **Three skills are the exception: `game-engine`, `kanban` and `web-accessibility` exist on both sides and have drifted apart**, so they are exempt from the mirror until a canonical side is chosen (#10131) — under Codex, Gemini CLI or Copilot those three names resolve to the `.agents/skills/` copy, which is NOT the one Claude Code reads. `skills.independent` in `tools/agentic-sync/port.json` is the list.
 
 | Skill | Available In | Purpose |
 |-------|-------------|---------|

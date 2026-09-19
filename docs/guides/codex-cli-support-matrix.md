@@ -95,23 +95,31 @@ table above fail *silently* if ignored:
   continuations, quoted assignments, leading redirects) — every gap an edit
   applied with all four hooks at exit 0. The question is asked of the **patch**
   instead. A patch that edits a file must say so on a line of its own
-  (`*** Add|Update|Delete File: <path>`), so any shell command whose text
-  contains such a line has every such path inspected, whatever shell syntax
-  surrounds it. A command with no file header is an ordinary command — a patch
-  that names no file edits nothing — so a `grep` for the envelope markers is
-  left alone. This is a superset of what Codex intercepts, in the enforcing
-  direction: it also inspects a heredoc that merely *writes* a patch file, at
-  the cost of an occasional advisory note about a file that was only mentioned.
-  The shell is read for one thing, the directory the paths resolve in:
-  `cd <literal path> &&` before the patch moves the base, as in Codex; any other
-  directory change (`cd "$X"`, `cd a\ b`, `cd x; …`, a subshell, `pushd`) before
-  a patch that names `apply_patch` is **blocked, with a message to use the patch
-  tool**, rather than checked against the wrong base. An `if` condition never
-  gates a file hook on this channel. The cost is one short-lived `node` start
-  per edit hook per shell command. What this cannot see is a patch whose text is
-  not in the command at all (`apply_patch < fix.patch`) — Codex does not
-  intercept that form, and it is a shell writing files, which no Edit/Write
-  hook sees under Claude Code either.
+  (`*** Add|Update|Delete File: <path>`, matched after trimming whitespace
+  exactly as Rust's `trim()` does — JavaScript's differs, and a header behind a
+  U+0085 was a header to Codex and plain text here). A shell command whose text
+  contains such a line ends one of two ways, never a third:
+  - **inspected** — every path in it is handed to the hook; or
+  - **blocked**, with a message giving the ways out.
+
+  A command with no file header is an ordinary command — a patch that names no
+  file edits nothing — so a `grep` for the envelope markers is left alone.
+
+  The shell is read for one thing, the directory the paths resolve in, and that
+  is a closed **allow-list**, because a fourth attempt got it wrong as a
+  deny-list (it looked for `cd`/`pushd`, and an earlier `<<`, a `\cd`, `env -C`,
+  `bash -c '…'` or `d=cd; $d x` each moved the base unseen). For a command that
+  also contains the word `apply_patch` or `applypatch`, the text before the
+  patch — continuations joined — must be, in full, `apply_patch <<…` or
+  `cd <literal path> && apply_patch <<…`: the two forms Codex itself intercepts,
+  whose base is known. Anything else is blocked without being parsed. A command
+  that does not contain that word (an obfuscated name, a heredoc that only
+  writes a patch file) is inspected against the hook's working directory and
+  never blocked; Codex intercepts none of those, and they are a shell writing
+  files, which no Edit/Write hook sees under Claude Code either. An `if`
+  condition never gates a file hook on this channel. The cost in time is one
+  short-lived `node` start per edit hook per shell command; the cost in false
+  blocks is under "Limits to know about".
 
 It also applies the `if` conditions from `.claude/settings.json`, which Codex has
 no key for, from the generated `.codex/hook-conditions.json`: six hooks carry
@@ -187,6 +195,15 @@ until someone decides where it belongs. That is deliberate: the first port wired
   to use the patch tool or root-relative paths. A carried patch that only ADDS
   files under an unseen `workdir` is checked against the wrong path, and nothing
   can tell. Item 7 of the checklist.
+- **Quoting a whole patch next to the word `apply_patch` is refused.** The
+  allow-list above cannot tell a command that APPLIES a patch from one that only
+  WRITES text containing one, so a how-to, a test fixture or a multi-line commit
+  message that carries a full `*** Update File:` line and says `apply_patch`
+  anywhere is blocked on `PreToolUse` like any other non-allow-listed form. The
+  message names both ways out: create the file with the patch tool, or pass the
+  text from a file (`git commit -F <file>`) so the patch is not inside a shell
+  command. It is a deliberate trade — a false block that explains itself, against
+  a base directory guessed wrong in silence. Item 8 of the checklist.
 - **`PostToolUse` cannot see a patch sent through the shell.** For the second
   edit channel the `PostToolUse` payload carries no command, so the five
   post-edit hooks (`post-edit-lint`, `check-arch`, `check-route-has-test`,
@@ -296,9 +313,13 @@ file, so "the lock names it" is not on its own a reason to delete anything.
 this repository has none of the servers in `.mcp.json` — Codex does not read that
 file. The gate says so on every run and starts enforcing parity of server
 **names** from the first `[mcp_servers.*]` table that is **committed**: like
-`scripts/check-codex-config-safety.sh` it reads `HEAD:.codex/config.toml`, so the
-personal, uncommitted taskboard block `docs/guides/taskboard-sync.md` describes
-does not turn a local check red. Commit all of the servers or none.
+`scripts/check-codex-config-safety.sh` it reads `HEAD:.codex/config.toml`, so an
+uncommitted edit to that file does not turn a local check red. That is a
+tolerance, not a recommendation: personal servers belong in the user-level
+`~/.codex/config.toml`, as `docs/guides/taskboard-sync.md` says, because in a
+linked worktree `worktree-safety-commit.sh` commits whatever is in the tree when
+a session stops — and a committed personal block does turn the check red.
+Commit all of the servers or none.
 
 `.codex/config.toml` is covered by a `deny` rule in `.claude/settings.json`,
 which stops *Claude Code* editing it; that rule does nothing under Codex (see
@@ -336,3 +357,7 @@ Unverified until someone does it; correct this file with what you find.
 7. Does the model ever send such a command with the exec tool's `workdir` set?
    If it does, do updates get blocked with the "working directory this hook
    cannot see" message, and how often — is that block a nuisance in practice?
+8. How often is a shell command that merely QUOTES a patch (a doc, a fixture, a
+   commit message) refused by the edit hooks, and does the model recover from
+   the message on its own? If it is frequent, the allow-list's cost is too high
+   as designed and this file should say so.

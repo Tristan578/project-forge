@@ -172,25 +172,46 @@ function findBash() {
   return 'bash';
 }
 
-// Every path a patch touches. Headers are matched on the TRIMMED line, as
-// Codex's streaming parser does; anchoring at column 0 would let an indented
-// `  *** Update File: x` hide its hunk from every hook while Codex applies it.
+// Rust's `str::trim()` strips the Unicode White_Space property; JavaScript's
+// `trim()` strips a DIFFERENT set (it keeps U+0085 NEL, it drops U+FEFF). Codex
+// matches patch headers on `line.trim()` (apply-patch/src/streaming_parser.rs),
+// so with JS trim a header behind a NEL was a header to Codex and plain text
+// here — the file was edited and no hook saw it. These two mirror Rust exactly.
+const RUST_WS = '\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
+const RUST_TRIM = new RegExp(`^[${RUST_WS}]+|[${RUST_WS}]+$`, 'g');
+const RUST_TRIM_END = new RegExp(`[${RUST_WS}]+$`);
+const rustTrim = (s) => s.replace(RUST_TRIM, '');
+const rustTrimEnd = (s) => s.replace(RUST_TRIM_END, '');
+
+// Every path a patch touches, read the way Codex's streaming parser reads it:
+//   * `*** Add|Update|Delete File: <path>` is matched on the line after Rust
+//     `trim()` — anchoring at column 0 would let an indented header hide its hunk
+//     from every hook while Codex applies it. The path is what follows the
+//     marker, NOT trimmed again (Codex does not).
+//   * `*** Move to: <path>` is matched after `trim_end()` ONLY — so not when
+//     indented — and only directly under its Update header, before any chunk,
+//     and once. Anywhere else Codex reads the same text as a context line, and
+//     treating it as a move would hand the hooks the added lines under the
+//     wrong path.
 function parsePatch(patch) {
   const files = [];
   let current = null;
+  let moveAllowed = false; // true only between an Update header and its first chunk line
   for (const rawLine of String(patch).split(/\r?\n/)) {
-    const line = rawLine.trim();
+    const line = rustTrim(rawLine);
     const head = /^\*\*\* (Add|Update|Delete) File: (.+)$/.exec(line);
     if (head) {
-      current = { op: head[1], path: head[2].trim(), added: [] };
+      current = { op: head[1], path: head[2], added: [] };
       files.push(current);
+      moveAllowed = head[1] === 'Update';
       continue;
     }
-    const move = /^\*\*\* Move to: (.+)$/.exec(line);
-    if (move && current) {
+    const move = moveAllowed ? /^\*\*\* Move to: (.+)$/.exec(rustTrimEnd(rawLine)) : null;
+    moveAllowed = false;
+    if (move) {
       // Both ends matter: the source is removed from where a hook may protect
       // it, the destination is written where another may.
-      const dest = { op: 'Update', path: move[1].trim(), added: current.added, isMoveDest: true };
+      const dest = { op: 'Update', path: move[1], added: current.added, isMoveDest: true };
       current.op = 'Delete';
       current.isMoveSource = true; // for messages: the author wrote a move, not a removal
       current.added = [];
@@ -219,54 +240,54 @@ function parsePatch(patch) {
 // file must SAY so, on a line of its own: `*** Add|Update|Delete File: <path>`.
 // So the whole command is read with the same header matcher used for the patch
 // tool, and:
-//   no file header anywhere   → null: an ordinary command. A patch with no
-//                               file header edits nothing. (`grep '*** Begin
-//                               Patch' x` lands here; so does `apply_patch --help`.)
-//   one or more               → { files, named, dir, unfollowed }: every path is
-//                               inspected. Delimiter, quoting, continuations,
-//                               assignments, redirects, comments, statements
-//                               before or after — none of it is looked at, so
-//                               none of it can hide a path.
-// That is a superset of what Codex intercepts, in the enforcing direction: it
-// also inspects a heredoc that writes a patch FILE. The price is an occasional
-// advisory note about a file that was only mentioned.
+//   no file header anywhere → null: an ordinary command. A patch with no file
+//                             header edits nothing. (`grep '*** Begin Patch' x`
+//                             lands here; so does `apply_patch --help`.)
+//   one or more             → every path is inspected or the command is
+//                             blocked; no shell syntax can make it neither.
 //
-// `named`: the command also contains the word apply_patch / applypatch. Only
-// then does this adapter BLOCK on something it cannot resolve (below), because
-// only then is "this is about to be applied" a fair reading.
+// The shell still decides ONE thing — the directory the paths resolve in — and a
+// fourth version got that wrong the same way: it looked for `cd`/`pushd` with a
+// regex (a DENY-list over shell text), and an earlier `<<`, a `\cd`, `env -C`,
+// `bash -c '…'` or `d=cd; $d x` each moved the base unseen. So this is a closed
+// ALLOW-list instead. For a command that also contains the word apply_patch or
+// applypatch (`named`), the text before the patch — continuations joined, as the
+// shell joins them; never inside the patch, where joining `+x \` to the next
+// line could swallow a header — must be, in full, one of:
+//       apply_patch <<…
+//       cd <literal path> && apply_patch <<…          (also `applypatch`)
+// which are the two forms Codex itself intercepts. Then the base is known: the
+// hook's cwd, or that literal directory. ANYTHING else → `{ refused: why }` and
+// the caller BLOCKS: an assignment or redirect first, a statement or a comment
+// line before it, an argument before the heredoc, the patch as a quoted
+// argument, a cd that needs expanding, a subshell, `env -C` … none of them is
+// parsed, so none of them can mislead.
 //
-// The shell still matters for ONE thing: which directory the paths resolve in.
-//   no cd / pushd / popd before the patch      → the hook's cwd.
-//   `cd <literal> && …` and nothing else moving → that directory, as in Codex.
-//   anything else (`cd "$X"`, `cd a\ b`, `cd x; …`, a subshell, two cds)
-//                                              → `unfollowed`: the caller blocks
-//                                                a named patch rather than check
-//                                                paths against the wrong base.
+// The cost is a false block, and it is a real one: a how-to, a test fixture or a
+// commit message that QUOTES a whole patch next to the word apply_patch is
+// refused too. The message says so and gives both ways out. It is recorded as a
+// limit in docs/guides/codex-cli-support-matrix.md.
+//
+// NOT named (`a\pply_patch`, `$P`, a heredoc that only writes a patch file): the
+// paths are inspected against the hook's cwd and nothing is ever blocked. Codex
+// intercepts none of those; they are a shell writing files, which no Edit/Write
+// hook sees under Claude Code either.
 function carriedPatch(command) {
   const files = parsePatch(command);
   if (files.length === 0) return null;
   const named = /(^|[^\w.-])(?:apply_patch|applypatch)(?![\w.-])/.test(command);
+  if (!named) return { files, named, dir: '' };
 
-  // Where do the hunk paths resolve? Only the shell text BEFORE the patch can
-  // move that. Continuations are joined there as the shell joins them — never
-  // inside the patch, where joining `+x \` to the next line could swallow a
-  // file header.
   const lines = command.split(/\r?\n/);
-  const firstMarker = lines.findIndex((l) => l.trim().startsWith('*** '));
-  const prefix = lines.slice(0, firstMarker).join('\n').replace(/\\\r?\n/g, '').split('<<')[0];
-  const movesDir = (s) => /(^|[\s;&|(){}`])(?:cd|pushd|popd)(?=[\s;&|)]|$)/.test(s);
-  let dir = '';
-  let unfollowed = null;
-  if (movesDir(prefix)) {
-    // The one form followed: `cd <literal> && …`, nothing else moving after it.
-    const m = /^\s*cd\s+('[^'\n]*'|"[^"\n]*"|[^\s;&|'"]+)\s*&&([\s\S]*)$/.exec(prefix);
-    // '…' is literal. "…" may still expand; a bare word may expand, glob or escape.
-    const expands = m && (m[1].startsWith("'") ? null : m[1].startsWith('"') ? /[$`]|\\[$`"\\]/ : /[$`~*?[\]{}\\]/);
-    if (!m || movesDir(m[2])) unfollowed = 'it changes directory in a way this hook cannot follow';
-    else if (expands && expands.test(m[1])) unfollowed = `its cd path (${m[1]}) needs the shell to expand it`;
-    else dir = m[1].replace(/^(["'])([\s\S]*)\1$/, '$2');
-  }
-  return { files, named, dir, unfollowed };
+  const firstMarker = lines.findIndex((l) => rustTrim(l).startsWith('*** '));
+  const prefix = lines.slice(0, firstMarker).join('\n').replace(/\\\r?\n/g, '');
+  const m = /^\s*(?:cd\s+('[^'\n]*'|"[^"\n]*"|[^\s;&|<>()'"]+)\s*&&\s*)?(?:apply_patch|applypatch)\s*<<[^\n]*\n?$/.exec(prefix);
+  if (!m) return { files, named, refused: 'the text before the patch is not one of the two forms whose working directory this hook can determine' };
+  if (m[1] === undefined) return { files, named, dir: '' };
+  // '…' is literal. "…" may still expand; a bare word may expand, glob or escape.
+  const expands = m[1].startsWith("'") ? null : m[1].startsWith('"') ? /[$`]|\\[$`"\\]/ : /[$`~*?[\]{}\\]/;
+  if (expands && expands.test(m[1])) return { files, named, refused: `its cd path (${m[1]}) needs the shell to expand it` };
+  return { files, named, dir: m[1].replace(/^(["'])([\s\S]*)\1$/, '$2') };
 }
 
 // `Bash(git push *)` → should the script run for this command?
@@ -364,14 +385,19 @@ function main() {
   const runs = [];
   const editMode = process.argv[5] === 'edit';
   // A patch carried inside a shell command (see the header).
-  const carried = editMode && toolName === 'Bash' && typeof input.tool_input?.command === 'string'
-    ? carriedPatch(input.tool_input.command)
-    : null;
+  // Codex sends the shell command as a string (unified_exec/exec_command.rs). If
+  // that ever changes shape, a file hook that cannot read the command must say
+  // so — exiting 0 would turn all four edit hooks into silent passes.
+  if (editMode && toolName === 'Bash' && typeof input.tool_input?.command !== 'string') {
+    fault(`${name}: the Bash payload carries no command string (got ${Array.isArray(input.tool_input?.command) ? 'an array' : typeof input.tool_input?.command}) — cannot tell whether it carries a patch`);
+  }
+  const carried = editMode && toolName === 'Bash' ? carriedPatch(input.tool_input.command) : null;
   if (editMode && toolName === 'Bash' && !carried) process.exit(0); // no file header anywhere in it: nothing for a file hook to see
-  if (carried?.named && carried.unfollowed) {
+  if (carried?.refused) {
     fault(
-      `${name}: this command applies a patch, but ${carried.unfollowed}, so the files it edits cannot be located or checked. ` +
-        `Send the patch through the apply_patch tool, or run it from the repository root as: apply_patch <<'EOF' … EOF`,
+      `${name}: this command contains a patch and the word apply_patch, but ${carried.refused}, so the files it names cannot be located or checked. ` +
+        `If it APPLIES the patch: send it through the apply_patch tool, or make the command start with exactly \`apply_patch <<'EOF'\` or \`cd <literal path> && apply_patch <<'EOF'\`. ` +
+        `If it only WRITES text that quotes a patch (a how-to, a fixture, a commit message): create that file with the apply_patch tool, or pass the text from a file (git commit -F <file>), so the patch is not inside a shell command.`,
     );
   }
 

@@ -57,7 +57,7 @@ if echo "$audit_out" | grep -qi "agentic config.*sync\|in sync with .*canonical"
 # does not delegate to the Codex gate it prints PASSED over a stale mirror (#9745).
 # Anchored to an executable line: a comment mentioning the gate must not satisfy it.
 # shellcheck disable=SC2016  # the $NAMES are literal text searched for in the audit script
-if grep -qE '^[[:space:]]*if bash "\$CODEX_GATE"' "$AUDIT" && grep -qE '^CODEX_GATE="\$PROJECT_ROOT/scripts/check-codex-port\.sh"$' "$AUDIT"; then
+if grep -qE '^[[:space:]]*if bash "\$CODEX_GATE" > /dev/null 2>&1; then$' "$AUDIT" && grep -qE '^CODEX_GATE="\$PROJECT_ROOT/scripts/check-codex-port\.sh"$' "$AUDIT"; then
   ok "audit delegates to scripts/check-codex-port.sh on an executable line"
 else
   bad "audit does not run scripts/check-codex-port.sh"

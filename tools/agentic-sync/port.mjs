@@ -727,10 +727,13 @@ function mcpParity() {
   }
   // The COMMITTED blob when git can supply it, exactly as
   // scripts/check-codex-config-safety.sh does and for the same reason: a
-  // contributor may keep a personal, uncommitted `[mcp_servers.*]` block in the
-  // working tree (docs/guides/taskboard-sync.md suggests one for the taskboard),
-  // and that must not turn a local --check red. In CI the checkout IS the ref
-  // under test, so this is "what does the repository declare?".
+  // contributor may have an uncommitted `[mcp_servers.*]` edit in the working
+  // tree, and that must not turn a local --check red. It is tolerated, NOT
+  // recommended: docs/guides/taskboard-sync.md sends personal servers to the
+  // user-level ~/.codex/config.toml, because in a linked worktree
+  // worktree-safety-commit.sh commits whatever is in the tree when a session
+  // stops — after which the block IS committed and this check goes red. In CI
+  // the checkout IS the ref under test: "what does the repository declare?".
   let config = null;
   try {
     config = execFileSync('git', ['-C', ROOT, 'show', 'HEAD:.codex/config.toml'], {
@@ -917,8 +920,11 @@ function main() {
       }
     }
     for (const rel of orphans) problems.push(`orphan:   ${rel} is no longer generated — --write will delete it`);
-    for (const rel of extras) problems.push(`extra:    ${rel} is inside a generated location but is not generated — delete it, or add it to the source under .claude/`);
   }
+  // BOTH modes, like everything below. --write never deletes a file it did not
+  // write, so an unowned file in a generated location survives it — and --write
+  // then said "in sync" over a tree the very next --check (and CI) rejected.
+  for (const rel of extras) problems.push(`extra:    ${rel} is inside a generated location but is not generated — delete it, or add it to the source under .claude/`);
   for (const rel of modified) {
     problems.push(`modified: ${rel} is no longer generated but differs from what this tool wrote (or the lock has no hash for it) — NOT deleted. Three ways out: delete the file; restore its source under .claude/; or, if it is now maintained by hand, declare it in port.json (skills.independent / agents.handAuthored), which releases it from the lock`);
   }

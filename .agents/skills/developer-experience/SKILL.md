@@ -55,7 +55,7 @@ A ticket can be moved to `done` only when:
 2. **Subtasks completed** — every implementation step toggled
 3. **Acceptance criteria verified** — each Given/When/Then confirmed
 4. **Context updated** — `.claude/rules/`, `MEMORY.md`, `CLAUDE.md` reflect any new patterns
-5. **Cross-IDE configs current** — if skills or tools changed, all 4 IDE configs updated
+5. **Cross-IDE configs current** — if skills, agents, hooks or tools changed, every provider config is updated AND the generated Codex CLI surface is regenerated (`refresh` below); `bash .claude/tools/dx-audit.sh` runs both sync gates
 6. **No orphaned artifacts** — no stale feature flags, no dead imports, no TODO comments without tickets
 
 ### 4. Onboarding Smoothness
@@ -103,8 +103,17 @@ bash .claude/tools/dx-audit.sh onboard
 Sync skill and tool references across all IDE configuration files:
 1. Read current skills list from `.claude/skills/*/SKILL.md`
 2. Read current tools list from `.claude/tools/*.sh`
-3. Update `.cursorrules`, `GEMINI.md`, `AGENTS.md`, `.github/copilot-instructions.md`
-4. Verify consistency
+3. Update the hand-written provider configs: `.cursorrules`, `GEMINI.md`, `AGENTS.md`, `.github/copilot-instructions.md`
+4. Regenerate the mirror other assistants read. `.agents/skills/`, `.codex/agents/` and `.codex/hooks.json` are GENERATED from `.claude/` — never hand-edit them:
+   ```bash
+   git add .claude/skills .claude/agents   # only files git TRACKS are mirrored; a new one is reported as `untracked:` until staged
+   node tools/agentic-sync/port.mjs --write
+   ```
+   Commit what it regenerates together with the source change.
+5. Verify consistency — both gates, which is what CI runs:
+   ```bash
+   bash scripts/check-agentic-sync.sh && bash scripts/check-codex-port.sh
+   ```
 
 ## When to Invoke This Skill
 
@@ -112,7 +121,7 @@ Sync skill and tool references across all IDE configuration files:
 |---------|------|-----|
 | Session start (hook) | `audit` | Catch stale configs before work begins |
 | Feature completed | `dod` | Enforce quality before marking done |
-| New skill/tool added | `refresh` | Keep cross-IDE configs consistent |
+| New skill/tool added, or a skill/agent/hook edited | `refresh` | Keep provider configs consistent and the generated Codex mirror in sync — a stale mirror fails `Agentic Config Sync` in CI |
 | After major PR merge | `audit` | Catch integration-level drift |
 | New contributor onboarding | `onboard` | Verify zero-friction setup |
 | Another agent requests | `doq` | Quick quality gate check |

@@ -74,6 +74,24 @@ grep -Fq 'fixture agent: all 2 skills resolve' "$fixture/audit-positive.log"
 grep -Fq 'frontend skill exists' "$fixture/audit-positive.log"
 grep -Fq 'design skill exists' "$fixture/audit-positive.log"
 checks=$((checks + 3))
+grep -Fq 'Codex CLI surface in sync with .claude/' "$fixture/audit-positive.log"
+checks=$((checks + 1))
+# The Codex gate delegation in its FAILING direction — the reason it exists is
+# that the audit printed PASSED over a stale mirror. A delegation that swallows
+# the gate's exit code (`|| true`) passes every assertion above.
+printf '#!/usr/bin/env bash\nexit 1\n' > "$audit_project/scripts/check-codex-port.sh"
+if bash "$audit_project/.claude/tools/dx-audit.sh" > "$fixture/audit-codex-drift.log"; then
+  echo 'Actual audit passed while the Codex gate failed' >&2; exit 1
+fi
+grep -Fq 'Codex CLI surface DRIFTED' "$fixture/audit-codex-drift.log"
+checks=$((checks + 1))
+rm "$audit_project/scripts/check-codex-port.sh"
+if bash "$audit_project/.claude/tools/dx-audit.sh" > "$fixture/audit-codex-missing.log"; then
+  echo 'Actual audit passed with no Codex gate at all' >&2; exit 1
+fi
+grep -Fq 'scripts/check-codex-port.sh missing' "$fixture/audit-codex-missing.log"
+checks=$((checks + 1))
+printf '#!/usr/bin/env bash\nexit 0\n' > "$audit_project/scripts/check-codex-port.sh"
 # Use a random skill absent from user providers: an installed user frontend
 # is a valid fallback and must never make this negative fixture fail spuriously.
 missing_fixture_skill="audit-$(basename "$fixture")"

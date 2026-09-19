@@ -567,6 +567,8 @@ jobs:
             .claude/hooks/block-main-commits.sh \
             .claude/hooks/inject-lessons-learned.sh \
             .claude/hooks/check-panel-registry.sh \
+            .claude/hooks/inject-post-compact.sh \
+            .claude/hooks/__tests__/inject-post-compact.test.sh \
             .claude/hooks/__tests__/check-panel-registry.test.sh \
             .claude/hooks/__tests__/reject-incomplete-review.test.sh \
             .claude/hooks/__tests__/review-quality-gate.test.sh \
@@ -1184,6 +1186,9 @@ jobs:
 
       - name: Run Codex CLI surface gate test suite
         run: bash scripts/__tests__/check-codex-port.test.sh
+
+      - name: Run post-compaction rule-digest hook suite (here because a .claude/rules/ edit fires this job, not hook-tests)
+        run: bash .claude/hooks/__tests__/inject-post-compact.test.sh
 
       - name: Run provider skill resolver fixtures
         run: bash scripts/__tests__/resolve-skill-path.test.sh
