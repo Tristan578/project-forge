@@ -1249,10 +1249,13 @@ done
 for ODD in '\u2028' '\u2029' '\r'; do
   rm -f "$LOG"
   adapt probe.sh "$(patch_payload PreToolUse "*** Begin Patch\n*** Add File: docs/ok.md\n+fine\n*** Add File: docs/od${ODD}d.md\n+bad\n*** End Patch")"
-  if [ "$RC" -eq 0 ] && [ "$(runs ENV)" = "2" ]; then
-    ok "a header whose PATH contains $ODD is still a header — both files are shown"
+  # Counting paths is not enough: a parser that BREAKS THE LINE at that character
+  # still shows two — the second one cut short at `docs/od`. So the truncated path
+  # must be absent, and the tail of the real one present.
+  if [ "$RC" -eq 0 ] && [ "$(runs ENV)" = "2" ] && ! grep -qxF "ENV=$CWD_NATIVE/docs/od" "$LOG" && grep -q 'd\.md' "$LOG"; then
+    ok "a header whose PATH contains $ODD is still a header — both files are shown, the second one whole"
   else
-    bad "a path containing $ODD hid its file: exit $RC, $(runs ENV) path(s) shown (2 wanted)"
+    bad "a path containing $ODD hid or truncated its file: exit $RC, saw: $(cat -v "$LOG" 2>/dev/null)"
   fi
 done
 
@@ -1712,11 +1715,12 @@ eval of a split cd|eval \"c\"\"d protected\" && apply_patch <<'EOF'\n@PA@\nEOF
 cd through a variable|d=cd; $d protected && apply_patch <<'EOF'\n@PA@\nEOF
 bash -c with the cd inside the string|bash -c 'cd protected; apply_patch' <<'EOF'\n@PA@\nEOF
 a body Codex's parser rejects (a stray line in an Add hunk)|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: protected/new.ts\n+ok\nstray\n*** End Patch\nEOF
+a body Codex rejects in finish(): an indented final End Patch straight after @@ leaves an EMPTY chunk (a parser that streams the last line would read it as context and accept)|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n   *** End Patch\nEOF
 COST — a heredoc that only WRITES a patch file|cat > fix.patch <<'EOF'\n@P@\nEOF
 COST — a how-to that quotes a patch|cd docs && cat > howto.md <<'DOC'\nUse apply_patch like this:\n@P@\nDOC
 COST — a multi-line commit message that quotes one|git commit -m \"fix: apply_patch handling\n\n@P@\"
 REFUSED_TABLE
-if [ "$REFUSED" -eq 55 ]; then ok "all 55 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 55"; fi
+if [ "$REFUSED" -eq 56 ]; then ok "all 56 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 56"; fi
 
 # Codex sends the command as a string. If that shape ever changes, a file hook
 # that cannot read it must block, not exit 0 over a patch it never looked at.
