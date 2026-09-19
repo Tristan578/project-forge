@@ -453,10 +453,12 @@ F="$(mkfix)"; gen "$F" --write
 HJ="$F/.codex/hooks.json"
 # shellcheck disable=SC2016  # the $(...) is literal text Codex will hand to a shell
 WANT_POSIX='node "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs" ok.sh 5 50'
+# shellcheck disable=SC2016  # as above: literal text for a shell Codex will start
+WANT_STOP='node "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs" ok.sh 3 8'
 if [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.command')" = "$WANT_POSIX" ] \
    && [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.commandWindows')" = "node .codex/hooks/run-claude-hook.mjs ok.sh 5 50" ] \
    && [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.timeout')" = "50" ] \
-   && [ "$(json_get "$HJ" 'hooks.Stop.0.hooks.0.command')" = 'node "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs" ok.sh 3 8' ] \
+   && [ "$(json_get "$HJ" 'hooks.Stop.0.hooks.0.command')" = "$WANT_STOP" ] \
    && [ "$(json_get "$HJ" 'hooks.Stop.0.hooks.0.timeout')" = "8" ]; then
   ok "commands carry the per-file timeout and the budget: an apply_patch hook gets per-file x factor, any other gets per-file + overhead"
 else
@@ -1105,6 +1107,39 @@ if [ "$RC" -eq 2 ]; then
 else
   ok "every event and script in .claude/settings.json is ported or explained (exit $RC ≠ 2)"
 fi
+
+echo "== the support matrix's numbers are re-derived, not remembered =="
+# Twice a review found a count in docs/guides/codex-cli-support-matrix.md that no
+# longer matched the generated files. The document's whole claim is that it says
+# only what is true of this tree, so its numbers are computed here.
+# shellcheck disable=SC2016  # a node program: the backticks and $ are JavaScript, not shell
+DOC_COUNTS="$(node -e '
+  const fs = require("fs");
+  const root = process.argv[1];
+  const doc = fs.readFileSync(root + "/docs/guides/codex-cli-support-matrix.md", "utf8");
+  const hooks = JSON.parse(fs.readFileSync(root + "/.codex/hooks.json", "utf8")).hooks;
+  const conds = JSON.parse(fs.readFileSync(root + "/.codex/hook-conditions.json", "utf8"));
+  const words = ["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen","twenty"];
+  const groups = Object.values(hooks).flat();
+  const total = groups.reduce((n, g) => n + g.hooks.length, 0);
+  const bash = groups.filter((g) => String(g.matcher || "").split("|").includes("Bash")).reduce((n, g) => n + g.hooks.length, 0);
+  const lists = Object.entries(conds).filter(([k]) => k !== "_README").flatMap(([, v]) => Object.values(v));
+  const conditional = lists.length;
+  const patterns = new Set(lists.flat()).size;
+  const agents = fs.readdirSync(root + "/.codex/agents").filter((f) => f.endsWith(".toml")).length;
+  const problems = [];
+  const want = (re, label) => { if (!re.test(doc)) problems.push(label); };
+  want(new RegExp("### Ported \\(" + total + " handlers\\)"), "Ported heading should say " + total);
+  want(new RegExp(words[bash] + " of the " + total + " handlers match `Bash`", "i"), "Bash-matched count should be " + words[bash] + " of " + total);
+  want(new RegExp(words[conditional] + " hooks carry\\s+one, over " + words[patterns] + " distinct patterns", "i"), "if-condition counts should be " + words[conditional] + " / " + words[patterns]);
+  want(new RegExp(words[agents - 1] + " of the " + words[agents], "i"), "generated-agent count should be " + words[agents - 1] + " of the " + words[agents]);
+  want(new RegExp("list " + total + " handlers"), "first-run checklist should expect " + total + " handlers");
+  process.stdout.write(problems.length ? problems.join("; ") : "OK " + total + "/" + bash + "/" + conditional + "/" + patterns + "/" + agents);
+' "$REPO_ROOT" 2>&1)"
+case "$DOC_COUNTS" in
+  "OK "*) ok "handler, Bash-matched, if-condition and agent counts in the support matrix match the generated files (${DOC_COUNTS#OK })" ;;
+  *) bad "the support matrix states a number the generated files contradict: $DOC_COUNTS" ;;
+esac
 
 echo "== CI wiring =="
 # Executable lines only: strip whole-line comments before counting.

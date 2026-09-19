@@ -4,9 +4,13 @@ What of the `.claude/` harness runs under OpenAI Codex CLI in this repository,
 what does not, and what stands in for the part that does not. This is the
 retain/remove record #9745 asked for.
 
-**Everything Codex-facing except `.codex/config.toml` and `.codex/AGENTS.md` is
-generated.** `tools/agentic-sync/port.mjs` derives it from `.claude/`;
-`scripts/check-codex-port.sh` fails a PR when the two differ. To change an agent,
+**Most of what Codex reads is generated.** `tools/agentic-sync/port.mjs` derives
+the project skills under `.agents/skills/`, thirteen of the fourteen
+`.codex/agents/*.toml`, `.codex/hooks.json` and `.codex/hook-conditions.json`
+from `.claude/`; `scripts/check-codex-port.sh` fails a PR when the two differ.
+Four Codex-facing files are **hand-written** and reviewed like any other code:
+`.codex/config.toml`, `.codex/AGENTS.md`, `.codex/agents/code-architect.toml`
+and the hook adapter `.codex/hooks/run-claude-hook.mjs`. To change an agent,
 a skill or a hook: edit the source under `.claude/`, run
 `node tools/agentic-sync/port.mjs --write`, commit both.
 
@@ -57,16 +61,27 @@ table above fail *silently* if ignored:
   script once per **touched** path: added, updated and deleted files, and both
   ends of a move.
 - **Only exit 2 blocks.** If the adapter itself cannot do its job on
-  `PreToolUse` (unreadable payload, no path found in a patch, script or bash
-  missing) it exits 2 with the reason. Exit 1 there would let the action
-  through. A *script* that crashes exits 1, as it does under Claude Code.
+  `PreToolUse` (unreadable or empty payload, no path found in a patch, script or
+  bash missing, out of time) it exits 2 with the reason. Exit 1 there would let
+  the action through. A *script* that crashes on one path is a reported failure,
+  as under Claude Code — but the remaining paths are still checked and any block
+  among them wins, because under Claude Code each file is its own invocation.
+- **One invocation, many files.** A `timeout` in `.claude/settings.json` bounds
+  one file's check; one Codex hook invocation covers a whole patch. `hooks.json`
+  therefore declares per-file × 10 (capped at 600 s) for `apply_patch` hooks and
+  per-file + 5 s for the rest, and hands the adapter both numbers. Each script
+  run keeps its own per-file bound, and if the budget runs out with paths still
+  unchecked the adapter blocks on `PreToolUse` — before Codex's own timeout
+  fires, which would only mark the run Failed and let the edit through. A very
+  large patch is told to split itself.
 - **Plain text is dropped.** Most advisory hooks here print a warning as text.
   The adapter wraps it as `additionalContext` on the events that accept it, and
   translates a JSON block into the shape each event takes.
 
-It also applies the `if` conditions from `.claude/settings.json`
-(`Bash(git push *)` and four others), which Codex has no key for, from the
-generated `.codex/hook-conditions.json`. Matching is deliberately generous — the
+It also applies the `if` conditions from `.claude/settings.json`, which Codex has
+no key for, from the generated `.codex/hook-conditions.json`: six hooks carry
+one, over four distinct patterns (`Bash(git push *)` three times,
+`Bash(git commit *)`, `Bash(gh pr create *)`, `Bash(gh api *)`). Matching is deliberately generous — the
 literal before the first `*` is looked for anywhere in the command — because
 running a script that then finds nothing to do is harmless and not running one
 that would have blocked is not.
@@ -118,7 +133,7 @@ until someone decides where it belongs. That is deliberate: the first port wired
   1, which Codex reports as Failed **and proceeds**. Blocking hooks then do not
   block. Start Codex at the root.
 - **`[features] shell_tool = false` is set in the committed `.codex/config.toml`.**
-  Ten of the 29 handlers match `Bash`, including the four policy hooks
+  Nine of the 29 handlers match `Bash`, including the four policy hooks
   (`block-main-commits`, `check-pr-metadata`, `pre-push-quality-gate`,
   `block-deferred-fixes`), and every generated agent is told to use shell
   commands. What that flag leaves available under 0.144.1, and therefore whether
@@ -149,10 +164,12 @@ Thirteen generated from `.claude/agents/*.md`, one hand-authored.
 - `effort` becomes `model_reasoning_effort`. `model` is dropped — the value is a
   Claude model alias — so each agent inherits the session's model.
 - `tools`, `skills`, `mcpServers`, `hooks`, `memory`, `maxTurns`, `isolation`
-  name mechanisms Codex does not have and are dropped. **Consequence:** Codex
-  has no per-agent tool allow-list, so the read-only reviewers
-  (`security-reviewer`, `test-reviewer`, …) are read-only by instruction only,
-  not by enforcement as they are under Claude Code.
+  name mechanisms Codex does not have and are dropped — each with its reason in
+  `agents.droppedFrontmatterKeys`, and a key not listed there stops the
+  generator. **Consequences:** Codex has no per-agent tool allow-list, and no
+  agent-scoped hooks, so the `block-writes.sh` guard the read-only reviewers
+  carry under Claude Code is **absent**. `security-reviewer`, `test-reviewer`
+  and the rest are read-only by instruction only.
 - `code-architect.toml` is hand-authored: under Claude Code that seat is the
   `feature-dev:code-architect` plugin agent, which has no file in this
   repository to generate from. It is listed under `agents.handAuthored` in
@@ -164,6 +181,15 @@ Thirteen generated from `.claude/agents/*.md`, one hand-authored.
 The 35 project skills under `.claude/skills/` are mirrored byte-for-byte into
 `.agents/skills/`. The check is two-directional: a stale file, a missing file and
 a hand-added file inside a mirrored directory all fail it.
+
+`tools/agentic-sync/port.lock.json` records each generated path with the sha256
+of what was written. When a path leaves the plan, `--write` deletes it **only if
+the file still matches that hash**. A skill that was handed over — declared
+`independent`, or moved to the `.agents/` side behind a symlink — is *released*
+from the lock and never deleted; a file that was edited after generation is
+reported as `modified` and left for a person. `.agents/skills/` also holds
+third-party skills this tool does not own, and the lock is an editable text
+file, so "the lock names it" is not on its own a reason to delete anything.
 
 - **Why a copy and not a symlink.** Codex follows directory symlinks, and this
   repository already links the other way for third-party skills
@@ -185,7 +211,10 @@ a hand-added file inside a mirrored directory all fail it.
 **`.codex/config.toml` declares no MCP servers today**, so a Codex session in
 this repository has none of the servers in `.mcp.json` — Codex does not read that
 file. The gate says so on every run and starts enforcing parity of server
-**names** from the first `[mcp_servers.*]` table that is added.
+**names** from the first `[mcp_servers.*]` table that is **committed**: like
+`scripts/check-codex-config-safety.sh` it reads `HEAD:.codex/config.toml`, so the
+personal, uncommitted taskboard block `docs/guides/taskboard-sync.md` describes
+does not turn a local check red. Commit all of the servers or none.
 
 `.codex/config.toml` is covered by a `deny` rule in `.claude/settings.json`,
 which stops *Claude Code* editing it; that rule does nothing under Codex (see
