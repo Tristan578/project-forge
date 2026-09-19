@@ -1021,7 +1021,16 @@ F="$(mkfix)"; gen "$F" --write
 wrap CODEX_PORT_ROOT="$F"; expect_rc 0 "wrapper: an in-sync tree is exit 0"
 printf '\nedit\n' >> "$F/.claude/skills/alpha/SKILL.md"
 wrap CODEX_PORT_ROOT="$F"; expect_rc 1 "wrapper: drift is exit 1"
-expect_out "never hand-edit" "…with the remediation text"
+expect_out "never hand-edit" "…with the remediation text (drift IS fixed by regenerating, never by hand)"
+# …but the wrapper must add NOTHING of its own after the generator's footer. It
+# used to end every failure with "never hand-edit it" — directly under a recipe
+# that, for a dead reference or an MCP mismatch, says to edit a hand-written file.
+F2="$(mkfix)"; gen "$F2" --write
+# shellcheck disable=SC2016  # the backticks are markdown in the fixture file, not a command
+printf 'See `.Codex/rules/nowhere.md` for the rules.\n' > "$F2/.codex/AGENTS.md"
+wrap CODEX_PORT_ROOT="$F2"; expect_rc 1 "wrapper: a dead reference in a hand-written .codex file is exit 1"
+expect_out "unresolved path .Codex/rules/nowhere.md" "…naming it"
+expect_no_out "never hand-edit" "…and the LAST thing the log says is not 'never hand-edit' — the fix for this one is a hand edit"
 wrap CODEX_PORT_ROOT="$F" CODEX_PORT_NODE="$TMP_ROOT/no-such-node"; expect_rc 2 "wrapper: a node binary that does not exist is exit 2, not a pass"
 STUB="$TMP_ROOT/stub-node"; printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB"; chmod +x "$STUB"
 wrap CODEX_PORT_ROOT="$F" CODEX_PORT_NODE="$STUB"; expect_rc 0 "wrapper: outside CI the test-only node override is honoured (this is the seam)"
