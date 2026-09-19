@@ -869,6 +869,7 @@ else
   F="$(gitfix)"
   git -C "$F" add -A
   if [ "$(git -C "$F" config --get core.fileMode)" = "true" ]; then
+    FILEMODE_HOST=1
     chmod +x "$F/.claude/skills/alpha/scripts/run.sh"   # disk +x, index still 100644
     gen "$F" --write
     if [ -x "$F/.agents/skills/alpha/scripts/run.sh" ]; then
@@ -884,6 +885,21 @@ else
     else
       bad "core.fileMode=true: the mirror followed the index against the disk"
     fi
+  else
+    FILEMODE_HOST=0
+  fi
+
+  # The core.fileMode=false branch needs nothing from the filesystem — the bit
+  # lives in the index — so it runs on EVERY host, not only where false is the
+  # default. Left to the host default it ran on Windows alone, and Linux CI never
+  # executed the branch Windows contributors depend on.
+  if [ "$FILEMODE_HOST" = 1 ]; then
+    F="$(gitfix)"
+    git -C "$F" config core.fileMode false
+    git -C "$F" add -A
+  fi
+  if [ "$(git -C "$F" config --get core.fileMode)" != "false" ]; then
+    bad "core.fileMode=false fixture: the repository does not report core.fileMode=false"
   else
     git -C "$F" update-index --chmod=+x .claude/skills/alpha/scripts/run.sh   # the only place the bit can live here
     gen "$F" --write
