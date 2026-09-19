@@ -701,6 +701,16 @@ else
     git -C "$d" config user.email fixture@example.invalid
     git -C "$d" config user.name fixture
     git -C "$d" config core.autocrlf false
+    # The stub cases below record a path as a symlink in the INDEX while the
+    # worktree holds a regular file — a `core.symlinks=false` checkout, i.e.
+    # Windows. That state only survives a later `git add -A` if git is told the
+    # same thing: with core.symlinks=true (the Linux default) the add sees a
+    # regular file, re-stages it as 100644, and the premise is gone — which is
+    # how one of these cases passed on Windows and went red on the CI runner.
+    # With it false, git documents that add/update-index "will not change the
+    # recorded type to regular file". Real symlinks are tested separately, in a
+    # fixture that is not a repository.
+    git -C "$d" config core.symlinks false
     echo "$d"
   }
   # as_symlink <fixture> <path> — record <path> in the index as a symlink whose
@@ -868,6 +878,9 @@ else
   printf '\nRead `.claude/skills/linked/SKILL.md`.\n' >> "$F/.claude/agents/demo.md"
   git -C "$F" add -A; as_symlink "$F" ".claude/skills/linked"
   gen "$F" --write; git -C "$F" add -A
+  if [ "$(git -C "$F" ls-files -s .claude/skills/linked | cut -c1-6)" != "120000" ]; then
+    bad "fixture is broken: .claude/skills/linked is no longer a symlink in the index after 'git add -A', so the case below tests nothing"
+  fi
   gen "$F" --check; expect_rc 0 "a reference THROUGH a symlink stub resolves (it is a real path wherever links are real)"
   # shellcheck disable=SC2016
   printf '\nRead `.claude/skills/linked/NOPE.md`.\n' >> "$F/.claude/agents/demo.md"
