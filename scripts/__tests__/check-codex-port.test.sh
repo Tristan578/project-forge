@@ -128,6 +128,44 @@ json_get() {
   ' "$1" "$2"
 }
 
+# json_set <file> <dotted.path> <json-value> — jq-free, and evaluates no code.
+json_set() {
+  node -e '
+    const fs = require("fs");
+    const [file, path, value] = process.argv.slice(1);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    const segs = path.split(".");
+    let v = doc;
+    for (const seg of segs.slice(0, -1)) v = v[seg];
+    v[segs[segs.length - 1]] = JSON.parse(value);
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' "$1" "$2" "$3"
+}
+
+# lock_set <fixture> <path> <json-value> — write one entry of the lock's `generated` map.
+lock_set() {
+  node -e '
+    const fs = require("fs");
+    const [file, key, value] = process.argv.slice(1);
+    const l = JSON.parse(fs.readFileSync(file, "utf8"));
+    l.generated[key] = JSON.parse(value);
+    fs.writeFileSync(file, JSON.stringify(l));
+  ' "$1/tools/agentic-sync/port.lock.json" "$2" "$3"
+}
+
+# file_replace <file> <from> <to> — literal, first occurrence; `|` in <to> is a
+# newline. (Not sed: BSD sed has no newline in a replacement, and this suite
+# runs on macOS as well as Linux and Git Bash.)
+file_replace() {
+  node -e '
+    const fs = require("fs");
+    const [file, from, to] = process.argv.slice(1);
+    const s = fs.readFileSync(file, "utf8");
+    if (!s.includes(from)) { console.error("file_replace: no match for " + from); process.exit(1); }
+    fs.writeFileSync(file, s.replace(from, to.split("|").join("\n")));
+  ' "$1" "$2" "$3"
+}
+
 echo "== generator: write, check, idempotence =="
 F="$(mkfix)"
 gen "$F" --check; expect_rc 1 "a tree that was never generated reports drift, not 'in sync'"
@@ -201,9 +239,9 @@ if [ "$(json_get "$HJ" 'hooks.Stop.0.@has:matcher')" = "false" ]; then
 else
   bad "a matcher was emitted for Stop"
 fi
-if [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.timeout')" = "5" ] \
-   && grep -qF 'run-claude-hook.mjs' "$HJ" && grep -qF '"commandWindows"' "$HJ"; then
-  ok "handlers run through the adapter, keep their timeout, and carry a Windows command"
+if [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.@has:commandWindows')" = "true" ] \
+   && [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.type')" = "command" ]; then
+  ok "each handler is a command handler with a Windows variant (exact strings are asserted further down)"
 else
   bad "handler shape is wrong: $(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0')"
 fi
@@ -309,7 +347,7 @@ echo "== generator: --write may delete ONLY what it generated =="
 # a SOURCE hook script included (found by the review board).
 F="$(mkfix)"; gen "$F" --write
 printf 'keep me\n' > "$F/README.md"
-node -e 'const fs=require("fs");const p=process.argv[1];const l=JSON.parse(fs.readFileSync(p,"utf8"));l.generated.push("README.md",".claude/hooks/ok.sh");fs.writeFileSync(p,JSON.stringify(l));' "$F/tools/agentic-sync/port.lock.json"
+lock_set "$F" "README.md" '"0000"'; lock_set "$F" ".claude/hooks/ok.sh" '"0000"'
 gen "$F" --write; expect_rc 2 "--write refuses a lock that names a path outside its targets"
 expect_out '"README.md"' "…naming the foreign path"
 if [ -f "$F/README.md" ] && [ -f "$F/.claude/hooks/ok.sh" ]; then
@@ -319,7 +357,7 @@ else
 fi
 gen "$F" --check; expect_rc 2 "--check refuses the same tampered lock instead of advising --write"
 F="$(mkfix)"; gen "$F" --write
-node -e 'const fs=require("fs");const p=process.argv[1];const l=JSON.parse(fs.readFileSync(p,"utf8"));l.generated.push(".agents/skills/../../README.md");fs.writeFileSync(p,JSON.stringify(l));' "$F/tools/agentic-sync/port.lock.json"
+lock_set "$F" ".agents/skills/../../README.md" '"0000"'
 printf 'keep me\n' > "$F/README.md"
 gen "$F" --write; expect_rc 2 "a lock entry that climbs out of a target with .. is refused too"
 if [ -f "$F/README.md" ]; then ok "…and the file it pointed at survives"; else bad "a ..-path in the lock deleted a file"; fi
@@ -371,19 +409,6 @@ live_ref() {
 }
 
 echo "== generator: every hook KEY is classified, like every event and script =="
-# json_set <file> <dotted.path> <json-value> — jq-free, and evaluates no code.
-json_set() {
-  node -e '
-    const fs = require("fs");
-    const [file, path, value] = process.argv.slice(1);
-    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
-    const segs = path.split(".");
-    let v = doc;
-    for (const seg of segs.slice(0, -1)) v = v[seg];
-    v[segs[segs.length - 1]] = JSON.parse(value);
-    fs.writeFileSync(file, JSON.stringify(doc));
-  ' "$1" "$2" "$3"
-}
 F="$(mkfix)"; json_set "$F/.claude/settings.json" hooks.PreToolUse.0.hooks.0.once true
 gen "$F" --check; expect_rc 2 "an unknown HANDLER key stops the generator"
 expect_out 'key "once"' "…naming the key"
@@ -427,10 +452,13 @@ echo "== generator: the emitted commands are exactly what Codex must execute =="
 F="$(mkfix)"; gen "$F" --write
 HJ="$F/.codex/hooks.json"
 # shellcheck disable=SC2016  # the $(...) is literal text Codex will hand to a shell
-WANT_POSIX='node "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs" ok.sh'
+WANT_POSIX='node "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs" ok.sh 5 50'
 if [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.command')" = "$WANT_POSIX" ] \
-   && [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.commandWindows')" = "node .codex/hooks/run-claude-hook.mjs ok.sh" ]; then
-  ok "command and commandWindows have exactly the expected value (not merely 'mention the adapter')"
+   && [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.commandWindows')" = "node .codex/hooks/run-claude-hook.mjs ok.sh 5 50" ] \
+   && [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.timeout')" = "50" ] \
+   && [ "$(json_get "$HJ" 'hooks.Stop.0.hooks.0.command')" = 'node "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs" ok.sh 3 8' ] \
+   && [ "$(json_get "$HJ" 'hooks.Stop.0.hooks.0.timeout')" = "8" ]; then
+  ok "commands carry the per-file timeout and the budget: an apply_patch hook gets per-file x factor, any other gets per-file + overhead"
 else
   bad "unexpected command strings: $(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0')"
 fi
@@ -453,20 +481,256 @@ else
   bad "git is required to prove the generated command runs end to end"
 fi
 
-echo "== generator: a symlink may only import a file git tracks =="
+echo "== generator: a path that leaves the plan is released, orphaned, or modified — only an orphan is deleted =="
+# The exact move made for kanban/game-engine/web-accessibility, and a likely
+# outcome of #10131: a mirrored skill is declared `independent`. Its .agents copy
+# is now hand-maintained and must survive (found by the second review board).
+F="$(mkfix)"
+# A second mirrored skill, so that handing `alpha` over does not leave an empty
+# mirror (which the generator refuses for a different, deliberate reason).
+mkdir -p "$F/.claude/skills/gamma"
+printf -- '---\nname: gamma\ndescription: stays mirrored\n---\n' > "$F/.claude/skills/gamma/SKILL.md"
+gen "$F" --write
+json_set "$F/tools/agentic-sync/port.json" skills.independent.alpha '"now maintained by hand on the .agents side"'
+gen "$F" --check
+if grep -qF 'orphan:' <<<"$OUT"; then
+  bad "a skill that became independent was reported as an orphan: $OUT"
+else
+  ok "a skill that became independent is not called an orphan"
+fi
+gen "$F" --write; expect_rc 0 "--write succeeds after a skill is handed over"
+expect_out "released 2 path(s)" "…and says it released the paths rather than removing them"
+if [ -f "$F/.agents/skills/alpha/SKILL.md" ] && [ -f "$F/.agents/skills/alpha/scripts/run.sh" ]; then
+  ok "…and the now hand-maintained copy is still there"
+else
+  bad "--write deleted a skill that had been declared independent"
+fi
+gen "$F" --check; expect_rc 0 "…and the tree is in sync afterwards, with the paths gone from the lock"
+
+F="$(mkfix)"; gen "$F" --write
+json_set "$F/tools/agentic-sync/port.json" agents.handAuthored.demo '"taken over by hand"'
+rm "$F/.claude/agents/demo.md"
+gen "$F" --write
+if [ -f "$F/.codex/agents/demo.toml" ]; then
+  ok "an agent that became handAuthored is released, not deleted"
+else
+  bad "--write deleted an agent that had been declared handAuthored"
+fi
+
+# A lock entry for a file in a target directory that this tool never wrote — a
+# third-party skill, say. The prefix test alone accepted it and --write deleted it.
+F="$(mkfix)"; gen "$F" --write
+mkdir -p "$F/.agents/skills/thirdparty"
+printf -- '---\nname: thirdparty\ndescription: not ours\n---\n' > "$F/.agents/skills/thirdparty/SKILL.md"
+lock_set "$F" ".agents/skills/thirdparty/SKILL.md" '"0000000000000000000000000000000000000000000000000000000000000000"'
+gen "$F" --write; expect_rc 1 "a lock entry whose hash does not match the file is NOT treated as an orphan"
+expect_out "modified: .agents/skills/thirdparty/SKILL.md" "…it is reported as modified, naming the file"
+if [ -f "$F/.agents/skills/thirdparty/SKILL.md" ]; then
+  ok "…and the file this tool never wrote is still there"
+else
+  bad "--write deleted a file it did not write because the lock named it"
+fi
+lock_set "$F" ".agents/skills/thirdparty/SKILL.md" 'null'
+gen "$F" --write
+if [ -f "$F/.agents/skills/thirdparty/SKILL.md" ]; then
+  ok "an entry with NO hash (the first lock format) proves nothing and deletes nothing"
+else
+  bad "a hashless lock entry caused a deletion"
+fi
+
+F="$(mkfix)"; gen "$F" --write
+rm -rf "$F/.claude/skills/alpha"
+mkdir -p "$F/.claude/skills/beta"
+printf -- '---\nname: beta\ndescription: second fixture skill\n---\n' > "$F/.claude/skills/beta/SKILL.md"
+printf 'edited after generation\n' >> "$F/.agents/skills/alpha/SKILL.md"
+gen "$F" --write
+if [ -f "$F/.agents/skills/alpha/SKILL.md" ] && [ ! -e "$F/.agents/skills/alpha/scripts/run.sh" ] && grep -qF 'modified: .agents/skills/alpha/SKILL.md' <<<"$OUT"; then
+  ok "of two orphans, the untouched one is deleted and the hand-edited one is kept and reported"
+else
+  bad "orphan/modified split is wrong: $OUT"
+fi
+
+echo "== generator: fail-closed means exit 2, never an uncaught exception =="
+F="$(mkfix)"; printf '{"skills":{},"agents":{},"hooks":{}}' > "$F/tools/agentic-sync/port.json"
+gen "$F" --check; expect_rc 2 "a valid-JSON manifest missing required keys is exit 2 (it used to be a TypeError and exit 1, which the gate reads as drift)"
+expect_out "manifest.skills.source" "…naming the first missing field"
+F="$(mkfix)"; json_set "$F/tools/agentic-sync/port.json" hooks.patchTimeoutFactor '"ten"'
+gen "$F" --check; expect_rc 2 "a manifest field of the wrong type is exit 2"
+F="$(mkfix)"; printf 'not json at all' > "$F/.claude/settings.json"
+gen "$F" --check; expect_rc 2 "an unparseable settings.json is exit 2"
+
+echo "== generator: agents — every branch that decides what Codex is told =="
+F="$(mkfix)"; gen "$F" --write
+if grep -qx 'model_reasoning_effort = "high"' "$F/.codex/agents/demo.toml"; then
+  ok "\`effort\` is emitted as model_reasoning_effort"
+else
+  bad "effort was not carried over: $(grep -n effort "$F/.codex/agents/demo.toml")"
+fi
+F="$(mkfix)"; file_replace "$F/.claude/agents/demo.md" 'effort: high' 'effort: ludicrous'
+gen "$F" --check; expect_rc 2 "an effort Codex does not accept stops the generator"
+expect_out '"ludicrous"' "…naming the value"
+F="$(mkfix)"; file_replace "$F/.claude/agents/demo.md" 'name: demo' 'name: someone-else'
+gen "$F" --check; expect_rc 2 "a frontmatter name that disagrees with the file name stops the generator"
+F="$(mkfix)"; printf -- '---\nname: code-architect\ndescription: now has a source\n---\n\nbody\n' > "$F/.claude/agents/code-architect.md"
+gen "$F" --check; expect_rc 2 "an agent listed as handAuthored that ALSO has a source is a contradiction, not a silent overwrite"
+F="$(mkfix)"; file_replace "$F/.claude/agents/demo.md" 'effort: high' 'effort: high|disallowedTools: [Bash]'
+gen "$F" --check; expect_rc 2 "an unclassified frontmatter KEY stops the generator — a future enforcement key must not vanish silently"
+expect_out 'key "disallowedTools"' "…naming the key"
+
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import tomllib' >/dev/null 2>&1; then
+  TOML_REPORT="$(python3 - "$REPO_ROOT/.codex/agents" <<'PY'
+import glob, os, sys, tomllib
+files = sorted(glob.glob(os.path.join(sys.argv[1], "*.toml")))
+bad = []
+for f in files:
+    try:
+        d = tomllib.load(open(f, "rb"))
+        for k in ("name", "description", "developer_instructions"):
+            if not str(d.get(k, "")).strip():
+                bad.append(f"{os.path.basename(f)}: empty {k}")
+        if d.get("name") + ".toml" != os.path.basename(f):
+            bad.append(f"{os.path.basename(f)}: name does not match file")
+    except Exception as e:
+        bad.append(f"{os.path.basename(f)}: {e}")
+print(f"{len(files)} {'OK' if not bad else 'BAD ' + '; '.join(bad)}")
+PY
+)"
+  case "$TOML_REPORT" in
+    "0 "*) bad "no committed .codex/agents/*.toml found — the parse check ran on nothing" ;;
+    *" OK") ok "every COMMITTED .codex/agents/*.toml parses with its required keys, the hand-authored one included (${TOML_REPORT%% *} files)" ;;
+    *) bad "a committed Codex agent does not parse: $TOML_REPORT" ;;
+  esac
+elif [ "${CI:-}" = "true" ]; then
+  bad "python3 with tomllib is required in CI to prove the committed agents parse"
+else
+  skip "python3/tomllib absent locally — committed agents not parsed on this host"
+fi
+
+echo "== generator: line endings and binary files =="
+F="$(mkfix)"
+printf -- '---\r\nname: alpha\r\ndescription: fixture skill\r\n---\r\n\r\n# Alpha with CRLF\r\n' > "$F/.claude/skills/alpha/SKILL.md"
+printf '\000\001\002BINARY\r\n\377' > "$F/.claude/skills/alpha/blob.bin"
+gen "$F" --write
+gen "$F" --check; expect_rc 0 "a CRLF source generates and checks clean"
+if grep -q "$(printf '\r')" "$F/.agents/skills/alpha/SKILL.md"; then
+  bad "CRLF was written into the mirror — the committed form must be LF"
+else
+  ok "the mirror of a CRLF text source is written with LF"
+fi
+if cmp -s "$F/.claude/skills/alpha/blob.bin" "$F/.agents/skills/alpha/blob.bin"; then
+  ok "a binary file is copied byte-for-byte (its CR LF bytes are not 'normalised')"
+else
+  bad "a binary file was altered by line-ending normalisation"
+fi
+F="$(mkfix)"; gen "$F" --write
+# An autocrlf checkout: the mirror on disk has CRLF, the source has LF.
+node -e 'const fs=require("fs");const p=process.argv[1];fs.writeFileSync(p,fs.readFileSync(p,"utf8").split("\n").join("\r\n"));' "$F/.agents/skills/alpha/SKILL.md"
+gen "$F" --check; expect_rc 0 "a mirror checked out with CRLF is not phantom drift"
+
+echo "== generator: git-backed behaviour (symlink stubs, executable bits, committed MCP config) =="
+if ! command -v git >/dev/null 2>&1; then
+  bad "git is required for the symlink-stub, executable-bit and committed-config cases"
+else
+  # gitfix — a fixture that is a real repository, so the index can be consulted.
+  gitfix() {
+    local d; d="$(mkfix)"
+    git -C "$d" init -q
+    git -C "$d" config user.email fixture@example.invalid
+    git -C "$d" config user.name fixture
+    git -C "$d" config core.autocrlf false
+    echo "$d"
+  }
+  # as_symlink <fixture> <path> — record <path> in the index as a symlink whose
+  # target is the file's current content. With the worktree file left a regular
+  # file this is EXACTLY a `core.symlinks=false` checkout — the Windows branch —
+  # and it is reproducible on every host.
+  as_symlink() {
+    local blob; blob="$(git -C "$1" hash-object -w "$1/$2")"
+    git -C "$1" update-index --add --cacheinfo "120000,$blob,$2"
+  }
+
+  F="$(gitfix)"
+  mkdir -p "$F/.claude/rules"; printf 'TRACKED RULE BODY\n' > "$F/.claude/rules/r.md"
+  printf '../../rules/r.md' > "$F/.claude/skills/alpha/ref.md"
+  git -C "$F" add -A; as_symlink "$F" ".claude/skills/alpha/ref.md"
+  gen "$F" --write; expect_rc 0 "a symlink STUB (core.symlinks=false) to a tracked file is followed"
+  if [ "$(cat "$F/.agents/skills/alpha/ref.md" 2>/dev/null)" = "TRACKED RULE BODY" ]; then
+    ok "…and the mirror holds the TARGET's content, not the stub's path text"
+  else
+    bad "stub was not dereferenced: '$(cat "$F/.agents/skills/alpha/ref.md" 2>/dev/null)'"
+  fi
+
+  F="$(gitfix)"
+  printf 'SECRET=1\n' > "$F/.env.local"
+  printf '../../../.env.local' > "$F/.claude/skills/alpha/notes.md"
+  git -C "$F" add -A -- . ':!.env.local'; as_symlink "$F" ".claude/skills/alpha/notes.md"
+  gen "$F" --write; expect_rc 2 "a stub pointing at an UNTRACKED in-repo file (.env.local) is refused"
+  expect_out "not a file git tracks" "…and says why"
+  if grep -rqF 'SECRET=1' "$F/.agents" 2>/dev/null; then bad "the secret reached the mirror"; else ok "…and the secret never reaches the mirror"; fi
+
+  F="$(gitfix)"
+  printf '/etc/hostname' > "$F/.claude/skills/alpha/abs.md"
+  git -C "$F" add -A; as_symlink "$F" ".claude/skills/alpha/abs.md"
+  gen "$F" --write; expect_rc 2 "a stub with an ABSOLUTE target is refused"
+  F="$(gitfix)"
+  printf '../../../../outside.md' > "$F/.claude/skills/alpha/up.md"
+  git -C "$F" add -A; as_symlink "$F" ".claude/skills/alpha/up.md"
+  gen "$F" --write; expect_rc 2 "a stub that climbs out of the repository is refused"
+
+  # Executable bits: --write mutates the git INDEX. That deserves a test.
+  F="$(gitfix)"
+  git -C "$F" add -A
+  git -C "$F" update-index --chmod=+x .claude/skills/alpha/scripts/run.sh
+  gen "$F" --write
+  git -C "$F" add -A
+  gen "$F" --write
+  MIRROR_MODE="$(git -C "$F" ls-files -s .agents/skills/alpha/scripts/run.sh | cut -c1-6)"
+  if [ "$MIRROR_MODE" = "100755" ]; then
+    ok "a mirrored script carries its source's executable bit in the index (core.fileMode on or off)"
+  else
+    bad "mirror index mode is '$MIRROR_MODE', source is 100755"
+  fi
+  gen "$F" --check; expect_rc 0 "…and --check is clean once it does"
+  git -C "$F" update-index --chmod=-x .agents/skills/alpha/scripts/run.sh
+  gen "$F" --check; expect_rc 1 "a mirror whose index mode differs from its source is drift"
+  expect_out "mode:     .agents/skills/alpha/scripts/run.sh" "…reported as \`mode:\`, naming the file"
+  expect_out "git update-index --chmod=+x" "…with the exact command that fixes it"
+  if [ "$(git -C "$F" ls-files -s .agents/skills/alpha/SKILL.md | cut -c1-6)" = "100644" ]; then
+    ok "a non-executable source stays non-executable"
+  else
+    bad "a plain file was marked executable"
+  fi
+
+  # MCP parity reads the COMMITTED config, like check-codex-config-safety.sh.
+  F="$(gitfix)"; gen "$F" --write
+  printf '{"mcpServers":{"alpha":{"command":"npx"},"beta":{"command":"npx"}}}\n' > "$F/.mcp.json"
+  printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+  git -C "$F" add -A; git -C "$F" commit -q -m fixture
+  gen "$F" --check; expect_rc 0 "committed config in parity passes"
+  printf 'model = "x"\n[mcp_servers.alpha]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+  gen "$F" --check; expect_rc 0 "an UNCOMMITTED local edit to config.toml (the taskboard guide suggests one) does not turn a local check red"
+  git -C "$F" add -A; git -C "$F" commit -q -m "commit the partial block"
+  gen "$F" --check; expect_rc 1 "…but once COMMITTED, a partial server list is a failure"
+  expect_out "beta is in .mcp.json but not in .codex/config.toml" "…naming the missing server"
+fi
+
+echo "== generator: a real symlink (POSIX hosts) =="
 F="$(mkfix)"
 printf 'SECRET=1\n' > "$F/.env.local"
 if ln -s ../../../.env.local "$F/.claude/skills/alpha/notes" 2>/dev/null && [ -L "$F/.claude/skills/alpha/notes" ]; then
-  gen "$F" --write; expect_rc 2 "a link to an untracked in-repo file (.env.local) is refused"
-  if grep -rqF 'SECRET=1' "$F/.agents" 2>/dev/null; then
-    bad "the secret's content was copied into the mirror"
-  else
-    ok "…and its content never reaches the mirror"
-  fi
+  gen "$F" --write; expect_rc 2 "a real symlink to an untracked in-repo file is refused"
+  if grep -rqF 'SECRET=1' "$F/.agents" 2>/dev/null; then bad "the secret reached the mirror"; else ok "…and its content never reaches the mirror"; fi
 else
-  # A genuine platform limit, not a missing feature: this host cannot create a
-  # symlink (Windows without the privilege). CI runs this on Linux.
-  skip "this host cannot create symlinks — containment is asserted on POSIX hosts"
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+      # A genuine platform limit: Git Bash cannot create a symlink without the
+      # privilege. The STUB branch above is what this platform actually runs.
+      skip "this Windows host cannot create a real symlink — the stub branch above covers what it executes" ;;
+    *)
+      # Anywhere else, not being able to build the fixture is a broken test, not
+      # an inapplicable one (lessons-learned #9).
+      bad "could not create a symlink on $(uname -s) — the containment case did not run" ;;
+  esac
 fi
 
 echo "== the wrapper: exit codes are the contract, and CI ignores the node override =="
@@ -531,7 +795,9 @@ STOPB
 # adapt <script> <payload-json> — sets RC, OUT (stdout) and ERR (stderr).
 adapt() {
   ERR_FILE="$H/err"
-  OUT="$(printf '%s' "$2" | CODEX_HOOK_SCRIPT_DIR="$H" CODEX_HOOK_CONDITIONS="${COND_FILE:-$H/no-conditions.json}" PROBE_LOG="$LOG" node "$ADAPTER" "$1" 2>"$ERR_FILE")"
+  # ADAPT_ARGS is "<per-run-seconds> <budget-seconds>", deliberately unquoted.
+  # shellcheck disable=SC2086
+  OUT="$(printf '%s' "$2" | CODEX_HOOK_SCRIPT_DIR="$H" CODEX_HOOK_CONDITIONS="${COND_FILE:-$H/no-conditions.json}" PROBE_LOG="$LOG" node "$ADAPTER" "$1" ${ADAPT_ARGS:-} 2>"$ERR_FILE")"
   RC=$?
   ERR="$(cat "$ERR_FILE")"
 }
@@ -638,8 +904,17 @@ else
 fi
 adapt nope.sh '{"hook_event_name":"Stop"}'
 if [ "$RC" -eq 1 ]; then ok "Stop: a missing script is a reported failure, not a block"; else bad "missing script on Stop: exit $RC"; fi
-adapt ../probe.sh '{"hook_event_name":"PreToolUse"}'
-if [ "$RC" -eq 2 ]; then ok "a script name with a path in it is refused"; else bad "path-bearing script name was accepted (exit $RC)"; fi
+# The target EXISTS (one level above the script dir), so only the name check can
+# refuse it. With a nonexistent target the "missing script" branch would exit 2
+# as well, and this case would pass with the name check deleted.
+cp "$H/probe.sh" "$H/../escaped.sh"
+rm -f "$LOG" "$LOG.stdin"
+adapt ../escaped.sh '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'expected a script name' <<<"$ERR"; then
+  ok "a script name with a path in it is refused by the NAME check, and the script outside the directory never runs"
+else
+  bad "path-bearing script name: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
 
 adapt block.sh "$PAYLOAD"
 if [ "$RC" -eq 2 ] && grep -qF 'blocked: policy says no' <<<"$ERR"; then
@@ -661,6 +936,86 @@ if [ "$RC" -eq 1 ] && grep -qF 'boom' <<<"$ERR"; then
 else
   bad "crash handling: exit $RC, stderr: $ERR"
 fi
+
+echo "== adapter: a crash on one path must not hide a block on another =="
+# Under Claude Code each file is its own hook invocation, so a crash on file A
+# never suppresses a block on file B. Exiting at the first crash did: Codex
+# reports exit 1 as Failed and APPLIES THE WHOLE PATCH (second review board).
+cat > "$H/crashy-guard.sh" <<'CG'
+#!/usr/bin/env bash
+printf 'SAW=%s\n' "${TOOL_INPUT_file_path:-<unset>}" >> "$PROBE_LOG"
+case "${TOOL_INPUT_file_path:-}" in
+  *crashy*) echo "kaboom" >&2; exit 7 ;;
+  *protected*) echo "guard: protected path" >&2; exit 2 ;;
+esac
+exit 0
+CG
+rm -f "$LOG"
+adapt crashy-guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: crashy/a.ts\n+x\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch')"
+if [ "$RC" -eq 2 ] && grep -qF 'guard: protected path' <<<"$ERR" && [ "$(runs SAW)" = "2" ]; then
+  ok "a crash on the FIRST path does not stop the SECOND being checked — the block still wins"
+else
+  bad "crash-then-block: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null) stderr: $ERR"
+fi
+rm -f "$LOG"
+adapt crashy-guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: crashy/a.ts\n+x\n*** Add File: fine/b.ts\n+y\n*** Add File: fine/c.ts\n+z\n*** End Patch')"
+if [ "$RC" -eq 1 ] && [ "$(runs SAW)" = "3" ] && grep -qF 'kaboom' <<<"$ERR" && grep -qF 'crashy/a.ts' <<<"$ERR"; then
+  ok "with nothing to block, every path is still checked and the crash is then reported, naming the file"
+else
+  bad "crash-only: exit $RC (1 wanted), runs=$(runs SAW), stderr: $ERR"
+fi
+
+echo "== adapter: running out of time is a block, not a silent pass =="
+# A hook's timeout in .claude/settings.json bounds ONE file. One Codex invocation
+# covers a whole patch; when Codex's own timeout fires the run is merely Failed
+# and the edit proceeds. So the adapter carries both numbers and must speak first.
+printf '#!/usr/bin/env bash\nsleep 3\n' > "$H/slow.sh"
+cat > "$H/steady.sh" <<'ST'
+#!/usr/bin/env bash
+printf 'SAW=%s\n' "${TOOL_INPUT_file_path:-<unset>}" >> "$PROBE_LOG"
+sleep 1
+ST
+ADAPT_ARGS="1 30"
+adapt slow.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: a.ts\n@@\n+x\n*** End Patch')"
+if [ "$RC" -eq 2 ] && grep -qF 'timed out' <<<"$ERR" && grep -qF 'NOT checked' <<<"$ERR"; then
+  ok "PreToolUse: a script that outruns its per-file timeout BLOCKS, saying the file was not checked"
+else
+  bad "per-file timeout: exit $RC (2 wanted), stderr: $ERR"
+fi
+rm -f "$LOG"
+ADAPT_ARGS="10 3"
+adapt steady.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: a.ts\n+1\n*** Add File: b.ts\n+2\n*** Add File: c.ts\n+3\n*** Add File: d.ts\n+4\n*** Add File: e.ts\n+5\n*** Add File: f.ts\n+6\n*** End Patch')"
+CHECKED="$(runs SAW)"
+if [ "$RC" -eq 2 ] && [ "$CHECKED" -ge 1 ] && [ "$CHECKED" -lt 6 ] && grep -qE 'out of time after checking [0-9]+ of 6 paths|timed out' <<<"$ERR"; then
+  ok "PreToolUse: a patch too large for the budget BLOCKS with paths unchecked ($CHECKED of 6 ran) — it does not pass on the ones it skipped"
+else
+  bad "budget exhaustion: exit $RC (2 wanted), $CHECKED of 6 ran, stderr: $ERR"
+fi
+adapt steady.sh "$(patch_payload PostToolUse '*** Begin Patch\n*** Add File: a.ts\n+1\n*** Add File: b.ts\n+2\n*** Add File: c.ts\n+3\n*** Add File: d.ts\n+4\n*** Add File: e.ts\n+5\n*** Add File: f.ts\n+6\n*** End Patch')"
+if [ "$RC" -eq 1 ]; then
+  ok "PostToolUse: the same exhaustion is a reported failure — the edit has already happened"
+else
+  bad "budget exhaustion on PostToolUse: exit $RC (1 wanted)"
+fi
+ADAPT_ARGS=""
+rm -f "$LOG"
+adapt steady.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: a.ts\n+1\n*** End Patch')"
+if [ "$RC" -eq 0 ] && [ "$(runs SAW)" = "1" ]; then
+  ok "with no numbers given the adapter imposes no bound of its own (Codex's still applies)"
+else
+  bad "unbounded run: exit $RC, runs=$(runs SAW)"
+fi
+
+echo "== adapter: an empty payload is a fault, not a free pass =="
+rm -f "$LOG" "$LOG.stdin"
+adapt probe.sh ''
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'empty' <<<"$ERR"; then
+  ok "an EMPTY payload blocks: the event is unknown, so the gating one is assumed, and the script does not run on nothing"
+else
+  bad "empty payload: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+adapt probe.sh '[1,2,3]'
+if [ "$RC" -eq 2 ]; then ok "a payload that is JSON but not an object blocks too"; else bad "array payload: exit $RC (2 wanted)"; fi
 
 echo "== adapter: output is translated per event (each Codex wire type is deny_unknown_fields) =="
 adapt text.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: a.ts\n@@\n+x\n*** End Patch')"
@@ -787,7 +1142,7 @@ else
   fi
 fi
 AGENTIC_LINE="$(grep -E "&& agentic=true" <<<"$CI_CODE")"
-for pat in '^\.claude/rules/' '^\.claude/hooks/' '^\.claude/tools/' '^\.claude/CLAUDE\.md$' '^\.claude/skills/' '^\.claude/agents/' '^\.claude/settings\.json$' '^\.agents/skills/' '^\.codex/' '^\.mcp\.json$' '^scripts/check-codex-port\.sh$'; do
+for pat in '^\.claude/rules/' '^\.claude/hooks/' '^\.claude/tools/' '^\.claude/CLAUDE\.md$' '^\.github/' '^\.claude/skills/' '^\.claude/agents/' '^\.claude/settings\.json$' '^\.agents/skills/' '^\.codex/' '^\.mcp\.json$' '^scripts/check-codex-port\.sh$'; do
   if grep -qF -- "$pat" <<<"$AGENTIC_LINE"; then
     ok "the ci-gate agentic filter fires on $pat"
   else

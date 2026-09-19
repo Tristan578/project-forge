@@ -6,9 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" on-session-start.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs on-session-start.sh",
-            "timeout": 10
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" on-session-start.sh 10 15",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs on-session-start.sh 10 15",
+            "timeout": 15
           }
         ]
       }
@@ -18,9 +18,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" on-prompt-submit.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs on-prompt-submit.sh",
-            "timeout": 5
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" on-prompt-submit.sh 5 10",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs on-prompt-submit.sh 5 10",
+            "timeout": 10
           }
         ]
       }
@@ -30,33 +30,33 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" on-stop.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs on-stop.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" lessons-learned-reminder.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs lessons-learned-reminder.sh",
-            "timeout": 3
-          },
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" builder-quality-gate.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs builder-quality-gate.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" review-quality-gate.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs review-quality-gate.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" worktree-safety-commit.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs worktree-safety-commit.sh",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" on-stop.sh 5 10",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs on-stop.sh 5 10",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" lessons-learned-reminder.sh 3 8",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs lessons-learned-reminder.sh 3 8",
+            "timeout": 8
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" builder-quality-gate.sh 5 10",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs builder-quality-gate.sh 5 10",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" review-quality-gate.sh 5 10",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs review-quality-gate.sh 5 10",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" worktree-safety-commit.sh 10 15",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs worktree-safety-commit.sh 10 15",
+            "timeout": 15
           }
         ]
       }
@@ -67,9 +67,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" inject-lessons-learned.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs inject-lessons-learned.sh",
-            "timeout": 5
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" inject-lessons-learned.sh 5 50",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs inject-lessons-learned.sh 5 50",
+            "timeout": 50
           }
         ]
       },
@@ -78,9 +78,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" pre-push-quality-gate.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs pre-push-quality-gate.sh",
-            "timeout": 120
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" pre-push-quality-gate.sh 120 125",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs pre-push-quality-gate.sh 120 125",
+            "timeout": 125
           }
         ]
       },
@@ -89,9 +89,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" block-main-commits.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs block-main-commits.sh",
-            "timeout": 3
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" block-main-commits.sh 3 8",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs block-main-commits.sh 3 8",
+            "timeout": 8
           }
         ]
       },
@@ -100,19 +100,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-pr-metadata.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-pr-metadata.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-docs-quality.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-docs-quality.sh",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-pr-metadata.sh 5 10",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-pr-metadata.sh 5 10",
             "timeout": 10
           }
         ]
@@ -122,9 +111,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" block-deferred-fixes.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs block-deferred-fixes.sh",
-            "timeout": 5,
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-docs-quality.sh 10 15",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-docs-quality.sh 10 15",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" block-deferred-fixes.sh 5 10",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs block-deferred-fixes.sh 5 10",
+            "timeout": 10,
             "statusMessage": "Checking for Boy Scout Rule violations"
           }
         ]
@@ -134,9 +134,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" verify-branch.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs verify-branch.sh",
-            "timeout": 5
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" verify-branch.sh 5 50",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs verify-branch.sh 5 50",
+            "timeout": 50
           }
         ]
       },
@@ -145,9 +145,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-db-transaction.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-db-transaction.sh",
-            "timeout": 3
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-db-transaction.sh 3 30",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-db-transaction.sh 3 30",
+            "timeout": 30
           }
         ]
       },
@@ -156,9 +156,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-sanitization-patterns.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-sanitization-patterns.sh",
-            "timeout": 3,
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-sanitization-patterns.sh 3 30",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-sanitization-patterns.sh 3 30",
+            "timeout": 30,
             "statusMessage": "Checking sanitization patterns"
           }
         ]
@@ -168,9 +168,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-vercel-json.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-vercel-json.sh",
-            "timeout": 3
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-vercel-json.sh 3 30",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-vercel-json.sh 3 30",
+            "timeout": 30
           }
         ]
       }
@@ -181,9 +181,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" auto-lockfile-sync.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs auto-lockfile-sync.sh",
-            "timeout": 30
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" auto-lockfile-sync.sh 30 300",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs auto-lockfile-sync.sh 30 300",
+            "timeout": 300
           }
         ]
       },
@@ -192,27 +192,44 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" post-edit-lint.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs post-edit-lint.sh",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" post-edit-lint.sh 15 150",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs post-edit-lint.sh 15 150",
+            "timeout": 150
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-arch.sh 5 50",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-arch.sh 5 50",
+            "timeout": 50
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-route-has-test.sh 5 50",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-route-has-test.sh 5 50",
+            "timeout": 50
+          },
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" cargo-check-wasm.sh 30 300",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs cargo-check-wasm.sh 30 300",
+            "timeout": 300
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" post-commit-clean.sh 10 15",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs post-commit-clean.sh 10 15",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-arch.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-arch.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" check-route-has-test.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs check-route-has-test.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" cargo-check-wasm.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs cargo-check-wasm.sh",
-            "timeout": 30
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" post-merge-doc-check.sh 10 15",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs post-merge-doc-check.sh 10 15",
+            "timeout": 15
           }
         ]
       },
@@ -221,26 +238,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" post-commit-clean.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs post-commit-clean.sh",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" post-merge-doc-check.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs post-merge-doc-check.sh",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" post-push-resolve-comments.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs post-push-resolve-comments.sh",
-            "timeout": 30,
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" post-push-resolve-comments.sh 30 35",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs post-push-resolve-comments.sh 30 35",
+            "timeout": 35,
             "statusMessage": "Checking for unreplied review comments"
           }
         ]
@@ -251,9 +251,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" log-agent-start.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs log-agent-start.sh",
-            "timeout": 3
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" log-agent-start.sh 3 8",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs log-agent-start.sh 3 8",
+            "timeout": 8
           }
         ]
       }
@@ -263,15 +263,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" validate-agent-output.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs validate-agent-output.sh",
-            "timeout": 5
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" validate-agent-output.sh 5 10",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs validate-agent-output.sh 5 10",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" reject-incomplete-review.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs reject-incomplete-review.sh",
-            "timeout": 5
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" reject-incomplete-review.sh 5 10",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs reject-incomplete-review.sh 5 10",
+            "timeout": 10
           }
         ]
       }
@@ -281,9 +281,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" save-critical-context.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs save-critical-context.sh",
-            "timeout": 5
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" save-critical-context.sh 5 10",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs save-critical-context.sh 5 10",
+            "timeout": 10
           }
         ]
       }

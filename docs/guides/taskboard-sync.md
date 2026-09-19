@@ -11,7 +11,7 @@ On Windows use python when python3 is unavailable. The launcher detects either s
 
 HTTP, MCP and synchronization use the same runtime. Windows uses APPDATA/taskboard (restoring the standard Roaming path when a GUI host omits APPDATA); macOS uses Library/Application Support/taskboard; Linux uses XDG_CONFIG_HOME/taskboard or ~/.config/taskboard. TASKBOARD_DB is an explicit override that must be shared by every client. TASKBOARD_API defaults to http://localhost:3010/api. A mismatched API/database or failed integrity check stops synchronization before writes.
 
-The committed .mcp.json config runs the launcher. For Codex add this project-local block, preserving other configuration:
+The committed .mcp.json config runs the launcher. Codex does not read .mcp.json, so for Codex add this block to your own `.codex/config.toml` as a LOCAL, UNCOMMITTED edit, preserving other configuration (start Codex at the repository root — the path is relative to where it starts). Do not commit it on its own: `scripts/check-codex-port.sh` requires the COMMITTED file to declare the same servers as .mcp.json, all or none (#8767):
 
 ~~~toml
 [mcp_servers.taskboard]

@@ -12,8 +12,9 @@
 //
 // WHAT IT EMITS — all derived, none hand-edited
 //   1. `.agents/skills/<name>/**`   byte-exact mirror of `.claude/skills/<name>/`.
-//      Codex discovers skills ONLY under `.agents/skills` (codex-rs
-//      core-skills/src/loader.rs) and has no configurable extra directory. A
+//      Codex discovers repo skills from `.agents/skills` — and from the project
+//      layer's `.codex/skills`, which this repository does not use — and has no
+//      configurable extra directory (codex-rs core-skills/src/loader.rs). A
 //      symlink would avoid the copy, but this repo is developed on Windows with
 //      `core.symlinks=false`, where a git symlink checks out as a text stub —
 //      the skills would silently not exist for the one platform Codex is
@@ -30,9 +31,15 @@
 //      hook is either ported or named in port.json with a reason. An event or
 //      script that is neither is a HARD ERROR — that is the property the first
 //      port lacked.
-//   4. `tools/agentic-sync/port.lock.json`  the list of generated paths, so a
-//      skill or agent DELETED from `.claude/` is removed from the mirror
-//      instead of lingering as an orphan nobody owns.
+//   4. `.codex/hook-conditions.json`  the `if` conditions of those hooks, which
+//      Codex has no key for; the adapter applies them.
+//   5. `tools/agentic-sync/port.lock.json`  every generated path WITH THE HASH
+//      of what was written, so a skill or agent DELETED from `.claude/` is
+//      removed from the mirror instead of lingering as an orphan nobody owns.
+//      The hash is what makes deletion safe: the target directories also hold
+//      files this tool does not own (third-party skills, the `independent`
+//      ones, hand-authored agents), the lock is an editable text file, and
+//      --write deletes ONLY a file that is still byte-for-byte what it wrote.
 //
 // MODES
 //   --write   regenerate everything, delete orphans named by the previous lock.
@@ -54,6 +61,7 @@
 //   CODEX_PORT_ROOT — base directory holding the manifest, sources and targets.
 
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -62,9 +70,11 @@ import {
   realpathSync,
   rmSync,
   rmdirSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { dirname, join, posix, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -203,9 +213,27 @@ function loadManifest() {
   } catch (e) {
     die(`manifest is not valid JSON: ${e.message}`);
   }
-  for (const k of ['skills', 'agents', 'hooks']) {
-    if (!m[k] || typeof m[k] !== 'object') die(`manifest.${k} must be an object`);
+  // Every field this file dereferences, checked up front. Without this a
+  // valid-JSON manifest missing a key surfaced as an uncaught TypeError and
+  // exit 1 — which the gate reads as "drift", not "could not run".
+  const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  const need = (path, test, what) => {
+    const v = path.split('.').reduce((o, k) => (isObj(o) ? o[k] : undefined), m);
+    if (!test(v)) die(`manifest.${path} must be ${what}`);
+  };
+  const str = (v) => typeof v === 'string' && v.length > 0;
+  const strs = (v) => Array.isArray(v) && v.every(str);
+  for (const k of ['skills', 'agents', 'hooks']) need(k, isObj, 'an object');
+  for (const k of ['skills.source', 'skills.target', 'agents.source', 'agents.target', 'hooks.source', 'hooks.target', 'hooks.adapter', 'hooks.conditions', 'hooks.scriptDir']) {
+    need(k, str, 'a non-empty string');
   }
+  for (const k of ['hooks.supportedEvents', 'hooks.matcherlessEvents', 'agents.reasoningEffort']) need(k, strs, 'an array of strings');
+  for (const k of ['skills.independent', 'agents.handAuthored', 'agents.droppedFrontmatterKeys', 'hooks.toolAliases', 'hooks.unsupportedEvents', 'hooks.skipScripts', 'hooks.droppedHandlerKeys']) {
+    need(k, isObj, 'an object');
+  }
+  need('hooks.patchTimeoutFactor', (v) => Number.isInteger(v) && v >= 1, 'a positive integer');
+  need('hooks.maxTimeoutSeconds', (v) => Number.isInteger(v) && v >= 1, 'a positive integer');
+  need('hooks.adapterOverheadSeconds', (v) => Number.isInteger(v) && v >= 2, 'an integer of at least 2');
   return m;
 }
 
@@ -235,13 +263,23 @@ function planSkills(m, modes, plan) {
 
 // --- 2. agents ---------------------------------------------------------------
 
-function parseAgent(rel, text) {
+const PORTED_FRONTMATTER = ['name', 'description', 'effort'];
+
+function parseAgent(rel, text, manifest) {
   const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text.replace(/\r\n/g, '\n'));
   if (!m) die(`${rel}: no YAML frontmatter`);
   const fm = {};
   for (const line of m[1].split('\n')) {
+    // Top-level keys only: an indented line belongs to the key above it.
     const kv = /^([A-Za-z][\w-]*):\s*(.*)$/.exec(line);
-    if (kv) fm[kv[1]] = kv[2].trim().replace(/^(["'])(.*)\1$/, '$2');
+    if (!kv) continue;
+    // Same rule as hook keys. A key Claude Code adds to agents tomorrow — a
+    // permission list, a disallowed-tools key — must not vanish from the Codex
+    // agents without anyone deciding what it means there.
+    if (!PORTED_FRONTMATTER.includes(kv[1]) && !Object.hasOwn(manifest.agents.droppedFrontmatterKeys, kv[1])) {
+      die(`${rel}: frontmatter key "${kv[1]}" is neither ported nor explained in port.json agents.droppedFrontmatterKeys`);
+    }
+    fm[kv[1]] = kv[2].trim().replace(/^(["'])(.*)\1$/, '$2');
   }
   for (const k of ['name', 'description']) {
     if (!fm[k]) die(`${rel}: frontmatter is missing a single-line \`${k}\``);
@@ -265,7 +303,7 @@ function tomlEscape(s, multiline) {
 }
 
 function renderAgent(rel, m) {
-  const { fm, body } = parseAgent(rel, readFileSync(abs(rel), 'utf8'));
+  const { fm, body } = parseAgent(rel, readFileSync(abs(rel), 'utf8'), m);
   const lines = [
     `# GENERATED from ${rel} by tools/agentic-sync/port.mjs — do not edit.`,
     `# Edit the source, then run: node tools/agentic-sync/port.mjs --write`,
@@ -371,18 +409,32 @@ function planHooks(m, plan) {
           report.skipped.push(`${event}:${name}`);
           continue;
         }
+        // TIME. A Claude `timeout` bounds ONE file's check. Under Codex one hook
+        // invocation covers a whole patch, and the adapter runs the script once
+        // per touched path inside it — so copying the number verbatim meant a
+        // dozen-file patch outran a 3 s budget, Codex marked the run Failed,
+        // and the edit proceeded unchecked. The adapter gets both numbers: the
+        // per-run bound, and the budget declared to Codex, which it must beat
+        // so that running out of time is a BLOCK, not a silent pass.
+        const perRun = Number.isFinite(hook.timeout) && hook.timeout > 0 ? hook.timeout : 0;
+        const perPatch = String(group.matcher || '').split('|').some((tool) => h.toolAliases[tool] === 'apply_patch');
+        // A single run still gets headroom for node and bash to start, or the
+        // script's own bound could never be reached before the adapter's.
+        const budget = !perRun
+          ? 0
+          : Math.min(h.maxTimeoutSeconds, perPatch ? perRun * h.patchTimeoutFactor : perRun + h.adapterOverheadSeconds);
         const handler = {
           type: 'command',
           // POSIX: resolve from the git root so a session started in a
           // subdirectory still finds the adapter.
-          command: `node "$(git rev-parse --show-toplevel)/${h.adapter}" ${name}`,
+          command: `node "$(git rev-parse --show-toplevel)/${h.adapter}" ${name} ${perRun} ${budget}`,
           // Windows: Codex runs hooks through the session shell, which may be
           // cmd or PowerShell; no quoting of $(...) survives both. A plain
           // relative path does — it requires Codex to be started at the repo
           // root (see docs/guides/codex-cli-support-matrix.md).
-          commandWindows: `node ${h.adapter} ${name}`,
+          commandWindows: `node ${h.adapter} ${name} ${perRun} ${budget}`,
         };
-        if (Number.isFinite(hook.timeout)) handler.timeout = hook.timeout;
+        if (budget) handler.timeout = budget;
         if (hook.statusMessage) handler.statusMessage = hook.statusMessage;
         handlers.push(handler);
         report.ported += 1;
@@ -538,6 +590,26 @@ function extraFiles(m, plan) {
   return extra;
 }
 
+// Has this generated path been handed to a person? Then it is not an orphan.
+function handedOver(m, rel) {
+  if (rel.startsWith(`${m.skills.target}/`)) {
+    const name = rel.split('/')[m.skills.target.split('/').length];
+    if (Object.hasOwn(m.skills.independent, name)) return true;
+    // `.claude/skills/<name>` is now a link (or its Windows stub) to the
+    // .agents side: that side is the canonical copy, not a mirror.
+    const src = `${m.skills.source}/${name}`;
+    if (existsExact(src)) {
+      const st = lstatSync(abs(src));
+      if (st.isSymbolicLink() || !st.isDirectory() || INDEX_MODES.get(src) === '120000') return true;
+    }
+    return false;
+  }
+  if (rel.startsWith(`${m.agents.target}/`)) {
+    return Object.hasOwn(m.agents.handAuthored, posix.basename(rel).replace(/\.toml$/, ''));
+  }
+  return false;
+}
+
 // The ONLY places --write may delete from. The lock is a committed text file; a
 // bad merge resolution, or an edit, can put any path in it, and the first cut
 // deleted whatever it named — a source hook script included.
@@ -572,8 +644,23 @@ function mcpParity() {
   } catch (e) {
     die(`.mcp.json is not valid JSON: ${e.message}`);
   }
+  // The COMMITTED blob when git can supply it, exactly as
+  // scripts/check-codex-config-safety.sh does and for the same reason: a
+  // contributor may keep a personal, uncommitted `[mcp_servers.*]` block in the
+  // working tree (docs/guides/taskboard-sync.md suggests one for the taskboard),
+  // and that must not turn a local --check red. In CI the checkout IS the ref
+  // under test, so this is "what does the repository declare?".
+  let config = null;
+  try {
+    config = execFileSync('git', ['-C', ROOT, 'show', 'HEAD:.codex/config.toml'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    config = readFileSync(abs('.codex/config.toml'), 'utf8'); // no git, or not yet committed
+  }
   const have = [];
-  for (const line of readFileSync(abs('.codex/config.toml'), 'utf8').split(/\r?\n/)) {
+  for (const line of config.split(/\r?\n/)) {
     // The table header of a server itself, not of a sub-table (`…sentry.env`).
     const hit = /^\s*\[mcp_servers\.("[^"]+"|[A-Za-z0-9_-]+)\]\s*(#.*)?$/.exec(line);
     if (hit) have.push(hit[1].replace(/^"|"$/g, ''));
@@ -607,25 +694,52 @@ function main() {
   const agents = planAgents(m, plan);
   const hooks = planHooks(m, plan);
 
-  const generated = [...plan.keys()].sort();
-  const lock = { _README: 'GENERATED by tools/agentic-sync/port.mjs — the paths it owns. Do not edit.', generated };
+  const sha = (buf) => createHash('sha256').update(buf).digest('hex');
+  const generated = {};
+  for (const rel of [...plan.keys()].sort()) generated[rel] = sha(plan.get(rel).content);
+  const lock = {
+    _README: 'GENERATED by tools/agentic-sync/port.mjs — each path it owns and the sha256 of what it wrote. Do not edit. --write deletes a path that has left the plan ONLY while the file still matches its hash.',
+    generated,
+  };
   plan.set(LOCK_REL, { content: Buffer.from(`${JSON.stringify(lock, null, 2)}\n`, 'utf8') });
 
-  let previous = [];
+  let previous = {};
   if (existsExact(LOCK_REL)) {
+    let parsed;
     try {
-      previous = JSON.parse(readFileSync(abs(LOCK_REL), 'utf8')).generated || [];
+      parsed = JSON.parse(readFileSync(abs(LOCK_REL), 'utf8')).generated;
     } catch (e) {
       die(`${LOCK_REL} is not valid JSON: ${e.message}`);
     }
+    // An array is the first lock format (paths only). It carries no hashes, so
+    // nothing it names can be proven to be this tool's work.
+    if (Array.isArray(parsed)) for (const rel of parsed) previous[rel] = null;
+    else if (parsed && typeof parsed === 'object') previous = parsed;
   }
-  for (const rel of previous) {
-    if (typeof rel !== 'string' || rel.includes('..') || rel.startsWith('/') || (!ownedByGenerator(m, rel) && rel !== LOCK_REL)) {
+  for (const rel of Object.keys(previous)) {
+    if (rel.includes('..') || rel.startsWith('/') || !ownedByGenerator(m, rel)) {
       die(`${LOCK_REL} names ${JSON.stringify(rel)}, which is outside the generator's targets — refusing to treat it as something this tool may delete. Restore the lock from git and re-run.`);
     }
   }
-  const orphans = previous.filter((rel) => !plan.has(rel) && rel !== LOCK_REL && existsExact(rel));
-  const extras = extraFiles(m, plan).filter((rel) => !orphans.includes(rel));
+  // A path that has left the plan is one of three things, and only one of them
+  // may be deleted:
+  //   released  its skill became `independent`, or moved to the .agents side
+  //             behind a symlink, or the agent became handAuthored. The file is
+  //             now someone else's. Dropped from the lock; NEVER deleted.
+  //   orphan    still byte-for-byte what this tool wrote. Deleted by --write.
+  //   modified  no longer generated AND edited since (or the lock predates
+  //             hashes). Reported; a person decides.
+  const released = [];
+  const orphans = [];
+  const modified = [];
+  for (const [rel, hash] of Object.entries(previous)) {
+    if (plan.has(rel) || !existsExact(rel)) continue;
+    if (handedOver(m, rel)) released.push(rel);
+    else if (hash && sha(normalize(readFileSync(abs(rel)))) === hash) orphans.push(rel);
+    else modified.push(rel);
+  }
+  const accounted = new Set([...released, ...orphans, ...modified]);
+  const extras = extraFiles(m, plan).filter((rel) => !accounted.has(rel));
 
   const refs = validateRefs(m, plan);
 
@@ -633,10 +747,21 @@ function main() {
     let wrote = 0;
     for (const [rel, { content }] of plan) {
       const p = abs(rel);
-      if (existsSync(p) && normalize(readFileSync(p)).equals(content)) continue;
-      mkdirSync(dirname(p), { recursive: true });
-      writeFileSync(p, content);
-      wrote += 1;
+      if (!(existsSync(p) && normalize(readFileSync(p)).equals(content))) {
+        mkdirSync(dirname(p), { recursive: true });
+        writeFileSync(p, content);
+        wrote += 1;
+      }
+      // The executable bit on DISK follows the source. With core.fileMode=true
+      // (Linux, macOS) git reads the mode from the file, so a mirrored script
+      // written 0644 would be staged 100644 and then show as a mode change
+      // forever. On Windows chmod is a no-op and the index is repaired below.
+      if (plan.get(rel).modeFrom) {
+        const from = plan.get(rel).modeFrom;
+        const wantExec = modes.has(from) ? modes.get(from) === '100755' : (statSync(abs(from)).mode & 0o111) !== 0;
+        const hasExec = (statSync(p).mode & 0o111) !== 0;
+        if (wantExec !== hasExec) chmodSync(p, wantExec ? 0o755 : 0o644);
+      }
     }
     for (const rel of orphans) {
       if (!abs(rel).startsWith(ROOT + sep)) die(`refusing to delete outside the root: ${rel}`);
@@ -670,7 +795,7 @@ function main() {
       }
     }
     console.log(
-      `codex-port: wrote ${wrote} file(s), removed ${orphans.length} orphan(s), fixed ${chmod} executable bit(s) in the index.`,
+      `codex-port: wrote ${wrote} file(s), removed ${orphans.length} orphan(s), released ${released.length} path(s) now maintained by hand, fixed ${chmod} executable bit(s) in the index.`,
     );
   }
 
@@ -683,8 +808,11 @@ function main() {
         problems.push(`mode:     ${rel} is ${modes.get(rel)}, source ${modeFrom} is ${modes.get(modeFrom)} — git update-index --chmod=${modes.get(modeFrom) === '100755' ? '+x' : '-x'} ${rel}`);
       }
     }
-    for (const rel of orphans) problems.push(`orphan:   ${rel} (its source is gone)`);
+    for (const rel of orphans) problems.push(`orphan:   ${rel} is no longer generated — --write will delete it`);
     for (const rel of extras) problems.push(`extra:    ${rel} is inside a generated location but is not generated — delete it, or add it to the source under .claude/`);
+  }
+  for (const rel of modified) {
+    problems.push(`modified: ${rel} is no longer generated but differs from what this tool wrote (or the lock has no hash for it) — NOT deleted; remove it by hand, or restore it`);
   }
   for (const r of refs) problems.push(`ref:      ${r}`);
   const mcp = mcpParity();
@@ -707,4 +835,8 @@ function main() {
   console.log('codex-port: generated Codex surface is in sync with .claude/.');
 }
 
-main();
+try {
+  main();
+} catch (e) {
+  die(`unexpected error — treating as could-not-run, not as drift: ${e && e.stack ? e.stack : e}`);
+}

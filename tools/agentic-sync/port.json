@@ -15,7 +15,17 @@
     "handAuthored": {
       "code-architect": "the Architect reviewer is the feature-dev:code-architect PLUGIN agent; there is no .claude/agents source file to generate from"
     },
-    "reasoningEffort": ["minimal", "low", "medium", "high"]
+    "reasoningEffort": ["minimal", "low", "medium", "high"],
+    "droppedFrontmatterKeys": {
+      "model": "a Claude model alias (sonnet, opus); omitted so the agent inherits the Codex session's model",
+      "memory": "Claude Code agent memory scope; Codex has no per-agent memory",
+      "isolation": "Claude Code worktree isolation for the agent; Codex has no equivalent key",
+      "tools": "a Claude Code tool ALLOW-LIST. Codex has no per-agent tool restriction, so a read-only reviewer is read-only by instruction only — recorded in docs/guides/codex-cli-support-matrix.md",
+      "skills": "skills preloaded for the agent under Claude Code; under Codex the agent invokes a skill by name",
+      "mcpServers": "per-agent MCP server selection; Codex agents see the session's servers",
+      "maxTurns": "Claude Code turn cap; no Codex key",
+      "hooks": "agent-scoped Claude Code hooks (e.g. block-writes.sh on the read-only reviewers). Codex has no agent-scoped hooks, so that enforcement is ABSENT for Codex agents — recorded in the support matrix"
+    }
   },
   "hooks": {
     "source": ".claude/settings.json",
@@ -23,6 +33,9 @@
     "adapter": ".codex/hooks/run-claude-hook.mjs",
     "conditions": ".codex/hook-conditions.json",
     "scriptDir": ".claude/hooks",
+    "patchTimeoutFactor": 10,
+    "adapterOverheadSeconds": 5,
+    "maxTimeoutSeconds": 600,
     "droppedHandlerKeys": {
       "async": "Codex skips a handler marked async outright (hooks/src/engine/discovery.rs: 'async hooks are not supported yet'), so copying the key would un-wire the hook. It is dropped and the hook runs synchronously, bounded by its own `timeout` and by its group's `if` condition, which the adapter applies. Today that is only post-push-resolve-comments.sh: up to 30s, after a command containing `git push`"
     },
