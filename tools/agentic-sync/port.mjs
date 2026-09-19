@@ -442,7 +442,8 @@ const REF = /(?<![A-Za-z0-9_.])(\.(?:claude|codex|agents|github)\/[A-Za-z0-9_@./
 const LEAD_CHARS = /[A-Za-z0-9_.~/:-]/;
 
 function refCandidate(text, index, raw) {
-  // The path text immediately before the match, e.g. `web/`, `~/`, `/home/x/`.
+  // The path text immediately before the match: a relative prefix (`web/`), a
+  // home prefix (`~/`), or the front of an absolute path.
   let start = index;
   while (start > 0 && LEAD_CHARS.test(text[start - 1])) start -= 1;
   const lead = text.slice(start, index);

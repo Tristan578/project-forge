@@ -4,19 +4,28 @@
 
 **Before writing ANY code, you MUST have a ticket.** This is non-negotiable and applies to every contributor and every AI tool in this repo.
 
-### Workflow (enforced by hooks)
+### Workflow (hooks are wired — you are still responsible)
 
-The shared enforcement scripts in `.claude/hooks/` run under Codex through
-`.codex/hooks.json`: session start, prompt submit, before and after every shell
-command and file edit, subagent start/stop, compaction, and stop. That file is
-**generated** from `.claude/settings.json` — never edit it; see
+The shared enforcement scripts in `.claude/hooks/` are wired for Codex in
+`.codex/hooks.json`: session start, prompt submit, before and after shell
+commands and file edits, subagent start/stop, pre-compaction, and stop. That
+file is **generated** from `.claude/settings.json` — never edit it; see
 `docs/guides/codex-cli-support-matrix.md` for what is wired, what Codex cannot
 express, and why.
 
+**Do not assume a hook ran.** This wiring has been tested outside Codex but not
+yet confirmed inside a live session, hooks run only after the one-time approval
+below, and on Windows they silently do nothing if Codex was not started at the
+repository root. Follow the rules in this file yourself; the hooks are a second
+line, not a replacement. If you were not shown the session-start backlog, the
+hooks are not running — do the manual steps under **If hooks are not running**.
+
 **One-time setup per checkout — hooks do nothing until you do this:**
 
-1. Start Codex **at the repository root**. The Windows hook commands and the
-   taskboard MCP server use paths relative to the directory Codex starts in.
+1. Start Codex **at the repository root**. On Windows the hook commands are
+   paths relative to the directory Codex starts in; started anywhere else, every
+   hook fails to find the adapter, Codex reports the run as failed and carries
+   on — so blocking hooks do not block, and nothing says so.
 2. Trust the project when Codex asks (or set `trust_level = "trusted"` for this
    path in `~/.codex/config.toml`). An untrusted project's `.codex/` layer is
    loaded but disabled.
@@ -36,9 +45,19 @@ Windows) and `jq`, which most of the shared scripts use to read their input.
 3. Ensure the ticket passes validation (see Required Ticket Fields below)
 4. Move the ticket to `in_progress`
 
-#### Still manual under Codex
+#### Always manual under Codex
 - After `git worktree add`: `bash .claude/hooks/worktree-setup.sh` (Codex has no
   worktree-created event).
+- After a compaction, re-read `.claude/rules/lessons-learned.md` and the rule
+  file for the area you are in. Claude Code re-injects a digest at that point;
+  Codex's post-compaction hook cannot carry text to the model.
+
+#### If hooks are not running
+```bash
+bash .claude/hooks/on-session-start.sh   # start of session: taskboard, GitHub pull, backlog
+bash .claude/hooks/post-edit-lint.sh      # after editing files under web/
+bash .claude/hooks/on-stop.sh             # after completing work: ticket validation, GitHub push
+```
 
 ## Planning
 

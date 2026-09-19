@@ -4,85 +4,126 @@ What of the `.claude/` harness runs under OpenAI Codex CLI in this repository,
 what does not, and what stands in for the part that does not. This is the
 retain/remove record #9745 asked for.
 
-**Everything Codex-facing is generated.** `tools/agentic-sync/port.mjs` derives it
-from `.claude/`; `scripts/check-codex-port.sh` fails a PR when the two differ.
-To change an agent, a skill or a hook: edit the source under `.claude/`, run
+**Everything Codex-facing except `.codex/config.toml` and `.codex/AGENTS.md` is
+generated.** `tools/agentic-sync/port.mjs` derives it from `.claude/`;
+`scripts/check-codex-port.sh` fails a PR when the two differ. To change an agent,
+a skill or a hook: edit the source under `.claude/`, run
 `node tools/agentic-sync/port.mjs --write`, commit both.
+
+## Status: wired and tested outside Codex; not yet run inside it
+
+The generator, the adapter and the gate are tested
+(`scripts/__tests__/check-codex-port.test.sh`), including the generated hook
+command executed end to end. **No part of this has been observed in a live
+Codex session**, because hooks need a logged-in session and a per-hook approval
+in `/hooks`. Until someone completes the [first-run checklist](#first-run-checklist)
+and corrects this file, read "ported" below as "wired to the verified contract",
+not "seen working". `.codex/AGENTS.md` keeps the manual fallback for that reason.
 
 ## What was verified, and how
 
 Codex's file formats were **not** inferred from Claude Code's. Each contract
 below was read from `openai/codex` at tag `rust-v0.144.1` — the version this was
 built against — and the file is named so the claim can be re-checked when the
-floor version moves.
+supported version moves. Nothing is claimed about any other version.
 
 | Contract | Source file (`codex-rs/…`) |
 |---|---|
 | Hooks are read from `<repo>/.codex/hooks.json` and the `[hooks]` table, per config layer; using both in one layer warns | `hooks/src/engine/discovery.rs`, `config/src/loader/mod.rs` |
 | Hook events: `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `SessionStart`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `Stop`. Unknown event keys are ignored, not rejected | `config/src/hook_config.rs` |
-| Handler fields `type`, `command`, `commandWindows`, `timeout` (seconds), `statusMessage`; matchers are ignored for `UserPromptSubmit` and `Stop` | `config/src/hook_config.rs` |
+| Handler fields `type`, `command`, `commandWindows`, `timeout` (seconds), `statusMessage`, `async`. A handler marked `async` is **skipped** ("async hooks are not supported yet"). Matchers are ignored for `UserPromptSubmit` and `Stop` | `config/src/hook_config.rs`, `hooks/src/engine/discovery.rs` |
 | A file edit is reported as tool `apply_patch`; `Edit`/`Write` are matcher aliases only. Shell is `Bash` | `core/src/tools/hook_names.rs` |
 | Hook stdin carries `tool_name`, `tool_input`, `cwd`, `hook_event_name`, … — and **no** `file_path`; no `TOOL_INPUT_*` environment variables | `hooks/src/events/pre_tool_use.rs` |
-| Exit 2 **with** stderr blocks. `additionalContext`, `systemMessage` and `permissionDecision: "deny"` are honoured. `permissionDecision: "allow"`/`"ask"`, `decision: "approve"`, `continue`, `stopReason`, `suppressOutput` mark the hook run Failed | `hooks/src/events/pre_tool_use.rs` |
+| **Only exit 2 with non-empty stderr blocks.** Any other non-zero exit marks the run Failed and the action proceeds | `hooks/src/events/pre_tool_use.rs` |
+| Plain (non-JSON) stdout is dropped. Each event accepts its own `deny_unknown_fields` JSON shape: `additionalContext` on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`; top-level `decision`/`reason` on `UserPromptSubmit`, `PostToolUse`, `SubagentStop`, `Stop`; **`PreCompact` and `PostCompact` accept neither** | `hooks/src/schema.rs`, `hooks/src/events/compact.rs` |
+| `permissionDecision: "allow"`/`"ask"`, `decision: "approve"` and `updatedInput` mark a `PreToolUse` run Failed | `hooks/src/events/pre_tool_use.rs` |
+| Patch file headers are matched on the **trimmed** line | `apply-patch/src/streaming_parser.rs` |
 | Subagents are `*.toml` under `.codex/agents/`; `name`, `description`, `developer_instructions` are required | `core/src/config/agent_roles.rs` |
-| Skills are discovered from `.agents/skills/`; there is no configurable extra directory | `core-skills/src/loader.rs` |
+| Skills are discovered from `.agents/skills/` (and the project layer's `.codex/skills/`); there is no configurable extra directory | `core-skills/src/loader.rs` |
 | `[mcp_servers.<name>]` accepts `command`, `args`, `env`, `env_vars`, `default_tools_approval_mode` (`auto` \| `prompt` \| `writes` \| `approve`), `enabled_tools`, `disabled_tools` | `config/src/mcp_types.rs` |
 | Under `approval_policy = "never"` an MCP call is auto-approved only when the tool is `approve` or the sandbox has full disk write access | `codex-mcp/src/mcp/mod.rs` |
 | Codex does not read a project `.mcp.json` | source search; it appears only as a plugin default |
 
-**Not verified:** any of this running inside a live Codex session. The generator,
-the adapter and the gate are tested (`scripts/__tests__/check-codex-port.test.sh`);
-a Codex session calling them is not, because hooks need per-hook approval in
-`/hooks` and a logged-in session. The first contributor to use this should
-confirm the four items under [First-run checklist](#first-run-checklist) and
-correct this file.
-
 ## Hooks
 
 `.codex/hooks.json` runs each shared `.claude/hooks/*.sh` script through
-`.codex/hooks/run-claude-hook.mjs`. The adapter exists because of one line in the
-table above: Codex sends an edit as `apply_patch` with the patch text and no
-`file_path`, and every Edit/Write hook here begins with "no `file_path` → exit
-0". Called directly, all nine would pass on every edit and read as enforcement.
-The adapter parses the patch and runs the script once per written file, with the
-payload the script expects; if it cannot find a path in a patch it fails rather
-than letting the check pass on nothing.
+`.codex/hooks/run-claude-hook.mjs`. The adapter exists because three rows of the
+table above fail *silently* if ignored:
 
-### Ported (31 handlers)
+- **No `file_path`.** Every Edit/Write hook here begins with "no `file_path` →
+  exit 0". Called directly, all nine would pass on every edit and read as
+  enforcement. The adapter parses the patch — trimming header lines exactly as
+  Codex's parser does, or an indented header would hide a hunk — and runs the
+  script once per **touched** path: added, updated and deleted files, and both
+  ends of a move.
+- **Only exit 2 blocks.** If the adapter itself cannot do its job on
+  `PreToolUse` (unreadable payload, no path found in a patch, script or bash
+  missing) it exits 2 with the reason. Exit 1 there would let the action
+  through. A *script* that crashes exits 1, as it does under Claude Code.
+- **Plain text is dropped.** Most advisory hooks here print a warning as text.
+  The adapter wraps it as `additionalContext` on the events that accept it, and
+  translates a JSON block into the shape each event takes.
+
+It also applies the `if` conditions from `.claude/settings.json`
+(`Bash(git push *)` and four others), which Codex has no key for, from the
+generated `.codex/hook-conditions.json`. Matching is deliberately generous — the
+literal before the first `*` is looked for anywhere in the command — because
+running a script that then finds nothing to do is harmless and not running one
+that would have blocked is not.
+
+### Ported (29 handlers)
 
 | Claude event | Codex event | Scripts |
 |---|---|---|
 | `SessionStart` | `SessionStart` | `on-session-start.sh` |
 | `UserPromptSubmit` | `UserPromptSubmit` | `on-prompt-submit.sh` |
 | `PreToolUse` `Edit\|Write\|Bash` | `PreToolUse` `apply_patch\|Bash` | `inject-lessons-learned.sh` |
-| `PreToolUse` `Bash` | `PreToolUse` `Bash` | `pre-push-quality-gate.sh`, `block-main-commits.sh`, `check-pr-metadata.sh`, `check-docs-quality.sh`, `block-deferred-fixes.sh` |
+| `PreToolUse` `Bash` | `PreToolUse` `Bash` | `pre-push-quality-gate.sh`, `block-main-commits.sh`, `check-pr-metadata.sh`, `check-docs-quality.sh`, `block-deferred-fixes.sh` (each with its `if` condition) |
 | `PreToolUse` `Edit\|Write` | `PreToolUse` `apply_patch` | `verify-branch.sh`, `check-db-transaction.sh`, `check-sanitization-patterns.sh`, `check-vercel-json.sh` |
 | `PostToolUse` `Edit\|Write` | `PostToolUse` `apply_patch` | `auto-lockfile-sync.sh`, `post-edit-lint.sh`, `check-arch.sh`, `check-route-has-test.sh`, `cargo-check-wasm.sh` |
-| `PostToolUse` `Bash` | `PostToolUse` `Bash` | `post-commit-clean.sh`, `post-merge-doc-check.sh`, `post-push-resolve-comments.sh` |
+| `PostToolUse` `Bash` | `PostToolUse` `Bash` | `post-commit-clean.sh`, `post-merge-doc-check.sh`, `post-push-resolve-comments.sh` (`if: Bash(git push *)`; `async` dropped, so it runs synchronously for up to 30 s after a push) |
 | `SubagentStart` / `SubagentStop` | same | `log-agent-start.sh`; `validate-agent-output.sh`, `reject-incomplete-review.sh` |
-| `PreCompact` / `PostCompact` | same | `save-critical-context.sh`; `restore-context-hints.sh`, `inject-post-compact.sh` |
+| `PreCompact` | `PreCompact` | `save-critical-context.sh` — it writes a snapshot file; that side effect works, its stdout goes nowhere |
 | `Stop` | `Stop` | `on-stop.sh`, `lessons-learned-reminder.sh`, `builder-quality-gate.sh`, `review-quality-gate.sh`, `worktree-safety-commit.sh` |
 
 ### Not ported, and what covers the gap
 
-| Claude hook | Why Codex cannot run it | Compensating workflow |
+| Claude mechanism | Why Codex cannot run it | Compensating workflow |
 |---|---|---|
-| `auto-approve-safe-commands.sh` (`PreToolUse` `Bash`) | Its entire output is `permissionDecision: "allow"`, which Codex rejects — the hook run is marked Failed. Codex has no hook-driven approval | Approvals come from `approval_policy` and the sandbox in `.codex/config.toml` |
+| `PostCompact` → `restore-context-hints.sh`, `inject-post-compact.sh` | Both exist only to put context back in front of the model. Codex's `PostCompact` output accepts no context field and drops plain text, so they would run and change nothing | **Instruction only:** `.codex/AGENTS.md` tells the agent to re-read `.claude/rules/lessons-learned.md` after a compaction |
+| `auto-approve-safe-commands.sh` (`PreToolUse` `Bash`) | Its entire output is `permissionDecision: "allow"`, which marks the run Failed. Codex has no hook-driven approval | Approvals come from `approval_policy` and the sandbox in `.codex/config.toml` |
+| `permissions.deny` (Edit/Write on `.claude/settings.json` and `.codex/config.toml`) | A Claude Code permission rule, not a hook; Codex has no equivalent this repository configures | **None.** Under the committed profile (`approval_policy = "never"`, workspace writes allowed) nothing in this repository stops a Codex session editing either file. Whether Codex's sandbox protects `.codex/` was not checked. Review any change to those two files |
 | `TaskCreated` → `validate-task-metadata.sh` | No such event | The taskboard validates tickets; `on-stop.sh` (ported) re-checks on `Stop` |
 | `TaskCompleted` → `validate-task-completion.sh` | No such event | `on-stop.sh` on `Stop` |
 | `WorktreeCreate` → `worktree-setup.sh` | No such event | Run `bash .claude/hooks/worktree-setup.sh` by hand after `git worktree add` (stated in `.codex/AGENTS.md`) |
-| `SessionEnd` → `on-stop.sh` | Absent from 0.144.1 (present from 0.155) | The same script already runs on `Stop`. Move it into `supportedEvents` in `tools/agentic-sync/port.json` when the floor version rises |
+| `SessionEnd` → `on-stop.sh` | Not an event 0.144.1 accepts; an unknown event key is silently ignored | The same script runs on `Stop` |
 | `ConfigChange` → `detect-settings-drift.sh` | No such event | Codex reviews hook changes itself: a changed hook loses its trusted hash and does not run until re-approved in `/hooks` |
 | `InstructionsLoaded`, `CwdChanged` → `inject-dynamic-context.sh` | No such events | The same context is reachable from `.codex/AGENTS.md` |
 | `FileChanged` (`.env`) → `env-change-warning.sh` | No such event | None. A `.env` edit made through Codex still passes the `apply_patch` hooks |
 | `StopFailure`, `PostToolUseFailure` → `rate-limit-backoff.sh` | No such events | None needed; the script only adds advisory context |
 
-Adding a hook to `.claude/settings.json` on an event that is in neither list
-**fails the generator** until someone decides which list it belongs in. That is
-deliberate: the first port wired 26 of 39 hooks and nothing said so.
+Adding a hook to `.claude/settings.json` on an event in neither list — or with a
+group or handler key the generator has not classified — **fails the generator**
+until someone decides where it belongs. That is deliberate: the first port wired
+26 of 39 hooks and nothing said so.
 
 ### Limits to know about
 
+- **Started anywhere but the repository root on Windows, every hook silently
+  does nothing.** The POSIX commands resolve the adapter from
+  `git rev-parse --show-toplevel`. The Windows commands cannot: Codex runs hooks
+  through the session shell, which may be `cmd` or PowerShell, and no quoting of
+  `$(…)` survives both — so `commandWindows` is relative to the directory Codex
+  started in. From any other directory `node` cannot find the adapter and exits
+  1, which Codex reports as Failed **and proceeds**. Blocking hooks then do not
+  block. Start Codex at the root.
+- **`[features] shell_tool = false` is set in the committed `.codex/config.toml`.**
+  Ten of the 29 handlers match `Bash`, including the four policy hooks
+  (`block-main-commits`, `check-pr-metadata`, `pre-push-quality-gate`,
+  `block-deferred-fixes`), and every generated agent is told to use shell
+  commands. What that flag leaves available under 0.144.1, and therefore whether
+  those hooks can ever fire under this profile, was **not** established. It is
+  item 5 of the checklist.
 - **Per-hook trust.** Codex stores a hash per hook under `[hooks.state]` in the
   user config. A new hook, or one whose command changed, is listed in `/hooks`
   and does not run until approved there. After pulling a change to
@@ -92,14 +133,8 @@ deliberate: the first port wired 26 of 39 hooks and nothing said so.
 - **Linked worktrees read the main checkout's hooks.** Codex replaces a
   worktree's hooks with those of the root checkout, so a hook change is only
   exercised from the main checkout.
-- **Start Codex at the repository root.** The POSIX hook commands resolve the
-  adapter from `git rev-parse --show-toplevel`. The Windows commands cannot: Codex
-  runs hooks through the session shell, which may be `cmd` or PowerShell, and no
-  quoting of `$(…)` survives both — so `commandWindows` is a path relative to
-  the directory Codex started in. The taskboard MCP entry has the same
-  constraint.
-- **Subagents do not inherit project hooks under Claude Code.** That gap
-  (`.claude/rules/gotchas-ops.md`) was not re-measured for Codex.
+- **Subagents.** Under Claude Code, project hooks do not fire for subagents
+  (`.claude/rules/gotchas-ops.md`). Whether they do under Codex was not measured.
 - **`jq`.** Most shared scripts parse their input with `jq`. Without it they
   take their "nothing to inspect" branch.
 
@@ -121,49 +156,64 @@ Thirteen generated from `.claude/agents/*.md`, one hand-authored.
 - `code-architect.toml` is hand-authored: under Claude Code that seat is the
   `feature-dev:code-architect` plugin agent, which has no file in this
   repository to generate from. It is listed under `agents.handAuthored` in
-  `tools/agentic-sync/port.json`.
+  `tools/agentic-sync/port.json`; any other `.toml` there that the generator did
+  not write is reported as `extra`.
 
 ## Skills
 
 The 35 project skills under `.claude/skills/` are mirrored byte-for-byte into
-`.agents/skills/`, the only place Codex looks.
+`.agents/skills/`. The check is two-directional: a stale file, a missing file and
+a hand-added file inside a mirrored directory all fail it.
 
 - **Why a copy and not a symlink.** Codex follows directory symlinks, and this
   repository already links the other way for third-party skills
   (`.claude/skills/tdd` → `.agents/skills/tdd`). But with `core.symlinks=false`
   — the Git for Windows default — a link checks out as a text file, so the
   skills would not exist on the platform Codex is used on here.
-- **Not mirrored:** `game-engine`, `kanban` and `web-accessibility` exist as real
-  directories on both sides and have drifted. Which side is canonical is
-  undecided, so the generator leaves both alone (`skills.independent`).
+- **Not mirrored, and not yet resolved (#10131):** `game-engine`, `kanban` and
+  `web-accessibility` exist as real directories on both sides and have drifted.
+  Which side is canonical is undecided, so the generator leaves both alone
+  (`skills.independent`). For these three, what a Codex user loads is **not** the
+  Claude Code copy.
+- A symlink inside a skill is dereferenced, and may only point at a file git
+  tracks — the target's content is copied into a tracked file.
 - Executable bits follow the source. On a checkout with `core.fileMode=false`,
   `--write` repairs the index entry of any staged mirror whose mode differs.
 
 ## MCP servers
 
-Codex does not read `.mcp.json`; servers are restated in `.codex/config.toml`
-and `scripts/check-codex-port.sh` fails when the two declare different server
-names. `.codex/config.toml` is guarded by a `deny` rule in
-`.claude/settings.json`, so it is edited by a person, not by an assistant.
+**`.codex/config.toml` declares no MCP servers today**, so a Codex session in
+this repository has none of the servers in `.mcp.json` — Codex does not read that
+file. The gate says so on every run and starts enforcing parity of server
+**names** from the first `[mcp_servers.*]` table that is added.
 
-- Secrets are forwarded by **name** with `env_vars`; `${VAR}` interpolation is a
-  Claude Code feature and Codex would pass the literal text.
-- Every server that holds a credential or reaches the network is
-  `default_tools_approval_mode = "prompt"`. The committed profile runs with
-  `approval_policy = "never"`; per the last-but-one row of the table above that
-  does not auto-approve MCP calls under the workspace-write sandbox, and
-  `"prompt"` is stated so a Stripe refund or a Neon branch delete stays
-  human-gated if that default ever moves.
+`.codex/config.toml` is covered by a `deny` rule in `.claude/settings.json`,
+which stops *Claude Code* editing it; that rule does nothing under Codex (see
+the `permissions.deny` row above). Adding the servers is therefore a hand edit,
+tracked by #8767. What the contract rows above imply for whoever makes it:
+
+- Forward secrets by **name** with `env_vars`. `${VAR}` interpolation is a Claude
+  Code feature; Codex would pass the literal text.
+- The committed profile runs with `approval_policy = "never"`. Per the contract
+  table that does not auto-approve MCP calls under the workspace-write sandbox,
+  but set `default_tools_approval_mode = "prompt"` on every server that holds a
+  credential or reaches the network anyway, so a Stripe refund or a Neon branch
+  delete stays human-gated if that default moves.
+- A relative `command`/`args` path resolves against the directory Codex started
+  in, not the repository root.
 
 ## First-run checklist
 
 Unverified until someone does it; correct this file with what you find.
 
-1. Started at the repo root and trusted, does `/hooks` list 31 handlers, and do
+1. Started at the repo root and trusted, does `/hooks` list 29 handlers, and do
    they run once approved?
 2. On Windows, which shell runs `commandWindows`, and does the relative path
    resolve?
 3. Does an `apply_patch` edit to a file under `web/src/lib/` containing
-   `db.transaction(` surface the `check-db-transaction.sh` warning?
+   `db.transaction(` surface the `check-db-transaction.sh` warning to the model?
 4. Does `$review-protocol` resolve, and does `spawn_agent` accept
    `security-reviewer`?
+5. With `shell_tool = false` as committed, can the agent run a shell command at
+   all, and does a `Bash`-matched hook (`block-main-commits.sh` on a commit to
+   `main`) fire and block?

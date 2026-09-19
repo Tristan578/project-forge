@@ -170,7 +170,7 @@ All hooks live in `.claude/hooks/` and are called by each tool's config:
 | `sync-to-github.sh` | Push local changes to GitHub Project | Called by on-stop |
 | `sync-from-github.sh` | Pull GitHub changes to local | Called by on-session-start |
 
-**Tool hook support**: Claude Code, Copilot, Gemini CLI, and Windsurf run these automatically via their hook configs. Codex CLI and Antigravity do not support hooks — developers must run the scripts manually (see `.codex/AGENTS.md` or `.agent/rules/taskboard-sync.md`).
+**Tool hook support**: Claude Code, Copilot, Gemini CLI, and Windsurf run these automatically via their hook configs. Codex CLI runs them through `.codex/hooks.json` (generated from `.claude/settings.json`), but only once its hooks have been approved in `/hooks` — until then, and until that wiring has been confirmed in a live session, run the scripts manually as `.codex/AGENTS.md` describes. Antigravity does not support hooks — run the scripts manually (see `.agent/rules/taskboard-sync.md`).
 
 **Antigravity config**: `.agent/rules/` (project rules + taskboard enforcement) + `.agent/skills/` (kanban, sync-push, sync-pull). See `.agent/rules/project.md` for full architecture and coding standards.
 

@@ -270,9 +270,9 @@ SpawnForge is designed for **AI-assisted development**. Six AI coding tools are 
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `.gemini/` | Automatic | `.agents/skills/` | `gemini-3.1-pro-preview` |
 | [Windsurf](https://windsurf.com) | `.windsurf/` | Automatic | `.windsurf/workflows/` | App-managed |
 | [Google Antigravity](https://antigravity.google) | `.agent/` + `.gemini/` | Manual | `.agent/skills/` | Gemini 3 |
-| [OpenAI Codex CLI](https://github.com/openai/codex) | `.codex/` | Automatic after a one-time `/hooks` approval | `.agents/skills/` | `gpt-5.3-codex` |
+| [OpenAI Codex CLI](https://github.com/openai/codex) | `.codex/` | Wired; run only after a one-time `/hooks` approval (not yet confirmed in a live session) | `.agents/skills/` | `gpt-5.3-codex` |
 
-**First-time setup:** Install the [taskboard binary](https://github.com/tcarac/taskboard/releases), then open the repo in your AI tool. Tools with automatic hooks will self-configure on first session. Tools without hooks (Codex, Antigravity) include manual workflow instructions in their `AGENTS.md` files.
+**First-time setup:** Install the [taskboard binary](https://github.com/tcarac/taskboard/releases), then open the repo in your AI tool. Tools with automatic hooks will self-configure on first session. Codex needs a one-time approval of its hooks in `/hooks` first (see `.codex/AGENTS.md`); Antigravity has no hooks and carries manual workflow instructions in its rules.
 
 ### Quick Start by Tool
 
@@ -344,7 +344,7 @@ Skills in `.agent/skills/` (singular — Antigravity uses `.agent/`, not `.agent
 <summary><strong>OpenAI Codex CLI</strong></summary>
 
 ```bash
-cd project-forge   # start Codex at the repo root — hook and MCP paths depend on it
+cd project-forge   # start Codex at the repo root — on Windows the hook commands are relative to it
 codex              # reads .codex/config.toml, .codex/AGENTS.md, .codex/hooks.json, .codex/agents/
 ```
 Hooks run the shared `.claude/hooks/` scripts, but only after a one-time approval: trust the project, then open `/hooks` and approve them (Codex re-asks whenever a hook's command changes). Config in `.codex/config.toml`. Subagents in `.codex/agents/`, skills in `.agents/skills/` — both **generated** from `.claude/` by `node tools/agentic-sync/port.mjs --write`, never hand-edited. What is wired, what Codex cannot express, and what was verified: `docs/guides/codex-cli-support-matrix.md`. Full enforcement rules in `.codex/AGENTS.md`.
@@ -539,9 +539,12 @@ project-forge/
 │   ├── rules/taskboard.md       #   Ticket enforcement rules
 │   └── workflows/               #   sync-push.md, sync-pull.md
 └── .codex/                      # OpenAI Codex CLI
-    ├── config.toml              #   Model (gpt-5.3-codex), approval policy, sandbox
-    ├── AGENTS.md                #   Full instructions (no hooks, so rules are inline)
-    └── skills/                  #   kanban, sync-push, sync-pull
+    ├── config.toml              #   Model (gpt-5.3-codex), approval policy, sandbox (hand-edited)
+    ├── AGENTS.md                #   Full instructions
+    ├── agents/                  #   Subagents — GENERATED from .claude/agents/
+    ├── hooks.json               #   Hook wiring — GENERATED from .claude/settings.json
+    ├── hook-conditions.json     #   The `if` conditions of those hooks — GENERATED
+    └── hooks/run-claude-hook.mjs #  Adapter: Codex hook payload → shared .claude/hooks scripts
 ```
 
 ## Contributing
