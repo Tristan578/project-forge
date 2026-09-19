@@ -63,6 +63,9 @@ for rule in bevy-api.md entity-snapshot.md web-quality.md library-apis.md file-m
 printf '// Fixture\n' > "$audit_project/tools/agentic-sync/sync.mjs"
 printf '{}\n' > "$audit_project/tools/agentic-sync/canonical.json"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$audit_project/scripts/check-agentic-sync.sh"
+# The audit delegates to a SECOND gate, the Codex CLI surface (#9745), and fails
+# when that gate is missing — so the minimal project carries a stub of it too.
+printf '#!/usr/bin/env bash\nexit 0\n' > "$audit_project/scripts/check-codex-port.sh"
 mkdir -p "$audit_project/.claude/skills/frontend" "$audit_project/.agents/skills/frontend" "$audit_project/.codex/skills/design"
 printf '# Fixture validate-\n' > "$audit_project/.agents/skills/frontend/SKILL.md"
 printf '# Fixture validate-\n' > "$audit_project/.codex/skills/design/SKILL.md"
