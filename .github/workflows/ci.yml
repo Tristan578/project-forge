@@ -153,7 +153,13 @@ jobs:
           # matcher below also lists `^\.claude/` — the lightweight
           # onboarding-guard + lockfile-sync-tests self-tests. All three are fast,
           # self-contained checks; the fan-out is what stays gated off.
-          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$' && hooks=true
+          # The Codex hook adapter and the generator behind it count as hook code: they
+          # are what runs the scripts above under Codex, and several of their branches
+          # (the git-for-Windows bash lookup, junction entry paths, the
+          # core.fileMode=false index repair) execute ONLY on Windows. Without these
+          # two patterns a change to either fired `agentic` — a Linux job — and never
+          # `hook-tests-windows`, so a Windows-only regression merged green.
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$|^\.codex/hooks/|^tools/agentic-sync/port\.' && hooks=true
           # Any package.json at ANY depth (web/, mcp-server/, apps/*, packages/*,
           # root) or the single root lockfile → run the lockfile-sync gate. Kept
           # ORTHOGONAL to any-code (like hooks): the gate is a ~30s self-contained

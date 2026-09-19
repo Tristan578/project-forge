@@ -234,7 +234,6 @@ for path in web/vitest.config.ts web/vitest.config.node.ts web/vitest.config.jsd
 done
 assert_output "lookalike outside web does not fire producer" "other/web/vitest.test-selection.ts" web false
 
-# ---- Empty diff -------------------------------------------------------------
 # ---- #9745: the Codex CLI surface gate runs in the agentic job --------------
 #
 # scripts/check-codex-port.sh regenerates .agents/skills, .codex/agents and
@@ -271,10 +270,19 @@ assert_output "web source does NOT fire agentic" "web/src/app/page.tsx" agentic 
 assert_output "engine source does NOT fire agentic" "engine/src/lib.rs" agentic false
 assert_output "a docs file does NOT fire agentic" "docs/known-limitations.md" agentic false
 
+assert_output "the hook adapter fires hooks (so the Windows hook job runs)" ".codex/hooks/run-claude-hook.mjs" hooks true
+assert_output "the generator fires hooks (so the Windows hook job runs)" "tools/agentic-sync/port.mjs" hooks true
+assert_output "the generator manifest fires hooks" "tools/agentic-sync/port.json" hooks true
+assert_output "the OTHER agentic generator does NOT fire hooks" "tools/agentic-sync/sync.mjs" hooks false
+assert_output "a generated agent does NOT fire hooks" ".codex/agents/security-reviewer.toml" hooks false
+
+# ---- Empty diff -------------------------------------------------------------
 echo "--- empty diff ---"
 assert_output "empty diff leaves docs false" "" docs false
 assert_output "empty diff leaves any-code false" "" any-code false
 assert_output "empty diff leaves deps false" "" deps false
+assert_output "empty diff leaves agentic false" "" agentic false
+assert_output "empty diff leaves hooks false" "" hooks false
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

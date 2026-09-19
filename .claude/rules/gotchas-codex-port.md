@@ -1,0 +1,26 @@
+---
+description: The Codex CLI surface gate — what is generated from .claude/, how to regenerate it, and what to decide when adding a hook, a skill or an agent.
+paths:
+  - ".claude/skills/**"
+  - ".claude/agents/**"
+  - ".claude/settings.json"
+  - ".claude/hooks/**"
+  - ".agents/skills/**"
+  - ".codex/**"
+  - ".mcp.json"
+  - "tools/agentic-sync/**"
+  - "scripts/check-codex-port.sh"
+  - "scripts/__tests__/check-codex-port.test.sh"
+---
+
+# Gotchas — the generated Codex CLI surface
+
+Its own file, not an entry in `gotchas-build-ci.md`, because it has to load where its
+SOURCES are edited (skills, agents, hooks) and that file is far too large to load there.
+
+- **Codex CLI surface drift: edit a skill, an agent or a hook under `.claude/` without regenerating and `Agentic Config Sync` goes red.** The FIFTH generated-artifact sync gate, and the one whose sources are the files agents edit most. The project skills under `.agents/skills/`, `.codex/agents/*.toml`, `.codex/hooks.json` and `.codex/hook-conditions.json` are GENERATED from `.claude/skills/`, `.claude/agents/*.md` and the `hooks` block of `.claude/settings.json` by `tools/agentic-sync/port.mjs` (#9745). They replaced a hand-copied port that rotted inside a week — 143 references to `.Codex/rules` and friends (directories that do not exist), 26 of 39 hooks wired, copies already drifted — and was quarantined in `.gitignore`.
+  - **Detection / wiring:** `scripts/check-codex-port.sh` runs the generator in `--check` mode inside the `agentic-sync` job, gated on ci-gate's `needs-agentic`, whose filter names the SOURCES and everything the check READS (`.claude/skills|agents|rules|hooks|tools/`, `.claude/settings.json`, `.claude/CLAUDE.md`, `.agents/skills/`, `.codex/`, `.github/`, `.mcp.json`) — a filter naming only the generated side would let a skill edit merge with a stale mirror. It reports `missing`/`stale`/`orphan`/`extra`/`mode` (drift, in both directions), `ref` (a repository path named in any `.codex/` file that does not exist, CASE-EXACTLY — `existsSync('.Codex/rules')` is true on a case-insensitive filesystem) and `mcp` (`.mcp.json` and `.codex/config.toml` declare different server names; Codex never reads `.mcp.json`). Exit 2 = could not run, including the deliberate hard errors: a hook EVENT, SCRIPT, or group/handler KEY in `.claude/settings.json` that `tools/agentic-sync/port.json` does not classify. That is the point — Claude Code adding a hook key must not silently change what Codex enforces. Unit-tested by `scripts/__tests__/check-codex-port.test.sh` (hermetic via `CODEX_PORT_ROOT`; never set in CI, and the suite asserts that).
+  - **Fix any drift:** `node tools/agentic-sync/port.mjs --write`, then commit everything it regenerates WITH the source change (`.agents/skills/`, `.codex/agents/`, `.codex/hooks.json`, `.codex/hook-conditions.json`, `tools/agentic-sync/port.lock.json`). Never hand-edit a generated file; `ref` and `mcp` findings are fixed in the source or in the hand-written `.codex/` file, not by `--write`. **On Windows stage first, then run `--write` again:** `core.fileMode=false` stages every new file as 100644, and the generator can repair a mirrored script's executable bit only in an index entry that already exists (it prints how many it fixed).
+  - **Adding a hook to `.claude/settings.json`:** decide what it means under Codex in the same change. A new event goes in `supportedEvents` or `unsupportedEvents` (with the reason); a script that cannot work there goes in `skipScripts`. Codex blocks ONLY on exit 2 with stderr, drops plain-text stdout, has no `async` and no `if` — `docs/guides/codex-cli-support-matrix.md` records each contract with the `openai/codex` source file it was read from, and what has NOT been confirmed in a live session.
+- **A released file keeps its "GENERATED from" header until a person removes it.** When an agent is declared `agents.handAuthored` (or a skill `skills.independent`) the generator stops owning the file and drops it from the lock, but the text still says it is generated from a source that may no longer exist — and the `ref` check will say so. Taking a file over means taking its header over too.
+- **Codex has TWO edit channels.** A patch can arrive as tool `apply_patch`, or carried in a shell command (`apply_patch <<EOF … EOF`), which hooks see as `Bash`. The generator wires `PreToolUse` Edit/Write hooks for both (mode `edit`); `PostToolUse` cannot see the second channel at all, because that call carries no command. A new blocking check on file edits belongs on `PreToolUse`.

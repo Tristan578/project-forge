@@ -540,6 +540,7 @@ fi
 expect_rc 1 "…and the released file's stale 'GENERATED from' header is reported, not waved through"
 expect_out "unresolved path .claude/agents/demo.md" "…naming the dead source path"
 file_replace "$F/.codex/agents/demo.toml" '# GENERATED from .claude/agents/demo.md by tools/agentic-sync/port.mjs' '# HAND-AUTHORED (formerly generated); listed under agents.handAuthored in'
+# shellcheck disable=SC2016  # literal Markdown backticks in the text being replaced
 file_replace "$F/.codex/agents/demo.toml" 'This role is generated from `.claude/agents/demo.md`.' 'This role is maintained by hand.'
 gen "$F" --check; expect_rc 0 "once the person takes the header over, the tree checks clean with the agent hand-authored"
 

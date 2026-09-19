@@ -46,18 +46,26 @@ Windows) and `jq`, which most of the shared scripts use to read their input.
 4. Move the ticket to `in_progress`
 
 #### Always manual under Codex
-- After `git worktree add`: `bash .claude/hooks/worktree-setup.sh` (Codex has no
-  worktree-created event).
+- After `git worktree add` (Codex has no worktree-created event). The script
+  reads the new worktree's path from a JSON payload on stdin — run bare, it
+  prints "No worktree_path in event" and does nothing. From the MAIN checkout
+  (needs `jq`):
+  ```bash
+  printf '{"worktree_path":"%s"}' "/absolute/path/to/the/new/worktree" | bash .claude/hooks/worktree-setup.sh
+  ```
 - After a compaction, re-read `.claude/rules/lessons-learned.md` and the rule
   file for the area you are in. Claude Code re-injects a digest at that point;
   Codex's post-compaction hook cannot carry text to the model.
 
 #### If hooks are not running
 ```bash
-bash .claude/hooks/on-session-start.sh   # start of session: taskboard, GitHub pull, backlog
-bash .claude/hooks/post-edit-lint.sh      # after editing files under web/
-bash .claude/hooks/on-stop.sh             # after completing work: ticket validation, GitHub push
+bash .claude/hooks/on-session-start.sh                     # start of session: taskboard, GitHub pull, backlog
+(cd web && npx eslint --max-warnings 0 <the files you edited>) # after editing files under web/
+bash .claude/hooks/on-stop.sh                               # after completing work: ticket validation, GitHub push
 ```
+(`post-edit-lint.sh` is not in that list on purpose: it takes the edited file
+from a hook payload on stdin, so run by hand it lints nothing and exits 0. The
+`eslint` line above is what it would have run.)
 
 ## Planning
 

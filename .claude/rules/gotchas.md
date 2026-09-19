@@ -1,13 +1,14 @@
 # Extended Gotchas — Index
 
-The gotchas are split across four topic files so each loads only in sessions that touch
+The gotchas are split across five topic files so each loads only in sessions that touch
 its area (see the `paths:` frontmatter in each). This index is always loaded; the bodies
 are not. Existing cross-references of the form "`gotchas.md` → \<Section\>" resolve via
 the table below.
 
 | Section | Lives in | Loads when you touch |
 |---------|----------|----------------------|
-| Build & CI | `rules/gotchas-build-ci.md` | `.github/**`, `scripts/**`, manifests/lockfile, vitest configs, `web/next.config.ts`, `web/src/app/api/**`, `web/src/lib/**`, and everything the Codex-surface gate reads: `.claude/skills/**`, `.claude/agents/**`, `.claude/settings.json`, `.claude/rules/**`, `.claude/hooks/**`, `.claude/tools/**`, `.claude/CLAUDE.md`, `.agents/skills/**`, `.codex/**`, `.mcp.json`, `tools/agentic-sync/**` |
+| Build & CI | `rules/gotchas-build-ci.md` | `.github/**`, `scripts/**`, manifests/lockfile, vitest configs, `web/next.config.ts`, `web/src/app/api/**`, `web/src/lib/**` |
+| Codex CLI surface (the fifth generated-artifact gate) | `rules/gotchas-codex-port.md` | `.claude/skills/**`, `.claude/agents/**`, `.claude/settings.json`, `.claude/hooks/**`, `.agents/skills/**`, `.codex/**`, `.mcp.json`, `tools/agentic-sync/**` |
 | Database | `rules/gotchas-web.md` | `web/**`, `packages/**`, `apps/**`, `drizzle/**` |
 | API & Security | `rules/gotchas-web.md` | same as above |
 | WASM / CDN | `rules/gotchas-web.md` | same as above |

@@ -103,7 +103,7 @@ All hooks in `.claude/hooks/` must:
 | Stale version refs in docs | Agent reads wrong API, ships bug | Update immediately when upgrading |
 | Broken script paths in skills | Agent hits `not found`, wastes time | Run `dx-audit.sh` after any rename |
 | Missing `CLAUDE.md` entry for new skill | New agent sessions don't know it exists | Add to Skills section after every skill creation |
-| IDE config drift | Agents on different IDEs use different patterns | Sync all 4 configs after every skill change |
+| IDE config drift | Agents on different IDEs use different patterns | After every skill change, update the hand-written configs in the Cross-IDE table and run `node tools/agentic-sync/port.mjs --write` for the generated ones |
 | Undocumented gotchas | Same mistake repeated by every agent | Add to `.claude/rules/lessons-learned.md` immediately |
 | Ticket without user story or AC | Agent doesn't know what "done" looks like | Enforce template at ticket creation |
 
@@ -113,6 +113,6 @@ All hooks in `.claude/hooks/` must:
 |---------|------|---------|
 | Session start | audit | `bash .claude/skills/developer-experience/scripts/run-dx-audit.sh` |
 | Feature completed | dod | `bash .claude/tools/validate-all.sh` |
-| New skill added | refresh | Update all 4 IDE configs manually |
+| New skill added | refresh | Update the hand-written IDE configs, then `node tools/agentic-sync/port.mjs --write` and commit the mirror it generates under `.agents/skills/` |
 | New contributor | onboard | `bash .claude/tools/dx-audit.sh onboard` |
 | PR before merge | full | `bash .claude/tools/validate-all.sh` |

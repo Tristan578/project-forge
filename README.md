@@ -530,7 +530,7 @@ project-forge/
 │   └── prompts/                 #   sync-push.prompt.md, sync-pull.prompt.md
 ├── .gemini/                     # Gemini CLI (+ Antigravity model config)
 │   └── settings.json            #   Hooks + model (gemini-3.1-pro-preview)
-├── .agents/                     # Shared skills (Copilot + Gemini CLI)
+├── .agents/                     # Shared skills (Codex CLI + Copilot + Gemini CLI); the project skills here are GENERATED mirrors of .claude/skills/ — never hand-edit them
 │   ├── rules/taskboard-sync.md  #   Ticket enforcement rules
 │   └── skills/                  #   kanban, sync-push, sync-pull
 ├── .agent/                      # Google Antigravity (singular — NOT .agents/)

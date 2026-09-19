@@ -37,6 +37,7 @@ supported version moves. Nothing is claimed about any other version.
 | Hook events: `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`, `SessionStart`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`, `Stop`. Unknown event keys are ignored, not rejected | `config/src/hook_config.rs` |
 | Handler fields `type`, `command`, `commandWindows`, `timeout` (seconds), `statusMessage`, `async`. A handler marked `async` is **skipped** ("async hooks are not supported yet"). Matchers are ignored for `UserPromptSubmit` and `Stop` | `config/src/hook_config.rs`, `hooks/src/engine/discovery.rs` |
 | A file edit is reported as tool `apply_patch`; `Edit`/`Write` are matcher aliases only. Shell is `Bash` | `core/src/tools/hook_names.rs` |
+| **There is a second edit channel.** The exec tool reports `apply_patch <<EOF … EOF` to `PreToolUse` as tool `Bash` with the command text, and only afterwards intercepts it and applies it as a real patch. The `PostToolUse` call for that edit carries no command at all | `core/src/tools/handlers/unified_exec/exec_command.rs` |
 | Hook stdin carries `tool_name`, `tool_input`, `cwd`, `hook_event_name`, … — and **no** `file_path`; no `TOOL_INPUT_*` environment variables | `hooks/src/events/pre_tool_use.rs` |
 | **Only exit 2 with non-empty stderr blocks.** Any other non-zero exit marks the run Failed and the action proceeds | `hooks/src/events/pre_tool_use.rs` |
 | Plain (non-JSON) stdout is dropped. Each event accepts its own `deny_unknown_fields` JSON shape: `additionalContext` on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`; top-level `decision`/`reason` on `UserPromptSubmit`, `PostToolUse`, `SubagentStop`, `Stop`; **`PreCompact` and `PostCompact` accept neither** | `hooks/src/schema.rs`, `hooks/src/events/compact.rs` |
@@ -69,14 +70,25 @@ table above fail *silently* if ignored:
 - **One invocation, many files.** A `timeout` in `.claude/settings.json` bounds
   one file's check; one Codex hook invocation covers a whole patch. `hooks.json`
   therefore declares per-file × 10 (capped at 600 s) for `apply_patch` hooks and
-  per-file + 5 s for the rest, and hands the adapter both numbers. Each script
+  per-file + 5 s for the rest, and hands the adapter both numbers (a hook with
+  no `timeout` of its own gets 10 s per file rather than no bound). Each script
   run keeps its own per-file bound, and if the budget runs out with paths still
   unchecked the adapter blocks on `PreToolUse` — before Codex's own timeout
   fires, which would only mark the run Failed and let the edit through. A very
   large patch is told to split itself.
 - **Plain text is dropped.** Most advisory hooks here print a warning as text.
-  The adapter wraps it as `additionalContext` on the events that accept it, and
-  translates a JSON block into the shape each event takes.
+  The adapter wraps it as `additionalContext` on the events that accept it. On
+  the four that accept no context (`Stop`, `SubagentStop`, `PreCompact`,
+  `PostCompact`) it becomes a `systemMessage` — shown to the person, not the
+  model, which is the most those events allow. A JSON block is translated into
+  the shape each event takes, and when a script blocks (exit 2) with its reason
+  on stdout rather than stderr — `reject-incomplete-review.sh` does — that
+  stdout is forwarded as the reason.
+- **Two edit channels.** Because of the contract row above, the four
+  `PreToolUse` edit hooks are wired for `Bash` as well as `apply_patch`, in mode
+  `edit`: on a shell command they do nothing unless it carries a
+  `*** Begin Patch` envelope, which is then checked path by path like any other
+  patch. The cost is one short-lived `node` start per hook per shell command.
 
 It also applies the `if` conditions from `.claude/settings.json`, which Codex has
 no key for, from the generated `.codex/hook-conditions.json`: six hooks carry
@@ -98,8 +110,8 @@ that would have blocked is not.
 | `PostToolUse` `Edit\|Write` | `PostToolUse` `apply_patch` | `auto-lockfile-sync.sh`, `post-edit-lint.sh`, `check-arch.sh`, `check-route-has-test.sh`, `cargo-check-wasm.sh` |
 | `PostToolUse` `Bash` | `PostToolUse` `Bash` | `post-commit-clean.sh`, `post-merge-doc-check.sh`, `post-push-resolve-comments.sh` (`if: Bash(git push *)`; `async` dropped, so it runs synchronously for up to 30 s after a push) |
 | `SubagentStart` / `SubagentStop` | same | `log-agent-start.sh`; `validate-agent-output.sh`, `reject-incomplete-review.sh` |
-| `PreCompact` | `PreCompact` | `save-critical-context.sh` — it writes a snapshot file; that side effect works, its stdout goes nowhere |
-| `Stop` | `Stop` | `on-stop.sh`, `lessons-learned-reminder.sh`, `builder-quality-gate.sh`, `review-quality-gate.sh`, `worktree-safety-commit.sh` |
+| `PreCompact` | `PreCompact` | `save-critical-context.sh` — it writes a snapshot file; that side effect works. Anything it prints reaches the person as a `systemMessage`, never the model |
+| `Stop` | `Stop` | `on-stop.sh`, `lessons-learned-reminder.sh`, `builder-quality-gate.sh`, `review-quality-gate.sh`, `worktree-safety-commit.sh`. `Stop` and `SubagentStop` accept no context: the reminders `lessons-learned-reminder.sh`, `builder-quality-gate.sh` and (on `SubagentStop`) `validate-agent-output.sh` print are shown to the **person** as a `systemMessage`; under Claude Code they reach the model. A block (exit 2) works on both |
 
 ### Not ported, and what covers the gap
 
@@ -110,7 +122,7 @@ that would have blocked is not.
 | `permissions.deny` (Edit/Write on `.claude/settings.json` and `.codex/config.toml`) | A Claude Code permission rule, not a hook; Codex has no equivalent this repository configures | **None.** Under the committed profile (`approval_policy = "never"`, workspace writes allowed) nothing in this repository stops a Codex session editing either file. Whether Codex's sandbox protects `.codex/` was not checked. Review any change to those two files |
 | `TaskCreated` → `validate-task-metadata.sh` | No such event | The taskboard validates tickets; `on-stop.sh` (ported) re-checks on `Stop` |
 | `TaskCompleted` → `validate-task-completion.sh` | No such event | `on-stop.sh` on `Stop` |
-| `WorktreeCreate` → `worktree-setup.sh` | No such event | Run `bash .claude/hooks/worktree-setup.sh` by hand after `git worktree add` (stated in `.codex/AGENTS.md`) |
+| `WorktreeCreate` → `worktree-setup.sh` | No such event | By hand after `git worktree add`, **with its payload**: the script reads `{"worktree_path": …}` from stdin and does nothing when run bare. `.codex/AGENTS.md` has the exact command |
 | `SessionEnd` → `on-stop.sh` | Not an event 0.144.1 accepts; an unknown event key is silently ignored | The same script runs on `Stop` |
 | `ConfigChange` → `detect-settings-drift.sh` | No such event | Codex reviews hook changes itself: a changed hook loses its trusted hash and does not run until re-approved in `/hooks` |
 | `InstructionsLoaded`, `CwdChanged` → `inject-dynamic-context.sh` | No such events | The same context is reachable from `.codex/AGENTS.md` |
@@ -123,6 +135,13 @@ until someone decides where it belongs. That is deliberate: the first port wired
 26 of 39 hooks and nothing said so.
 
 ### Limits to know about
+
+- **`PostToolUse` cannot see a patch sent through the shell.** For the second
+  edit channel the `PostToolUse` payload carries no command, so the five
+  post-edit hooks (`post-edit-lint`, `check-arch`, `check-route-has-test`,
+  `cargo-check-wasm`, `auto-lockfile-sync`) do not run for an edit made as
+  `apply_patch <<EOF` in a shell command. The `PreToolUse` hooks do. A new
+  *blocking* check on file edits belongs on `PreToolUse` for that reason.
 
 - **Started anywhere but the repository root on Windows, every hook silently
   does nothing.** The POSIX commands resolve the adapter from
@@ -208,10 +227,15 @@ file, so "the lock names it" is not on its own a reason to delete anything.
   Which side is canonical is undecided, so the generator leaves both alone
   (`skills.independent`). For these three, what a Codex user loads is **not** the
   Claude Code copy.
-- A symlink inside a skill is dereferenced, and may only point at a file git
-  tracks — the target's content is copied into a tracked file.
-- Executable bits follow the source. On a checkout with `core.fileMode=false`,
-  `--write` repairs the index entry of any staged mirror whose mode differs.
+- **Only files git tracks are mirrored** — a stray `.env` or a `__pycache__`
+  beside a skill script does not ride into a tracked directory; `--write` lists
+  what it left out. A symlink inside a skill is dereferenced under the same
+  rule: it may only point at a tracked file.
+- Executable bits follow the source: from the file's mode on disk where git
+  trusts it (`core.fileMode=true`), from the index where it does not (Windows).
+  There, a newly mirrored script has no index entry to repair yet, so the first
+  `--write` names it and `--check` stays red until you `git add` and run
+  `--write` again — otherwise the drift would first appear in CI.
 
 ## MCP servers
 
@@ -253,3 +277,6 @@ Unverified until someone does it; correct this file with what you find.
 5. With `shell_tool = false` as committed, can the agent run a shell command at
    all, and does a `Bash`-matched hook (`block-main-commits.sh` on a commit to
    `main`) fire and block?
+6. Does an edit made as `apply_patch <<'EOF' … EOF` in a shell command reach the
+   `PreToolUse` edit hooks (it should, as tool `Bash`), and is it true that the
+   `PostToolUse` payload for it carries no command?
