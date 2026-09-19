@@ -1,0 +1,59 @@
+{
+  "_README": "Manifest for tools/agentic-sync/port.mjs, which GENERATES the OpenAI Codex CLI surface from the canonical .claude/ tree: .agents/skills/<name>/ (byte-exact mirrors), .codex/agents/<name>.toml and .codex/hooks.json. Never hand-edit a generated file — edit the .claude/ source and run `node tools/agentic-sync/port.mjs --write`. CI gate: scripts/check-codex-port.sh. Contracts were verified against openai/codex at tag rust-v0.144.1 (docs/guides/codex-cli-support-matrix.md cites each one). Every hook event and every hook script wired in .claude/settings.json must be EITHER portable OR named below with a reason; an unlisted one fails the generator, so the 26-of-39 drift that quarantined the first port (#9745) cannot recur silently.",
+  "skills": {
+    "source": ".claude/skills",
+    "target": ".agents/skills",
+    "independent": {
+      "game-engine": "exists on both sides as a real directory and the two have drifted; which side is canonical is undecided, so neither is overwritten",
+      "kanban": "exists on both sides as a real directory and the two have drifted; which side is canonical is undecided, so neither is overwritten",
+      "web-accessibility": "exists on both sides as a real directory and the two have drifted; which side is canonical is undecided, so neither is overwritten"
+    }
+  },
+  "agents": {
+    "source": ".claude/agents",
+    "target": ".codex/agents",
+    "handAuthored": {
+      "code-architect": "the Architect reviewer is the feature-dev:code-architect PLUGIN agent; there is no .claude/agents source file to generate from"
+    },
+    "reasoningEffort": ["minimal", "low", "medium", "high"]
+  },
+  "hooks": {
+    "source": ".claude/settings.json",
+    "target": ".codex/hooks.json",
+    "adapter": ".codex/hooks/run-claude-hook.mjs",
+    "scriptDir": ".claude/hooks",
+    "supportedEvents": [
+      "PreToolUse",
+      "PostToolUse",
+      "PreCompact",
+      "PostCompact",
+      "SessionStart",
+      "UserPromptSubmit",
+      "SubagentStart",
+      "SubagentStop",
+      "Stop"
+    ],
+    "matcherlessEvents": ["UserPromptSubmit", "Stop"],
+    "toolAliases": {
+      "Edit": "apply_patch",
+      "Write": "apply_patch",
+      "MultiEdit": "apply_patch",
+      "Bash": "Bash"
+    },
+    "unsupportedEvents": {
+      "TaskCreated": "no Codex hook event; task metadata is validated by the taskboard and by scripts, not at creation time",
+      "TaskCompleted": "no Codex hook event; ticket completion is checked by .claude/hooks/on-stop.sh, which IS wired to Stop",
+      "StopFailure": "no Codex hook event; rate-limit backoff is advisory context only",
+      "ConfigChange": "no Codex hook event; Codex reviews hook changes itself (every changed hook loses its trusted_hash until re-approved in /hooks)",
+      "InstructionsLoaded": "no Codex hook event; the same context is reachable from .codex/AGENTS.md",
+      "FileChanged": "no Codex hook event",
+      "WorktreeCreate": "no Codex hook event; run .claude/hooks/worktree-setup.sh by hand after `git worktree add`",
+      "SessionEnd": "absent from codex-cli 0.144.1 (present from 0.155); on-stop.sh already runs on Stop, so nothing is lost today — move it here when the floor version rises",
+      "CwdChanged": "no Codex hook event",
+      "PostToolUseFailure": "no Codex hook event; rate-limit backoff is advisory context only"
+    },
+    "skipScripts": {
+      "auto-approve-safe-commands.sh": "its whole output is permissionDecision=allow, which Codex rejects as unsupported (the hook run is marked Failed). Codex has no hook-driven approval; approvals come from approval_policy and the sandbox"
+    }
+  }
+}

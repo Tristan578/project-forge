@@ -1,0 +1,45 @@
+{
+  "_comment": "Template for a single MCP command manifest entry. Copy this object into the 'commands' array in mcp-server/manifest/commands.json AND web/src/data/commands.json.",
+  "_instructions": [
+    "1. Replace 'my_domain_action' with your snake_case command name.",
+    "2. Replace 'category_name' with an existing category from the valid list.",
+    "3. Write a description that tells the AI WHAT it does, not just restates the name.",
+    "   Include: parameter effects, side effects, prerequisites.",
+    "4. Set visibility: 'public' (user-facing) or 'internal' (system/compound actions).",
+    "5. List all parameters with accurate types, descriptions, and ranges.",
+    "6. Add 'required' array listing mandatory parameter names.",
+    "7. Delete this '_comment' and '_instructions' block before committing."
+  ],
+  "name": "my_domain_action",
+  "category": "category_name",
+  "description": "One-sentence summary of what this command does. Include: what it affects, valid ranges for numeric params (e.g. 0.0-1.0), whether it triggers events, and any prerequisites (e.g. 'requires entity to have a mesh component').",
+  "visibility": "public",
+  "parameters": {
+    "type": "object",
+    "required": ["entityId"],
+    "properties": {
+      "entityId": {
+        "type": "string",
+        "description": "Target entity identifier from the scene graph. Obtain via list_entities or from a selection event."
+      },
+      "value": {
+        "type": "number",
+        "description": "Numeric parameter. Range: 0.0 (minimum) to 1.0 (maximum). Default: 0.5.",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      "mode": {
+        "type": "string",
+        "description": "How to apply the change: 'add' accumulates on top of the current value, 'replace' overwrites it.",
+        "enum": ["add", "replace"],
+        "default": "replace"
+      },
+      "enabled": {
+        "type": "boolean",
+        "description": "Whether to enable (true) or disable (false) the feature.",
+        "default": true
+      }
+    }
+  }
+}
