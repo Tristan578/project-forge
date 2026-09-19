@@ -191,6 +191,12 @@ reported as `modified` and left for a person. `.agents/skills/` also holds
 third-party skills this tool does not own, and the lock is an editable text
 file, so "the lock names it" is not on its own a reason to delete anything.
 
+- **`.agents/skills/` is not Codex's alone.** Gemini CLI and Copilot read it too
+  (`GEMINI.md`, the README tool table), so the mirror puts these 35 skills in
+  front of them as well. They were written for Claude Code and name its tools;
+  the generated *agents* carry a preface mapping those names to Codex's, the
+  mirrored *skills* carry none, because they are byte-exact copies by design.
+  `GEMINI.md` tells Gemini to translate tool names itself.
 - **Why a copy and not a symlink.** Codex follows directory symlinks, and this
   repository already links the other way for third-party skills
   (`.claude/skills/tdd` → `.agents/skills/tdd`). But with `core.symlinks=false`

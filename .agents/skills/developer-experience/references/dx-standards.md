@@ -26,22 +26,24 @@ A ticket can be moved to `done` only when:
 2. **Subtasks completed** — every implementation step toggled in the taskboard
 3. **Acceptance criteria verified** — each Given/When/Then confirmed
 4. **Context updated** — `.claude/rules/`, `MEMORY.md`, `CLAUDE.md` reflect any new patterns
-5. **Cross-IDE configs current** — if skills or tools changed, all 4 IDE configs updated
+5. **Cross-IDE configs current** — if skills or tools changed, every config in the table below is updated, and the generated Codex surface is regenerated (`node tools/agentic-sync/port.mjs --write`)
 6. **No orphaned artifacts** — no stale feature flags, no dead imports, no TODO comments without tickets
 
-## Cross-IDE Consistency (4 configs that must stay in sync)
+## Cross-IDE Consistency
 
-SpawnForge supports 5 IDE tools. When skills or tools change, update ALL of these:
+SpawnForge supports several AI coding tools. When skills or tools change, update ALL of the hand-written configs below, then regenerate the generated ones:
 
 | Config File | IDE | Key contents |
 |-------------|-----|-------------|
 | `.claude/CLAUDE.md` | Claude Code | Skills list, agents, hooks, rules |
 | `.cursorrules` | Cursor | Referenced skills, tool paths, patterns |
 | `GEMINI.md` | Gemini CLI | Same as .cursorrules format |
-| `AGENTS.md` | OpenAI Codex CLI / Devin | Agent profiles, capabilities |
+| `AGENTS.md`, `.codex/AGENTS.md` | OpenAI Codex CLI / Devin | Agent profiles, capabilities, the Codex hook and planning workflow |
 | `.github/copilot-instructions.md` | GitHub Copilot | Code style, patterns |
 
 Run `bash .claude/tools/dx-audit.sh` after any skill or tool addition to check consistency.
+
+**Generated, never hand-edited** (#9745): the project skills under `.agents/skills/` (read by Codex, Gemini CLI and Copilot), `.codex/agents/*.toml`, `.codex/hooks.json` and `.codex/hook-conditions.json` are derived from `.claude/skills/`, `.claude/agents/` and the `hooks` block of `.claude/settings.json`. After changing any of those sources run `node tools/agentic-sync/port.mjs --write` and commit the result; `bash scripts/check-codex-port.sh` is the gate. What each tool can and cannot enforce is recorded in `docs/guides/codex-cli-support-matrix.md`.
 
 ## Feature Documentation Requirements
 

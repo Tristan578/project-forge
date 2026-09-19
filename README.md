@@ -392,15 +392,17 @@ The `tb_validate_ticket()` function in `taskboard-state.sh` enforces:
 
 Skills are callable capabilities loaded on-demand. Each tool stores them in its own directory, but all reference the same shared hook scripts.
 
+The project's own skills are authored once, under `.claude/skills/`, and **mirrored** byte-for-byte into `.agents/skills/` by `node tools/agentic-sync/port.mjs --write` — the directory Codex, Gemini CLI and Copilot read. "Mirrored" below means the text is available there; it was written for Claude Code and names Claude's tools.
+
 | Skill | Available In | Purpose |
 |-------|-------------|---------|
 | **kanban** | All 6 tools | View board, create/update/move tickets, validate fields, toggle subtasks. Claude Code uses MCP tools; other tools use REST API (`curl` to `localhost:3010`) |
 | **sync-push** | All 6 tools | Push local ticket changes to GitHub Project. Syncs full body (description, priority, subtask checkboxes, metadata block). Detects changes via content hashing |
 | **sync-pull** | All 6 tools | Pull GitHub Project changes to local taskboard. Reconstructs subtasks from checkboxes, re-links tickets by ULID from metadata, imports new tickets with parsed fields |
-| **planner** | Claude Code | Architect agent — analyzes requests, creates detailed specs in `specs/`, never writes code |
-| **builder** | Claude Code | Implementation agent — reads specs, writes Rust/TypeScript, runs lint/check after coding |
-| **cycle** | Claude Code | Orchestration — runs Plan → Build → Verify loop, updates project context after each cycle |
-| **arch-validator** | Claude Code | Runs `check_arch.py` — 7 structural rules (bridge isolation, file sizes, dispatch chain, store composition) |
+| **planner** | Claude Code; mirrored to `.agents/skills/` | Architect agent — analyzes requests, creates detailed specs in `specs/`, never writes code |
+| **builder** | Claude Code; mirrored to `.agents/skills/` | Implementation agent — reads specs, writes Rust/TypeScript, runs lint/check after coding |
+| **cycle** | Claude Code; mirrored to `.agents/skills/` | Orchestration — runs Plan → Build → Verify loop, updates project context after each cycle |
+| **arch-validator** | Claude Code; mirrored to `.agents/skills/` | Runs `check_arch.py` — 7 structural rules (bridge isolation, file sizes, dispatch chain, store composition) |
 
 ### GitHub Project Sync
 

@@ -130,7 +130,7 @@ function findBash() {
 // Every path a patch touches. Headers are matched on the TRIMMED line, as
 // Codex's streaming parser does; anchoring at column 0 would let an indented
 // `  *** Update File: x` hide its hunk from every hook while Codex applies it.
-export function parsePatch(patch) {
+function parsePatch(patch) {
   const files = [];
   let current = null;
   for (const rawLine of String(patch).split(/\r?\n/)) {
@@ -164,7 +164,7 @@ export function parsePatch(patch) {
 // first `*` is looked for ANYWHERE in the command. Running a script that then
 // decides it has nothing to do is harmless; not running one that would have
 // blocked is not.
-export function conditionMatches(pattern, toolName, command) {
+function conditionMatches(pattern, toolName, command) {
   const m = /^([A-Za-z_]+)\((.*)\)$/.exec(pattern);
   if (!m) return true; // unreadable condition → run
   if (m[1] !== toolName) return false;
@@ -232,7 +232,13 @@ function main() {
     EVENT = 'PreToolUse';
     fault(`hook payload is not a JSON object — refusing to let ${name} pass unread`);
   }
-  EVENT = typeof input.hook_event_name === 'string' ? input.hook_event_name : '';
+  // Codex always names the event. Without it nothing below can tell a gating
+  // event from an advisory one, so every later fault would exit 1 and proceed.
+  if (typeof input.hook_event_name !== 'string' || !input.hook_event_name) {
+    EVENT = 'PreToolUse';
+    fault(`hook payload names no hook_event_name — refusing to let ${name} pass on an event it cannot identify`);
+  }
+  EVENT = input.hook_event_name;
 
   if (!/^[\w.-]+\.sh$/.test(name)) fault(`expected a script name like check-foo.sh, got "${name}"`);
   const script = join(SCRIPT_DIR, name);
@@ -345,5 +351,15 @@ function main() {
   process.exit(0);
 }
 
-// Importable for tests without running.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+// ALWAYS run. There was an "only when executed directly" guard here comparing
+// process.argv[1] with this module's path. Node realpaths the entry module but
+// not argv[1], so through a directory junction or a symlinked checkout the two
+// differ, main() never ran, and the process exited 0 with no output — every
+// hook, the blocking ones included, silently passed. This file is a program,
+// not a library: nothing imports it, so there is nothing for a guard to protect.
+try {
+  main();
+} catch (e) {
+  EVENT = EVENT || 'PreToolUse';
+  fault(`unexpected error (${e && e.message ? e.message : e}) — treating as a check that could not run`);
+}

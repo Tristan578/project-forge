@@ -551,6 +551,42 @@ if [ -f "$F/.agents/skills/alpha/SKILL.md" ] && [ ! -e "$F/.agents/skills/alpha/
 else
   bad "orphan/modified split is wrong: $OUT"
 fi
+# …and it must KEEP being reported. The first cut rebuilt the lock from the plan
+# alone, so one --write forgot the path: the next --check was green with a skill
+# deleted from .claude/ still on disk and still discoverable by Codex.
+gen "$F" --check; expect_rc 1 "a modified path is still reported by the NEXT --check — it is not forgotten after one --write"
+expect_out "modified: .agents/skills/alpha/SKILL.md" "…naming the same file"
+gen "$F" --write; gen "$F" --check; expect_rc 1 "…and by the one after that, for as long as the file is there"
+rm -rf "$F/.agents/skills/alpha"
+gen "$F" --write; gen "$F" --check; expect_rc 0 "once a person removes the file, the entry leaves the lock and the tree is in sync"
+
+# The FIRST lock format: `generated` is an ARRAY of paths, no hashes. Nothing it
+# names can be proven to be this tool's work, so nothing it names is deleted.
+F="$(mkfix)"; gen "$F" --write
+rm -rf "$F/.claude/skills/alpha"
+mkdir -p "$F/.claude/skills/beta"
+printf -- '---\nname: beta\ndescription: second fixture skill\n---\n' > "$F/.claude/skills/beta/SKILL.md"
+node -e '
+  const fs = require("fs");
+  const p = process.argv[1];
+  const l = JSON.parse(fs.readFileSync(p, "utf8"));
+  l.generated = Object.keys(l.generated);
+  fs.writeFileSync(p, JSON.stringify(l));
+' "$F/tools/agentic-sync/port.lock.json"
+gen "$F" --write; expect_rc 1 "a paths-only (first-format) lock deletes nothing — every departed path is 'modified'"
+if [ -f "$F/.agents/skills/alpha/SKILL.md" ] && [ -f "$F/.agents/skills/alpha/scripts/run.sh" ]; then
+  ok "…and both departed files are still on disk"
+else
+  bad "a hashless array lock caused a deletion"
+fi
+expect_out "modified: .agents/skills/alpha/scripts/run.sh" "…each reported by name"
+
+F="$(mkfix)"
+# A directory where a file is expected: readFileSync throws EISDIR, which no
+# explicit die() anticipates — it reaches the top-level catch.
+rm "$F/.claude/agents/demo.md"; mkdir "$F/.claude/agents/demo.md"
+gen "$F" --check; expect_rc 2 "an UNANTICIPATED exception is exit 2 (could not run), never exit 1 (drift)"
+expect_out "unexpected error" "…through the top-level catch, which says so"
 
 echo "== generator: fail-closed means exit 2, never an uncaught exception =="
 F="$(mkfix)"; printf '{"skills":{},"agents":{},"hooks":{}}' > "$F/tools/agentic-sync/port.json"
@@ -679,11 +715,55 @@ else
   git -C "$F" add -A; as_symlink "$F" ".claude/skills/alpha/up.md"
   gen "$F" --write; expect_rc 2 "a stub that climbs out of the repository is refused"
 
-  # Executable bits: --write mutates the git INDEX. That deserves a test.
+  # The third way a skill is handed over: `.claude/skills/<name>` is replaced by a
+  # link to the .agents side (this repo's layout for third-party skills). The
+  # .agents copy is then the CANONICAL one; deleting it as an orphan would
+  # delete the only copy.
   F="$(gitfix)"
+  mkdir -p "$F/.claude/skills/gamma"
+  printf -- '---\nname: gamma\ndescription: stays mirrored\n---\n' > "$F/.claude/skills/gamma/SKILL.md"
+  gen "$F" --write
+  rm -rf "$F/.claude/skills/alpha"
+  printf '../../.agents/skills/alpha' > "$F/.claude/skills/alpha"
+  git -C "$F" add -A; as_symlink "$F" ".claude/skills/alpha"
+  gen "$F" --write; expect_rc 0 "a skill whose .claude side became a LINK to the .agents side is handed over cleanly"
+  if [ -f "$F/.agents/skills/alpha/SKILL.md" ] && [ -f "$F/.agents/skills/alpha/scripts/run.sh" ]; then
+    ok "…and the now-canonical .agents copy is released from the lock, not deleted"
+  else
+    bad "--write deleted the canonical copy of a skill that moved behind a symlink"
+  fi
+  git -C "$F" add -A
+  gen "$F" --check; expect_rc 0 "…and the tree checks clean afterwards"
+
+  # Executable bits: --write mutates the git INDEX, and chmods the file on disk.
+  #
+  # The source is made executable in BOTH places. The first cut set the bit in
+  # the index only, which holds on Windows (core.fileMode=false) and nowhere
+  # else: on Linux the next `git add -A` re-reads the 0644 file and stages the
+  # SOURCE as 100644 again, so the premise evaporated and the case went red in
+  # CI after passing here. `chmod` is a no-op on Windows; `update-index` is
+  # redundant on Linux; together they say the same thing on every host.
+  F="$(gitfix)"
+  chmod +x "$F/.claude/skills/alpha/scripts/run.sh"
   git -C "$F" add -A
   git -C "$F" update-index --chmod=+x .claude/skills/alpha/scripts/run.sh
+  if [ "$(git -C "$F" ls-files -s .claude/skills/alpha/scripts/run.sh | cut -c1-6)" != "100755" ]; then
+    bad "fixture is broken: the SOURCE script is not 100755 in the index, so nothing below means anything"
+  fi
   gen "$F" --write
+  # Does this filesystem carry an executable bit at all? (Not on Windows.)
+  PROBE_X="$F/.probe-x"; : > "$PROBE_X"; chmod +x "$PROBE_X"
+  if [ -x "$PROBE_X" ] && chmod -x "$PROBE_X" && [ ! -x "$PROBE_X" ]; then
+    if [ -x "$F/.agents/skills/alpha/scripts/run.sh" ] && [ ! -x "$F/.agents/skills/alpha/SKILL.md" ]; then
+      ok "the mirrored script is executable ON DISK before anything is staged, and a plain file is not"
+    else
+      bad "on-disk mode is wrong: run.sh $([ -x "$F/.agents/skills/alpha/scripts/run.sh" ] && echo +x || echo -x), SKILL.md $([ -x "$F/.agents/skills/alpha/SKILL.md" ] && echo +x || echo -x)"
+    fi
+  else
+    # A genuine platform limit: this filesystem has no executable bit to set.
+    skip "this filesystem carries no executable bit — the on-disk chmod is asserted on POSIX hosts; the index is asserted below on every host"
+  fi
+  rm -f "$PROBE_X"
   git -C "$F" add -A
   gen "$F" --write
   MIRROR_MODE="$(git -C "$F" ls-files -s .agents/skills/alpha/scripts/run.sh | cut -c1-6)"
@@ -809,6 +889,8 @@ out_get() { printf '%s' "$OUT" > "$H/out.json"; json_get "$H/out.json" "$1"; }
 patch_payload() {
   printf '{"cwd":"%s","hook_event_name":"%s","tool_name":"apply_patch","tool_input":{"command":"%s"}}' "$CWD_NATIVE" "$1" "$2"
 }
+# bash_payload <event> <command> — a Codex Bash payload.
+bash_payload() { printf '{"hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" "$2"; }
 runs() { grep -c "^$1=" "$LOG" 2>/dev/null || true; }
 
 PATCH='*** Begin Patch\n*** Add File: web/src/new.ts\n+export const a = 1;\n*** Update File: web/src/old.ts\n@@\n-const b = 1;\n+const b = 2;\n*** Delete File: web/src/gone.ts\n*** End Patch\n'
@@ -1008,6 +1090,37 @@ else
   bad "unbounded run: exit $RC, runs=$(runs SAW)"
 fi
 
+echo "== adapter: it runs however the checkout is reached =="
+# An "only when executed directly" guard compared process.argv[1] with the
+# module path. Node realpaths the entry module but not argv[1], so through a
+# junction or a symlinked checkout they differed, main() never ran, and the
+# process exited 0 with no output: every hook passed. Reach the adapter through
+# a link and demand the same answer as through its real path.
+LINKED="$TMP_ROOT/linked-codex-hooks"
+ADAPTER_DIR="$(dirname "$ADAPTER")"
+if ! ln -s "$ADAPTER_DIR" "$LINKED" 2>/dev/null || [ ! -L "$LINKED" ]; then
+  rm -rf "$LINKED"
+  # Git Bash cannot make a symlink without the privilege; a directory junction
+  # needs none and is the form this bug was reproduced through.
+  cmd //c mklink //J "$(cygpath -w "$LINKED")" "$(cygpath -w "$ADAPTER_DIR")" >/dev/null 2>&1 || true
+fi
+if [ -f "$LINKED/run-claude-hook.mjs" ]; then
+  REAL_ADAPTER="$ADAPTER"; ADAPTER="$LINKED/run-claude-hook.mjs"
+  rm -f "$LOG"
+  adapt probe.sh "$(patch_payload PreToolUse '*** Begin Patch\n nothing recognisable\n*** End Patch')"
+  VIA_LINK_FAULT="$RC"
+  adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch')"
+  VIA_LINK_BLOCK="$RC"
+  ADAPTER="$REAL_ADAPTER"
+  if [ "$VIA_LINK_FAULT" -eq 2 ] && [ "$VIA_LINK_BLOCK" -eq 2 ]; then
+    ok "reached through a link, the adapter still RUNS: a fault blocks and a guard blocks (it used to exit 0, silently)"
+  else
+    bad "through a link the adapter answered fault=$VIA_LINK_FAULT block=$VIA_LINK_BLOCK (2 and 2 wanted) — main() did not run"
+  fi
+else
+  bad "could not create a symlink or a junction to the adapter directory — the entry-guard case did not run"
+fi
+
 echo "== adapter: an empty payload is a fault, not a free pass =="
 rm -f "$LOG" "$LOG.stdin"
 adapt probe.sh ''
@@ -1018,6 +1131,56 @@ else
 fi
 adapt probe.sh '[1,2,3]'
 if [ "$RC" -eq 2 ]; then ok "a payload that is JSON but not an object blocks too"; else bad "array payload: exit $RC (2 wanted)"; fi
+# An OBJECT with no event name. Without the name nothing can tell a gating event
+# from an advisory one, so every later fault would exit 1 and the action proceed.
+rm -f "$LOG" "$LOG.stdin"
+adapt probe.sh '{}'
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'hook_event_name' <<<"$ERR"; then
+  ok "an object payload with NO hook_event_name blocks, and the script does not run on it"
+else
+  bad "payload without an event: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+adapt probe.sh '{"tool_name":"apply_patch","tool_input":{"command":"garbage"}}'
+if [ "$RC" -eq 2 ]; then ok "…so a no-path patch with no event name blocks too (it used to exit 1 and proceed)"; else bad "no-event no-path patch: exit $RC (2 wanted)"; fi
+adapt probe.sh '{"hook_event_name":42,"tool_name":"Bash","tool_input":{"command":"ls"}}'
+if [ "$RC" -eq 2 ]; then ok "a non-string hook_event_name is no name at all"; else bad "numeric event name: exit $RC (2 wanted)"; fi
+
+echo "== adapter: systemMessage and the command convenience variable =="
+cat > "$H/sysmsg.sh" <<'SM'
+#!/usr/bin/env bash
+printf '%s' '{"systemMessage":"lockfile was re-synced"}'
+SM
+adapt sysmsg.sh '{"hook_event_name":"Stop"}'
+if [ "$(out_get systemMessage)" = "lockfile was re-synced" ] && [ "$(out_get @has:hookSpecificOutput)" = "false" ]; then
+  ok "systemMessage passes through, on an event that accepts nothing else"
+else
+  bad "systemMessage was lost or wrapped: $OUT"
+fi
+adapt sysmsg.sh "$PAYLOAD"
+if [ "$(out_get systemMessage)" = "$(printf 'lockfile was re-synced\nlockfile was re-synced\nlockfile was re-synced')" ]; then
+  ok "systemMessage from each per-file run is kept"
+else
+  bad "systemMessage merge is wrong: $OUT"
+fi
+cat > "$H/cmdenv.sh" <<'CE'
+#!/usr/bin/env bash
+printf 'CMDENV=%s\n' "${TOOL_INPUT_command-<unset>}" >> "$PROBE_LOG"
+CE
+rm -f "$LOG"
+adapt cmdenv.sh "$(bash_payload PreToolUse 'git status')"
+if grep -qxF 'CMDENV=git status' "$LOG"; then
+  ok "TOOL_INPUT_command is set for a Bash payload (hook-utils.sh falls back to it)"
+else
+  bad "TOOL_INPUT_command missing: $(cat "$LOG" 2>/dev/null)"
+fi
+rm -f "$LOG"
+BIG="$(node -e 'process.stdout.write("x".repeat(40000))')"
+adapt cmdenv.sh "$(bash_payload PreToolUse "$BIG")"
+if [ "$RC" -eq 0 ] && grep -qxF 'CMDENV=<unset>' "$LOG"; then
+  ok "a command too large for an environment string is OMITTED from the variable, and the script still runs (E2BIG would otherwise be a non-blocking failure)"
+else
+  bad "large command: exit $RC, log: $(cut -c1-60 "$LOG" 2>/dev/null)"
+fi
 
 echo "== adapter: output is translated per event (each Codex wire type is deny_unknown_fields) =="
 adapt text.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: a.ts\n@@\n+x\n*** End Patch')"
@@ -1069,7 +1232,6 @@ fi
 echo "== adapter: \`if\` conditions from .claude/settings.json =="
 COND_FILE="$H/conditions.json"
 printf '{"PostToolUse":{"probe.sh":["Bash(git push *)"]}}' > "$COND_FILE"
-bash_payload() { printf '{"hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" "$2"; }
 rm -f "$LOG" "$LOG.stdin"
 adapt probe.sh "$(bash_payload PostToolUse 'git status')"
 if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then
@@ -1127,6 +1289,8 @@ DOC_COUNTS="$(node -e '
   const conditional = lists.length;
   const patterns = new Set(lists.flat()).size;
   const agents = fs.readdirSync(root + "/.codex/agents").filter((f) => f.endsWith(".toml")).length;
+  const lock = JSON.parse(fs.readFileSync(root + "/tools/agentic-sync/port.lock.json", "utf8")).generated;
+  const skills = new Set(Object.keys(lock).filter((k) => k.startsWith(".agents/skills/")).map((k) => k.split("/")[2])).size;
   const problems = [];
   const want = (re, label) => { if (!re.test(doc)) problems.push(label); };
   want(new RegExp("### Ported \\(" + total + " handlers\\)"), "Ported heading should say " + total);
@@ -1134,10 +1298,11 @@ DOC_COUNTS="$(node -e '
   want(new RegExp(words[conditional] + " hooks carry\\s+one, over " + words[patterns] + " distinct patterns", "i"), "if-condition counts should be " + words[conditional] + " / " + words[patterns]);
   want(new RegExp(words[agents - 1] + " of the " + words[agents], "i"), "generated-agent count should be " + words[agents - 1] + " of the " + words[agents]);
   want(new RegExp("list " + total + " handlers"), "first-run checklist should expect " + total + " handlers");
-  process.stdout.write(problems.length ? problems.join("; ") : "OK " + total + "/" + bash + "/" + conditional + "/" + patterns + "/" + agents);
+  want(new RegExp("The " + skills + " project skills"), "mirrored-skill count should be " + skills);
+  process.stdout.write(problems.length ? problems.join("; ") : "OK " + total + "/" + bash + "/" + conditional + "/" + patterns + "/" + agents + "/" + skills);
 ' "$REPO_ROOT" 2>&1)"
 case "$DOC_COUNTS" in
-  "OK "*) ok "handler, Bash-matched, if-condition and agent counts in the support matrix match the generated files (${DOC_COUNTS#OK })" ;;
+  "OK "*) ok "handler, Bash-matched, if-condition, agent and skill counts in the support matrix match the generated files (${DOC_COUNTS#OK })" ;;
   *) bad "the support matrix states a number the generated files contradict: $DOC_COUNTS" ;;
 esac
 
@@ -1176,6 +1341,9 @@ else
     ok "the gate step has no if:, continue-on-error:, shell:, working-directory: or env:"
   fi
 fi
+# Text containment only — it proves the pattern is WRITTEN, not that it works.
+# The executable proof (the real step body run against synthetic paths, with
+# near-misses) is scripts/__tests__/ci-gate-path-filters.test.sh → "#9745".
 AGENTIC_LINE="$(grep -E "&& agentic=true" <<<"$CI_CODE")"
 for pat in '^\.claude/rules/' '^\.claude/hooks/' '^\.claude/tools/' '^\.claude/CLAUDE\.md$' '^\.github/' '^\.claude/skills/' '^\.claude/agents/' '^\.claude/settings\.json$' '^\.agents/skills/' '^\.codex/' '^\.mcp\.json$' '^scripts/check-codex-port\.sh$'; do
   if grep -qF -- "$pat" <<<"$AGENTIC_LINE"; then
@@ -1184,9 +1352,9 @@ for pat in '^\.claude/rules/' '^\.claude/hooks/' '^\.claude/tools/' '^\.claude/C
     bad "the ci-gate agentic filter does not fire on $pat — a change there would never run the gate"
   fi
 done
-SEAM_HITS="$(grep -rnE 'CODEX_PORT_ROOT|CODEX_PORT_NODE|CODEX_HOOK_SCRIPT_DIR|CODEX_HOOK_BASH' "$REPO_ROOT/.github/workflows" "$REPO_ROOT/.github/actions" 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)"
+SEAM_HITS="$(grep -rnE 'CODEX_PORT_ROOT|CODEX_PORT_NODE|CODEX_HOOK_SCRIPT_DIR|CODEX_HOOK_CONDITIONS|CODEX_HOOK_BASH' "$REPO_ROOT/.github/workflows" "$REPO_ROOT/.github/actions" 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)"
 if [ -z "$SEAM_HITS" ]; then
-  ok "no workflow or composite action sets a test-only seam"
+  ok "no workflow or composite action sets a test-only seam (all five, CODEX_HOOK_CONDITIONS included — that one fails OPEN)"
 else
   bad "a test-only seam is wired in CI (it would point the gate at an empty tree): $SEAM_HITS"
 fi

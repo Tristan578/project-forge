@@ -7,7 +7,7 @@ the table below.
 
 | Section | Lives in | Loads when you touch |
 |---------|----------|----------------------|
-| Build & CI | `rules/gotchas-build-ci.md` | `.github/**`, `scripts/**`, manifests/lockfile, vitest configs, `web/next.config.ts`, `web/src/app/api/**`, `web/src/lib/**`, and the Codex-surface sources: `.claude/skills/**`, `.claude/agents/**`, `.claude/settings.json`, `.agents/skills/**`, `.codex/**`, `tools/agentic-sync/**` |
+| Build & CI | `rules/gotchas-build-ci.md` | `.github/**`, `scripts/**`, manifests/lockfile, vitest configs, `web/next.config.ts`, `web/src/app/api/**`, `web/src/lib/**`, and everything the Codex-surface gate reads: `.claude/skills/**`, `.claude/agents/**`, `.claude/settings.json`, `.claude/rules/**`, `.claude/hooks/**`, `.claude/tools/**`, `.claude/CLAUDE.md`, `.agents/skills/**`, `.codex/**`, `.mcp.json`, `tools/agentic-sync/**` |
 | Database | `rules/gotchas-web.md` | `web/**`, `packages/**`, `apps/**`, `drizzle/**` |
 | API & Security | `rules/gotchas-web.md` | same as above |
 | WASM / CDN | `rules/gotchas-web.md` | same as above |
