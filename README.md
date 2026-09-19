@@ -270,9 +270,9 @@ SpawnForge is designed for **AI-assisted development**. Six AI coding tools are 
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `.gemini/` | Automatic | `.agents/skills/` | `gemini-3.1-pro-preview` |
 | [Windsurf](https://windsurf.com) | `.windsurf/` | Automatic | `.windsurf/workflows/` | App-managed |
 | [Google Antigravity](https://antigravity.google) | `.agent/` + `.gemini/` | Manual | `.agent/skills/` | Gemini 3 |
-| [OpenAI Codex CLI](https://github.com/openai/codex) | `.codex/` | Manual | `.codex/skills/` | `gpt-5.3-codex` |
+| [OpenAI Codex CLI](https://github.com/openai/codex) | `.codex/` | Wired; run only after a one-time `/hooks` approval (not yet confirmed in a live session) | `.agents/skills/` | `gpt-5.3-codex` |
 
-**First-time setup:** Install the [taskboard binary](https://github.com/tcarac/taskboard/releases), then open the repo in your AI tool. Tools with automatic hooks will self-configure on first session. Tools without hooks (Codex, Antigravity) include manual workflow instructions in their `AGENTS.md` files.
+**First-time setup:** Install the [taskboard binary](https://github.com/tcarac/taskboard/releases), then open the repo in your AI tool. Tools with automatic hooks will self-configure on first session. Codex needs a one-time approval of its hooks in `/hooks` first (see `.codex/AGENTS.md`); Antigravity has no hooks and carries manual workflow instructions in its rules.
 
 ### Quick Start by Tool
 
@@ -344,14 +344,10 @@ Skills in `.agent/skills/` (singular — Antigravity uses `.agent/`, not `.agent
 <summary><strong>OpenAI Codex CLI</strong></summary>
 
 ```bash
-cd project-forge
-codex  # reads .codex/config.toml and .codex/AGENTS.md
-# No auto-hooks — run manually:
-bash .claude/hooks/on-session-start.sh   # start of session
-bash .claude/hooks/on-stop.sh             # after work
-bash .claude/hooks/post-edit-lint.sh      # after editing
+cd project-forge   # start Codex at the repo root — on Windows the hook commands are relative to it
+codex              # reads .codex/config.toml, .codex/AGENTS.md, .codex/hooks.json, .codex/agents/
 ```
-Config in `.codex/config.toml`. Skills in `.codex/skills/`. Full enforcement rules in `.codex/AGENTS.md`.
+Hooks run the shared `.claude/hooks/` scripts, but only after a one-time approval: trust the project, then open `/hooks` and approve them (Codex re-asks whenever a hook's command changes). Config in `.codex/config.toml`. Subagents in `.codex/agents/`, skills in `.agents/skills/` — both **generated** from `.claude/` by `node tools/agentic-sync/port.mjs --write`, never hand-edited. What is wired, what Codex cannot express, and what was verified: `docs/guides/codex-cli-support-matrix.md`. Full enforcement rules in `.codex/AGENTS.md`.
 
 </details>
 
@@ -396,15 +392,17 @@ The `tb_validate_ticket()` function in `taskboard-state.sh` enforces:
 
 Skills are callable capabilities loaded on-demand. Each tool stores them in its own directory, but all reference the same shared hook scripts.
 
+The project's own skills are authored once, under `.claude/skills/`, and **mirrored** byte-for-byte into `.agents/skills/` by `node tools/agentic-sync/port.mjs --write` — the directory Codex, Gemini CLI and Copilot read. "Mirrored" below means the text is available there; it was written for Claude Code and names Claude's tools.
+
 | Skill | Available In | Purpose |
 |-------|-------------|---------|
 | **kanban** | All 6 tools | View board, create/update/move tickets, validate fields, toggle subtasks. Claude Code uses MCP tools; other tools use REST API (`curl` to `localhost:3010`) |
 | **sync-push** | All 6 tools | Push local ticket changes to GitHub Project. Syncs full body (description, priority, subtask checkboxes, metadata block). Detects changes via content hashing |
 | **sync-pull** | All 6 tools | Pull GitHub Project changes to local taskboard. Reconstructs subtasks from checkboxes, re-links tickets by ULID from metadata, imports new tickets with parsed fields |
-| **planner** | Claude Code | Architect agent — analyzes requests, creates detailed specs in `specs/`, never writes code |
-| **builder** | Claude Code | Implementation agent — reads specs, writes Rust/TypeScript, runs lint/check after coding |
-| **cycle** | Claude Code | Orchestration — runs Plan → Build → Verify loop, updates project context after each cycle |
-| **arch-validator** | Claude Code | Runs `check_arch.py` — 7 structural rules (bridge isolation, file sizes, dispatch chain, store composition) |
+| **planner** | Claude Code; mirrored to `.agents/skills/` | Architect agent — analyzes requests, creates detailed specs in `specs/`, never writes code |
+| **builder** | Claude Code; mirrored to `.agents/skills/` | Implementation agent — reads specs, writes Rust/TypeScript, runs lint/check after coding |
+| **cycle** | Claude Code; mirrored to `.agents/skills/` | Orchestration — runs Plan → Build → Verify loop, updates project context after each cycle |
+| **arch-validator** | Claude Code; mirrored to `.agents/skills/` | Runs `check_arch.py` — 7 structural rules (bridge isolation, file sizes, dispatch chain, store composition) |
 
 ### GitHub Project Sync
 
@@ -532,7 +530,7 @@ project-forge/
 │   └── prompts/                 #   sync-push.prompt.md, sync-pull.prompt.md
 ├── .gemini/                     # Gemini CLI (+ Antigravity model config)
 │   └── settings.json            #   Hooks + model (gemini-3.1-pro-preview)
-├── .agents/                     # Shared skills (Copilot + Gemini CLI)
+├── .agents/                     # Shared skills (Codex CLI + Copilot + Gemini CLI); the project skills here are GENERATED mirrors of .claude/skills/ — never hand-edit them
 │   ├── rules/taskboard-sync.md  #   Ticket enforcement rules
 │   └── skills/                  #   kanban, sync-push, sync-pull
 ├── .agent/                      # Google Antigravity (singular — NOT .agents/)
@@ -543,9 +541,12 @@ project-forge/
 │   ├── rules/taskboard.md       #   Ticket enforcement rules
 │   └── workflows/               #   sync-push.md, sync-pull.md
 └── .codex/                      # OpenAI Codex CLI
-    ├── config.toml              #   Model (gpt-5.3-codex), approval policy, sandbox
-    ├── AGENTS.md                #   Full instructions (no hooks, so rules are inline)
-    └── skills/                  #   kanban, sync-push, sync-pull
+    ├── config.toml              #   Model (gpt-5.3-codex), approval policy, sandbox (hand-edited)
+    ├── AGENTS.md                #   Full instructions
+    ├── agents/                  #   Subagents — GENERATED from .claude/agents/
+    ├── hooks.json               #   Hook wiring — GENERATED from .claude/settings.json
+    ├── hook-conditions.json     #   The `if` conditions of those hooks — GENERATED
+    └── hooks/run-claude-hook.mjs #  Adapter: Codex hook payload → shared .claude/hooks scripts
 ```
 
 ## Contributing

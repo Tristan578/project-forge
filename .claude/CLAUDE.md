@@ -68,11 +68,12 @@ Key: `_` prefix for unused params, no `useRef.current` during render, no blanket
 | `rules/web-quality.md` | ESLint rules, React patterns, Next.js constraints |
 | `rules/library-apis.md` | csgrs, noise, terrain, texture pipeline, particles |
 | `rules/file-map.md` | Engine + web structure, communication pattern |
-| `rules/gotchas.md` | Index of the four gotchas files below (always loaded; the bodies are not) |
+| `rules/gotchas.md` | Index of the five gotchas files below (always loaded; the bodies are not) |
 | `rules/gotchas-build-ci.md` | Build/CI, lockfiles, self-defense gates, npm audit, RSC boundary, bundle size |
 | `rules/gotchas-web.md` | Database, API & security, WASM/CDN, UI & frontend |
 | `rules/gotchas-engine.md` | Engine & game loop: command wire, route_domain, component carry, physics |
 | `rules/gotchas-ops.md` | Claude Code config, deploy/service infrastructure, enforcement hooks |
+| `rules/gotchas-codex-port.md` | The generated Codex CLI surface: what `tools/agentic-sync/port.mjs` derives from `.claude/`, the regen recipe, adding a hook |
 | `rules/agent-operations.md` | Agent SOPs, testing, committing, PR creation |
 | `rules/hook-testing.md` | Conventions for the bash suites under `.claude/hooks/__tests__/` |
 

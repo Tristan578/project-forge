@@ -1,0 +1,138 @@
+# SpawnForge Version Pins and Upgrade Blockers
+
+Documenting why specific dependencies are pinned and what must be audited before upgrading.
+
+---
+
+## JavaScript / Node
+
+### stripe — `22.6.0`, API version `2026-08-26.dahlia`
+
+**Upgraded from** `^20.4.1` in PR #8136 (v21 `decimal_string` and v22 callback/ES6-class changes were non-issues — all amounts use integer cents, no callbacks, ESM imports). Bumped `22.2.x → 22.3.0` in the 2026-06-27 changelog-review wave.
+
+**ApiVersion moves in lockstep with the SDK.** stripe-node pins an `ApiVersion` literal (`22.6.0` → `2026-08-26.dahlia`); the hardcoded string must stay in sync across FIVE sites. Four are code, where a mismatch breaks `tsc`: `web/src/lib/billing/stripe-client.ts` (single source) plus the 3 billing route tests (`checkout`/`portal`/`status`). The fifth is the `web/src/app/api/stripe/webhook/route.ts` comment — it must track the literal but does not affect compilation.
+
+**Before future upgrades:**
+1. Check for new `apiVersion` string — update `web/src/lib/billing/stripe-client.ts` (single source)
+2. Test the full payment flow (checkout → subscription → invoice → refund) in staging
+3. Verify webhook Dashboard endpoint API version matches the SDK version
+4. Remove `invoice.subscription` backward-compat fallback in webhook route once Dashboard is on dahlia
+
+---
+
+### wasm-bindgen (Rust) — Pinned at `=0.2.127`
+
+**Why pinned:** `wasm-bindgen` must match exactly between the Rust crate and the installed CLI tool (`wasm-bindgen-cli`). A mismatch causes the WASM build to fail with cryptic errors about missing exports.
+
+**Before upgrading:**
+1. Update `engine/Cargo.toml`: `wasm-bindgen = "=<new-version>"`
+2. Update `engine/Cargo.lock` via `cargo update wasm-bindgen`
+3. Update CLI: `cargo install wasm-bindgen-cli --version <new-version> --force`
+4. Run full WASM build: `powershell -File build_wasm.ps1`
+5. Test both WebGPU and WebGL2 variants in browser
+6. Update CI workflow if it installs `wasm-bindgen-cli` explicitly
+
+**This is a coordinated change — both Cargo.toml AND the installed CLI must match.**
+
+---
+
+### Next.js — Currently `16.x`
+
+**Why constrained:** Next.js 16 introduced Turbopack as the default for builds. Major version upgrades often require:
+- Route handler signature changes
+- Middleware (now `proxy.ts`) rename
+- `params` and `searchParams` async changes
+- E2E test updates for hydration dialog selectors
+
+**Before upgrading:**
+1. Read the Next.js upgrade guide for the target version
+2. Run `/changelog-review` to check for breaking changes
+3. Test E2E with `npx playwright test` — hydration dialogs often change behavior
+4. Check `web/src/proxy.ts` — middleware API may have changed
+5. Verify `vercel.json` is still valid (no deprecated fields)
+
+---
+
+### Bevy — Currently `0.18`
+
+**Why constrained:** Bevy is in active development and every minor version has breaking API changes. Upgrading requires:
+- Updating all import paths (see `.claude/rules/bevy-api.md` for the 0.16→0.18 migration)
+- Updating all event types (`MessageWriter`, `MessageReader`, `#[derive(Message)]`)
+- Rebuilding WASM with matching bevy_rapier, bevy_hanabi versions
+- Testing physics, rendering, particles, and animation
+
+**Before upgrading:**
+1. Read the Bevy migration guide for the target version
+2. Update all library versions that depend on Bevy (bevy_rapier, bevy_hanabi, transform-gizmo-bevy, bevy_panorbit_camera)
+3. Update import paths in all `engine/src/` files
+4. Run `bash .claude/tools/validate-rust.sh full`
+5. Full WASM build and browser test
+
+---
+
+### actions/upload-artifact + actions/download-artifact — Pin to a Node24 major, NOT to a shared major
+
+**Current versions:** `upload-artifact@v7.0.1`, `download-artifact@v8.0.1` (both SHA-pinned, both Node24).
+
+**The old "must match `@v4`" rule was wrong and has been removed.** The v4+ artifact format is cross-compatible across majors, and the two actions deliberately release out of step: `download-artifact@v8` was published *to support* `upload-artifact@v7`'s new direct-upload (unzipped) mode. Requiring a shared major would force a downgrade.
+
+**The real constraint is the runner Node runtime.** GitHub removed Node20 from hosted runners in fall 2026; any artifact action major still targeting Node20 (upload `@v4`, download `@v4`) fails outright. Pin to a Node24-era major.
+
+**Breaking changes to know when bumping:**
+- `upload-artifact@v7`: migrated to ESM; new `archive: false` for single-file direct upload (ignores `name`, fails on a multi-file glob).
+- `download-artifact@v8`: migrated to ESM; **digest/hash mismatches now `error` by default** (was a warning) — override via the `digest-mismatch` parameter. Non-zipped downloads are detected by `Content-Type` and skipped for decompression; `skip-decompress: true` forces it.
+
+See `.claude/rules/gotchas-build-ci.md` for the canonical statement of this rule.
+
+---
+
+### TypeScript — Currently `^6.0.3`. Do NOT bump to 7 casually.
+
+**TypeScript 7.0.2 shipped 2026-08-20** — the native Go port, 8–12× faster compiles. It is not a drop-in upgrade, and the reason is easy to miss because it is not a language change:
+
+**7.0 ships with no stable programmatic API.** Anything embedding the compiler — `typescript-eslint` (reaching us through `eslint-config-next`), Volar, and the Vue/MDX/Astro/Svelte/Angular template checkers — can only use 6.0. The API lands in **7.1**. The vendor's workaround is running both compilers side by side: `"@typescript/native": "npm:typescript@^7.0.2"` for `tsc`, `"typescript": "npm:@typescript/typescript6@^6.0.2"` for the lint toolchain.
+
+**What actually bites us** (audited 2026-09-10 — most 7.0 removals do not apply, since every config is already `moduleResolution: bundler`, `strict: true`, `esModuleInterop: true`, and no config targets ES5 or sets `downlevelIteration`):
+
+- **`baseUrl` is removed.** The root `tsconfig.json` sets `baseUrl: "."`.
+- **`types` now defaults to `[]`, not `["*"]`.** Only `autoforge/tsconfig.json` sets it explicitly, so the other five configs lose `@types` auto-discovery. This is the same failure class as #9968 — a type shim that resolves from the workspace root and vanishes in a deploy root — so it will surface at `next build` in the deploy root, the most expensive place to find it.
+- **`rootDir` now defaults to `./`** instead of being auto-detected; `web` and `apps/docs` do not set it.
+
+Land the `types` and `baseUrl` config changes **under TypeScript 6 first**, prove them green, and only then swap compilers — never move both variables at once.
+
+Audit ticket: #9975.
+
+---
+
+## Upgrade Decision Matrix
+
+| Dependency | Current | Upgrade Risk | Recommended Action |
+|-----------|---------|-------------|-------------------|
+| `stripe` | `^22.6.1` | LOW | Centralized in `stripe-client.ts`, check apiVersion string (currently `2026-08-26.dahlia` — verified 2026-09-11) |
+| `wasm-bindgen` | =0.2.127 | HIGH (CLI must match) | Only upgrade as a coordinated Rust+CLI change |
+| `next` | 16.x | MEDIUM | Check migration guide, test E2E |
+| `bevy` | 0.18 | HIGH (API churn) | Only on planned engine upgrade sprint |
+| `@clerk/nextjs` | ^7.9.1 | LOW-MEDIUM | Check for auth() API changes (7.5 dropped `baseTheme` — appearance API migrated in f55ec99d) |
+| `drizzle-orm` | 0.45.2 | LOW | Check migration query syntax |
+| `vitest` | ^5.0.0 | LOW | Check for workspace config changes; 5.x brought `@rolldown/binding` in as a native dep — see `scripts/check-native-bindings.sh` |
+| `zod` | ^4.5.4 | LOW | Already on v4 |
+| `typescript` | ^6.0.3 | **HIGH (no programmatic API in 7.0)** | Do not bump to 7 without the audit — see the TypeScript section above and #9975 |
+| `@sentry/nextjs` + `@sentry/profiling-node` | `^10.73.0` (both) | MEDIUM | The two **declared ranges** must stay byte-identical; a skew fails silently at load. Pinned by `sentry-regressions.test.ts:863` |
+
+> **This column is the declared range, not the locked version.** The range in `web/package.json` is usually behind what `package-lock.json` resolves: `@sentry/*` declares `^10.73.0` and locks `10.74.0`; `@clerk/nextjs` declares `^7.9.1` and locks `7.9.2`. Compare like with like before concluding something is out of date — reading a range against a registry `latest` is how a routine bump gets mistaken for a major one.
+>
+> Last verified against `origin/main` on **2026-09-11**. Read `web/package.json` and `package-lock.json` for live values rather than trusting this snapshot.
+
+---
+
+## How to Check for Breaking Changes Before Upgrading
+
+```bash
+# Check what the latest version is
+npm view <package> version
+
+# Read the changelog (use WebFetch or context7 MCP)
+# GitHub releases page: https://github.com/<owner>/<repo>/releases
+
+# Run /changelog-review skill for automated analysis
+```

@@ -305,7 +305,9 @@ Typical hand-edit homes (the project ID in particular recurs in `curl` examples)
 
 - Provider rule/skill dirs: `.windsurf/`, `.agent/`, `.agents/`,
   `.github/instructions/`, `.github/skills/` (e.g. `kanban/SKILL.md`),
-  `.codex/skills/` (e.g. `kanban/SKILL.md`), and `.claude/` skills/rules.
+  and `.claude/` skills/rules. (`.codex/agents/`, `.codex/hooks.json` and the
+  project skills under `.agents/skills/` are generated from `.claude/` — fix
+  the source and run `node tools/agentic-sync/port.mjs --write`.)
 - Repo docs: `README.md`, this file (`CONTRIBUTING.md`), and `docs/`.
 
 > **`GEMINI.md` needs no hand-edit for the synced facts.** It pulls them in with
