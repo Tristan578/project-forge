@@ -88,22 +88,30 @@ table above fail *silently* if ignored:
   stdout is forwarded as the reason.
 - **Two edit channels.** Because of the contract row above, the four
   `PreToolUse` edit hooks are wired for `Bash` as well as `apply_patch`, in mode
-  `edit`. On a shell command they act when it **starts with the invocation
-  Codex intercepts** — `apply_patch` or `applypatch`, optionally behind
-  `cd <path> &&`, followed by a heredoc with any delimiter the shell allows
-  (`'EOF'`, `'END-PATCH'`, `\EOF`, unquoted …). The heredoc body is the patch and
-  the `cd` moves the base, as in Codex. Codex's matcher is a tree-sitter query
-  and the adapter's is not, so the rule for a command that starts that way but
-  cannot be parsed here (an argument or a variable assignment before the
-  heredoc, a `cd` path the shell must expand, a heredoc that never closes) is
-  **block, with a message to use the patch tool** — never "ordinary command".
-  That makes it a superset of what Codex intercepts, in the enforcing
-  direction: statements after the closing delimiter do not stop the patch being
-  inspected. A command that does not start that way — one that merely mentions
-  the markers, a script that runs `apply_patch` after other statements — is an
-  ordinary shell command, as a `sed -i` is under Claude Code. An `if` condition
-  never gates a file hook on this channel. The cost is one short-lived `node`
-  start per edit hook per shell command.
+  `edit`. The adapter does **not** try to recognise the shell shapes Codex
+  intercepts: Codex decides that with a tree-sitter query over the bash
+  grammar, and three regex recognisers written here were each narrower than it
+  somewhere (an envelope cut short; identifier-only heredoc delimiters; line
+  continuations, quoted assignments, leading redirects) — every gap an edit
+  applied with all four hooks at exit 0. The question is asked of the **patch**
+  instead. A patch that edits a file must say so on a line of its own
+  (`*** Add|Update|Delete File: <path>`), so any shell command whose text
+  contains such a line has every such path inspected, whatever shell syntax
+  surrounds it. A command with no file header is an ordinary command — a patch
+  that names no file edits nothing — so a `grep` for the envelope markers is
+  left alone. This is a superset of what Codex intercepts, in the enforcing
+  direction: it also inspects a heredoc that merely *writes* a patch file, at
+  the cost of an occasional advisory note about a file that was only mentioned.
+  The shell is read for one thing, the directory the paths resolve in:
+  `cd <literal path> &&` before the patch moves the base, as in Codex; any other
+  directory change (`cd "$X"`, `cd a\ b`, `cd x; …`, a subshell, `pushd`) before
+  a patch that names `apply_patch` is **blocked, with a message to use the patch
+  tool**, rather than checked against the wrong base. An `if` condition never
+  gates a file hook on this channel. The cost is one short-lived `node` start
+  per edit hook per shell command. What this cannot see is a patch whose text is
+  not in the command at all (`apply_patch < fix.patch`) — Codex does not
+  intercept that form, and it is a shell writing files, which no Edit/Write
+  hook sees under Claude Code either.
 
 It also applies the `if` conditions from `.claude/settings.json`, which Codex has
 no key for, from the generated `.codex/hook-conditions.json`: six hooks carry
@@ -120,13 +128,33 @@ that would have blocked is not.
 | `SessionStart` | `SessionStart` | `on-session-start.sh` |
 | `UserPromptSubmit` | `UserPromptSubmit` | `on-prompt-submit.sh` |
 | `PreToolUse` `Edit\|Write\|Bash` | `PreToolUse` `apply_patch\|Bash` | `inject-lessons-learned.sh` |
-| `PreToolUse` `Bash` | `PreToolUse` `Bash` | `pre-push-quality-gate.sh`, `block-main-commits.sh`, `check-pr-metadata.sh`, `check-docs-quality.sh`, `block-deferred-fixes.sh` (each with its `if` condition) |
+| `PreToolUse` `Bash` | `PreToolUse` `Bash` | `pre-push-quality-gate.sh`, `block-main-commits.sh`, `check-pr-metadata.sh`, `check-docs-quality.sh`, `block-deferred-fixes.sh` (each with its `if` condition). `block-deferred-fixes.sh` loses its `statusMessage` ("Checking for Boy Scout Rule violations") — see the note under this table |
 | `PreToolUse` `Edit\|Write` | `PreToolUse` `apply_patch\|Bash`, mode `edit` (see "Two edit channels") | `verify-branch.sh`, `check-db-transaction.sh`, `check-sanitization-patterns.sh`, `check-vercel-json.sh`. Their `statusMessage` is dropped: matched for every shell command, a line like "Checking sanitization patterns" would be false |
 | `PostToolUse` `Edit\|Write` | `PostToolUse` `apply_patch` | `auto-lockfile-sync.sh`, `post-edit-lint.sh`, `check-arch.sh`, `check-route-has-test.sh`, `cargo-check-wasm.sh` |
-| `PostToolUse` `Bash` | `PostToolUse` `Bash` | `post-commit-clean.sh`, `post-merge-doc-check.sh`, `post-push-resolve-comments.sh` (`if: Bash(git push *)`; `async` dropped, so it runs synchronously for up to 30 s after a push) |
+| `PostToolUse` `Bash` | `PostToolUse` `Bash` | `post-commit-clean.sh`, `post-merge-doc-check.sh`, `post-push-resolve-comments.sh` (`if: Bash(git push *)`; `async` dropped, so it runs synchronously for up to 30 s after a push — and, its `statusMessage` being dropped too, **with no status line explaining the wait**; see the note under this table) |
 | `SubagentStart` / `SubagentStop` | same | `log-agent-start.sh`; `validate-agent-output.sh`, `reject-incomplete-review.sh` |
 | `PreCompact` | `PreCompact` | `save-critical-context.sh` — it writes a snapshot file; that side effect works. Anything it prints reaches the person as a `systemMessage`, never the model |
 | `Stop` | `Stop` | `on-stop.sh`, `lessons-learned-reminder.sh`, `builder-quality-gate.sh`, `review-quality-gate.sh`, `worktree-safety-commit.sh`. `Stop` and `SubagentStop` accept no context: the reminders `lessons-learned-reminder.sh`, `builder-quality-gate.sh` and (on `SubagentStop`) `validate-agent-output.sh` print are shown to the **person** as a `systemMessage`; under Claude Code they reach the model. A block (exit 2) works on both |
+
+**No ported hook shows a status line.** `.claude/settings.json` sets a
+`statusMessage` on four handlers. One belongs to `auto-approve-safe-commands.sh`,
+which is not ported. The other three are dropped by two rules in the generator,
+for one reason: Codex shows the line whenever the handler is *matched*, and it
+has no `if`, so these handlers are matched for every shell command while acting
+on almost none —
+
+- an edit-only hook is matched for `Bash` to see a carried patch
+  ("Checking sanitization patterns" would show on an `ls`);
+- a handler whose group carries an `if` has that condition applied inside the
+  adapter ("Checking for Boy Scout Rule violations" and "Checking for unreplied
+  review comments" would show on every command, where Claude Code shows them on
+  `gh api` and `git push` alone).
+
+The trade-off is silence where Claude Code explains itself: after a `git push`,
+`post-push-resolve-comments.sh` can hold the turn for up to 30 s with nothing on
+screen saying why. A line that is false on every other command was judged worse
+than none; the contract row above lists `statusMessage` because Codex supports
+the field, not because this port uses it.
 
 ### Not ported, and what covers the gap
 

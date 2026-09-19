@@ -60,6 +60,11 @@ expect_out() {
   if grep -qF -- "$1" <<<"$OUT"; then ok "$2"; else bad "$2 — output lacks '$1': $OUT"; fi
 }
 
+# expect_no_out <fixed-string> <label> — and must NOT say the wrong thing.
+expect_no_out() {
+  if grep -qF -- "$1" <<<"$OUT"; then bad "$2 — output contains '$1': $OUT"; else ok "$2"; fi
+}
+
 # mkfix — build a minimal but complete source tree; echoes its path.
 mkfix() {
   local d
@@ -250,6 +255,11 @@ echo "== generator: drift, orphans, and --check never writes =="
 printf '\nA new line.\n' >> "$F/.claude/skills/alpha/SKILL.md"
 gen "$F" --check; expect_rc 1 "editing a source skill without regenerating is drift"
 expect_out "stale:    .agents/skills/alpha/SKILL.md" "…and names the stale file"
+# The remediation footer prints a recipe per KIND of problem present, and only those.
+expect_out 'port.mjs --write   (then commit the result)' "footer: drift is fixed by regenerating, and says so"
+expect_out 'never hand-edit them' "footer: …and says the drifted files are generated"
+expect_no_out 'the files named above, THEN run' "footer: no staging advice when nothing needs staging"
+expect_no_out 'restate the server in .codex/config.toml' "footer: no mcp recipe when there is no mcp problem"
 if grep -qF 'A new line.' "$F/.agents/skills/alpha/SKILL.md"; then
   bad "--check WROTE to the mirror — a check must never mutate"
 else
@@ -282,6 +292,7 @@ printf '\nRead `.Codex/rules/lessons-learned.md` before acting.\n' >> "$F/.claud
 gen "$F" --write
 gen "$F" --check; expect_rc 1 "a reference to nonexistent .Codex/rules fails validation"
 expect_out ".codex/agents/demo.toml: unresolved path .Codex/rules/lessons-learned.md" "…with the exact unresolved path and the file that carries it"
+expect_out ': correct the path in the SOURCE' "footer: a dead reference is fixed in the source, and says so"
 
 F="$(mkfix)"
 # Wrong CASE only. On a case-insensitive filesystem a plain exists() says yes.
@@ -330,6 +341,9 @@ expect_out "declares no [mcp_servers.*]" "…but says so out loud instead of rea
 printf '[mcp_servers.alpha]\ncommand = "npx"\n\n[mcp_servers.alpha.env]\nA = "1"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 1 "a server in .mcp.json that Codex lacks is a failure"
 expect_out "beta is in .mcp.json but not in .codex/config.toml" "…naming the missing server"
+expect_out ': restate the server in .codex/config.toml' "footer: an mcp mismatch is fixed in the hand-written config"
+expect_out 'take it back out of the commit' "footer: …and names the recovery for a personal block committed by accident"
+expect_no_out 'never hand-edit' "footer: …without ALSO being told never to hand-edit (the fix IS a hand edit)"
 if grep -qF 'alpha.env' <<<"$OUT" || grep -qF ' env is in' <<<"$OUT"; then
   bad "a sub-table ([mcp_servers.alpha.env]) was mistaken for a server"
 else
@@ -601,6 +615,7 @@ printf -- '---\nname: thirdparty\ndescription: not ours\n---\n' > "$F/.agents/sk
 lock_set "$F" ".agents/skills/thirdparty/SKILL.md" '"0000000000000000000000000000000000000000000000000000000000000000"'
 gen "$F" --write; expect_rc 1 "a lock entry whose hash does not match the file is NOT treated as an orphan"
 expect_out "modified: .agents/skills/thirdparty/SKILL.md" "…it is reported as modified, naming the file"
+expect_out 'never deletes a file it cannot prove it wrote' "footer: a modified file gets its own recipe"
 if [ -f "$F/.agents/skills/thirdparty/SKILL.md" ]; then
   ok "…and the file this tool never wrote is still there"
 else
@@ -876,6 +891,8 @@ else
   printf '__pycache__/\n' > "$F/.gitignore"; git -C "$F" add .gitignore
   gen "$F" --write; expect_rc 1 "an untracked file that git does NOT ignore is a problem in --write too — it is about to be committed, and the mirror would first be found missing in CI"
   expect_out "untracked: .claude/skills/alpha/.env" "…named as \`untracked:\`"
+  expect_out 'the files named above, THEN run' "footer: an untracked source is fixed by staging first"
+  expect_no_out '(then commit the result)' "footer: …and it does NOT tell someone who has just run --write to run --write"
   if grep -qF 'untracked: .claude/skills/alpha/__pycache__' <<<"$OUT"; then
     bad "a git-IGNORED file was reported as a problem; it should only be listed"
   else
@@ -931,6 +948,8 @@ else
     gen "$F" --write
     expect_rc 1 "core.fileMode=false: the FIRST --write does not end by claiming 'in sync'"
     expect_out "must be executable but is not staged" "…it says the mirrored script still needs staging"
+    expect_out 'the files named above, THEN run' "footer: the unstaged executable is fixed by staging first"
+    expect_no_out '(then commit the result)' "footer: …not by the command that was just run"
     gen "$F" --check; expect_rc 1 "core.fileMode=false: and a local --check is RED until that is done (the drift must not first appear in CI)"
     expect_out "must be executable but is not staged" "…naming the reason"
     git -C "$F" add -A; gen "$F" --write
@@ -1250,7 +1269,7 @@ rm -f "$LOG"
 ADAPT_ARGS="10 3"
 adapt steady.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: a.ts\n+1\n*** Add File: b.ts\n+2\n*** Add File: c.ts\n+3\n*** Add File: d.ts\n+4\n*** Add File: e.ts\n+5\n*** Add File: f.ts\n+6\n*** End Patch')"
 CHECKED="$(runs SAW)"
-if [ "$RC" -eq 2 ] && [ "$CHECKED" -ge 1 ] && [ "$CHECKED" -lt 6 ] && grep -qE 'out of time after checking [0-9]+ of 6 paths|timed out' <<<"$ERR"; then
+if [ "$RC" -eq 2 ] && [ "$CHECKED" -ge 1 ] && [ "$CHECKED" -lt 6 ] && grep -qE 'out of time (after checking [0-9]+ of 6 paths|while checking path [0-9]+ of 6)' <<<"$ERR" && ! grep -qF 'settings.json' <<<"$ERR"; then
   ok "PreToolUse: a patch too large for the budget BLOCKS with paths unchecked ($CHECKED of 6 ran) — it does not pass on the ones it skipped"
 else
   bad "budget exhaustion: exit $RC (2 wanted), $CHECKED of 6 ran, stderr: $ERR"
@@ -1372,10 +1391,6 @@ echo "== adapter: Codex's SECOND edit channel — a patch carried in a shell com
 carried_payload() { printf '{"cwd":"%s","hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$CWD_NATIVE" "$1" "$2"; }
 # heredoc <prefix> <patch-body-with-\n-escapes> — one of the two intercepted forms.
 heredoc() { printf '%s' "${1}apply_patch <<'EOF'\n*** Begin Patch\n${2}\n*** End Patch\nEOF"; }
-# heredoc_as <invocation-up-to-and-including-the-delimiter> <closing-line> <patch-body>
-# — the same patch under ANOTHER spelling. Everything is JSON-escaped text: a
-# backslash is `\\`, a double quote `\"`, a tab `\t`.
-heredoc_as() { printf '%s' "${1}\n*** Begin Patch\n${3}\n*** End Patch\n${2}"; }
 # Files the patches below UPDATE must exist: an update of a file that is not
 # there is how the adapter detects a base directory it cannot see.
 mkdir -p "$TMP_ROOT/protected" "$TMP_ROOT/docs" "$TMP_ROOT/web/src/lib"
@@ -1408,70 +1423,119 @@ else
   bad "cd into a protected directory was not seen: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
 fi
 
-# Codex's query puts NO constraint on the heredoc delimiter, and the bash grammar
-# takes any word. Every case below is a sole top-level apply_patch heredoc, so
-# Codex intercepts it. With `EOF` as the only delimiter in this suite, a
-# recogniser that accepted identifiers alone passed — and each of these spellings
-# then went past all four edit hooks with exit 0.
-UPD='*** Update File: protected/x.ts\n@@\n+evil'
-SPELLED=0
-while IFS='|' read -r LABEL OPEN CLOSE; do
-  SPELLED=$((SPELLED + 1))
-  rm -f "$LOG"
-  adapt guard.sh "$(carried_payload PreToolUse "$(heredoc_as "$OPEN" "$CLOSE" "$UPD")")"
-  if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
-    ok "intercepted spelling is inspected: $LABEL"
-  else
-    bad "spelling went unchecked ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
-  fi
-done <<'SPELLINGS'
-a hyphenated delimiter|apply_patch <<'END-PATCH'|END-PATCH
-a delimiter that starts with a digit|apply_patch <<'1EOF'|1EOF
-a dotted delimiter|apply_patch <<'PATCH.END'|PATCH.END
-a delimiter with a space in it|apply_patch <<'END PATCH'|END PATCH
-a backslash-escaped delimiter|apply_patch <<\\EOF|EOF
-a double-quoted delimiter|apply_patch <<\"EOF\"|EOF
-an unquoted delimiter|apply_patch <<EOF|EOF
-no space before the redirect, space after it|apply_patch<< 'EOF'|EOF
-<<- with a tab-indented closing line|apply_patch <<-'EOF'|\tEOF
-the applypatch alias|applypatch <<'EOF'|EOF
-a double-quoted cd path|cd \".\" && apply_patch <<'EOF'|EOF
-SPELLINGS
-# The loop must have walked its table, or eleven spellings read as zero problems.
-if [ "$SPELLED" -eq 11 ]; then ok "all 11 delimiter/alias spellings were driven"; else bad "the spelling table was not walked: $SPELLED of 11"; fi
-
-# Statements AFTER the closing delimiter: Codex would not intercept this, but the
-# shell then runs `apply_patch` from PATH on the same patch — so it is inspected.
-rm -f "$LOG"
-adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' "$UPD")\necho done")"
-if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
-  ok "a command that STARTS with the invocation is inspected even with statements after the heredoc (a superset of Codex, in the enforcing direction)"
-else
-  bad "trailing statements hid the patch: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no)"
-fi
-
-# What starts like the invocation but cannot be parsed here BLOCKS. Codex's
-# matcher is a tree-sitter query and this is not; where they might disagree the
-# answer is "not checked, so not allowed" — never exit 0.
-UNPARSED_DRIVEN=0
+# THE QUESTION IS ASKED OF THE PATCH, NOT OF THE SHELL. Three versions of the
+# recogniser asked "is this one of the shapes Codex intercepts?" with a regex,
+# and each was narrower than Codex's tree-sitter query somewhere: identifier-only
+# heredoc delimiters, then line continuations, quoted assignments, leading
+# redirects and comments. Each gap was an edit applied with every hook at exit 0.
+# Now any command whose text carries a file header is inspected, so every row
+# below — whatever Codex itself does with it — must reach the guard.
+# Rows are JSON-escaped text: `\\` is one backslash, `\n` a newline. @P@ is the
+# patch (it updates protected/x.ts, which guard.sh blocks).
+PATCH='*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch'
+SHAPES=0
 while IFS='|' read -r LABEL CMD; do
-  UNPARSED_DRIVEN=$((UNPARSED_DRIVEN + 1))
+  SHAPES=$((SHAPES + 1))
   rm -f "$LOG"
-  adapt guard.sh "$(carried_payload PreToolUse "$CMD")"
-  if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'cannot be checked' <<<"$ERR" && grep -qF 'apply_patch tool' <<<"$ERR"; then
-    ok "unparseable apply_patch heredoc BLOCKS with a way out: $LABEL"
+  adapt guard.sh "$(carried_payload PreToolUse "${CMD//@P@/$PATCH}")"
+  if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
+    ok "inspected whatever the shell around it: $LABEL"
   else
-    bad "unparseable invocation did not block ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+    bad "a carried patch went unchecked ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
   fi
-done <<'UNPARSED'
-a variable assignment before it|FOO=1 apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
-an argument before the heredoc|apply_patch --x <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
-a second redirect on the line|apply_patch <<'EOF' > out.txt\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
-a cd path the shell must expand|cd $HOME/protected && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: x.ts\n@@\n+evil\n*** End Patch\nEOF
-a heredoc that is never closed|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch
-a closing line indented with spaces (bash does not close on it)|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\n  EOF
-UNPARSED
-if [ "$UNPARSED_DRIVEN" -eq 6 ]; then ok "all 6 unparseable shapes were driven"; else bad "the unparseable table was not walked: $UNPARSED_DRIVEN of 6"; fi
+done <<'SHAPES_TABLE'
+the plain form (control)|apply_patch <<'EOF'\n@P@\nEOF
+a hyphenated delimiter|apply_patch <<'END-PATCH'\n@P@\nEND-PATCH
+a delimiter that starts with a digit|apply_patch <<'1EOF'\n@P@\n1EOF
+a dotted delimiter|apply_patch <<'PATCH.END'\n@P@\nPATCH.END
+a delimiter with a space in it|apply_patch <<'END PATCH'\n@P@\nEND PATCH
+a backslash-escaped delimiter|apply_patch <<\\EOF\n@P@\nEOF
+a double-quoted delimiter|apply_patch <<\"EOF\"\n@P@\nEOF
+an unquoted delimiter|apply_patch <<EOF\n@P@\nEOF
+no space before the redirect|apply_patch<< 'EOF'\n@P@\nEOF
+<<- with a tab-indented closing line|apply_patch <<-'EOF'\n@P@\n\tEOF
+the applypatch alias|applypatch <<'EOF'\n@P@\nEOF
+a line continuation before the heredoc|apply_patch \\\n<<'EOF'\n@P@\nEOF
+a line continuation with no space before it|apply_patch\\\n<<'EOF'\n@P@\nEOF
+a CRLF line continuation|apply_patch \\\r\n<<'EOF'\r\n@P@\r\nEOF
+a variable assignment before it|FOO=1 apply_patch <<'EOF'\n@P@\nEOF
+an assignment whose value has a space|FOO=\"a b\" apply_patch <<'EOF'\n@P@\nEOF
+an assignment from a command substitution|FOO=$(echo a b) apply_patch <<'EOF'\n@P@\nEOF
+a redirect before the command name|2>/dev/null apply_patch <<'EOF'\n@P@\nEOF
+a comment line before it|# note\napply_patch <<'EOF'\n@P@\nEOF
+an argument before the heredoc|apply_patch --x <<'EOF'\n@P@\nEOF
+a second redirect on the line|apply_patch <<'EOF' > out.txt\n@P@\nEOF
+a statement before it|echo start; apply_patch <<'EOF'\n@P@\nEOF
+a statement after the closing line|apply_patch <<'EOF'\n@P@\nEOF\necho done
+a heredoc that is never closed|apply_patch <<'EOF'\n@P@
+a closing line indented with spaces|apply_patch <<'EOF'\n@P@\n  EOF
+the patch as a quoted argument, no heredoc|apply_patch '@P@'
+the command name obfuscated (no literal apply_patch word)|a\\pply_patch <<'EOF'\n@P@\nEOF
+an indented file header (Codex trims, so must this)|apply_patch <<'EOF'\n*** Begin Patch\n   *** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
+a heredoc delimiter that is the word cd (not a directory change)|apply_patch << cd\n@P@\ncd
+SHAPES_TABLE
+# The loop must have walked its table, or 29 shapes read as zero problems.
+if [ "$SHAPES" -eq 29 ]; then ok "all 29 shell shapes were driven"; else bad "the shape table was not walked: $SHAPES of 29"; fi
+
+# The shell matters for ONE thing: the directory the paths resolve in.
+# @PX@ updates x.ts RELATIVE to the cd, i.e. protected/x.ts.
+PATCH_X='*** Begin Patch\n*** Update File: x.ts\n@@\n+evil\n*** End Patch'
+FOLLOWED=0
+while IFS='|' read -r LABEL CMD; do
+  FOLLOWED=$((FOLLOWED + 1))
+  rm -f "$LOG"
+  adapt guard.sh "$(carried_payload PreToolUse "${CMD//@PX@/$PATCH_X}")"
+  if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
+    ok "cd followed: $LABEL"
+  else
+    bad "cd not followed ($LABEL): exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
+  fi
+done <<'FOLLOWED_TABLE'
+a bare literal path|cd protected && apply_patch <<'EOF'\n@PX@\nEOF
+a double-quoted literal path|cd \"protected\" && apply_patch <<'EOF'\n@PX@\nEOF
+a single-quoted path|cd 'protected' && apply_patch <<'EOF'\n@PX@\nEOF
+a continuation before the &&|cd protected \\\n&& apply_patch <<'EOF'\n@PX@\nEOF
+a continuation after the &&|cd protected && \\\napply_patch <<'EOF'\n@PX@\nEOF
+FOLLOWED_TABLE
+if [ "$FOLLOWED" -eq 5 ]; then ok "all 5 followable cd forms were driven"; else bad "the followed-cd table was not walked: $FOLLOWED of 5"; fi
+
+# Any OTHER directory change before a patch that names apply_patch BLOCKS: the
+# paths would be checked against the wrong base, and nothing downstream can tell.
+UNFOLLOWED=0
+while IFS='|' read -r LABEL CMD; do
+  UNFOLLOWED=$((UNFOLLOWED + 1))
+  rm -f "$LOG"
+  adapt guard.sh "$(carried_payload PreToolUse "${CMD//@PX@/$PATCH_X}")"
+  if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'cannot be located or checked' <<<"$ERR" && grep -qF 'apply_patch tool' <<<"$ERR"; then
+    ok "a directory change this hook cannot follow BLOCKS, with a way out: $LABEL"
+  else
+    bad "unfollowable cd did not block ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+  fi
+done <<'UNFOLLOWED_TABLE'
+a bare path with a variable|cd $HOME/protected && apply_patch <<'EOF'\n@PX@\nEOF
+a DOUBLE-quoted path with a variable|cd \"$HOME/protected\" && apply_patch <<'EOF'\n@PX@\nEOF
+a double-quoted path with a command substitution|cd \"`pwd`/protected\" && apply_patch <<'EOF'\n@PX@\nEOF
+a bare path with an escaped space|cd pro\\ tected && apply_patch <<'EOF'\n@PX@\nEOF
+a bare path with a glob|cd prot* && apply_patch <<'EOF'\n@PX@\nEOF
+a tilde path|cd ~/protected && apply_patch <<'EOF'\n@PX@\nEOF
+cd joined with a semicolon|cd protected; apply_patch <<'EOF'\n@PX@\nEOF
+cd on its own line|cd protected\napply_patch <<'EOF'\n@PX@\nEOF
+two cds|cd . && cd protected && apply_patch <<'EOF'\n@PX@\nEOF
+a subshell|(cd protected && apply_patch <<'EOF'\n@PX@\nEOF\n)
+pushd|pushd protected && apply_patch <<'EOF'\n@PX@\nEOF
+UNFOLLOWED_TABLE
+if [ "$UNFOLLOWED" -eq 11 ]; then ok "all 11 unfollowable directory changes were driven"; else bad "the unfollowed-cd table was not walked: $UNFOLLOWED of 11"; fi
+
+# A heredoc that only WRITES a patch file names no apply_patch. Its paths are
+# still inspected, but it is never BLOCKED for what this hook cannot resolve —
+# the file it mentions may simply not be here.
+rm -f "$LOG"
+adapt probe.sh "$(carried_payload PreToolUse "cd \$HOME && cat > fix.patch <<'EOF'\n*** Begin Patch\n*** Update File: docs/not-here.md\n@@\n+z\n*** End Patch\nEOF")"
+if [ "$RC" -eq 0 ] && grep -qxF "ENV=$CWD_NATIVE/docs/not-here.md" "$LOG"; then
+  ok "a patch that is only WRITTEN to a file (no apply_patch word) is inspected but never blocked for an unfollowable cd or a missing target"
+else
+  bad "unnamed patch handling: exit $RC (0 wanted), saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
+fi
 
 # The heredoc BODY is the patch. Cutting at the first `*** End Patch` text let an
 # added line containing those words hide every file after it.
@@ -1511,8 +1575,8 @@ fi
 # resolve them against a base this hook cannot see, and nothing else notices.
 rm -f "$LOG"
 adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Update File: docs/missing.md\n*** Move to: docs/renamed.md\n@@\n+z')")"
-if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'docs/missing.md, which does not exist under' <<<"$ERR"; then
-  ok "a move whose SOURCE does not exist where the paths resolve blocks"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'this patch moves docs/missing.md, which does not exist under' <<<"$ERR"; then
+  ok "a move whose SOURCE does not exist where the paths resolve blocks — and the message says MOVES, which is what the author wrote"
 else
   bad "missing move source: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
 fi
@@ -1524,17 +1588,18 @@ else
   bad "missing delete target: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
 fi
 
-# What Codex does NOT intercept is an ordinary shell command here too.
+# A command with NO file header is an ordinary shell command: a patch that names
+# no file edits nothing. (The third row has the envelope markers and no header.)
 for CMD in "grep -cF '*** Begin Patch' a.sh; grep -cF '*** End Patch' a.sh" \
            "ls -la protected/" \
-           "echo start; $(heredoc '' '*** Update File: protected/x.ts\n@@\n+evil')" \
+           "cat <<'EOF'\n*** Begin Patch\n*** End Patch\nEOF" \
            "apply_patch --help" \
            "apply_patch_helper <<'EOF'\nx\nEOF" \
            "./apply_patch.sh <<'EOF'\nx\nEOF"; do
   rm -f "$LOG"
   adapt guard.sh "$(carried_payload PreToolUse "$CMD")"
   if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then
-    ok "not an intercepted form, so an ordinary command (exit 0, script not run): $(printf '%s' "$CMD" | cut -c1-44)…"
+    ok "no file header anywhere in it, so an ordinary command (exit 0, script not run): $(printf '%s' "$CMD" | cut -c1-44)…"
   else
     bad "a non-invocation was treated as a patch: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no): $(printf '%s' "$CMD" | cut -c1-60)"
   fi

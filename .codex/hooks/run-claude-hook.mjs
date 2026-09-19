@@ -41,16 +41,18 @@
 //     allows:
 //         apply_patch <<'EOF' … EOF
 //         cd <path> && apply_patch <<'EOF' … EOF        (also `applypatch`)
-//     Its matcher is a tree-sitter query and this file is not, so the rule here
-//     is about the START of the command: one that begins with that invocation
-//     and a heredoc is either parsed — the heredoc BODY is the patch, so a
-//     `*** End Patch` inside an added line cannot cut it short, and `cd <path>`
-//     moves the base, as in Codex — or, if this parser cannot read it, BLOCKED.
-//     It is never waved through as an ordinary command. A command that does not
-//     start that way — one that merely mentions the markers, a script that runs
-//     apply_patch after other statements — is an ordinary shell command: a
-//     shell can write files a hundred ways, none of which an Edit/Write hook
-//     sees under Claude Code either.
+//     Its matcher is a tree-sitter query over the bash grammar. This file does
+//     NOT try to reproduce it — three attempts to recognise "the shapes Codex
+//     intercepts" with a regex were each narrower somewhere, and each gap was
+//     an edit applied with every hook at exit 0. Instead the question is asked
+//     of the PATCH: any shell command whose text contains a file header line
+//     (`*** Add|Update|Delete File: <path>`) has every such path inspected,
+//     whatever shell syntax surrounds it (see carriedPatch). `cd <literal> &&`
+//     before the patch moves the base, as in Codex; any other directory change
+//     before a patch that names apply_patch BLOCKS. What this leaves out is a
+//     patch whose text is NOT in the command (`apply_patch < file.patch`) —
+//     Codex does not intercept that either, and a shell can write files a
+//     hundred ways, none of which an Edit/Write hook sees under Claude Code.
 //
 //     ONE THING THIS CANNOT SEE: the exec tool's `workdir` argument also moves
 //     the base, and the hook payload does not carry it. So for a carried patch
@@ -190,6 +192,7 @@ function parsePatch(patch) {
       // it, the destination is written where another may.
       const dest = { op: 'Update', path: move[1].trim(), added: current.added, isMoveDest: true };
       current.op = 'Delete';
+      current.isMoveSource = true; // for messages: the author wrote a move, not a removal
       current.added = [];
       files.push(dest);
       current = dest;
@@ -201,50 +204,69 @@ function parsePatch(patch) {
   return files;
 }
 
-// Does this shell command carry a patch? Three answers:
-//   null               — an ordinary command; nothing for a file hook to see.
-//   { dir, body }      — a patch, with the directory a leading `cd` moved to.
-//   { unparsed: why }  — it STARTS like the invocation Codex intercepts and has
-//                        a heredoc, but this parser cannot read it. The caller
-//                        blocks: Codex's matcher is a tree-sitter query over the
-//                        bash grammar, this is not, and where the two might
-//                        disagree the answer must be "not checked → not
-//                        allowed", never "ordinary command → exit 0".
-// Codex's query puts NO constraint on the heredoc delimiter, and the bash
-// grammar takes any word: quoted up to the closing quote (spaces included),
-// backslash-escaped, or a bare run of non-blank characters — `'END-PATCH'`,
-// `'1EOF'`, `\EOF` are all intercepted. An earlier version of this function
-// accepted identifiers only, and every other spelling sailed past the edit
-// hooks.
+// Does this shell command carry a patch?
 //
-// Deliberately a SUPERSET of what Codex intercepts, in the enforcing direction:
-// statements after the closing delimiter do not stop the patch being inspected
-// (Codex would not intercept that command, but the shell would then run
-// `apply_patch` from PATH and apply the same patch).
-function carriedInvocation(command) {
-  const head = /^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:cd\s+("[^"\n]*"|'[^'\n]*'|[^\s;&|'"]+)\s*&&\s*)?(?:apply_patch|applypatch)(?![\w.-])([^\n]*)(?:\r?\n|$)/.exec(command);
-  if (!head) return null;
-  const restOfLine = head[2];
-  if (!restOfLine.includes('<<')) return null; // `apply_patch --help`, `apply_patch "$P"`: no heredoc, nothing Codex intercepts
-  const unparsed = (why) => ({ unparsed: why });
-  if (/^\s*[A-Za-z_][A-Za-z0-9_]*=/.test(command)) return unparsed('it sets a variable before apply_patch');
+// THE QUESTION IS ASKED OF THE PATCH, NOT OF THE SHELL. Three earlier versions
+// asked "is this command one of the shapes Codex intercepts?" and answered with
+// a regex over shell syntax. Codex answers it with a tree-sitter query over the
+// bash grammar; each regex was narrower somewhere — an envelope cut short, an
+// identifier-only heredoc delimiter, then a backslash-newline continuation, a
+// quoted assignment, a leading redirect or comment — and each gap was an edit
+// Codex applied while every hook exited 0. Shell syntax is open-ended; a
+// recogniser for it is never finished (lessons-learned #21).
+//
+// A patch is not. Whatever the shell around it looks like, a patch that edits a
+// file must SAY so, on a line of its own: `*** Add|Update|Delete File: <path>`.
+// So the whole command is read with the same header matcher used for the patch
+// tool, and:
+//   no file header anywhere   → null: an ordinary command. A patch with no
+//                               file header edits nothing. (`grep '*** Begin
+//                               Patch' x` lands here; so does `apply_patch --help`.)
+//   one or more               → { files, named, dir, unfollowed }: every path is
+//                               inspected. Delimiter, quoting, continuations,
+//                               assignments, redirects, comments, statements
+//                               before or after — none of it is looked at, so
+//                               none of it can hide a path.
+// That is a superset of what Codex intercepts, in the enforcing direction: it
+// also inspects a heredoc that writes a patch FILE. The price is an occasional
+// advisory note about a file that was only mentioned.
+//
+// `named`: the command also contains the word apply_patch / applypatch. Only
+// then does this adapter BLOCK on something it cannot resolve (below), because
+// only then is "this is about to be applied" a fair reading.
+//
+// The shell still matters for ONE thing: which directory the paths resolve in.
+//   no cd / pushd / popd before the patch      → the hook's cwd.
+//   `cd <literal> && …` and nothing else moving → that directory, as in Codex.
+//   anything else (`cd "$X"`, `cd a\ b`, `cd x; …`, a subshell, two cds)
+//                                              → `unfollowed`: the caller blocks
+//                                                a named patch rather than check
+//                                                paths against the wrong base.
+function carriedPatch(command) {
+  const files = parsePatch(command);
+  if (files.length === 0) return null;
+  const named = /(^|[^\w.-])(?:apply_patch|applypatch)(?![\w.-])/.test(command);
+
+  // Where do the hunk paths resolve? Only the shell text BEFORE the patch can
+  // move that. Continuations are joined there as the shell joins them — never
+  // inside the patch, where joining `+x \` to the next line could swallow a
+  // file header.
+  const lines = command.split(/\r?\n/);
+  const firstMarker = lines.findIndex((l) => l.trim().startsWith('*** '));
+  const prefix = lines.slice(0, firstMarker).join('\n').replace(/\\\r?\n/g, '').split('<<')[0];
+  const movesDir = (s) => /(^|[\s;&|(){}`])(?:cd|pushd|popd)(?=[\s;&|)]|$)/.test(s);
   let dir = '';
-  if (head[1]) {
-    dir = head[1].replace(/^(["'])([\s\S]*)\1$/, '$2');
+  let unfollowed = null;
+  if (movesDir(prefix)) {
+    // The one form followed: `cd <literal> && …`, nothing else moving after it.
+    const m = /^\s*cd\s+('[^'\n]*'|"[^"\n]*"|[^\s;&|'"]+)\s*&&([\s\S]*)$/.exec(prefix);
     // '…' is literal. "…" may still expand; a bare word may expand, glob or escape.
-    const expands = head[1].startsWith('"') ? /[$`]|\\[$`"\\]/ : /[$`~*?[\]{}\\]/;
-    if (!head[1].startsWith("'") && expands.test(dir)) return unparsed(`its cd path (${head[1]}) needs the shell to expand it`);
+    const expands = m && (m[1].startsWith("'") ? null : m[1].startsWith('"') ? /[$`]|\\[$`"\\]/ : /[$`~*?[\]{}\\]/);
+    if (!m || movesDir(m[2])) unfollowed = 'it changes directory in a way this hook cannot follow';
+    else if (expands && expands.test(m[1])) unfollowed = `its cd path (${m[1]}) needs the shell to expand it`;
+    else dir = m[1].replace(/^(["'])([\s\S]*)\1$/, '$2');
   }
-  const redirect = /^\s*<<(-?)\s*('[^'\n]*'|"[^"\n]*"|[^\s<>|&;()]+)[ \t]*\r?$/.exec(restOfLine);
-  if (!redirect) return unparsed('apply_patch is followed by something other than a single heredoc');
-  // Quote removal, as the shell does it, gives the line that closes the body.
-  const closing = redirect[2].replace(/['"\\]/g, '');
-  if (!closing) return unparsed('its heredoc delimiter is empty');
-  const lines = command.slice(head[0].length).split(/\r?\n/);
-  const stripTabs = redirect[1] === '-';
-  const end = lines.findIndex((l) => (stripTabs ? l.replace(/^\t+/, '') : l) === closing);
-  if (end === -1) return unparsed(`its heredoc is never closed by a line reading ${closing}`);
-  return { dir, body: lines.slice(0, end).join('\n') };
+  return { files, named, dir, unfollowed };
 }
 
 // `Bash(git push *)` → should the script run for this command?
@@ -343,13 +365,13 @@ function main() {
   const editMode = process.argv[5] === 'edit';
   // A patch carried inside a shell command (see the header).
   const carried = editMode && toolName === 'Bash' && typeof input.tool_input?.command === 'string'
-    ? carriedInvocation(input.tool_input.command)
+    ? carriedPatch(input.tool_input.command)
     : null;
-  if (editMode && toolName === 'Bash' && !carried) process.exit(0); // an ordinary command: nothing for a file hook to see
-  if (carried?.unparsed) {
+  if (editMode && toolName === 'Bash' && !carried) process.exit(0); // no file header anywhere in it: nothing for a file hook to see
+  if (carried?.named && carried.unfollowed) {
     fault(
-      `${name}: this command starts an apply_patch heredoc, but ${carried.unparsed}, so the files it edits cannot be checked. ` +
-        `Send the patch through the apply_patch tool, or as the whole command in the form: apply_patch <<'EOF' … EOF`,
+      `${name}: this command applies a patch, but ${carried.unfollowed}, so the files it edits cannot be located or checked. ` +
+        `Send the patch through the apply_patch tool, or run it from the repository root as: apply_patch <<'EOF' … EOF`,
     );
   }
 
@@ -364,9 +386,9 @@ function main() {
   }
 
   if (toolName === 'apply_patch' || carried) {
-    const patch = carried ? carried.body : input.tool_input?.command ?? input.tool_input?.input ?? input.tool_input?.patch;
+    const patch = input.tool_input?.command ?? input.tool_input?.input ?? input.tool_input?.patch;
     const base = carried && carried.dir ? resolve(cwd, carried.dir) : cwd;
-    const files = parsePatch(typeof patch === 'string' ? patch : '');
+    const files = carried ? carried.files : parsePatch(typeof patch === 'string' ? patch : '');
     if (files.length === 0) {
       fault(`${name}: could not find a file path in the apply_patch payload — refusing to let the check pass on nothing`);
     }
@@ -376,9 +398,11 @@ function main() {
       // carry it. A file this patch UPDATES or DELETES must already exist; if
       // it does not exist where the path resolves, the base is wrong and every
       // check below would be looking at a file that is not the one being edited.
-      if (carried && !f.isMoveDest && f.op !== 'Add' && !existsSync(resolved)) {
+      // Only for a NAMED patch: a heredoc that merely writes a patch file may
+      // well mention files that are not here, and blocking that would be wrong.
+      if (carried?.named && !f.isMoveDest && f.op !== 'Add' && !existsSync(resolved)) {
         fault(
-          `${name}: this patch ${f.op === 'Delete' ? 'removes' : 'updates'} ${f.path}, which does not exist under ${base.replace(/\\/g, '/')}. ` +
+          `${name}: this patch ${f.isMoveSource ? 'moves' : f.op === 'Delete' ? 'removes' : 'updates'} ${f.path}, which does not exist under ${base.replace(/\\/g, '/')}. ` +
             `The command was probably run with a working directory this hook cannot see, so the edit cannot be checked. ` +
             `Send the patch through the apply_patch tool, or run it from the repository root with root-relative paths.`,
         );
@@ -430,6 +454,11 @@ function main() {
       maxBuffer: 64 * 1024 * 1024,
       ...(Number.isFinite(timeout) ? { timeout, killSignal: 'SIGKILL' } : {}),
     });
+    if (res.error && res.error.code === 'ETIMEDOUT' && perRunMs && remaining < perRunMs) {
+      // The PATCH budget cut this run short, not the hook's own bound. Saying
+      // "raise the hook's timeout" here would send the reader to the wrong fix.
+      fault(`${name}: out of time while checking path ${i + 1} of ${runs.length} (budget ${budgetMs / 1000}s) — it and the rest were NOT checked. Split the patch into smaller ones.`);
+    }
     if (res.error && res.error.code === 'ETIMEDOUT') {
       fault(
         `${name}: timed out after ${Math.round(timeout / 1000)}s on ${run.env.TOOL_INPUT_file_path || 'this command'} — it was NOT checked. ` +

@@ -110,7 +110,7 @@
     ".codex/agents/code-reviewer.toml": "22662e299db735e89369de0042a5c69772fbb75ec7675461b09965ad237e2d0b",
     ".codex/agents/docs-guardian.toml": "0720c4b5d71348ec91254948615a840e324353764726aab98396266839b27340",
     ".codex/agents/docs-maintainer.toml": "9f7006ed4c36f403c270d6dfa43194c22e74cadcaa442048b5fd836d6b45e93a",
-    ".codex/agents/dx-guardian.toml": "d1e17490cbca7a8b859eaccfe8a957ed5a037f6193b47d175cc3ef71bf72af7b",
+    ".codex/agents/dx-guardian.toml": "dcc1c570aa98cdf08b6cfee8fa99c8189130a71d38ad72fa0b00c2cc6b373838",
     ".codex/agents/infra-devops.toml": "24001b44c1bda1e5d2804f2c247f078350017cb6efcaf5c2fad6393ebb381ef6",
     ".codex/agents/planner.toml": "ba5c8a8e190c3c5c9e97a0d4945b21fefc2ecc249136c69124d456f057bc76a2",
     ".codex/agents/rust-engine.toml": "b6554b1fc6f9d281da5338498b7186d9da4c70a123c9f83d88de72f0c8653e3c",

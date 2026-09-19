@@ -11,13 +11,15 @@ On Windows use python when python3 is unavailable. The launcher detects either s
 
 HTTP, MCP and synchronization use the same runtime. Windows uses APPDATA/taskboard (restoring the standard Roaming path when a GUI host omits APPDATA); macOS uses Library/Application Support/taskboard; Linux uses XDG_CONFIG_HOME/taskboard or ~/.config/taskboard. TASKBOARD_DB is an explicit override that must be shared by every client. TASKBOARD_API defaults to http://localhost:3010/api. A mismatched API/database or failed integrity check stops synchronization before writes.
 
-The committed .mcp.json config runs the launcher. Codex does not read .mcp.json, so for Codex add this block to your own `.codex/config.toml` as a LOCAL, UNCOMMITTED edit, preserving other configuration (start Codex at the repository root — the path is relative to where it starts). Do not commit it on its own: `scripts/check-codex-port.sh` requires the COMMITTED file to declare the same servers as .mcp.json, all or none (#8767):
+The committed .mcp.json config runs the launcher. Codex does not read .mcp.json, so for Codex add this block to your USER-level config, `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows), preserving other configuration. Use the ABSOLUTE path of the launcher in your main checkout — a user-level server is started for every project you open, and a relative path resolves only when Codex starts at this repository's root:
 
 ~~~toml
 [mcp_servers.taskboard]
 command = "node"
-args = [".claude/hooks/taskboard-launch.mjs", "mcp"]
+args = ["/absolute/path/to/project-forge/.claude/hooks/taskboard-launch.mjs", "mcp"]
 ~~~
+
+Do NOT put it in the repository's `.codex/config.toml`, not even as an uncommitted edit. That file is tracked, and in a linked worktree `.claude/hooks/worktree-safety-commit.sh` runs `git add -A && git commit` when a session stops — so the personal block is swept into a commit, the COMMITTED file then declares `taskboard` alone, and `scripts/check-codex-port.sh` goes red with one `mcp:` line for every other server in .mcp.json (it requires the committed file to declare the same servers as .mcp.json, all or none — #8767). If that has already happened, take the block back out of the commit; do not "fix" it by restating the other servers. Not verified here: a live Codex session starting this server from the user-level file (see the first-run checklist in `docs/guides/codex-cli-support-matrix.md`).
 
 Remove old client overrides pointing at .claude/taskboard.db. Reconnect already-running MCP sessions after changing their configuration. Never copy a SQLite database into a worktree or delete a database to resolve an identity mismatch.
 

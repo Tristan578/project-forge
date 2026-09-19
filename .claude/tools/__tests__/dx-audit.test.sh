@@ -52,6 +52,17 @@ echo "== dx-audit: behavioural — agentic section runs and passes on the in-syn
 audit_out="$(bash "$AUDIT" audit 2>&1 || true)"
 if echo "$audit_out" | grep -qi "agentic"; then ok "audit output includes an agentic source-of-truth section"; else bad "audit output has no agentic section"; fi
 if echo "$audit_out" | grep -qi "agentic config.*sync\|in sync with .*canonical"; then ok "audit reports the agentic config in sync"; else bad "audit did not report agentic sync status"; fi
+# The SECOND generator (tools/agentic-sync/port.mjs → the Codex CLI surface). The
+# audit is the check the DX docs send contributors to after adding a skill; if it
+# does not delegate to the Codex gate it prints PASSED over a stale mirror (#9745).
+# Anchored to an executable line: a comment mentioning the gate must not satisfy it.
+# shellcheck disable=SC2016  # the $NAMES are literal text searched for in the audit script
+if grep -qE '^[[:space:]]*if bash "\$CODEX_GATE"' "$AUDIT" && grep -qE '^CODEX_GATE="\$PROJECT_ROOT/scripts/check-codex-port\.sh"$' "$AUDIT"; then
+  ok "audit delegates to scripts/check-codex-port.sh on an executable line"
+else
+  bad "audit does not run scripts/check-codex-port.sh"
+fi
+if echo "$audit_out" | grep -qF "Codex CLI surface in sync with .claude/"; then ok "audit reports the Codex CLI surface in sync"; else bad "audit did not report the Codex surface status: $(echo "$audit_out" | grep -i codex | head -3)"; fi
 
 echo "== structural: this suite is wired into CI (anti-unwiring) =="
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"

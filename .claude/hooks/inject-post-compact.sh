@@ -106,6 +106,7 @@ for rule in "${RULES[@]}"; do
     gotchas-codex-port.md) hint="Generated Codex CLI surface: port.mjs --write, the drift gate, adding a hook" ;;
     agent-operations.md) hint="Agent SOPs: testing, committing, PR creation, dispatch" ;;
     hook-testing.md)    hint="Bash test conventions for .claude/hooks/__tests__" ;;
+    lessons-learned.md) hint="MANDATORY: anti-patterns from real bugs here (gates that check the wrong property, vacuous tests, unverified claims)" ;;
     *)                  hint="(no summary)" ;;
   esac
   echo "- ${rel} — ${hint}"

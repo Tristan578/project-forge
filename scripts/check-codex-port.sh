@@ -57,8 +57,10 @@ if [ "$rc" -eq 0 ]; then
   exit 0
 fi
 if [ "$rc" -eq 1 ]; then
-  echo "" >&2
-  echo "The Codex CLI surface is GENERATED from .claude/ — never hand-edit it." >&2
+  # Nothing is added here. The generator has already printed a recipe for each
+  # KIND of problem it listed, and they differ: drift is fixed by regenerating,
+  # while `mcp:` and `ref:` are fixed by editing a hand-written .codex/ file. A
+  # blanket "never hand-edit it" as the last line of the log contradicted those.
   exit 1
 fi
 echo "::error::the Codex port generator could not run (exit $rc) — treating as a failure, not a pass" >&2

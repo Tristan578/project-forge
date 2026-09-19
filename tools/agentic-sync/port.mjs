@@ -954,7 +954,7 @@ function main() {
     // --write" as the fix for something --write has just reported.
     const has = (re) => problems.some((p) => re.test(p));
     if (has(/^(missing|stale|orphan):/) || has(/^mode: .* source /)) {
-      console.error('Fix `missing`/`stale`/`orphan`/`mode`: node tools/agentic-sync/port.mjs --write   (then commit the result)');
+      console.error('Fix `missing`/`stale`/`orphan`/`mode`: node tools/agentic-sync/port.mjs --write   (then commit the result). Those files are GENERATED from .claude/ — never hand-edit them.');
     }
     if (has(/^untracked:/) || has(/^mode: .* is not staged/)) {
       console.error('Fix `untracked` / `mode … not staged`: `git add` the files named above, THEN run node tools/agentic-sync/port.mjs --write again. Running it again without staging prints this same report.');
@@ -963,7 +963,7 @@ function main() {
       console.error('Fix `extra`/`modified`: --write never deletes a file it cannot prove it wrote; each line above says what to do with that file.');
     }
     if (has(/^ref:/)) console.error('Fix `ref`: correct the path in the SOURCE under .claude/ (or the hand-authored .codex/ file) — the generator copies text, it does not invent paths.');
-    if (has(/^mcp:/)) console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files.');
+    if (has(/^mcp:/)) console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files. If the COMMITTED .codex/config.toml carries a personal server block that was swept into a commit by accident (a `git add -A`, a safety commit), take it back out of the commit — personal servers belong in ~/.codex/config.toml.');
     process.exit(1);
   }
   console.log('codex-port: generated Codex surface is in sync with .claude/.');

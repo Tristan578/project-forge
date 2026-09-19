@@ -112,6 +112,25 @@ else
   fail "scripts/check-agentic-sync.sh missing"
 fi
 
+# The Codex CLI surface (.agents/skills/, .codex/agents/, .codex/hooks.json) is
+# generated from .claude/ by a SECOND generator, tools/agentic-sync/port.mjs.
+# Delegated for the same reason as above — and because without it this audit
+# printed "PASSED" over a stale skill mirror that then went red in CI (#9745).
+CODEX_GATE="$PROJECT_ROOT/scripts/check-codex-port.sh"
+if [ -f "$CODEX_GATE" ]; then
+  if command -v node > /dev/null 2>&1; then
+    if bash "$CODEX_GATE" > /dev/null 2>&1; then
+      pass "Codex CLI surface in sync with .claude/"
+    else
+      fail "Codex CLI surface DRIFTED or invalid — run: bash scripts/check-codex-port.sh (it names each problem and its fix)"
+    fi
+  else
+    warn "node not found — cannot verify the Codex CLI surface"
+  fi
+else
+  fail "scripts/check-codex-port.sh missing"
+fi
+
 # ============================================
 # 2. Validation Script Health
 # ============================================
