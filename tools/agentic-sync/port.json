@@ -21,7 +21,11 @@
     "source": ".claude/settings.json",
     "target": ".codex/hooks.json",
     "adapter": ".codex/hooks/run-claude-hook.mjs",
+    "conditions": ".codex/hook-conditions.json",
     "scriptDir": ".claude/hooks",
+    "droppedHandlerKeys": {
+      "async": "Codex skips a handler marked async outright (hooks/src/engine/discovery.rs: 'async hooks are not supported yet'), so copying the key would un-wire the hook. It is dropped and the hook runs synchronously, bounded by its own `timeout` and by its group's `if` condition, which the adapter applies. Today that is only post-push-resolve-comments.sh: up to 30s, after a command containing `git push`"
+    },
     "supportedEvents": [
       "PreToolUse",
       "PostToolUse",
@@ -53,6 +57,8 @@
       "PostToolUseFailure": "no Codex hook event; rate-limit backoff is advisory context only"
     },
     "skipScripts": {
+      "restore-context-hints.sh": "exists only to put context back in front of the model after compaction. Codex's PostCompact output accepts neither additionalContext nor any hookSpecificOutput (hooks/src/schema.rs, PostCompactCommandOutputWire, deny_unknown_fields) and drops plain stdout, so under Codex it could run and change nothing. Not wired rather than wired-and-inert",
+      "inject-post-compact.sh": "same as restore-context-hints.sh: a PostCompact context injector, and Codex's PostCompact cannot carry context to the model. Compensating control: .codex/AGENTS.md is re-read by Codex and points at .claude/rules/",
       "auto-approve-safe-commands.sh": "its whole output is permissionDecision=allow, which Codex rejects as unsupported (the hook run is marked Failed). Codex has no hook-driven approval; approvals come from approval_policy and the sandbox"
     }
   }

@@ -3,41 +3,70 @@
 //
 // WHY AN ADAPTER AND NOT A DIRECT CALL
 // The hook scripts were written against Claude Code's payload. Codex's differs
-// in exactly the place that fails silently (verified against openai/codex
-// rust-v0.144.1, codex-rs/hooks/src/events/pre_tool_use.rs and
-// core/src/tools/hook_names.rs):
+// in exactly the places that fail silently. Each statement below was read from
+// openai/codex at tag rust-v0.144.1; the file is named so it can be re-checked.
 //
 //   * A file edit arrives as tool `apply_patch` with `tool_input.command` set to
 //     the PATCH TEXT. There is no `tool_input.file_path` and there are no
-//     `TOOL_INPUT_*` environment variables.
-//   * Every Edit/Write hook here starts with "no file_path → exit 0". Called
-//     directly, all nine would therefore pass on every edit, forever, and read
-//     as enforcement (lessons-learned #1 and #9).
+//     `TOOL_INPUT_*` environment variables (core/src/tools/hook_names.rs,
+//     hooks/src/events/pre_tool_use.rs). Every Edit/Write hook here starts with
+//     "no file_path → exit 0", so called directly all nine would pass on every
+//     edit, forever, and read as enforcement (lessons-learned #1 and #9).
+//   * ONLY exit 2 with a non-empty stderr blocks. Any other non-zero exit marks
+//     the hook run Failed and THE ACTION PROCEEDS (pre_tool_use.rs). So a fault
+//     in this adapter must not exit 1 on the event that gates actions.
+//   * Plain stdout is dropped; only JSON reaches the model, and each event
+//     accepts a different, `deny_unknown_fields` shape (hooks/src/schema.rs).
+//     A hook that "warns" in plain text would otherwise warn nobody.
 //
-// So for `apply_patch` this adapter parses the patch, and runs the script ONCE
-// PER TOUCHED FILE with the payload those scripts expect: `tool_name` Edit or
-// Write, `tool_input.file_path` absolute, and `TOOL_INPUT_file_path` set. If it
-// cannot find a single path in a patch it FAILS (exit 1, reported by Codex)
-// rather than letting the scripts pass on nothing. `Bash` payloads already match
-// (`tool_input.command`) and pass through untouched.
+// WHAT IT DOES
+//   apply_patch → parse the patch the way Codex's own parser does (headers are
+//     matched on the TRIMMED line — apply-patch/src/streaming_parser.rs — or an
+//     indented header would hide a hunk from every hook) and run the script
+//     ONCE PER TOUCHED PATH: added and updated files, deleted files, and BOTH
+//     ends of a move. Payload per run: `tool_name` Write (Add) or Edit,
+//     `tool_input.file_path` absolute and forward-slashed, and
+//     `TOOL_INPUT_file_path` set.
+//   Bash → the payload already matches (`tool_input.command`); passed through.
+//   `if` conditions from .claude/settings.json (e.g. `Bash(git push *)`) are
+//     read from `.codex/hook-conditions.json`, which the generator writes.
+//     Codex has no such key, and without it `post-push-resolve-comments.sh`
+//     would run `gh` after every shell command.
 //
-// OUTPUT TRANSLATION
-//   exit 2 + stderr            → same meaning in Codex (block); passed through.
-//   other non-zero             → exit 1, stderr passed through (Codex: Failed).
-//   JSON additionalContext     → supported by Codex; merged across files.
-//   JSON systemMessage         → supported; merged.
-//   permissionDecision "deny"  → supported; passed through with its reason.
-//   permissionDecision allow/ask, decision "approve", continue, stopReason,
-//   suppressOutput             → Codex marks the run Failed on these, so they
-//                                are dropped. Codex has no hook-driven approval.
-//   plain text                 → passed through unchanged.
+// EXIT CODES
+//   script exits 2            → exit 2, its stderr passed through (block).
+//   script exits other non-0  → exit 1, stderr passed through. Codex reports the
+//                               run as Failed and proceeds — the same meaning a
+//                               crashing hook has under Claude Code.
+//   ADAPTER fault on PreToolUse (unreadable payload, no path found in a patch,
+//     script or bash missing)  → exit 2 with the reason. Enforcement that
+//                               cannot run must not read as enforcement that
+//                               passed. On other events: exit 1.
+//
+// OUTPUT, per event (hooks/src/schema.rs)
+//   additionalContext   SessionStart, UserPromptSubmit, PreToolUse, PostToolUse,
+//                       SubagentStart. Plain-text stdout is wrapped into it
+//                       here, merged across runs.
+//   block               PreToolUse → hookSpecificOutput.permissionDecision
+//                       "deny"; UserPromptSubmit, PostToolUse, SubagentStop,
+//                       Stop → top-level decision "block" + reason.
+//   systemMessage       every event.
+//   PreCompact / PostCompact accept none of the above: text from a script on
+//                       those events cannot reach the model, which is why the
+//                       context-restoring PostCompact scripts are listed as NOT
+//                       ported in tools/agentic-sync/port.json.
+//   Dropped everywhere: permissionDecision allow/ask, decision "approve",
+//                       updatedInput, continue, stopReason, suppressOutput —
+//                       Codex marks the run Failed on the first four and has no
+//                       hook-driven approval.
 //
 // Usage (from .codex/hooks.json, generated by tools/agentic-sync/port.mjs):
 //   node .codex/hooks/run-claude-hook.mjs <script-name.sh>
 //
 // TEST SEAMS (never set by hooks.json)
-//   CODEX_HOOK_SCRIPT_DIR — directory holding the scripts (default .claude/hooks)
-//   CODEX_HOOK_BASH       — bash binary to use
+//   CODEX_HOOK_SCRIPT_DIR  — directory holding the scripts (default .claude/hooks)
+//   CODEX_HOOK_CONDITIONS  — path of the conditions file
+//   CODEX_HOOK_BASH        — bash binary to use
 
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -48,10 +77,23 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCRIPT_DIR = process.env.CODEX_HOOK_SCRIPT_DIR
   ? resolve(process.env.CODEX_HOOK_SCRIPT_DIR)
   : join(REPO_ROOT, '.claude', 'hooks');
+const CONDITIONS = process.env.CODEX_HOOK_CONDITIONS
+  ? resolve(process.env.CODEX_HOOK_CONDITIONS)
+  : join(REPO_ROOT, '.codex', 'hook-conditions.json');
 
-function fail(msg) {
+const CONTEXT_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SubagentStart']);
+const TOP_LEVEL_BLOCK_EVENTS = new Set(['UserPromptSubmit', 'PostToolUse', 'SubagentStop', 'Stop']);
+// An env string this large makes execve fail with E2BIG on Linux (128 KiB per
+// string), which would surface as a non-blocking failure. The scripts read the
+// command from stdin; the variable is a convenience, so it is simply omitted.
+const MAX_ENV_VALUE = 32 * 1024;
+
+let EVENT = '';
+
+// A fault in the adapter itself. Blocks on the event that gates actions.
+function fault(msg) {
   process.stderr.write(`run-claude-hook: ${msg}\n`);
-  process.exit(1);
+  process.exit(EVENT === 'PreToolUse' ? 2 : 1);
 }
 
 // On Windows a bare `bash` can resolve to C:\Windows\System32\bash.exe (WSL),
@@ -70,11 +112,14 @@ function findBash() {
   return 'bash';
 }
 
-// `*** Add File: p`, `*** Update File: p`, `*** Delete File: p`, `*** Move to: p`
+// Every path a patch touches. Headers are matched on the TRIMMED line, as
+// Codex's streaming parser does; anchoring at column 0 would let an indented
+// `  *** Update File: x` hide its hunk from every hook while Codex applies it.
 export function parsePatch(patch) {
   const files = [];
   let current = null;
-  for (const line of String(patch).split(/\r?\n/)) {
+  for (const rawLine of String(patch).split(/\r?\n/)) {
+    const line = rawLine.trim();
     const head = /^\*\*\* (Add|Update|Delete) File: (.+)$/.exec(line);
     if (head) {
       current = { op: head[1], path: head[2].trim(), added: [] };
@@ -83,40 +128,69 @@ export function parsePatch(patch) {
     }
     const move = /^\*\*\* Move to: (.+)$/.exec(line);
     if (move && current) {
-      current.path = move[1].trim();
+      // Both ends matter: the source is removed from where a hook may protect
+      // it, the destination is written where another may.
+      const dest = { op: 'Update', path: move[1].trim(), added: current.added };
+      current.op = 'Delete';
+      current.added = [];
+      files.push(dest);
+      current = dest;
       continue;
     }
-    if (current && line.startsWith('+')) current.added.push(line.slice(1));
+    if (/^\*\*\* (Begin|End) Patch$/.test(line) || line === '*** End of File') continue;
+    if (current && rawLine.startsWith('+')) current.added.push(rawLine.slice(1));
   }
   return files;
 }
 
-const DROP_TOP = ['continue', 'stopReason', 'suppressOutput'];
+// `Bash(git push *)` → should the script run for this command?
+// Deliberately GENEROUS: Claude Code evaluates these against its own parse of
+// the command, which is not reproducible here, so the literal text before the
+// first `*` is looked for ANYWHERE in the command. Running a script that then
+// decides it has nothing to do is harmless; not running one that would have
+// blocked is not.
+export function conditionMatches(pattern, toolName, command) {
+  const m = /^([A-Za-z_]+)\((.*)\)$/.exec(pattern);
+  if (!m) return true; // unreadable condition → run
+  if (m[1] !== toolName) return false;
+  const literal = m[2].split('*')[0].trim();
+  return literal === '' || String(command).includes(literal);
+}
 
-function sanitize(obj) {
-  const out = { ...obj };
-  for (const k of DROP_TOP) delete out[k];
-  if (out.decision === 'approve') {
-    delete out.decision;
-    delete out.reason;
+function conditionsFor(event, name) {
+  try {
+    const all = JSON.parse(readFileSync(CONDITIONS, 'utf8'));
+    const list = all?.[event]?.[name];
+    return Array.isArray(list) ? list : null;
+  } catch {
+    return null; // missing or unreadable → no condition → run
   }
-  if (out.hookSpecificOutput && typeof out.hookSpecificOutput === 'object') {
-    const hso = { ...out.hookSpecificOutput };
-    if (hso.permissionDecision && hso.permissionDecision !== 'deny') {
-      delete hso.permissionDecision;
-      delete hso.permissionDecisionReason;
+}
+
+function emit(event, { deny, contexts, messages }) {
+  const out = {};
+  const context = contexts.join('\n\n');
+  if (event === 'PreToolUse') {
+    const hso = { hookEventName: event };
+    if (deny) {
+      hso.permissionDecision = 'deny';
+      hso.permissionDecisionReason = deny;
     }
-    delete hso.updatedInput;
-    out.hookSpecificOutput = hso;
+    if (context) hso.additionalContext = context;
+    if (deny || context) out.hookSpecificOutput = hso;
+  } else {
+    if (deny && TOP_LEVEL_BLOCK_EVENTS.has(event)) {
+      out.decision = 'block';
+      out.reason = deny;
+    }
+    if (context && CONTEXT_EVENTS.has(event)) out.hookSpecificOutput = { hookEventName: event, additionalContext: context };
   }
-  return out;
+  if (messages.length) out.systemMessage = messages.join('\n');
+  if (Object.keys(out).length) process.stdout.write(`${JSON.stringify(out)}\n`);
 }
 
 function main() {
   const name = process.argv[2] || '';
-  if (!/^[\w.-]+\.sh$/.test(name)) fail(`expected a script name like check-foo.sh, got "${name}"`);
-  const script = join(SCRIPT_DIR, name);
-  if (!existsSync(script)) fail(`${script} does not exist`);
 
   let raw = '';
   try {
@@ -129,20 +203,34 @@ function main() {
     try {
       input = JSON.parse(raw);
     } catch (e) {
-      fail(`hook payload is not JSON: ${e.message}`);
+      // The event is unknown here; an unreadable payload on a gating event must
+      // not proceed, so assume the gating one.
+      EVENT = 'PreToolUse';
+      fault(`hook payload is not JSON (${e.message}) — refusing to let ${name} pass unread`);
     }
   }
-  const cwd = typeof input.cwd === 'string' && existsSync(input.cwd) ? input.cwd : REPO_ROOT;
+  EVENT = typeof input.hook_event_name === 'string' ? input.hook_event_name : '';
 
-  // One invocation per touched file for apply_patch; one invocation otherwise.
+  if (!/^[\w.-]+\.sh$/.test(name)) fault(`expected a script name like check-foo.sh, got "${name}"`);
+  const script = join(SCRIPT_DIR, name);
+  if (!existsSync(script)) fault(`${script} does not exist — the check it carries cannot run`);
+
+  const cwd = typeof input.cwd === 'string' && existsSync(input.cwd) ? input.cwd : REPO_ROOT;
+  const toolName = input.tool_name;
+
+  // `if` conditions (Bash only — that is the only tool they are written for).
+  if (toolName === 'Bash') {
+    const conds = conditionsFor(EVENT, name);
+    const command = input.tool_input?.command ?? '';
+    if (conds && !conds.some((c) => conditionMatches(c, 'Bash', command))) process.exit(0);
+  }
+
   const runs = [];
-  if (input.tool_name === 'apply_patch') {
+  if (toolName === 'apply_patch') {
     const patch = input.tool_input?.command ?? input.tool_input?.input ?? input.tool_input?.patch;
-    const files = parsePatch(typeof patch === 'string' ? patch : '').filter((f) => f.op !== 'Delete');
+    const files = parsePatch(typeof patch === 'string' ? patch : '');
     if (files.length === 0) {
-      const deletesOnly = parsePatch(typeof patch === 'string' ? patch : '').length > 0;
-      if (deletesOnly) process.exit(0); // nothing written; nothing to inspect
-      fail(`${name}: could not find a file path in the apply_patch payload — refusing to let the check pass on nothing`);
+      fault(`${name}: could not find a file path in the apply_patch payload — refusing to let the check pass on nothing`);
     }
     for (const f of files) {
       // Forward slashes on every platform: the consumers are bash scripts that
@@ -151,7 +239,7 @@ function main() {
       const filePath = (isAbsolute(f.path) ? f.path : resolve(cwd, f.path)).replace(/\\/g, '/');
       const toolInput = { file_path: filePath };
       if (f.op === 'Add') toolInput.content = f.added.join('\n');
-      else toolInput.new_string = f.added.join('\n');
+      else toolInput.new_string = f.added.join('\n'); // '' for a delete / move source
       runs.push({
         payload: { ...input, tool_name: f.op === 'Add' ? 'Write' : 'Edit', tool_input: toolInput },
         env: { TOOL_INPUT_file_path: filePath },
@@ -159,14 +247,14 @@ function main() {
     }
   } else {
     const env = {};
-    if (typeof input.tool_input?.command === 'string') env.TOOL_INPUT_command = input.tool_input.command;
+    const command = input.tool_input?.command;
+    if (typeof command === 'string' && command.length < MAX_ENV_VALUE) env.TOOL_INPUT_command = command;
     runs.push({ payload: raw.trim() ? input : null, env });
   }
 
   const bash = findBash();
   const contexts = [];
   const messages = [];
-  const texts = [];
   let deny = null;
   for (const run of runs) {
     const res = spawnSync(bash, [script], {
@@ -176,14 +264,17 @@ function main() {
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });
-    if (res.error) fail(`${name}: could not start bash (${res.error.message})`);
+    if (res.error) fault(`${name}: could not start bash (${res.error.message})`);
     if (res.status === 2) {
-      process.stderr.write(res.stderr || `${name} blocked this action without giving a reason\n`);
+      process.stderr.write(res.stderr && res.stderr.trim() ? res.stderr : `${name} blocked this action without giving a reason\n`);
       process.exit(2);
     }
     if (res.status !== 0) {
+      // The script itself crashed. Same meaning as under Claude Code: reported,
+      // not blocking. (An ADAPTER fault is different — see fault().)
       process.stderr.write(res.stderr || '');
-      fail(`${name} exited ${res.status}`);
+      process.stderr.write(`run-claude-hook: ${name} exited ${res.status}\n`);
+      process.exit(1);
     }
     const stdout = (res.stdout || '').trim();
     if (!stdout) continue;
@@ -196,32 +287,17 @@ function main() {
       }
     }
     if (!parsed || typeof parsed !== 'object') {
-      texts.push(stdout);
+      contexts.push(stdout); // plain text: only JSON reaches the model, so wrap it
       continue;
     }
-    const clean = sanitize(parsed);
-    const hso = clean.hookSpecificOutput || {};
-    if (hso.permissionDecision === 'deny' && !deny) {
-      deny = hso.permissionDecisionReason || `${name} denied this action`;
-    }
-    if (clean.decision === 'block' && !deny) deny = clean.reason || `${name} blocked this action`;
+    const hso = parsed.hookSpecificOutput && typeof parsed.hookSpecificOutput === 'object' ? parsed.hookSpecificOutput : {};
+    if (hso.permissionDecision === 'deny' && !deny) deny = hso.permissionDecisionReason || `${name} denied this action`;
+    if (parsed.decision === 'block' && !deny) deny = parsed.reason || `${name} blocked this action`;
     if (hso.additionalContext) contexts.push(String(hso.additionalContext));
-    if (clean.systemMessage) messages.push(String(clean.systemMessage));
+    if (parsed.systemMessage) messages.push(String(parsed.systemMessage));
   }
 
-  if (!deny && contexts.length === 0 && messages.length === 0) {
-    if (texts.length) process.stdout.write(`${texts.join('\n')}\n`);
-    process.exit(0);
-  }
-  const hookSpecificOutput = { hookEventName: input.hook_event_name || 'PreToolUse' };
-  if (deny) {
-    hookSpecificOutput.permissionDecision = 'deny';
-    hookSpecificOutput.permissionDecisionReason = deny;
-  }
-  if (contexts.length || texts.length) hookSpecificOutput.additionalContext = [...contexts, ...texts].join('\n\n');
-  const out = { hookSpecificOutput };
-  if (messages.length) out.systemMessage = messages.join('\n');
-  process.stdout.write(`${JSON.stringify(out)}\n`);
+  emit(EVENT, { deny, contexts, messages });
   process.exit(0);
 }
 

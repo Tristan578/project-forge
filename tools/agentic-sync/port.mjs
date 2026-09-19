@@ -59,6 +59,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   rmdirSync,
   writeFileSync,
@@ -148,18 +149,38 @@ function gitIndex() {
 
 // Read a source file, dereferencing a symlink whether the platform checked it
 // out as a real link or as a text stub holding the link target.
+//
+// CONTAINMENT, identically on both branches. A link's TARGET CONTENT is copied
+// into a tracked file, in the one directory reviewers are told not to read line
+// by line — so a link such as `notes -> ../../../.env.local` would publish a
+// secret through a "regenerate and commit" instruction. The target must
+// therefore be (a) inside the repository and (b) a file git TRACKS. "Inside the
+// repo" alone is not enough: `.env.local` is inside it. When git is unavailable
+// the tracked test cannot be made, and a link is refused rather than trusted.
 function readSource(rel, modes) {
   const p = abs(rel);
   const st = lstatSync(p);
-  if (st.isSymbolicLink()) return readFileSync(p); // follows the link
-  if (modes.get(rel) === '120000') {
+  const isLink = st.isSymbolicLink();
+  const isStub = !isLink && modes.get(rel) === '120000';
+  if (!isLink && !isStub) return readFileSync(p);
+
+  let resolved;
+  if (isLink) {
+    const real = realpathSync(p);
+    const realRoot = realpathSync(ROOT);
+    if (!real.startsWith(realRoot + sep)) die(`symlink ${rel} points outside the repository`);
+    resolved = real.slice(realRoot.length + 1).split(sep).join('/');
+  } else {
     const target = readFileSync(p, 'utf8').trim();
-    const resolved = posix.normalize(posix.join(posix.dirname(rel), target));
+    if (target.startsWith('/') || /^[A-Za-z]:/.test(target)) die(`symlink ${rel} has an absolute target (${target})`);
+    resolved = posix.normalize(posix.join(posix.dirname(rel), target));
     if (resolved.startsWith('..')) die(`symlink ${rel} points outside the repository (${target})`);
-    if (!existsExact(resolved)) die(`symlink ${rel} -> ${target} does not resolve`);
-    return readFileSync(abs(resolved));
   }
-  return readFileSync(p);
+  if (!existsExact(resolved)) die(`symlink ${rel} -> ${resolved} does not resolve`);
+  if (!modes.has(resolved)) {
+    die(`symlink ${rel} -> ${resolved}: the target is not a file git tracks, so its content will not be copied into the mirror`);
+  }
+  return readFileSync(abs(resolved));
 }
 
 function walk(relDir, modes, out = []) {
@@ -224,6 +245,11 @@ function parseAgent(rel, text) {
   }
   for (const k of ['name', 'description']) {
     if (!fm[k]) die(`${rel}: frontmatter is missing a single-line \`${k}\``);
+    // This is a line reader, not a YAML parser. A block scalar (`description: >`)
+    // would otherwise come through as the one-character description ">".
+    if (/^[>|][+-]?\d*$/.test(fm[k])) {
+      die(`${rel}: \`${k}\` is a YAML block scalar (${fm[k]}); write it on one line — this generator does not parse multi-line YAML`);
+    }
   }
   return { fm, body: m[2].replace(/^\n+/, '').replace(/\s+$/, '') };
 }
@@ -305,17 +331,37 @@ function planHooks(m, plan) {
     die(`${h.source} is not valid JSON: ${e.message}`);
   }
   const out = {};
+  const conditions = {};
   const report = { ported: 0, skipped: [], unsupported: [] };
+  // Every key on a group or a handler is classified, exactly like events and
+  // scripts. `.claude/settings.json` already carries two the first cut of this
+  // generator dropped without a word: a group-level `if` on six groups and
+  // `async` on one handler. A key Claude Code adds tomorrow must stop the
+  // generator until someone decides what it means under Codex.
+  const GROUP_KEYS = ['matcher', 'hooks', 'if'];
+  const HANDLER_KEYS = ['type', 'command', 'timeout', 'statusMessage', ...Object.keys(h.droppedHandlerKeys || {})];
   for (const [event, groups] of Object.entries(settings.hooks || {})) {
     const supported = h.supportedEvents.includes(event);
     if (!supported && !Object.hasOwn(h.unsupportedEvents, event)) {
       die(`hooks: event "${event}" is wired in ${h.source} but is neither in port.json hooks.supportedEvents nor explained in hooks.unsupportedEvents`);
     }
     for (const group of groups) {
+      for (const k of Object.keys(group)) {
+        if (!GROUP_KEYS.includes(k)) die(`hooks: ${event} group carries key "${k}", which this generator does not know how to port — classify it in port.mjs`);
+      }
       const handlers = [];
       for (const hook of group.hooks || []) {
-        const name = /([\w.-]+\.sh)/.exec(hook.command || '')?.[1];
-        if (hook.type !== 'command' || !name) die(`hooks: cannot port non-script hook on ${event}: ${JSON.stringify(hook)}`);
+        for (const k of Object.keys(hook)) {
+          if (!HANDLER_KEYS.includes(k)) die(`hooks: a ${event} handler carries key "${k}", which is neither ported nor explained in port.json hooks.droppedHandlerKeys`);
+        }
+        // The whole command must be one of the two house spellings, so that an
+        // argument after the script name cannot vanish: the adapter is called
+        // with the script NAME only.
+        const cmd = /^bash (?:"\$\(git rev-parse --show-toplevel\)\/|)\.claude\/hooks\/([\w.-]+\.sh)"?$/.exec(hook.command || '');
+        if (hook.type !== 'command' || !cmd) {
+          die(`hooks: cannot port this ${event} handler — expected \`bash .claude/hooks/<name>.sh\` with no arguments: ${JSON.stringify(hook.command)}`);
+        }
+        const name = cmd[1];
         if (!existsExact(`${h.scriptDir}/${name}`)) die(`hooks: ${event} names ${h.scriptDir}/${name}, which does not exist`);
         if (!supported) {
           report.unsupported.push(`${event}:${name}`);
@@ -340,6 +386,15 @@ function planHooks(m, plan) {
         if (hook.statusMessage) handler.statusMessage = hook.statusMessage;
         handlers.push(handler);
         report.ported += 1;
+        // Codex has no `if`. The adapter applies it, reading this file. A script
+        // wired once WITHOUT a condition always runs, so record `null` for it and
+        // never let a later conditional group narrow it.
+        const slot = (conditions[event] ||= {});
+        if (typeof group.if === 'string' && group.if) {
+          if (slot[name] !== null) (slot[name] ||= []).push(group.if);
+        } else {
+          slot[name] = null;
+        }
       }
       if (handlers.length === 0) continue;
       const entry = {};
@@ -358,43 +413,140 @@ function planHooks(m, plan) {
     hooks: out,
   };
   plan.set(h.target, { content: Buffer.from(`${JSON.stringify(doc, null, 2)}\n`, 'utf8') });
+  // Only the conditional scripts are written; an absent entry means "always run".
+  const cond = { _README: 'GENERATED by tools/agentic-sync/port.mjs from the `if` keys in .claude/settings.json — do not edit. Read by .codex/hooks/run-claude-hook.mjs.' };
+  for (const [event, scripts] of Object.entries(conditions)) {
+    for (const [name, list] of Object.entries(scripts)) {
+      if (Array.isArray(list)) (cond[event] ||= {})[name] = [...new Set(list)];
+    }
+  }
+  plan.set(h.conditions, { content: Buffer.from(`${JSON.stringify(cond, null, 2)}\n`, 'utf8') });
   return report;
 }
 
 // --- reference validation (the #9745 negative scenario) ----------------------
 
 // Repo paths named inside the Codex surface must exist, case-exactly.
-const REF = /(?<![\w/.-])(\.(?:claude|codex|agents|github)\/[A-Za-z0-9_@./-]*[A-Za-z0-9_/-])/gi;
+//
+// The first cut of this had two blind spots, both found in review and both in
+// the exact shape of the defect it exists to catch:
+//   * it skipped any reference preceded by `/` — which is how this repository
+//     spells nearly every hook and tool invocation
+//     (`"$(git rev-parse --show-toplevel)/.claude/hooks/x.sh"`, `$ROOT/...`);
+//   * it skipped a reference followed by a glob or placeholder entirely, so
+//     `.Codex/rules/*.md` passed although `.Codex/rules` does not exist.
+// Now: what precedes the reference decides what it is relative to, and a glob
+// or placeholder still has its longest literal DIRECTORY checked.
+const REF = /(?<![A-Za-z0-9_.])(\.(?:claude|codex|agents|github)\/[A-Za-z0-9_@./-]*[A-Za-z0-9_/-])/gi;
+// No `@`: `@.claude/CLAUDE.md` is Claude Code's import syntax for a ROOT path.
+const LEAD_CHARS = /[A-Za-z0-9_.~/:-]/;
 
-function unresolvedRefs(relFile, text) {
+function refCandidate(text, index, raw) {
+  // The path text immediately before the match, e.g. `web/`, `~/`, `/home/x/`.
+  let start = index;
+  while (start > 0 && LEAD_CHARS.test(text[start - 1])) start -= 1;
+  const lead = text.slice(start, index);
+  const before = text[start - 1] || '';
+
+  let ref = raw;
+  const after = text[index + raw.length] || '';
+  const placeholder = /XXX|NNN/.exec(ref);
+  if (placeholder) ref = ref.slice(0, placeholder.index);
+  // `*` is a glob in `.claude/rules/*.md` but Markdown emphasis in
+  // `**@.claude/CLAUDE.md**`. It is emphasis when the path already ends in a
+  // file extension and the asterisks are not followed by more path.
+  const rest = text.slice(index + raw.length);
+  const emphasis = after === '*' && /\.[A-Za-z0-9]+$/.test(raw) && /^\*{1,3}(?![A-Za-z0-9_./-])/.test(rest);
+  if (placeholder || (/[<{*[]/.test(after) && !emphasis)) {
+    // Keep only whole literal segments: `.claude/hooks/validate-` → `.claude/hooks`.
+    ref = ref.endsWith('/') ? ref : posix.dirname(ref);
+  }
+  ref = ref.replace(/\/+$/, '');
+  if (!ref || ref === '.') return null;
+
+  if (lead === '' || lead === './') return ref;
+  if (lead.includes('://') || lead.startsWith('~') || /^[A-Za-z]:/.test(lead)) return null; // URL, home, drive
+  if (lead === '/' && /[)}"']/.test(before)) return ref; // $(…)/x, ${ROOT}/x
+  if (before === '$' && /^[A-Za-z_][A-Za-z0-9_]*\/$/.test(lead)) return ref; // $ROOT/x
+  if (lead.startsWith('/')) return null; // an absolute path on some other machine
+  return posix.normalize(`${lead}${ref}`); // `web/.claude/agent-memory/…`
+}
+
+function unresolvedRefs(relFile, text, plan) {
   const bad = [];
   for (const match of text.matchAll(REF)) {
     const raw = match[1];
-    const ref = raw.replace(/\/+$/, '');
-    // Placeholders and globs are prose, not paths.
-    const after = text[match.index + raw.length] || '';
-    if (/[<{*]/.test(after) || /XXX|NNN/.test(ref)) continue;
-    if (!existsExact(ref)) bad.push(`${relFile}: unresolved path ${raw}`);
+    const candidate = refCandidate(text, match.index, raw);
+    // A path the generator is about to write resolves, even before --write.
+    if (candidate && !candidate.startsWith('..') && !plan.has(candidate) && !existsExact(candidate)) {
+      bad.push(`${relFile}: unresolved path ${candidate === raw.replace(/\/+$/, '') ? raw : `${raw} (checked as ${candidate})`}`);
+    }
   }
   return [...new Set(bad)];
+}
+
+// Everything under `.codex/` that git would track: generated or hand-written,
+// planned or not. `.codex/hooks/` holds one tracked file (see .gitignore); the
+// rest of that directory is ignored leftovers and is not scanned.
+function codexFiles(m) {
+  const out = [];
+  if (!existsExact('.codex')) return out;
+  for (const rel of walk('.codex', INDEX_MODES)) {
+    if (rel.startsWith('.codex/hooks/') && rel !== m.hooks.adapter) continue;
+    out.push(rel);
+  }
+  return out;
 }
 
 function validateRefs(m, plan) {
   const bad = [];
   const scan = new Map();
+  for (const rel of codexFiles(m)) {
+    const buf = readFileSync(abs(rel));
+    if (!isBinary(buf)) scan.set(rel, buf.toString('utf8'));
+  }
+  // What WOULD be written wins over what is on disk, so --check reports a dead
+  // reference in the source even before anyone has run --write.
   for (const [rel, { content }] of plan) {
     if (rel.startsWith('.codex/') && !isBinary(content)) scan.set(rel, content.toString('utf8'));
   }
-  // Hand-authored Codex files are held to the same rule as generated ones.
-  for (const rel of ['.codex/AGENTS.md', '.codex/config.toml']) {
-    if (existsExact(rel)) scan.set(rel, readFileSync(abs(rel), 'utf8'));
-  }
-  for (const name of Object.keys(m.agents.handAuthored || {})) {
-    const rel = `${m.agents.target}/${name}.toml`;
-    if (existsExact(rel)) scan.set(rel, readFileSync(abs(rel), 'utf8'));
-  }
-  for (const [rel, text] of scan) bad.push(...unresolvedRefs(rel, text));
+  for (const [rel, text] of scan) bad.push(...unresolvedRefs(rel, text, plan));
   return bad;
+}
+
+// Files sitting inside a generated location that the generator does not own.
+// Without this the check is one-directional: a hand-added
+// `.agents/skills/<mirrored>/EXTRA.md` ships to Codex users, is never removed by
+// --write, and the "byte-exact mirror" claim is false while the gate is green.
+function extraFiles(m, plan) {
+  const extra = [];
+  const mirrored = new Set();
+  for (const rel of plan.keys()) {
+    if (rel.startsWith(`${m.skills.target}/`)) mirrored.add(rel.split('/').slice(0, 3).join('/'));
+  }
+  for (const dir of [...mirrored].sort()) {
+    if (!existsExact(dir)) continue;
+    for (const rel of walk(dir, INDEX_MODES)) if (!plan.has(rel)) extra.push(rel);
+  }
+  if (existsExact(m.agents.target)) {
+    for (const rel of walk(m.agents.target, INDEX_MODES)) {
+      const name = posix.basename(rel).replace(/\.toml$/, '');
+      if (!plan.has(rel) && !Object.hasOwn(m.agents.handAuthored || {}, name)) extra.push(rel);
+    }
+  }
+  return extra;
+}
+
+// The ONLY places --write may delete from. The lock is a committed text file; a
+// bad merge resolution, or an edit, can put any path in it, and the first cut
+// deleted whatever it named — a source hook script included.
+function ownedByGenerator(m, rel) {
+  return (
+    rel.startsWith(`${m.skills.target}/`) ||
+    rel.startsWith(`${m.agents.target}/`) ||
+    rel === m.hooks.target ||
+    rel === m.hooks.conditions
+  );
 }
 
 // --- MCP server parity: .mcp.json <-> .codex/config.toml ----------------------
@@ -466,7 +618,13 @@ function main() {
       die(`${LOCK_REL} is not valid JSON: ${e.message}`);
     }
   }
-  const orphans = previous.filter((p) => !plan.has(p) && existsExact(p));
+  for (const rel of previous) {
+    if (typeof rel !== 'string' || rel.includes('..') || rel.startsWith('/') || (!ownedByGenerator(m, rel) && rel !== LOCK_REL)) {
+      die(`${LOCK_REL} names ${JSON.stringify(rel)}, which is outside the generator's targets — refusing to treat it as something this tool may delete. Restore the lock from git and re-run.`);
+    }
+  }
+  const orphans = previous.filter((rel) => !plan.has(rel) && rel !== LOCK_REL && existsExact(rel));
+  const extras = extraFiles(m, plan).filter((rel) => !orphans.includes(rel));
 
   const refs = validateRefs(m, plan);
 
@@ -525,6 +683,7 @@ function main() {
       }
     }
     for (const rel of orphans) problems.push(`orphan:   ${rel} (its source is gone)`);
+    for (const rel of extras) problems.push(`extra:    ${rel} is inside a generated location but is not generated — delete it, or add it to the source under .claude/`);
   }
   for (const r of refs) problems.push(`ref:      ${r}`);
   const mcp = mcpParity();

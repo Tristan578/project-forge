@@ -114,10 +114,12 @@ SETTINGS
 # json_get <file> <dotted.path> — jq-free JSON probe. Walks the path; prints a
 # string as-is and anything else as JSON. Two suffixes cover what the cases
 # need without evaluating code: `.@keys` (sorted, comma-joined) and `.@has:<k>`.
+# A literal dot in a key is written `\.` (e.g. `PreToolUse.ok\.sh.0`).
 json_get() {
   node -e '
     let v = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-    for (const seg of process.argv[2].split(".")) {
+    for (const raw of process.argv[2].split(/(?<!\\)\./)) {
+      const seg = raw.split("\\.").join(".");
       if (seg === "@keys") v = Object.keys(v).sort().join(",");
       else if (seg.startsWith("@has:")) v = Object.hasOwn(v, seg.slice(5));
       else v = v == null ? undefined : v[seg];
@@ -301,9 +303,195 @@ expect_out "gamma is in .codex/config.toml but not in .mcp.json" "…naming the 
 printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "matching server names pass"
 
+echo "== generator: --write may delete ONLY what it generated =="
+# The lock is a committed text file. A bad merge resolution, or an edit, can put
+# any path in it — and the first cut of --write deleted whatever it named,
+# a SOURCE hook script included (found by the review board).
+F="$(mkfix)"; gen "$F" --write
+printf 'keep me\n' > "$F/README.md"
+node -e 'const fs=require("fs");const p=process.argv[1];const l=JSON.parse(fs.readFileSync(p,"utf8"));l.generated.push("README.md",".claude/hooks/ok.sh");fs.writeFileSync(p,JSON.stringify(l));' "$F/tools/agentic-sync/port.lock.json"
+gen "$F" --write; expect_rc 2 "--write refuses a lock that names a path outside its targets"
+expect_out '"README.md"' "…naming the foreign path"
+if [ -f "$F/README.md" ] && [ -f "$F/.claude/hooks/ok.sh" ]; then
+  ok "…and neither the unrelated file nor the SOURCE hook script was deleted"
+else
+  bad "--write deleted a file outside its targets"
+fi
+gen "$F" --check; expect_rc 2 "--check refuses the same tampered lock instead of advising --write"
+F="$(mkfix)"; gen "$F" --write
+node -e 'const fs=require("fs");const p=process.argv[1];const l=JSON.parse(fs.readFileSync(p,"utf8"));l.generated.push(".agents/skills/../../README.md");fs.writeFileSync(p,JSON.stringify(l));' "$F/tools/agentic-sync/port.lock.json"
+printf 'keep me\n' > "$F/README.md"
+gen "$F" --write; expect_rc 2 "a lock entry that climbs out of a target with .. is refused too"
+if [ -f "$F/README.md" ]; then ok "…and the file it pointed at survives"; else bad "a ..-path in the lock deleted a file"; fi
+
+echo "== generator: the check is two-directional =="
+F="$(mkfix)"; gen "$F" --write
+printf 'hand added\n' > "$F/.agents/skills/alpha/EXTRA.md"
+gen "$F" --check; expect_rc 1 "a hand-added file inside a mirrored skill is drift"
+expect_out "extra:    .agents/skills/alpha/EXTRA.md" "…and is named"
+rm "$F/.agents/skills/alpha/EXTRA.md"
+# shellcheck disable=SC2016  # literal Markdown backticks in fixture text
+printf 'name = "rogue"\ndescription = "x"\ndeveloper_instructions = "Read `.Codex/rules/x.md`"\n' > "$F/.codex/agents/rogue.toml"
+gen "$F" --check; expect_rc 1 "a hand-added agent that is neither generated nor declared handAuthored is drift"
+expect_out "extra:    .codex/agents/rogue.toml" "…and is named"
+expect_out ".codex/agents/rogue.toml: unresolved path .Codex/rules/x.md" "…and its dead reference is reported too — every .codex file is scanned, not only planned ones"
+
+echo "== generator: the dead-reference validator has no blind spot in this repo's own spellings =="
+# Each of these passed the first cut of the validator (found by the review board).
+# dead_ref <text appended to the agent body> <expected substring> <label>
+dead_ref() {
+  F="$(mkfix)"
+  printf '\n%s\n' "$1" >> "$F/.claude/agents/demo.md"
+  gen "$F" --write
+  gen "$F" --check
+  if [ "$RC" -eq 1 ] && grep -qF -- "$2" <<<"$OUT"; then ok "$3"; else bad "$3 — exit $RC, wanted '$2' in: $OUT"; fi
+}
+# live_ref <text> <label> — must NOT be reported.
+live_ref() {
+  F="$(mkfix)"
+  printf '\n%s\n' "$1" >> "$F/.claude/agents/demo.md"
+  gen "$F" --write
+  gen "$F" --check
+  if [ "$RC" -eq 0 ]; then ok "$2"; else bad "$2 — reported a live or non-repo path: $OUT"; fi
+}
+# shellcheck disable=SC2016  # these are literal fixture text; nothing here should expand
+{
+  dead_ref 'Run "$ROOT/.Codex/rules/x.md".'                                  'unresolved path .Codex/rules/x.md' 'a dead path after $ROOT/ is caught'
+  dead_ref 'Run bash "$(git rev-parse --show-toplevel)/.Codex/tools/y.sh".'  'unresolved path .Codex/tools/y.sh' 'a dead path after $(git rev-parse --show-toplevel)/ is caught'
+  dead_ref 'Run "${ROOT}/.Codex/rules/x.md".'                                'unresolved path .Codex/rules/x.md' 'a dead path after ${ROOT}/ is caught'
+  dead_ref 'See ./.Codex/rules/x.md.'                                         'unresolved path .Codex/rules/x.md' 'a dead path after ./ is caught'
+  dead_ref 'Read every `.Codex/rules/*.md`.'                                  'unresolved path .Codex/rules/'       'a GLOB still has its literal directory checked'
+  dead_ref 'See `.Codex/skills/<name>/SKILL.md`.'                             'unresolved path .Codex/skills/'      'a PLACEHOLDER still has its literal directory checked'
+  dead_ref 'See `.Codex/rules/{a,b}.md`.'                                     'unresolved path .Codex/rules/'       'a BRACE pattern still has its literal directory checked'
+  dead_ref 'See nested/.claude/hooks/ok.sh.'                                  'checked as nested/.claude/hooks/ok.sh' 'a relative prefix is part of the path, not a reason to skip it'
+  live_ref 'Read every `.claude/hooks/*.sh` and `.claude/skills/<name>/SKILL.md`.' 'a glob or placeholder under a directory that exists passes'
+  live_ref 'Import **@.claude/hooks/ok.sh** first.'                           'Claude @-import syntax and Markdown bold are read as a root path, not a prefix or a glob'
+  live_ref 'User memory lives in ~/.claude/projects/x and at https://example.com/org/repo/.github/workflows/ci.yml.' 'a home path and a URL are not repository paths'
+  live_ref 'CI checks out to /home/runner/work/x/.claude/hooks/gone.sh.'      'an absolute path on another machine is not a repository path'
+}
+
+echo "== generator: every hook KEY is classified, like every event and script =="
+# json_set <file> <dotted.path> <json-value> — jq-free, and evaluates no code.
+json_set() {
+  node -e '
+    const fs = require("fs");
+    const [file, path, value] = process.argv.slice(1);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    const segs = path.split(".");
+    let v = doc;
+    for (const seg of segs.slice(0, -1)) v = v[seg];
+    v[segs[segs.length - 1]] = JSON.parse(value);
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' "$1" "$2" "$3"
+}
+F="$(mkfix)"; json_set "$F/.claude/settings.json" hooks.PreToolUse.0.hooks.0.once true
+gen "$F" --check; expect_rc 2 "an unknown HANDLER key stops the generator"
+expect_out 'key "once"' "…naming the key"
+F="$(mkfix)"; json_set "$F/.claude/settings.json" hooks.PreToolUse.0.unless '"x"'
+gen "$F" --check; expect_rc 2 "an unknown GROUP key stops the generator"
+expect_out 'key "unless"' "…naming the key"
+F="$(mkfix)"; json_set "$F/.claude/settings.json" hooks.Stop.0.hooks.0.command '"bash .claude/hooks/ok.sh --flag value"'
+gen "$F" --check; expect_rc 2 "arguments after the script name stop the generator — the adapter is called with the name only, so they would vanish"
+F="$(mkfix)"; json_set "$F/.claude/settings.json" hooks.Stop.0.hooks.0.command '"echo .claude/hooks/ok.sh"'
+gen "$F" --check; expect_rc 2 "a command that merely MENTIONS a script is not mistaken for one that runs it"
+
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks.PreToolUse.0.if '"Bash(git push *)"'
+json_set "$F/.claude/settings.json" hooks.PreToolUse.0.hooks.0.async true
+json_set "$F/.claude/settings.json" hooks.PostToolUse '[{"matcher":"Bash","if":"Bash(gh api *)","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]},{"matcher":"Bash","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]'
+gen "$F" --write; expect_rc 0 "\`if\` and \`async\` are accepted because both are classified"
+CJ="$F/.codex/hook-conditions.json"
+if [ "$(json_get "$CJ" 'PreToolUse.ok\.sh.0')" = "Bash(git push *)" ]; then
+  ok "a group's \`if\` is written to hook-conditions.json, keyed by event and script"
+else
+  bad "the if condition was not recorded: $(cat "$CJ" 2>/dev/null)"
+fi
+if [ "$(json_get "$CJ" '@has:PostToolUse')" = "false" ]; then
+  ok "a script ALSO wired without a condition is never narrowed — it always runs"
+else
+  bad "an unconditional wiring was narrowed by a conditional one: $(cat "$CJ")"
+fi
+if [ "$(json_get "$F/.codex/hooks.json" 'hooks.PreToolUse.0.hooks.0.@has:async')" = "false" ] \
+   && [ "$(json_get "$F/.codex/hooks.json" 'hooks.PreToolUse.0.@has:if')" = "false" ]; then
+  ok "neither key reaches hooks.json (Codex skips an async handler outright, and has no \`if\`)"
+else
+  bad "async or if leaked into hooks.json"
+fi
+
+F="$(mkfix)"
+printf -- '---\nname: folded\ndescription: >\n  A folded\n  description\n---\n\nbody\n' > "$F/.claude/agents/folded.md"
+gen "$F" --check; expect_rc 2 "a YAML block-scalar description is refused rather than emitted as the description \">\""
+expect_out "block scalar" "…and the message says why"
+
+echo "== generator: the emitted commands are exactly what Codex must execute =="
+F="$(mkfix)"; gen "$F" --write
+HJ="$F/.codex/hooks.json"
+# shellcheck disable=SC2016  # the $(...) is literal text Codex will hand to a shell
+WANT_POSIX='node "$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs" ok.sh'
+if [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.command')" = "$WANT_POSIX" ] \
+   && [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.commandWindows')" = "node .codex/hooks/run-claude-hook.mjs ok.sh" ]; then
+  ok "command and commandWindows have exactly the expected value (not merely 'mention the adapter')"
+else
+  bad "unexpected command strings: $(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0')"
+fi
+if command -v git >/dev/null 2>&1; then
+  # Run the generated POSIX command for real, from a SUBDIRECTORY of a git repo.
+  cat > "$F/.claude/hooks/ok.sh" <<'MARK'
+#!/usr/bin/env bash
+echo ran > "$MARKER"
+MARK
+  git -C "$F" init -q 2>/dev/null
+  mkdir -p "$F/web/src"
+  MARKER_FILE="$F/marker"
+  if ( cd "$F/web/src" && printf '{"hook_event_name":"Stop"}' | MARKER="$MARKER_FILE" bash -c "$(json_get "$HJ" 'hooks.Stop.0.hooks.0.command')" >/dev/null 2>&1 ) \
+     && [ -f "$MARKER_FILE" ]; then
+    ok "the generated POSIX command, run from a subdirectory, finds the adapter and runs the script end to end"
+  else
+    bad "the generated POSIX command did not run the script from a subdirectory"
+  fi
+else
+  bad "git is required to prove the generated command runs end to end"
+fi
+
+echo "== generator: a symlink may only import a file git tracks =="
+F="$(mkfix)"
+printf 'SECRET=1\n' > "$F/.env.local"
+if ln -s ../../../.env.local "$F/.claude/skills/alpha/notes" 2>/dev/null && [ -L "$F/.claude/skills/alpha/notes" ]; then
+  gen "$F" --write; expect_rc 2 "a link to an untracked in-repo file (.env.local) is refused"
+  if grep -rqF 'SECRET=1' "$F/.agents" 2>/dev/null; then
+    bad "the secret's content was copied into the mirror"
+  else
+    ok "…and its content never reaches the mirror"
+  fi
+else
+  # A genuine platform limit, not a missing feature: this host cannot create a
+  # symlink (Windows without the privilege). CI runs this on Linux.
+  skip "this host cannot create symlinks — containment is asserted on POSIX hosts"
+fi
+
+echo "== the wrapper: exit codes are the contract, and CI ignores the node override =="
+# The generator reads CODEX_PORT_ROOT; the wrapper locates node and the generator.
+wrap() { OUT="$(env -u CI "$@" bash "$WRAPPER" 2>&1)"; RC=$?; }
+F="$(mkfix)"; gen "$F" --write
+wrap CODEX_PORT_ROOT="$F"; expect_rc 0 "wrapper: an in-sync tree is exit 0"
+printf '\nedit\n' >> "$F/.claude/skills/alpha/SKILL.md"
+wrap CODEX_PORT_ROOT="$F"; expect_rc 1 "wrapper: drift is exit 1"
+expect_out "never hand-edit" "…with the remediation text"
+wrap CODEX_PORT_ROOT="$F" CODEX_PORT_NODE="$TMP_ROOT/no-such-node"; expect_rc 2 "wrapper: a node binary that does not exist is exit 2, not a pass"
+STUB="$TMP_ROOT/stub-node"; printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB"; chmod +x "$STUB"
+wrap CODEX_PORT_ROOT="$F" CODEX_PORT_NODE="$STUB"; expect_rc 0 "wrapper: outside CI the test-only node override is honoured (this is the seam)"
+OUT="$(CI=true CODEX_PORT_ROOT="$F" CODEX_PORT_NODE="$STUB" bash "$WRAPPER" 2>&1)"; RC=$?
+expect_rc 1 "wrapper: under CI=true the override is IGNORED — a stub that exits 0 cannot turn drift green"
+printf '{ broken' > "$F/tools/agentic-sync/port.json"
+wrap CODEX_PORT_ROOT="$F"; expect_rc 2 "wrapper: a generator that cannot run is exit 2, never 0"
+
 echo "== adapter: Codex payload → the shape the shared hook scripts read =="
 H="$(mktemp -d "$TMP_ROOT/hooks.XXXXXX")"
 LOG="$H/log"
+# A cwd node can see on every host (an MSYS /tmp path means nothing to node.exe).
+# `pwd -W` is Git-for-Windows' "Windows path, forward slashes"; elsewhere it
+# fails and plain `pwd` is already what node sees.
+CWD_NATIVE="$(cd "$TMP_ROOT" && { pwd -W 2>/dev/null || pwd; })"
 # probe.sh records what it was given: the env path, then its stdin verbatim.
 cat > "$H/probe.sh" <<'PROBE'
 #!/usr/bin/env bash
@@ -312,65 +500,146 @@ cat >> "$PROBE_LOG.stdin"
 printf '\n' >> "$PROBE_LOG.stdin"
 exit 0
 PROBE
+# guard.sh blocks any path containing "protected" — a stand-in for a path policy.
+cat > "$H/guard.sh" <<'GUARD'
+#!/usr/bin/env bash
+printf 'SAW=%s\n' "${TOOL_INPUT_file_path:-<unset>}" >> "$PROBE_LOG"
+case "${TOOL_INPUT_file_path:-}" in *protected*) echo "guard: protected path" >&2; exit 2 ;; esac
+exit 0
+GUARD
 printf '#!/usr/bin/env bash\necho "blocked: policy says no" >&2\nexit 2\n' > "$H/block.sh"
+printf '#!/usr/bin/env bash\nexit 2\n' > "$H/block-silent.sh"
 printf '#!/usr/bin/env bash\necho "boom" >&2\nexit 7\n' > "$H/crash.sh"
+printf '#!/usr/bin/env bash\necho "WARNING: db.transaction() detected"\n' > "$H/text.sh"
+cat > "$H/ctx.sh" <<'CTX'
+#!/usr/bin/env bash
+printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"ctx for %s"}}' "${TOOL_INPUT_file_path##*/}"
+CTX
 cat > "$H/allow.sh" <<'ALLOW'
 #!/usr/bin/env bash
 printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"safe","additionalContext":"remember the rule"},"suppressOutput":true}'
 ALLOW
+cat > "$H/deny.sh" <<'DENY'
+#!/usr/bin/env bash
+printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"not on main"}}'
+DENY
+cat > "$H/stopblock.sh" <<'STOPB'
+#!/usr/bin/env bash
+printf '%s' '{"decision":"block","reason":"review is incomplete"}'
+STOPB
 
 # adapt <script> <payload-json> — sets RC, OUT (stdout) and ERR (stderr).
 adapt() {
   ERR_FILE="$H/err"
-  OUT="$(printf '%s' "$2" | CODEX_HOOK_SCRIPT_DIR="$H" PROBE_LOG="$LOG" node "$ADAPTER" "$1" 2>"$ERR_FILE")"
+  OUT="$(printf '%s' "$2" | CODEX_HOOK_SCRIPT_DIR="$H" CODEX_HOOK_CONDITIONS="${COND_FILE:-$H/no-conditions.json}" PROBE_LOG="$LOG" node "$ADAPTER" "$1" 2>"$ERR_FILE")"
   RC=$?
   ERR="$(cat "$ERR_FILE")"
 }
+# out_get <dotted.path> — read a field of the adapter's JSON stdout.
+out_get() { printf '%s' "$OUT" > "$H/out.json"; json_get "$H/out.json" "$1"; }
+# patch_payload <event> <patch-with-\n-escapes> — a Codex apply_patch payload.
+patch_payload() {
+  printf '{"cwd":"%s","hook_event_name":"%s","tool_name":"apply_patch","tool_input":{"command":"%s"}}' "$CWD_NATIVE" "$1" "$2"
+}
+runs() { grep -c "^$1=" "$LOG" 2>/dev/null || true; }
 
 PATCH='*** Begin Patch\n*** Add File: web/src/new.ts\n+export const a = 1;\n*** Update File: web/src/old.ts\n@@\n-const b = 1;\n+const b = 2;\n*** Delete File: web/src/gone.ts\n*** End Patch\n'
-PAYLOAD="{\"cwd\":\"$TMP_ROOT\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"apply_patch\",\"tool_input\":{\"command\":\"$PATCH\"}}"
+PAYLOAD="$(patch_payload PreToolUse "$PATCH")"
 rm -f "$LOG" "$LOG.stdin"
 adapt probe.sh "$PAYLOAD"; expect_rc 0 "an apply_patch payload runs the script and succeeds"
-if [ "$(grep -c '^ENV=' "$LOG" 2>/dev/null)" = "2" ]; then
-  ok "the script runs once per WRITTEN file (Add + Update), not for the Delete"
+if [ "$(runs ENV)" = "3" ]; then
+  ok "the script runs once per TOUCHED path — added, updated AND deleted"
 else
-  bad "expected 2 runs, log has: $(cat "$LOG" 2>/dev/null)"
+  bad "expected 3 runs, log has: $(cat "$LOG" 2>/dev/null)"
 fi
-if grep -qE '^ENV=.*/web/src/new\.ts$' "$LOG" && grep -qE '^ENV=.*/web/src/old\.ts$' "$LOG" && ! grep -q '[\\]' "$LOG"; then
-  ok "TOOL_INPUT_file_path is set, absolute, and forward-slashed on every platform"
+if grep -qxF "ENV=$CWD_NATIVE/web/src/new.ts" "$LOG" && grep -qxF "ENV=$CWD_NATIVE/web/src/old.ts" "$LOG" \
+   && grep -qxF "ENV=$CWD_NATIVE/web/src/gone.ts" "$LOG" && ! grep -q '[\\]' "$LOG"; then
+  ok "TOOL_INPUT_file_path is set, resolved against the payload cwd, and forward-slashed on every platform"
 else
-  bad "TOOL_INPUT_file_path is wrong: $(cat "$LOG")"
+  bad "TOOL_INPUT_file_path is wrong (cwd $CWD_NATIVE): $(cat "$LOG")"
 fi
-FIRST="$(sed -n '1p' "$LOG.stdin")"
-if [ "$(node -e 'const d=JSON.parse(process.argv[1]);process.stdout.write(d.tool_name+"|"+/\/web\/src\/new\.ts$/.test(d.tool_input.file_path)+"|"+d.tool_input.content)' "$FIRST")" = "Write|true|export const a = 1;" ]; then
-  ok "stdin carries tool_name Write, tool_input.file_path and the added content"
+sed -n '1p' "$LOG.stdin" > "$H/first.json"; sed -n '3p' "$LOG.stdin" > "$H/third.json"
+if [ "$(json_get "$H/first.json" tool_name)" = "Write" ] && [ "$(json_get "$H/first.json" tool_input.content)" = "export const a = 1;" ] \
+   && [ "$(json_get "$H/first.json" tool_input.file_path)" = "$CWD_NATIVE/web/src/new.ts" ]; then
+  ok "an added file arrives as tool_name Write with file_path and its content"
 else
-  bad "stdin payload is wrong: $FIRST"
+  bad "Add payload is wrong: $(cat "$H/first.json")"
 fi
-
-rm -f "$LOG" "$LOG.stdin"
-adapt probe.sh "{\"cwd\":\"$TMP_ROOT\",\"tool_name\":\"apply_patch\",\"tool_input\":{\"command\":\"*** Begin Patch\\n nothing recognisable\\n*** End Patch\"}}"
-if [ "$RC" -ne 0 ] && [ "$RC" -ne 2 ] && [ ! -e "$LOG" ] && grep -qF 'could not find a file path' <<<"$ERR"; then
-  ok "a patch with no recognisable path FAILS (exit $RC) instead of letting the check pass on nothing"
+if [ "$(json_get "$H/third.json" tool_name)" = "Edit" ] && [ "$(json_get "$H/third.json" tool_input.new_string)" = "" ]; then
+  ok "a deleted file arrives as tool_name Edit with an empty new_string"
 else
-  bad "no-path patch: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
-fi
-
-rm -f "$LOG" "$LOG.stdin"
-adapt probe.sh "{\"cwd\":\"$TMP_ROOT\",\"tool_name\":\"apply_patch\",\"tool_input\":{\"command\":\"*** Begin Patch\\n*** Delete File: a.ts\\n*** End Patch\"}}"
-if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then
-  ok "a delete-only patch writes nothing, so nothing is inspected and it passes"
-else
-  bad "delete-only patch: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no)"
+  bad "Delete payload is wrong: $(cat "$H/third.json")"
 fi
 
-rm -f "$LOG" "$LOG.stdin"
-adapt probe.sh "{\"cwd\":\"$TMP_ROOT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git status\"}}"
-if [ "$RC" -eq 0 ] && [ "$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).tool_input.command)' "$(sed -n '1p' "$LOG.stdin")")" = "git status" ]; then
-  ok "a Bash payload passes through with tool_input.command intact"
+echo "== adapter: nothing a patch touches can be hidden from a hook =="
+rm -f "$LOG"
+adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: ok/new.ts\n+fine\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch')"
+if [ "$RC" -eq 2 ] && grep -qF 'guard: protected path' <<<"$ERR" && [ "$(runs SAW)" = "2" ]; then
+  ok "a block on the SECOND file of a patch blocks the patch"
 else
-  bad "Bash passthrough is wrong: exit $RC, stdin: $(cat "$LOG.stdin" 2>/dev/null)"
+  bad "second-file block: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
 fi
+rm -f "$LOG"
+# Codex's parser matches headers on the TRIMMED line; so must the adapter, or an
+# indented header hides its hunk from every hook while Codex still applies it.
+adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: ok/new.ts\n+fine\n  *** Update File: protected/x.ts\n@@\n+evil\n*** End Patch')"
+if [ "$RC" -eq 2 ]; then
+  ok "an INDENTED file header is still seen (matches Codex's own trim-then-match parser)"
+else
+  bad "an indented header hid a hunk: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
+fi
+rm -f "$LOG"
+adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Delete File: protected/x.ts\n*** End Patch')"
+if [ "$RC" -eq 2 ]; then
+  ok "a delete-only patch is inspected — deleting a protected file is blocked"
+else
+  bad "delete-only patch was not inspected: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
+fi
+rm -f "$LOG"
+adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: protected/x.ts\n*** Move to: elsewhere/x.ts\n@@\n+moved\n*** End Patch')"
+if [ "$RC" -eq 2 ]; then
+  ok "the SOURCE of a move is inspected, not only its destination"
+else
+  bad "move source was not inspected: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
+fi
+rm -f "$LOG"
+adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: elsewhere/x.ts\n*** Move to: protected/x.ts\n@@\n+moved\n*** End Patch')"
+if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/elsewhere/x.ts" "$LOG"; then
+  ok "the DESTINATION of a move is inspected too"
+else
+  bad "move destination was not inspected: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
+fi
+
+echo "== adapter: a fault must not read as a pass (Codex blocks ONLY on exit 2) =="
+rm -f "$LOG"
+adapt probe.sh "$(patch_payload PreToolUse '*** Begin Patch\n nothing recognisable\n*** End Patch')"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'could not find a file path' <<<"$ERR"; then
+  ok "PreToolUse: a patch with no recognisable path BLOCKS (exit 2) with the reason"
+else
+  bad "no-path patch on PreToolUse: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+adapt probe.sh "$(patch_payload PostToolUse '*** Begin Patch\n nothing recognisable\n*** End Patch')"
+if [ "$RC" -eq 1 ]; then
+  ok "PostToolUse: the same fault is a reported failure (exit 1) — the edit already happened, there is nothing to block"
+else
+  bad "no-path patch on PostToolUse: exit $RC"
+fi
+adapt probe.sh 'this is not json'
+if [ "$RC" -eq 2 ] && grep -qF 'not JSON' <<<"$ERR"; then
+  ok "an unreadable payload blocks: the event is unknown, so the gating one is assumed"
+else
+  bad "non-JSON payload: exit $RC, stderr: $ERR"
+fi
+adapt nope.sh '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'
+if [ "$RC" -eq 2 ] && grep -qF 'does not exist' <<<"$ERR"; then
+  ok "PreToolUse: a missing script blocks — a check that cannot run has not passed"
+else
+  bad "missing script on PreToolUse: exit $RC, $ERR"
+fi
+adapt nope.sh '{"hook_event_name":"Stop"}'
+if [ "$RC" -eq 1 ]; then ok "Stop: a missing script is a reported failure, not a block"; else bad "missing script on Stop: exit $RC"; fi
+adapt ../probe.sh '{"hook_event_name":"PreToolUse"}'
+if [ "$RC" -eq 2 ]; then ok "a script name with a path in it is refused"; else bad "path-bearing script name was accepted (exit $RC)"; fi
 
 adapt block.sh "$PAYLOAD"
 if [ "$RC" -eq 2 ] && grep -qF 'blocked: policy says no' <<<"$ERR"; then
@@ -378,25 +647,101 @@ if [ "$RC" -eq 2 ] && grep -qF 'blocked: policy says no' <<<"$ERR"; then
 else
   bad "block passthrough: exit $RC, stderr: $ERR"
 fi
+adapt block-silent.sh "$PAYLOAD"
+if [ "$RC" -eq 2 ] && [ -n "$ERR" ]; then
+  ok "a script that exits 2 SILENTLY is given a reason — Codex ignores exit 2 with empty stderr"
+else
+  bad "silent exit 2: exit $RC, stderr: '$ERR'"
+fi
+# Parity with Claude Code, where a hook that crashes (exit 1) is reported and
+# does not block. An ADAPTER fault is the different case asserted above.
 adapt crash.sh "$PAYLOAD"
-if [ "$RC" -ne 0 ] && [ "$RC" -ne 2 ] && grep -qF 'boom' <<<"$ERR"; then
-  ok "a crashing script is reported as a failure, never as a block and never as a pass"
+if [ "$RC" -eq 1 ] && grep -qF 'boom' <<<"$ERR"; then
+  ok "a crashing SCRIPT is a reported failure with its stderr, as under Claude Code"
 else
   bad "crash handling: exit $RC, stderr: $ERR"
 fi
 
-adapt allow.sh "{\"cwd\":\"$TMP_ROOT\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}"
-if [ "$RC" -eq 0 ] && ! grep -qF '"allow"' <<<"$OUT" && ! grep -qF 'suppressOutput' <<<"$OUT" \
-   && [ "$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).hookSpecificOutput.additionalContext)' "$OUT")" = "remember the rule" ]; then
+echo "== adapter: output is translated per event (each Codex wire type is deny_unknown_fields) =="
+adapt text.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: a.ts\n@@\n+x\n*** End Patch')"
+if [ "$RC" -eq 0 ] && [ "$(out_get hookSpecificOutput.additionalContext)" = "WARNING: db.transaction() detected" ] \
+   && [ "$(out_get hookSpecificOutput.hookEventName)" = "PreToolUse" ]; then
+  ok "PLAIN-TEXT stdout is wrapped as additionalContext — Codex drops plain text, so a warning would warn nobody"
+else
+  bad "plain text was not wrapped: exit $RC, stdout: $OUT"
+fi
+adapt text.sh '{"hook_event_name":"PostCompact"}'
+if [ "$RC" -eq 0 ] && [ -z "$OUT" ]; then
+  ok "PostCompact: nothing is emitted — that wire type accepts no context and rejects hookSpecificOutput"
+else
+  bad "PostCompact emitted output Codex would reject: $OUT"
+fi
+adapt ctx.sh "$PAYLOAD"
+CTX_OUT="$(out_get hookSpecificOutput.additionalContext)"
+if grep -qF 'ctx for new.ts' <<<"$CTX_OUT" && grep -qF 'ctx for old.ts' <<<"$CTX_OUT" && grep -qF 'ctx for gone.ts' <<<"$CTX_OUT"; then
+  ok "additionalContext from every per-file run is merged into one output"
+else
+  bad "context was not merged: $OUT"
+fi
+adapt allow.sh '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'
+if [ "$RC" -eq 0 ] && [ "$(out_get hookSpecificOutput.@has:permissionDecision)" = "false" ] && [ "$(out_get @has:suppressOutput)" = "false" ] \
+   && [ "$(out_get hookSpecificOutput.additionalContext)" = "remember the rule" ]; then
   ok "permissionDecision=allow and suppressOutput are dropped (Codex fails the run on them); additionalContext survives"
 else
-  bad "output translation is wrong: exit $RC, stdout: $OUT"
+  bad "allow translation is wrong: exit $RC, stdout: $OUT"
+fi
+adapt deny.sh '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'
+if [ "$(out_get hookSpecificOutput.permissionDecision)" = "deny" ] && [ "$(out_get hookSpecificOutput.permissionDecisionReason)" = "not on main" ]; then
+  ok "PreToolUse: a JSON deny is passed on as permissionDecision=deny with its reason"
+else
+  bad "deny translation is wrong: $OUT"
+fi
+adapt stopblock.sh '{"hook_event_name":"Stop"}'
+if [ "$(out_get decision)" = "block" ] && [ "$(out_get reason)" = "review is incomplete" ] && [ "$(out_get @has:hookSpecificOutput)" = "false" ]; then
+  ok "Stop: a JSON block stays TOP-LEVEL decision/reason — Stop rejects hookSpecificOutput outright"
+else
+  bad "Stop block translation is wrong: $OUT"
+fi
+adapt stopblock.sh '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'
+if [ "$(out_get hookSpecificOutput.permissionDecision)" = "deny" ] && [ "$(out_get @has:decision)" = "false" ]; then
+  ok "PreToolUse: the same JSON block becomes permissionDecision=deny"
+else
+  bad "PreToolUse block translation is wrong: $OUT"
 fi
 
-adapt ../probe.sh '{}'
-if [ "$RC" -ne 0 ] && [ "$RC" -ne 2 ]; then ok "a script name with a path in it is refused"; else bad "path-bearing script name was accepted (exit $RC)"; fi
-adapt nope.sh '{}'
-if [ "$RC" -ne 0 ] && grep -qF 'does not exist' <<<"$ERR"; then ok "a missing script is a reported failure"; else bad "missing script: exit $RC, $ERR"; fi
+echo "== adapter: \`if\` conditions from .claude/settings.json =="
+COND_FILE="$H/conditions.json"
+printf '{"PostToolUse":{"probe.sh":["Bash(git push *)"]}}' > "$COND_FILE"
+bash_payload() { printf '{"hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" "$2"; }
+rm -f "$LOG" "$LOG.stdin"
+adapt probe.sh "$(bash_payload PostToolUse 'git status')"
+if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then
+  ok "a command that does not match the condition does not run the script"
+else
+  bad "condition did not filter: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no)"
+fi
+adapt probe.sh "$(bash_payload PostToolUse 'cd web && git push origin HEAD')"
+if [ -e "$LOG" ]; then
+  ok "the literal is matched ANYWHERE in the command — a compound command still runs the script"
+else
+  bad "a compound 'cd x && git push' did not run the script"
+fi
+rm -f "$LOG" "$LOG.stdin"
+adapt probe.sh "$(bash_payload PreToolUse 'git status')"
+if [ -e "$LOG" ]; then ok "a condition recorded for one event does not filter another"; else bad "a PostToolUse condition filtered a PreToolUse run"; fi
+rm -f "$LOG" "$LOG.stdin"
+printf '{ broken' > "$COND_FILE"
+adapt probe.sh "$(bash_payload PostToolUse 'git status')"
+if [ -e "$LOG" ]; then ok "an unreadable conditions file means RUN — the failure direction is enforcement"; else bad "an unreadable conditions file suppressed the script"; fi
+rm -f "$LOG" "$LOG.stdin"
+unset COND_FILE
+adapt probe.sh "$(bash_payload PreToolUse 'git status')"
+sed -n '1p' "$LOG.stdin" > "$H/bash.json"
+if [ "$RC" -eq 0 ] && [ "$(json_get "$H/bash.json" tool_input.command)" = "git status" ]; then
+  ok "a Bash payload passes through with tool_input.command intact"
+else
+  bad "Bash passthrough is wrong: exit $RC, stdin: $(cat "$LOG.stdin" 2>/dev/null)"
+fi
 
 echo "== the real manifest classifies every hook the real settings.json wires =="
 OUT="$(node "$GEN" --check 2>&1)"; RC=$?
@@ -442,7 +787,7 @@ else
   fi
 fi
 AGENTIC_LINE="$(grep -E "&& agentic=true" <<<"$CI_CODE")"
-for pat in '^\.claude/skills/' '^\.claude/agents/' '^\.claude/settings\.json$' '^\.agents/skills/' '^\.codex/' '^\.mcp\.json$' '^scripts/check-codex-port\.sh$'; do
+for pat in '^\.claude/rules/' '^\.claude/hooks/' '^\.claude/tools/' '^\.claude/CLAUDE\.md$' '^\.claude/skills/' '^\.claude/agents/' '^\.claude/settings\.json$' '^\.agents/skills/' '^\.codex/' '^\.mcp\.json$' '^scripts/check-codex-port\.sh$'; do
   if grep -qF -- "$pat" <<<"$AGENTIC_LINE"; then
     ok "the ci-gate agentic filter fires on $pat"
   else

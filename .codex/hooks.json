@@ -287,24 +287,6 @@
           }
         ]
       }
-    ],
-    "PostCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" restore-context-hints.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs restore-context-hints.sh",
-            "timeout": 3
-          },
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" inject-post-compact.sh",
-            "commandWindows": "node .codex/hooks/run-claude-hook.mjs inject-post-compact.sh",
-            "timeout": 5
-          }
-        ]
-      }
     ]
   }
 }

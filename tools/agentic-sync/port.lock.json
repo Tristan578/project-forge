@@ -119,6 +119,7 @@
     ".codex/agents/test-writer.toml",
     ".codex/agents/ux-reviewer.toml",
     ".codex/agents/validator.toml",
+    ".codex/hook-conditions.json",
     ".codex/hooks.json"
   ]
 }
