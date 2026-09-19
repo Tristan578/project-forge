@@ -270,7 +270,7 @@ SpawnForge is designed for **AI-assisted development**. Six AI coding tools are 
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `.gemini/` | Automatic | `.agents/skills/` | `gemini-3.1-pro-preview` |
 | [Windsurf](https://windsurf.com) | `.windsurf/` | Automatic | `.windsurf/workflows/` | App-managed |
 | [Google Antigravity](https://antigravity.google) | `.agent/` + `.gemini/` | Manual | `.agent/skills/` | Gemini 3 |
-| [OpenAI Codex CLI](https://github.com/openai/codex) | `.codex/` | Manual | `.codex/skills/` | `gpt-5.3-codex` |
+| [OpenAI Codex CLI](https://github.com/openai/codex) | `.codex/` | Automatic after a one-time `/hooks` approval | `.agents/skills/` | `gpt-5.3-codex` |
 
 **First-time setup:** Install the [taskboard binary](https://github.com/tcarac/taskboard/releases), then open the repo in your AI tool. Tools with automatic hooks will self-configure on first session. Tools without hooks (Codex, Antigravity) include manual workflow instructions in their `AGENTS.md` files.
 
@@ -344,14 +344,10 @@ Skills in `.agent/skills/` (singular — Antigravity uses `.agent/`, not `.agent
 <summary><strong>OpenAI Codex CLI</strong></summary>
 
 ```bash
-cd project-forge
-codex  # reads .codex/config.toml and .codex/AGENTS.md
-# No auto-hooks — run manually:
-bash .claude/hooks/on-session-start.sh   # start of session
-bash .claude/hooks/on-stop.sh             # after work
-bash .claude/hooks/post-edit-lint.sh      # after editing
+cd project-forge   # start Codex at the repo root — hook and MCP paths depend on it
+codex              # reads .codex/config.toml, .codex/AGENTS.md, .codex/hooks.json, .codex/agents/
 ```
-Config in `.codex/config.toml`. Skills in `.codex/skills/`. Full enforcement rules in `.codex/AGENTS.md`.
+Hooks run the shared `.claude/hooks/` scripts, but only after a one-time approval: trust the project, then open `/hooks` and approve them (Codex re-asks whenever a hook's command changes). Config in `.codex/config.toml`. Subagents in `.codex/agents/`, skills in `.agents/skills/` — both **generated** from `.claude/` by `node tools/agentic-sync/port.mjs --write`, never hand-edited. What is wired, what Codex cannot express, and what was verified: `docs/guides/codex-cli-support-matrix.md`. Full enforcement rules in `.codex/AGENTS.md`.
 
 </details>
 

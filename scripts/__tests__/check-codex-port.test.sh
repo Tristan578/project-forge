@@ -68,6 +68,7 @@ mkfix() {
            "$d/.claude/agents" "$d/.claude/hooks" "$d/.codex/hooks" "$d/.codex/agents"
   cp "$MANIFEST" "$d/tools/agentic-sync/port.json"
   cp "$ADAPTER" "$d/.codex/hooks/run-claude-hook.mjs"
+  # shellcheck disable=SC2016  # the backticks are literal Markdown in fixture text, not a command substitution
   printf -- '---\nname: alpha\ndescription: fixture skill\n---\n\n# Alpha\n\nSee `.claude/hooks/ok.sh`.\n' > "$d/.claude/skills/alpha/SKILL.md"
   printf '#!/usr/bin/env bash\necho alpha\n' > "$d/.claude/skills/alpha/scripts/run.sh"
   printf -- '---\nname: kanban\ndescription: independent on both sides\n---\n' > "$d/.claude/skills/kanban/SKILL.md"
@@ -236,6 +237,7 @@ gen "$F" --check; expect_rc 0 "the tree is in sync again after the orphan is rem
 
 echo "== generator: the #9745 negative scenario — dead references =="
 F="$(mkfix)"
+# shellcheck disable=SC2016  # the backticks are literal Markdown in fixture text, not a command substitution
 printf '\nRead `.Codex/rules/lessons-learned.md` before acting.\n' >> "$F/.claude/agents/demo.md"
 gen "$F" --write
 gen "$F" --check; expect_rc 1 "a reference to nonexistent .Codex/rules fails validation"
@@ -243,6 +245,7 @@ expect_out ".codex/agents/demo.toml: unresolved path .Codex/rules/lessons-learne
 
 F="$(mkfix)"
 # Wrong CASE only. On a case-insensitive filesystem a plain exists() says yes.
+# shellcheck disable=SC2016  # the backticks are literal Markdown in fixture text, not a command substitution
 printf '\nRun `.claude/Hooks/ok.sh`.\n' >> "$F/.claude/agents/demo.md"
 gen "$F" --write
 gen "$F" --check; expect_rc 1 "a path that differs only in case is unresolved on every filesystem"
@@ -333,7 +336,7 @@ if [ "$(grep -c '^ENV=' "$LOG" 2>/dev/null)" = "2" ]; then
 else
   bad "expected 2 runs, log has: $(cat "$LOG" 2>/dev/null)"
 fi
-if grep -qE '^ENV=.*/web/src/new\.ts$' "$LOG" && grep -qE '^ENV=.*/web/src/old\.ts$' "$LOG" && ! grep -qF '\' "$LOG"; then
+if grep -qE '^ENV=.*/web/src/new\.ts$' "$LOG" && grep -qE '^ENV=.*/web/src/old\.ts$' "$LOG" && ! grep -q '[\\]' "$LOG"; then
   ok "TOOL_INPUT_file_path is set, absolute, and forward-slashed on every platform"
 else
   bad "TOOL_INPUT_file_path is wrong: $(cat "$LOG")"
@@ -412,6 +415,32 @@ if [ "$N" = "1" ]; then
 else
   bad "expected exactly 1 executable 'run: bash scripts/check-codex-port.sh' in ci.yml, found $N"
 fi
+# A containment check is not enough. YAML's last-key-wins means a SECOND `run:`
+# appended to the step replaces the command while the original line stays
+# byte-present (.claude/rules/gotchas-build-ci.md → duplicate YAML keys). Cut the
+# step out and require exactly one `run:` key in it, no `if:`, and no
+# `continue-on-error:` — each of which would leave the line above untouched and
+# the gate dead or advisory.
+STEP="$(awk '
+  /^      - name: Check the generated Codex CLI surface/ { f = 1; print; next }
+  f && (/^      - / || /^  [A-Za-z0-9_-]+:/ || /^[^ ]/) { exit }
+  f { print }
+' <<<"$CI_CODE")"
+if [ -z "$STEP" ]; then
+  bad "could not find the gate step in ci.yml by name — the step-level pins below would pass on nothing"
+else
+  RUNS="$(grep -cE '^        run:' <<<"$STEP")"
+  if [ "$RUNS" = "1" ] && grep -qxF '        run: bash scripts/check-codex-port.sh' <<<"$STEP"; then
+    ok "the gate step has exactly one run: key, and it is the gate"
+  else
+    bad "the gate step has $RUNS run: key(s) or the wrong command: $STEP"
+  fi
+  if grep -qE '^        (if|continue-on-error|shell|working-directory|env):' <<<"$STEP"; then
+    bad "the gate step carries a key that can skip, soften or redirect it: $STEP"
+  else
+    ok "the gate step has no if:, continue-on-error:, shell:, working-directory: or env:"
+  fi
+fi
 AGENTIC_LINE="$(grep -E "&& agentic=true" <<<"$CI_CODE")"
 for pat in '^\.claude/skills/' '^\.claude/agents/' '^\.claude/settings\.json$' '^\.agents/skills/' '^\.codex/' '^\.mcp\.json$' '^scripts/check-codex-port\.sh$'; do
   if grep -qF -- "$pat" <<<"$AGENTIC_LINE"; then
@@ -426,10 +455,15 @@ if [ -z "$SEAM_HITS" ]; then
 else
   bad "a test-only seam is wired in CI (it would point the gate at an empty tree): $SEAM_HITS"
 fi
-if grep -qF 'scripts/__tests__/check-codex-port.test.sh' "$CI_YML"; then
-  ok "this suite is itself run by a workflow"
+# An executable `run:` line, counted — NOT "the path appears somewhere". The
+# path also appears in the shellcheck list, so a containment check stayed green
+# when the run step itself was replaced with `run: 'true'` (measured by mutation
+# while writing this suite): linted, never executed.
+N="$(grep -cE '^        run: bash scripts/__tests__/check-codex-port\.test\.sh[[:space:]]*$' <<<"$CI_CODE")"
+if [ "$N" = "1" ]; then
+  ok "this suite is itself RUN by ci.yml, on exactly one executable line"
 else
-  bad "this suite is not referenced by ci.yml — it would never execute in CI"
+  bad "expected exactly 1 executable run of this suite in ci.yml, found $N — it would be linted but never executed"
 fi
 
 # =============================================================================

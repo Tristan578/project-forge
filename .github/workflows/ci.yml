@@ -174,7 +174,16 @@ jobs:
           # also matches `ci` above, which is fine — editing a gate script warrants
           # the wider run; .claude/tools/dx-audit.sh matches neither ci nor hooks,
           # so wiring it here is what makes its contract test run at all.)
-          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$' && agentic=true
+          #
+          # The same job also runs the Codex CLI surface gate
+          # (scripts/check-codex-port.sh, #9745), whose inputs are wider: the
+          # generated mirror is derived from .claude/skills, .claude/agents and
+          # .claude/settings.json, so an edit to any SOURCE must fire it — a
+          # filter naming only the generated side would let a skill change
+          # merge with a stale mirror and never run the check that catches it.
+          # .mcp.json is here because the gate compares it with
+          # .codex/config.toml, which Codex reads instead.
+          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$|^\.claude/skills/|^\.claude/agents/|^\.claude/settings\.json$|^\.agents/skills/|^\.codex/|^\.mcp\.json$|^scripts/check-codex-port\.sh$|^scripts/__tests__/check-codex-port\.test\.sh$' && agentic=true
           # Taskboard onboarding-hygiene tripwire (scripts/check-taskboard-onboarding-hygiene.sh).
           # Fires whenever a CONTRIBUTOR-FACING ONBOARDING SURFACE changes — the
           # surfaces where a rotated taskboard project/team ULID or a forbidden
@@ -824,6 +833,9 @@ jobs:
       - name: Check provider instruction files are in sync with canonical.json
         run: bash scripts/check-agentic-sync.sh
 
+      - name: Check the generated Codex CLI surface is in sync with .claude/
+        run: bash scripts/check-codex-port.sh
+
   # ---- Taskboard Onboarding Hygiene ----
   # The negative guard the parity review called for: greps the WHOLE tree and
   # fails the PR if a stale taskboard onboarding FACT the agentic-sync generator
@@ -1093,6 +1105,7 @@ jobs:
             scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
             scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
+            scripts/check-codex-port.sh scripts/__tests__/check-codex-port.test.sh \
             scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
@@ -1153,6 +1166,9 @@ jobs:
 
       - name: Run agentic-config gate test suite
         run: bash scripts/__tests__/check-agentic-sync.test.sh
+
+      - name: Run Codex CLI surface gate test suite
+        run: bash scripts/__tests__/check-codex-port.test.sh
 
       - name: Run provider skill resolver fixtures
         run: bash scripts/__tests__/resolve-skill-path.test.sh
