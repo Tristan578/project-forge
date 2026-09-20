@@ -2424,15 +2424,16 @@ unset COND_FILE
 echo "== adapter: the jq probe spends the hook's budget, not its own =="
 # A bash that starts and then does not answer. Unbounded, the probe fails OPEN:
 # past Codex's timeout the run is Failed and the action proceeds. The stub sleeps
-# 5 s; the budget is 4.5 s, so the adapter must speak at 3.6 s (80 %). A probe with
-# its own fixed bound, or none, returns after the full 5 s — and then "finds" jq,
-# because the stub exits 0.
+# 8 s; the budget is 4.5 s, so the adapter must speak at 3.6 s (80 %). A probe with
+# its own fixed bound, or none, returns after the full 8 s — and then "finds" jq,
+# because the stub exits 0. SECONDS counts whole seconds, so the line is drawn at
+# 7: more than three seconds of slack for a loaded runner, and still short of 8.
 case "$(uname -s)" in
   MINGW*|MSYS*)
     skip "the probe's time bound — needs a stand-in for bash that node can start, and on Windows node cannot start a shell script as a program; Linux CI drives it"
     ;;
   *)
-    printf '#!/bin/sh\nexec sleep 5\n' > "$H/slow-bash"
+    printf '#!/bin/sh\nexec sleep 8\n' > "$H/slow-bash"
     chmod +x "$H/slow-bash"
     for EV in PreToolUse PostToolUse; do
       rm -f "$LOG"
@@ -2441,10 +2442,10 @@ case "$(uname -s)" in
       TOOK=$((SECONDS - T0))
       ERR="$(cat "$ERR_FILE")"
       WANT=2; [ "$EV" = "PostToolUse" ] && WANT=1
-      if [ "$RC" -eq "$WANT" ] && [ ! -e "$LOG" ] && grep -qE 'did not answer within 3\.[0-9]+s' <<<"$ERR" && [ "$TOOK" -lt 5 ]; then
+      if [ "$RC" -eq "$WANT" ] && [ ! -e "$LOG" ] && grep -qE 'did not answer within 3\.[0-9]+s' <<<"$ERR" && [ "$TOOK" -lt 7 ]; then
         ok "$EV: a bash that does not answer is cut off INSIDE the budget (${TOOK}s of 4.5) and reported (exit $WANT) — the probe does not outlive Codex's timeout"
       else
-        bad "$EV: a bash that does not answer: exit $RC ($WANT wanted), took ${TOOK}s (under 5 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+        bad "$EV: a bash that does not answer: exit $RC ($WANT wanted), took ${TOOK}s (under 7 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
       fi
     done
     ;;
