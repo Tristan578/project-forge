@@ -568,6 +568,16 @@ if [ "$(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0.hooks.0.@has:status
 else
   bad "statusMessage on conditional/unconditional handlers is wrong: $(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse')"
 fi
+# The conditions file holds ONE of the source's `if` keys today. It has to say why,
+# or the rest read as a generator bug and get "fixed" by hand. (Same fixture: its
+# only condition is a PostToolUse one, which IS written.)
+README_TEXT="$(json_get "$F/.codex/hook-conditions.json" _README)"
+if grep -qF 'NON-GATING events only' <<<"$README_TEXT" && grep -qF 'is left out ON PURPOSE' <<<"$README_TEXT" \
+   && [ "$(json_get "$F/.codex/hook-conditions.json" 'PostToolUse.ok\.sh.0')" = "Bash(git push *)" ]; then
+  ok "the generated conditions file says it carries non-gating events only, and that a PreToolUse \`if\` is absent on purpose"
+else
+  bad "hook-conditions.json does not explain what it leaves out: $README_TEXT"
+fi
 F="$(mkfix)"; json_set "$F/.claude/settings.json" hooks.PreToolUse.0.if '"Edit(web/**)"'
 gen "$F" --check; expect_rc 2 "an \`if\` written for a tool other than Bash stops the generator — it would be silently skipped for a carried patch"
 expect_out 'Edit(web/**)' "…naming the condition"
