@@ -243,7 +243,10 @@ function codexParse(text) {
   // The last line has no \n after it, so finish() sees it as it is. A line that
   // is exactly "\r\r" is therefore an EMPTY line to Codex — a context line in
   // an Update hunk — and stripping once made the port reject a patch Codex applies.
-  lines = lines.map((l, i) => (i < lines.length - 1 && l.endsWith('\r') ? l.slice(0, -1) : l));
+  // (Applied to the last line as well: Codex does not strip that one a second
+  // time, but only its trim() is ever looked at, so the two are indistinguishable
+  // and a special case here would be a branch no test can observe.)
+  lines = lines.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
 
   const hunks = [];
   let mode = 'NotStarted';
