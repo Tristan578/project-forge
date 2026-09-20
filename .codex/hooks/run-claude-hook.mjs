@@ -47,8 +47,10 @@
 //     did, and each failed open somewhere. A shell command with any line that
 //     looks like a file header has exactly TWO outcomes (see carriedPatch):
 //       ACCEPTED — the WHOLE command is `[cd <literal> &&] apply_patch <<'D'`
-//                  … `D`, quoted delimiter, nothing after the closing line, a
-//                  body the parser port accepts → every path is shown;
+//                  … `D`, quoted delimiter, nothing after the closing line, no
+//                  carriage return on the opening or the closing line (two
+//                  bashes read one differently), a body the parser port
+//                  accepts → every path is shown;
 //       REFUSED  — everything else, unparsed → the hook blocks, with the ways
 //                  out. That includes a command that only WRITES text quoting a
 //                  patch; the support matrix records that cost under Limits.
@@ -65,10 +67,12 @@
 //     that way; that residue is recorded in the support matrix.
 //     (PostToolUse cannot see this channel at all: there the intercepted call
 //     carries no command. Also recorded.)
-//   `if` conditions from .claude/settings.json (e.g. `Bash(git push *)`) are
-//     read from `.codex/hook-conditions.json`, which the generator writes.
-//     Codex has no such key, and without it `post-push-resolve-comments.sh`
-//     would run `gh` after every shell command.
+//   `if` conditions from .claude/settings.json (e.g. `Bash(git push *)`): Codex
+//     has no such key. On NON-GATING events they are read from
+//     `.codex/hook-conditions.json`, which the generator writes — without that
+//     `post-push-resolve-comments.sh` would run `gh` after every shell command.
+//     On PreToolUse none is applied and none is written: a blocking script
+//     always starts and routes on the command itself (see conditionMatches).
 //
 // EXIT CODES
 //   script exits 2            → exit 2 (block). The reason is its stderr; if
@@ -90,8 +94,9 @@
 //                               unchecked when the budget runs out are an
 //                               adapter fault (exit 2 on PreToolUse): a patch
 //                               too large to check has not been checked.
-//   ADAPTER fault on PreToolUse (unreadable or EMPTY payload, no path found in
-//     a patch, script or bash missing, budget exhausted)
+//   ADAPTER fault on PreToolUse (unreadable or EMPTY payload, a patch that names
+//     no file, script or bash or jq missing, a run that ends 126/127 or cannot
+//     be completed, budget exhausted)
 //                              → exit 2 with the reason. Enforcement that
 //                               cannot run must not read as enforcement that
 //                               passed. On other events: exit 1.
@@ -149,6 +154,9 @@ const TOP_LEVEL_BLOCK_EVENTS = new Set(['UserPromptSubmit', 'PostToolUse', 'Suba
 // string), which would surface as a non-blocking failure. The scripts read the
 // command from stdin; the variable is a convenience, so it is simply omitted.
 const MAX_ENV_VALUE = 32 * 1024;
+const MAX_OUTPUT = 64 * 1024 * 1024;
+// One spelling of the pointer, so the suite can hold it against the document.
+const ON_PATH = `bash (Git for Windows' on Windows), node, git and jq must be on PATH — .codex/AGENTS.md, "Requirements on PATH".`;
 
 let EVENT = '';
 const STARTED = Date.now();
@@ -183,7 +191,7 @@ function findBash() {
   fault(
     `no usable bash: Git for Windows' bash.exe was not found next to \`git --exec-path\`${execPath ? ` (${execPath})` : ' (git itself did not run)'}, ` +
       `and a bare \`bash\` on Windows is the WSL launcher, which cannot see this checkout. ` +
-      `Install Git for Windows and make sure git, node and jq are on PATH (.codex/AGENTS.md, "Requirements on PATH"). This needs a person: no hook can run until it is fixed.`,
+      `Install Git for Windows. ${ON_PATH} This needs a person: no hook can run until it is fixed.`,
   );
   return '';
 }
@@ -434,7 +442,16 @@ const CD_LITERAL = String.raw`'[^'\n]*'|"[^"\n$` + '`' + String.raw`\\]*"|[A-Za-
 // backslash quotes the CR), so a head containing it simply does not match.
 const SEP = String.raw`(?:[ \t]|\\\n)`;
 const HEAD_LINE = new RegExp(String.raw`^${SEP}*(?:cd${SEP}+(${CD_LITERAL})${SEP}*&&${SEP}*)?(?:apply_patch|applypatch)${SEP}*$`);
-const HEREDOC_OPEN = new RegExp(String.raw`^<<[ \t]*(?:'([^'\n]+)'|"([^"\n$` + '`' + String.raw`\\]+)")[ \t]*\r?\n`);
+// NO CARRIAGE RETURN anywhere on the opening line, and none in the delimiter.
+// Two bashes disagree about one (the suite prints what the bash it runs under
+// does): to bash on Linux a CR is an ordinary byte (`<<'EOF'<CR>` opens a heredoc
+// whose delimiter is `EOF<CR>`); Git for Windows' bash drops a CR before the LF
+// (the delimiter is `EOF`, and a line `EOF<CR>` closes it). A delimiter ENDING in CR made the two readers close
+// on different lines — everything between was shell to bash and patch body to
+// this file. What cannot be read one way is refused; see the close finder below.
+// (carriedPatch() refuses a CR on the opening line BEFORE this is asked, so the
+// classes below need not exclude one.)
+const HEREDOC_OPEN = new RegExp(String.raw`^<<[ \t]*(?:'([^'\n]+)'|"([^"\n$` + '`' + String.raw`\\]+)")[ \t]*\n`);
 function carriedPatch(command) {
   if (looseHeaderPaths(command).length === 0) return null;
   // `fix` says what to do about THIS cause; one remedy for every cause sent the
@@ -447,6 +464,10 @@ function carriedPatch(command) {
   if (at === -1) return refused('it has no heredoc');
   const head = HEAD_LINE.exec(command.slice(0, at));
   if (!head) return refused('the text before its heredoc is not exactly `apply_patch` or `cd <literal path> && apply_patch` (a line continuation may separate words, never split one)');
+  const LF_ONLY = 'write the command with LF line endings: no carriage return on the `apply_patch <<\'EOF\'` line, in the delimiter, or on the line that closes it (the patch BODY may carry them)';
+  if (command.slice(at).split('\n', 1)[0].includes('\r')) {
+    return refused('the line that opens its heredoc contains a carriage return, which bash on Linux reads as part of the delimiter and Git for Windows\' bash drops', LF_ONLY);
+  }
   const open = HEREDOC_OPEN.exec(command.slice(at));
   if (!open) {
     // Two different mistakes, two different ways out.
@@ -457,8 +478,16 @@ function carriedPatch(command) {
   }
   const delimiter = open[1] ?? open[2];
   const bodyLines = command.slice(at + open[0].length).split('\n');
-  const close = bodyLines.findIndex((l) => (l.endsWith('\r') ? l.slice(0, -1) : l) === delimiter);
+  // The FIRST line either bash could take for the closing one: the delimiter, with
+  // or without carriage returns after it. Only the byte-exact spelling closes the
+  // heredoc for both (Git for Windows' bash also closes on `EOF<CR>`; bash on
+  // Linux, to which a CR is an ordinary byte, does not), so any other spelling is refused rather than read the
+  // way one of them reads it.
+  const close = bodyLines.findIndex((l) => l.replace(/\r+$/, '') === delimiter);
   if (close === -1) return refused(`its heredoc is never closed by a line reading exactly ${delimiter}`);
+  if (bodyLines[close] !== delimiter) {
+    return refused(`the line that would close its heredoc (${delimiter}) ends in a carriage return — Git for Windows' bash closes the heredoc there, bash on Linux does not`, LF_ONLY);
+  }
   if (bodyLines.slice(close + 1).join('\n').trim() !== '') return refused('something follows the closing heredoc delimiter');
 
   let dir = '';
@@ -589,7 +618,12 @@ function main() {
   // that ever changes shape, a file hook that cannot read the command must say
   // so — exiting 0 would turn all four edit hooks into silent passes.
   if (editMode && toolName === 'Bash' && typeof input.tool_input?.command !== 'string') {
-    fault(`${name}: the Bash payload carries no command string (got ${Array.isArray(input.tool_input?.command) ? 'an array' : typeof input.tool_input?.command}) — cannot tell whether it carries a patch`);
+    // Adapter-level, like every fault down to the loop: no `${name}:` in front —
+    // every edit hook reaches it for the same payload and none of them said it.
+    fault(
+      `the Bash payload carries no command string (got ${Array.isArray(input.tool_input?.command) ? 'an array' : typeof input.tool_input?.command}), so the edit hooks cannot tell whether it carries a patch. ` +
+        `Codex sent the command as a string when this was written (core/src/tools/handlers/unified_exec/exec_command.rs in openai/codex); if that changed, main() in .codex/hooks/run-claude-hook.mjs has to be re-read against it. This needs a person.`,
+    );
   }
   const carried = editMode && toolName === 'Bash' ? carriedPatch(input.tool_input.command) : null;
   if (editMode && toolName === 'Bash' && !carried) process.exit(0); // no file header anywhere in it: nothing for a file hook to see
@@ -635,7 +669,12 @@ function main() {
       // which is how a whole class of port bugs stayed invisible. If Codex would
       // reject the text too, blocking costs nothing; if it would not, the port
       // has diverged and that must be loud.
-      if (typeof patch !== 'string') fault(`${name}: the apply_patch payload carries no patch text in tool_input.command — refusing to let the check pass on nothing`);
+      if (typeof patch !== 'string') {
+        fault(
+          `the apply_patch payload carries no patch text in tool_input.command, so the files it edits cannot be checked. ` +
+            `Codex put the patch there when this was written (core/src/tools/hook_names.rs in openai/codex); if that changed, main() in .codex/hooks/run-claude-hook.mjs has to be re-read against it. This needs a person.`,
+        );
+      }
       const parsed = codexParse(patch);
       if (!parsed.ok) {
         fault(
@@ -646,7 +685,11 @@ function main() {
       files = touchedFiles(parsed.hunks);
     }
     if (files.length === 0) {
-      fault(`${name}: could not find a file path in the apply_patch payload — refusing to let the check pass on nothing`);
+      // A well-formed envelope with no Add/Update/Delete section. Codex applies
+      // nothing for it ("No files were modified.", apply-patch/src/lib.rs), so the
+      // block costs nothing — and it is not "a path could not be found", which
+      // read like five checks each failing at their job.
+      fault(`this patch names no file — it has no Add File, Update File or Delete File section — so there is nothing to check, and Codex applies nothing for it. Add a hunk, or drop the call.`);
     }
     for (const f of files) {
       // resolve() on BOTH branches: it is what removes `.` and `..` segments, and
@@ -684,11 +727,17 @@ function main() {
   }
 
   const bash = findBash();
-  const contexts = [];
-  const messages = [];
-  const texts = [];
-  const crashes = [];
-  let deny = null;
+  // jq, asked for BEFORE any script starts. Most scripts read their payload with
+  // it, and without it they split two ways, both wrong: the ones under `set -e`
+  // exit 127 with bash's "jq: command not found" swallowed by their own
+  // `2>/dev/null`, and the rest take their "nothing to inspect" branch and pass.
+  // A requirement is all-or-nothing here, as bash is: the scripts that do not
+  // use jq are held back too, so that its absence shows at session start and
+  // not at the first push. (Asking "does THIS script use jq" would mean reading
+  // shell text, through every file it sources, to decide whether a check runs.)
+  // The question goes to the SAME bash the scripts run under, because its PATH is
+  // not node's (Git for Windows' bash.exe adds directories of its own).
+  //
   // Seconds → ms. Absent or nonsensical numbers mean "no bound of our own":
   // Codex's timeout still applies, this adapter just cannot pre-empt it.
   const perRunMs = Number(process.argv[3]) > 0 ? Number(process.argv[3]) * 1000 : 0;
@@ -696,6 +745,21 @@ function main() {
   // Leave room to report: once Codex's own timeout fires, the run is merely
   // Failed and the action proceeds — this adapter must speak first.
   const deadline = budgetMs ? STARTED + Math.max(budgetMs - 1500, budgetMs * 0.8) : 0;
+  // The probe spends the same budget as the runs. With none left it is not
+  // started: the loop below says "out of time" before its first run.
+  const probeMs = deadline ? Math.min(deadline - Date.now(), 10000) : 10000;
+  if (probeMs > 0) {
+    const probe = spawnSync(bash, ['-c', 'command -v jq'], { cwd, encoding: 'utf8', timeout: probeMs, killSignal: 'SIGKILL' });
+    if (probe.error) fault(`could not start bash, or it did not answer within ${probeMs / 1000}s (${probe.error.message}). ${ON_PATH} This needs a person.`);
+    if (probe.status !== 0) {
+      fault(`jq is not on the PATH that bash sees. Most hook scripts read their payload with it, the blocking ones among them, and without it they either die with no message or read nothing and pass — so NO hook is run until it is installed. ${ON_PATH} This needs a person.`);
+    }
+  }
+  const contexts = [];
+  const messages = [];
+  const texts = [];
+  const crashes = [];
+  let deny = null;
   for (let i = 0; i < runs.length; i += 1) {
     const run = runs[i];
     const remaining = deadline ? deadline - Date.now() : Infinity;
@@ -708,7 +772,7 @@ function main() {
       cwd,
       env: { ...process.env, ...run.env },
       encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
+      maxBuffer: MAX_OUTPUT,
       ...(Number.isFinite(timeout) ? { timeout, killSignal: 'SIGKILL' } : {}),
     });
     if (res.error && res.error.code === 'ETIMEDOUT' && perRunMs && remaining < perRunMs) {
@@ -723,12 +787,22 @@ function main() {
           `(where there is none, hooks.defaultTimeoutSeconds in tools/agentic-sync/port.json): raise it, then run node tools/agentic-sync/port.mjs --write.`,
       );
     }
-    if (res.error) fault(`${name}: could not start bash (${res.error.message}). bash (Git for Windows' on Windows), node, git and jq must be on PATH — .codex/AGENTS.md, "Requirements on PATH". This needs a person.`);
-    // 126/127 are the INTERPRETER's own failures (cannot execute / not found), not
-    // the script's verdict. Treated as a crash they exit 1, Codex marks the run
-    // Failed, and the action proceeds with the check never having run.
+    // bash started a moment ago (the jq probe), so this is the RUN failing to
+    // complete — output past maxBuffer (ENOBUFS), an environment too large to
+    // exec — not a missing interpreter.
+    if (res.error) {
+      fault(`${name}: the run could not be completed (${res.error.message}) — ${run.env.TOOL_INPUT_file_path || 'this command'} was NOT checked. If the script printed more than ${MAX_OUTPUT / (1024 * 1024)} MiB, that is the cause: a hook reports a verdict, not a file.`);
+    }
+    // 126/127 mean a command was found but could not be executed / was not found
+    // at all — the script itself, OR anything it calls: under `set -e` a missing
+    // tool ends the script with 127 too, so the message may not blame bash.
+    // Either way no verdict was reached. Treated as a crash they would exit 1,
+    // Codex would mark the run Failed, and the action would proceed unchecked.
     if (res.status === 126 || res.status === 127) {
-      fault(`${name}: bash could not execute the script (exit ${res.status}${res.stderr ? `: ${res.stderr.trim()}` : ''}) — the check did not run`);
+      fault(
+        `${name} exited ${res.status} (${res.status === 127 ? 'command not found' : 'found but not executable'})${res.stderr ? `: ${res.stderr.trim()}` : ''} — the check did not run. ` +
+          `Either bash could not run the script itself, or the script called a tool that is ${res.status === 127 ? 'not on PATH' : 'not executable'}; a script that hides its own stderr will not say which. ${ON_PATH} This needs a person.`,
+      );
     }
     if (res.status === 2) {
       const said = [res.stderr, res.stdout].find((s) => s && s.trim());

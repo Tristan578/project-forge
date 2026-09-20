@@ -545,7 +545,7 @@ project-forge/
     ├── AGENTS.md                #   Full instructions
     ├── agents/                  #   Subagents — GENERATED from .claude/agents/
     ├── hooks.json               #   Hook wiring — GENERATED from .claude/settings.json
-    ├── hook-conditions.json     #   The `if` conditions of those hooks — GENERATED
+    ├── hook-conditions.json     #   `if` conditions of NON-blocking hooks only (a PreToolUse `if` is left out on purpose) — GENERATED
     └── hooks/run-claude-hook.mjs #  Adapter: Codex hook payload → shared .claude/hooks scripts
 ```
 

@@ -38,8 +38,15 @@ hooks are not running — do the manual steps under **If hooks are not running**
 4. In a linked `git worktree`, Codex reads hooks from the **main checkout's**
    `.codex/`, not the worktree's. Test a hook change from the main checkout.
 
-Requirements on `PATH`: `node`, `git`, `bash` (Git for Windows' bash on
-Windows) and `jq`, which most of the shared scripts use to read their input.
+#### Requirements on PATH
+
+`node`, `git`, `bash` (Git for Windows' bash on Windows) and `jq`, which most of
+the shared scripts use to read their input. The adapter asks bash for `jq` before
+it starts any script: without it **no** hook runs — the ones that do not use it
+included, so the gap shows at session start — a `PreToolUse` hook blocks, and the
+message names `jq` and this heading. (Left to themselves the scripts would split
+two ways: the ones under `set -e` end with exit 127 and no message, the others
+read nothing and pass.)
 
 #### Before Writing Code
 1. Review the backlog at http://localhost:3010

@@ -119,7 +119,7 @@
     ".codex/agents/test-writer.toml": "fcd4b121769531042432cd66cf7cdd6c66560abb203686692241fa534d2a4d42",
     ".codex/agents/ux-reviewer.toml": "58eca48f212dc7e1b4863be6ff56111b3a8661d739b30d64b961a143c889187e",
     ".codex/agents/validator.toml": "0e9b5c6332244c33bd9fa037eaee4242656d985180aae6176707b13dd7d05313",
-    ".codex/hook-conditions.json": "336ff823be128a2571d31e90d4c215552434f2ee98b39bd435978c9824b07922",
+    ".codex/hook-conditions.json": "cb505996d50de4425ef499adf0c3e6be65b67ac080009edf253893aa7cbe98ec",
     ".codex/hooks.json": "9ccf584ccc0b58fa8062b031560bfb417ce7bc3a8b86255b558e17415cd797e7"
   }
 }

@@ -119,8 +119,16 @@ above fail *silently* if ignored:
     `cd` target) exactly as the shell joins it — the delimiter
     **quoted** so the shell expands nothing in the body, a literal `cd` target
     (quoted, or a bare word of `[A-Za-z0-9_./-]`) that is not empty and does not
-    start with `-`, nothing after the closing delimiter, and a body that the
-    port of Codex's own parser accepts. Then the base directory and every path
+    start with `-`, nothing after the closing delimiter, **no carriage return on
+    the opening line, in the delimiter or on the closing line** (the body may
+    carry them), and a body that the port of Codex's own parser accepts. The
+    carriage-return rule exists because two bashes read one differently (the
+    suite prints what the bash it runs under does, on both CI platforms): to
+    bash on Linux it is an ordinary byte, so `<<'EOF'<CR>` opens a
+    heredoc that only `EOF<CR>` closes; Git for Windows' bash drops it before a
+    line feed, so `EOF<CR>` closes a heredoc opened as `'EOF'`. A delimiter
+    ending in one made bash and the adapter close on different lines, and what
+    lay between was shell to one and patch body to the other. Then the base directory and every path
     are known, and each path is shown to the hook;
   - **refused** — everything else, without being parsed, so nothing in it can
     mislead. The hook blocks with a message giving the ways out.
@@ -181,10 +189,12 @@ on almost none —
 
 - an edit-only hook is matched for `Bash` to see a carried patch
   ("Checking sanitization patterns" would show on an `ls`);
-- a handler whose group carries an `if` has that condition applied inside the
-  adapter ("Checking for Boy Scout Rule violations" and "Checking for unreplied
-  review comments" would show on every command, where Claude Code shows them on
-  `gh api` and `git push` alone).
+- a handler whose group carries an `if` is matched for every shell command
+  whatever becomes of the condition (see "`if` conditions" above). On `PreToolUse` the condition is never applied: the script starts each
+  time and filters for itself, so "Checking for Boy Scout Rule violations" would
+  show on an `ls`. On a non-gating event the adapter applies it and usually exits
+  at once, so "Checking for unreplied review comments" would show on every
+  command, where Claude Code shows it on `git push` alone.
 
 The trade-off is silence where Claude Code explains itself: after a `git push`,
 `post-push-resolve-comments.sh` can hold the turn for up to 30 s with nothing on
@@ -280,8 +290,25 @@ until someone decides where it belongs. That is deliberate: the first port wired
   exercised from the main checkout.
 - **Subagents.** Under Claude Code, project hooks do not fire for subagents
   (`.claude/rules/gotchas-ops.md`). Whether they do under Codex was not measured.
-- **`jq`.** Most shared scripts parse their input with `jq`. Without it they
-  take their "nothing to inspect" branch.
+- **`jq`.** Most shared scripts parse their input with `jq` — every blocking
+  Bash hook among them — and the adapter asks the bash it is about to use for
+  `jq` before it starts any script. Without it **no hook runs**, the ones that do
+  not use `jq` included: on `PreToolUse` every matched handler blocks, elsewhere
+  the run is reported as failed, and the message names `jq` and
+  `.codex/AGENTS.md`, "Requirements on PATH". All-or-nothing is deliberate — the
+  gap shows at session start instead of at the first push, and asking "does this
+  script use `jq`" would mean reading shell text, through every file it sources,
+  to decide whether a check runs. It costs one ~50 ms bash start per hook
+  (measured on Windows). Left to themselves the scripts split two ways,
+  both wrong: the ones under `set -e` (`pre-push-quality-gate.sh`,
+  `check-sanitization-patterns.sh`, `check-pr-metadata.sh`) end with exit 127 and no message, because their own
+  `2>/dev/null` swallows bash's "jq: command not found"; the others read nothing,
+  take their "nothing to inspect" branch and pass. Under Claude Code that split is
+  what happens today.
+- **Exit 126 and 127 from a script block on `PreToolUse`** and say that the check
+  did not run. They mean "found but not executable" and "command not found" — of
+  the script itself *or of anything it calls* — so the message cannot say which;
+  it prints the script's stderr when there is any.
 
 ## Subagents
 

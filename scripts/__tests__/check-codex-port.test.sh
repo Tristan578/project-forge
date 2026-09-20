@@ -588,6 +588,28 @@ if [ "$(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0.command')" = "$WANT_POSIX" ] 
 else
   bad "unexpected command strings: $(json_get "$HJ" 'hooks.PreToolUse.0.hooks.0')"
 fi
+# The patch budget follows the matcher Codex SEES. A tool-event group with no
+# matcher (or `*`, or '') is emitted matcher-less, Codex matches it for
+# apply_patch like everything else, and the adapter runs it once per touched
+# path — read off the source's alias list it got the single-run budget (3 8), and
+# a many-file patch ran out of a time sized for one file. It is NOT an edit-only
+# hook either: nothing narrows it, so it must keep acting on plain shell commands.
+for MATCHER in '' '"matcher":"",' '"matcher":"*",'; do
+  for EV in PreToolUse PostToolUse; do
+    F="$(mkfix)"
+    json_set "$F/.claude/settings.json" "hooks.$EV" "[{${MATCHER}\"hooks\":[{\"type\":\"command\",\"command\":\"bash .claude/hooks/ok.sh\",\"timeout\":3}]}]"
+    gen "$F" --write
+    GOT="$(json_get "$F/.codex/hooks.json" "hooks.$EV.0.hooks.0.commandWindows")"
+    if [ "$GOT" = "node .codex/hooks/run-claude-hook.mjs ok.sh 3 30" ] && [ "$(json_get "$F/.codex/hooks.json" "hooks.$EV.0.hooks.0.timeout")" = "30" ] \
+       && [ "$(json_get "$F/.codex/hooks.json" "hooks.$EV.0.@has:matcher")" = "false" ]; then
+      ok "$EV group with ${MATCHER:-no matcher}: emitted matcher-less WITH the patch budget (3 30), and not as an edit-only hook"
+    else
+      bad "$EV group with ${MATCHER:-no matcher} was ported as: $GOT (wanted … ok.sh 3 30, no matcher)"
+    fi
+  done
+done
+# (Only on the events that carry a tool call: the matcher-less Stop hook in the
+# case above keeps `3 8`, which is what pins the event test in the generator.)
 if command -v git >/dev/null 2>&1; then
   # Run the generated POSIX command for real, from a SUBDIRECTORY of a git repo.
   cat > "$F/.claude/hooks/ok.sh" <<'MARK'
@@ -1469,16 +1491,18 @@ fi
 for FIELD in input patch; do
   rm -f "$LOG"
   adapt probe.sh "$(printf '{"cwd":"%s","hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"%s":"*** Begin Patch\\n*** Add File: ok/new.ts\\n+x\\n*** End Patch"}}' "$CWD_NATIVE" "$FIELD")"
-  if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'no patch text in tool_input.command' <<<"$ERR"; then
-    ok "a patch under tool_input.$FIELD (a shape Codex was never seen to send) BLOCKS instead of being guessed at"
+  if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'no patch text in tool_input.command' <<<"$ERR" && grep -qF 'core/src/tools/hook_names.rs' <<<"$ERR" && ! grep -qF 'probe.sh' <<<"$ERR"; then
+    ok "a patch under tool_input.$FIELD (a shape Codex was never seen to send) BLOCKS instead of being guessed at — naming the adapter and the Codex file to re-read, not the hook"
   else
     bad "tool_input.$FIELD: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
   fi
 done
 rm -f "$LOG"
 adapt probe.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** End Patch')"
-if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'could not find a file path' <<<"$ERR"; then
-  ok "PreToolUse: a VALID patch that touches no file BLOCKS too (exit 2) — nothing to check is not a pass"
+# Five handlers reach this for one patch: the text names the adapter, not the
+# hook in argv, and gives the cause and the way out rather than "could not find".
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'this patch names no file' <<<"$ERR" && grep -qF 'Add a hunk, or drop the call' <<<"$ERR" && ! grep -qF 'probe.sh' <<<"$ERR"; then
+  ok "PreToolUse: a VALID patch that touches no file BLOCKS too (exit 2) — nothing to check is not a pass; the text says why and what to do, and names no hook"
 else
   bad "no-path patch on PreToolUse: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
 fi
@@ -1801,7 +1825,7 @@ no space before the redirect, one after it|apply_patch<< 'EOF'\n@P@\nEOF
 the applypatch alias|applypatch <<'EOF'\n@P@\nEOF
 a line continuation before the heredoc|apply_patch \\\n<<'EOF'\n@P@\nEOF
 a line continuation with no space before it|apply_patch\\\n<<'EOF'\n@P@\nEOF
-CRLF line endings throughout|apply_patch <<'EOF'\r\n*** Begin Patch\r\n*** Update File: protected/x.ts\r\n@@\r\n+evil\r\n*** End Patch\r\nEOF\r\n
+CRLF line endings in the patch BODY, as a patch for a CRLF file has (on the opening or closing line they are refused — two bashes read them differently)|apply_patch <<'EOF'\n*** Begin Patch\r\n*** Update File: protected/x.ts\r\n@@\r\n+evil\r\n*** End Patch\r\nEOF
 blank lines after the closing delimiter|apply_patch <<'EOF'\n@P@\nEOF\n\n
 an indented file header after Begin Patch (Codex trims there)|apply_patch <<'EOF'\n*** Begin Patch\n   *** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
 a NEL-prefixed file header (Rust trims it)|apply_patch <<'EOF'\n*** Begin Patch\n\u0085*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
@@ -1915,11 +1939,17 @@ a body Codex rejects: an Update hunk with nothing in it|apply_patch <<'EOF'\n***
 a body Codex rejects: @@ directly after an empty chunk|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n@@\n+evil\n*** End Patch\nEOF
 a body Codex's parser rejects (a stray line in an Add hunk)|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: protected/new.ts\n+ok\nstray\n*** End Patch\nEOF
 a body Codex rejects in finish(): an indented final End Patch straight after @@ leaves an EMPTY chunk (a parser that streams the last line would read it as context and accept)|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n   *** End Patch\nEOF
+a delimiter ENDING in a carriage return — bash closes on the first EOF<CR>, this file once read on to EOF<CR><CR>, and the lines between were shell to one and patch body to the other|apply_patch <<'EOF\r'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n ok\nEOF\r\n apply_patch <<'X'\n+hidden\nEOF\r\r
+the same with a double-quoted delimiter|apply_patch <<\"EOF\r\"\n@P@\nEOF\r
+a carriage return after the delimiter on the opening line (to bash on Linux the delimiter is then EOF<CR>)|apply_patch <<'EOF'\r\n@P@\nEOF
+a whole command with CRLF line endings|apply_patch <<'EOF'\r\n@P@\r\nEOF\r\n
+a closing line ending in a carriage return (Git for Windows' bash closes there, bash on Linux does not)|apply_patch <<'EOF'\n@P@\nEOF\r
+a delimiter that is also a valid context line, met first with a carriage return and then byte-exact — read the Linux way alone the body parses, while Git for Windows' bash closes on the first and runs the rest as shell|apply_patch <<' ok'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+a\n ok\r\n+b\n*** End Patch\n ok
 COST — a heredoc that only WRITES a patch file|cat > fix.patch <<'EOF'\n@P@\nEOF
 COST — a how-to that quotes a patch|cd docs && cat > howto.md <<'DOC'\nUse apply_patch like this:\n@P@\nDOC
 COST — a multi-line commit message that quotes one|git commit -m \"fix: apply_patch handling\n\n@P@\"
 REFUSED_TABLE
-if [ "$REFUSED" -eq 66 ]; then ok "all 66 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 66"; fi
+if [ "$REFUSED" -eq 72 ]; then ok "all 72 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 72"; fi
 
 # The way out must fit the CAUSE. One remedy for everything told the author of a
 # body that would not parse to "make it the WHOLE command" — which it already was.
@@ -1960,6 +1990,33 @@ if [ "$RC" -eq 2 ] && grep -qF 'not a plain QUOTED word' <<<"$ERR" && grep -qF '
 else
   bad "unquoted-delimiter refusal: exit $RC, stderr: $ERR"
 fi
+# A carriage return where two bashes read it differently. Each cause has its own
+# guard, so each is pinned on the words only that guard prints.
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\r\n$PATCH\nEOF")"
+if [ "$RC" -eq 2 ] && grep -qF 'the line that opens its heredoc contains a carriage return' <<<"$ERR" && grep -qF 'LF line endings' <<<"$ERR" && ! grep -qF 'make it the WHOLE command' <<<"$ERR"; then
+  ok "refusal for a carriage return on the OPENING line: names it, and says to use LF line endings"
+else
+  bad "opening-line carriage return names the wrong cause: exit $RC, stderr: $ERR"
+fi
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n$PATCH\nEOF\r")"
+if [ "$RC" -eq 2 ] && grep -qF 'the line that would close its heredoc (EOF) ends in a carriage return' <<<"$ERR" && grep -qF 'LF line endings' <<<"$ERR"; then
+  ok "refusal for a carriage return on the CLOSING line: names it, and says to use LF line endings"
+else
+  bad "closing-line carriage return names the wrong cause: exit $RC, stderr: $ERR"
+fi
+# (…and only there: the accepted table above carries a patch with a CRLF body.)
+#
+# REPORTING ONLY — two `note` lines, which can neither pass nor fail. The refusals
+# above rest on a claim about BASH, not about the adapter: that two bashes read a
+# carriage return differently. This prints what the bash running the suite does
+# (through `-c`, the way Codex hands a command over), so the claim in the adapter
+# and in the support matrix can be held against a CI log from each platform
+# rather than taken on trust (lessons-learned #17). "body AFTER" means the
+# heredoc closed on the line in question; anything longer means it did not.
+CR_OPEN_CMD="$(printf "cat <<'EOF'\r\nbody\nEOF\necho AFTER")"
+CR_CLOSE_CMD="$(printf "cat <<'EOF'\nbody\nEOF\r\necho AFTER\nEOF")"
+echo "  note  $(uname -s) bash, heredoc opened as <<'EOF'<CR> and met by a bare EOF line: $(bash -c "$CR_OPEN_CMD" 2>/dev/null | tr -d '\r' | tr '\n' ' ')"
+echo "  note  $(uname -s) bash, heredoc opened as <<'EOF' and met by an EOF<CR> line: $(bash -c "$CR_CLOSE_CMD" 2>/dev/null | tr -d '\r' | tr '\n' ' ')"
 adapt guard.sh "$(carried_payload PreToolUse "echo start; apply_patch <<'EOF'\n$PATCH\nEOF")"
 if [ "$RC" -eq 2 ] && grep -qF 'make it the WHOLE command' <<<"$ERR"; then
   ok "refusal for the wrong SHAPE: says to make it the whole command"
@@ -1978,8 +2035,8 @@ fi
 # that cannot read it must block, not exit 0 over a patch it never looked at.
 rm -f "$LOG"
 adapt guard.sh "$(printf '{"cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":["apply_patch","*** Begin Patch"]}}' "$CWD_NATIVE")"
-if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'no command string' <<<"$ERR"; then
-  ok "a Bash payload whose command is not a string BLOCKS in mode edit"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'no command string' <<<"$ERR" && grep -qF 'unified_exec/exec_command.rs' <<<"$ERR" && ! grep -qF 'guard.sh' <<<"$ERR"; then
+  ok "a Bash payload whose command is not a string BLOCKS in mode edit — naming the adapter and the Codex file to re-read, not the hook"
 else
   bad "a non-string command passed silently: exit $RC (2 wanted), stderr: $ERR"
 fi
@@ -2054,15 +2111,32 @@ done
 
 # A file hook looking at a carried patch is not gated by an `if` written for
 # shell commands — otherwise the two edit channels disagree and this one fails open.
+#
+# Driven on PostToolUse, the only place a condition is applied at all: on
+# PreToolUse this case passes whatever the adapter does with a carried patch,
+# because no condition is consulted there in the first place. (Codex sends no
+# command on PostToolUse for this channel today; the adapter does not rely on
+# that, and this is the rule it follows if one ever arrives.)
 COND_FILE="$H/edit-conditions.json"
-printf '{"PreToolUse":{"guard.sh":["Bash(git push *)"]}}' > "$COND_FILE"
+printf '{"PostToolUse":{"guard.sh":["Bash(git push *)"]}}' > "$COND_FILE"
 rm -f "$LOG"
-adapt guard.sh "$(carried_payload PreToolUse "$(heredoc '' '*** Update File: protected/x.ts\n@@\n+evil')")"
-if [ "$RC" -eq 2 ]; then
-  ok "an \`if\` condition does not switch a file hook off for a carried patch"
+adapt guard.sh "$(carried_payload PostToolUse "$(heredoc '' '*** Update File: protected/x.ts\n@@\n+evil')")"
+if [ "$RC" -eq 2 ] && grep -qF 'protected/x.ts' "$LOG" 2>/dev/null; then
+  ok "an \`if\` condition does not switch a file hook off for a carried patch (PostToolUse, condition not matching: the script still ran)"
 else
-  bad "a Bash condition suppressed the check of a carried patch: exit $RC"
+  bad "a Bash condition suppressed the check of a carried patch: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no)"
 fi
+# The control: the same condition DOES filter that event when no patch is carried,
+# so the case above is the carried patch at work and not a condition that never fires.
+rm -f "$LOG"
+ADAPT_ARGS="5 50"
+adapt guard.sh "$(bash_payload PostToolUse 'ls protected')"
+if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then
+  ok "…control: without a carried patch the same condition filters the same event (script not run)"
+else
+  bad "the carried-patch case has no control — the condition did not filter a plain command: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no)"
+fi
+ADAPT_ARGS="5 50 edit"
 unset COND_FILE
 
 ADAPT_ARGS="5 50"
@@ -2100,24 +2174,121 @@ if [ "$RC" -eq 1 ]; then ok "…and is a reported failure on PostToolUse"; else 
 ERR_FILE="$H/err"
 OUT="$(printf '%s' "$(bash_payload PreToolUse 'ls')" | CODEX_HOOK_BASH="$TMP_ROOT/no-such-bash" CODEX_HOOK_SCRIPT_DIR="$H" CODEX_HOOK_CONDITIONS="$H/no-conditions.json" PROBE_LOG="$LOG" node "$ADAPTER" probe.sh 2>"$ERR_FILE")"; RC=$?
 ERR="$(cat "$ERR_FILE")"
-if [ "$RC" -eq 2 ] && grep -qF 'could not start bash' <<<"$ERR" && grep -qF 'Requirements on PATH' <<<"$ERR"; then
-  ok "PreToolUse: a bash that cannot be started blocks, and says what must be on PATH"
+if [ "$RC" -eq 2 ] && grep -qF 'could not start bash' <<<"$ERR" && grep -qF 'Requirements on PATH' <<<"$ERR" && ! grep -qF 'probe.sh' <<<"$ERR"; then
+  ok "PreToolUse: a bash that cannot be started blocks, says what must be on PATH, and names the adapter rather than the hook"
 else
   bad "missing bash: exit $RC (2 wanted), stderr: $ERR"
 fi
-# 126 and 127 are the INTERPRETER's own failures (cannot execute / not found) — a
-# bash that starts and cannot run the script, which is what the WSL launcher does
-# on Windows. Read as a script crash they exit 1, Codex marks the run Failed, and
-# the action proceeds with the check never having run.
+# 126 and 127 mean "found but not executable" and "command not found" — of the
+# script OR of anything it calls, so no verdict was reached. Read as a script
+# crash they exit 1, Codex marks the run Failed, and the action proceeds with the
+# check never having run.
 for CODE in 126 127; do
   printf '#!/usr/bin/env bash\necho "cannot execute" >&2\nexit %s\n' "$CODE" > "$H/interp.sh"
   adapt interp.sh "$(bash_payload PreToolUse 'ls')"
-  if [ "$RC" -eq 2 ] && grep -qF 'could not execute the script' <<<"$ERR" && grep -qF 'the check did not run' <<<"$ERR"; then
-    ok "PreToolUse: exit $CODE from the run is an interpreter failure — it BLOCKS, it is not read as a crash the action may outlive"
+  if [ "$RC" -eq 2 ] && grep -qF "interp.sh exited $CODE" <<<"$ERR" && grep -qF 'the check did not run' <<<"$ERR" && grep -qF 'cannot execute' <<<"$ERR"; then
+    ok "PreToolUse: exit $CODE from the run is not a verdict — it BLOCKS, with the script's stderr, instead of being read as a crash the action may outlive"
   else
     bad "exit $CODE was read as a script crash: adapter exit $RC (2 wanted), stderr: $ERR"
   fi
 done
+# …and the message may not blame bash. Under `set -e` a tool the SCRIPT calls and
+# cannot find ends it with 127 too, usually with its stderr thrown away — the
+# opening of pre-push-quality-gate.sh, with a tool that does not exist for jq.
+cat > "$H/missing-tool.sh" <<'MISSING'
+#!/usr/bin/env bash
+set -euo pipefail
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | no-such-tool-for-this-suite -r '.tool_input.command // empty' 2>/dev/null)
+exit 0
+MISSING
+adapt missing-tool.sh "$(bash_payload PreToolUse 'ls')"
+if [ "$RC" -eq 2 ] && grep -qF 'missing-tool.sh exited 127 (command not found)' <<<"$ERR" && grep -qF 'called a tool that is not on PATH' <<<"$ERR" \
+   && grep -qF 'Requirements on PATH' <<<"$ERR" && ! grep -qF 'could not execute the script' <<<"$ERR"; then
+  ok "exit 127 from a tool the SCRIPT could not find: the message says a tool may be missing and where the requirements are — it does not claim bash failed to run the script"
+else
+  bad "a script-level 127 is misattributed: exit $RC (2 wanted), stderr: $ERR"
+fi
+
+# jq is asked for BEFORE any script starts. Without it the real scripts split two
+# ways, both wrong: the ones under `set -e` end 127 with no message (their own
+# 2>/dev/null swallows bash's), the rest read nothing and pass. adapt_path runs
+# the adapter with PATH replaced, so the bash it uses must be named explicitly.
+NODE_BIN="$(command -v node)"
+BASH_NATIVE="$(command -v bash)"
+if command -v cygpath >/dev/null 2>&1; then BASH_NATIVE="$(cygpath -w "$BASH_NATIVE")"; fi
+mkdir -p "$H/nobin"
+adapt_path() {
+  ERR_FILE="$H/err"
+  OUT="$(printf '%s' "$3" | env PATH="$1" CODEX_HOOK_BASH="$BASH_NATIVE" CODEX_HOOK_SCRIPT_DIR="$H" CODEX_HOOK_CONDITIONS="$H/no-conditions.json" PROBE_LOG="$LOG" "$NODE_BIN" "$ADAPTER" "$2" 2>"$ERR_FILE")"
+  RC=$?
+  ERR="$(cat "$ERR_FILE")"
+}
+# The control first: the same call with the PATH left alone runs the script, so a
+# block below is the missing jq and not a bash this helper failed to start.
+rm -f "$LOG"
+adapt_path "$PATH" probe.sh "$(bash_payload PreToolUse 'ls')"
+if [ "$RC" -eq 0 ] && [ -e "$LOG" ]; then
+  ok "control: with jq reachable, the explicit-bash helper runs the script (exit 0)"
+else
+  bad "the jq cases below cannot be trusted — their control failed: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+cat > "$H/sete.sh" <<'SETE'
+#!/usr/bin/env bash
+set -euo pipefail
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+printf 'RAN\n' >> "$PROBE_LOG"
+exit 0
+SETE
+for SCRIPT in sete.sh probe.sh; do
+  rm -f "$LOG"
+  adapt_path "$H/nobin" "$SCRIPT" "$(bash_payload PreToolUse 'ls')"
+  if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'jq is not on the PATH that bash sees' <<<"$ERR" && grep -qF 'Requirements on PATH' <<<"$ERR" \
+     && ! grep -qF "$SCRIPT" <<<"$ERR" && ! grep -qF 'exited 127' <<<"$ERR"; then
+    ok "PreToolUse without jq ($SCRIPT): BLOCKS before the script starts, naming jq and the requirements — not an unexplained 127, not a silent pass"
+  else
+    bad "a run without jq ($SCRIPT): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+  fi
+done
+adapt_path "$H/nobin" probe.sh "$(bash_payload PostToolUse 'ls')"
+if [ "$RC" -eq 1 ] && grep -qF 'jq is not on the PATH that bash sees' <<<"$ERR"; then
+  ok "…and on PostToolUse it is a reported failure (exit 1)"
+else
+  bad "a PostToolUse run without jq: exit $RC (1 wanted), stderr: $ERR"
+fi
+
+# findBash() on Windows. A bare `bash` there is the WSL launcher: it starts, cannot
+# see this checkout, the script "exits 1", Codex reads Failed and the action goes
+# through. So when Git's bash is not found the adapter must SAY so — and the old
+# `return 'bash'` fallback also blocks under this PATH ("could not start bash"),
+# which is why the text is asserted and not only the exit code. CODEX_HOOK_BASH,
+# which every other case sets or inherits, bypasses findBash entirely.
+case "$(uname -s)" in
+  MINGW*|MSYS*)
+    rm -f "$LOG"
+    OUT="$(printf '%s' "$(bash_payload PreToolUse 'ls')" | env -u CODEX_HOOK_BASH PATH="$(dirname "$NODE_BIN")" CODEX_HOOK_SCRIPT_DIR="$H" CODEX_HOOK_CONDITIONS="$H/no-conditions.json" PROBE_LOG="$LOG" "$NODE_BIN" "$ADAPTER" probe.sh 2>"$ERR_FILE")"; RC=$?
+    ERR="$(cat "$ERR_FILE")"
+    if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'no usable bash' <<<"$ERR" && grep -qF 'Requirements on PATH' <<<"$ERR" && ! grep -qF 'could not start bash' <<<"$ERR"; then
+      ok "Windows: with Git's bash not findable the adapter BLOCKS saying 'no usable bash' — it does not fall back to a bare bash (the WSL launcher)"
+    else
+      bad "findBash without git on PATH: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+    fi
+    ;;
+  *)
+    skip "findBash's 'no usable bash' fault — Windows-only by construction: on $(uname -s) findBash returns the bare name, and there is no WSL launcher for it to be"
+    ;;
+esac
+
+# A run that cannot be COMPLETED is not "could not start bash": bash started a
+# moment ago, for the jq probe. Output past the adapter's buffer is the drivable case.
+printf '#!/usr/bin/env bash\nhead -c 68000000 /dev/zero | tr "\\0" x\n' > "$H/flood.sh"
+adapt flood.sh "$(bash_payload PreToolUse 'ls')"
+if [ "$RC" -eq 2 ] && grep -qF 'the run could not be completed' <<<"$ERR" && grep -qF 'ENOBUFS' <<<"$ERR" && grep -qF '64 MiB' <<<"$ERR"; then
+  ok "a script that floods stdout past the buffer BLOCKS as a run that could not be completed, naming the limit"
+else
+  bad "a flooding script: exit $RC (2 wanted), stderr: $(printf '%s' "$ERR" | cut -c1-300)"
+fi
 # The payload's cwd may name a directory that no longer exists (a removed
 # worktree). spawnSync would fail ENOENT there and every hook would block with
 # "could not start bash"; the adapter falls back to the repository root instead.
@@ -2252,10 +2423,15 @@ for CMD in 'git status' 'commit git' 'gitx commit' 'git recommit' 'echo git-comm
   adapt probe.sh "$(bash_payload PostToolUse "$CMD")"
   if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then ok "condition 'git commit' does not match: $CMD"; else bad "condition 'git commit' matched '$CMD'"; fi
 done
-printf '{"PostToolUse":{"probe.sh":["Bash(git push *)"]}}' > "$COND_FILE"
+# A condition belongs to the EVENT it was recorded under. Driven with the pairing
+# that can tell: a condition keyed under PreToolUse and a non-matching PostToolUse
+# command. (The other way round — a PostToolUse condition, a PreToolUse payload —
+# passes whatever conditionsFor() does with the key, because PreToolUse consults
+# no condition at all; that is the NEVER_FILTERED table below.)
+printf '{"PreToolUse":{"probe.sh":["Bash(git push *)"]}}' > "$COND_FILE"
 rm -f "$LOG" "$LOG.stdin"
-adapt probe.sh "$(bash_payload PreToolUse 'git status')"
-if [ -e "$LOG" ]; then ok "a condition recorded for one event does not filter another"; else bad "a PostToolUse condition filtered a PreToolUse run"; fi
+adapt probe.sh "$(bash_payload PostToolUse 'git status')"
+if [ -e "$LOG" ]; then ok "a condition recorded for one event does not filter another (PreToolUse-keyed, PostToolUse payload: the script ran)"; else bad "a PreToolUse condition filtered a PostToolUse run"; fi
 # On PreToolUse a condition is NEVER applied, even if one is present in the file:
 # the blocking script always starts and routes on the command itself. A filter in
 # front of it skipped spellings block-main-commits.sh is hardened to catch, and
@@ -2310,6 +2486,47 @@ else
   ok "every event and script in .claude/settings.json is ported or explained (exit $RC ≠ 2)"
 fi
 
+echo "== every real PreToolUse hook with an \`if\` filters for ITSELF =="
+# Not applying a PreToolUse condition is sound only while each such script routes
+# on the command it is handed. Under Claude Code the `if` may do the narrowing;
+# under Codex nothing does, so a script that relied on it would block — or do its
+# heavy work — on EVERY shell command, with every gate green. The list is derived
+# from the real settings.json and each REAL script is run through the real adapter
+# (no CODEX_HOOK_SCRIPT_DIR) with a command none of them is about.
+# shellcheck disable=SC2016  # a node program: the $ is JavaScript, not shell
+SELF_FILTER_NAMES="$(node -e '
+  const fs = require("fs");
+  const root = process.argv[1];
+  const src = JSON.parse(fs.readFileSync(root + "/.claude/settings.json", "utf8")).hooks;
+  const ported = JSON.stringify(JSON.parse(fs.readFileSync(root + "/.codex/hooks.json", "utf8")).hooks);
+  const names = new Set();
+  for (const g of src.PreToolUse || []) {
+    if (typeof g.if !== "string" || !g.if) continue;
+    for (const h of g.hooks || []) {
+      const m = /([\w.-]+\.sh)"?$/.exec(h.command || "");
+      if (m && ported.includes(" " + m[1] + " ")) names.add(m[1]);
+    }
+  }
+  process.stdout.write([...names].join("\n"));
+' "$REPO_ROOT")"
+REPO_NATIVE="$(cd "$REPO_ROOT" && { pwd -W 2>/dev/null || pwd; })"
+SELF_FILTERED=0
+while IFS= read -r NAME; do
+  [ -n "$NAME" ] || continue
+  SELF_FILTERED=$((SELF_FILTERED + 1))
+  OUT="$(printf '{"cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"true"}}' "$REPO_NATIVE" | node "$ADAPTER" "$NAME" 10 15 2>"$H/err")"; RC=$?
+  if [ "$RC" -eq 0 ] && ! grep -qE '"(permissionDecision|decision)"' <<<"$OUT"; then
+    ok "$NAME starts for \`true\`, decides it is not its business and allows it (exit 0, no deny) — it does not lean on its \`if\`"
+  else
+    bad "$NAME does not filter for itself: for the command \`true\` the adapter exited $RC (0 wanted) — under Codex its \`if\` is not applied, so it would do this on every shell command. stdout: $OUT stderr: $(cat "$H/err")"
+  fi
+done <<<"$SELF_FILTER_NAMES"
+if [ "$SELF_FILTERED" -ge 1 ]; then
+  ok "$SELF_FILTERED real PreToolUse hook(s) carrying an \`if\` were driven"
+else
+  bad "no PreToolUse hook with an \`if\` was found in .claude/settings.json — the derivation matched nothing, so nothing above was checked"
+fi
+
 echo "== the support matrix's numbers are re-derived, not remembered =="
 # Twice a review found a count in docs/guides/codex-cli-support-matrix.md that no
 # longer matched the generated files. The document's whole claim is that it says
@@ -2348,6 +2565,22 @@ DOC_COUNTS="$(node -e '
   const pointer = /Details: (docs\/guides\/[\w.-]+\.md), "([^"]+)"/.exec(adapter);
   if (!pointer) problems.push("the adapter no longer points its refusal at a document and heading");
   else if (pointer[1] !== "docs/guides/codex-cli-support-matrix.md" || !new RegExp("^#+ " + pointer[2] + "$", "m").test(doc)) problems.push("the adapter points at " + pointer[1] + " / " + pointer[2] + ", which this document does not have");
+  // The same for the PATH pointer, which every "needs a person" fault carries. It is
+  // read off the ONE constant that spells it, and held against a real heading.
+  const onPath = /const ON_PATH = `[^`]*— (\.codex\/[\w.-]+\.md), "([^"]+)"\.`;/.exec(adapter);
+  if (!onPath) problems.push("the adapter no longer spells its PATH pointer in one ON_PATH constant");
+  else {
+    const target = fs.readFileSync(root + "/" + onPath[1], "utf8");
+    if (!new RegExp("^#+ " + onPath[2] + "$", "m").test(target)) problems.push("the adapter points at " + onPath[1] + " / " + onPath[2] + ", and that file has no such heading");
+    if ((adapter.match(/Requirements on PATH/g) || []).length !== 1) problems.push("the PATH pointer is spelled somewhere other than ON_PATH, where this check cannot see it");
+  }
+  // Both files explain why an `if` hook loses its status line; twice that prose
+  // kept saying the adapter applies every condition after it stopped doing so.
+  const gen = fs.readFileSync(root + "/tools/agentic-sync/port.mjs", "utf8");
+  for (const [label, text] of [["the support matrix", doc], ["port.mjs", gen]]) {
+    if (/has that condition applied inside the\s+(\/\/\s+)?adapter|which moved into the adapter|; the adapter applies them\./.test(text)) problems.push(label + " still says every `if` is applied by the adapter — on PreToolUse none is");
+  }
+  if (!/NON-GATING events only/.test(String(conds._README)) || !/PreToolUse/.test(String(conds._README))) problems.push("hook-conditions.json does not say that PreToolUse conditions are left out on purpose");
   want(new RegExp(words[agents - 1] + " of the " + words[agents], "i"), "generated-agent count should be " + words[agents - 1] + " of the " + words[agents]);
   want(new RegExp("list " + total + " handlers"), "first-run checklist should expect " + total + " handlers");
   want(new RegExp("The " + skills + " project skills"), "mirrored-skill count should be " + skills);

@@ -31,8 +31,12 @@
 //      hook is either ported or named in port.json with a reason. An event or
 //      script that is neither is a HARD ERROR — that is the property the first
 //      port lacked.
-//   4. `.codex/hook-conditions.json`  the `if` conditions of those hooks, which
-//      Codex has no key for; the adapter applies them.
+//   4. `.codex/hook-conditions.json`  the `if` conditions of the hooks on
+//      NON-GATING events (PostToolUse …). Codex has no key for `if`; the adapter
+//      applies these. A `PreToolUse` `if` is classified and then deliberately NOT
+//      emitted: a blocking script always starts and routes on the command itself
+//      (see conditionMatches() in the adapter), so most source `if`s are absent
+//      from this file on purpose.
 //   5. `tools/agentic-sync/port.lock.json`  every generated path WITH THE HASH
 //      of what was written, so a skill or agent DELETED from `.claude/` is
 //      removed from the mirror instead of lingering as an orphan nobody owns.
@@ -396,6 +400,9 @@ function planAgents(m, plan) {
 
 // --- 3. hooks ----------------------------------------------------------------
 
+// The events that carry a tool call, and so can carry a patch.
+const TOOL_EVENTS = ['PreToolUse', 'PostToolUse'];
+
 function mapMatcher(matcher, event, h) {
   if (h.matcherlessEvents.includes(event)) return undefined; // Codex ignores it
   if (matcher === undefined || matcher === '' || matcher === '*') return undefined;
@@ -438,6 +445,9 @@ function planHooks(m, plan) {
         if (!GROUP_KEYS.includes(k)) die(`hooks: ${event} group carries key "${k}", which this generator does not know how to port — classify it in port.mjs`);
       }
       const handlers = [];
+      // null = no matcher reaches Codex, so every tool is matched.
+      const groupMatcher = supported ? mapMatcher(group.matcher, event, h) : undefined;
+      const seenTools = groupMatcher === undefined ? null : groupMatcher.split('|');
       for (const hook of group.hooks || []) {
         for (const k of Object.keys(hook)) {
           if (!HANDLER_KEYS.includes(k)) die(`hooks: a ${event} handler carries key "${k}", which is neither ported nor explained in port.json hooks.droppedHandlerKeys`);
@@ -470,13 +480,19 @@ function planHooks(m, plan) {
         // a large patch would simply run into Codex's own timeout — Failed, and
         // the edit proceeds. It gets the manifest's default instead.
         const perRun = Number.isFinite(hook.timeout) && hook.timeout > 0 ? hook.timeout : h.defaultTimeoutSeconds;
-        const aliases = String(group.matcher || '').split('|').map((tool) => h.toolAliases[tool]);
-        const perPatch = aliases.includes('apply_patch');
+        // Asked of the matcher Codex will SEE, not of the source text: a tool-event
+        // group with no matcher (or `*`, or '') is emitted matcher-less, Codex
+        // matches it for `apply_patch` like everything else, and the adapter runs
+        // it once per touched path — so it needs the patch budget as much as an
+        // `Edit|Write` group does. Read off the alias list it got the single-run
+        // budget, and a many-file patch ran out of a time sized for one file.
+        const aliases = seenTools ?? [];
+        const perPatch = TOOL_EVENTS.includes(event) && (seenTools === null || aliases.includes('apply_patch'));
         // A hook that inspects FILES and gates the action. Codex's exec tool
         // reports `apply_patch <<EOF … EOF` to hooks as `Bash` and only then
         // applies it as a patch, so such a hook must be offered Bash payloads
         // too; the adapter (mode `edit`) acts only on one that carries a patch.
-        const editOnly = event === 'PreToolUse' && perPatch && !aliases.includes('Bash');
+        const editOnly = event === 'PreToolUse' && aliases.includes('apply_patch') && !aliases.includes('Bash');
         // A single run still gets headroom for node and bash to start, or the
         // script's own bound could never be reached before the adapter's.
         const budget = !perRun
@@ -499,17 +515,20 @@ function planHooks(m, plan) {
         // than it acts would announce work it is not doing on every shell command:
         //   - an edit-only hook, matched for `Bash` to see a carried patch
         //     ("Checking sanitization patterns" on an `ls`);
-        //   - a hook whose group carries an `if`, which moved into the adapter
-        //     ("Checking for unreplied review comments" on every command, where
-        //     Claude Code shows it on `git push` alone).
+        //   - a hook whose group carries an `if`. Codex matches it for EVERY shell
+        //     command whatever becomes of the condition: on PreToolUse the script
+        //     starts each time and filters for itself ("Checking for Boy Scout Rule
+        //     violations" on an `ls`); elsewhere the adapter applies the condition
+        //     and usually exits at once ("Checking for unreplied review comments",
+        //     which Claude Code shows on `git push` alone).
         const conditional = typeof group.if === 'string' && group.if !== '';
         if (hook.statusMessage && !editOnly && !conditional) handler.statusMessage = hook.statusMessage;
         handlers.push(handler);
         report.ported += 1;
-        // Codex has no `if`. Where one is applied at all, the adapter applies it,
-        // reading this file.
+        // Codex has no `if`. Where one is applied at all (never on PreToolUse —
+        // below), the adapter applies it, reading the conditions file.
         if (conditional && !/^Bash\(/.test(group.if)) {
-          die(`hooks: ${event} group has \`if: ${JSON.stringify(group.if)}\`. Only \`Bash(…)\` conditions are ported: the adapter applies them to shell commands, and a condition on another tool would be silently skipped for a patch carried in a shell command. Decide how it should behave under Codex and teach port.mjs.`);
+          die(`hooks: ${event} group has \`if: ${JSON.stringify(group.if)}\`. Only \`Bash(…)\` conditions are classified: the adapter's matcher reads shell commands and nothing else (and applies a condition only on a non-gating event — on PreToolUse the script always starts). What a condition on another tool should mean under Codex has not been decided: decide it, then teach port.mjs and conditionMatches() in the adapter together.`);
         }
         // The one spelling the adapter's matcher honours: literal words, a space,
         // then `*`. `Bash(git push:*)` and `Bash(git push*)` are valid under Claude
@@ -536,7 +555,7 @@ function planHooks(m, plan) {
       }
       if (handlers.length === 0) continue;
       const entry = {};
-      let matcher = mapMatcher(group.matcher, event, h);
+      let matcher = groupMatcher;
       if (matcher === 'apply_patch' && event === 'PreToolUse') matcher = 'apply_patch|Bash'; // see `editOnly` above
       if (matcher !== undefined) entry.matcher = matcher;
       entry.hooks = handlers;
@@ -553,7 +572,12 @@ function planHooks(m, plan) {
   };
   plan.set(h.target, { content: Buffer.from(`${JSON.stringify(doc, null, 2)}\n`, 'utf8') });
   // Only the conditional scripts are written; an absent entry means "always run".
-  const cond = { _README: 'GENERATED by tools/agentic-sync/port.mjs from the `if` keys in .claude/settings.json — do not edit. Read by .codex/hooks/run-claude-hook.mjs.' };
+  const cond = {
+    _README:
+      'GENERATED by tools/agentic-sync/port.mjs from the `if` keys in .claude/settings.json — do not edit. Read by .codex/hooks/run-claude-hook.mjs. ' +
+      'It holds the conditions of NON-GATING events only. A PreToolUse `if` is left out ON PURPOSE: under Codex a blocking script always starts and routes on the command itself, ' +
+      'so most `if` keys in the source have no entry here — see docs/guides/codex-cli-support-matrix.md, "`if` conditions".',
+  };
   for (const [event, scripts] of Object.entries(conditions)) {
     for (const [name, list] of Object.entries(scripts)) {
       if (Array.isArray(list)) (cond[event] ||= {})[name] = [...new Set(list)];
