@@ -2450,6 +2450,30 @@ case "$(uname -s)" in
     ;;
 esac
 
+echo "== adapter: a fractional number of seconds is still a whole number of milliseconds =="
+# node rejects a fractional `timeout` outright ("must be an unsigned integer"), and
+# the top-level catch turns that into a block on every hook. It was first seen as
+# a Linux-only failure of the spent-budget case: that runner reached the probe
+# inside the first millisecond, with 0.8 ms of a 0.001 s budget left. These two are
+# deterministic: whatever has elapsed is a whole number, so 80 % of 3.0005 s leaves
+# a fraction, and so does a per-run bound of 1.5 ms.
+rm -f "$LOG"
+ADAPT_ARGS="10 3.0005"
+adapt probe.sh "$(bash_payload PreToolUse 'ls')"
+if [ "$RC" -eq 0 ] && [ -e "$LOG" ] && ! grep -qF 'unexpected error' <<<"$ERR"; then
+  ok "a fractional BUDGET runs the script (the deadline is rounded down to whole milliseconds)"
+else
+  bad "a fractional budget: exit $RC (0 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+ADAPT_ARGS="0.0015 50"
+adapt slow.sh "$(bash_payload PreToolUse 'ls')"
+if [ "$RC" -eq 2 ] && grep -qF 'timed out' <<<"$ERR" && ! grep -qF 'unexpected error' <<<"$ERR"; then
+  ok "a fractional PER-RUN bound is a timeout like any other, not an adapter exception"
+else
+  bad "a fractional per-run bound: exit $RC (2 wanted), stderr: $ERR"
+fi
+ADAPT_ARGS=""
+
 echo "== adapter: out of time on a PLAIN command does not say 'split the patch' =="
 # There is no patch to split. The time went on starting up — node, a cold bash, the
 # jq probe — so the message says how much, and that the way out is to try again.

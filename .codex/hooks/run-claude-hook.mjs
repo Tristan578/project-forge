@@ -782,11 +782,14 @@ function main() {
   //
   // Seconds → ms. Absent or nonsensical numbers mean "no bound of our own":
   // Codex's timeout still applies, this adapter just cannot pre-empt it.
-  const perRunMs = Number(process.argv[3]) > 0 ? Number(process.argv[3]) * 1000 : 0;
+  const perRunMs = Number(process.argv[3]) > 0 ? Math.ceil(Number(process.argv[3]) * 1000) : 0;
   const budgetMs = Number(process.argv[4]) > 0 ? Number(process.argv[4]) * 1000 : 0;
   // Leave room to report: once Codex's own timeout fires, the run is merely
   // Failed and the action proceeds — this adapter must speak first.
-  const deadline = budgetMs ? STARTED + Math.max(budgetMs - 1500, budgetMs * 0.8) : 0;
+  // WHOLE milliseconds: node rejects a fractional `timeout` outright ("must be an
+  // unsigned integer"), and a fractional budget left a fraction of one to spend —
+  // seen only on a runner fast enough to reach this line inside the first ms.
+  const deadline = budgetMs ? STARTED + Math.floor(Math.max(budgetMs - 1500, budgetMs * 0.8)) : 0;
   // The probe spends the same budget as the runs. With none left it is not
   // started: the loop below says "out of time" before its first run.
   const probeMs = deadline ? Math.min(deadline - Date.now(), 10000) : 10000;
