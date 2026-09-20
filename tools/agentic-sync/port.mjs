@@ -427,7 +427,7 @@ function planHooks(m, plan) {
   }
   const out = {};
   const conditions = {};
-  const report = { ported: 0, skipped: [], unsupported: [] };
+  const report = { ported: 0, skipped: [], unsupported: [], bothChannels: [] };
   // Every key on a group or a handler is classified, exactly like events and
   // scripts. `.claude/settings.json` already carries two the first cut of this
   // generator dropped without a word: a group-level `if` on six groups and
@@ -525,6 +525,12 @@ function planHooks(m, plan) {
         if (hook.statusMessage && !editOnly && !conditional) handler.statusMessage = hook.statusMessage;
         handlers.push(handler);
         report.ported += 1;
+        // Matched for both edit channels but not an edit-only hook: the adapter has
+        // a mode that acts ONLY on a carried patch and one that never looks for
+        // one, and none for a script that inspects both. See the note in main().
+        if (event === 'PreToolUse' && (seenTools === null || (aliases.includes('apply_patch') && aliases.includes('Bash')))) {
+          report.bothChannels.push(name);
+        }
         // Codex has no `if`. Where one is applied at all (never on PreToolUse —
         // below), the adapter applies it, reading the conditions file.
         if (conditional && !/^Bash\(/.test(group.if)) {
@@ -536,6 +542,17 @@ function planHooks(m, plan) {
         // so the script would silently never start. Refused here, not guessed at.
         if (conditional && !/^Bash\((?:[^\s*()]+ )+\*\)$/.test(group.if)) {
           die(`hooks: ${event} group has \`if: ${JSON.stringify(group.if)}\`. Only the form \`Bash(word [word…] *)\` — words, one space, then \`*\` — is ported. Rewrite the condition in that form, or teach port.mjs and the adapter's conditionMatches() the new spelling together.`);
+        }
+        // A `Bash(…)` condition belongs on a group Codex matches for `Bash` ALONE.
+        // Under Claude Code `if: Bash(git push *)` on an `Edit|Write|Bash` group —
+        // or on one with no matcher — fires for matching shell commands only. Under
+        // Codex the adapter consults a condition for a Bash payload and for nothing
+        // else, so the same group would also run after every patch, or after every
+        // tool call: the cost the conditions file exists to prevent. (On an
+        // `Edit|Write` group the condition can never hold at all.) Undecided, so it
+        // stops the generator rather than being ported with every gate green.
+        if (conditional && groupMatcher !== 'Bash') {
+          die(`hooks: ${event} group has \`if: ${JSON.stringify(group.if)}\` but its matcher (${group.matcher === undefined ? 'none' : JSON.stringify(group.matcher)}) reaches ${seenTools === null ? 'every tool' : seenTools.join(' and ')} under Codex. A Bash condition is applied to shell commands and to nothing else, so the script would also run for every other tool the group matches. Give the group \`"matcher": "Bash"\`, or decide what the condition should mean for the other tools and teach port.mjs and the adapter together.`);
         }
         // NOT on PreToolUse. There the script always starts and routes on the
         // command itself; a filter in front of a blocking script is a second,
@@ -995,6 +1012,16 @@ function main() {
     `codex-port: ${skills} skills, ${agents} agents, ${hooks.ported} hooks ported ` +
       `(${hooks.skipped.length} skipped by name, ${hooks.unsupported.length} on events Codex lacks).`,
   );
+  // A NOTE, not a problem: nothing is wrong with the source, and the residue is a
+  // stated limit. But it is printed on every run so that it is seen when the
+  // group is written rather than discovered when a check turns out not to fire.
+  if (hooks.bothChannels.length) {
+    console.log(
+      `codex-port: note — ${hooks.bothChannels.length} PreToolUse hook(s) are matched for BOTH apply_patch and Bash: ${hooks.bothChannels.join(', ')}. ` +
+        'On the patch tool each touched file is shown to them; a patch carried in a shell command reaches them as a plain command, its files NOT shown. ' +
+        'A check that gates on file paths must live in an `Edit|Write`-only group, which is wired for both channels (docs/guides/codex-cli-support-matrix.md, "Limits to know about").',
+    );
+  }
   if (problems.length) {
     console.error('::error::codex-port: the generated Codex surface is out of date or invalid:');
     for (const p of problems) console.error(`  ${p}`);

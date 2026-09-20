@@ -456,6 +456,8 @@ F="$(mkfix)"; json_set "$F/.claude/settings.json" hooks.Stop.0.hooks.0.command '
 gen "$F" --check; expect_rc 2 "a command that merely MENTIONS a script is not mistaken for one that runs it"
 
 F="$(mkfix)"
+# (On a Bash-only group: a Bash `if` anywhere else stops the generator — below.)
+json_set "$F/.claude/settings.json" hooks.PreToolUse.0.matcher '"Bash"'
 json_set "$F/.claude/settings.json" hooks.PreToolUse.0.if '"Bash(git push *)"'
 json_set "$F/.claude/settings.json" hooks.PreToolUse.0.hooks.0.async true
 json_set "$F/.claude/settings.json" hooks.PostToolUse '[{"matcher":"Bash","if":"Bash(gh api *)","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]},{"matcher":"Bash","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]'
@@ -581,6 +583,42 @@ fi
 F="$(mkfix)"; json_set "$F/.claude/settings.json" hooks.PreToolUse.0.if '"Edit(web/**)"'
 gen "$F" --check; expect_rc 2 "an \`if\` written for a tool other than Bash stops the generator — it would be silently skipped for a carried patch"
 expect_out 'Edit(web/**)' "…naming the condition"
+# A Bash condition belongs on a group Codex matches for Bash ALONE. The adapter
+# consults a condition for a shell command and for nothing else, so on a wider
+# group the script would also run after every patch (or every tool call) — the
+# cost the conditions file exists to prevent — and on an Edit|Write group the
+# condition can never hold. Each shape was ported with every gate green.
+WIDE=0
+while IFS='#' read -r LABEL MATCHER REACHES; do
+  WIDE=$((WIDE + 1))
+  for EV in PreToolUse PostToolUse; do
+    F="$(mkfix)"
+    json_set "$F/.claude/settings.json" "hooks.$EV" "[{${MATCHER}\"if\":\"Bash(git push *)\",\"hooks\":[{\"type\":\"command\",\"command\":\"bash .claude/hooks/ok.sh\"}]}]"
+    gen "$F" --check; expect_rc 2 "$EV: a Bash \`if\` on a group with $LABEL stops the generator — the condition would not narrow the other tools"
+    expect_out "reaches $REACHES under Codex" "…saying which tools the group reaches ($REACHES)"
+  done
+done <<'WIDE_IF_TABLE'
+no matcher##every tool
+the matcher Edit|Write|Bash#"matcher":"Edit|Write|Bash",#apply_patch and Bash
+the matcher Edit|Write#"matcher":"Edit|Write",#apply_patch
+WIDE_IF_TABLE
+if [ "$WIDE" -eq 3 ]; then ok "all 3 wide-group shapes were driven, on both tool events"; else bad "the wide-\`if\` table was not walked: $WIDE of 3"; fi
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks.PostToolUse '[{"matcher":"Bash","if":"Bash(git push *)","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]'
+gen "$F" --check; RC_BASH_ONLY=$RC
+if [ "$RC_BASH_ONLY" -ne 2 ]; then ok "…control: the same condition on a Bash-only group is accepted (exit $RC_BASH_ONLY ≠ 2)"; else bad "a Bash \`if\` on a Bash-only group stopped the generator: $OUT"; fi
+
+# A PreToolUse group matched for BOTH edit channels is ported, and SAID: a patch
+# carried in a shell command reaches such a hook as a plain command, its files not
+# shown (the adapter has no mode that does both). A note on every run, so it is
+# seen when the group is written.
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks.PreToolUse '[{"matcher":"Edit|Write|Bash","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]'
+gen "$F" --write
+expect_out 'matched for BOTH apply_patch and Bash: ok.sh' "a PreToolUse group that reaches both edit channels is named in a note"
+expect_out '-only group, which is wired for both channels' "…which says where a file-gating check must live instead"
+F="$(mkfix)"; gen "$F" --write
+expect_no_out 'matched for BOTH' "…and an Edit|Write-only group (the default fixture) draws no such note"
 
 echo "== generator: the emitted commands are exactly what Codex must execute =="
 F="$(mkfix)"; gen "$F" --write
@@ -1953,13 +1991,18 @@ a delimiter ENDING in a carriage return — bash closes on the first EOF<CR>, th
 the same with a double-quoted delimiter|apply_patch <<\"EOF\r\"\n@P@\nEOF\r
 a carriage return after the delimiter on the opening line (to bash on Linux the delimiter is then EOF<CR>)|apply_patch <<'EOF'\r\n@P@\nEOF
 a whole command with CRLF line endings|apply_patch <<'EOF'\r\n@P@\r\nEOF\r\n
-a closing line ending in a carriage return (Git for Windows' bash closes there, bash on Linux does not)|apply_patch <<'EOF'\n@P@\nEOF\r
+a closing line ending in a carriage return (Git for Windows' bash closes there, bash on Linux does not)|apply_patch <<'EOF'\n@P@\nEOF\r\n
+a carriage return in the MIDDLE of a path — Git for Windows' bash deletes it wherever it stands, so the hooks were shown a path no glob matched while bash handed apply_patch the real one|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: prot\rected/new.ts\n+evil\n*** End Patch\nEOF
+a carriage return in the middle of an added line|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: protected/new.ts\n+ev\ril\n*** End Patch\nEOF
+a carriage return inside the quoted cd target|cd 'prot\rected' && apply_patch <<'EOF'\n@PA@\nEOF
+a no-break space after the closing line — blank to JavaScript's trim(), a second command to bash|apply_patch <<'EOF'\n@P@\nEOF\n\u00a0
+a form feed and a vertical tab after the closing line|apply_patch <<'EOF'\n@P@\nEOF\n\f\u000b
 a delimiter that is also a valid context line, met first with a carriage return and then byte-exact — read the Linux way alone the body parses, while Git for Windows' bash closes on the first and runs the rest as shell|apply_patch <<' ok'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+a\n ok\r\n+b\n*** End Patch\n ok
 COST — a heredoc that only WRITES a patch file|cat > fix.patch <<'EOF'\n@P@\nEOF
 COST — a how-to that quotes a patch|cd docs && cat > howto.md <<'DOC'\nUse apply_patch like this:\n@P@\nDOC
 COST — a multi-line commit message that quotes one|git commit -m \"fix: apply_patch handling\n\n@P@\"
 REFUSED_TABLE
-if [ "$REFUSED" -eq 72 ]; then ok "all 72 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 72"; fi
+if [ "$REFUSED" -eq 77 ]; then ok "all 77 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 77"; fi
 
 # The way out must fit the CAUSE. One remedy for everything told the author of a
 # body that would not parse to "make it the WHOLE command" — which it already was.
@@ -2008,11 +2051,24 @@ if [ "$RC" -eq 2 ] && grep -qF 'the line that opens its heredoc contains a carri
 else
   bad "opening-line carriage return names the wrong cause: exit $RC, stderr: $ERR"
 fi
-adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n$PATCH\nEOF\r")"
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n$PATCH\nEOF\r\n")"
 if [ "$RC" -eq 2 ] && grep -qF 'the line that would close its heredoc (EOF) ends in a carriage return' <<<"$ERR" && grep -qF 'LF line endings' <<<"$ERR"; then
   ok "refusal for a carriage return on the CLOSING line: names it, and says to use LF line endings"
 else
   bad "closing-line carriage return names the wrong cause: exit $RC, stderr: $ERR"
+fi
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: ok/ne\rw.ts\n+x\n*** End Patch\nEOF")"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'a carriage return that does not end a line' <<<"$ERR" && grep -qF 'LF line endings' <<<"$ERR"; then
+  ok "refusal for a carriage return in the MIDDLE of a line: names it (Git for Windows' bash deletes it, bash on Linux keeps it)"
+else
+  bad "mid-line carriage return names the wrong cause: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n$PATCH\nEOF\n\f")"
+if [ "$RC" -eq 2 ] && grep -qF 'only spaces, tabs and newlines may' <<<"$ERR"; then
+  ok "refusal for a form feed after the closing line: blank is bash's idea of blank, not JavaScript's"
+else
+  bad "a form feed after the closing line: exit $RC, stderr: $ERR"
 fi
 # (…and only there: the accepted table above carries a patch with a CRLF body.)
 #
@@ -2027,6 +2083,10 @@ CR_OPEN_CMD="$(printf "cat <<'EOF'\r\nbody\nEOF\necho AFTER")"
 CR_CLOSE_CMD="$(printf "cat <<'EOF'\nbody\nEOF\r\necho AFTER\nEOF")"
 echo "  note  $(uname -s) bash, heredoc opened as <<'EOF'<CR> and met by a bare EOF line: $(bash -c "$CR_OPEN_CMD" 2>/dev/null | tr -d '\r' | tr '\n' ' ')"
 echo "  note  $(uname -s) bash, heredoc opened as <<'EOF' and met by an EOF<CR> line: $(bash -c "$CR_CLOSE_CMD" 2>/dev/null | tr -d '\r' | tr '\n' ' ')"
+# …and a CR that is NOT before a line feed: "61 62" means this bash deleted it
+# from the middle of a single-quoted word, "61 0d 62" that it kept it.
+CR_MID_CMD="$(printf "printf '%%s' 'a\rb'")"
+echo "  note  $(uname -s) bash, the bytes of a single-quoted a<CR>b: $(bash -c "$CR_MID_CMD" 2>/dev/null | od -An -tx1 | tr -s ' \n' ' ')"
 adapt guard.sh "$(carried_payload PreToolUse "echo start; apply_patch <<'EOF'\n$PATCH\nEOF")"
 if [ "$RC" -eq 2 ] && grep -qF 'make it the WHOLE command' <<<"$ERR"; then
   ok "refusal for the wrong SHAPE: says to make it the whole command"
@@ -2214,8 +2274,9 @@ exit 0
 MISSING
 adapt missing-tool.sh "$(bash_payload PreToolUse 'ls')"
 if [ "$RC" -eq 2 ] && grep -qF 'missing-tool.sh exited 127 (command not found)' <<<"$ERR" && grep -qF 'called a tool that is not on PATH' <<<"$ERR" \
-   && grep -qF 'Requirements on PATH' <<<"$ERR" && ! grep -qF 'could not execute the script' <<<"$ERR"; then
-  ok "exit 127 from a tool the SCRIPT could not find: the message says a tool may be missing and where the requirements are — it does not claim bash failed to run the script"
+   && grep -qF 'bash and jq both answered a moment ago' <<<"$ERR" && grep -qF 'bash -x .claude/hooks/missing-tool.sh' <<<"$ERR" \
+   && ! grep -qF 'Requirements on PATH' <<<"$ERR" && ! grep -qF 'could not execute the script' <<<"$ERR"; then
+  ok "exit 127 from a tool the SCRIPT could not find: says bash and jq are NOT the cause (both just answered) and how to find the one that is — not a list of four tools that are all present"
 else
   bad "a script-level 127 is misattributed: exit $RC (2 wanted), stderr: $ERR"
 fi
@@ -2299,6 +2360,116 @@ if [ "$RC" -eq 2 ] && grep -qF 'the run could not be completed' <<<"$ERR" && gre
 else
   bad "a flooding script: exit $RC (2 wanted), stderr: $(printf '%s' "$ERR" | cut -c1-300)"
 fi
+# …EXCEPT a payload the script chose not to read. With one larger than the pipe
+# buffer node reports the unfinished WRITE as the error (EOF on Windows, EPIPE
+# elsewhere) although the script ran to its own exit code, which is the verdict:
+# read as a failed run, an `exit 0` became a block and a PostToolUse `exit 2` a
+# mere failure. (Where the platform reports no error for it, these two pass
+# through the ordinary path — the outcome asserted is the same.)
+node -e 'process.stdout.write(JSON.stringify({ hook_event_name: process.argv[1], tool_name: "Bash", tool_input: { command: "echo " + "x".repeat(400000) } }))' PreToolUse > "$H/big-pre.json"
+node -e 'process.stdout.write(JSON.stringify({ hook_event_name: process.argv[1], tool_name: "Bash", tool_input: { command: "echo " + "x".repeat(400000) } }))' PostToolUse > "$H/big-post.json"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$H/unread-ok.sh"
+printf '#!/usr/bin/env bash\necho "blocked without reading the payload" >&2\nexit 2\n' > "$H/unread-block.sh"
+adapt unread-ok.sh "$(cat "$H/big-pre.json")"
+if [ "$RC" -eq 0 ]; then
+  ok "a script that exits 0 WITHOUT reading a large payload is a pass — the unfinished write is not a failed run"
+else
+  bad "an unread large payload turned exit 0 into: exit $RC, stderr: $(printf '%s' "$ERR" | cut -c1-300)"
+fi
+adapt unread-block.sh "$(cat "$H/big-post.json")"
+if [ "$RC" -eq 2 ] && grep -qF 'blocked without reading the payload' <<<"$ERR"; then
+  ok "…and one that exits 2 without reading it still BLOCKS on PostToolUse, with its own reason (read as a failed run it would exit 1)"
+else
+  bad "an unread large payload lost a block: exit $RC (2 wanted), stderr: $(printf '%s' "$ERR" | cut -c1-300)"
+fi
+
+echo "== adapter: its own text handling is linear — it runs outside its own deadline =="
+# The deadline is consulted between script runs, so time spent INSIDE the adapter
+# is never pre-empted: past Codex's timeout the run is merely Failed and the action
+# proceeds. End-anchored regexes (`[ws]+$`, `\r+$`) restart at every position of a
+# long run that is not at the end — 300000 interior spaces in a command with no
+# patch in it took 55 s against a declared budget of 30 (100000 took 6 s, measured
+# here). Each case below finishes in well under a second when the work is linear;
+# ten seconds is the line between linear and not, not a performance target.
+LONG_RUN=300000
+node -e '
+  const [n, dir] = [Number(process.argv[1]), process.argv[2]];
+  const w = (f, o) => require("fs").writeFileSync(dir + "/" + f, JSON.stringify(o));
+  w("long-cmd.json", { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "echo a" + " ".repeat(n) + "b" } });
+  w("long-patch.json", { hook_event_name: "PreToolUse", tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** Add File: ok/long.ts\n+a" + " ".repeat(n) + "b\n*** End Patch" } });
+  w("long-cond.json", { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "git ".repeat(n / 4) } });
+' "$LONG_RUN" "$H"
+COND_FILE="$H/long-conditions.json"
+printf '{"PostToolUse":{"probe.sh":["Bash(git push *)"]}}' > "$COND_FILE"
+while IFS='|' read -r LABEL FILE ARGS WANT_RAN; do
+  rm -f "$LOG" "$LOG.stdin"
+  ADAPT_ARGS="$ARGS"
+  T0=$SECONDS
+  adapt probe.sh "$(cat "$H/$FILE")"
+  TOOK=$((SECONDS - T0))
+  RAN="$([ -e "$LOG" ] && echo yes || echo no)"
+  if [ "$RC" -eq 0 ] && [ "$RAN" = "$WANT_RAN" ] && [ "$TOOK" -lt 10 ]; then
+    ok "linear on a $LONG_RUN-character interior run (${TOOK}s): $LABEL"
+  else
+    bad "$LABEL: exit $RC (0 wanted), ran=$RAN ($WANT_RAN wanted), took ${TOOK}s (under 10 wanted), stderr: $(printf '%s' "$ERR" | cut -c1-200)"
+  fi
+done <<'LINEAR_TABLE'
+an edit hook reading a plain shell command (the header scan trims every line)|long-cmd.json|5 50 edit|no
+the patch tool, one added line (the parser port trims every line)|long-patch.json|5 50|yes
+a condition whose first word repeats and whose second never comes|long-cond.json|5 50|no
+LINEAR_TABLE
+ADAPT_ARGS=""
+unset COND_FILE
+
+echo "== adapter: the jq probe spends the hook's budget, not its own =="
+# A bash that starts and then does not answer. Unbounded, the probe fails OPEN:
+# past Codex's timeout the run is Failed and the action proceeds. The stub sleeps
+# 5 s; the budget is 4.5 s, so the adapter must speak at 3.6 s (80 %). A probe with
+# its own fixed bound, or none, returns after the full 5 s — and then "finds" jq,
+# because the stub exits 0.
+case "$(uname -s)" in
+  MINGW*|MSYS*)
+    skip "the probe's time bound — needs a stand-in for bash that node can start, and on Windows node cannot start a shell script as a program; Linux CI drives it"
+    ;;
+  *)
+    printf '#!/bin/sh\nexec sleep 5\n' > "$H/slow-bash"
+    chmod +x "$H/slow-bash"
+    for EV in PreToolUse PostToolUse; do
+      rm -f "$LOG"
+      T0=$SECONDS
+      OUT="$(printf '%s' "$(bash_payload "$EV" 'ls')" | CODEX_HOOK_BASH="$H/slow-bash" CODEX_HOOK_SCRIPT_DIR="$H" CODEX_HOOK_CONDITIONS="$H/no-conditions.json" PROBE_LOG="$LOG" node "$ADAPTER" probe.sh 1 4.5 2>"$ERR_FILE")"; RC=$?
+      TOOK=$((SECONDS - T0))
+      ERR="$(cat "$ERR_FILE")"
+      WANT=2; [ "$EV" = "PostToolUse" ] && WANT=1
+      if [ "$RC" -eq "$WANT" ] && [ ! -e "$LOG" ] && grep -qE 'did not answer within 3\.[0-9]+s' <<<"$ERR" && [ "$TOOK" -lt 5 ]; then
+        ok "$EV: a bash that does not answer is cut off INSIDE the budget (${TOOK}s of 4.5) and reported (exit $WANT) — the probe does not outlive Codex's timeout"
+      else
+        bad "$EV: a bash that does not answer: exit $RC ($WANT wanted), took ${TOOK}s (under 5 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+      fi
+    done
+    ;;
+esac
+
+echo "== adapter: out of time on a PLAIN command does not say 'split the patch' =="
+# There is no patch to split. The time went on starting up — node, a cold bash, the
+# jq probe — so the message says how much, and that the way out is to try again.
+rm -f "$LOG"
+ADAPT_ARGS="5 0.001"
+adapt probe.sh "$(bash_payload PreToolUse 'git commit -m x')"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'out of time before the check could start' <<<"$ERR" && grep -qE '[0-9.]+s of it went on starting up' <<<"$ERR" \
+   && grep -qF 'Run it again' <<<"$ERR" && ! grep -qF 'Split the patch' <<<"$ERR" && ! grep -qF 'paths' <<<"$ERR"; then
+  ok "a plain command with no budget left: says the time went on starting up and to run it again — not to split a patch that does not exist"
+else
+  bad "out of time on a plain command: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+ADAPT_ARGS="10 2"
+adapt slow.sh "$(bash_payload PreToolUse 'git commit -m x')"
+if [ "$RC" -eq 2 ] && grep -qF 'out of time while the check was running' <<<"$ERR" && ! grep -qF 'Split the patch' <<<"$ERR"; then
+  ok "…and the same when the budget runs out DURING the one run"
+else
+  bad "out of time during a plain command: exit $RC (2 wanted), stderr: $ERR"
+fi
+ADAPT_ARGS=""
 # The payload's cwd may name a directory that no longer exists (a removed
 # worktree). spawnSync would fail ENOENT there and every hook would block with
 # "could not start bash"; the adapter falls back to the repository root instead.
@@ -2442,6 +2613,18 @@ printf '{"PreToolUse":{"probe.sh":["Bash(git push *)"]}}' > "$COND_FILE"
 rm -f "$LOG" "$LOG.stdin"
 adapt probe.sh "$(bash_payload PostToolUse 'git status')"
 if [ -e "$LOG" ]; then ok "a condition recorded for one event does not filter another (PreToolUse-keyed, PostToolUse payload: the script ran)"; else bad "a PreToolUse condition filtered a PostToolUse run"; fi
+# A condition is consulted for a SHELL COMMAND and for nothing else: a patch on
+# the same event runs the script whatever the condition says. That is why the
+# generator refuses a Bash `if` on any group Codex matches for more than Bash —
+# here is the behaviour that refusal keeps from being reached by accident.
+printf '{"PostToolUse":{"probe.sh":["Bash(git push *)"]}}' > "$COND_FILE"
+rm -f "$LOG" "$LOG.stdin"
+adapt probe.sh "$(patch_payload PostToolUse '*** Begin Patch\n*** Add File: ok/new.ts\n+x\n*** End Patch')"
+if [ "$RC" -eq 0 ] && [ -e "$LOG" ]; then
+  ok "a Bash condition does not filter an apply_patch payload — the script runs (so the generator keeps such a condition on Bash-only groups)"
+else
+  bad "a Bash condition was applied to a patch: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no)"
+fi
 # On PreToolUse a condition is NEVER applied, even if one is present in the file:
 # the blocking script always starts and routes on the command itself. A filter in
 # front of it skipped spellings block-main-commits.sh is hardened to catch, and
@@ -2591,6 +2774,11 @@ DOC_COUNTS="$(node -e '
     if (/has that condition applied inside the\s+(\/\/\s+)?adapter|which moved into the adapter|; the adapter applies them\./.test(text)) problems.push(label + " still says every `if` is applied by the adapter — on PreToolUse none is");
   }
   if (!/NON-GATING events only/.test(String(conds._README)) || !/PreToolUse/.test(String(conds._README))) problems.push("hook-conditions.json does not say that PreToolUse conditions are left out on purpose");
+  // That _README sends its reader to a section of this document, which is a bold
+  // lead-in rather than a heading. Read out of the generated file, held against the text.
+  const readmePointer = /see (docs\/guides\/[\w.-]+\.md), "([^"]+)"/.exec(String(conds._README));
+  if (!readmePointer) problems.push("hook-conditions.json no longer points at a document and section");
+  else if (readmePointer[1] !== "docs/guides/codex-cli-support-matrix.md" || !(doc.includes("\n**" + readmePointer[2] + ".**") || new RegExp("^#+ " + readmePointer[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "m").test(doc))) problems.push("hook-conditions.json points at " + readmePointer[1] + " / " + readmePointer[2] + ", and this document has no section of that name");
   want(new RegExp(words[agents - 1] + " of the " + words[agents], "i"), "generated-agent count should be " + words[agents - 1] + " of the " + words[agents]);
   want(new RegExp("list " + total + " handlers"), "first-run checklist should expect " + total + " handlers");
   want(new RegExp("The " + skills + " project skills"), "mirrored-skill count should be " + skills);

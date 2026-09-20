@@ -47,10 +47,11 @@
 //     did, and each failed open somewhere. A shell command with any line that
 //     looks like a file header has exactly TWO outcomes (see carriedPatch):
 //       ACCEPTED — the WHOLE command is `[cd <literal> &&] apply_patch <<'D'`
-//                  … `D`, quoted delimiter, nothing after the closing line, no
-//                  carriage return on the opening or the closing line (two
-//                  bashes read one differently), a body the parser port
-//                  accepts → every path is shown;
+//                  … `D`, quoted delimiter, nothing but spaces, tabs and
+//                  newlines after the closing line, no carriage return except
+//                  the one ending a line inside the body (Git for Windows'
+//                  bash deletes a CR wherever it stands, bash on Linux keeps
+//                  it), a body the parser port accepts → every path is shown;
 //       REFUSED  — everything else, unparsed → the hook blocks, with the ways
 //                  out. That includes a command that only WRITES text quoting a
 //                  patch; the support matrix records that cost under Limits.
@@ -199,11 +200,25 @@ function findBash() {
 // Rust's `str::trim()` strips the Unicode White_Space property; JavaScript's
 // `trim()` strips a DIFFERENT set (it keeps U+0085 NEL, it drops U+FEFF). Codex
 // is Rust, so every trim below is Rust's.
-const RUST_WS = '\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
-const RUST_TRIM = new RegExp(`^[${RUST_WS}]+|[${RUST_WS}]+$`, 'g');
-const RUST_TRIM_END = new RegExp(`[${RUST_WS}]+$`);
-const rustTrim = (s) => s.replace(RUST_TRIM, '');
-const rustTrimEnd = (s) => s.replace(RUST_TRIM_END, '');
+//
+// INDEX LOOPS, not `[ws]+$` regexes. A regex anchored only at the end restarts at
+// every position of a long whitespace run that is NOT at the end, which is
+// quadratic: `echo a<300000 spaces>b` — no patch in it — kept an edit hook busy
+// for 55 s against a declared budget of 30, inside the adapter itself, where
+// the deadline is not consulted. Past Codex's own timeout the run is merely
+// Failed and the action proceeds. Every trim here is one pass.
+const RUST_WS = /[\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
+const rustTrimEnd = (s) => {
+  let end = s.length;
+  while (end > 0 && RUST_WS.test(s[end - 1])) end -= 1;
+  return s.slice(0, end);
+};
+const rustTrim = (s) => {
+  const t = rustTrimEnd(s);
+  let start = 0;
+  while (start < t.length && RUST_WS.test(t[start])) start += 1;
+  return t.slice(start);
+};
 // Rust's `str::lines()`: split on \n, drop ONE trailing \r per line. Nothing else
 // is a line break — not U+2028, not a lone \r — so a PATH may contain those, and
 // no regex with `.` may be used on a line. (`lines()` also drops a final empty
@@ -442,15 +457,15 @@ const CD_LITERAL = String.raw`'[^'\n]*'|"[^"\n$` + '`' + String.raw`\\]*"|[A-Za-
 // backslash quotes the CR), so a head containing it simply does not match.
 const SEP = String.raw`(?:[ \t]|\\\n)`;
 const HEAD_LINE = new RegExp(String.raw`^${SEP}*(?:cd${SEP}+(${CD_LITERAL})${SEP}*&&${SEP}*)?(?:apply_patch|applypatch)${SEP}*$`);
-// NO CARRIAGE RETURN anywhere on the opening line, and none in the delimiter.
-// Two bashes disagree about one (the suite prints what the bash it runs under
-// does): to bash on Linux a CR is an ordinary byte (`<<'EOF'<CR>` opens a heredoc
-// whose delimiter is `EOF<CR>`); Git for Windows' bash drops a CR before the LF
-// (the delimiter is `EOF`, and a line `EOF<CR>` closes it). A delimiter ENDING in CR made the two readers close
-// on different lines — everything between was shell to bash and patch body to
-// this file. What cannot be read one way is refused; see the close finder below.
-// (carriedPatch() refuses a CR on the opening line BEFORE this is asked, so the
-// classes below need not exclude one.)
+// NO CARRIAGE RETURN on the line that opens the heredoc. Two bashes disagree about
+// one (the suite prints what the bash it runs under does): to bash on Linux a CR
+// is an ordinary byte, so `<<'EOF'<CR>` opens a heredoc whose delimiter is
+// `EOF<CR>`; Git for Windows' bash deletes it, so the delimiter is `EOF` and a
+// line `EOF<CR>` closes it. A delimiter ENDING in CR made the two readers close on
+// different lines — everything between was shell to bash and patch body to this
+// file. What cannot be read one way is refused. (carriedPatch() refuses every CR
+// outside a CRLF in the body BEFORE this is asked, so the classes below need not
+// exclude one.)
 const HEREDOC_OPEN = new RegExp(String.raw`^<<[ \t]*(?:'([^'\n]+)'|"([^"\n$` + '`' + String.raw`\\]+)")[ \t]*\n`);
 function carriedPatch(command) {
   if (looseHeaderPaths(command).length === 0) return null;
@@ -460,11 +475,22 @@ function carriedPatch(command) {
   const WHOLE = "make it the WHOLE command, exactly `apply_patch <<'EOF'` … `EOF` or `cd <literal path> && apply_patch <<'EOF'` … `EOF`, with a quoted delimiter and nothing after the closing line";
   const refused = (why, fix = WHOLE, opts = {}) => ({ refused: why, fix, noTool: opts.noTool === true });
 
+  // A CARRIAGE RETURN IS READ TWO WAYS, so the only one accepted is the one both
+  // readers agree on. Git for Windows' bash DELETES a CR wherever it stands in the
+  // command text — mid-word, inside either kind of quote, inside the body of a
+  // quoted-delimiter heredoc (measured: `printf '%s' 'a<CR>b'` prints `ab`); bash
+  // on Linux keeps every one. So `Add File: we<CR>b/src/lib/x.ts` was shown to the
+  // hooks as a path no glob matched while bash handed apply_patch `web/src/lib/x.ts`.
+  // The one CR left alone is the one directly before a line feed INSIDE the body:
+  // Codex's parser strips that itself, so no path or added line can carry it.
+  const LF_ONLY = 'write the command with LF line endings. The only carriage return accepted is the one ending a line INSIDE the patch body (a CRLF file): none in the command before the heredoc, on the `apply_patch <<\'EOF\'` line, in the middle of a line, or on the line that closes the heredoc';
+  if (/\r(?!\n)/.test(command)) {
+    return refused("it contains a carriage return that does not end a line, which Git for Windows' bash deletes and bash on Linux keeps — the two would apply different text", LF_ONLY);
+  }
   const at = command.indexOf('<<');
   if (at === -1) return refused('it has no heredoc');
   const head = HEAD_LINE.exec(command.slice(0, at));
   if (!head) return refused('the text before its heredoc is not exactly `apply_patch` or `cd <literal path> && apply_patch` (a line continuation may separate words, never split one)');
-  const LF_ONLY = 'write the command with LF line endings: no carriage return on the `apply_patch <<\'EOF\'` line, in the delimiter, or on the line that closes it (the patch BODY may carry them)';
   if (command.slice(at).split('\n', 1)[0].includes('\r')) {
     return refused('the line that opens its heredoc contains a carriage return, which bash on Linux reads as part of the delimiter and Git for Windows\' bash drops', LF_ONLY);
   }
@@ -479,16 +505,20 @@ function carriedPatch(command) {
   const delimiter = open[1] ?? open[2];
   const bodyLines = command.slice(at + open[0].length).split('\n');
   // The FIRST line either bash could take for the closing one: the delimiter, with
-  // or without carriage returns after it. Only the byte-exact spelling closes the
-  // heredoc for both (Git for Windows' bash also closes on `EOF<CR>`; bash on
-  // Linux, to which a CR is an ordinary byte, does not), so any other spelling is refused rather than read the
-  // way one of them reads it.
-  const close = bodyLines.findIndex((l) => l.replace(/\r+$/, '') === delimiter);
+  // or without a carriage return after it (one at most — a second would not end a
+  // line, and was refused above). Only the byte-exact spelling closes the heredoc
+  // for both (Git for Windows' bash also closes on `EOF<CR>`; bash on Linux does
+  // not), so the other is refused rather than read the way one of them reads it.
+  const close = bodyLines.findIndex((l) => (l.endsWith('\r') ? l.slice(0, -1) : l) === delimiter);
   if (close === -1) return refused(`its heredoc is never closed by a line reading exactly ${delimiter}`);
   if (bodyLines[close] !== delimiter) {
     return refused(`the line that would close its heredoc (${delimiter}) ends in a carriage return — Git for Windows' bash closes the heredoc there, bash on Linux does not`, LF_ONLY);
   }
-  if (bodyLines.slice(close + 1).join('\n').trim() !== '') return refused('something follows the closing heredoc delimiter');
+  // BASH's idea of blank — space, tab, newline — not JavaScript's. `trim()` also
+  // strips U+00A0, form feed, vertical tab, U+2028 and U+FEFF, each of which bash
+  // runs as a second command: the command was then not the WHOLE command, which
+  // is also the one form Codex intercepts rather than hands to a real shell.
+  if (/[^ \t\n]/.test(bodyLines.slice(close + 1).join('\n'))) return refused('something follows the closing heredoc delimiter (only spaces, tabs and newlines may)');
 
   let dir = '';
   if (head[1] !== undefined) {
@@ -527,10 +557,22 @@ function conditionMatches(pattern, toolName, command) {
   // very spellings block-main-commits.sh exists to catch — so the script was
   // never started for them.
   const words = m[2].split('*')[0].trim().split(/\s+/).filter(Boolean);
-  // (No words — `Bash(*)` — builds an empty regex, which matches every command.)
-  const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(words.map((w) => `(?<![\\w-])${esc(w)}(?![\\w-])`).join('[\\s\\S]*?'));
-  return re.test(String(command));
+  // (No words — `Bash(*)` — leaves nothing to look for: every command matches.)
+  //
+  // One left-to-right pass: the earliest whole-word occurrence of each word after
+  // the one before it. This was a regex, `w1[\s\S]*?w2`, which restarts the lazy
+  // scan at every occurrence of w1 — quadratic on a long command that repeats the
+  // first word and never reaches the second, on the same budget as everything else.
+  const text = String(command);
+  const inWord = (c) => c !== undefined && /[\w-]/.test(c);
+  let from = 0;
+  for (const w of words) {
+    let i = text.indexOf(w, from);
+    while (i !== -1 && (inWord(text[i - 1]) || inWord(text[i + w.length]))) i = text.indexOf(w, i + 1);
+    if (i === -1) return false;
+    from = i + w.length;
+  }
+  return true;
 }
 
 function conditionsFor(event, name) {
@@ -755,6 +797,20 @@ function main() {
       fault(`jq is not on the PATH that bash sees. Most hook scripts read their payload with it, the blocking ones among them, and without it they either die with no message or read nothing and pass — so NO hook is run until it is installed. ${ON_PATH} This needs a person.`);
     }
   }
+  // Two readers, two ways out. A patch too large for its budget is split. A plain
+  // command has nothing to split: there the time went on starting up — node, a cold
+  // bash, the jq probe — and the way out is to try again, so the message says how
+  // much was spent before the check began. ("Split the patch" on a blocked
+  // `git commit` sent its reader looking for a patch that did not exist.)
+  const isPatch = toolName === 'apply_patch' || Boolean(carried);
+  const beforeRunsMs = Date.now() - STARTED;
+  const outOfTime = (wherePatch, restPatch, whereCommand) => {
+    const budget = `budget ${budgetMs / 1000}s; stopping at ${(deadline - STARTED) / 1000}s to report before Codex's own timeout`;
+    return isPatch
+      ? `${name}: out of time ${wherePatch} (${budget}) — ${restPatch} NOT checked. Split the patch into smaller ones.`
+      : `${name}: out of time ${whereCommand} (${budget}; ${(beforeRunsMs / 1000).toFixed(1)}s of it went on starting up — node, finding bash, asking it for jq — before the check began) — this command was NOT checked. ` +
+          `Run it again: a slow first start is the usual cause. If it repeats, raise this hook's \`timeout\` in .claude/settings.json and run node tools/agentic-sync/port.mjs --write.`;
+  };
   const contexts = [];
   const messages = [];
   const texts = [];
@@ -764,7 +820,7 @@ function main() {
     const run = runs[i];
     const remaining = deadline ? deadline - Date.now() : Infinity;
     if (remaining <= 0) {
-      fault(`${name}: out of time after checking ${i} of ${runs.length} paths (budget ${budgetMs / 1000}s; stopping at ${(deadline - STARTED) / 1000}s to report before Codex's own timeout) — the rest were NOT checked. Split the patch into smaller ones.`);
+      fault(outOfTime(`after checking ${i} of ${runs.length} paths`, 'the rest were', 'before the check could start'));
     }
     const timeout = Math.min(perRunMs || Infinity, remaining);
     const res = spawnSync(bash, [script], {
@@ -778,7 +834,7 @@ function main() {
     if (res.error && res.error.code === 'ETIMEDOUT' && perRunMs && remaining < perRunMs) {
       // The PATCH budget cut this run short, not the hook's own bound. Saying
       // "raise the hook's timeout" here would send the reader to the wrong fix.
-      fault(`${name}: out of time while checking path ${i + 1} of ${runs.length} (budget ${budgetMs / 1000}s; stopping at ${(deadline - STARTED) / 1000}s to report before Codex's own timeout) — it and the rest were NOT checked. Split the patch into smaller ones.`);
+      fault(outOfTime(`while checking path ${i + 1} of ${runs.length}`, 'it and the rest were', 'while the check was running'));
     }
     if (res.error && res.error.code === 'ETIMEDOUT') {
       fault(
@@ -790,7 +846,15 @@ function main() {
     // bash started a moment ago (the jq probe), so this is the RUN failing to
     // complete — output past maxBuffer (ENOBUFS), an environment too large to
     // exec — not a missing interpreter.
-    if (res.error) {
+    //
+    // EXCEPT a payload the script chose not to read. Several ported scripts decide
+    // without reading stdin, and with a payload larger than the pipe buffer node
+    // reports the unfinished WRITE as the error (`EOF` on Windows — measured —
+    // `EPIPE` elsewhere) although the script ran to its own exit code. That code
+    // is the verdict: read as a failed run, an `exit 0` became a block and, on
+    // PostToolUse, an `exit 2` became a mere failure.
+    const unreadPayload = res.error && (res.error.code === 'EOF' || res.error.code === 'EPIPE') && typeof res.status === 'number';
+    if (res.error && !unreadPayload) {
       fault(`${name}: the run could not be completed (${res.error.message}) — ${run.env.TOOL_INPUT_file_path || 'this command'} was NOT checked. If the script printed more than ${MAX_OUTPUT / (1024 * 1024)} MiB, that is the cause: a hook reports a verdict, not a file.`);
     }
     // 126/127 mean a command was found but could not be executed / was not found
@@ -801,7 +865,8 @@ function main() {
     if (res.status === 126 || res.status === 127) {
       fault(
         `${name} exited ${res.status} (${res.status === 127 ? 'command not found' : 'found but not executable'})${res.stderr ? `: ${res.stderr.trim()}` : ''} — the check did not run. ` +
-          `Either bash could not run the script itself, or the script called a tool that is ${res.status === 127 ? 'not on PATH' : 'not executable'}; a script that hides its own stderr will not say which. ${ON_PATH} This needs a person.`,
+          `Either bash could not run the script itself, or the script called a tool that is ${res.status === 127 ? 'not on PATH' : 'not executable'}. bash and jq both answered a moment ago, so it is neither of those — the scripts also call tools such as python3, gh, curl and npx. ` +
+          `A script that hides its own stderr will not say which, so trace it by hand: bash -x .claude/hooks/${name} </dev/null. This needs a person.`,
       );
     }
     if (res.status === 2) {

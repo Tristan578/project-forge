@@ -42,9 +42,9 @@ hooks are not running — do the manual steps under **If hooks are not running**
 
 `node`, `git`, `bash` (Git for Windows' bash on Windows) and `jq`, which most of
 the shared scripts use to read their input. The adapter asks bash for `jq` before
-it starts any script: without it **no** hook runs — the ones that do not use it
-included, so the gap shows at session start — a `PreToolUse` hook blocks, and the
-message names `jq` and this heading. (Left to themselves the scripts would split
+it starts any script: without it **no** script is started — the ones that do not
+use it included, so the gap shows at session start — a `PreToolUse` hook that
+would have started one blocks, and the message names `jq` and this heading. (Left to themselves the scripts would split
 two ways: the ones under `set -e` end with exit 127 and no message, the others
 read nothing and pass.)
 

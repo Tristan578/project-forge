@@ -78,8 +78,10 @@ above fail *silently* if ignored:
   added lines and the Move destination missing.
 - **Only exit 2 blocks.** If the adapter itself cannot do its job on
   `PreToolUse` (unreadable or empty payload, a patch it cannot parse or that
-  touches no file, a shell command whose `command` is not a string, script or
-  bash missing, out of time) it exits 2 with the reason. Exit 1 there would let
+  names no file, a shell command whose `command` is not a string, the script,
+  bash or `jq` missing, a run that ends with exit 126/127 or cannot be
+  completed, out of time — `jq` and exit 126/127 have entries under "Limits to
+  know about") it exits 2 with the reason. Exit 1 there would let
   the action through. A *script* that crashes on one path is a reported failure,
   as under Claude Code — but the remaining paths are still checked and any block
   among them wins, because under Claude Code each file is its own invocation.
@@ -119,17 +121,21 @@ above fail *silently* if ignored:
     `cd` target) exactly as the shell joins it — the delimiter
     **quoted** so the shell expands nothing in the body, a literal `cd` target
     (quoted, or a bare word of `[A-Za-z0-9_./-]`) that is not empty and does not
-    start with `-`, nothing after the closing delimiter, **no carriage return on
-    the opening line, in the delimiter or on the closing line** (the body may
-    carry them), and a body that the port of Codex's own parser accepts. The
-    carriage-return rule exists because two bashes read one differently (the
-    suite prints what the bash it runs under does, on both CI platforms): to
-    bash on Linux it is an ordinary byte, so `<<'EOF'<CR>` opens a
-    heredoc that only `EOF<CR>` closes; Git for Windows' bash drops it before a
-    line feed, so `EOF<CR>` closes a heredoc opened as `'EOF'`. A delimiter
-    ending in one made bash and the adapter close on different lines, and what
-    lay between was shell to one and patch body to the other. Then the base directory and every path
-    are known, and each path is shown to the hook;
+    start with `-`, nothing but spaces, tabs and newlines after the closing
+    delimiter (bash's idea of blank, not JavaScript's: a U+00A0 or a form feed
+    there is a second command), **no carriage return anywhere except the one
+    ending a line inside the patch body**, and a body that the port of Codex's
+    own parser accepts. The carriage-return rule exists because two bashes read
+    one differently (the suite prints what the bash it runs under does, on both
+    CI platforms): to bash on Linux it is an ordinary byte, so `<<'EOF'<CR>`
+    opens a heredoc that only `EOF<CR>` closes; Git for Windows' bash **deletes
+    it wherever it stands** — mid-word, inside either kind of quote, inside a
+    quoted heredoc body — so `EOF<CR>` closes a heredoc opened as `'EOF'`, and
+    `Add File: we<CR>b/src/lib/x.ts` was shown to the hooks as a path no glob
+    matched while bash handed `apply_patch` `web/src/lib/x.ts`. The one
+    carriage return left alone ends a line inside the body, where Codex's parser
+    strips it itself, so no path or added line can carry it. Then the base
+    directory and every path are known, and each path is shown to the hook;
   - **refused** — everything else, without being parsed, so nothing in it can
     mislead. The hook blocks with a message giving the ways out.
 
@@ -292,23 +298,42 @@ until someone decides where it belongs. That is deliberate: the first port wired
   (`.claude/rules/gotchas-ops.md`). Whether they do under Codex was not measured.
 - **`jq`.** Most shared scripts parse their input with `jq` — every blocking
   Bash hook among them — and the adapter asks the bash it is about to use for
-  `jq` before it starts any script. Without it **no hook runs**, the ones that do
-  not use `jq` included: on `PreToolUse` every matched handler blocks, elsewhere
-  the run is reported as failed, and the message names `jq` and
-  `.codex/AGENTS.md`, "Requirements on PATH". All-or-nothing is deliberate — the
+  `jq` before it starts any script. Without it **no script is started**, the ones
+  that do not use `jq` included: every handler that would have started one
+  blocks on `PreToolUse` and is reported as failed elsewhere, and the message
+  names `jq` and `.codex/AGENTS.md`, "Requirements on PATH". (A handler that has
+  nothing to do exits before the question is asked — an edit hook matched for a
+  shell command that carries no patch, a conditional hook whose condition does
+  not hold — so an `ls` is blocked by the hooks that inspect shell commands while
+  the edit handlers matched for it stay silent.) All-or-nothing is deliberate — the
   gap shows at session start instead of at the first push, and asking "does this
   script use `jq`" would mean reading shell text, through every file it sources,
   to decide whether a check runs. It costs one ~50 ms bash start per hook
   (measured on Windows). Left to themselves the scripts split two ways,
-  both wrong: the ones under `set -e` (`pre-push-quality-gate.sh`,
-  `check-sanitization-patterns.sh`, `check-pr-metadata.sh`) end with exit 127 and no message, because their own
-  `2>/dev/null` swallows bash's "jq: command not found"; the others read nothing,
-  take their "nothing to inspect" branch and pass. Under Claude Code that split is
-  what happens today.
+  both wrong (measured with `jq` off `PATH`): `pre-push-quality-gate.sh` and
+  `check-sanitization-patterns.sh`, which call `jq` directly under `set -e`, end
+  with exit 127 and no message, because their own `2>/dev/null` swallows bash's
+  "jq: command not found"; the others read nothing, take their "nothing to
+  inspect" branch and pass — `check-pr-metadata.sh` among them although it is
+  under `set -e` too, because its only `jq` call sits inside a command
+  substitution, where bash clears `-e`. Under Claude Code that split is what
+  happens today.
 - **Exit 126 and 127 from a script block on `PreToolUse`** and say that the check
   did not run. They mean "found but not executable" and "command not found" — of
-  the script itself *or of anything it calls* — so the message cannot say which;
-  it prints the script's stderr when there is any.
+  the script itself *or of anything it calls* — so the message cannot say which.
+  It prints the script's stderr when there is any, says that bash and `jq` have
+  just answered (so it is neither), and gives the command that finds the culprit:
+  `bash -x .claude/hooks/<name>`. The scripts call more than the four tools under
+  "Requirements on PATH" — `python3`, `gh`, `curl`, `npx` among them.
+- **A `PreToolUse` check that gates on file paths must live in an
+  `Edit|Write`-only group.** Only such a group is wired for both edit channels:
+  the adapter runs it in a mode that acts on a patch carried in a shell command
+  and on nothing else in that command. A group that also matches `Bash` (or has
+  no matcher) is run the other way — the shell command is passed through as a
+  command, and a patch carried in it is **not** split into files. There is no
+  mode that does both. One hook has that shape today, `inject-lessons-learned.sh`,
+  which only advises and matches on the whole command text; the generator names
+  every such hook in a note on each run.
 
 ## Subagents
 
