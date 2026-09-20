@@ -491,6 +491,18 @@ if [ "$(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0.hooks.0.timeout')" 
 else
   bad "default timeout / PostToolUse matcher wrong: $(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0')"
 fi
+# The x10 has a ceiling (hooks.maxTimeoutSeconds, 600). No fixture reached it, so
+# removing the cap could not change any asserted value. 100 s per file x 10 is
+# 1000; both what Codex is told and the budget the adapter is handed must say 600.
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks.PostToolUse '[{"matcher":"Edit|Write","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh","timeout":100}]}]'
+gen "$F" --write
+if [ "$(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0.hooks.0.timeout')" = "600" ] \
+   && [ "$(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0.hooks.0.commandWindows')" = "node .codex/hooks/run-claude-hook.mjs ok.sh 100 600" ]; then
+  ok "a patch hook's budget is CAPPED at maxTimeoutSeconds (100 s x 10 -> 600, not 1000), in the declared timeout and in the adapter's argument"
+else
+  bad "the timeout cap is wrong: $(json_get "$F/.codex/hooks.json" 'hooks.PostToolUse.0.hooks.0')"
+fi
 
 F="$(mkfix)"
 json_set "$F/.claude/settings.json" hooks.PreToolUse.0.matcher '"Edit|Write|Bash"'
@@ -1204,17 +1216,77 @@ else
   bad "an indented final End Patch lost the patch: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
 fi
 
-# …and lenient mode: Codex accepts the patch text wrapped in `<<'EOF'` … `EOF`
-# (some models send it that way) and strips the wrapper. The assertion is on the
-# ADDED LINES, not the path: if the port rejected this text the fallback would
-# still show the path, but with no content — the right exit code from the wrong guard.
+# The rest of the state machine, one row per rule, each asserted on the ADDED
+# LINES the hook receives — a path alone cannot tell a rule that works from one
+# that was deleted. Inputs are Codex's own fixtures where it has one.
+#   @label | @patch (JSON-escaped) | expected NEW= value (JSON)
+PORT_RULES=0
+while IFS='|' read -r LABEL BODY WANT; do
+  PORT_RULES=$((PORT_RULES + 1))
+  rm -f "$LOG"
+  PROBE_LOG="$LOG" adapt newstring.sh "$(patch_payload PreToolUse "$BODY")"
+  if [ "$RC" -eq 0 ] && [ "$(runs PATH)" = "1" ] && grep -qxF "PATH=$CWD_NATIVE/docs/a.md" "$LOG" && grep -qxF "NEW=$WANT" "$LOG"; then
+    ok "port rule: $LABEL"
+  else
+    bad "port rule broken ($LABEL): exit $RC, saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
+  fi
+done <<'PORT_RULES_TABLE'
+lenient mode, the patch wrapped in <<'EOF' … EOF|<<'EOF'\n*** Begin Patch\n*** Update File: docs/a.md\n@@\n+w0\n*** End Patch\nEOF|"w0"
+lenient mode, the unquoted <<EOF wrapper|<<EOF\n*** Begin Patch\n*** Update File: docs/a.md\n@@\n+w1\n*** End Patch\nEOF|"w1"
+lenient mode, the double-quoted <<"EOF" wrapper|<<\"EOF\"\n*** Begin Patch\n*** Update File: docs/a.md\n@@\n+w2\n*** End Patch\nEOF|"w2"
+an Environment ID preamble is accepted (environment_id_mode)|*** Begin Patch\n*** Environment ID: env-1\n*** Update File: docs/a.md\n@@\n+envd\n*** End Patch|"envd"
+a bare EMPTY line inside an Update hunk is a context line (preserves_bare_empty_update_lines)|*** Begin Patch\n*** Update File: docs/a.md\n@@\n+before\n\n+after blank\n*** End Patch|"before\nafter blank"
+*** End of File closes a chunk and the patch is still valid|*** Begin Patch\n*** Update File: docs/a.md\n@@\n-old\n+new tail\n*** End of File\n*** End Patch|"new tail"
+a line that is exactly CR CR is an EMPTY context line — Codex strips a trailing CR twice|*** Begin Patch\n*** Update File: docs/a.md\n@@\n-old\n\r\r\n+new\n*** End Patch|"new"
+a + line ending in CR CR carries no CR into the added content|*** Begin Patch\n*** Update File: docs/a.md\n@@\n+x\r\r\n*** End Patch|"x"
+an Update hunk with no @@ at all (the first chunk is implicit)|*** Begin Patch\n*** Update File: docs/a.md\n+implicit\n*** End Patch|"implicit"
+PORT_RULES_TABLE
+if [ "$PORT_RULES" -eq 9 ]; then ok "all 9 port-rule rows were driven"; else bad "the port-rule table was not walked: $PORT_RULES of 9"; fi
+# The double-CR case again with a MOVE: when the port rejected this patch, the
+# old fallback showed the source path alone — the destination, the path a
+# protect-this-directory hook most needs, was never shown.
 rm -f "$LOG"
-PROBE_LOG="$LOG" adapt newstring.sh "$(patch_payload PreToolUse "<<'EOF'\n*** Begin Patch\n*** Update File: docs/a.md\n@@\n+wrapped\n*** End Patch\nEOF")"
-if [ "$RC" -eq 0 ] && grep -qxF "PATH=$CWD_NATIVE/docs/a.md" "$LOG" && grep -qxF 'NEW="wrapped"' "$LOG"; then
-  ok "lenient mode: a patch wrapped in <<'EOF' … EOF is parsed by the port, added lines and all"
+adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: docs/a.md\n*** Move to: protected/secret.ts\n@@\n-old\n\r\r\n+new\n*** End Patch')"
+if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/secret.ts" "$LOG"; then
+  ok "a Move whose hunk holds a CR CR line is parsed, and its DESTINATION is shown"
 else
-  bad "the lenient heredoc wrapper was not parsed by the port: exit $RC, saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
+  bad "double-CR Move: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
 fi
+# …and the rules by which Codex REJECTS a patch. On the tool channel a rejection
+# is a block naming the error; each row is the error text the rule produces.
+PORT_REJECTS=0
+while IFS='|' read -r LABEL BODY WANT; do
+  PORT_REJECTS=$((PORT_REJECTS + 1))
+  rm -f "$LOG"
+  adapt guard.sh "$(patch_payload PreToolUse "$BODY")"
+  if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'does not parse the way Codex parses it' <<<"$ERR" && grep -qF "$WANT" <<<"$ERR"; then
+    ok "port rejection: $LABEL"
+  else
+    bad "port rejection missing ($LABEL): exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+  fi
+done <<'PORT_REJECTS_TABLE'
+an Update hunk with nothing in it, followed by another header|*** Begin Patch\n*** Update File: docs/a.md\n*** Delete File: protected/x.ts\n*** End Patch|update file hunk for path 'docs/a.md' is empty
+@@ directly after an empty chunk|*** Begin Patch\n*** Update File: protected/x.ts\n@@\n@@\n+evil\n*** End Patch|unexpected line found in update hunk
+*** End of File on an empty chunk|*** Begin Patch\n*** Update File: protected/x.ts\n@@\n*** End of File\n*** End Patch|update hunk does not contain any lines
+text after *** End Patch in the middle of the patch|*** Begin Patch\n*** Update File: docs/a.md\n@@\n+a\n*** End Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch|the last line of the patch must be '*** End Patch'
+a second Environment ID|*** Begin Patch\n*** Environment ID: a\n*** Environment ID: b\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch|environment id given more than once
+a line after the End of File marker that is not @@|*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+a\n*** End of File\n+b\n*** End Patch|expected update hunk to start with a @@ context marker
+a wrapper with a mismatched quote|<<\"EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF|the first line of the patch must be '*** Begin Patch'
+PORT_REJECTS_TABLE
+if [ "$PORT_REJECTS" -eq 7 ]; then ok "all 7 port-rejection rows were driven"; else bad "the port-rejection table was not walked: $PORT_REJECTS of 7"; fi
+
+# An ABSOLUTE patch path is normalised like a relative one. Handed over verbatim,
+# `<repo>/web/src/./lib/x.ts` matched no `*/web/src/lib/*` glob while the relative
+# spelling of the same file did, and `docs/../protected/x.ts` walked past a guard.
+for SPELLING in "$CWD_NATIVE/docs/../protected/x.ts" "$CWD_NATIVE/./protected/./x.ts" "docs/../protected/x.ts"; do
+  rm -f "$LOG"
+  adapt guard.sh "$(patch_payload PreToolUse "*** Begin Patch\n*** Delete File: ${SPELLING}\n*** End Patch")"
+  if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
+    ok "a path spelled ${SPELLING#"$CWD_NATIVE"/} is shown normalised, absolute or not"
+  else
+    bad "path not normalised (${SPELLING}): exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null)"
+  fi
+done
 
 # 2. Every member of Rust's White_Space, in front of a header. A trim set missing
 #    ANY of them is a header Codex sees and the hooks do not; five were pinned and
@@ -1237,10 +1309,10 @@ if [ "$WS_MEMBERS" -eq 23 ]; then ok "all 23 White_Space members outside CR/LF w
 for NOTWS in '\ufeff' '\u200b'; do
   rm -f "$LOG"
   adapt guard.sh "$(patch_payload PreToolUse "*** Begin Patch\n*** Add File: ok/new.ts\n+fine\n${NOTWS}*** Delete File: protected/x.ts\n*** End Patch")"
-  if [ "$RC" -eq 0 ] && ! grep -qF "protected" "$LOG"; then
-    ok "$NOTWS is not White_Space: that line is not a header to Codex, and is not made one here"
+  if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'does not parse the way Codex parses it' <<<"$ERR" && grep -qF 'not a valid hunk header' <<<"$ERR"; then
+    ok "$NOTWS is not White_Space: that line is no header to Codex, which REJECTS the patch — and so does the port, out loud"
   else
-    bad "$NOTWS was trimmed as if it were White_Space: exit $RC (0 wanted), saw: $(cat "$LOG" 2>/dev/null)"
+    bad "$NOTWS was trimmed as if it were White_Space, or the rejection was silent: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
   fi
 done
 
@@ -1281,17 +1353,17 @@ else
 fi
 rm -f "$LOG"
 adapt probe.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: docs/a.md\n@@\n+z\n*** Move to: protected/y.ts\n*** End Patch')"
-if [ "$RC" -eq 0 ] && [ "$(runs ENV)" = "1" ]; then
-  ok "a '*** Move to:' AFTER the first chunk line is a context line, as in Codex"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'expected update hunk to start with a @@ context marker' <<<"$ERR"; then
+  ok "a '*** Move to:' AFTER the first chunk line is not a move and not context either: Codex REJECTS the patch, and the port says so"
 else
-  bad "a late Move line was treated as a move: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
+  bad "a late Move line: exit $RC (2 wanted, a rejection), saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
 fi
 rm -f "$LOG"
 adapt probe.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Update File: docs/a.md\n*** Move to: docs/b.md\n*** Move to: protected/y.ts\n@@\n+z\n*** End Patch')"
-if [ "$RC" -eq 0 ] && [ "$(runs ENV)" = "1" ] && ! grep -qF "protected/y.ts" "$LOG"; then
-  ok "a SECOND '*** Move to:' is not a move — Codex rejects that patch outright, and the fallback still shows its header path"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'unexpected line found in update hunk' <<<"$ERR"; then
+  ok "a SECOND '*** Move to:' is not a move: Codex REJECTS that patch, and the port says so"
 else
-  bad "a second Move line was treated as a move: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
+  bad "a second Move line: exit $RC (2 wanted, a rejection), saw: $(cat "$LOG" 2>/dev/null), stderr: $ERR"
 fi
 rm -f "$LOG"
 adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Delete File: protected/x.ts\n*** End Patch')"
@@ -1318,8 +1390,27 @@ fi
 echo "== adapter: a fault must not read as a pass (Codex blocks ONLY on exit 2) =="
 rm -f "$LOG"
 adapt probe.sh "$(patch_payload PreToolUse '*** Begin Patch\n nothing recognisable\n*** End Patch')"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'does not parse the way Codex parses it' <<<"$ERR" && grep -qF 'not a valid hunk header' <<<"$ERR"; then
+  ok "PreToolUse: a patch the parser port cannot parse BLOCKS (exit 2), naming the parse error"
+else
+  bad "unparseable patch on PreToolUse: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+# Codex puts the patch text in tool_input.command. The adapter used to fall back
+# to two other field names nobody had observed; an unpinned guess is removed, and
+# a payload without `command` is a fault rather than a different code path.
+for FIELD in input patch; do
+  rm -f "$LOG"
+  adapt probe.sh "$(printf '{"cwd":"%s","hook_event_name":"PreToolUse","tool_name":"apply_patch","tool_input":{"%s":"*** Begin Patch\\n*** Add File: ok/new.ts\\n+x\\n*** End Patch"}}' "$CWD_NATIVE" "$FIELD")"
+  if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'no patch text in tool_input.command' <<<"$ERR"; then
+    ok "a patch under tool_input.$FIELD (a shape Codex was never seen to send) BLOCKS instead of being guessed at"
+  else
+    bad "tool_input.$FIELD: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+  fi
+done
+rm -f "$LOG"
+adapt probe.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** End Patch')"
 if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'could not find a file path' <<<"$ERR"; then
-  ok "PreToolUse: a patch with no recognisable path BLOCKS (exit 2) with the reason"
+  ok "PreToolUse: a VALID patch that touches no file BLOCKS too (exit 2) — nothing to check is not a pass"
 else
   bad "no-path patch on PreToolUse: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
 fi
@@ -1714,13 +1805,46 @@ env -C|env -C protected apply_patch <<'EOF'\n@PA@\nEOF
 eval of a split cd|eval \"c\"\"d protected\" && apply_patch <<'EOF'\n@PA@\nEOF
 cd through a variable|d=cd; $d protected && apply_patch <<'EOF'\n@PA@\nEOF
 bash -c with the cd inside the string|bash -c 'cd protected; apply_patch' <<'EOF'\n@PA@\nEOF
+a line continuation INSIDE a single-quoted cd target (two literal bytes to bash; joining made it a different directory)|cd 'prot\\\nected' && apply_patch <<'EOF'\n@PA@\nEOF
+a line continuation inside a bare cd target|cd prot\\\nected && apply_patch <<'EOF'\n@PA@\nEOF
+a body Codex rejects: an Update hunk with nothing in it|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n*** Delete File: docs/a.md\n*** End Patch\nEOF
+a body Codex rejects: @@ directly after an empty chunk|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n@@\n+evil\n*** End Patch\nEOF
 a body Codex's parser rejects (a stray line in an Add hunk)|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: protected/new.ts\n+ok\nstray\n*** End Patch\nEOF
 a body Codex rejects in finish(): an indented final End Patch straight after @@ leaves an EMPTY chunk (a parser that streams the last line would read it as context and accept)|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n   *** End Patch\nEOF
 COST — a heredoc that only WRITES a patch file|cat > fix.patch <<'EOF'\n@P@\nEOF
 COST — a how-to that quotes a patch|cd docs && cat > howto.md <<'DOC'\nUse apply_patch like this:\n@P@\nDOC
 COST — a multi-line commit message that quotes one|git commit -m \"fix: apply_patch handling\n\n@P@\"
 REFUSED_TABLE
-if [ "$REFUSED" -eq 56 ]; then ok "all 56 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 56"; fi
+if [ "$REFUSED" -eq 60 ]; then ok "all 60 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 60"; fi
+
+# The way out must fit the CAUSE. One remedy for everything told the author of a
+# body that would not parse to "make it the WHOLE command" — which it already was.
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: protected/new.ts\n+ok\nstray\n*** End Patch\nEOF")"
+if [ "$RC" -eq 2 ] && grep -qF 'correct the patch text' <<<"$ERR" && ! grep -qF 'make it the WHOLE command' <<<"$ERR"; then
+  ok "refusal for a body that does not parse: says to correct the patch, not to reshape a command that is already the right shape"
+else
+  bad "body-parse refusal gives the wrong way out: exit $RC, stderr: $ERR"
+fi
+adapt guard.sh "$(carried_payload PreToolUse "cd - && apply_patch <<'EOF'\n$PATCH_A\nEOF")"
+if [ "$RC" -eq 2 ] && grep -qF 'cd to a literal directory' <<<"$ERR" && ! grep -qF 'make it the WHOLE command' <<<"$ERR"; then
+  ok "refusal for a cd target of '-': says what to do about the cd"
+else
+  bad "cd-target refusal gives the wrong way out: exit $RC, stderr: $ERR"
+fi
+adapt guard.sh "$(carried_payload PreToolUse "echo start; apply_patch <<'EOF'\n$PATCH\nEOF")"
+if [ "$RC" -eq 2 ] && grep -qF 'make it the WHOLE command' <<<"$ERR"; then
+  ok "refusal for the wrong SHAPE: says to make it the whole command"
+else
+  bad "shape refusal lacks its way out: exit $RC, stderr: $ERR"
+fi
+# Four edit hooks reach the refusal for the same command. The text must be the
+# same from each and must not read as the opinion of whichever check was running.
+if grep -q '^run-claude-hook (edit hooks): ' <<<"$ERR" && ! grep -qF 'guard.sh' <<<"$ERR"; then
+  ok "the refusal names the adapter, not the hook script that happened to be running"
+else
+  bad "the refusal is attributed to a hook script: $ERR"
+fi
 
 # Codex sends the command as a string. If that shape ever changes, a file hook
 # that cannot read it must block, not exit 0 over a patch it never looked at.
@@ -1953,6 +2077,31 @@ if [ -e "$LOG" ]; then
 else
   bad "a compound 'cd x && git push' did not run the script"
 fi
+# GENEROUS means the pattern's WORDS in order, with anything between them. One
+# substring test never started block-main-commits.sh for `git -C . commit`,
+# `git  commit` or `git \<LF>commit` — the spellings that script exists to catch.
+printf '{"PostToolUse":{"probe.sh":["Bash(git commit *)"]}}' > "$COND_FILE"
+SPELLED_COND=0
+while IFS='|' read -r LABEL CMD; do
+  SPELLED_COND=$((SPELLED_COND + 1))
+  rm -f "$LOG" "$LOG.stdin"
+  adapt probe.sh "$(bash_payload PostToolUse "$CMD")"
+  if [ -e "$LOG" ]; then ok "condition 'git commit' still runs the script for: $LABEL"; else bad "a spelling of git commit skipped the script: $LABEL"; fi
+done <<'COND_SPELLINGS'
+the plain form|git commit -m x
+git -C <dir> commit|git -C . commit -m x
+two spaces|git  commit -m x
+git -c k=v commit|git -c user.name=x commit -m x
+a line continuation between the words|git \\\ncommit -m x
+COND_SPELLINGS
+if [ "$SPELLED_COND" -eq 5 ]; then ok "all 5 commit spellings were driven"; else bad "the condition table was not walked: $SPELLED_COND of 5"; fi
+# …and still a filter: the words must be WORDS, in ORDER.
+for CMD in 'git status' 'commit git' 'gitx commit' 'git recommit' 'echo git-commit'; do
+  rm -f "$LOG" "$LOG.stdin"
+  adapt probe.sh "$(bash_payload PostToolUse "$CMD")"
+  if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then ok "condition 'git commit' does not match: $CMD"; else bad "condition 'git commit' matched '$CMD'"; fi
+done
+printf '{"PostToolUse":{"probe.sh":["Bash(git push *)"]}}' > "$COND_FILE"
 rm -f "$LOG" "$LOG.stdin"
 adapt probe.sh "$(bash_payload PreToolUse 'git status')"
 if [ -e "$LOG" ]; then ok "a condition recorded for one event does not filter another"; else bad "a PostToolUse condition filtered a PreToolUse run"; fi

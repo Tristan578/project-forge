@@ -20,12 +20,12 @@
 //     A hook that "warns" in plain text would otherwise warn nobody.
 //
 // WHAT IT DOES
-//   apply_patch → parse the patch the way Codex's own parser does (headers are
-//     matched on the TRIMMED line — apply-patch/src/streaming_parser.rs — or an
-//     indented header would hide a hunk from every hook) and run the script
-//     ONCE PER TOUCHED PATH: added and updated files, deleted files, and BOTH
-//     ends of a move. Payload per run: `tool_name` Write (Add) or Edit,
-//     `tool_input.file_path` absolute and forward-slashed, and
+//   apply_patch → parse the patch with a line-for-line PORT of Codex's own
+//     parser (codexParse: apply-patch/src/parser.rs + streaming_parser.rs) and
+//     run the script ONCE PER TOUCHED PATH: added and updated files, deleted
+//     files, and BOTH ends of a move. A patch the port cannot parse is BLOCKED,
+//     not guessed at. Payload per run: `tool_name` Write (Add) or Edit,
+//     `tool_input.file_path` absolute, normalised and forward-slashed, and
 //     `TOOL_INPUT_file_path` set.
 //   Bash → the payload already matches (`tool_input.command`); passed through.
 //   Bash CARRYING A PATCH → Codex has a second edit channel. Its exec tool
@@ -41,18 +41,21 @@
 //     allows:
 //         apply_patch <<'EOF' … EOF
 //         cd <path> && apply_patch <<'EOF' … EOF        (also `applypatch`)
-//     Its matcher is a tree-sitter query over the bash grammar. This file does
-//     NOT try to reproduce it — three attempts to recognise "the shapes Codex
-//     intercepts" with a regex were each narrower somewhere, and each gap was
-//     an edit applied with every hook at exit 0. Instead the question is asked
-//     of the PATCH: any shell command whose text contains a file header line
-//     (`*** Add|Update|Delete File: <path>`) has every such path inspected,
-//     whatever shell syntax surrounds it (see carriedPatch). `cd <literal> &&`
-//     before the patch moves the base, as in Codex; any other directory change
-//     before a patch that names apply_patch BLOCKS. What this leaves out is a
-//     patch whose text is NOT in the command (`apply_patch < file.patch`) —
-//     Codex does not intercept that either, and a shell can write files a
-//     hundred ways, none of which an Edit/Write hook sees under Claude Code.
+//     Its matcher is a tree-sitter query over the bash grammar, and what it
+//     does not intercept runs in a real shell where `apply_patch` is a real
+//     executable on PATH. This file does NOT read the shell: five attempts
+//     did, and each failed open somewhere. A shell command with any line that
+//     looks like a file header has exactly TWO outcomes (see carriedPatch):
+//       ACCEPTED — the WHOLE command is `[cd <literal> &&] apply_patch <<'D'`
+//                  … `D`, quoted delimiter, nothing after the closing line, a
+//                  body the parser port accepts → every path is shown;
+//       REFUSED  — everything else, unparsed → the hook blocks, with the ways
+//                  out. That includes a command that only WRITES text quoting a
+//                  patch; the support matrix records that cost under Limits.
+//     What this leaves out is a patch whose text is NOT in the command
+//     (`apply_patch < file.patch`) — Codex does not intercept that either, and
+//     a shell can write files a hundred ways, none of which an Edit/Write hook
+//     sees under Claude Code.
 //
 //     ONE THING THIS CANNOT SEE: the exec tool's `workdir` argument also moves
 //     the base, and the hook payload does not carry it. So for a carried patch
@@ -234,6 +237,14 @@ function codexParse(text) {
     if (!boundariesOk(lines)) return { ok: false, error: 'the heredoc body does not start with *** Begin Patch and end with *** End Patch' };
   }
 
+  // Codex strips a trailing \r TWICE from every line but the last: once in
+  // `patch.trim().lines()` (done above) and again in push_delta, after it has
+  // re-joined the lines with \n (streaming_parser.rs: `line.strip_suffix('\r')`).
+  // The last line has no \n after it, so finish() sees it as it is. A line that
+  // is exactly "\r\r" is therefore an EMPTY line to Codex — a context line in
+  // an Update hunk — and stripping once made the port reject a patch Codex applies.
+  lines = lines.map((l, i) => (i < lines.length - 1 && l.endsWith('\r') ? l.slice(0, -1) : l));
+
   const hunks = [];
   let mode = 'NotStarted';
   let envSeen = false;
@@ -346,8 +357,9 @@ function touchedFiles(hunks) {
 // Does any line of this text LOOK like a file header, in any parser state? A
 // deliberate SUPERSET of what Codex can treat as one (trim() is the widest rule
 // it uses), and no regex touches the path, so nothing in a path can make a
-// header invisible. Used to decide that a shell command is patch-bearing, and
-// as the fallback when the port above rejects a patch sent through the tool.
+// header invisible. Used ONLY to decide that a shell command is patch-bearing —
+// never to choose what a hook is shown: that is the port's job, and where the
+// port cannot parse, the answer is a block.
 function looseHeaderPaths(text) {
   const out = [];
   for (const raw of rustLines(String(text))) {
@@ -407,12 +419,24 @@ const HEAD_LINE = new RegExp(String.raw`^[ \t]*(?:cd[ \t]+(${CD_LITERAL})[ \t]*&
 const HEREDOC_OPEN = new RegExp(String.raw`^<<[ \t]*(?:'([^'\n]+)'|"([^"\n$` + '`' + String.raw`\\]+)")[ \t]*\r?\n`);
 function carriedPatch(command) {
   if (looseHeaderPaths(command).length === 0) return null;
-  const refused = (why) => ({ refused: why });
+  // `fix` says what to do about THIS cause; one remedy for every cause sent the
+  // reader of a body that would not parse to "make it the whole command", which
+  // it already was.
+  const WHOLE = "make it the WHOLE command, exactly `apply_patch <<'EOF'` … `EOF` or `cd <literal path> && apply_patch <<'EOF'` … `EOF`, with a quoted delimiter and nothing after the closing line";
+  const refused = (why, fix = WHOLE) => ({ refused: why, fix });
 
   const at = command.indexOf('<<');
   if (at === -1) return refused('it has no heredoc');
   const head = HEAD_LINE.exec(command.slice(0, at).replace(/\\\r?\n/g, ''));
   if (!head) return refused('the text before its heredoc is not exactly `apply_patch` or `cd <literal path> && apply_patch`');
+  // The continuation rewrite above must not have reached INSIDE the cd target:
+  // in quotes a backslash-newline is two literal bytes to bash and to Codex
+  // (invocation.rs takes a raw_string verbatim), so `cd 'x\<LF>y'` names a
+  // directory that joining turned into `xy`. If the target is not in the raw
+  // text exactly as matched, it was assembled by the rewrite: refuse.
+  if (head[1] !== undefined && !command.slice(0, at).includes(head[1])) {
+    return refused(`a line continuation falls inside its cd target (${head[1]})`, 'write the cd target on one line');
+  }
   const open = HEREDOC_OPEN.exec(command.slice(at));
   if (!open) return refused('its heredoc delimiter is not a plain QUOTED word (unquoted, the shell would expand the patch before applying it)');
   const delimiter = open[1] ?? open[2];
@@ -424,10 +448,10 @@ function carriedPatch(command) {
   let dir = '';
   if (head[1] !== undefined) {
     dir = head[1].replace(/^(["'])([\s\S]*)\1$/, '$2');
-    if (dir === '' || dir.startsWith('-')) return refused(`its cd target (${head[1]}) is empty or starts with "-"`);
+    if (dir === '' || dir.startsWith('-')) return refused(`its cd target (${head[1]}) is empty or starts with "-"`, 'cd to a literal directory, or drop the cd and use paths relative to the repository root');
   }
   const parsed = codexParse(bodyLines.slice(0, close).join('\n'));
-  if (!parsed.ok) return refused(`the patch in it does not parse the way Codex parses it (${parsed.error})`);
+  if (!parsed.ok) return refused(`the patch in it does not parse the way Codex parses it (${parsed.error})`, 'correct the patch text — Codex would reject it too');
   return { files: touchedFiles(parsed.hunks), dir };
 }
 
@@ -441,8 +465,16 @@ function conditionMatches(pattern, toolName, command) {
   const m = /^([A-Za-z_]+)\((.*)\)$/.exec(pattern);
   if (!m) return true; // unreadable condition → run
   if (m[1] !== toolName) return false;
-  const literal = m[2].split('*')[0].trim();
-  return literal === '' || String(command).includes(literal);
+  // The literal words before the first `*`, IN ORDER, with anything between
+  // them. A single substring test skipped `git -C . commit`, `git  commit`,
+  // `git -c k=v commit` and `git \<LF>commit` for `Bash(git commit *)` — the
+  // very spellings block-main-commits.sh exists to catch — so the script was
+  // never started for them.
+  const words = m[2].split('*')[0].trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(words.map((w) => `(?<![\\w-])${esc(w)}(?![\\w-])`).join('[\\s\\S]*?'));
+  return re.test(String(command));
 }
 
 function conditionsFor(event, name) {
@@ -535,11 +567,17 @@ function main() {
   const carried = editMode && toolName === 'Bash' ? carriedPatch(input.tool_input.command) : null;
   if (editMode && toolName === 'Bash' && !carried) process.exit(0); // no file header anywhere in it: nothing for a file hook to see
   if (carried?.refused) {
-    fault(
-      `${name}: this shell command contains a patch, but ${carried.refused}, so the files it names cannot be located or checked. ` +
-        `If it APPLIES the patch: send it through the apply_patch tool, or make it the WHOLE command, exactly \`apply_patch <<'EOF'\` … \`EOF\` or \`cd <literal path> && apply_patch <<'EOF'\` … \`EOF\`, with a quoted delimiter and nothing after it. ` +
-        `If it only WRITES text that quotes a patch (a patch file, a how-to, a fixture, a commit message): create that file with the apply_patch tool, or pass the text from a file (git commit -F <file>), so the patch is not inside a shell command.`,
+    // Every edit hook reaches this line for the same command, so the text is the
+    // same from each of them and names the adapter, not the check that happened
+    // to be running — "check-vercel-json.sh: this shell command…" read as if that
+    // check had an opinion about it.
+    process.stderr.write(
+      `run-claude-hook (edit hooks): this shell command contains a patch, but ${carried.refused}, so the files it names cannot be located or checked. ` +
+        `If it APPLIES the patch: ${carried.fix}, or send it through the apply_patch tool. ` +
+        `If it only WRITES text that quotes a patch (a patch file, a how-to, a fixture, a commit message): create that file with the apply_patch tool, or pass the text from a file (git commit -F <file>). ` +
+        `Details: docs/guides/codex-cli-support-matrix.md, "Limits to know about".\n`,
     );
+    process.exit(EVENT === 'PreToolUse' ? 2 : 1);
   }
 
   // `if` conditions are written for shell commands (`Bash(git push *)`) and gate
@@ -553,23 +591,40 @@ function main() {
   }
 
   if (toolName === 'apply_patch' || carried) {
-    const patch = input.tool_input?.command ?? input.tool_input?.input ?? input.tool_input?.patch;
+    // Codex puts the patch text in `tool_input.command` (core/src/tools/
+    // hook_names.rs). Other field names were guessed at once and never observed;
+    // a payload without it is a fault below, not a guess.
+    const patch = input.tool_input?.command;
     const base = carried && carried.dir ? resolve(cwd, carried.dir) : cwd;
     let files;
     if (carried) files = carried.files;
     else {
       // The patch tool. Codex's own parser decides what is edited, so its port
-      // decides what is shown. If the port REJECTS the text, Codex applies
-      // nothing — but a bug in the port must not turn into a silent pass, so
-      // every line that even looks like a file header is shown instead.
-      const parsed = codexParse(typeof patch === 'string' ? patch : '');
-      files = parsed.ok ? touchedFiles(parsed.hunks) : looseHeaderPaths(typeof patch === 'string' ? patch : '');
+      // decides what is shown — and a patch the port cannot parse is BLOCKED.
+      // There used to be a fallback here that showed every line looking like a
+      // header instead; it turned each disagreement between the port and Codex
+      // into an exit 0 with the added lines and the Move destination missing,
+      // which is how a whole class of port bugs stayed invisible. If Codex would
+      // reject the text too, blocking costs nothing; if it would not, the port
+      // has diverged and that must be loud.
+      if (typeof patch !== 'string') fault(`${name}: the apply_patch payload carries no patch text in tool_input.command — refusing to let the check pass on nothing`);
+      const parsed = codexParse(patch);
+      if (!parsed.ok) {
+        fault(
+          `${name}: this patch does not parse the way Codex parses it (${parsed.error}), so the files it edits cannot be checked. ` +
+            `Codex should reject it too — correct the patch. If Codex accepts it, the parser port in .codex/hooks/run-claude-hook.mjs (codexParse) has diverged from apply-patch/src/streaming_parser.rs and needs re-reading.`,
+        );
+      }
+      files = touchedFiles(parsed.hunks);
     }
     if (files.length === 0) {
       fault(`${name}: could not find a file path in the apply_patch payload — refusing to let the check pass on nothing`);
     }
     for (const f of files) {
-      const resolved = isAbsolute(f.path) ? f.path : resolve(base, f.path);
+      // resolve() on BOTH branches: it is what removes `.` and `..` segments, and
+      // an absolute `<repo>/web/src/./lib/x.ts` handed over verbatim matched no
+      // `*/web/src/lib/*` glob while the relative spelling of the same file did.
+      const resolved = isAbsolute(f.path) ? resolve(f.path) : resolve(base, f.path);
       // The exec tool's `workdir` moves the base too, and the payload does not
       // carry it. A file this patch UPDATES or DELETES must already exist; if
       // it does not exist where the path resolves, the base is wrong and every

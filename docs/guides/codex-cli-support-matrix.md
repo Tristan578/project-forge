@@ -49,7 +49,7 @@ supported version moves. Nothing is claimed about any other version.
 | **Only exit 2 with non-empty stderr blocks.** Any other non-zero exit marks the run Failed and the action proceeds | `hooks/src/events/pre_tool_use.rs` |
 | Plain (non-JSON) stdout is dropped. Each event accepts its own `deny_unknown_fields` JSON shape: `additionalContext` on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `SubagentStart`; top-level `decision`/`reason` on `UserPromptSubmit`, `PostToolUse`, `SubagentStop`, `Stop`; **`PreCompact` and `PostCompact` accept neither** | `hooks/src/schema.rs`, `hooks/src/events/compact.rs` |
 | `permissionDecision: "allow"`/`"ask"` and `decision: "approve"` mark a `PreToolUse` run Failed. `updatedInput` is honoured only alongside a deny; the adapter never forwards it (no script here uses it) | `hooks/src/events/pre_tool_use.rs`, `hooks/src/engine/output_parser.rs` |
-| Patch file headers (`*** Add\|Update\|Delete File: `) are matched on the line after Rust `trim()` — which strips the Unicode White_Space property, U+0085 included, unlike JavaScript's — **except inside an Update hunk, where headers and `*** Move to: ` are matched after `trim_end()` only**, so an indented header there is a context line (`keeps_indented_update_markers_as_context_lines`). `Move to` counts only directly under its Update header, before any chunk, and once. The path is everything after the marker, unvalidated; lines split on `\n` alone. The last line ends the patch if it *trims* to `*** End Patch`, in any state. A patch the parser rejects is not applied | `apply-patch/src/parser.rs`, `apply-patch/src/streaming_parser.rs` |
+| Patch file headers (`*** Add\|Update\|Delete File: `) are matched on the line after Rust `trim()` — which strips the Unicode White_Space property, U+0085 included, unlike JavaScript's — **except inside an Update hunk, where headers and `*** Move to: ` are matched after `trim_end()` only**, so an indented header there is a context line (`keeps_indented_update_markers_as_context_lines`). `Move to` counts only directly under its Update header, before any chunk, and once. The path is everything after the marker, unvalidated; lines split on `\n` alone, and a trailing `\r` is stripped from each line **twice** (once by `lines()`, again by `push_delta` — so a line that is exactly `\r\r` is an empty line), except the last, which is stripped once. The last line ends the patch if it *trims* to `*** End Patch`, in any state. A patch the parser rejects is not applied | `apply-patch/src/parser.rs`, `apply-patch/src/streaming_parser.rs` |
 | What the exec tool does not intercept runs in a real shell, where `apply_patch` and `applypatch` are real executables: a directory holding them is prepended to `PATH` | `arg0/src/lib.rs` |
 | Project instructions are `AGENTS.md` files collected from the project root (nearest `.git`) down to the cwd. **`<repo>/.codex/AGENTS.md` is not on that path and is not loaded** | `core/src/agents_md.rs` |
 | Subagents are `*.toml` under `.codex/agents/`; `name`, `description`, `developer_instructions` are required | `core/src/config/agent_roles.rs` |
@@ -61,17 +61,24 @@ supported version moves. Nothing is claimed about any other version.
 ## Hooks
 
 `.codex/hooks.json` runs each shared `.claude/hooks/*.sh` script through
-`.codex/hooks/run-claude-hook.mjs`. The adapter exists because three rows of the
-table above fail *silently* if ignored:
+`.codex/hooks/run-claude-hook.mjs`. The adapter exists because rows of the table
+above fail *silently* if ignored:
 
 - **No `file_path`.** Every Edit/Write hook here begins with "no `file_path` →
   exit 0". Called directly, all nine would pass on every edit and read as
-  enforcement. The adapter parses the patch — trimming header lines exactly as
-  Codex's parser does, or an indented header would hide a hunk — and runs the
-  script once per **touched** path: added, updated and deleted files, and both
-  ends of a move.
+  enforcement. The adapter parses the patch with a **line-for-line port of
+  Codex's own parser** (three approximations each hid a file or showed a hook the
+  wrong path) and runs the script once per **touched** path: added, updated and
+  deleted files, and both ends of a move, each normalised — an absolute
+  `…/web/src/./lib/x.ts` is shown as `…/web/src/lib/x.ts`, like a relative one.
+  **A patch the port cannot parse is blocked**, naming the parse error. Codex
+  should reject such a patch too; if it does not, the port has diverged, and a
+  block says so where the fallback that used to be here (show whatever looks
+  like a header) turned every such divergence into a silent exit 0 with the
+  added lines and the Move destination missing.
 - **Only exit 2 blocks.** If the adapter itself cannot do its job on
-  `PreToolUse` (unreadable or empty payload, no path found in a patch, script or
+  `PreToolUse` (unreadable or empty payload, a patch it cannot parse or that
+  touches no file, a shell command whose `command` is not a string, script or
   bash missing, out of time) it exits 2 with the reason. Exit 1 there would let
   the action through. A *script* that crashes on one path is a reported failure,
   as under Claude Code — but the remaining paths are still checked and any block
@@ -107,7 +114,9 @@ table above fail *silently* if ignored:
   command has exactly two outcomes:
   - **accepted** — the WHOLE command, first byte to last, is
     `apply_patch <<'D'` … `D` or `cd <literal path> && apply_patch <<'D'` … `D`
-    (or `applypatch`): spaces and tabs only as separators, the delimiter
+    (or `applypatch`): spaces and tabs only as separators — plus a
+    backslash-newline continuation, which may join the first line (outside the
+    `cd` target) exactly as the shell joins it — the delimiter
     **quoted** so the shell expands nothing in the body, a literal `cd` target
     (quoted, or a bare word of `[A-Za-z0-9_./-]`) that is not empty and does not
     start with `-`, nothing after the closing delimiter, and a body that the
@@ -128,9 +137,11 @@ It also applies the `if` conditions from `.claude/settings.json`, which Codex ha
 no key for, from the generated `.codex/hook-conditions.json`: six hooks carry
 one, over four distinct patterns (`Bash(git push *)` three times,
 `Bash(git commit *)`, `Bash(gh pr create *)`, `Bash(gh api *)`). Matching is deliberately generous — the
-literal before the first `*` is looked for anywhere in the command — because
-running a script that then finds nothing to do is harmless and not running one
-that would have blocked is not.
+words before the first `*` must appear in the command in that order, as words,
+with anything between them (`git -C . commit`, `git  commit`, `git -c k=v commit`
+and a line continuation between the words all match `Bash(git commit *)`) —
+because running a script that then finds nothing to do is harmless and not
+running one that would have blocked is not.
 
 ### Ported (29 handlers)
 
@@ -211,7 +222,11 @@ until someone decides where it belongs. That is deliberate: the first port wired
   `check-vercel-json.sh`) only ever advise — none exits 2 — so the refusal
   currently protects a correctly-aimed *warning*, not a block. It is sized for
   the blocking check this document tells authors to put on this path. Item 8 of
-  the checklist asks whether that is the right trade.
+  the checklist asks whether that is the right trade. One refused command is
+  also refused **once per edit hook** — four today — because each handler is its
+  own process and each must block on its own; the text is identical from all of
+  them and names the adapter rather than the check. How Codex presents several
+  blocking hooks to the model (the first, or all of them) was not verified.
 - **`PostToolUse` cannot see a patch sent through the shell.** For the second
   edit channel the `PostToolUse` payload carries no command, so the five
   post-edit hooks (`post-edit-lint`, `check-arch`, `check-route-has-test`,
