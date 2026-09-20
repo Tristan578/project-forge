@@ -1324,12 +1324,14 @@ an Update hunk with nothing in it, followed by another header|*** Begin Patch\n*
 text after *** End Patch in the middle of the patch|*** Begin Patch\n*** Update File: docs/a.md\n@@\n+a\n*** End Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch|the last line of the patch must be '*** End Patch'
 a second Environment ID|*** Begin Patch\n*** Environment ID: a\n*** Environment ID: b\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch|environment id given more than once
 a line after the End of File marker that is not @@|*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+a\n*** End of File\n+b\n*** End Patch|expected update hunk to start with a @@ context marker
+a wrapper whose body does not START with Begin Patch|<<'EOF'\njunk\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF|the heredoc body does not start with *** Begin Patch
+a wrapper whose body does not END with End Patch|<<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\njunk\nEOF|the heredoc body does not start with *** Begin Patch
 a wrapper with a mismatched quote|<<\"EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF|the first line of the patch must be '*** Begin Patch'
 an EMPTY Environment ID|*** Begin Patch\n*** Environment ID:   \n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch|environment id is empty
 an Environment ID after a file header (Codex takes it only straight after Begin Patch)|*** Begin Patch\n*** Add File: protected/new.ts\n*** Environment ID: env-1\n+evil\n*** End Patch|is not a valid hunk header
 an Environment ID inside an Update hunk|*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** Environment ID: env-1\n*** End Patch|expected update hunk to start with a @@ context marker
 PORT_REJECTS_TABLE
-if [ "$PORT_REJECTS" -eq 10 ]; then ok "all 10 port-rejection rows were driven"; else bad "the port-rejection table was not walked: $PORT_REJECTS of 10"; fi
+if [ "$PORT_REJECTS" -eq 12 ]; then ok "all 12 port-rejection rows were driven"; else bad "the port-rejection table was not walked: $PORT_REJECTS of 12"; fi
 # An adapter-level block is not the verdict of whichever script is in argv: five
 # handlers match apply_patch, and "check-vercel-json.sh: this patch does not
 # parse" read as if that check had an opinion about it.
@@ -1587,6 +1589,18 @@ if [ "$RC" -eq 2 ] && [ "$CHECKED" -ge 1 ] && [ "$CHECKED" -lt 6 ] && grep -qE '
 else
   bad "budget exhaustion: exit $RC (2 wanted), $CHECKED of 6 ran, stderr: $ERR"
 fi
+# A budget that is ALREADY spent when the loop starts: the adapter must say so
+# before starting a run it has no time for. (Without that guard the run is
+# started with a negative timeout, which throws — an exit 2 by accident.)
+rm -f "$LOG"
+ADAPT_ARGS="5 0.001"
+adapt steady.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: a.ts\n+1\n*** End Patch')"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'out of time after checking 0 of 1 paths' <<<"$ERR"; then
+  ok "a budget already spent BLOCKS before any run starts, saying that nothing was checked"
+else
+  bad "spent budget: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
+fi
+ADAPT_ARGS="10 3"
 adapt steady.sh "$(patch_payload PostToolUse '*** Begin Patch\n*** Add File: a.ts\n+1\n*** Add File: b.ts\n+2\n*** Add File: c.ts\n+3\n*** Add File: d.ts\n+4\n*** Add File: e.ts\n+5\n*** Add File: f.ts\n+6\n*** End Patch')"
 if [ "$RC" -eq 1 ]; then
   ok "PostToolUse: the same exhaustion is a reported failure — the edit has already happened"
@@ -1636,13 +1650,22 @@ fi
 echo "== adapter: an empty payload is a fault, not a free pass =="
 rm -f "$LOG" "$LOG.stdin"
 adapt probe.sh ''
-if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'empty' <<<"$ERR"; then
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'hook payload is empty' <<<"$ERR"; then
   ok "an EMPTY payload blocks: the event is unknown, so the gating one is assumed, and the script does not run on nothing"
 else
   bad "empty payload: exit $RC (2 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
 fi
-adapt probe.sh '[1,2,3]'
-if [ "$RC" -eq 2 ]; then ok "a payload that is JSON but not an object blocks too"; else bad "array payload: exit $RC (2 wanted)"; fi
+# Pinned on the message: with the guard gone these still exit 2, but through a
+# LATER guard ("names no hook_event_name") or the top-level catch — the right exit
+# code from the wrong guard.
+for NOT_OBJECT in '[1,2,3]' 'null' '"text"' '7'; do
+  adapt probe.sh "$NOT_OBJECT"
+  if [ "$RC" -eq 2 ] && grep -qF 'hook payload is not a JSON object' <<<"$ERR"; then
+    ok "a payload that is JSON but not an object ($NOT_OBJECT) blocks, and says so"
+  else
+    bad "non-object payload $NOT_OBJECT: exit $RC (2 wanted), stderr: $ERR"
+  fi
+done
 # An OBJECT with no event name. Without the name nothing can tell a gating event
 # from an advisory one, so every later fault would exit 1 and the action proceed.
 rm -f "$LOG" "$LOG.stdin"
@@ -1658,6 +1681,15 @@ adapt probe.sh '{"hook_event_name":42,"tool_name":"Bash","tool_input":{"command"
 if [ "$RC" -eq 2 ]; then ok "a non-string hook_event_name is no name at all"; else bad "numeric event name: exit $RC (2 wanted)"; fi
 
 echo "== adapter: systemMessage and the command convenience variable =="
+# A script that prints NOTHING must produce no output at all. On Stop plain text
+# becomes a systemMessage, so treating "" as text would emit {"systemMessage":""}.
+printf '#!/usr/bin/env bash\nexit 0\n' > "$H/silent.sh"
+adapt silent.sh '{"hook_event_name":"Stop"}'
+if [ "$RC" -eq 0 ] && [ -z "$OUT" ]; then
+  ok "a silent script on Stop produces no output — not an empty systemMessage"
+else
+  bad "a silent script produced output: exit $RC, stdout: $OUT"
+fi
 cat > "$H/sysmsg.sh" <<'SM'
 #!/usr/bin/env bash
 printf '%s' '{"systemMessage":"lockfile was re-synced"}'
@@ -1909,6 +1941,18 @@ if [ "$RC" -eq 2 ] && grep -qF 'something follows the heredoc delimiter on its o
   ok "refusal for text AFTER a quoted delimiter: names that, and does not tell the author to quote a delimiter that is already quoted"
 else
   bad "opening-line refusal names the wrong cause: exit $RC, stderr: $ERR"
+fi
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch '$PATCH'")"
+if [ "$RC" -eq 2 ] && grep -qF 'but it has no heredoc' <<<"$ERR"; then
+  ok "refusal for a patch passed as an ARGUMENT: says there is no heredoc"
+else
+  bad "no-heredoc refusal names the wrong cause: exit $RC, stderr: $ERR"
+fi
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n$PATCH")"
+if [ "$RC" -eq 2 ] && grep -qF 'its heredoc is never closed by a line reading exactly EOF' <<<"$ERR"; then
+  ok "refusal for a heredoc that is never CLOSED: says so, naming the delimiter"
+else
+  bad "unclosed-heredoc refusal names the wrong cause: exit $RC, stderr: $ERR"
 fi
 adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<EOF\n$PATCH\nEOF")"
 if [ "$RC" -eq 2 ] && grep -qF 'not a plain QUOTED word' <<<"$ERR" && grep -qF 'quote the delimiter' <<<"$ERR"; then
@@ -2238,7 +2282,10 @@ printf '{"PostToolUse":{"probe.sh":["this is not a condition"]}}' > "$COND_FILE"
 adapt probe.sh "$(bash_payload PostToolUse 'git status')"
 if [ -e "$LOG" ]; then ok "a condition the adapter cannot parse means RUN, not skip"; else bad "an unparseable condition suppressed the script"; fi
 rm -f "$LOG" "$LOG.stdin"
-printf '{"PostToolUse":{"probe.sh":["Edit(src/*)"]}}' > "$COND_FILE"
+# `Edit(git status *)`: the words DO appear in the command, so only the tool-name
+# check can keep the script from running. (`Edit(src/*)` never matched `git status`
+# anyway, so that fixture passed with the check deleted.)
+printf '{"PostToolUse":{"probe.sh":["Edit(git status *)"]}}' > "$COND_FILE"
 adapt probe.sh "$(bash_payload PostToolUse 'git status')"
 if [ ! -e "$LOG" ]; then ok "a well-formed condition written for ANOTHER tool does not match a Bash payload"; else bad "a condition for another tool matched Bash"; fi
 rm -f "$LOG" "$LOG.stdin"

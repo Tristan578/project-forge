@@ -196,14 +196,12 @@ const RUST_TRIM = new RegExp(`^[${RUST_WS}]+|[${RUST_WS}]+$`, 'g');
 const RUST_TRIM_END = new RegExp(`[${RUST_WS}]+$`);
 const rustTrim = (s) => s.replace(RUST_TRIM, '');
 const rustTrimEnd = (s) => s.replace(RUST_TRIM_END, '');
-// Rust's `str::lines()`: split on \n, drop ONE trailing \r per line, and no
-// final empty line. Nothing else is a line break — not U+2028, not a lone \r —
-// so a PATH may contain those, and no regex with `.` may be used on a line.
-const rustLines = (s) => {
-  const parts = s.split('\n');
-  if (parts[parts.length - 1] === '') parts.pop();
-  return parts.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
-};
+// Rust's `str::lines()`: split on \n, drop ONE trailing \r per line. Nothing else
+// is a line break — not U+2028, not a lone \r — so a PATH may contain those, and
+// no regex with `.` may be used on a line. (`lines()` also drops a final empty
+// line; both callers here make that unobservable — the parser trims the text
+// first, the header scan ignores an empty line — so it is not reproduced.)
+const rustLines = (s) => s.split('\n').map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
 
 const M = {
   begin: '*** Begin Patch',
@@ -262,7 +260,7 @@ function codexParse(text) {
   lines = lines.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
 
   const hunks = [];
-  let mode = 'NotStarted';
+  let mode = 'StartedPatch'; // the boundary check above proved line 1 is `*** Begin Patch`
   let envSeen = false;
   const last = () => hunks[hunks.length - 1];
   const lastChunkEmpty = (h) => h.chunks.length > 0 && h.chunks[h.chunks.length - 1].lines === 0;
@@ -300,14 +298,8 @@ function codexParse(text) {
   // process_line; the last has no newline after it and is handled by finish(),
   // where a line that TRIMS to `*** End Patch` ends the patch in any state —
   // even inside an Update hunk, where an indented header is otherwise context.
-  const finalLine = lines[lines.length - 1];
-  for (const line of lines.slice(0, -1)) {
+  for (const line of lines.slice(1, -1)) {
     const trimmed = rustTrim(line);
-    if (mode === 'NotStarted') {
-      if (trimmed !== M.begin) return fail("the first line of the patch must be '*** Begin Patch'");
-      mode = 'StartedPatch';
-      continue;
-    }
     if (mode === 'EndedPatch') {
       if (trimmed !== '') return fail("the last line of the patch must be '*** End Patch'");
       continue;
@@ -335,7 +327,9 @@ function codexParse(text) {
     if (isCtx && lastChunkEmpty(h)) return fail(`unexpected line found in update hunk: '${line}'`);
     if (isCtx) { newChunk(h); continue; }
     if (updateLine === M.eof) {
-      if (lastChunkEmpty(h)) return fail('update hunk does not contain any lines');
+      // On an EMPTY chunk Codex rejects right here. Nothing is lost by not doing so:
+      // every line that can follow (blank, @@, a header, End Patch, anything else)
+      // rejects an empty chunk too, so the patch is refused either way.
       if (lastChunk) lastChunk.eof = true;
       continue;
     }
@@ -349,8 +343,8 @@ function codexParse(text) {
     if (lastChunk && lastChunk.lines > 0) return fail(`expected update hunk to start with a @@ context marker, got: '${line}'`);
     return fail(`unexpected line found in update hunk: '${line}'`);
   }
-  // finish(): the boundary check above already proved this line trims to the end marker.
-  if (rustTrim(finalLine) !== M.end) return fail("the last line of the patch must be '*** End Patch'");
+  // finish(): the last line trims to the end marker — the boundary check proved it —
+  // so all that is left is the check every header runs on the hunk before it.
   const problem = updateHunkProblem();
   if (problem) return fail(problem);
   return { ok: true, hunks };
@@ -504,7 +498,7 @@ function conditionMatches(pattern, toolName, command) {
   // very spellings block-main-commits.sh exists to catch — so the script was
   // never started for them.
   const words = m[2].split('*')[0].trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return true;
+  // (No words — `Bash(*)` — builds an empty regex, which matches every command.)
   const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(words.map((w) => `(?<![\\w-])${esc(w)}(?![\\w-])`).join('[\\s\\S]*?'));
   return re.test(String(command));
