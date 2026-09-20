@@ -2,8 +2,9 @@
 # Codex CLI surface drift gate — fail a PR when the generated Codex surface
 # (.agents/skills/<project skills>, .codex/agents/*.toml, .codex/hooks.json) no
 # longer matches its source under .claude/, when any `.codex/` file names a
-# repository path that does not exist, or when `.codex/config.toml` and
-# `.mcp.json` declare different MCP servers.
+# path under .claude/, .codex/, .agents/ or .github/ that does not exist (those
+# four roots only — a reference to docs/ or scripts/ is NOT resolved), or when
+# `.codex/config.toml` and `.mcp.json` declare different MCP servers.
 #
 # WHY IT EXISTS
 # The first port of .claude/ to Codex was made by hand and rotted inside a week:

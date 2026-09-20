@@ -164,15 +164,28 @@ function fault(msg) {
 function findBash() {
   if (process.env.CODEX_HOOK_BASH) return process.env.CODEX_HOOK_BASH;
   if (process.platform !== 'win32') return 'bash';
+  let execPath = '';
   try {
-    const execPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
-    // <git>/mingw64/libexec/git-core → <git>/bin/bash.exe
-    const candidate = resolve(execPath, '..', '..', '..', 'bin', 'bash.exe');
-    if (existsSync(candidate)) return candidate;
+    execPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
   } catch {
-    // fall through
+    // reported below
   }
-  return 'bash';
+  if (execPath) {
+    // <git>/mingw64/libexec/git-core → <git>/bin/bash.exe, or <git>/usr/bin/bash.exe
+    for (const tail of [['bin', 'bash.exe'], ['usr', 'bin', 'bash.exe']]) {
+      const candidate = resolve(execPath, '..', '..', '..', ...tail);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  // NOT a bare `bash`: that is the hazard named above. The WSL shim starts,
+  // cannot see this checkout, and the script "exits 1" — which Codex reads as
+  // Failed and lets the action through. A check that cannot run must say so.
+  fault(
+    `no usable bash: Git for Windows' bash.exe was not found next to \`git --exec-path\`${execPath ? ` (${execPath})` : ' (git itself did not run)'}, ` +
+      `and a bare \`bash\` on Windows is the WSL launcher, which cannot see this checkout. ` +
+      `Install Git for Windows and make sure git, node and jq are on PATH (.codex/AGENTS.md, "Requirements on PATH"). This needs a person: no hook can run until it is fixed.`,
+  );
+  return '';
 }
 
 // Rust's `str::trim()` strips the Unicode White_Space property; JavaScript's
@@ -418,7 +431,15 @@ function looseHeaderPaths(text) {
 // shell: a shell writing files, which no Edit/Write hook sees under Claude Code
 // either.
 const CD_LITERAL = String.raw`'[^'\n]*'|"[^"\n$` + '`' + String.raw`\\]*"|[A-Za-z0-9_./-]+`;
-const HEAD_LINE = new RegExp(String.raw`^[ \t]*(?:cd[ \t]+(${CD_LITERAL})[ \t]*&&[ \t]*)?(?:apply_patch|applypatch)[ \t]*$`);
+// SEP: a space, a tab, or a backslash-LF continuation, which bash deletes between
+// words. Matched on the RAW text: an earlier version JOINED continuations first
+// and then looked for the cd target "somewhere in the head", which `cd c\<LF>d`
+// satisfied through the letters of `cd` itself. With no joining step a
+// continuation can only ever sit BETWEEN words — never inside the cd target or a
+// command name — and backslash-CR-LF is not one at all (to POSIX bash the
+// backslash quotes the CR), so a head containing it simply does not match.
+const SEP = String.raw`(?:[ \t]|\\\n)`;
+const HEAD_LINE = new RegExp(String.raw`^${SEP}*(?:cd${SEP}+(${CD_LITERAL})${SEP}*&&${SEP}*)?(?:apply_patch|applypatch)${SEP}*$`);
 const HEREDOC_OPEN = new RegExp(String.raw`^<<[ \t]*(?:'([^'\n]+)'|"([^"\n$` + '`' + String.raw`\\]+)")[ \t]*\r?\n`);
 function carriedPatch(command) {
   if (looseHeaderPaths(command).length === 0) return null;
@@ -426,22 +447,20 @@ function carriedPatch(command) {
   // reader of a body that would not parse to "make it the whole command", which
   // it already was.
   const WHOLE = "make it the WHOLE command, exactly `apply_patch <<'EOF'` … `EOF` or `cd <literal path> && apply_patch <<'EOF'` … `EOF`, with a quoted delimiter and nothing after the closing line";
-  const refused = (why, fix = WHOLE) => ({ refused: why, fix });
+  const refused = (why, fix = WHOLE, opts = {}) => ({ refused: why, fix, noTool: opts.noTool === true });
 
   const at = command.indexOf('<<');
   if (at === -1) return refused('it has no heredoc');
-  const head = HEAD_LINE.exec(command.slice(0, at).replace(/\\\r?\n/g, ''));
-  if (!head) return refused('the text before its heredoc is not exactly `apply_patch` or `cd <literal path> && apply_patch`');
-  // The continuation rewrite above must not have reached INSIDE the cd target:
-  // in quotes a backslash-newline is two literal bytes to bash and to Codex
-  // (invocation.rs takes a raw_string verbatim), so `cd 'x\<LF>y'` names a
-  // directory that joining turned into `xy`. If the target is not in the raw
-  // text exactly as matched, it was assembled by the rewrite: refuse.
-  if (head[1] !== undefined && !command.slice(0, at).includes(head[1])) {
-    return refused(`a line continuation falls inside its cd target (${head[1]})`, 'write the cd target on one line');
-  }
+  const head = HEAD_LINE.exec(command.slice(0, at));
+  if (!head) return refused('the text before its heredoc is not exactly `apply_patch` or `cd <literal path> && apply_patch` (a line continuation may separate words, never split one)');
   const open = HEREDOC_OPEN.exec(command.slice(at));
-  if (!open) return refused('its heredoc delimiter is not a plain QUOTED word (unquoted, the shell would expand the patch before applying it)');
+  if (!open) {
+    // Two different mistakes, two different ways out.
+    const quotedButFollowed = /^<<[ \t]*(?:'[^'\n]+'|"[^"\n$`\\]+")/.test(command.slice(at));
+    return quotedButFollowed
+      ? refused('something follows the heredoc delimiter on its opening line', 'put nothing after the quoted delimiter on the `apply_patch <<\'EOF\'` line — no redirect, no second command, no second heredoc')
+      : refused('its heredoc delimiter is not a plain QUOTED word (unquoted, the shell would expand the patch before applying it)', "quote the delimiter: `apply_patch <<'EOF'`");
+  }
   const delimiter = open[1] ?? open[2];
   const bodyLines = command.slice(at + open[0].length).split('\n');
   const close = bodyLines.findIndex((l) => (l.endsWith('\r') ? l.slice(0, -1) : l) === delimiter);
@@ -454,16 +473,27 @@ function carriedPatch(command) {
     if (dir === '' || dir.startsWith('-')) return refused(`its cd target (${head[1]}) is empty or starts with "-"`, 'cd to a literal directory, or drop the cd and use paths relative to the repository root');
   }
   const parsed = codexParse(bodyLines.slice(0, close).join('\n'));
-  if (!parsed.ok) return refused(`the patch in it does not parse the way Codex parses it (${parsed.error})`, 'correct the patch text — Codex would reject it too');
+  if (!parsed.ok) return refused(`the patch in it does not parse the way Codex parses it (${parsed.error})`, 'correct the patch text — Codex would reject it too, through the apply_patch tool as well', { noTool: true });
   return { files: touchedFiles(parsed.hunks), dir };
 }
 
 // `Bash(git push *)` → should the script run for this command?
-// Deliberately GENEROUS: Claude Code evaluates these against its own parse of
-// the command, which is not reproducible here, so the literal text before the
-// first `*` is looked for ANYWHERE in the command. Running a script that then
-// decides it has nothing to do is harmless; not running one that would have
-// blocked is not.
+//
+// NEVER ASKED ON PreToolUse. There the script always starts and decides for
+// itself: every blocking Bash hook here routes on the command it is given, and
+// block-main-commits.sh does so with a normaliser hardened over many rounds
+// (quotes, `$'…'`, continuations inside a word, `git -C`). A filter in front of
+// it is a second, weaker router — it skipped `g''it commit` and `git com\<LF>mit`,
+// and with the source's `if: Bash(git commit *)` it never started the script for
+// merge, cherry-pick, revert or pull, which that script also exists to stop.
+// Reading shell text to decide whether enforcement runs is the mistake this file
+// has made and removed twice already (lessons-learned #21).
+//
+// On the NON-gating events (PostToolUse …) a skipped run costs an advisory, and
+// an unfiltered one costs real work — post-push-resolve-comments.sh does not
+// look at the command and would call `gh` after every shell command. So there
+// the condition is applied, generously: the pattern's words before the first
+// `*`, in order, as words, with anything between them.
 function conditionMatches(pattern, toolName, command) {
   const m = /^([A-Za-z_]+)\((.*)\)$/.exec(pattern);
   if (!m) return true; // unreadable condition → run
@@ -553,7 +583,7 @@ function main() {
 
   if (!/^[\w.-]+\.sh$/.test(name)) fault(`expected a script name like check-foo.sh, got "${name}"`);
   const script = join(SCRIPT_DIR, name);
-  if (!existsSync(script)) fault(`${script} does not exist — the check it carries cannot run`);
+  if (!existsSync(script)) fault(`${script} does not exist — the check it carries cannot run. Restore it from git, or, if the hook was removed from .claude/settings.json on purpose, regenerate: node tools/agentic-sync/port.mjs --write`);
 
   const cwd = typeof input.cwd === 'string' && existsSync(input.cwd) ? input.cwd : REPO_ROOT;
   const toolName = input.tool_name;
@@ -573,21 +603,22 @@ function main() {
     // Every edit hook reaches this line for the same command, so the text is the
     // same from each of them and names the adapter, not the check that happened
     // to be running — "check-vercel-json.sh: this shell command…" read as if that
-    // check had an opinion about it.
+    // check had an opinion about it. The same goes for every ADAPTER-LEVEL block
+    // below (a patch that does not parse, a base directory that cannot be seen):
+    // none of them is the verdict of the script named in argv.
     process.stderr.write(
       `run-claude-hook (edit hooks): this shell command contains a patch, but ${carried.refused}, so the files it names cannot be located or checked. ` +
-        `If it APPLIES the patch: ${carried.fix}, or send it through the apply_patch tool. ` +
+        `If it APPLIES the patch: ${carried.fix}${carried.noTool ? '' : ', or send it through the apply_patch tool'}. ` +
         `If it only WRITES text that quotes a patch (a patch file, a how-to, a fixture, a commit message): create that file with the apply_patch tool, or pass the text from a file (git commit -F <file>). ` +
         `Details: docs/guides/codex-cli-support-matrix.md, "Limits to know about".\n`,
     );
     process.exit(EVENT === 'PreToolUse' ? 2 : 1);
   }
 
-  // `if` conditions are written for shell commands (`Bash(git push *)`) and gate
-  // a hook that inspects the COMMAND. They never apply to a file hook looking
-  // at a carried patch: skipping it here would make the two edit channels
-  // disagree, with the shell one failing open.
-  if (toolName === 'Bash' && !carried) {
+  // `if` conditions: never on PreToolUse (see conditionMatches), and never for a
+  // file hook looking at a carried patch — skipping it here would make the two
+  // edit channels disagree, with the shell one failing open.
+  if (toolName === 'Bash' && !carried && EVENT !== 'PreToolUse') {
     const conds = conditionsFor(EVENT, name);
     const command = input.tool_input?.command ?? '';
     if (conds && !conds.some((c) => conditionMatches(c, 'Bash', command))) process.exit(0);
@@ -614,7 +645,7 @@ function main() {
       const parsed = codexParse(patch);
       if (!parsed.ok) {
         fault(
-          `${name}: this patch does not parse the way Codex parses it (${parsed.error}), so the files it edits cannot be checked. ` +
+          `this patch does not parse the way Codex parses it (${parsed.error}), so the files it edits cannot be checked. ` +
             `Codex should reject it too — correct the patch. If Codex accepts it, the parser port in .codex/hooks/run-claude-hook.mjs (codexParse) has diverged from apply-patch/src/streaming_parser.rs and needs re-reading.`,
         );
       }
@@ -634,7 +665,7 @@ function main() {
       // check below would be looking at a file that is not the one being edited.
       if (carried && !f.isMoveDest && f.op !== 'Add' && !existsSync(resolved)) {
         fault(
-          `${name}: this patch ${f.isMoveSource ? 'moves' : f.op === 'Delete' ? 'removes' : 'updates'} ${f.path}, which does not exist under ${base.replace(/\\/g, '/')}. ` +
+          `this patch ${f.isMoveSource ? 'moves' : f.op === 'Delete' ? 'removes' : 'updates'} ${f.path}, which does not exist under ${base.replace(/\\/g, '/')}. ` +
             `The command was probably run with a working directory this hook cannot see, so the edit cannot be checked. ` +
             `Send the patch through the apply_patch tool, or run it from the repository root with root-relative paths.`,
         );
@@ -675,7 +706,7 @@ function main() {
     const run = runs[i];
     const remaining = deadline ? deadline - Date.now() : Infinity;
     if (remaining <= 0) {
-      fault(`${name}: out of time after checking ${i} of ${runs.length} paths (budget ${budgetMs / 1000}s) — the rest were NOT checked. Split the patch into smaller ones.`);
+      fault(`${name}: out of time after checking ${i} of ${runs.length} paths (budget ${budgetMs / 1000}s; stopping at ${(deadline - STARTED) / 1000}s to report before Codex's own timeout) — the rest were NOT checked. Split the patch into smaller ones.`);
     }
     const timeout = Math.min(perRunMs || Infinity, remaining);
     const res = spawnSync(bash, [script], {
@@ -689,7 +720,7 @@ function main() {
     if (res.error && res.error.code === 'ETIMEDOUT' && perRunMs && remaining < perRunMs) {
       // The PATCH budget cut this run short, not the hook's own bound. Saying
       // "raise the hook's timeout" here would send the reader to the wrong fix.
-      fault(`${name}: out of time while checking path ${i + 1} of ${runs.length} (budget ${budgetMs / 1000}s) — it and the rest were NOT checked. Split the patch into smaller ones.`);
+      fault(`${name}: out of time while checking path ${i + 1} of ${runs.length} (budget ${budgetMs / 1000}s; stopping at ${(deadline - STARTED) / 1000}s to report before Codex's own timeout) — it and the rest were NOT checked. Split the patch into smaller ones.`);
     }
     if (res.error && res.error.code === 'ETIMEDOUT') {
       fault(
@@ -698,7 +729,13 @@ function main() {
           `(where there is none, hooks.defaultTimeoutSeconds in tools/agentic-sync/port.json): raise it, then run node tools/agentic-sync/port.mjs --write.`,
       );
     }
-    if (res.error) fault(`${name}: could not start bash (${res.error.message})`);
+    if (res.error) fault(`${name}: could not start bash (${res.error.message}). bash (Git for Windows' on Windows), node, git and jq must be on PATH — .codex/AGENTS.md, "Requirements on PATH". This needs a person.`);
+    // 126/127 are the INTERPRETER's own failures (cannot execute / not found), not
+    // the script's verdict. Treated as a crash they exit 1, Codex marks the run
+    // Failed, and the action proceeds with the check never having run.
+    if (res.status === 126 || res.status === 127) {
+      fault(`${name}: bash could not execute the script (exit ${res.status}${res.stderr ? `: ${res.stderr.trim()}` : ''}) — the check did not run`);
+    }
     if (res.status === 2) {
       const said = [res.stderr, res.stdout].find((s) => s && s.trim());
       process.stderr.write(said ? (said.endsWith('\n') ? said : `${said}\n`) : `${name} blocked this action without giving a reason\n`);

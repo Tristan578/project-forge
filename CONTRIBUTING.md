@@ -321,8 +321,17 @@ Typical hand-edit homes (the project ID in particular recurs in `curl` examples)
 Two required CI gates enforce this so a missed surface fails the PR instead of
 silently onboarding the next contributor against a broken board:
 
-- **`agentic-sync`** — re-runs `sync.mjs --check`; fails if any of the four
-  generated targets drifts from `canonical.json`. Fix: re-run step 2 and commit.
+- **`agentic-sync`** — runs two checks, with two different fixes:
+  - `sync.mjs --check` fails if any of the four generated targets drifts from
+    `canonical.json`. Fix: re-run step 2 and commit.
+  - `scripts/check-codex-port.sh` fails if the generated Codex CLI surface
+    (`.agents/skills/`, `.codex/agents/`, `.codex/hooks.json`,
+    `.codex/hook-conditions.json`, `tools/agentic-sync/port.lock.json`) has
+    drifted from `.claude/skills/`, `.claude/agents/` or the `hooks` block of
+    `.claude/settings.json` — step 2 does **not** touch it. Fix: `git add` any
+    new source file (only tracked files are mirrored), run
+    `node tools/agentic-sync/port.mjs --write`, and commit what it regenerates.
+    The gate's output names each problem and the recipe for its kind.
 - **`taskboard-onboarding-guard`** (`scripts/check-taskboard-onboarding-hygiene.sh`)
   — greps the **whole tree** and fails on a known-dead taskboard ULID *or* a
   taskboard start command carrying the forbidden `--db` flag (which points the

@@ -73,6 +73,9 @@ mkfix() {
            "$d/.claude/agents" "$d/.claude/hooks" "$d/.codex/hooks" "$d/.codex/agents"
   cp "$MANIFEST" "$d/tools/agentic-sync/port.json"
   cp "$ADAPTER" "$d/.codex/hooks/run-claude-hook.mjs"
+  # The real adapter's messages send readers to this file, and the reference
+  # validator resolves every path a .codex/ file names — so the fixture has one.
+  printf '# Codex instructions (fixture)\n' > "$d/.codex/AGENTS.md"
   # shellcheck disable=SC2016  # the backticks are literal Markdown in fixture text, not a command substitution
   printf -- '---\nname: alpha\ndescription: fixture skill\n---\n\n# Alpha\n\nSee `.claude/hooks/ok.sh`.\n' > "$d/.claude/skills/alpha/SKILL.md"
   printf '#!/usr/bin/env bash\necho alpha\n' > "$d/.claude/skills/alpha/scripts/run.sh"
@@ -354,6 +357,16 @@ gen "$F" --check; expect_rc 1 "a server Codex declares that .mcp.json lacks is a
 expect_out "gamma is in .codex/config.toml but not in .mcp.json" "…naming the extra server"
 printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "matching server names pass"
+# Quoted table names. If that branch of the header regex regresses, a config whose
+# servers are ALL written quoted yields zero declared servers — the warning-only
+# path — and parity silently stops being enforced.
+printf '[mcp_servers."alpha"]\ncommand = "npx"\n[mcp_servers."beta"]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "QUOTED server table names are read as servers"
+expect_out "2 MCP servers declared for Codex, matching .mcp.json" "…counted, not mistaken for 'declares no servers'"
+printf '[mcp_servers."alpha"]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 1 "…and a quoted config missing a server is still a failure"
+expect_out "beta is in .mcp.json but not in .codex/config.toml" "…naming it"
+printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
 
 echo "== generator: --write may delete ONLY what it generated =="
 # The lock is a committed text file. A bad merge resolution, or an edit, can put
@@ -448,11 +461,29 @@ json_set "$F/.claude/settings.json" hooks.PreToolUse.0.hooks.0.async true
 json_set "$F/.claude/settings.json" hooks.PostToolUse '[{"matcher":"Bash","if":"Bash(gh api *)","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]},{"matcher":"Bash","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]'
 gen "$F" --write; expect_rc 0 "\`if\` and \`async\` are accepted because both are classified"
 CJ="$F/.codex/hook-conditions.json"
-if [ "$(json_get "$CJ" 'PreToolUse.ok\.sh.0')" = "Bash(git push *)" ]; then
-  ok "a group's \`if\` is written to hook-conditions.json, keyed by event and script"
+# A PreToolUse `if` is classified and then deliberately NOT emitted: on the
+# blocking event the script always starts and routes on the command itself. A
+# filter in front of it is a second, weaker router (it skipped `g''it commit`).
+if [ "$(json_get "$CJ" '@has:PreToolUse')" = "false" ]; then
+  ok "a PreToolUse \`if\` is NOT written to hook-conditions.json — the blocking script always starts"
 else
-  bad "the if condition was not recorded: $(cat "$CJ" 2>/dev/null)"
+  bad "a PreToolUse condition was emitted, so the adapter would filter a blocking script: $(cat "$CJ" 2>/dev/null)"
 fi
+F3="$(mkfix)"
+json_set "$F3/.claude/settings.json" hooks.PostToolUse '[{"matcher":"Bash","if":"Bash(git push *)","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]'
+gen "$F3" --write; expect_rc 0 "a PostToolUse \`if\` is accepted"
+if [ "$(json_get "$F3/.codex/hook-conditions.json" 'PostToolUse.ok\.sh.0')" = "Bash(git push *)" ]; then
+  ok "…and IS written, keyed by event and script: on a non-gating event an unfiltered run costs real work"
+else
+  bad "the PostToolUse condition was not recorded: $(cat "$F3/.codex/hook-conditions.json" 2>/dev/null)"
+fi
+# Spellings Claude Code accepts but a whole-word matcher can never satisfy: a word
+# glued to the glob. Ported silently, the script would simply never start.
+for BADIF in 'Bash(git push:*)' 'Bash(git push*)' 'Bash(*)' 'Bash(git  push *)'; do
+  F3="$(mkfix)"
+  json_set "$F3/.claude/settings.json" hooks.PostToolUse "[{\"matcher\":\"Bash\",\"if\":\"$BADIF\",\"hooks\":[{\"type\":\"command\",\"command\":\"bash .claude/hooks/ok.sh\"}]}]"
+  gen "$F3" --check; expect_rc 2 "an \`if\` spelled $BADIF stops the generator — the adapter's matcher could never honour it"
+done
 if [ "$(json_get "$CJ" '@has:PostToolUse')" = "false" ]; then
   ok "a script ALSO wired without a condition is never narrowed — it always runs"
 else
@@ -698,6 +729,26 @@ gen "$F" --check; expect_rc 2 "an UNANTICIPATED exception is exit 2 (could not r
 expect_out "unexpected error" "…through the top-level catch, which says so"
 
 echo "== generator: fail-closed means exit 2, never an uncaught exception =="
+# A structural step that matches NOTHING must fail, not emit an empty result: with
+# every wired script skipped by name, hooks.json would be `{}` and Codex would
+# enforce nothing while the gate read "in sync".
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks '{"Stop":[{"hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]}'
+json_set "$F/tools/agentic-sync/port.json" hooks.skipScripts '{"ok.sh":"fixture: skip the only wired script"}'
+gen "$F" --check; expect_rc 2 "a settings.json whose every hook is skipped by name stops the generator"
+expect_out "nothing was ported" "…saying that nothing was ported, rather than emitting an empty hooks.json"
+# A lock that is not JSON. Rebuilding it silently would forget every \`modified\`
+# entry and every orphan it was tracking.
+F="$(mkfix)"; gen "$F" --write
+printf '{ broken' > "$F/tools/agentic-sync/port.lock.json"
+gen "$F" --check; expect_rc 2 "--check: a lock that is not valid JSON is exit 2"
+expect_out "port.lock.json is not valid JSON" "…naming the file"
+gen "$F" --write; expect_rc 2 "--write: the same — it does not quietly rebuild the lock"
+if [ "$(cat "$F/tools/agentic-sync/port.lock.json")" = '{ broken' ]; then
+  ok "…and the broken lock is left exactly as it was, for a person to look at"
+else
+  bad "--write rewrote an unparseable lock: $(head -c 120 "$F/tools/agentic-sync/port.lock.json")"
+fi
 F="$(mkfix)"; printf '{"skills":{},"agents":{},"hooks":{}}' > "$F/tools/agentic-sync/port.json"
 gen "$F" --check; expect_rc 2 "a valid-JSON manifest missing required keys is exit 2 (it used to be a TypeError and exit 1, which the gate reads as drift)"
 expect_out "manifest.skills.source" "…naming the first missing field"
@@ -1163,7 +1214,7 @@ rm -f "$LOG"
 # Codex's parser matches headers on the TRIMMED line; so must the adapter, or an
 # indented header hides its hunk from every hook while Codex still applies it.
 adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: ok/new.ts\n+fine\n  *** Update File: protected/x.ts\n@@\n+evil\n*** End Patch')"
-if [ "$RC" -eq 2 ]; then
+if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
   ok "an INDENTED file header is still seen (matches Codex's own trim-then-match parser)"
 else
   bad "an indented header hid a hunk: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
@@ -1181,7 +1232,7 @@ else
 fi
 rm -f "$LOG"
 adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: ok/new.ts\n+fine\n\u3000\u00a0*** Delete File: protected/x.ts\u2028\n*** End Patch')"
-if [ "$RC" -eq 2 ]; then
+if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
   ok "…and behind/before other Unicode spaces (U+3000, U+00A0, U+2028)"
 else
   bad "a Unicode-space-wrapped header hid a hunk: exit $RC (2 wanted), saw: $(cat "$LOG" 2>/dev/null)"
@@ -1240,8 +1291,10 @@ a bare EMPTY line inside an Update hunk is a context line (preserves_bare_empty_
 a line that is exactly CR CR is an EMPTY context line — Codex strips a trailing CR twice|*** Begin Patch\n*** Update File: docs/a.md\n@@\n-old\n\r\r\n+new\n*** End Patch|"new"
 a + line ending in CR CR carries no CR into the added content|*** Begin Patch\n*** Update File: docs/a.md\n@@\n+x\r\r\n*** End Patch|"x"
 an Update hunk with no @@ at all (the first chunk is implicit)|*** Begin Patch\n*** Update File: docs/a.md\n+implicit\n*** End Patch|"implicit"
+a BLANK line after *** End of File is ignored (ignores_empty_lines_after_end_of_file)|*** Begin Patch\n*** Update File: docs/a.md\n@@\n+quux\n*** End of File\n\n*** End Patch|"quux"
+blank lines after an End Patch in the middle are accepted|*** Begin Patch\n*** Update File: docs/a.md\n@@\n+mid\n*** End Patch\n\n*** End Patch|"mid"
 PORT_RULES_TABLE
-if [ "$PORT_RULES" -eq 9 ]; then ok "all 9 port-rule rows were driven"; else bad "the port-rule table was not walked: $PORT_RULES of 9"; fi
+if [ "$PORT_RULES" -eq 11 ]; then ok "all 11 port-rule rows were driven"; else bad "the port-rule table was not walked: $PORT_RULES of 11"; fi
 # The double-CR case again with a MOVE: when the port rejected this patch, the
 # old fallback showed the source path alone — the destination, the path a
 # protect-this-directory hook most needs, was never shown.
@@ -1272,8 +1325,21 @@ text after *** End Patch in the middle of the patch|*** Begin Patch\n*** Update 
 a second Environment ID|*** Begin Patch\n*** Environment ID: a\n*** Environment ID: b\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch|environment id given more than once
 a line after the End of File marker that is not @@|*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+a\n*** End of File\n+b\n*** End Patch|expected update hunk to start with a @@ context marker
 a wrapper with a mismatched quote|<<\"EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF|the first line of the patch must be '*** Begin Patch'
+an EMPTY Environment ID|*** Begin Patch\n*** Environment ID:   \n*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch|environment id is empty
+an Environment ID after a file header (Codex takes it only straight after Begin Patch)|*** Begin Patch\n*** Add File: protected/new.ts\n*** Environment ID: env-1\n+evil\n*** End Patch|is not a valid hunk header
+an Environment ID inside an Update hunk|*** Begin Patch\n*** Update File: protected/x.ts\n@@\n+evil\n*** Environment ID: env-1\n*** End Patch|expected update hunk to start with a @@ context marker
 PORT_REJECTS_TABLE
-if [ "$PORT_REJECTS" -eq 7 ]; then ok "all 7 port-rejection rows were driven"; else bad "the port-rejection table was not walked: $PORT_REJECTS of 7"; fi
+if [ "$PORT_REJECTS" -eq 10 ]; then ok "all 10 port-rejection rows were driven"; else bad "the port-rejection table was not walked: $PORT_REJECTS of 10"; fi
+# An adapter-level block is not the verdict of whichever script is in argv: five
+# handlers match apply_patch, and "check-vercel-json.sh: this patch does not
+# parse" read as if that check had an opinion about it.
+rm -f "$LOG"
+adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n nothing\n*** End Patch')"
+if [ "$RC" -eq 2 ] && grep -q '^run-claude-hook: this patch does not parse' <<<"$ERR" && ! grep -qF 'guard.sh' <<<"$ERR"; then
+  ok "the parse-error block names the adapter, not the hook script that happened to be running"
+else
+  bad "the parse-error block is attributed to a hook script: $ERR"
+fi
 
 # An ABSOLUTE patch path is normalised like a relative one. Handed over verbatim,
 # `<repo>/web/src/./lib/x.ts` matched no `*/web/src/lib/*` glob while the relative
@@ -1367,7 +1433,7 @@ else
 fi
 rm -f "$LOG"
 adapt guard.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Delete File: protected/x.ts\n*** End Patch')"
-if [ "$RC" -eq 2 ]; then
+if [ "$RC" -eq 2 ] && grep -qxF "SAW=$CWD_NATIVE/protected/x.ts" "$LOG"; then
   ok "a delete-only patch is inspected — deleting a protected file is blocked"
 else
   bad "delete-only patch was not inspected: exit $RC, saw: $(cat "$LOG" 2>/dev/null)"
@@ -1427,8 +1493,8 @@ else
   bad "non-JSON payload: exit $RC, stderr: $ERR"
 fi
 adapt nope.sh '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'
-if [ "$RC" -eq 2 ] && grep -qF 'does not exist' <<<"$ERR"; then
-  ok "PreToolUse: a missing script blocks — a check that cannot run has not passed"
+if [ "$RC" -eq 2 ] && grep -qF 'does not exist' <<<"$ERR" && grep -qF 'port.mjs --write' <<<"$ERR"; then
+  ok "PreToolUse: a missing script blocks — a check that cannot run has not passed — and the message says how to repair it"
 else
   bad "missing script on PreToolUse: exit $RC, $ERR"
 fi
@@ -1516,7 +1582,7 @@ rm -f "$LOG"
 ADAPT_ARGS="10 3"
 adapt steady.sh "$(patch_payload PreToolUse '*** Begin Patch\n*** Add File: a.ts\n+1\n*** Add File: b.ts\n+2\n*** Add File: c.ts\n+3\n*** Add File: d.ts\n+4\n*** Add File: e.ts\n+5\n*** Add File: f.ts\n+6\n*** End Patch')"
 CHECKED="$(runs SAW)"
-if [ "$RC" -eq 2 ] && [ "$CHECKED" -ge 1 ] && [ "$CHECKED" -lt 6 ] && grep -qE 'out of time (after checking [0-9]+ of 6 paths|while checking path [0-9]+ of 6)' <<<"$ERR" && ! grep -qF 'settings.json' <<<"$ERR"; then
+if [ "$RC" -eq 2 ] && [ "$CHECKED" -ge 1 ] && [ "$CHECKED" -lt 6 ] && grep -qE 'out of time (after checking [0-9]+ of 6 paths|while checking path [0-9]+ of 6)' <<<"$ERR" && ! grep -qF 'settings.json' <<<"$ERR" && grep -qF 'budget 3s; stopping at 2.4s to report before' <<<"$ERR"; then
   ok "PreToolUse: a patch too large for the budget BLOCKS with paths unchecked ($CHECKED of 6 ran) — it does not pass on the ones it skipped"
 else
   bad "budget exhaustion: exit $RC (2 wanted), $CHECKED of 6 ran, stderr: $ERR"
@@ -1703,7 +1769,7 @@ no space before the redirect, one after it|apply_patch<< 'EOF'\n@P@\nEOF
 the applypatch alias|applypatch <<'EOF'\n@P@\nEOF
 a line continuation before the heredoc|apply_patch \\\n<<'EOF'\n@P@\nEOF
 a line continuation with no space before it|apply_patch\\\n<<'EOF'\n@P@\nEOF
-CRLF line endings throughout|apply_patch \\\r\n<<'EOF'\r\n*** Begin Patch\r\n*** Update File: protected/x.ts\r\n@@\r\n+evil\r\n*** End Patch\r\nEOF\r\n
+CRLF line endings throughout|apply_patch <<'EOF'\r\n*** Begin Patch\r\n*** Update File: protected/x.ts\r\n@@\r\n+evil\r\n*** End Patch\r\nEOF\r\n
 blank lines after the closing delimiter|apply_patch <<'EOF'\n@P@\nEOF\n\n
 an indented file header after Begin Patch (Codex trims there)|apply_patch <<'EOF'\n*** Begin Patch\n   *** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
 a NEL-prefixed file header (Rust trims it)|apply_patch <<'EOF'\n*** Begin Patch\n\u0085*** Update File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
@@ -1805,6 +1871,12 @@ env -C|env -C protected apply_patch <<'EOF'\n@PA@\nEOF
 eval of a split cd|eval \"c\"\"d protected\" && apply_patch <<'EOF'\n@PA@\nEOF
 cd through a variable|d=cd; $d protected && apply_patch <<'EOF'\n@PA@\nEOF
 bash -c with the cd inside the string|bash -c 'cd protected; apply_patch' <<'EOF'\n@PA@\nEOF
+a backslash-CR-LF before the heredoc (to POSIX bash the backslash quotes the CR: it is NOT a continuation)|apply_patch \\\r\n<<'EOF'\n@P@\nEOF
+a cd target split by a continuation whose halves spell a word already in the head (the old check looked for the joined text ANYWHERE)|cd c\\\nd && apply_patch <<'EOF'\n@PA@\nEOF
+a cd target split so that it spells the command name|cd apply_\\\npatch && apply_patch <<'EOF'\n@PA@\nEOF
+a cd target split by backslash-CR-LF|cd apply_\\\r\npatch && apply_patch <<'EOF'\n@PA@\nEOF
+a command name split by a continuation|apply_\\\npatch <<'EOF'\n@P@\nEOF
+a second heredoc on the opening line|apply_patch <<'A' <<'EOF'\n@P@\nEOF\nA
 a line continuation INSIDE a single-quoted cd target (two literal bytes to bash; joining made it a different directory)|cd 'prot\\\nected' && apply_patch <<'EOF'\n@PA@\nEOF
 a line continuation inside a bare cd target|cd prot\\\nected && apply_patch <<'EOF'\n@PA@\nEOF
 a body Codex rejects: an Update hunk with nothing in it|apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: protected/x.ts\n*** Delete File: docs/a.md\n*** End Patch\nEOF
@@ -1815,13 +1887,13 @@ COST — a heredoc that only WRITES a patch file|cat > fix.patch <<'EOF'\n@P@\nE
 COST — a how-to that quotes a patch|cd docs && cat > howto.md <<'DOC'\nUse apply_patch like this:\n@P@\nDOC
 COST — a multi-line commit message that quotes one|git commit -m \"fix: apply_patch handling\n\n@P@\"
 REFUSED_TABLE
-if [ "$REFUSED" -eq 60 ]; then ok "all 60 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 60"; fi
+if [ "$REFUSED" -eq 66 ]; then ok "all 66 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 66"; fi
 
 # The way out must fit the CAUSE. One remedy for everything told the author of a
 # body that would not parse to "make it the WHOLE command" — which it already was.
 rm -f "$LOG"
 adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: protected/new.ts\n+ok\nstray\n*** End Patch\nEOF")"
-if [ "$RC" -eq 2 ] && grep -qF 'correct the patch text' <<<"$ERR" && ! grep -qF 'make it the WHOLE command' <<<"$ERR"; then
+if [ "$RC" -eq 2 ] && grep -qF 'correct the patch text' <<<"$ERR" && ! grep -qF 'make it the WHOLE command' <<<"$ERR" && ! grep -qF 'or send it through the apply_patch tool' <<<"$ERR"; then
   ok "refusal for a body that does not parse: says to correct the patch, not to reshape a command that is already the right shape"
 else
   bad "body-parse refusal gives the wrong way out: exit $RC, stderr: $ERR"
@@ -1831,6 +1903,18 @@ if [ "$RC" -eq 2 ] && grep -qF 'cd to a literal directory' <<<"$ERR" && ! grep -
   ok "refusal for a cd target of '-': says what to do about the cd"
 else
   bad "cd-target refusal gives the wrong way out: exit $RC, stderr: $ERR"
+fi
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF' > out.txt\n$PATCH\nEOF")"
+if [ "$RC" -eq 2 ] && grep -qF 'something follows the heredoc delimiter on its opening line' <<<"$ERR" && grep -qF 'put nothing after the quoted delimiter' <<<"$ERR" && ! grep -qF 'not a plain QUOTED word' <<<"$ERR"; then
+  ok "refusal for text AFTER a quoted delimiter: names that, and does not tell the author to quote a delimiter that is already quoted"
+else
+  bad "opening-line refusal names the wrong cause: exit $RC, stderr: $ERR"
+fi
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<EOF\n$PATCH\nEOF")"
+if [ "$RC" -eq 2 ] && grep -qF 'not a plain QUOTED word' <<<"$ERR" && grep -qF 'quote the delimiter' <<<"$ERR"; then
+  ok "refusal for an UNQUOTED delimiter: says to quote it"
+else
+  bad "unquoted-delimiter refusal: exit $RC, stderr: $ERR"
 fi
 adapt guard.sh "$(carried_payload PreToolUse "echo start; apply_patch <<'EOF'\n$PATCH\nEOF")"
 if [ "$RC" -eq 2 ] && grep -qF 'make it the WHOLE command' <<<"$ERR"; then
@@ -1972,10 +2056,33 @@ if [ "$RC" -eq 1 ]; then ok "…and is a reported failure on PostToolUse"; else 
 ERR_FILE="$H/err"
 OUT="$(printf '%s' "$(bash_payload PreToolUse 'ls')" | CODEX_HOOK_BASH="$TMP_ROOT/no-such-bash" CODEX_HOOK_SCRIPT_DIR="$H" CODEX_HOOK_CONDITIONS="$H/no-conditions.json" PROBE_LOG="$LOG" node "$ADAPTER" probe.sh 2>"$ERR_FILE")"; RC=$?
 ERR="$(cat "$ERR_FILE")"
-if [ "$RC" -eq 2 ] && grep -qF 'could not start bash' <<<"$ERR"; then
-  ok "PreToolUse: a bash that cannot be started blocks"
+if [ "$RC" -eq 2 ] && grep -qF 'could not start bash' <<<"$ERR" && grep -qF 'Requirements on PATH' <<<"$ERR"; then
+  ok "PreToolUse: a bash that cannot be started blocks, and says what must be on PATH"
 else
   bad "missing bash: exit $RC (2 wanted), stderr: $ERR"
+fi
+# 126 and 127 are the INTERPRETER's own failures (cannot execute / not found) — a
+# bash that starts and cannot run the script, which is what the WSL launcher does
+# on Windows. Read as a script crash they exit 1, Codex marks the run Failed, and
+# the action proceeds with the check never having run.
+for CODE in 126 127; do
+  printf '#!/usr/bin/env bash\necho "cannot execute" >&2\nexit %s\n' "$CODE" > "$H/interp.sh"
+  adapt interp.sh "$(bash_payload PreToolUse 'ls')"
+  if [ "$RC" -eq 2 ] && grep -qF 'could not execute the script' <<<"$ERR" && grep -qF 'the check did not run' <<<"$ERR"; then
+    ok "PreToolUse: exit $CODE from the run is an interpreter failure — it BLOCKS, it is not read as a crash the action may outlive"
+  else
+    bad "exit $CODE was read as a script crash: adapter exit $RC (2 wanted), stderr: $ERR"
+  fi
+done
+# The payload's cwd may name a directory that no longer exists (a removed
+# worktree). spawnSync would fail ENOENT there and every hook would block with
+# "could not start bash"; the adapter falls back to the repository root instead.
+rm -f "$LOG" "$LOG.stdin"
+adapt probe.sh "$(printf '{"cwd":"%s/no-such-dir","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}' "$CWD_NATIVE")"
+if [ "$RC" -eq 0 ] && [ -e "$LOG" ]; then
+  ok "a payload cwd that does not exist falls back to the repository root — the script still runs"
+else
+  bad "a nonexistent cwd broke the run: exit $RC, ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
 fi
 
 echo "== adapter: output is translated per event (each Codex wire type is deny_unknown_fields) =="
@@ -2105,6 +2212,27 @@ printf '{"PostToolUse":{"probe.sh":["Bash(git push *)"]}}' > "$COND_FILE"
 rm -f "$LOG" "$LOG.stdin"
 adapt probe.sh "$(bash_payload PreToolUse 'git status')"
 if [ -e "$LOG" ]; then ok "a condition recorded for one event does not filter another"; else bad "a PostToolUse condition filtered a PreToolUse run"; fi
+# On PreToolUse a condition is NEVER applied, even if one is present in the file:
+# the blocking script always starts and routes on the command itself. A filter in
+# front of it skipped spellings block-main-commits.sh is hardened to catch, and
+# the source's `Bash(git commit *)` never started it for merge/cherry-pick/revert.
+printf '{"PreToolUse":{"probe.sh":["Bash(git commit *)"]}}' > "$COND_FILE"
+NEVER_FILTERED=0
+while IFS='|' read -r LABEL CMD; do
+  NEVER_FILTERED=$((NEVER_FILTERED + 1))
+  rm -f "$LOG" "$LOG.stdin"
+  adapt probe.sh "$(bash_payload PreToolUse "$CMD")"
+  if [ -e "$LOG" ]; then ok "PreToolUse: the script is started regardless of a condition — $LABEL"; else bad "a PreToolUse condition kept a blocking script from starting: $LABEL"; fi
+done <<'NEVER_FILTERED_TABLE'
+empty quotes inside the command word|g''it commit -m x
+empty quotes inside the subcommand|git c''ommit -m x
+a continuation INSIDE the subcommand|git com\\\nmit -m x
+a different commit-creating subcommand|git merge --no-ff topic
+cherry-pick|git cherry-pick abc123
+a command the condition plainly does not name|git status
+NEVER_FILTERED_TABLE
+if [ "$NEVER_FILTERED" -eq 6 ]; then ok "all 6 never-filtered commands were driven"; else bad "the never-filtered table was not walked: $NEVER_FILTERED of 6"; fi
+printf '{"PostToolUse":{"probe.sh":["Bash(git push *)"]}}' > "$COND_FILE"
 rm -f "$LOG" "$LOG.stdin"
 printf '{"PostToolUse":{"probe.sh":["this is not a condition"]}}' > "$COND_FILE"
 adapt probe.sh "$(bash_payload PostToolUse 'git status')"
@@ -2151,8 +2279,11 @@ DOC_COUNTS="$(node -e '
   const total = groups.reduce((n, g) => n + g.hooks.length, 0);
   const bash = groups.filter((g) => String(g.matcher || "").split("|").includes("Bash")).reduce((n, g) => n + g.hooks.length, 0);
   const lists = Object.entries(conds).filter(([k]) => k !== "_README").flatMap(([, v]) => Object.values(v));
-  const conditional = lists.length;
-  const patterns = new Set(lists.flat()).size;
+  const applied = lists.length;
+  const srcIfs = Object.values(JSON.parse(fs.readFileSync(root + "/.claude/settings.json", "utf8")).hooks).flat()
+    .filter((g) => typeof g.if === "string" && g.if).flatMap((g) => (g.hooks || []).map(() => g.if));
+  const conditional = srcIfs.length;
+  const patterns = new Set(srcIfs).size;
   const agents = fs.readdirSync(root + "/.codex/agents").filter((f) => f.endsWith(".toml")).length;
   const lock = JSON.parse(fs.readFileSync(root + "/tools/agentic-sync/port.lock.json", "utf8")).generated;
   const skills = new Set(Object.keys(lock).filter((k) => k.startsWith(".agents/skills/")).map((k) => k.split("/")[2])).size;
@@ -2161,6 +2292,15 @@ DOC_COUNTS="$(node -e '
   want(new RegExp("### Ported \\(" + total + " handlers\\)"), "Ported heading should say " + total);
   want(new RegExp(words[bash] + " of the " + total + " handlers match `Bash`", "i"), "Bash-matched count should be " + words[bash] + " of " + total);
   want(new RegExp(words[conditional] + " hooks carry\\s+one, over " + words[patterns] + " distinct patterns", "i"), "if-condition counts should be " + words[conditional] + " / " + words[patterns]);
+  want(new RegExp("Only " + words[applied] + " of them (is|are) applied", "i"), "applied if-condition count should be " + words[applied]);
+  if (Object.keys(conds).some((k) => k === "PreToolUse")) problems.push("hook-conditions.json carries a PreToolUse condition, which the matrix says is never applied");
+  // The block messages of the adapter send readers to this document and this heading.
+  // The reference validator does not resolve docs/ paths, so nothing else notices a rename.
+  // (No apostrophes in this program: it sits inside a single-quoted shell string.)
+  const adapter = fs.readFileSync(root + "/.codex/hooks/run-claude-hook.mjs", "utf8");
+  const pointer = /Details: (docs\/guides\/[\w.-]+\.md), "([^"]+)"/.exec(adapter);
+  if (!pointer) problems.push("the adapter no longer points its refusal at a document and heading");
+  else if (pointer[1] !== "docs/guides/codex-cli-support-matrix.md" || !new RegExp("^#+ " + pointer[2] + "$", "m").test(doc)) problems.push("the adapter points at " + pointer[1] + " / " + pointer[2] + ", which this document does not have");
   want(new RegExp(words[agents - 1] + " of the " + words[agents], "i"), "generated-agent count should be " + words[agents - 1] + " of the " + words[agents]);
   want(new RegExp("list " + total + " handlers"), "first-run checklist should expect " + total + " handlers");
   want(new RegExp("The " + skills + " project skills"), "mirrored-skill count should be " + skills);
@@ -2187,6 +2327,22 @@ esac
 echo "== CI wiring =="
 # Executable lines only: strip whole-line comments before counting.
 CI_CODE="$(grep -vE '^[[:space:]]*#' "$CI_YML")"
+# The JOB that runs the gate. A step pin is not enough: job-level
+# `continue-on-error: true` lets the job report success over a red gate, and a
+# second job-level `if:` replaces the first (YAML: last key wins).
+JOB="$(awk '/^  agentic-sync:[[:space:]]*$/{j=1;next} j && /^  [A-Za-z0-9_-]+:/{exit} j{print}' <<<"$CI_CODE")"
+JOB_KEYS="$(grep -E '^    [A-Za-z_-]+:' <<<"$JOB" | sed -E 's/^    ([A-Za-z_-]+):.*/\1/' | tr '\n' ' ')"
+if [ -n "$JOB" ] && [ "$JOB_KEYS" = "name needs if runs-on timeout-minutes permissions steps " ]; then
+  ok "the agentic-sync job has exactly its seven job-level keys — no continue-on-error, no second if:"
+else
+  bad "the agentic-sync job's job-level keys changed: '$JOB_KEYS'"
+fi
+WANT_IF="    if: \${{ needs.ci-gate.outputs.needs-agentic == 'true' }}"
+if grep -qxF "$WANT_IF" <<<"$JOB"; then
+  ok "…and its if: is the needs-agentic gate, nothing weaker"
+else
+  bad "the agentic-sync job's if: is not the needs-agentic gate: $(grep -E '^    if:' <<<"$JOB")"
+fi
 N="$(grep -cE '^[[:space:]]+run: bash scripts/check-codex-port\.sh[[:space:]]*$' <<<"$CI_CODE")"
 if [ "$N" = "1" ]; then
   ok "ci.yml runs the gate on exactly one executable line"

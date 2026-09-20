@@ -133,15 +133,29 @@ above fail *silently* if ignored:
   this channel. The cost in time is one short-lived `node` start per edit hook
   per shell command; the cost in false blocks is under "Limits to know about".
 
-It also applies the `if` conditions from `.claude/settings.json`, which Codex has
-no key for, from the generated `.codex/hook-conditions.json`: six hooks carry
-one, over four distinct patterns (`Bash(git push *)` three times,
-`Bash(git commit *)`, `Bash(gh pr create *)`, `Bash(gh api *)`). Matching is deliberately generous — the
-words before the first `*` must appear in the command in that order, as words,
-with anything between them (`git -C . commit`, `git  commit`, `git -c k=v commit`
-and a line continuation between the words all match `Bash(git commit *)`) —
-because running a script that then finds nothing to do is harmless and not
-running one that would have blocked is not.
+**`if` conditions.** Codex has no key for the `if` conditions in
+`.claude/settings.json`: six hooks carry one, over four distinct patterns
+(`Bash(git push *)` three times, `Bash(git commit *)`, `Bash(gh pr create *)`,
+`Bash(gh api *)`). Only one of them is applied, and that is deliberate:
+
+- **On `PreToolUse` a condition is never applied — the script always starts.**
+  Every blocking Bash hook here routes on the command it is handed, and
+  `block-main-commits.sh` does so with a normaliser hardened over many rounds
+  (quotes, `$'…'`, a continuation inside a word, `git -C`). A filter in front of
+  it is a second, weaker router: it skipped `g''it commit` and `git com\<LF>mit`,
+  and the source's `Bash(git commit *)` never started that script for `merge`,
+  `cherry-pick`, `revert` or `pull`, which it also exists to stop. Reading shell
+  text to decide whether enforcement runs is the mistake this adapter made and
+  removed twice for patches. The cost is that those five scripts start for every
+  shell command and exit at their own first check.
+- **On the non-gating events the condition is applied**, from the generated
+  `.codex/hook-conditions.json`, because there an unfiltered run costs real work:
+  `post-push-resolve-comments.sh` does not look at the command and would call
+  `gh` after every shell command. Matching is generous — the words before the
+  first `*` must appear in the command in that order, as words, with anything
+  between them — and the generator accepts only the spelling that matcher can
+  honour, `Bash(word [word…] *)`; `Bash(git push:*)` or `Bash(git push*)` stops
+  it rather than being ported into a condition that can never match.
 
 ### Ported (29 handlers)
 
@@ -150,7 +164,7 @@ running one that would have blocked is not.
 | `SessionStart` | `SessionStart` | `on-session-start.sh` |
 | `UserPromptSubmit` | `UserPromptSubmit` | `on-prompt-submit.sh` |
 | `PreToolUse` `Edit\|Write\|Bash` | `PreToolUse` `apply_patch\|Bash` | `inject-lessons-learned.sh` |
-| `PreToolUse` `Bash` | `PreToolUse` `Bash` | `pre-push-quality-gate.sh`, `block-main-commits.sh`, `check-pr-metadata.sh`, `check-docs-quality.sh`, `block-deferred-fixes.sh` (each with its `if` condition). `block-deferred-fixes.sh` loses its `statusMessage` ("Checking for Boy Scout Rule violations") — see the note under this table |
+| `PreToolUse` `Bash` | `PreToolUse` `Bash` | `pre-push-quality-gate.sh`, `block-main-commits.sh`, `check-pr-metadata.sh`, `check-docs-quality.sh`, `block-deferred-fixes.sh`. Each has an `if` in `.claude/settings.json`; under Codex it is **not applied** — the script always starts and routes on the command itself (see "`if` conditions" above). `block-deferred-fixes.sh` loses its `statusMessage` ("Checking for Boy Scout Rule violations") — see the note under this table |
 | `PreToolUse` `Edit\|Write` | `PreToolUse` `apply_patch\|Bash`, mode `edit` (see "Two edit channels") | `verify-branch.sh`, `check-db-transaction.sh`, `check-sanitization-patterns.sh`, `check-vercel-json.sh`. Their `statusMessage` is dropped: matched for every shell command, a line like "Checking sanitization patterns" would be false |
 | `PostToolUse` `Edit\|Write` | `PostToolUse` `apply_patch` | `auto-lockfile-sync.sh`, `post-edit-lint.sh`, `check-arch.sh`, `check-route-has-test.sh`, `cargo-check-wasm.sh` |
 | `PostToolUse` `Bash` | `PostToolUse` `Bash` | `post-commit-clean.sh`, `post-merge-doc-check.sh`, `post-push-resolve-comments.sh` (`if: Bash(git push *)`; `async` dropped, so it runs synchronously for up to 30 s after a push — and, its `statusMessage` being dropped too, **with no status line explaining the wait**; see the note under this table) |
@@ -214,7 +228,8 @@ until someone decides where it belongs. That is deliberate: the first port wired
   that only WRITES text containing one, so a heredoc that writes a patch file, a
   test fixture, or a multi-line commit message quoting a whole patch is blocked
   on `PreToolUse` — whenever a line of it starts with `*** Add File: `,
-  `*** Update File: ` or `*** Delete File: `. The message names the ways out:
+  `*** Update File: ` or `*** Delete File: ` **after trimming whitespace**, so
+  indenting a quoted patch does not avoid it. The message names the ways out:
   create the file with the patch tool, or pass the text from a file
   (`git commit -F <file>`) so the patch is not inside a shell command. **Weigh
   it knowing what it buys today:** the four hooks on this path
@@ -225,8 +240,12 @@ until someone decides where it belongs. That is deliberate: the first port wired
   the checklist asks whether that is the right trade. One refused command is
   also refused **once per edit hook** — four today — because each handler is its
   own process and each must block on its own; the text is identical from all of
-  them and names the adapter rather than the check. How Codex presents several
-  blocking hooks to the model (the first, or all of them) was not verified.
+  them and names the adapter rather than the check. The same holds on the patch
+  tool for a patch that does not parse or a base directory that cannot be seen:
+  every handler matched for the edit reports it — five on the tool channel
+  (`inject-lessons-learned.sh` plus the four edit hooks), four on the shell
+  channel. How Codex presents several blocking hooks to the model (the first, or
+  all of them) was not verified.
 - **`PostToolUse` cannot see a patch sent through the shell.** For the second
   edit channel the `PostToolUse` payload carries no command, so the five
   post-edit hooks (`post-edit-lint`, `check-arch`, `check-route-has-test`,

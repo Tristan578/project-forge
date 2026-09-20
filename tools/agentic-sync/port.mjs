@@ -52,7 +52,8 @@
 //             `extra:` file survives it). For `untracked:` and `mode: … not
 //             staged` the fix is `git add`, then --write again.
 //   --check   exit 1 on any difference. Never writes. Also validates that every
-//             repo path named inside a `.codex/` file resolves, CASE-EXACTLY —
+//             path under .claude/, .codex/, .agents/ or .github/ named inside a
+//             `.codex/` file resolves (other roots are not checked), CASE-EXACTLY —
 //             `existsSync('.Codex/rules')` is TRUE on a case-insensitive
 //             filesystem when `.codex/rules` exists, so a plain exists-check
 //             would pass the exact defect this gate is here to catch.
@@ -505,14 +506,29 @@ function planHooks(m, plan) {
         if (hook.statusMessage && !editOnly && !conditional) handler.statusMessage = hook.statusMessage;
         handlers.push(handler);
         report.ported += 1;
-        // Codex has no `if`. The adapter applies it, reading this file. A script
-        // wired once WITHOUT a condition always runs, so record `null` for it and
-        // never let a later conditional group narrow it.
-        const slot = (conditions[event] ||= {});
-        if (typeof group.if === 'string' && group.if && !/^Bash\(/.test(group.if)) {
+        // Codex has no `if`. Where one is applied at all, the adapter applies it,
+        // reading this file.
+        if (conditional && !/^Bash\(/.test(group.if)) {
           die(`hooks: ${event} group has \`if: ${JSON.stringify(group.if)}\`. Only \`Bash(…)\` conditions are ported: the adapter applies them to shell commands, and a condition on another tool would be silently skipped for a patch carried in a shell command. Decide how it should behave under Codex and teach port.mjs.`);
         }
-        if (typeof group.if === 'string' && group.if) {
+        // The one spelling the adapter's matcher honours: literal words, a space,
+        // then `*`. `Bash(git push:*)` and `Bash(git push*)` are valid under Claude
+        // Code, but a word glued to the glob can never satisfy a whole-word test,
+        // so the script would silently never start. Refused here, not guessed at.
+        if (conditional && !/^Bash\((?:[^\s*()]+ )+\*\)$/.test(group.if)) {
+          die(`hooks: ${event} group has \`if: ${JSON.stringify(group.if)}\`. Only the form \`Bash(word [word…] *)\` — words, one space, then \`*\` — is ported. Rewrite the condition in that form, or teach port.mjs and the adapter's conditionMatches() the new spelling together.`);
+        }
+        // NOT on PreToolUse. There the script always starts and routes on the
+        // command itself; a filter in front of a blocking script is a second,
+        // weaker router (it skipped `g''it commit`, and the source's
+        // `Bash(git commit *)` never started block-main-commits.sh for merge,
+        // cherry-pick, revert or pull). So a PreToolUse `if` is classified and
+        // then deliberately not emitted — see conditionMatches() in the adapter.
+        if (event === 'PreToolUse') continue;
+        // A script wired once WITHOUT a condition always runs, so record `null`
+        // for it and never let a later conditional group narrow it.
+        const slot = (conditions[event] ||= {});
+        if (conditional) {
           if (slot[name] !== null) (slot[name] ||= []).push(group.if);
         } else {
           slot[name] = null;
