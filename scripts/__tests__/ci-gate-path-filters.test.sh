@@ -234,11 +234,58 @@ for path in web/vitest.config.ts web/vitest.config.node.ts web/vitest.config.jsd
 done
 assert_output "lookalike outside web does not fire producer" "other/web/vitest.test-selection.ts" web false
 
+# ---- #9745: the Codex CLI surface gate runs in the agentic job --------------
+#
+# scripts/check-codex-port.sh regenerates .agents/skills, .codex/agents and
+# .codex/hooks.json from .claude/ and compares. Its inputs are the SOURCES, the
+# generated side, and every repository path the .codex/ files NAME (the gate
+# resolves them, and dies when a wired hook script is missing). A filter naming
+# only the generated side lets a skill edit merge with a stale mirror; one that
+# omits what is merely READ lets a rename merge green and turns the NEXT,
+# unrelated agentic PR red for someone else's change.
+echo "--- Codex surface gate (#9745) ---"
+assert_output "a skill SOURCE fires agentic" ".claude/skills/testing/SKILL.md" agentic true
+assert_output "an agent SOURCE fires agentic" ".claude/agents/security-reviewer.md" agentic true
+assert_output "the hooks SOURCE fires agentic" ".claude/settings.json" agentic true
+assert_output "a generated skill fires agentic" ".agents/skills/testing/SKILL.md" agentic true
+assert_output "a generated agent fires agentic" ".codex/agents/security-reviewer.toml" agentic true
+assert_output "the generated hooks file fires agentic" ".codex/hooks.json" agentic true
+assert_output "the hook adapter fires agentic" ".codex/hooks/run-claude-hook.mjs" agentic true
+assert_output "the hand-written Codex config fires agentic" ".codex/config.toml" agentic true
+assert_output "the generator fires agentic" "tools/agentic-sync/port.mjs" agentic true
+assert_output "the gate script fires agentic" "scripts/check-codex-port.sh" agentic true
+assert_output "the gate's suite fires agentic" "scripts/__tests__/check-codex-port.test.sh" agentic true
+assert_output ".mcp.json fires agentic (MCP parity)" ".mcp.json" agentic true
+assert_output "a hook SCRIPT the surface names fires agentic" ".claude/hooks/block-main-commits.sh" agentic true
+assert_output "a rule file the agents name fires agentic" ".claude/rules/lessons-learned.md" agentic true
+assert_output "a validate tool the agents name fires agentic" ".claude/tools/validate-rust.sh" agentic true
+assert_output ".claude/CLAUDE.md fires agentic" ".claude/CLAUDE.md" agentic true
+assert_output "a workflow the agents name fires agentic" ".github/workflows/cd.yml" agentic true
+# Near misses: the anchors and escapes must hold, not merely contain the text.
+assert_output "the ROOT CLAUDE.md does NOT fire agentic" "CLAUDE.md" agentic false
+assert_output "a near-miss of .mcp.json does NOT fire agentic" ".mcp.jsonx" agentic false
+assert_output "a nested .mcp.json does NOT fire agentic" "web/.mcp.json" agentic false
+assert_output "a near-miss of settings.json does NOT fire agentic" ".claude/settings.json.bak" agentic false
+assert_output "web source does NOT fire agentic" "web/src/app/page.tsx" agentic false
+assert_output "engine source does NOT fire agentic" "engine/src/lib.rs" agentic false
+assert_output "a docs file does NOT fire agentic" "docs/known-limitations.md" agentic false
+
+assert_output "the hook adapter fires hooks (so the Windows hook job runs)" ".codex/hooks/run-claude-hook.mjs" hooks true
+assert_output "the generator fires hooks (so the Windows hook job runs)" "tools/agentic-sync/port.mjs" hooks true
+assert_output "the generator manifest fires hooks" "tools/agentic-sync/port.json" hooks true
+assert_output "the GENERATED lock beside them does NOT fire hooks (it changes with every skill edit)" "tools/agentic-sync/port.lock.json" hooks false
+assert_output "…but it still fires agentic, where its drift is checked" "tools/agentic-sync/port.lock.json" agentic true
+assert_output "a near-miss of the manifest does NOT fire hooks" "tools/agentic-sync/port.json.bak" hooks false
+assert_output "the OTHER agentic generator does NOT fire hooks" "tools/agentic-sync/sync.mjs" hooks false
+assert_output "a generated agent does NOT fire hooks" ".codex/agents/security-reviewer.toml" hooks false
+
 # ---- Empty diff -------------------------------------------------------------
 echo "--- empty diff ---"
 assert_output "empty diff leaves docs false" "" docs false
 assert_output "empty diff leaves any-code false" "" any-code false
 assert_output "empty diff leaves deps false" "" deps false
+assert_output "empty diff leaves agentic false" "" agentic false
+assert_output "empty diff leaves hooks false" "" hooks false
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

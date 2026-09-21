@@ -153,7 +153,17 @@ jobs:
           # matcher below also lists `^\.claude/` — the lightweight
           # onboarding-guard + lockfile-sync-tests self-tests. All three are fast,
           # self-contained checks; the fan-out is what stays gated off.
-          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$' && hooks=true
+          # The Codex hook adapter and the generator behind it count as hook code: they
+          # are what runs the scripts above under Codex, and several of their branches
+          # (the git-for-Windows bash lookup, junction entry paths, the
+          # core.fileMode=false index repair) execute ONLY on Windows. Without these
+          # two patterns a change to either fired `agentic` — a Linux job — and never
+          # `hook-tests-windows`, so a Windows-only regression merged green.
+          # The code and its manifest ONLY — not the generated port.lock.json beside
+          # them, which carries a hash per mirrored file and so changes with every
+          # skill or agent text edit; matching it would put the ~27-minute Windows
+          # job on every SKILL.md change.
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$|^\.codex/hooks/|^tools/agentic-sync/port\.(mjs|json)$' && hooks=true
           # Any package.json at ANY depth (web/, mcp-server/, apps/*, packages/*,
           # root) or the single root lockfile → run the lockfile-sync gate. Kept
           # ORTHOGONAL to any-code (like hooks): the gate is a ~30s self-contained
@@ -174,7 +184,21 @@ jobs:
           # also matches `ci` above, which is fine — editing a gate script warrants
           # the wider run; .claude/tools/dx-audit.sh matches neither ci nor hooks,
           # so wiring it here is what makes its contract test run at all.)
-          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$' && agentic=true
+          #
+          # The same job also runs the Codex CLI surface gate
+          # (scripts/check-codex-port.sh, #9745), whose inputs are wider: the
+          # generated mirror is derived from .claude/skills, .claude/agents and
+          # .claude/settings.json, so an edit to any SOURCE must fire it — a
+          # filter naming only the generated side would let a skill change
+          # merge with a stale mirror and never run the check that catches it.
+          # .mcp.json is here because the gate compares it with
+          # .codex/config.toml, which Codex reads instead.
+          # .claude/rules, .claude/hooks, .claude/tools, .claude/CLAUDE.md and .github/ are here
+          # because the gate also verifies that every repository path NAMED inside
+          # a .codex/ file exists, and dies when a wired hook script is missing.
+          # Without them, renaming a rule file merges green and the NEXT, unrelated
+          # PR that touches a skill goes red for someone else's change.
+          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$|^\.claude/skills/|^\.claude/agents/|^\.claude/settings\.json$|^\.claude/rules/|^\.claude/hooks/|^\.claude/tools/|^\.claude/CLAUDE\.md$|^\.github/|^\.agents/skills/|^\.codex/|^\.mcp\.json$|^scripts/check-codex-port\.sh$|^scripts/__tests__/check-codex-port\.test\.sh$' && agentic=true
           # Taskboard onboarding-hygiene tripwire (scripts/check-taskboard-onboarding-hygiene.sh).
           # Fires whenever a CONTRIBUTOR-FACING ONBOARDING SURFACE changes — the
           # surfaces where a rotated taskboard project/team ULID or a forbidden
@@ -543,6 +567,8 @@ jobs:
             .claude/hooks/block-main-commits.sh \
             .claude/hooks/inject-lessons-learned.sh \
             .claude/hooks/check-panel-registry.sh \
+            .claude/hooks/inject-post-compact.sh \
+            .claude/hooks/__tests__/inject-post-compact.test.sh \
             .claude/hooks/__tests__/check-panel-registry.test.sh \
             .claude/hooks/__tests__/reject-incomplete-review.test.sh \
             .claude/hooks/__tests__/review-quality-gate.test.sh \
@@ -824,6 +850,9 @@ jobs:
       - name: Check provider instruction files are in sync with canonical.json
         run: bash scripts/check-agentic-sync.sh
 
+      - name: Check the generated Codex CLI surface is in sync with .claude/
+        run: bash scripts/check-codex-port.sh
+
   # ---- Taskboard Onboarding Hygiene ----
   # The negative guard the parity review called for: greps the WHOLE tree and
   # fails the PR if a stale taskboard onboarding FACT the agentic-sync generator
@@ -1093,6 +1122,7 @@ jobs:
             scripts/check-lockfile-sync.sh scripts/__tests__/check-lockfile-sync.test.sh \
             scripts/check-ci-success.sh scripts/__tests__/check-ci-success.test.sh \
             scripts/check-agentic-sync.sh scripts/__tests__/check-agentic-sync.test.sh \
+            scripts/check-codex-port.sh scripts/__tests__/check-codex-port.test.sh \
             scripts/check-taskboard-onboarding-hygiene.sh scripts/__tests__/check-taskboard-onboarding-hygiene.test.sh \
             scripts/check-codex-config-safety.sh scripts/__tests__/check-codex-config-safety.test.sh \
             scripts/check-ghaw-lock-sync.sh scripts/get-ghaw-compiler-version.sh scripts/__tests__/check-ghaw-lock-sync.test.sh \
@@ -1153,6 +1183,12 @@ jobs:
 
       - name: Run agentic-config gate test suite
         run: bash scripts/__tests__/check-agentic-sync.test.sh
+
+      - name: Run Codex CLI surface gate test suite
+        run: bash scripts/__tests__/check-codex-port.test.sh
+
+      - name: Run post-compaction rule-digest hook suite (here because a .claude/rules/ edit fires this job, not hook-tests)
+        run: bash .claude/hooks/__tests__/inject-post-compact.test.sh
 
       - name: Run provider skill resolver fixtures
         run: bash scripts/__tests__/resolve-skill-path.test.sh

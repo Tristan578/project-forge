@@ -1,0 +1,168 @@
+---
+name: pr-green-machine
+description: Drive all open PRs to merge-ready state — fixes CI failures, resolves Sentry comments, clears merge conflicts. Use when multiple PRs need to go green or when asked to "clean up PRs", "fix all PRs", or "make PRs mergeable".
+context: fork
+---
+
+# PR Green Machine
+
+Drive every open PR to GREEN — CI passing, Sentry resolved, conflicts gone — one at a time, oldest to newest.
+
+## Core Principle
+
+**Evidence before assertions.** Never claim a PR is green without running the checks. Never assume a cached CI result is current. Never skip a validation domain because "it probably passes." Every claim must have a command output backing it.
+
+The authoritative gate is `pwsh -NoProfile -File scripts/audit-pr-readiness.ps1 -PullRequest <N> -Json`. Exit `0` means ready, `1` means verified blockers remain, and `2` means the audit failed. Never translate exit `1` or `2` into a green claim. It paginates GitHub evidence and validates the exact current head SHA, current main, metadata, reviews, ownership, overlap, and CI.
+
+## Pipeline (per PR)
+
+### Phase 1: Triage
+
+1. Run the readiness auditor and retain its JSON as the triage baseline.
+2. Check base branch: `gh pr view <N> --json baseRefName --jq .baseRefName` — if wrong, fix with `gh pr edit <N> --base main`
+3. Check merge conflicts: if CONFLICTING, rebase onto the correct base and force-push
+4. Check unreplied Sentry comments — count them
+5. Use `gh pr checks <N>` only for human-readable follow-up, never as the complete readiness inventory.
+
+Output a triage summary table:
+```
+| Check          | Status  | Action Needed |
+|----------------|---------|---------------|
+| Base branch    | main    | OK / WRONG    |
+| Merge conflicts| YES/NO  | Rebase needed |
+| CI checks      | X pass, Y fail | Fix failures |
+| Sentry comments| N unreplied | Review + fix/reply |
+```
+
+### Phase 2: Code Review
+
+Dispatch a code-review agent (use `/pr-code-review <N>`) that:
+- Reads the FULL diff and every changed file in context
+- Checks for: logic errors, security, API contracts, performance, conventions
+- Cross-references against `.claude/rules/lessons-learned.md` (45+ anti-patterns)
+- Verifies findings against actual code before reporting
+- Posts findings as a GitHub PR comment (not APPROVE/REQUEST_CHANGES)
+
+### Phase 3: Root-Cause Analysis
+
+For every failing CI check:
+1. `gh run view <RUN_ID> --log-failed` — read the actual error
+2. Identify the root cause (not the symptom)
+3. Check lessons learned for known patterns (e.g., #29 action versions, #15 maxDuration, #1 panelRegistry)
+
+For every unreplied Sentry comment:
+1. Read the full comment body
+2. Read the file at the reported location
+3. Classify: real bug, false positive, or already fixed
+4. If real: plan the fix. If false positive: draft the reply with evidence.
+
+### Phase 4: Multi-Domain Validation (Pre-Fix)
+
+Before writing any fix, validate current state across all domains:
+
+```bash
+# Architecture
+python3 .claude/skills/arch-validator/check_arch.py 2>/dev/null || echo "SKIP (no engine changes)"
+
+# TypeScript
+cd web && npx tsc --noEmit
+
+# Lint
+cd web && npx eslint --max-warnings 0 .
+
+# Unit tests (targeted to changed files)
+cd web && npx vitest run <changed-test-dirs>
+
+# MCP tests
+cd mcp-server && npx vitest run
+```
+
+Record which checks pass and which fail BEFORE making changes. This is the baseline.
+
+### Phase 5: Fix
+
+Apply fixes for:
+1. All code review findings (bugs and nits)
+2. All CI root causes
+3. All valid Sentry findings
+4. All pre-existing issues found in changed files
+
+Rules:
+- Commit after each logical fix (not batched)
+- Run targeted lint + tsc after each edit
+- Reply to every Sentry comment with: commit SHA (fixed), PF-ticket (deferred), or technical explanation (false positive)
+- No banned phrases without a ticket: "will fix later", "known issue", "out of scope"
+
+### Phase 6: Multi-Domain Validation (Post-Fix)
+
+Re-run ALL checks from Phase 4. Every check that was green before must still be green. Every check that was red must now be green.
+
+```bash
+cd web && npx tsc --noEmit
+cd web && npx eslint --max-warnings 0 .
+cd web && npx vitest run
+cd mcp-server && npx vitest run
+```
+
+If ANY check regresses, go back to Phase 5. Do not push until local validation is fully green.
+
+### Phase 7: Push + CI Babysit
+
+1. Push the fixes
+2. Wait for CI to start: `gh pr checks <N>`
+3. Monitor until ALL checks complete — do not move on while checks are pending
+4. If any check fails:
+   - `gh run view <RUN_ID> --log-failed`
+   - Root-cause, fix, re-validate locally, push again
+   - Repeat until ALL checks are green
+5. Verify merge status: `gh pr view <N> --json mergeable --jq .mergeable` must be MERGEABLE
+6. Verify zero unreplied Sentry comments
+7. Final evidence output:
+
+After every push, rebase, branch update, or review submission, discard the old result and rerun the auditor. A result belongs only to its reported `head_sha` and `main_sha`.
+
+```
+PR #NNNN — GREEN
+  CI: All N checks passed (list each)
+  Sentry: 0 unreplied comments
+  Conflicts: MERGEABLE
+  Evidence: gh pr checks NNNN output attached
+```
+
+Only after this output is produced, move to the next PR.
+
+## Anti-Pattern Checklist (Check Before Every Fix)
+
+Before editing ANY file, check if the file type has a known anti-pattern:
+- `.github/workflows/` → #29: verify action versions exist, #30: no GNU-only patterns
+- `api/generate/*/route.ts` → #15: maxDuration, #16: refundTokens in catch
+- `components/**/*.tsx` → #1: panelRegistry, #4: useRef in render, #5: Date.now in render
+- `chat/handlers/` → #28: forge API exists, #10: sceneGraph.nodes not sceneGraph
+- `tokens/` → #16: refund in all paths, #20: webhook idempotent
+- Callbacks → #45: audit all call sites that trigger the callback
+- Stacked branches → #46: fix on the branch that introduced the code
+
+## Execution Order
+
+Discover the live PR list at the start of every run — never work from a remembered or hardcoded list:
+
+```bash
+gh pr list --state open --json number,title,createdAt --jq 'sort_by(.createdAt) | .[] | "#\(.number) \(.title)"'
+```
+
+Process PRs oldest to newest by creation date. Skip Dependabot PRs unless explicitly asked (they have their own lockfile-drift protocol — see `.claude/rules/gotchas-build-ci.md` → Build & CI).
+
+Do NOT parallelize. Each PR must be fully GREEN before starting the next. If a fix on PR N breaks PR N+1 (shared branch), fix N+1 immediately before moving on.
+
+## Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/pr-status.sh" <pr-number>` — Run the fail-closed repository readiness auditor
+- `bash "${CLAUDE_SKILL_DIR}/scripts/fix-common-ci.sh"` — Auto-fix common CI failures: runs `eslint --fix`, then `tsc --noEmit` to surface remaining type errors, then targeted unit tests
+
+## References
+
+- See [ci-fix-playbook.md](references/ci-fix-playbook.md) for step-by-step fixes for every common CI failure: lint, TypeScript, vitest, E2E, manifest sync, lockfile drift, and 0-second workflow failures
+
+## Hook and agent boundary
+
+Hooks and agents invoke the auditor as a subprocess and consume only its exit code and JSON. They must not duplicate its policy, cache results across changed head/base SHAs, auto-resolve review threads, or mutate branches and Relationships. Pre-push use is advisory because remote CI has not run; post-push and pre-handoff use is mandatory and fail-closed.
