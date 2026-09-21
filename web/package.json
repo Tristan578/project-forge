@@ -80,7 +80,7 @@
     "bcryptjs": "^3.0.3",
     "botid": "^1.5.11",
     "dockview-react": "^8.3.1",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.0",
     "drizzle-orm": "0.45.2",
     "jsfxr": "^1.4.1",
     "lucide-react": "^1.45.0",
