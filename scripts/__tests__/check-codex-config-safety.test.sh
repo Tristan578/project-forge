@@ -396,8 +396,20 @@ done <<'CRED_TABLE'
 0|a non-secret literal whose key is not secret-named|[mcp_servers.sentry.env]\nSENTRY_ORG = "tristan-nolan"\nSENTRY_PROJECT = "spawnforge-ai"
 0|a ${...} placeholder value carries nothing|TOKEN = "${SENTRY_AUTH_TOKEN}"
 0|a credential shape inside a whole-line comment is inactive|# example: SENTRY_AUTH_TOKEN = "abc123def456"\napproval_policy = "untrusted"
+0|a placeholder with a trailing comment still carries nothing|TOKEN = "${SENTRY_AUTH_TOKEN}"  # forwarded by name
+1|LOWERCASE secret key (the key rule was case-sensitive while the shape rule was not)|sentry_auth_token = "abc123def456verysecretvalue"
+1|MIXED-case secret key|Sentry_Auth_Token = "abc123def456verysecretvalue"
+1|lowercase key with a value matching no provider shape|custom_api_token = "abcdef0123456789ABCDEF"
+1|a lowercase db_password|db_password = "hunter2hunter2hunter2"
+1|TRIPLE-QUOTED value under the canonical key name|SENTRY_AUTH_TOKEN = """abcdef0123456789ABCDEFGHIJ"""
+1|triple-quoted with single quotes|API_KEY = '''abcdef0123456789ABCDEF'''
+1|a placeholder on one line must NOT excuse a literal on another|FOO_TOKEN = "${FOO_TOKEN}"\nBAR_TOKEN = "abcdef0123456789ABCDEF"
+1|…in either order|BAR_TOKEN = "abcdef0123456789ABCDEF"\nFOO_TOKEN = "${FOO_TOKEN}"
+0|`monkey` ends in `key` but is not a secret-named key|monkey = "banana"
+0|`keyboard` contains `key` but is not a secret-named key|keyboard = "qwerty"
+0|`tokenizer` contains `token` but is not a secret-named key|tokenizer = "bpe"
 CRED_TABLE
-if [ "$CRED_CASES" -eq 10 ]; then ok "all 10 credential cases were driven"; else bad "the credential table was not walked: $CRED_CASES of 10"; fi
+if [ "$CRED_CASES" -eq 22 ]; then ok "all 22 credential cases were driven"; else bad "the credential table was not walked: $CRED_CASES of 22"; fi
 
 # The file this repo actually ships must pass BOTH rules, or the gate is red on main.
 if [ -f "$REPO_ROOT/.codex/config.toml" ]; then

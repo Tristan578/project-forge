@@ -109,29 +109,46 @@ fi
 # from editing the file. That guarded the writer; this guards the CONTENT, so it
 # also catches a human, another tool, or the Codex app itself writing a secret.
 #
-# TWO INDEPENDENT RULES, both over ACTIVE lines only:
-#   1. A well-known credential PREFIX anywhere (provider token shapes).
-#   2. A key whose NAME says secret (…KEY/TOKEN/SECRET/PASSWORD/PASSWD/CREDENTIAL)
-#      assigned a non-empty quoted literal. `env_vars = [...]` cannot trip this:
-#      the key there is `env_vars`, and the names live in the VALUE. A
-#      `${PLACEHOLDER}` value is allowed, since it carries nothing.
+# NORMALISE FIRST, THEN MATCH — one decision per defect class instead of a regex
+# per spelling. A review board reproduced three live bypasses of the first cut of
+# this check, each a different spelling of the same value:
+#   * `sentry_auth_token = "…"` — the key rule was case-SENSITIVE while the shape
+#     rule beside it was not, so any lower/mixed-case key slipped through;
+#   * `TOKEN = """…"""` — the value pattern wanted a quote followed by a NON-quote,
+#     and the second `"` of a TOML triple-quote fails that, so triple-quoted
+#     secrets never matched at all;
+#   * a `${…}` placeholder ANYWHERE suppressed the whole per-line loop, because the
+#     outer pre-check appended `*` to the pattern and so matched any secret-key
+#     line containing `${` — the exact "a placeholder on one line excuses a literal
+#     on another" failure its own comment forbade.
+# So: collapse triple-quote delimiters to single quotes, and match case-insensitively
+# per line. Every rule below reads the SAME normalised text (lessons-learned #21 —
+# a detector and the thing it guards must not read different string spaces).
+norm="$(sed -e 's/"""/"/g' -e "s/'''/'/g" <<<"$active")"
+
+# RULE 1 — a well-known provider credential shape anywhere.
 CRED_SHAPES='(sk-[A-Za-z0-9_-]{16,}|sk_(live|test)_[A-Za-z0-9]{8,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|napi_[A-Za-z0-9]{20,}|AIza[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
-# A secret-ish key = value "literal". The value must contain a non-space character
-# and must not be a ${…} placeholder.
-SECRET_KEY_RE='(^[[:space:]]*|[{,][[:space:]]*)[A-Za-z_][A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[[:space:]]*=[[:space:]]*("|'"'"')[^"'"'"']'
+# RULE 2 — a secret-NAMED key assigned a non-empty quoted literal. The marker must
+# be the whole key or follow an `_`, so `monkey = "banana"` is not a secret and
+# `sentry_auth_token` is. Matched case-insensitively. `env_vars = [...]` cannot
+# trip it: the key there is `env_vars` and the NAMES live in the value, which is a
+# list, not a quoted scalar.
+SECRET_KEY_RE='(^[[:space:]]*|[{,][[:space:]]*)([A-Za-z0-9]+_)*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[[:space:]]*=[[:space:]]*("|'"'"')[^"'"'"']'
+# A value that is EXACTLY a ${…} placeholder carries nothing, so it is allowed.
+PLACEHOLDER_RE='=[[:space:]]*("|'"'"')\$\{[A-Za-z0-9_]+\}("|'"'"')[[:space:]]*(#.*)?$'
 
 cred_hit=""
-if grep -Eqi "$CRED_SHAPES" <<<"$active"; then
+if grep -Eqi "$CRED_SHAPES" <<<"$norm"; then
   cred_hit="a provider credential shape"
-elif grep -Eq "$SECRET_KEY_RE" <<<"$active" && ! grep -Eq "$SECRET_KEY_RE"'*\$\{' <<<"$active"; then
-  # Re-check line by line so a ${…} placeholder on one line does not excuse a
-  # literal on another.
+else
+  # PER LINE, with no whole-file pre-check: a placeholder on one line must never
+  # excuse a literal on another.
   while IFS= read -r line; do
-    grep -Eq "$SECRET_KEY_RE" <<<"$line" || continue
-    grep -Eq '=[[:space:]]*("|'"'"')\$\{[A-Za-z0-9_]+\}("|'"'"')[[:space:]]*$' <<<"$line" && continue
+    grep -Eqi "$SECRET_KEY_RE" <<<"$line" || continue
+    grep -Eqi "$PLACEHOLDER_RE" <<<"$line" && continue
     cred_hit="a secret-named key assigned a literal value"
     break
-  done <<<"$active"
+  done <<<"$norm"
 fi
 
 if [ -n "$cred_hit" ]; then
