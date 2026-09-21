@@ -404,6 +404,11 @@ function looseHeaderPaths(text) {
   return out;
 }
 
+// What Git for Windows' bash will have of this text by the time it runs it: it
+// deletes every CR wherever it stands, quoted or not (measured). bash on Linux
+// keeps them all, so the raw text is that reader's view.
+const crDeleted = (s) => (s.includes('\r') ? s.split('\r').join('') : s);
+
 // A patch carried in a shell command.
 //
 // Codex hands hooks the shell command BEFORE deciding whether it is a patch.
@@ -468,7 +473,17 @@ const HEAD_LINE = new RegExp(String.raw`^${SEP}*(?:cd${SEP}+(${CD_LITERAL})${SEP
 // exclude one.)
 const HEREDOC_OPEN = new RegExp(String.raw`^<<[ \t]*(?:'([^'\n]+)'|"([^"\n$` + '`' + String.raw`\\]+)")[ \t]*\n`);
 function carriedPatch(command) {
-  if (looseHeaderPaths(command).length === 0) return null;
+  // ASKED IN EVERY VIEW AN APPLIER MIGHT USE, not just in the bytes as sent.
+  // Git for Windows' bash DELETES every carriage return while reading the script,
+  // so `*** Ad<CR>d File: x.ts` is a header to the apply_patch it then runs and
+  // not one here. Gating on the raw text alone made that command an ORDINARY
+  // command: the adapter exited 0, no edit hook was shown the path, and the file
+  // was written — a silent third outcome where this file promises two. The CR
+  // refusal below could never fire, because it sits behind this gate.
+  // (lessons-learned #21: the detector and the thing it guards must not read the
+  // same bytes in different string spaces. The refusal stays the answer; this
+  // only decides that the question gets asked.)
+  if (looseHeaderPaths(command).length === 0 && looseHeaderPaths(crDeleted(command)).length === 0) return null;
   // `fix` says what to do about THIS cause; one remedy for every cause sent the
   // reader of a body that would not parse to "make it the whole command", which
   // it already was.

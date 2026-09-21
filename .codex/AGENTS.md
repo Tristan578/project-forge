@@ -45,8 +45,10 @@ the shared scripts use to read their input. The adapter asks bash for `jq` befor
 it starts any script: without it **no** script is started — the ones that do not
 use it included, so the gap shows at session start — a `PreToolUse` hook that
 would have started one blocks, and the message names `jq` and this heading. (Left to themselves the scripts would split
-two ways: the ones under `set -e` end with exit 127 and no message, the others
-read nothing and pass.)
+two ways: the ones that call `jq` directly under `set -e` end with exit 127 and no
+message, the others read nothing and pass. `set -e` alone does not decide it — a
+`jq` call inside a command substitution does not end the script, because bash
+clears `-e` there.)
 
 #### Before Writing Code
 1. Review the backlog at http://localhost:3010

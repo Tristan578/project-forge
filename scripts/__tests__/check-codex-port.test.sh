@@ -617,6 +617,10 @@ json_set "$F/.claude/settings.json" hooks.PreToolUse '[{"matcher":"Edit|Write|Ba
 gen "$F" --write
 expect_out 'matched for BOTH apply_patch and Bash: ok.sh' "a PreToolUse group that reaches both edit channels is named in a note"
 expect_out '-only group, which is wired for both channels' "…which says where a file-gating check must live instead"
+# …and in --check, the mode CI runs (scripts/check-codex-port.sh) and so the only
+# mode anyone ever reads the note in. It was asserted under --write alone.
+gen "$F" --check
+expect_out 'matched for BOTH apply_patch and Bash: ok.sh' "…and the note is printed in --check too, which is the mode CI runs"
 F="$(mkfix)"; gen "$F" --write
 expect_no_out 'matched for BOTH' "…and an Edit|Write-only group (the default fixture) draws no such note"
 
@@ -1993,6 +1997,10 @@ a carriage return after the delimiter on the opening line (to bash on Linux the 
 a whole command with CRLF line endings|apply_patch <<'EOF'\r\n@P@\r\nEOF\r\n
 a closing line ending in a carriage return (Git for Windows' bash closes there, bash on Linux does not)|apply_patch <<'EOF'\n@P@\nEOF\r\n
 a carriage return in the MIDDLE of a path — Git for Windows' bash deletes it wherever it stands, so the hooks were shown a path no glob matched while bash handed apply_patch the real one|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: prot\rected/new.ts\n+evil\n*** End Patch\nEOF
+a carriage return inside the MARKER, which hides the header from the entry gate while bash hands apply_patch a valid one — without both views this command is not refused but IGNORED, exit 0 with no hook run|apply_patch <<'EOF'\n*** Begin Patch\n*** Ad\rd File: protected/new.ts\n+evil\n*** End Patch\nEOF
+a carriage return between the marker and its colon|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File\r: protected/new.ts\n+evil\n*** End Patch\nEOF
+a carriage return inside a Delete marker|apply_patch <<'EOF'\n*** Begin Patch\n*** Dele\rte File: docs/a.md\n*** End Patch\nEOF
+a carriage return inside an Update marker|apply_patch <<'EOF'\n*** Begin Patch\n*** Upda\rte File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
 a carriage return in the middle of an added line|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: protected/new.ts\n+ev\ril\n*** End Patch\nEOF
 a carriage return inside the quoted cd target|cd 'prot\rected' && apply_patch <<'EOF'\n@PA@\nEOF
 a no-break space after the closing line — blank to JavaScript's trim(), a second command to bash|apply_patch <<'EOF'\n@P@\nEOF\n\u00a0
@@ -2002,7 +2010,7 @@ COST — a heredoc that only WRITES a patch file|cat > fix.patch <<'EOF'\n@P@\nE
 COST — a how-to that quotes a patch|cd docs && cat > howto.md <<'DOC'\nUse apply_patch like this:\n@P@\nDOC
 COST — a multi-line commit message that quotes one|git commit -m \"fix: apply_patch handling\n\n@P@\"
 REFUSED_TABLE
-if [ "$REFUSED" -eq 77 ]; then ok "all 77 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 77"; fi
+if [ "$REFUSED" -eq 81 ]; then ok "all 81 refused shapes were driven"; else bad "the refused table was not walked: $REFUSED of 81"; fi
 
 # The way out must fit the CAUSE. One remedy for everything told the author of a
 # body that would not parse to "make it the WHOLE command" — which it already was.
@@ -2056,6 +2064,26 @@ if [ "$RC" -eq 2 ] && grep -qF 'the line that would close its heredoc (EOF) ends
   ok "refusal for a carriage return on the CLOSING line: names it, and says to use LF line endings"
 else
   bad "closing-line carriage return names the wrong cause: exit $RC, stderr: $ERR"
+fi
+# The entry gate is asked in EVERY view an applier might use. A CR inside the
+# MARKER hides the header from the raw text, so gating on that alone gave a silent
+# THIRD outcome — not ACCEPTED, not REFUSED, but IGNORED: exit 0, no hook run, and
+# Git for Windows' bash then handed apply_patch a valid header.
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n*** Begin Patch\n*** Ad\rd File: protected/new.ts\n+evil\n*** End Patch\nEOF")"
+if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'a carriage return that does not end a line' <<<"$ERR"; then
+  ok "a carriage return inside the MARKER is REFUSED, not ignored — the gate is asked in the CR-deleted view too"
+else
+  bad "a CR inside the marker was not refused (exit $RC, 2 wanted; ran=$([ -e "$LOG" ] && echo yes || echo no)) — the adapter and Git for Windows' bash disagree about whether this is a patch: $ERR"
+fi
+# …and the widened gate must not make an ordinary command patch-bearing. A CR that
+# spells no marker in EITHER view is nothing to a file hook.
+rm -f "$LOG"
+adapt guard.sh "$(carried_payload PreToolUse "printf 'a\rb' && grep -c 'Add File' notes.txt")"
+if [ "$RC" -eq 0 ] && [ ! -e "$LOG" ]; then
+  ok "…and a command with a carriage return but no header in EITHER view is still an ordinary command (exit 0)"
+else
+  bad "the CR-deleted view turned an ordinary command into a patch: exit $RC (0 wanted), ran=$([ -e "$LOG" ] && echo yes || echo no), stderr: $ERR"
 fi
 rm -f "$LOG"
 adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: ok/ne\rw.ts\n+x\n*** End Patch\nEOF")"
@@ -2703,6 +2731,9 @@ if [ "$RC" -eq 2 ]; then
 else
   ok "every event and script in .claude/settings.json is ported or explained (exit $RC ≠ 2)"
 fi
+# Kept for DOC_COUNTS below, which holds the matrix against it. Empty when no hook
+# has that shape — which is a state the comparison there must handle, not a skip.
+BOTH_NOTE="$(printf '%s\n' "$OUT" | grep -F 'are matched for BOTH apply_patch and Bash: ' || true)"
 
 echo "== every real PreToolUse hook with an \`if\` filters for ITSELF =="
 # Not applying a PreToolUse condition is sound only while each such script routes
@@ -2792,6 +2823,21 @@ DOC_COUNTS="$(node -e '
     if (!new RegExp("^#+ " + onPath[2] + "$", "m").test(target)) problems.push("the adapter points at " + onPath[1] + " / " + onPath[2] + ", and that file has no such heading");
     if ((adapter.match(/Requirements on PATH/g) || []).length !== 1) problems.push("the PATH pointer is spelled somewhere other than ON_PATH, where this check cannot see it");
   }
+  // REPORTING ON A COUPLING, not on behaviour: the jq taxonomy is stated in three
+  // documents, and a review found it corrected in one. Any file that says a script
+  // ends 127 without jq must also carry the caveat that `set -e` alone does not
+  // decide it (a jq call inside a command substitution does not end the script) —
+  // so a fourth copy is caught by being written, not by being remembered.
+  // Whitespace is collapsed first: prose wraps, and the phrase this looks for
+  // straddled a line break in the very file that carries it.
+  const jqClaimFiles = [".claude/rules/gotchas-codex-port.md", ".codex/AGENTS.md", "docs/guides/codex-cli-support-matrix.md", "AGENTS.md", "README.md", "CONTRIBUTING.md", "CLAUDE.md"]
+    .filter((f) => fs.existsSync(root + "/" + f))
+    .map((f) => [f, fs.readFileSync(root + "/" + f, "utf8").replace(/\s+/g, " ")])
+    .filter(([, t]) => /exit 127/.test(t) && /jq/.test(t));
+  if (jqClaimFiles.length === 0) problems.push("no document states what happens to a hook script without jq — this check is looking at the wrong files");
+  for (const [f, t] of jqClaimFiles) {
+    if (!/command substitution/.test(t)) problems.push(f + " says a script ends 127 without jq but not that `set -e` alone does not decide it (check-pr-metadata.sh has `set -e` and exits 0)");
+  }
   // Both files explain why an `if` hook loses its status line; twice that prose
   // kept saying the adapter applies every condition after it stopped doing so.
   const gen = fs.readFileSync(root + "/tools/agentic-sync/port.mjs", "utf8");
@@ -2820,8 +2866,24 @@ DOC_COUNTS="$(node -e '
   want(new RegExp("The other\\s+" + words[withStatus.length - statusOnSkipped] + " are dropped", "i"), "dropped status-line count should be " + words[withStatus.length - statusOnSkipped]);
   if (statusPorted === 0) want(/\*\*No ported hook shows a status line\.\*\*/, "the matrix should say no ported hook shows a status line");
   else problems.push("hooks.json now carries " + statusPorted + " statusMessage key(s) but the matrix says no ported hook shows one");
+  // The hooks matched for BOTH edit channels are named in the matrix. The
+  // generator computes that set on every run, so the document is held against ITS
+  // output (argv[2] is the note from the real --check above), in both directions:
+  // a hook it names and the matrix does not, and a hook the matrix names and it
+  // does not. The limit paragraph is cut out by its own heading text.
+  const note = process.argv[2] || "";
+  // Cut at the SENTENCE end (dot-space), not at the first dot — that one is in `.sh`.
+  const noted = (/are matched for BOTH apply_patch and Bash: (.*?)\. /.exec(note) || [, ""])[1]
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  const limitPara = (/\n- \*\*A `PreToolUse` check that gates on file paths[\s\S]*?(?=\n- \*\*|\n## )/.exec(doc) || [""])[0];
+  if (!limitPara) problems.push("the matrix has no both-channels limit entry to hold against the generator");
+  else {
+    const named = [...limitPara.matchAll(/`([\w.-]+\.sh)`/g)].map((m) => m[1]);
+    for (const n of noted) if (!named.includes(n)) problems.push("the generator reports " + n + " as matched for both edit channels and the matrix does not name it");
+    for (const n of named) if (!noted.includes(n)) problems.push("the matrix names " + n + " as matched for both edit channels and the generator does not");
+  }
   process.stdout.write(problems.length ? problems.join("; ") : "OK " + total + "/" + bash + "/" + conditional + "/" + patterns + "/" + agents + "/" + skills);
-' "$REPO_ROOT" 2>&1)"
+' "$REPO_ROOT" "$BOTH_NOTE" 2>&1)"
 case "$DOC_COUNTS" in
   "OK "*) ok "handler, Bash-matched, if-condition, agent and skill counts in the support matrix match the generated files (${DOC_COUNTS#OK })" ;;
   *) bad "the support matrix states a number the generated files contradict: $DOC_COUNTS" ;;
