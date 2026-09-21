@@ -98,5 +98,56 @@ if [ "$has_never" -eq 1 ] && [ "$has_network" -eq 1 ]; then
   exit 1
 fi
 
-echo "✓ codex-config-safety: committed profile is not the unattended+network-open combo — pass"
+# --- reject a committed CREDENTIAL VALUE -------------------------------------
+# This file names the MCP servers a Codex session gets, and the repository is
+# public. Codex has no `${VAR}` interpolation, so the only correct way to give a
+# server a secret is `env_vars = ["NAME", …]` — a list of variable NAMES it
+# forwards from the environment that starts it. A literal secret pasted in here
+# would be published.
+#
+# This replaces an earlier `permissions.deny` entry that merely stopped ONE agent
+# from editing the file. That guarded the writer; this guards the CONTENT, so it
+# also catches a human, another tool, or the Codex app itself writing a secret.
+#
+# TWO INDEPENDENT RULES, both over ACTIVE lines only:
+#   1. A well-known credential PREFIX anywhere (provider token shapes).
+#   2. A key whose NAME says secret (…KEY/TOKEN/SECRET/PASSWORD/PASSWD/CREDENTIAL)
+#      assigned a non-empty quoted literal. `env_vars = [...]` cannot trip this:
+#      the key there is `env_vars`, and the names live in the VALUE. A
+#      `${PLACEHOLDER}` value is allowed, since it carries nothing.
+CRED_SHAPES='(sk-[A-Za-z0-9_-]{16,}|sk_(live|test)_[A-Za-z0-9]{8,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|napi_[A-Za-z0-9]{20,}|AIza[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
+# A secret-ish key = value "literal". The value must contain a non-space character
+# and must not be a ${…} placeholder.
+SECRET_KEY_RE='(^[[:space:]]*|[{,][[:space:]]*)[A-Za-z_][A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[[:space:]]*=[[:space:]]*("|'"'"')[^"'"'"']'
+
+cred_hit=""
+if grep -Eqi "$CRED_SHAPES" <<<"$active"; then
+  cred_hit="a provider credential shape"
+elif grep -Eq "$SECRET_KEY_RE" <<<"$active" && ! grep -Eq "$SECRET_KEY_RE"'*\$\{' <<<"$active"; then
+  # Re-check line by line so a ${…} placeholder on one line does not excuse a
+  # literal on another.
+  while IFS= read -r line; do
+    grep -Eq "$SECRET_KEY_RE" <<<"$line" || continue
+    grep -Eq '=[[:space:]]*("|'"'"')\$\{[A-Za-z0-9_]+\}("|'"'"')[[:space:]]*$' <<<"$line" && continue
+    cred_hit="a secret-named key assigned a literal value"
+    break
+  done <<<"$active"
+fi
+
+if [ -n "$cred_hit" ]; then
+  src="${CODEX_CONFIG_PATH:-$ROOT/.codex/config.toml (committed HEAD)}"
+  echo "::error::CODEX-SECRET: committed Codex config appears to contain a credential" >&2
+  echo "  file:   $src" >&2
+  echo "  found:  $cred_hit" >&2
+  echo "" >&2
+  echo "  This repository is public and this file is committed, so a literal" >&2
+  echo "  secret here is published. Codex has no \${VAR} interpolation: pass" >&2
+  echo "  secrets by NAME instead, with env_vars = [\"MY_TOKEN\"], which Codex" >&2
+  echo "  forwards from the environment that starts it." >&2
+  echo "  If this is a false positive (a non-secret value whose key name merely" >&2
+  echo "  ends in _KEY), rename the key or move it out of this file." >&2
+  exit 1
+fi
+
+echo "✓ codex-config-safety: committed profile is not the unattended+network-open combo, and carries no credential — pass"
 exit 0

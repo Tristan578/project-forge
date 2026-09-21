@@ -368,6 +368,46 @@ else
 fi
 
 # =============================================================================
+# A committed CREDENTIAL. This file names the MCP servers a Codex session gets and
+# the repository is public, so a literal secret here would be published. Codex has
+# no `${VAR}` interpolation: secrets travel as NAMES in `env_vars = [...]`, which
+# must never trip the guard. This replaced a `permissions.deny` entry that only
+# stopped one agent from editing the file — content is guarded now, not the writer,
+# so a human or another tool writing a secret is caught too.
+echo "== a committed credential is rejected =="
+CRED_CASES=0
+while IFS='|' read -r want label content; do
+  [ -n "$want" ] || continue
+  CRED_CASES=$((CRED_CASES + 1))
+  run_fixture "$(printf '%b' "$content")"; rc=$?
+  if [ "$rc" -eq "$want" ]; then
+    ok "exit $rc as wanted — $label"
+  else
+    bad "$label: got exit $rc, wanted $want"
+  fi
+done <<'CRED_TABLE'
+1|a secret-named key assigned a literal|approval_policy = "untrusted"\n[mcp_servers.sentry.env]\nSENTRY_AUTH_TOKEN = "abc123def456"
+1|an anthropic-shaped key anywhere in the file|foo = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAA"
+1|a stripe live key|x = "sk_live_51AbCdEfGhIjKlMnOp"
+1|a github personal access token|x = "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+1|a PEM private key header|k = """-----BEGIN RSA PRIVATE KEY-----"""
+1|a secret inside a single-line inline table|e = { API_KEY = "literalvalue" }
+0|env_vars carrying NAMES only — the correct Codex mechanism|approval_policy = "untrusted"\n[mcp_servers.sentry]\nenv_vars = ["SENTRY_AUTH_TOKEN", "NEON_API_KEY"]
+0|a non-secret literal whose key is not secret-named|[mcp_servers.sentry.env]\nSENTRY_ORG = "tristan-nolan"\nSENTRY_PROJECT = "spawnforge-ai"
+0|a ${...} placeholder value carries nothing|TOKEN = "${SENTRY_AUTH_TOKEN}"
+0|a credential shape inside a whole-line comment is inactive|# example: SENTRY_AUTH_TOKEN = "abc123def456"\napproval_policy = "untrusted"
+CRED_TABLE
+if [ "$CRED_CASES" -eq 10 ]; then ok "all 10 credential cases were driven"; else bad "the credential table was not walked: $CRED_CASES of 10"; fi
+
+# The file this repo actually ships must pass BOTH rules, or the gate is red on main.
+if [ -f "$REPO_ROOT/.codex/config.toml" ]; then
+  run_fixture "$(cat "$REPO_ROOT/.codex/config.toml")"; rc=$?
+  if [ "$rc" -eq 0 ]; then ok "the repository's own .codex/config.toml passes the guard"; else bad "the repository's own .codex/config.toml FAILS the guard (exit $rc)"; fi
+else
+  bad "no .codex/config.toml in the repository — this guard has nothing to protect"
+fi
+
+# =============================================================================
 echo ""
 echo "== summary =="
 echo "  PASS=$PASS FAIL=$FAIL"

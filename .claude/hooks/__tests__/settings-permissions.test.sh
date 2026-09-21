@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Tests for the committed permission posture in .claude/settings.json:
 #   * a `permissions.allow` allow-list of safe read/build/test commands,
-#   * a `permissions.deny` guard protecting the two off-limits config files
-#     (.claude/settings.json and .codex/config.toml) for BOTH Edit and Write,
+#   * a `permissions.deny` guard protecting the off-limits config file
+#     (.claude/settings.json) for BOTH Edit and Write,
 #   * the auto-approve-safe-commands.sh hook wired as a PreToolUse Bash hook.
 #
 # Deny paths use the gitignore-anchored, project-root form `/<path>` so they
@@ -79,11 +79,16 @@ done
 assert_jq "allow-list has exactly 7 entries" '.permissions.allow | length == 7'
 
 # --- Off-limits file guards: project-root-anchored, Edit AND Write ---
+# `.codex/config.toml` was here too and is NOT any more. That entry stopped one
+# agent from editing the file; what it was protecting against is a SECRET reaching
+# a public repo, and it blocked maintenance of a file the README describes as
+# hand-edited. The protection moved to the CONTENT, where it is strictly stronger:
+# scripts/check-codex-config-safety.sh now rejects a committed credential in that
+# file whoever writes it — an agent, a human, or the Codex app itself — and its
+# suite drives ten cases for it. Do not re-add a deny here without removing that.
 for rule in \
   'Edit(/.claude/settings.json)' \
-  'Write(/.claude/settings.json)' \
-  'Edit(/.codex/config.toml)' \
-  'Write(/.codex/config.toml)' ; do
+  'Write(/.claude/settings.json)' ; do
   # shellcheck disable=SC2016  # $r is a jq variable bound via --arg, not a shell var
   assert_jq "deny contains $rule" --arg r "$rule" '.permissions.deny | index($r) != null'
 done
