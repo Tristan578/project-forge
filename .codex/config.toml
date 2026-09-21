@@ -1,5 +1,11 @@
 # SpawnForge — OpenAI Codex project configuration
 # See: https://developers.openai.com/codex/config-reference/
+#
+# HAND-EDITED, not generated. tools/agentic-sync/port.mjs only READS this file, to
+# check that the [mcp_servers.*] names below match .mcp.json — Codex never reads
+# .mcp.json, so without these blocks a Codex session has none of the 8 servers a
+# Claude Code session has (#8767). Parity is enforced from the first declaration,
+# so adding or removing a server here means doing the same in .mcp.json.
 
 # Model & approval
 model = "gpt-5.3-codex"
@@ -13,3 +19,52 @@ allow = ["**/*"]
 [features]
 shell_tool = false
 web_search = false
+
+# --- MCP servers: the same 8 as .mcp.json -------------------------------------
+# SECRETS ARE FORWARDED BY NAME, never written here. `.mcp.json` uses Claude's
+# `${VAR}` interpolation in `env`; Codex has no interpolation and instead takes
+# `env_vars = [...]`, a list of variable NAMES it passes through from the
+# environment that starts it. A non-secret value (an org slug) goes in `env` as a
+# literal. So this file contains no credential, and each server is inert unless
+# the named variables are already exported.
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp@latest"]
+
+[mcp_servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[mcp_servers.neon]
+command = "npx"
+args = ["-y", "@neondatabase/mcp-server-neon"]
+env_vars = ["NEON_API_KEY"]
+
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@playwright/mcp@latest"]
+
+[mcp_servers.sentry]
+command = "npx"
+args = ["-y", "@sentry/mcp-server@latest"]
+env_vars = ["SENTRY_AUTH_TOKEN"]
+
+# Non-secret identifiers, already public in this repo's docs.
+[mcp_servers.sentry.env]
+SENTRY_ORG = "tristan-nolan"
+SENTRY_PROJECT = "spawnforge-ai"
+
+[mcp_servers.stripe]
+command = "npx"
+args = ["-y", "@stripe/mcp@latest"]
+env_vars = ["STRIPE_SECRET_KEY"]
+
+[mcp_servers.taskboard]
+command = "node"
+args = [".claude/hooks/taskboard-launch.mjs", "mcp"]
+
+[mcp_servers.upstash]
+command = "npx"
+args = ["-y", "@upstash/mcp-server@latest"]
+env_vars = ["UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"]
