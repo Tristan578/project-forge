@@ -795,9 +795,12 @@ function main() {
 
   const bash = findBash();
   // jq, asked for BEFORE any script starts. Most scripts read their payload with
-  // it, and without it they split two ways, both wrong: the ones under `set -e`
-  // exit 127 with bash's "jq: command not found" swallowed by their own
-  // `2>/dev/null`, and the rest take their "nothing to inspect" branch and pass.
+  // it, and without it they split two ways, both wrong: the ones that call jq
+  // DIRECTLY under `set -e` exit 127 with bash's "jq: command not found" swallowed
+  // by their own `2>/dev/null`, and the rest take their "nothing to inspect" branch
+  // and pass. `set -e` alone does not decide it — a jq call inside a command
+  // substitution does not end the script, because bash clears -e there, which is
+  // why check-pr-metadata.sh has `set -euo pipefail` and still exits 0 (measured).
   // A requirement is all-or-nothing here, as bash is: the scripts that do not
   // use jq are held back too, so that its absence shows at session start and
   // not at the first push. (Asking "does THIS script use jq" would mean reading

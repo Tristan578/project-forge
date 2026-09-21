@@ -1997,7 +1997,7 @@ a carriage return after the delimiter on the opening line (to bash on Linux the 
 a whole command with CRLF line endings|apply_patch <<'EOF'\r\n@P@\r\nEOF\r\n
 a closing line ending in a carriage return (Git for Windows' bash closes there, bash on Linux does not)|apply_patch <<'EOF'\n@P@\nEOF\r\n
 a carriage return in the MIDDLE of a path — Git for Windows' bash deletes it wherever it stands, so the hooks were shown a path no glob matched while bash handed apply_patch the real one|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: prot\rected/new.ts\n+evil\n*** End Patch\nEOF
-a carriage return inside the MARKER, which hides the header from the entry gate while bash hands apply_patch a valid one — without both views this command is not refused but IGNORED, exit 0 with no hook run|apply_patch <<'EOF'\n*** Begin Patch\n*** Ad\rd File: protected/new.ts\n+evil\n*** End Patch\nEOF
+a carriage return inside the MARKER, which hides the header from the entry gate while bash hands apply_patch a valid one — read in the raw text alone this command is not refused but IGNORED, exit 0 with no hook run|apply_patch <<'EOF'\n*** Begin Patch\n*** Ad\rd File: protected/new.ts\n+evil\n*** End Patch\nEOF
 a carriage return between the marker and its colon|apply_patch <<'EOF'\n*** Begin Patch\n*** Add File\r: protected/new.ts\n+evil\n*** End Patch\nEOF
 a carriage return inside a Delete marker|apply_patch <<'EOF'\n*** Begin Patch\n*** Dele\rte File: docs/a.md\n*** End Patch\nEOF
 a carriage return inside an Update marker|apply_patch <<'EOF'\n*** Begin Patch\n*** Upda\rte File: protected/x.ts\n@@\n+evil\n*** End Patch\nEOF
@@ -2065,14 +2065,16 @@ if [ "$RC" -eq 2 ] && grep -qF 'the line that would close its heredoc (EOF) ends
 else
   bad "closing-line carriage return names the wrong cause: exit $RC, stderr: $ERR"
 fi
-# The entry gate is asked in EVERY view an applier might use. A CR inside the
-# MARKER hides the header from the raw text, so gating on that alone gave a silent
-# THIRD outcome — not ACCEPTED, not REFUSED, but IGNORED: exit 0, no hook run, and
-# Git for Windows' bash then handed apply_patch a valid header.
+# The entry gate is asked in the view the WIDEST applier uses: the text with every
+# carriage return deleted, which is what Git for Windows' bash runs. A CR inside the
+# MARKER hides the header from the RAW text, so gating on that gave a silent THIRD
+# outcome — not ACCEPTED, not REFUSED, but IGNORED: exit 0, no hook run, and that
+# bash then handed apply_patch a valid header. (Deleting carriage returns can only
+# CREATE a header, never destroy one, so this one view covers the raw one too.)
 rm -f "$LOG"
 adapt guard.sh "$(carried_payload PreToolUse "apply_patch <<'EOF'\n*** Begin Patch\n*** Ad\rd File: protected/new.ts\n+evil\n*** End Patch\nEOF")"
 if [ "$RC" -eq 2 ] && [ ! -e "$LOG" ] && grep -qF 'a carriage return that does not end a line' <<<"$ERR"; then
-  ok "a carriage return inside the MARKER is REFUSED, not ignored — the gate is asked in the CR-deleted view too"
+  ok "a carriage return inside the MARKER is REFUSED, not ignored — the gate is asked in the CR-deleted view"
 else
   bad "a CR inside the marker was not refused (exit $RC, 2 wanted; ran=$([ -e "$LOG" ] && echo yes || echo no)) — the adapter and Git for Windows' bash disagree about whether this is a patch: $ERR"
 fi
@@ -2823,20 +2825,49 @@ DOC_COUNTS="$(node -e '
     if (!new RegExp("^#+ " + onPath[2] + "$", "m").test(target)) problems.push("the adapter points at " + onPath[1] + " / " + onPath[2] + ", and that file has no such heading");
     if ((adapter.match(/Requirements on PATH/g) || []).length !== 1) problems.push("the PATH pointer is spelled somewhere other than ON_PATH, where this check cannot see it");
   }
-  // REPORTING ON A COUPLING, not on behaviour: the jq taxonomy is stated in three
-  // documents, and a review found it corrected in one. Any file that says a script
-  // ends 127 without jq must also carry the caveat that `set -e` alone does not
-  // decide it (a jq call inside a command substitution does not end the script) —
-  // so a fourth copy is caught by being written, not by being remembered.
-  // Whitespace is collapsed first: prose wraps, and the phrase this looks for
-  // straddled a line break in the very file that carries it.
-  const jqClaimFiles = [".claude/rules/gotchas-codex-port.md", ".codex/AGENTS.md", "docs/guides/codex-cli-support-matrix.md", "AGENTS.md", "README.md", "CONTRIBUTING.md", "CLAUDE.md"]
-    .filter((f) => fs.existsSync(root + "/" + f))
-    .map((f) => [f, fs.readFileSync(root + "/" + f, "utf8").replace(/\s+/g, " ")])
-    .filter(([, t]) => /exit 127/.test(t) && /jq/.test(t));
-  if (jqClaimFiles.length === 0) problems.push("no document states what happens to a hook script without jq — this check is looking at the wrong files");
+  // REPORTING ON A COUPLING, not on behaviour: the jq taxonomy was stated in four
+  // places and a review found it corrected in one. Anything that says a script ends
+  // 127 without jq must also carry the caveat that `set -e` alone does not decide it
+  // (a jq call in a command substitution does not end the script).
+  //
+  // The SUBJECT IS DERIVED, not listed. A hardcoded list was the first cut, and it
+  // shipped green over a copy it did not name: the comment in the adapter itself, a
+  // `.mjs` the list could not contain. So every file that could carry the claim is
+  // WALKED: the agent-instruction and doc trees plus the Codex surface, matched
+  // case-insensitively, because "Exit 127" is the same claim. Each file is
+  // NORMALISED first — line-leading comment markers dropped, then whitespace
+  // collapsed — because the phrase wraps, and in a source file it wraps across a
+  // `//`, which a plain whitespace collapse leaves sitting between the two words.
+  const skipDir = new Set(["node_modules", ".git", "dist", "build", "coverage", ".next", "target"]);
+  const walk = (d, acc) => {
+    let entries = [];
+    try { entries = fs.readdirSync(root + "/" + d, { withFileTypes: true }); } catch { return acc; }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const rel = d ? d + "/" + e.name : e.name;
+      if (e.isDirectory()) { if (!skipDir.has(e.name)) walk(rel, acc); }
+      else if (/\.(md|mjs|js|sh|toml|json|mdc|cursorrules)$/.test(e.name) || /^\.?[\w.-]*(rules|instructions)[\w.-]*$/i.test(e.name)) acc.push(rel);
+    }
+    return acc;
+  };
+  const jqCandidates = [...new Set([
+    ...walk(".claude", []), ...walk(".codex", []), ...walk(".agents", []), ...walk("docs", []), ...walk(".github", []),
+    ...fs.readdirSync(root).filter((f) => { try { return fs.statSync(root + "/" + f).isFile(); } catch { return false; } }),
+  ])].filter((f) => !/\.lock\.yml$/.test(f));
+  const jqClaimFiles = jqCandidates
+    .map((f) => { try { return [f, fs.readFileSync(root + "/" + f, "utf8").replace(/^[ \t]*(?:\/\/+|#+|\*)[ \t]?/gm, " ").replace(/\s+/g, " ")]; } catch { return null; } })
+    .filter(Boolean)
+    .filter(([, t]) => /(?:exit|status)\s+127/i.test(t) && /\bjq\b/.test(t));
+  // The vacuity guard names the copies that MUST be found, not a count. A bare
+  // floor could be lowered without any test noticing, because nothing observes it
+  // while the walk is healthy — and lowering it plus breaking the walk is green in
+  // combination, which is the shape lessons-learned #19 warns about. A missing
+  // path cannot be compensated for that way.
+  const jqFound = jqClaimFiles.map(([f]) => f);
+  for (const known of ["docs/guides/codex-cli-support-matrix.md", ".codex/AGENTS.md", ".claude/rules/gotchas-codex-port.md", ".codex/hooks/run-claude-hook.mjs"]) {
+    if (!jqFound.includes(known)) problems.push(known + " states what happens to a hook script without jq and the walk did not find it — the walk is looking in the wrong place (found: " + (jqFound.join(", ") || "nothing") + ")");
+  }
   for (const [f, t] of jqClaimFiles) {
-    if (!/command substitution/.test(t)) problems.push(f + " says a script ends 127 without jq but not that `set -e` alone does not decide it (check-pr-metadata.sh has `set -e` and exits 0)");
+    if (!/command substitution/i.test(t)) problems.push(f + " says a script ends 127 without jq but not that `set -e` alone does not decide it (check-pr-metadata.sh has `set -e` and exits 0)");
   }
   // Both files explain why an `if` hook loses its status line; twice that prose
   // kept saying the adapter applies every condition after it stopped doing so.
