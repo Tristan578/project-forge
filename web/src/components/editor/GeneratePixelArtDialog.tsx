@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { X, Wand2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useGenerationStore } from '@/stores/generationStore';
@@ -24,6 +24,10 @@ const DITHER_OPTIONS = [
 const PRESET_IDS = Object.keys(PALETTES).filter((id) => id !== 'custom') as PaletteId[];
 
 export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [prompt, setPrompt] = useState('');
   const [targetSize, setTargetSize] = useState<(typeof SIZES)[number]>(32);
   const [palette, setPalette] = useState<PaletteId>('pico-8');
@@ -129,8 +133,9 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
 
           {/* Style */}
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Style</label>
+            <label htmlFor={fieldId('style')} className="block text-xs text-zinc-400 mb-1">Style</label>
             <select
+              id={fieldId('style')}
               value={style}
               onChange={(e) => setStyle(e.target.value as typeof style)}
               className="w-full bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-zinc-100"
@@ -163,8 +168,9 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
 
           {/* Palette */}
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Palette</label>
+            <label htmlFor={fieldId('palette')} className="block text-xs text-zinc-400 mb-1">Palette</label>
             <select
+              id={fieldId('palette')}
               value={palette}
               onChange={(e) => setPalette(e.target.value as PaletteId)}
               className="w-full bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-zinc-100"
@@ -194,8 +200,9 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
 
           {/* Dithering */}
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Dithering</label>
+            <label htmlFor={fieldId('dithering')} className="block text-xs text-zinc-400 mb-1">Dithering</label>
             <select
+              id={fieldId('dithering')}
               value={dithering}
               onChange={(e) => setDithering(e.target.value)}
               className="w-full bg-zinc-800 border border-zinc-600 rounded px-3 py-2 text-sm text-zinc-100"
@@ -206,10 +213,11 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
             </select>
             {dithering !== 'none' && (
               <div className="mt-2">
-                <label className="text-xs text-zinc-400">
+                <label htmlFor={fieldId('dithering-intensity')} className="text-xs text-zinc-400">
                   Intensity: {Math.round(ditheringIntensity * 100)}%
                 </label>
                 <input
+                  id={fieldId('dithering-intensity')}
                   type="range"
                   min={0}
                   max={1}
