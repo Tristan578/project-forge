@@ -28,7 +28,32 @@
  * (see `int` below) is what keeps the two sides on a single value.
  */
 
-import type { GameComponentData, PlatformLoopMode, WinConditionType } from '@/stores/slices/types';
+import type {
+  CharacterControllerData,
+  CheckpointData,
+  CollectibleData,
+  DamageZoneData,
+  DialogueTriggerData,
+  FollowerData,
+  GameComponentData,
+  HealthData,
+  MovingPlatformData,
+  PlatformLoopMode,
+  ProjectileData,
+  SpawnerData,
+  TeleporterData,
+  TriggerZoneData,
+  WinConditionData,
+  WinConditionType,
+} from '@/stores/slices/types';
+// Type-only: `gameComponentCorrections` imports `gameComponentFields` from here
+// at runtime, so a value import in this direction would be a cycle.
+import type {
+  CorrectionReason,
+  CorrectionValue,
+  GameComponentFieldCorrection,
+  GameComponentWriteReport,
+} from './gameComponentCorrections';
 
 /** Store discriminant -> the engine's `component_name()`. */
 const ENGINE_TYPE_BY_STORE_TYPE: Record<GameComponentData['type'], string> = {
@@ -78,8 +103,12 @@ function ownEnumerableSnapshot(source: Record<string, unknown>): Record<string, 
  * the whole failure mode this module exists to prevent. It replaced a
  * `component as unknown as Record<string, Record<string, unknown>>` index, which
  * type-checked for every value including ones that were not components at all.
+ *
+ * Exported for `gameComponentCorrections`, which compares a field's value before
+ * and after a write to decide whether an adjustment marker still describes it.
+ * Returns a fresh shallow copy, so a caller cannot write through it.
  */
-function storePropsOf(component: GameComponentData): Record<string, unknown> {
+export function gameComponentFields(component: GameComponentData): Record<string, unknown> {
   switch (component.type) {
     case 'characterController': return { ...component.characterController };
     case 'health': return { ...component.health };
@@ -118,7 +147,7 @@ function propertiesOf(component: GameComponentData): Record<string, unknown> {
       oneShot: component.dialogueTrigger.oneShot,
     };
   }
-  return storePropsOf(component);
+  return gameComponentFields(component);
 }
 
 /**
@@ -132,7 +161,30 @@ function propertiesOf(component: GameComponentData): Record<string, unknown> {
  * except where the engine would have disagreed.
  */
 export function normalizeGameComponent(component: GameComponentData): GameComponentData {
-  return buildStoreComponent(component.type, storePropsOf(component)) ?? component;
+  return normalizeGameComponentWithReport(component).component;
+}
+
+/** A built component together with what building it did to the request. */
+export interface BuiltGameComponent extends GameComponentWriteReport {
+  readonly component: GameComponentData;
+}
+
+/**
+ * `normalizeGameComponent`, plus a record of every field the normalization
+ * changed (PF-1148).
+ *
+ * Zero corrections for an already-valid component — every field is read back
+ * under its own name and lands on itself — so the store can run this on every
+ * write and only ever hear about a value the engine would have disagreed with.
+ * `supplied` lists every field, since a complete component names all of them.
+ */
+export function normalizeGameComponentWithReport(component: GameComponentData): BuiltGameComponent {
+  const sink: CorrectionSink = { corrections: [], supplied: [] };
+  const built = buildComponent(component.type, gameComponentFields(component), sink);
+  // Unreachable for a well-typed component; kept so a value that is not one
+  // (a cast from a scene file) still comes back as itself rather than `null`.
+  if (built === null) return { component, corrections: [], supplied: [] };
+  return { component: built, corrections: sink.corrections, supplied: sink.supplied };
 }
 
 /** Convert a store component into the flat payload the engine expects. */
@@ -339,10 +391,10 @@ const isEngineFinite = (v: unknown): v is number =>
  * Proxy is free to answer differently on the second read, so a value that passed
  * the check need not be the value that crosses the wire.
  */
-const vec3 = (v: unknown, fallback: [number, number, number]): [number, number, number] => {
-  if (!Array.isArray(v) || v.length !== 3) return fallback;
+const parseVec3 = (v: unknown): [number, number, number] | null => {
+  if (!Array.isArray(v) || v.length !== 3) return null;
   const [x, y, z] = v as unknown[];
-  return isEngineFinite(x) && isEngineFinite(y) && isEngineFinite(z) ? [x, y, z] : fallback;
+  return isEngineFinite(x) && isEngineFinite(y) && isEngineFinite(z) ? [x, y, z] : null;
 };
 const nullableStr = (v: unknown, fallback: string | null): string | null =>
   v === null ? null
@@ -467,8 +519,8 @@ const MAX_WAYPOINTS = 64;
 
 /**
  * Mirror the engine's waypoint parse: keep the first `MAX_WAYPOINTS` entries
- * that are 3-element arrays of engine-finite numbers, and fall back to the
- * default route if that leaves nothing.
+ * that are 3-element arrays of engine-finite numbers, and answer `null` — the
+ * caller keeps the default route — if that leaves fewer than two.
  *
  * The store used to cast `props.waypoints` through untouched. The engine
  * `filter_map`s each entry, so an array carrying a 2-element point or a string
@@ -476,24 +528,30 @@ const MAX_WAYPOINTS = 64;
  * arbitrarily long one left it holding a `Vec` walked every frame and written
  * into every scene save.
  */
-const waypointList = (
+const parseWaypoints = (
   v: unknown,
-  fallback: [number, number, number][],
-): [number, number, number][] => {
-  if (!Array.isArray(v)) return fallback;
-  const out: [number, number, number][] = [];
+): { points: [number, number, number][]; truncated: boolean; given: number } | null => {
+  if (!Array.isArray(v)) return null;
+  const points: [number, number, number][] = [];
+  let truncated = false;
   for (const point of v) {
     // Cap first: `take` after `filter_map` on the Rust side stops the iterator
     // once the cap is reached, so neither side visits the rest of the array.
-    if (out.length >= MAX_WAYPOINTS) break;
+    // Reaching this with entries still unvisited is the only way anything is
+    // cut off for LENGTH, as opposed to dropped for being unusable — the
+    // report tells the two apart (PF-1148).
+    if (points.length >= MAX_WAYPOINTS) {
+      truncated = true;
+      break;
+    }
     if (!Array.isArray(point) || point.length !== 3) continue;
-    // Destructure rather than `.every` + re-read, for the reason `vec3` above
-    // documents: `every` skips holes, so `[0, , 0]` cleared the check and was
-    // pushed as `[0, undefined, 0]` — `[0, null, 0]` on the wire, dropped by the
-    // engine and kept by the store.
+    // Destructure rather than `.every` + re-read, for the reason `parseVec3`
+    // above documents: `every` skips holes, so `[0, , 0]` cleared the check and
+    // was pushed as `[0, undefined, 0]` — `[0, null, 0]` on the wire, dropped by
+    // the engine and kept by the store.
     const [x, y, z] = point as unknown[];
     if (!isEngineFinite(x) || !isEngineFinite(y) || !isEngineFinite(z)) continue;
-    out.push([x, y, z]);
+    points.push([x, y, z]);
   }
   // `if !waypoints.is_empty()` in the engine: an all-malformed list leaves the
   // Rust `Default` route standing rather than an empty one, which
@@ -503,7 +561,7 @@ const waypointList = (
   // reports nothing, so a surviving single point is a platform the store shows a
   // route for and the engine never moves — the same silent divergence an empty
   // list produces, just harder to see in the inspector.
-  return out.length >= 2 ? out : fallback;
+  return points.length >= 2 ? { points, truncated, given: v.length } : null;
 };
 
 /**
@@ -574,6 +632,167 @@ const int = (v: unknown, fallback: number, max: number): number =>
 const nullableInt = (v: unknown, fallback: number | null, max: number): number | null =>
   v === null ? null : typeof v === 'number' && Number.isFinite(v) ? int(v, 0, max) : fallback;
 
+// ---------------------------------------------------------------------------
+// The correction report (PF-1148)
+//
+// Every coercer above answers with the value the engine will hold and says
+// nothing about whether that is the value it was given. The reader below wraps
+// each of them per field and, when the caller asked for a report, records the
+// fields whose applied value differs from the supplied one. It never changes
+// what is applied: `buildStoreComponent` and `buildStoreComponentWithReport`
+// return the same component for the same bag, and the plain builder does no
+// reporting work at all.
+// ---------------------------------------------------------------------------
+
+/** Longest string a correction echoes verbatim; anything longer is described. */
+const MAX_ECHOED_TEXT = 48;
+
+function describeRaw(v: unknown): string {
+  if (v === undefined) return 'empty';
+  if (v === null) return 'null';
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (typeof v === 'string') {
+    return v.length <= MAX_ECHOED_TEXT ? JSON.stringify(v) : `a ${v.length}-character text`;
+  }
+  if (Array.isArray(v)) return `a list of ${v.length} ${v.length === 1 ? 'item' : 'items'}`;
+  if (typeof v === 'object') return 'an object';
+  return `a ${typeof v}`;
+}
+
+/**
+ * The caller's value as a correction carries it: itself when JSON can hold it
+ * and it is short enough to be worth echoing, a description otherwise. A
+ * 300-character id is not repeated back, and `NaN` is not silently turned into
+ * the `null` that `JSON.stringify` would write.
+ */
+function summarizeValue(v: unknown): CorrectionValue {
+  if (v === null || typeof v === 'boolean') return v;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : { description: String(v) };
+  if (typeof v === 'string') {
+    return v.length <= MAX_ECHOED_TEXT ? v : { description: `a ${v.length}-character text` };
+  }
+  if (Array.isArray(v) && v.length <= 4) {
+    // Indexed, so a hole reads as `undefined` and is shown as `empty`.
+    const parts: string[] = [];
+    for (let i = 0; i < v.length; i += 1) parts.push(describeRaw(v[i]));
+    return { description: `[${parts.join(', ')}]` };
+  }
+  return { description: describeRaw(v) };
+}
+
+/** Where a reporting build collects what it did. */
+interface CorrectionSink {
+  readonly corrections: GameComponentFieldCorrection[];
+  readonly supplied: string[];
+}
+
+/** Why a `u32` field moved, given that it did. */
+function u32Reason(v: unknown, max: number): CorrectionReason {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return 'invalid-replaced';
+  const rounded = Math.round(v);
+  return rounded < 0 || rounded > max ? 'clamped' : 'rounded';
+}
+
+/**
+ * The coercers above, bound to one component's bag and field names.
+ *
+ * Each method reads `props[field]` unless handed a value (the health aliases
+ * are), applies exactly the coercion it wraps, and — only when `sink` exists
+ * and the caller supplied a value — records a correction if what it applied is
+ * not what it was given. A missing key is never a correction: filling a gap
+ * with the default is the builder's job, not a change to anyone's request.
+ *
+ * `Field` is `keyof T`, so a reported field name that is not a real store field
+ * is a compile error rather than a marker on nothing.
+ */
+function fieldReader<T extends object>(
+  component: GameComponentData['type'],
+  props: Record<string, unknown>,
+  sink: CorrectionSink | undefined,
+) {
+  type Field = keyof T & string;
+  const named = (field: Field, v: unknown): boolean => {
+    if (sink === undefined || v === undefined) return false;
+    sink.supplied.push(field);
+    return true;
+  };
+  const record = (
+    field: Field,
+    requested: CorrectionValue,
+    applied: CorrectionValue,
+    reason: CorrectionReason,
+    unit?: 'points',
+  ): void => {
+    sink?.corrections.push(
+      unit === undefined
+        ? { component, field, requested, applied, reason }
+        : { component, field, requested, applied, reason, unit },
+    );
+  };
+  /** The shared shape of every scalar field: coerce, then compare. */
+  const scalar = <V extends CorrectionValue>(
+    field: Field,
+    v: unknown,
+    applied: V,
+    reason: () => CorrectionReason,
+  ): V => {
+    if (named(field, v) && applied !== v) record(field, summarizeValue(v), applied, reason());
+    return applied;
+  };
+
+  return {
+    num: (field: Field, fallback: number, range: EngineRange, v: unknown = props[field]): number =>
+      scalar(field, v, num(v, fallback, range), () => (isEngineFinite(v) ? 'clamped' : 'invalid-replaced')),
+    int: (field: Field, fallback: number, max: number, v: unknown = props[field]): number =>
+      scalar(field, v, int(v, fallback, max), () => u32Reason(v, max)),
+    nullableInt: (field: Field, fallback: number | null, max: number, v: unknown = props[field]): number | null =>
+      scalar(field, v, nullableInt(v, fallback, max), () => u32Reason(v, max)),
+    bool: (field: Field, fallback: boolean, v: unknown = props[field]): boolean =>
+      scalar(field, v, bool(v, fallback), () => 'invalid-replaced'),
+    str: (field: Field, fallback: string, v: unknown = props[field]): string =>
+      scalar(field, v, str(v, fallback), () => 'invalid-replaced'),
+    nullableStr: (field: Field, fallback: string | null, v: unknown = props[field]): string | null =>
+      scalar(field, v, nullableStr(v, fallback), () => 'invalid-replaced'),
+    oneOf: <E extends string>(field: Field, allowed: readonly E[], fallback: E, v: unknown = props[field]): E =>
+      scalar(field, v, oneOf(v, allowed, fallback), () => 'invalid-replaced'),
+    vec3: (
+      field: Field,
+      fallback: [number, number, number],
+      v: unknown = props[field],
+    ): [number, number, number] => {
+      const supplied = named(field, v);
+      const parsed = parseVec3(v);
+      if (parsed !== null) return parsed;
+      if (supplied) record(field, summarizeValue(v), [...fallback], 'invalid-replaced');
+      return fallback;
+    },
+    /**
+     * Counts, not points: "you gave 300, 64 were kept" is the report an author
+     * can act on, and echoing 300 coordinate triples back is the raw diff the
+     * issue asks us not to show.
+     */
+    waypoints: (
+      field: Field,
+      fallback: [number, number, number][],
+      v: unknown = props[field],
+    ): [number, number, number][] => {
+      const supplied = named(field, v);
+      const parsed = parseWaypoints(v);
+      if (supplied) {
+        if (parsed === null) {
+          const requested = Array.isArray(v) ? v.length : summarizeValue(v);
+          record(field, requested, fallback.length, 'invalid-replaced', 'points');
+        } else if (parsed.truncated) {
+          record(field, parsed.given, parsed.points.length, 'truncated', 'points');
+        } else if (parsed.points.length !== parsed.given) {
+          record(field, parsed.given, parsed.points.length, 'dropped', 'points');
+        }
+      }
+      return parsed?.points ?? fallback;
+    },
+  };
+}
+
 /**
  * Build a COMPLETE store component from a partial properties bag.
  *
@@ -594,165 +813,200 @@ export function buildStoreComponent(
   name: string,
   rawProps: Record<string, unknown> = {},
 ): GameComponentData | null {
+  return buildComponent(name, rawProps, undefined);
+}
+
+/**
+ * `buildStoreComponent`, plus the per-field record of what the build changed
+ * (PF-1148): one {@link GameComponentFieldCorrection} for each field whose
+ * applied value is not the value supplied, and the list of fields supplied.
+ *
+ * This is the call for any path whose values came from someone who will not be
+ * looking at the inspector when they land — the chat and MCP tools, the
+ * generation pipeline — so the request and the result can be told apart later.
+ */
+export function buildStoreComponentWithReport(
+  name: string,
+  rawProps: Record<string, unknown> = {},
+): BuiltGameComponent | null {
+  const sink: CorrectionSink = { corrections: [], supplied: [] };
+  const component = buildComponent(name, rawProps, sink);
+  return component === null
+    ? null
+    : { component, corrections: sink.corrections, supplied: sink.supplied };
+}
+
+function buildComponent(
+  name: string,
+  rawProps: Record<string, unknown>,
+  sink: CorrectionSink | undefined,
+): GameComponentData | null {
   const props = ownEnumerableSnapshot(rawProps);
   switch (toStoreComponentType(name)) {
-    case 'characterController':
+    case 'characterController': {
+      const f = fieldReader<CharacterControllerData>('characterController', props, sink);
       return {
         type: 'characterController',
         characterController: {
-          speed: num(props.speed, 5, ENGINE_PROP_RANGES.character_controller.speed),
-          jumpHeight: num(props.jumpHeight, 8, ENGINE_PROP_RANGES.character_controller.jumpHeight),
-          gravityScale: num(
-            props.gravityScale,
-            1,
-            ENGINE_PROP_RANGES.character_controller.gravityScale,
-          ),
-          canDoubleJump: bool(props.canDoubleJump, false),
+          speed: f.num('speed', 5, ENGINE_PROP_RANGES.character_controller.speed),
+          jumpHeight: f.num('jumpHeight', 8, ENGINE_PROP_RANGES.character_controller.jumpHeight),
+          gravityScale: f.num('gravityScale', 1, ENGINE_PROP_RANGES.character_controller.gravityScale),
+          canDoubleJump: f.bool('canDoubleJump', false),
         },
       };
+    }
     case 'health': {
+      const f = fieldReader<HealthData>('health', props, sink);
       // The chat tool has always accepted `maxHealth`/`currentHealth` aliases;
       // keep them working, and default current to max so a bare `maxHp` bump
       // doesn't leave the entity on the old (lower) current value.
-      const maxHp = num(props.maxHealth ?? props.maxHp, 100, ENGINE_PROP_RANGES.health.maxHp);
+      const maxHp = f.num('maxHp', 100, ENGINE_PROP_RANGES.health.maxHp, props.maxHealth ?? props.maxHp);
       return {
         type: 'health',
         health: {
           maxHp,
           // Clamped, then used as the fallback — `maxHp` is already inside
           // `currentHp`'s own range, so the engine's "current defaults to max"
-          // rule lands on the same number on both sides.
-          currentHp: num(
-            props.currentHealth ?? props.currentHp,
+          // rule lands on the same number on both sides. A fallback is not a
+          // correction: no current value was asked for.
+          currentHp: f.num(
+            'currentHp',
             maxHp,
             ENGINE_PROP_RANGES.health.currentHp,
+            props.currentHealth ?? props.currentHp,
           ),
-          invincibilitySecs: num(
-            props.invincibilitySecs,
-            0.5,
-            ENGINE_PROP_RANGES.health.invincibilitySecs,
-          ),
-          respawnOnDeath: bool(props.respawnOnDeath, true),
-          respawnPoint: vec3(props.respawnPoint, [0, 1, 0]),
-          despawnOnDeath: bool(props.despawnOnDeath, true),
+          invincibilitySecs: f.num('invincibilitySecs', 0.5, ENGINE_PROP_RANGES.health.invincibilitySecs),
+          respawnOnDeath: f.bool('respawnOnDeath', true),
+          respawnPoint: f.vec3('respawnPoint', [0, 1, 0]),
+          despawnOnDeath: f.bool('despawnOnDeath', true),
         },
       };
     }
-    case 'collectible':
+    case 'collectible': {
+      const f = fieldReader<CollectibleData>('collectible', props, sink);
       return {
         type: 'collectible',
         collectible: {
-          value: int(props.value, 1, ENGINE_PROP_MAXIMA.collectible.value),
-          destroyOnCollect: bool(props.destroyOnCollect, true),
-          pickupSoundAsset: nullableStr(props.pickupSoundAsset, null),
-          rotateSpeed: num(props.rotateSpeed, 90, ENGINE_PROP_RANGES.collectible.rotateSpeed),
+          value: f.int('value', 1, ENGINE_PROP_MAXIMA.collectible.value),
+          destroyOnCollect: f.bool('destroyOnCollect', true),
+          pickupSoundAsset: f.nullableStr('pickupSoundAsset', null),
+          rotateSpeed: f.num('rotateSpeed', 90, ENGINE_PROP_RANGES.collectible.rotateSpeed),
         },
       };
-    case 'damageZone':
+    }
+    case 'damageZone': {
+      const f = fieldReader<DamageZoneData>('damageZone', props, sink);
       return {
         type: 'damageZone',
         damageZone: {
-          damagePerSecond: num(
-            props.damagePerSecond,
-            25,
-            ENGINE_PROP_RANGES.damage_zone.damagePerSecond,
-          ),
-          oneShot: bool(props.oneShot, false),
+          damagePerSecond: f.num('damagePerSecond', 25, ENGINE_PROP_RANGES.damage_zone.damagePerSecond),
+          oneShot: f.bool('oneShot', false),
         },
       };
-    case 'checkpoint':
-      return { type: 'checkpoint', checkpoint: { autoSave: bool(props.autoSave, true) } };
-    case 'teleporter':
+    }
+    case 'checkpoint': {
+      const f = fieldReader<CheckpointData>('checkpoint', props, sink);
+      return { type: 'checkpoint', checkpoint: { autoSave: f.bool('autoSave', true) } };
+    }
+    case 'teleporter': {
+      const f = fieldReader<TeleporterData>('teleporter', props, sink);
       return {
         type: 'teleporter',
         teleporter: {
-          targetPosition: vec3(props.targetPosition, [0, 1, 0]),
-          cooldownSecs: num(props.cooldownSecs, 1, ENGINE_PROP_RANGES.teleporter.cooldownSecs),
+          targetPosition: f.vec3('targetPosition', [0, 1, 0]),
+          cooldownSecs: f.num('cooldownSecs', 1, ENGINE_PROP_RANGES.teleporter.cooldownSecs),
         },
       };
-    case 'movingPlatform':
+    }
+    case 'movingPlatform': {
+      const f = fieldReader<MovingPlatformData>('movingPlatform', props, sink);
       return {
         type: 'movingPlatform',
         movingPlatform: {
-          speed: num(props.speed, 2, ENGINE_PROP_RANGES.moving_platform.speed),
-          waypoints: waypointList(props.waypoints, [
+          speed: f.num('speed', 2, ENGINE_PROP_RANGES.moving_platform.speed),
+          waypoints: f.waypoints('waypoints', [
             [0, 0, 0],
             [0, 3, 0],
           ]),
-          pauseDuration: num(
-            props.pauseDuration,
-            0.5,
-            ENGINE_PROP_RANGES.moving_platform.pauseDuration,
-          ),
-          loopMode: oneOf(props.loopMode, PLATFORM_LOOP_MODES, 'pingPong'),
+          pauseDuration: f.num('pauseDuration', 0.5, ENGINE_PROP_RANGES.moving_platform.pauseDuration),
+          loopMode: f.oneOf('loopMode', PLATFORM_LOOP_MODES, 'pingPong'),
         },
       };
-    case 'triggerZone':
+    }
+    case 'triggerZone': {
+      const f = fieldReader<TriggerZoneData>('triggerZone', props, sink);
       return {
         type: 'triggerZone',
         triggerZone: {
-          eventName: str(props.eventName, 'trigger'),
-          oneShot: bool(props.oneShot, false),
+          eventName: f.str('eventName', 'trigger'),
+          oneShot: f.bool('oneShot', false),
         },
       };
-    case 'spawner':
+    }
+    case 'spawner': {
+      const f = fieldReader<SpawnerData>('spawner', props, sink);
       return {
         type: 'spawner',
         spawner: {
-          entityType: str(props.entityType, 'cube'),
-          intervalSecs: num(props.intervalSecs, 3, ENGINE_PROP_RANGES.spawner.intervalSecs),
-          maxCount: int(props.maxCount, 5, ENGINE_PROP_MAXIMA.spawner.maxCount),
-          spawnOffset: vec3(props.spawnOffset, [0, 1, 0]),
-          onTrigger: nullableStr(props.onTrigger, null),
+          entityType: f.str('entityType', 'cube'),
+          intervalSecs: f.num('intervalSecs', 3, ENGINE_PROP_RANGES.spawner.intervalSecs),
+          maxCount: f.int('maxCount', 5, ENGINE_PROP_MAXIMA.spawner.maxCount),
+          spawnOffset: f.vec3('spawnOffset', [0, 1, 0]),
+          onTrigger: f.nullableStr('onTrigger', null),
         },
       };
-    case 'follower':
+    }
+    case 'follower': {
+      const f = fieldReader<FollowerData>('follower', props, sink);
       return {
         type: 'follower',
         follower: {
-          targetEntityId: nullableStr(props.targetEntityId, null),
-          speed: num(props.speed, 3, ENGINE_PROP_RANGES.follower.speed),
-          stopDistance: num(props.stopDistance, 1.5, ENGINE_PROP_RANGES.follower.stopDistance),
-          lookAtTarget: bool(props.lookAtTarget, true),
+          targetEntityId: f.nullableStr('targetEntityId', null),
+          speed: f.num('speed', 3, ENGINE_PROP_RANGES.follower.speed),
+          stopDistance: f.num('stopDistance', 1.5, ENGINE_PROP_RANGES.follower.stopDistance),
+          lookAtTarget: f.bool('lookAtTarget', true),
         },
       };
-    case 'projectile':
+    }
+    case 'projectile': {
+      const f = fieldReader<ProjectileData>('projectile', props, sink);
       return {
         type: 'projectile',
         projectile: {
-          speed: num(props.speed, 15, ENGINE_PROP_RANGES.projectile.speed),
-          damage: num(props.damage, 10, ENGINE_PROP_RANGES.projectile.damage),
-          lifetimeSecs: num(props.lifetimeSecs, 5, ENGINE_PROP_RANGES.projectile.lifetimeSecs),
-          gravity: bool(props.gravity, false),
-          destroyOnHit: bool(props.destroyOnHit, true),
+          speed: f.num('speed', 15, ENGINE_PROP_RANGES.projectile.speed),
+          damage: f.num('damage', 10, ENGINE_PROP_RANGES.projectile.damage),
+          lifetimeSecs: f.num('lifetimeSecs', 5, ENGINE_PROP_RANGES.projectile.lifetimeSecs),
+          gravity: f.bool('gravity', false),
+          destroyOnHit: f.bool('destroyOnHit', true),
         },
       };
-    case 'winCondition':
+    }
+    case 'winCondition': {
+      const f = fieldReader<WinConditionData>('winCondition', props, sink);
       return {
         type: 'winCondition',
         winCondition: {
-          conditionType: oneOf(props.conditionType, WIN_CONDITION_TYPES, 'score'),
-          targetScore: nullableInt(props.targetScore, 10, ENGINE_PROP_MAXIMA.win_condition.targetScore),
-          targetEntityId: nullableStr(props.targetEntityId, null),
+          conditionType: f.oneOf('conditionType', WIN_CONDITION_TYPES, 'score'),
+          targetScore: f.nullableInt('targetScore', 10, ENGINE_PROP_MAXIMA.win_condition.targetScore),
+          targetEntityId: f.nullableStr('targetEntityId', null),
         },
       };
-    case 'dialogueTrigger':
+    }
+    case 'dialogueTrigger': {
       // Accepts the store's field names; the engine's spellings are applied by
       // `toWireComponent`, which is the only place the two vocabularies meet.
+      const f = fieldReader<DialogueTriggerData>('dialogueTrigger', props, sink);
       return {
         type: 'dialogueTrigger',
         dialogueTrigger: {
-          treeId: str(props.treeId, ''),
-          triggerRadius: num(
-            props.triggerRadius,
-            3,
-            ENGINE_PROP_RANGES.dialogue_trigger.interactionRadius,
-          ),
-          requireInteract: bool(props.requireInteract, true),
-          interactKey: str(props.interactKey, 'interact'),
-          oneShot: bool(props.oneShot, false),
+          treeId: f.str('treeId', ''),
+          triggerRadius: f.num('triggerRadius', 3, ENGINE_PROP_RANGES.dialogue_trigger.interactionRadius),
+          requireInteract: f.bool('requireInteract', true),
+          interactKey: f.str('interactKey', 'interact'),
+          oneShot: f.bool('oneShot', false),
         },
       };
+    }
     case null:
       return null;
   }
