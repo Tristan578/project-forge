@@ -398,8 +398,15 @@ the wrong command|[mcp_servers.alpha]\ncommand = "node"\nargs = ["-y", "@scope/p
 a dropped credential NAME, so the secret never reaches the server|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha forwards ALPHA_TOKEN
 a changed non-secret literal|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "someone-else"\n|alpha sets ALPHA_ORG
 an args array that is never closed is REPORTED, not read as empty|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"\nenv_vars = ["ALPHA_TOKEN"]\n|could not be read
+an EXTRA arg after a continuation line whose COMMENT holds a stray bracket|[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y", "@scope/pkg@latest", # ] note\n    "--allow-shell-exec",\n]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha args are
 MCP_SHAPE_TABLE
-if [ "$SHAPE_ROWS" -eq 5 ]; then ok "all 5 MCP shape-drift rows were driven"; else bad "the MCP shape table was not walked: $SHAPE_ROWS of 5"; fi
+if [ "$SHAPE_ROWS" -eq 6 ]; then ok "all 6 MCP shape-drift rows were driven"; else bad "the MCP shape table was not walked: $SHAPE_ROWS of 6"; fi
+# …and the SAME shape with no extra argument is parity, so the bracket-in-a-comment
+# fix did not simply make every commented array unreadable. A `#` or a bracket
+# INSIDE a quoted value is data, not a delimiter, on the same reasoning.
+# shellcheck disable=SC2059  # the fixtures carry \n escapes that printf must expand
+printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y", "@scope/pkg@latest", # ] note\n]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "a comment containing a bracket does not close the array early"
 # The Codex app rewrites this file with MULTI-LINE arrays. That is the same TOML,
 # so it must read as parity — a check that called it drift would go red every time
 # the app touched the file.

@@ -5,9 +5,9 @@
 #     (.claude/settings.json) for BOTH Edit and Write,
 #   * the auto-approve-safe-commands.sh hook wired as a PreToolUse Bash hook.
 #
-# Deny paths use the gitignore-anchored, project-root form `/<path>` so they
-# match regardless of the agent's current working directory. Edit and Write are
-# distinct permission tools, so each off-limits file is denied for both.
+# The deny path uses the gitignore-anchored, project-root form `/<path>` so it
+# matches regardless of the agent's current working directory. Edit and Write are
+# distinct permission tools, so the off-limits file is denied for both.
 #
 # Run: bash .claude/hooks/__tests__/settings-permissions.test.sh
 set -uo pipefail

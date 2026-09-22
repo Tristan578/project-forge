@@ -795,9 +795,34 @@ function codexServerBlocks(text) {
     if (!blocks.has(n)) blocks.set(n, { command: undefined, args: [], envVars: [], env: {}, parseError: '' });
     return blocks.get(n);
   };
-  // `["-y", "pkg"]` or a multi-line array opened on this line — returns null when
-  // the array is not closed here, so the caller keeps consuming.
-  const scalars = (s) => [...s.matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => (m[1] !== undefined ? m[1] : m[2]));
+  // ONE PASS PER LINE, string-aware. Counting brackets over the raw text let a
+  // trailing comment containing a stray `]` close the array early: the elements
+  // after it were dropped, no parseError was raised, and mcpParity() then reported
+  // PARITY on a config that really differed — a server silently carrying an extra
+  // argument. A `#` inside a quoted value is not a comment either, and a bracket
+  // inside one is not a delimiter, so quotes have to be tracked to get any of it
+  // right. Returns the quoted scalars and the bracket depth change, comment excluded.
+  const readLine = (s) => {
+    const values = [];
+    let depth = 0;
+    let i = 0;
+    while (i < s.length) {
+      const c = s[i];
+      if (c === '"' || c === "'") {
+        const end = s.indexOf(c, i + 1);
+        if (end === -1) { values.push(s.slice(i + 1)); i = s.length; break; } // unterminated
+        values.push(s.slice(i + 1, end));
+        i = end + 1;
+        continue;
+      }
+      if (c === '#') break; // unquoted: the rest of the line is a comment
+      if (c === '[') depth += 1;
+      if (c === ']') depth -= 1;
+      i += 1;
+    }
+    return { values, depth };
+  };
+  const scalars = (s) => readLine(s).values;
   for (let i = 0; i < lines.length; i += 1) {
     const raw = lines[i];
     const line = raw.replace(/^\s+/, '');
@@ -829,14 +854,15 @@ function codexServerBlocks(text) {
     if (key === 'args' || key === 'env_vars') {
       // Consume until the array closes, so the multi-line form reads the same as
       // the inline one. An unterminated array is a parseError, never an empty list.
-      let depth = (rest.match(/\[/g) || []).length - (rest.match(/\]/g) || []).length;
-      let collected = scalars(rest);
+      const first = readLine(rest);
+      let depth = first.depth;
+      let collected = first.values;
       let guard = 0;
       while (depth > 0 && i + 1 < lines.length) {
         i += 1;
-        const cont = lines[i];
-        collected = collected.concat(scalars(cont));
-        depth += (cont.match(/\[/g) || []).length - (cont.match(/\]/g) || []).length;
+        const cont = readLine(lines[i]);
+        collected = collected.concat(cont.values);
+        depth += cont.depth;
         if ((guard += 1) > 500) break;
       }
       if (depth > 0) block.parseError = `${key} array is not closed`;
@@ -913,7 +939,7 @@ function mcpParity() {
       out.problems.push(`mcp:      ${n} command is ${JSON.stringify(got.command)} in .codex/config.toml but ${JSON.stringify(wanted.command)} in .mcp.json`);
     }
     const wantArgs = Array.isArray(wanted.args) ? wanted.args : [];
-    if (wantArgs.join(' ') !== got.args.join(' ')) {
+    if (wantArgs.join('\0') !== got.args.join('\0')) {
       out.problems.push(`mcp:      ${n} args are ${JSON.stringify(got.args)} in .codex/config.toml but ${JSON.stringify(wantArgs)} in .mcp.json`);
     }
     // The env is compared by MEANING, since the two files express it differently.

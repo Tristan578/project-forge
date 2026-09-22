@@ -5,27 +5,46 @@ what an autonomous agent (Claude Code) is auto-allowed to run, what it is
 hard-blocked from touching, and how a human changes any of it. Read this if a
 tool call was unexpectedly **denied** or unexpectedly **auto-approved**.
 
-## Two off-limits files (hard-blocked, not prompted)
+## One off-limits file (hard-blocked, not prompted)
 
-The `permissions.deny` block blocks `Edit` and `Write` to exactly two paths:
+The `permissions.deny` block blocks `Edit` and `Write` to exactly one path:
 
 | File | Why it is off-limits |
 |------|----------------------|
 | `.claude/settings.json` | It defines the agent's OWN permissions, hooks, and deny rules. Letting an agent edit it would let the agent widen its own sandbox — rules cannot constrain the thing that governs them. |
-| `.codex/config.toml` | The Codex CLI's committed config (sandbox mode, approval policy, MCP servers). Same self-governance problem for the Codex agent, and a permissive profile here has regressed before — see the Codex permissive-profile guard wired into `.github/workflows/ci.yml`. |
+
+`.codex/config.toml` used to be here too, for the same self-governance reason.
+That entry was removed in #10134, because it restrained ONE writer rather than the
+file's content while blocking maintenance of a file this repo hand-maintains (the
+MCP server declarations live there). What guards it now:
+
+- **Its dangerous PROFILE** — `scripts/check-codex-config-safety.sh` in CI rejects
+  a committed `approval_policy = "never"` together with `network_access = true`,
+  whoever wrote it. That is the regression the old entry was reacting to, and it
+  was always the check doing the work rather than the deny.
+- **Secret-shaped CONTENT** — GitHub secret-scanning push protection, enabled
+  repo-wide, rejects a recognised credential at push time for every file and every
+  actor. Verify with
+  `gh api repos/Tristan578/project-forge --jq .security_and_analysis`.
+- **Drift from `.mcp.json`** — `tools/agentic-sync/port.mjs --check` compares the
+  declared servers' names, command, args and secret names.
+
+Residual, stated plainly: push protection matches KNOWN provider patterns, so an
+arbitrary internal credential with no recognisable shape is not caught by it. The
+deny never closed that either.
 
 `deny` is a HARD block: the agent gets a refusal, not a "do you want to allow
-this?" prompt. The paths are root-anchored (`/.claude/...`, `/.codex/...`) and
-denied for BOTH `Edit` and `Write` — they are distinct tools, and a deny on one
-does not imply the other.
+this?" prompt. The path is root-anchored (`/.claude/settings.json`) and denied for
+BOTH `Edit` and `Write` — they are distinct tools, and a deny on one does not
+imply the other.
 
 ### How these files actually change
 
-A human edits them by hand, in a normal editor or via Claude Code's interactive
+A human edits it by hand, in a normal editor or via Claude Code's interactive
 `/permissions` UI — neither path goes through the `Edit`/`Write` tools the deny
-rules gate. CI re-checks both on every change: `settings-permissions.test.sh`
-validates the permissions posture, and the Codex guard in `ci.yml` rejects a
-permissive Codex profile.
+rule gates. CI re-checks the posture on every change with
+`settings-permissions.test.sh`, and the Codex guard in `ci.yml` independently
+rejects a permissive Codex profile whether or not any deny rule exists.
 
 ### If an agent legitimately needs one of these changed
 
