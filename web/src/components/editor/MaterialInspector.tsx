@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState, useMemo, memo } from 'react';
+import { useCallback, useId, useRef, useState, useMemo, memo } from 'react';
 import { Image as ImageIcon, X, ChevronDown, ChevronRight, BookmarkPlus, Sparkles, HelpCircle, Layers } from 'lucide-react';
 import { useEditorStore, type MaterialData } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -23,7 +23,9 @@ interface SliderRowProps {
 }
 
 function SliderRow({ label, value, min = 0, max = 1, step = 0.01, onChange, tooltipTerm, tooltipText }: SliderRowProps) {
-  const inputId = `slider-${label.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`;
+  // useId, not an id derived from the label: a label-derived id repeats when
+  // the inspector mounts twice, and whenever two rows share a label.
+  const inputId = useId();
   return (
     <div className="flex items-center gap-2">
       <label htmlFor={inputId} className="w-20 shrink-0 text-xs text-zinc-400">
@@ -64,6 +66,7 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
   const removeTexture = useEditorStore((s) => s.removeTexture);
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const fileRef = useRef<HTMLInputElement>(null);
+  const selectId = useId();
 
   const assetName = textureRef ? assetRegistry[textureRef]?.name : null;
 
@@ -101,13 +104,14 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
 
   return (
     <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400">
+      <label htmlFor={selectId} className="w-20 shrink-0 text-xs text-zinc-400">
         {label}
         {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
       </label>
       {textureAssets.length > 0 ? (
         <>
           <select
+            id={selectId}
             value={textureRef ?? '__none__'}
             onChange={(e) => handleSelectChange(e.target.value)}
             className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
@@ -156,6 +160,7 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
         ref={fileRef}
         type="file"
         accept=".png,.jpg,.jpeg,.webp"
+        aria-label={`Upload ${label.toLowerCase()} texture file`}
         className="hidden"
         onChange={(e) => handleFileSelect(e.target.files)}
       />
@@ -186,12 +191,14 @@ function CollapsibleSection({ title, children, defaultOpen = false }: {
 
 function PresetSelector({ onApply, onSaveToLibrary }: { onApply: (preset: MaterialPreset) => void; onSaveToLibrary: () => void }) {
   const [selectedId, setSelectedId] = useState<string>('');
+  const presetId = useId();
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
-        <label className="w-20 shrink-0 text-xs text-zinc-400">Preset<InfoTooltip term="materialPreset" /></label>
+        <label htmlFor={presetId} className="w-20 shrink-0 text-xs text-zinc-400">Preset<InfoTooltip term="materialPreset" /></label>
         <select
+          id={presetId}
           value={selectedId}
           onChange={(e) => setSelectedId(e.target.value)}
           className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
@@ -252,6 +259,10 @@ export const MaterialInspector = memo(function MaterialInspector() {
   const removeShaderEffect = useEditorStore((s) => s.removeShaderEffect);
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
   const openShaderEditor = useShaderEditorStore((s) => s.openShaderEditor);
+  // useId, not literal ids: the inspector can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
 
   const handleUpdate = useCallback(
     (partial: Partial<MaterialData>) => {
@@ -353,8 +364,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
         {/* Shader Effect */}
         <CollapsibleSection title="Shader Effect" defaultOpen={shaderType !== 'none'}>
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400">Type<InfoTooltip term="shaderType" /></label>
+            <label htmlFor={fieldId('shader-type')} className="w-20 shrink-0 text-xs text-zinc-400">Type<InfoTooltip term="shaderType" /></label>
             <select
+              id={fieldId('shader-type')}
               value={shaderType}
               onChange={(e) => handleShaderTypeChange(e.target.value)}
               className="flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
@@ -378,8 +390,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
             <>
               {/* Common params */}
               <div className="flex items-center gap-2">
-                <label className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip text="The color applied to this shader effect" /></label>
+                <label htmlFor={fieldId('shader-color')} className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip text="The color applied to this shader effect" /></label>
                 <input
+                  id={fieldId('shader-color')}
                   type="color"
                   value={linearToHex(primaryShaderEffect.customColor[0], primaryShaderEffect.customColor[1], primaryShaderEffect.customColor[2])}
                   onChange={(e) => {
@@ -453,8 +466,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Base Color */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip term="baseColor" /></label>
+          <label htmlFor={fieldId('base-color')} className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip term="baseColor" /></label>
           <input
+            id={fieldId('base-color')}
             type="color"
             value={baseColorHex}
             onChange={(e) => {
@@ -486,8 +500,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Metallic */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Metallic<InfoTooltip term="metallic" /></label>
+          <label htmlFor={fieldId('metallic')} className="w-20 shrink-0 text-xs text-zinc-400">Metallic<InfoTooltip term="metallic" /></label>
           <input
+            id={fieldId('metallic')}
             type="range"
             min={0}
             max={1}
@@ -506,8 +521,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Roughness */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Roughness<InfoTooltip term="roughness" /></label>
+          <label htmlFor={fieldId('roughness')} className="w-20 shrink-0 text-xs text-zinc-400">Roughness<InfoTooltip term="roughness" /></label>
           <input
+            id={fieldId('roughness')}
             type="range"
             min={0}
             max={1}
@@ -526,8 +542,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Reflectance */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Reflectance<InfoTooltip term="reflectance" /></label>
+          <label htmlFor={fieldId('reflectance')} className="w-20 shrink-0 text-xs text-zinc-400">Reflectance<InfoTooltip term="reflectance" /></label>
           <input
+            id={fieldId('reflectance')}
             type="range"
             min={0}
             max={1}
@@ -546,8 +563,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Emissive */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Emissive<InfoTooltip term="emissive" /></label>
+          <label htmlFor={fieldId('emissive')} className="w-20 shrink-0 text-xs text-zinc-400">Emissive<InfoTooltip term="emissive" /></label>
           <input
+            id={fieldId('emissive')}
             type="color"
             value={emissiveHex}
             onChange={(e) => {
@@ -581,8 +599,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Double Sided */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Double Sided<InfoTooltip term="doubleSided" /></label>
+          <label htmlFor={fieldId('double-sided')} className="w-20 shrink-0 text-xs text-zinc-400">Double Sided<InfoTooltip term="doubleSided" /></label>
           <input
+            id={fieldId('double-sided')}
             type="checkbox"
             checked={primaryMaterial.doubleSided}
             onChange={(e) => handleUpdate({ doubleSided: e.target.checked })}
@@ -593,8 +612,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Unlit */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Unlit<InfoTooltip term="unlit" /></label>
+          <label htmlFor={fieldId('unlit')} className="w-20 shrink-0 text-xs text-zinc-400">Unlit<InfoTooltip term="unlit" /></label>
           <input
+            id={fieldId('unlit')}
             type="checkbox"
             checked={primaryMaterial.unlit}
             onChange={(e) => handleUpdate({ unlit: e.target.checked })}
@@ -647,8 +667,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
           <TextureSlot label="Depth Map" slot="depth_map" textureRef={primaryMaterial.depthMapTexture} entityId={primaryId} tooltipTerm="depthMap" />
           <SliderRow label="Depth Scale" value={primaryMaterial.parallaxDepthScale ?? 0.1} min={0} max={0.5} step={0.005} onChange={(v) => handleUpdate({ parallaxDepthScale: v })} tooltipTerm="depthScale" />
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400">Method<InfoTooltip term="parallaxMethod" /></label>
+            <label htmlFor={fieldId('parallax-method')} className="w-20 shrink-0 text-xs text-zinc-400">Method<InfoTooltip term="parallaxMethod" /></label>
             <select
+              id={fieldId('parallax-method')}
               value={primaryMaterial.parallaxMappingMethod ?? 'occlusion'}
               onChange={(e) => handleUpdate({ parallaxMappingMethod: e.target.value as 'occlusion' | 'relief' })}
               className="flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
@@ -686,17 +707,21 @@ export const MaterialInspector = memo(function MaterialInspector() {
           </div>
           <SliderRow label="Thickness" value={primaryMaterial.thickness ?? 0} min={0} max={10} step={0.01} onChange={(v) => handleUpdate({ thickness: v })} tooltipTerm="transmissionThickness" />
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400">Atten. Dist.<InfoTooltip term="attenuationDist" /></label>
+            {/* The label names the distance slider; the checkbox beside it
+                is the separate "Infinite" switch, named on its own. */}
+            <label htmlFor={fieldId('attenuation-distance')} className="w-20 shrink-0 text-xs text-zinc-400">Atten. Dist.<InfoTooltip term="attenuationDist" /></label>
             <input
               type="checkbox"
               checked={primaryMaterial.attenuationDistance == null}
               onChange={(e) => handleUpdate({ attenuationDistance: e.target.checked ? null : 10 })}
               className="h-3 w-3 rounded border-[var(--sf-border)] bg-[var(--sf-bg-surface)] text-blue-500"
+              aria-label="Infinite attenuation distance"
               title="Infinite attenuation distance"
             />
             <span className="text-[10px] text-zinc-400">Infinite</span>
             {primaryMaterial.attenuationDistance != null && (
               <input
+                id={fieldId('attenuation-distance')}
                 type="range"
                 min={0.01}
                 max={1000}
@@ -711,8 +736,9 @@ export const MaterialInspector = memo(function MaterialInspector() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400">Atten. Color<InfoTooltip term="attenuationColor" /></label>
+            <label htmlFor={fieldId('attenuation-color')} className="w-20 shrink-0 text-xs text-zinc-400">Atten. Color<InfoTooltip term="attenuationColor" /></label>
             <input
+              id={fieldId('attenuation-color')}
               type="color"
               value={attColorHex}
               onChange={(e) => {
