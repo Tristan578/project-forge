@@ -79,13 +79,27 @@ done
 assert_jq "allow-list has exactly 7 entries" '.permissions.allow | length == 7'
 
 # --- Off-limits file guards: project-root-anchored, Edit AND Write ---
-# `.codex/config.toml` was here too and is NOT any more. That entry stopped one
-# agent from editing the file; what it was protecting against is a SECRET reaching
-# a public repo, and it blocked maintenance of a file the README describes as
-# hand-edited. The protection moved to the CONTENT, where it is strictly stronger:
-# scripts/check-codex-config-safety.sh now rejects a committed credential in that
-# file whoever writes it — an agent, a human, or the Codex app itself — and its
-# suite drives ten cases for it. Do not re-add a deny here without removing that.
+# `.codex/config.toml` was here too and is NOT any more. That entry stopped ONE
+# agent from editing the file; what it guarded against is a SECRET reaching a
+# public repo, and it blocked maintenance of a file the README calls hand-edited.
+#
+# The control for that is GITHUB SECRET SCANNING WITH PUSH PROTECTION, verified
+# enabled on this repo (`gh api repos/{owner}/{repo}` →
+# `security_and_analysis.secret_scanning_push_protection.status: "enabled"`). It
+# rejects a recognised credential AT PUSH TIME, for every file, every actor and
+# every TOML spelling — including the Codex app, which rewrites this file
+# unprompted. That is the mandatory single path a secret must pass through, which
+# is where a control belongs (lessons-learned #21).
+#
+# A hand-written scanner was tried here first and abandoned: two review rounds
+# found five separate bypasses of it (case, triple quotes, a whole-file
+# short-circuit, dotted keys, multi-line strings) because a grep cannot carry a
+# security property over TOML's grammar. Do not re-add one.
+#
+# HONEST RESIDUAL: push protection matches KNOWN provider patterns, so an
+# arbitrary internal credential with no recognisable shape is not caught by it.
+# That gap predates this change and the deny never closed it either — the deny
+# only ever restrained one writer, not the file's content.
 for rule in \
   'Edit(/.claude/settings.json)' \
   'Write(/.claude/settings.json)' ; do
