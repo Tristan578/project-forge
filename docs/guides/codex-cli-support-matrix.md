@@ -214,7 +214,7 @@ the field, not because this port uses it.
 |---|---|---|
 | `PostCompact` → `restore-context-hints.sh`, `inject-post-compact.sh` | Both exist only to put context back in front of the model. Codex's `PostCompact` output accepts no context field and drops plain text, so they would run and change nothing | **Instruction only:** the root `AGENTS.md` (which Codex loads; `.codex/AGENTS.md` it does not) tells the agent to re-read `.claude/rules/lessons-learned.md` after a compaction |
 | `auto-approve-safe-commands.sh` (`PreToolUse` `Bash`) | Its entire output is `permissionDecision: "allow"`, which marks the run Failed. Codex has no hook-driven approval | Approvals come from `approval_policy` and the sandbox in `.codex/config.toml` |
-| `permissions.deny` (Edit/Write on `.claude/settings.json` and `.codex/config.toml`) | A Claude Code permission rule, not a hook; Codex has no equivalent this repository configures | **None.** Under the committed profile (`approval_policy = "never"`, workspace writes allowed) nothing in this repository stops a Codex session editing either file. Whether Codex's sandbox protects `.codex/` was not checked. Review any change to those two files |
+| `permissions.deny` (Edit/Write on `.claude/settings.json`) | A Claude Code permission rule, not a hook; Codex has no equivalent this repository configures. It no longer covers `.codex/config.toml`: that entry restrained one agent from editing a hand-maintained file, and secret-shaped content is covered repo-wide by GitHub secret-scanning push protection instead (#10134) | **None.** Under the committed profile (`approval_policy = "never"`, workspace writes allowed) nothing in this repository stops a Codex session editing either file. Whether Codex's sandbox protects `.codex/` was not checked. Review any change to those two files |
 | `TaskCreated` → `validate-task-metadata.sh` | No such event | The taskboard validates tickets; `on-stop.sh` (ported) re-checks on `Stop` |
 | `TaskCompleted` → `validate-task-completion.sh` | No such event | `on-stop.sh` on `Stop` |
 | `WorktreeCreate` → `worktree-setup.sh` | No such event | By hand after `git worktree add`, **with its payload**: the script reads `{"worktree_path": …}` from stdin and does nothing when run bare. `.codex/AGENTS.md` has the exact command |
@@ -415,10 +415,14 @@ linked worktree `worktree-safety-commit.sh` commits whatever is in the tree when
 a session stops — and a committed personal block does turn the check red.
 Commit all of the servers or none.
 
-`.codex/config.toml` is covered by a `deny` rule in `.claude/settings.json`,
-which stops *Claude Code* editing it; that rule does nothing under Codex (see
-the `permissions.deny` row above). Adding the servers is therefore a hand edit,
-tracked by #8767. What the contract rows above imply for whoever makes it:
+`.codex/config.toml` is hand-maintained. It used to be covered by a `deny` rule in
+`.claude/settings.json` that stopped *Claude Code* editing it; that rule did
+nothing under Codex (see the `permissions.deny` row above) and is gone as of
+#10134, because it restrained one writer rather than the file's content while
+blocking maintenance. Secret-shaped content is covered repo-wide by GitHub
+secret-scanning push protection, which rejects a recognised credential at push
+time for every file and every actor. Adding the servers is a hand edit, tracked
+by #8767. What the contract rows above imply for whoever makes it:
 
 - Forward secrets by **name** with `env_vars`. `${VAR}` interpolation is a Claude
   Code feature; Codex would pass the literal text.

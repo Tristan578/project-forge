@@ -368,6 +368,45 @@ gen "$F" --check; expect_rc 1 "…and a quoted config missing a server is still 
 expect_out "beta is in .mcp.json but not in .codex/config.toml" "…naming it"
 printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
 
+# SHAPE, not just names. Comparing names alone let a server be restated with the
+# wrong package, the wrong command or a dropped credential NAME and still read as
+# parity — Codex would then run something other than what .mcp.json describes, or
+# start a server whose secret never reaches it. Each row mutates one field of a
+# config that is otherwise in parity.
+# shellcheck disable=SC2016  # ${ALPHA_TOKEN} is Claude's interpolation syntax, the literal text under test — it must NOT expand
+printf '{"mcpServers":{"alpha":{"command":"npx","args":["-y","@scope/pkg@latest"],"env":{"ALPHA_TOKEN":"${ALPHA_TOKEN}","ALPHA_ORG":"acme"}}}}\n' > "$F/.mcp.json"
+MCP_OK='[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n'
+# shellcheck disable=SC2059  # the fixtures carry \n escapes that printf must expand
+printf "$MCP_OK" > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "a server matching on command, args and env is parity"
+expect_out 'name, command, args and secret names' "…and the note says what was compared, so a name-only check cannot masquerade as this one"
+SHAPE_ROWS=0
+while IFS='|' read -r LABEL FIXTURE NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  SHAPE_ROWS=$((SHAPE_ROWS + 1))
+  # shellcheck disable=SC2059  # as above
+  printf "$FIXTURE" > "$F/.codex/config.toml"
+  gen "$F" --check
+  if [ "$RC" -eq 1 ] && grep -qF "$NEEDLE" <<<"$OUT"; then
+    ok "MCP shape drift is caught: $LABEL"
+  else
+    bad "MCP shape drift went unreported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-200)"
+  fi
+done <<'MCP_SHAPE_TABLE'
+the wrong package in args|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@0.0.1"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha args are
+the wrong command|[mcp_servers.alpha]\ncommand = "node"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha command is
+a dropped credential NAME, so the secret never reaches the server|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha forwards ALPHA_TOKEN
+a changed non-secret literal|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "someone-else"\n|alpha sets ALPHA_ORG
+an args array that is never closed is REPORTED, not read as empty|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"\nenv_vars = ["ALPHA_TOKEN"]\n|could not be read
+MCP_SHAPE_TABLE
+if [ "$SHAPE_ROWS" -eq 5 ]; then ok "all 5 MCP shape-drift rows were driven"; else bad "the MCP shape table was not walked: $SHAPE_ROWS of 5"; fi
+# The Codex app rewrites this file with MULTI-LINE arrays. That is the same TOML,
+# so it must read as parity — a check that called it drift would go red every time
+# the app touched the file.
+# shellcheck disable=SC2059  # as above
+printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y",\n    "@scope/pkg@latest",\n]\nenv_vars = [\n    "ALPHA_TOKEN",\n]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "the multi-line array form the Codex app writes is parity, not drift"
+
 echo "== generator: --write may delete ONLY what it generated =="
 # The lock is a committed text file. A bad merge resolution, or an edit, can put
 # any path in it — and the first cut of --write deleted whatever it named,

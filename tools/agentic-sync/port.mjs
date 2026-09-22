@@ -766,24 +766,100 @@ function ownedByGenerator(m, rel) {
 
 // Codex never reads `.mcp.json`, so a server added there is simply absent for
 // Codex users until it is restated in `.codex/config.toml` — and nothing else
-// would notice. NAMES only: command/args are not compared, because Codex
-// forwards secrets by name through `env_vars` where `.mcp.json` interpolates
-// `${VAR}`, so the two are never byte-identical by design.
+// would notice.
 //
-// config.toml is hand-authored (and guarded by a deny rule in
-// .claude/settings.json), so this is a check the generator cannot fix.
+// NAMES, COMMAND, ARGS AND THE SECRET NAMES ARE ALL COMPARED. Names alone was the
+// first cut, on the reasoning that the two files are never byte-identical because
+// Codex forwards secrets by name through `env_vars` where `.mcp.json` interpolates
+// `${VAR}`. True of the ENV, and not a reason to skip the rest: a review found that
+// a server could be restated with the wrong package, the wrong args or a dropped
+// credential name and this check would still call it parity. So the env is compared
+// STRUCTURALLY — a `${VAR}` value must appear in `env_vars`, a literal value must
+// appear verbatim in the `[…env]` sub-table — and command/args are compared exactly.
+//
+// config.toml is hand-authored, so this is a check the generator cannot fix; it
+// reports and a person edits. (It used to be guarded by a `deny` rule in
+// .claude/settings.json as well. That rule is gone — it only ever restrained one
+// agent, and secret-shaped content is covered repo-wide by GitHub push protection.)
+// `[mcp_servers.<name>]` blocks out of a config.toml, as { command, args, envVars,
+// env }. Deliberately NOT a TOML parser — it reads the four shapes this file is
+// allowed to use, and anything else it cannot read becomes a `parseError` that is
+// REPORTED rather than silently treated as parity (the failure mode that matters
+// here is a wrong comparison reading as a right one).
+function codexServerBlocks(text) {
+  const lines = String(text).split(/\r?\n/);
+  const blocks = new Map();
+  let name = null;
+  let isEnv = false;
+  const ensure = (n) => {
+    if (!blocks.has(n)) blocks.set(n, { command: undefined, args: [], envVars: [], env: {}, parseError: '' });
+    return blocks.get(n);
+  };
+  // `["-y", "pkg"]` or a multi-line array opened on this line — returns null when
+  // the array is not closed here, so the caller keeps consuming.
+  const scalars = (s) => [...s.matchAll(/"([^"]*)"|'([^']*)'/g)].map((m) => (m[1] !== undefined ? m[1] : m[2]));
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i];
+    const line = raw.replace(/^\s+/, '');
+    if (line.startsWith('#')) continue;
+    const header = /^\[mcp_servers\.("[^"]+"|[A-Za-z0-9_-]+)(\.env)?\]\s*(#.*)?$/.exec(line);
+    if (header) {
+      name = header[1].replace(/^"|"$/g, '');
+      isEnv = header[2] === '.env';
+      ensure(name);
+      continue;
+    }
+    if (/^\[/.test(line)) { name = null; isEnv = false; continue; } // some other table
+    if (!name) continue;
+    const kv = /^([A-Za-z_][A-Za-z0-9_-]*|"[^"]+")\s*=\s*(.*)$/.exec(line);
+    if (!kv) continue;
+    const key = kv[1].replace(/^"|"$/g, '');
+    let rest = kv[2];
+    const block = ensure(name);
+    if (isEnv) {
+      const v = scalars(rest);
+      if (v.length) block.env[key] = v[0];
+      continue;
+    }
+    if (key === 'command') {
+      const v = scalars(rest);
+      if (v.length) block.command = v[0];
+      continue;
+    }
+    if (key === 'args' || key === 'env_vars') {
+      // Consume until the array closes, so the multi-line form reads the same as
+      // the inline one. An unterminated array is a parseError, never an empty list.
+      let depth = (rest.match(/\[/g) || []).length - (rest.match(/\]/g) || []).length;
+      let collected = scalars(rest);
+      let guard = 0;
+      while (depth > 0 && i + 1 < lines.length) {
+        i += 1;
+        const cont = lines[i];
+        collected = collected.concat(scalars(cont));
+        depth += (cont.match(/\[/g) || []).length - (cont.match(/\]/g) || []).length;
+        if ((guard += 1) > 500) break;
+      }
+      if (depth > 0) block.parseError = `${key} array is not closed`;
+      else if (key === 'args') block.args = collected;
+      else block.envVars = collected;
+    }
+  }
+  return blocks;
+}
+
 function mcpParity() {
   const out = { problems: [], note: '' };
   if (!existsExact('.mcp.json') || !existsExact('.codex/config.toml')) {
     out.note = 'MCP parity skipped — .mcp.json or .codex/config.toml is absent.';
     return out;
   }
-  let want;
+  let wantServers;
   try {
-    want = Object.keys(JSON.parse(readFileSync(abs('.mcp.json'), 'utf8')).mcpServers || {}).sort();
+    wantServers = JSON.parse(readFileSync(abs('.mcp.json'), 'utf8')).mcpServers || {};
   } catch (e) {
     die(`.mcp.json is not valid JSON: ${e.message}`);
   }
+  const want = Object.keys(wantServers).sort();
   // The COMMITTED blob when git can supply it, exactly as
   // scripts/check-codex-config-safety.sh does and for the same reason: a
   // contributor may have an uncommitted `[mcp_servers.*]` edit in the working
@@ -817,7 +893,42 @@ function mcpParity() {
   }
   for (const n of want) if (!have.includes(n)) out.problems.push(`mcp:      ${n} is in .mcp.json but not in .codex/config.toml`);
   for (const n of have) if (!want.includes(n)) out.problems.push(`mcp:      ${n} is in .codex/config.toml but not in .mcp.json`);
-  if (out.problems.length === 0) out.note = `${have.length} MCP servers declared for Codex, matching .mcp.json.`;
+
+  // SHAPE, not just presence. Each server's own table is cut out by its header and
+  // the next one; a `[name.env]` sub-table is collected separately. Both the inline
+  // (`args = ["-y", "x"]`) and the multi-line array forms are accepted, because the
+  // Codex app itself rewrites this file into the multi-line form and that is the
+  // same TOML — a formatting difference must not read as drift.
+  const blocks = codexServerBlocks(config);
+  for (const n of want) {
+    if (!have.includes(n)) continue; // already reported as missing
+    const got = blocks.get(n);
+    const wanted = wantServers[n] || {};
+    if (!got) continue;
+    if (got.parseError) {
+      out.problems.push(`mcp:      ${n} could not be read from .codex/config.toml (${got.parseError}) — compare it by hand`);
+      continue;
+    }
+    if (typeof wanted.command === 'string' && got.command !== wanted.command) {
+      out.problems.push(`mcp:      ${n} command is ${JSON.stringify(got.command)} in .codex/config.toml but ${JSON.stringify(wanted.command)} in .mcp.json`);
+    }
+    const wantArgs = Array.isArray(wanted.args) ? wanted.args : [];
+    if (wantArgs.join(' ') !== got.args.join(' ')) {
+      out.problems.push(`mcp:      ${n} args are ${JSON.stringify(got.args)} in .codex/config.toml but ${JSON.stringify(wantArgs)} in .mcp.json`);
+    }
+    // The env is compared by MEANING, since the two files express it differently.
+    for (const [k, v] of Object.entries(wanted.env || {})) {
+      const interpolated = /^\$\{[A-Za-z0-9_]+\}$/.test(String(v));
+      if (interpolated) {
+        if (!got.envVars.includes(k)) {
+          out.problems.push(`mcp:      ${n} forwards ${k} in .mcp.json but it is not in env_vars in .codex/config.toml — Codex has no \${VAR} interpolation, so that secret never reaches the server`);
+        }
+      } else if (got.env[k] !== String(v)) {
+        out.problems.push(`mcp:      ${n} sets ${k}=${JSON.stringify(String(v))} in .mcp.json but ${got.env[k] === undefined ? 'it is absent from' : `${JSON.stringify(got.env[k])} in`} .codex/config.toml`);
+      }
+    }
+  }
+  if (out.problems.length === 0) out.note = `${have.length} MCP servers declared for Codex, matching .mcp.json (name, command, args and secret names).`;
   return out;
 }
 

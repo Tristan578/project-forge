@@ -31,24 +31,29 @@ web_search = false
 [mcp_servers.context7]
 command = "npx"
 args = ["-y", "@upstash/context7-mcp@latest"]
+default_tools_approval_mode = "prompt"
 
 [mcp_servers.github]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
+default_tools_approval_mode = "prompt"
 
 [mcp_servers.neon]
 command = "npx"
 args = ["-y", "@neondatabase/mcp-server-neon"]
 env_vars = ["NEON_API_KEY"]
+default_tools_approval_mode = "prompt"
 
 [mcp_servers.playwright]
 command = "npx"
 args = ["-y", "@playwright/mcp@latest"]
+default_tools_approval_mode = "prompt"
 
 [mcp_servers.sentry]
 command = "npx"
 args = ["-y", "@sentry/mcp-server@latest"]
 env_vars = ["SENTRY_AUTH_TOKEN"]
+default_tools_approval_mode = "prompt"
 
 # Non-secret identifiers, already public in this repo's docs.
 [mcp_servers.sentry.env]
@@ -59,6 +64,7 @@ SENTRY_PROJECT = "spawnforge-ai"
 command = "npx"
 args = ["-y", "@stripe/mcp@latest"]
 env_vars = ["STRIPE_SECRET_KEY"]
+default_tools_approval_mode = "prompt"
 
 [mcp_servers.taskboard]
 command = "node"
@@ -68,3 +74,4 @@ args = [".claude/hooks/taskboard-launch.mjs", "mcp"]
 command = "npx"
 args = ["-y", "@upstash/mcp-server@latest"]
 env_vars = ["UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"]
+default_tools_approval_mode = "prompt"
