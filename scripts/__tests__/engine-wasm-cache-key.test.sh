@@ -55,11 +55,14 @@ make_repo() {
     git init -q
     git config user.email t@t.t
     git config user.name t
-    mkdir -p engine/src .transform-gizmo-fork/crates .github/workflows
+    mkdir -p engine/src .transform-gizmo-fork/crates .github/workflows scripts
     printf 'fn main() {}\n' > engine/src/lib.rs
     printf '[package]\nname = "forge_engine"\n' > engine/Cargo.toml
     printf 'gizmo source\n' > .transform-gizmo-fork/crates/lib.rs
     printf 'jobs:\n  build-wasm:\n    steps:\n      - run: cargo build --features webgl2\n' > .github/workflows/cd.yml
+    # The ci-reuse mode also hashes the PR-side recipe and its bindgen installer.
+    printf 'jobs:\n  build-wasm:\n    steps:\n      - run: cargo build --features webgl2\n' > .github/workflows/quality-gates.yml
+    printf '#!/usr/bin/env bash\ncargo install --locked wasm-bindgen-cli\n' > scripts/install-wasm-bindgen-cli.sh
     printf 'unrelated\n' > README.md
     git add -A
     git commit -qm base
@@ -400,6 +403,115 @@ if bash "$SCRIPT" bogus >/dev/null 2>&1; then
   fail "an unknown mode still produced a key rather than exiting non-zero"
 else
   pass "an unknown mode exits non-zero rather than emitting a degenerate key"
+fi
+
+# --- ci-reuse mode: the PR CI artifact CD may adopt (#9525) --------------------
+# quality-gates.yml builds the four variants on the PR's merge ref; cd.yml adopts
+# them on the first CD run after the merge instead of rebuilding. The identity
+# has to cover everything that decides those bytes on EITHER side: the engine,
+# its path dependency and bindgen version (shared with all4), the CD recipe
+# (shared with all4), the quality-gates recipe that actually built them, and the
+# installer that put wasm-bindgen on the PR runner. If any of those moved
+# between the PR's CI run and the merge, the keys differ and CD builds.
+echo ""
+echo "=== ci-reuse mode identifies the PR-built set CD may adopt ==="
+REPOR="$(make_repo)"
+keyr_in() { ( cd "$1" && bash "$SCRIPT" ci-reuse 2>/dev/null ); }
+REUSE_KEY="$(keyr_in "$REPOR")"
+REUSE_ALL4="$(key4_in "$REPOR")"
+REUSE_WEBGL2="$(key_in "$REPOR")"
+
+if [[ "$REUSE_KEY" =~ ^engine-wasm-ci-reuse-[0-9a-f]{40}-[0-9a-f]{40}-wb[0-9.]+-recipe[0-9a-f]{40}-qg[0-9a-f]{40}-bgi[0-9a-f]{40}$ ]]; then
+  pass "ci-reuse key has the expected shape (all4 identity + quality-gates recipe + bindgen installer)"
+else
+  fail "unexpected ci-reuse key shape: '$REUSE_KEY'"
+fi
+
+REUSE_BODY="${REUSE_KEY#engine-wasm-ci-reuse-}"
+if [ "${REUSE_BODY%-qg*}" = "${REUSE_ALL4#engine-wasm-all4-}" ]; then
+  pass "ci-reuse extends the all4 identity (same engine, fork, bindgen and CD recipe) rather than redefining it"
+else
+  fail "ci-reuse body '${REUSE_BODY%-qg*}' != all4 body '${REUSE_ALL4#engine-wasm-all4-}' — an adopted set could be persisted under an all4 key that describes different sources"
+fi
+
+if [ "$REUSE_KEY" != "$REUSE_ALL4" ] && [ "$REUSE_KEY" != "$REUSE_WEBGL2" ]; then
+  pass "ci-reuse is distinct from the all4 and webgl2 keys"
+else
+  fail "ci-reuse collided with another mode's key"
+fi
+
+if [ "$(keyr_in "$REPOR")" = "$REUSE_KEY" ]; then
+  pass "the same tree yields the same ci-reuse key"
+else
+  fail "ci-reuse key is not deterministic for an unchanged tree"
+fi
+
+printf 'unrelated ci-reuse edit\n' >> "$REPOR/README.md"
+commit_in "$REPOR" "unrelated edit"
+if [ "$(keyr_in "$REPOR")" = "$REUSE_KEY" ]; then
+  pass "an unrelated commit leaves the ci-reuse key unchanged (a web-only merge in between keeps the reuse)"
+else
+  fail "an unrelated commit changed the ci-reuse key — the reuse would miss on every merge"
+fi
+
+# Each build input must move the key on its own. Run in order, each compared
+# with the key just before it, so a single missing input names itself.
+PREV_REUSE="$(keyr_in "$REPOR")"
+for input in \
+  "engine source|engine/src/lib.rs" \
+  "transform-gizmo path dependency|.transform-gizmo-fork/crates/lib.rs" \
+  "quality-gates recipe (it BUILT the binaries)|.github/workflows/quality-gates.yml" \
+  "CD recipe|.github/workflows/cd.yml" \
+  "wasm-bindgen installer the PR runner used|scripts/install-wasm-bindgen-cli.sh"; do
+  label="${input%%|*}"
+  path="${input#*|}"
+  printf '# edit\n' >> "$REPOR/$path"
+  commit_in "$REPOR" "edit $path"
+  NOW_REUSE="$(keyr_in "$REPOR")"
+  if [ -n "$NOW_REUSE" ] && [ "$NOW_REUSE" != "$PREV_REUSE" ]; then
+    pass "a change to the ${label} changes the ci-reuse key"
+  else
+    fail "a change to the ${label} (${path}) left the ci-reuse key unchanged — CD would adopt a binary built from different inputs than main"
+  fi
+  PREV_REUSE="$NOW_REUSE"
+done
+
+CUR_REUSE="$(keyr_in "$REPOR")"
+BUMPED_REUSE="$( ( cd "$REPOR" && WASM_BINDGEN_VERSION=9.9.9 bash "$SCRIPT" ci-reuse 2>/dev/null ) )"
+if [ -n "$BUMPED_REUSE" ] && [ "$BUMPED_REUSE" != "$CUR_REUSE" ]; then
+  pass "the wasm-bindgen version participates in the ci-reuse key"
+else
+  fail "changing the bindgen version left the ci-reuse key identical"
+fi
+
+# A missing input must fail loudly, never produce a key that happens to match.
+for missing in .github/workflows/quality-gates.yml scripts/install-wasm-bindgen-cli.sh; do
+  MISS_REPO="$(make_repo)"
+  rm "$MISS_REPO/$missing"
+  commit_in "$MISS_REPO" "remove $missing"
+  OUTR="$( ( cd "$MISS_REPO" && bash "$SCRIPT" ci-reuse 2>&1 ) )" && RCR=0 || RCR=$?
+  if [ "$RCR" -ne 0 ] && grep -qF "$missing" <<<"$OUTR"; then
+    pass "a missing ${missing} fails ci-reuse (exit $RCR) and names the input"
+  else
+    fail "a missing ${missing} gave exit $RCR and output '$OUTR' — expected a non-zero exit naming it"
+  fi
+  if [ -n "$(key4_in "$MISS_REPO")" ]; then
+    pass "all4 does not depend on ${missing} (only ci-reuse hashes it)"
+  else
+    fail "all4 now fails without ${missing}; the CD cache key must not depend on PR-side inputs"
+  fi
+  rm -rf "$MISS_REPO"
+done
+rm -rf "$REPOR"
+
+# The real inputs must resolve in THIS repository. A fixture proves the logic;
+# only the live tree proves the paths the key names still exist here. If one
+# moved, adopt would fail on every CD run -- better to fail this suite first.
+REAL_REUSE="$( ( cd "$REPO_ROOT" && bash "$SCRIPT" ci-reuse 2>&1 ) )" && RC_REAL=0 || RC_REAL=$?
+if [ "$RC_REAL" -eq 0 ] && [[ "$REAL_REUSE" =~ ^engine-wasm-ci-reuse- ]]; then
+  pass "ci-reuse resolves every input in this repository's own tree"
+else
+  fail "ci-reuse cannot resolve this repository's inputs (exit $RC_REAL): $REAL_REUSE"
 fi
 
 # --- build-wasm reuses the content-addressed cache for ALL FOUR variants -------
