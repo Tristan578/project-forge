@@ -38,7 +38,7 @@ this?" prompt. The path is root-anchored (`/.claude/settings.json`) and denied f
 BOTH `Edit` and `Write` — they are distinct tools, and a deny on one does not
 imply the other.
 
-### How these files actually change
+### How this file actually changes
 
 A human edits it by hand, in a normal editor or via Claude Code's interactive
 `/permissions` UI — neither path goes through the `Edit`/`Write` tools the deny
@@ -46,7 +46,7 @@ rule gates. CI re-checks the posture on every change with
 `settings-permissions.test.sh`, and the Codex guard in `ci.yml` independently
 rejects a permissive Codex profile whether or not any deny rule exists.
 
-### If an agent legitimately needs one of these changed
+### If an agent legitimately needs it changed
 
 It cannot do it itself, by design. It should surface the exact change it wants and
 why, and let a human make the edit (or temporarily lift the rule via
