@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createGameSlice, setGameDispatcher, setWinnabilityStateReader, type GameSlice } from '../gameSlice';
 import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, SceneGraph } from '../types';
+import { buildStoreComponentWithReport } from '@/lib/engine/gameComponentWire';
+import { componentAdjustmentsOf } from '@/lib/engine/gameComponentCorrections';
 
 const { chatSetState, chatGetState } = vi.hoisted(() => ({
   chatSetState: vi.fn(),
@@ -326,6 +328,143 @@ describe('gameSlice', () => {
         entityId: 'entity-1',
         componentName: 'nonExistent',
       });
+    });
+  });
+
+  // PF-1148: the per-field record of "asked for X, applied Y" the inspector marks
+  // fields from. Ephemeral editor state — it never rides inside a component, a
+  // wire payload or anything a scene save reads.
+  describe('Game component adjustments', () => {
+    const route = (n: number): [number, number, number][] =>
+      Array.from({ length: n }, (_, i) => [i, 0, 0] as [number, number, number]);
+
+    function platformFromTool(props: Record<string, unknown>) {
+      const built = buildStoreComponentWithReport('moving_platform', props);
+      if (built === null) throw new Error('moving_platform did not build');
+      return built;
+    }
+
+    const adjustmentsOf = (entityId: string, type: GameComponentData['type']) =>
+      componentAdjustmentsOf(store.getState().gameComponentAdjustments, entityId, type);
+
+    it('starts with no adjustments', () => {
+      expect(store.getState().gameComponentAdjustments).toEqual({});
+    });
+
+    it('records the corrections a tool call caused, field by field', () => {
+      const built = platformFromTool({ speed: 99999, waypoints: route(300) });
+      store.getState().addGameComponent('e1', built.component, built);
+
+      expect(adjustmentsOf('e1', 'movingPlatform')).toEqual({
+        speed: { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' },
+        waypoints: {
+          component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+        },
+      });
+    });
+
+    it('records nothing for an in-range write', () => {
+      const built = platformFromTool({ speed: 6, waypoints: route(3) });
+      expect(built.corrections).toEqual([]);
+      store.getState().addGameComponent('e1', built.component, built);
+      expect(store.getState().gameComponentAdjustments).toEqual({});
+      // And the write itself landed — an empty map is not a skipped write.
+      const stored = store.getState().allGameComponents['e1'][0];
+      expect(stored.type === 'movingPlatform' && stored.movingPlatform.speed).toBe(6);
+    });
+
+    it('records the store’s own coercion of a raw value, with no report passed in', () => {
+      // The inspector hands the store a whole component and no report; a 10.4 in
+      // a whole-number field is still a value the author asked for and did not get.
+      store.getState().addGameComponent('e1', {
+        type: 'collectible',
+        collectible: { value: 10.4, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 90 },
+      });
+      expect(adjustmentsOf('e1', 'collectible')).toEqual({
+        value: { component: 'collectible', field: 'value', requested: 10.4, applied: 10, reason: 'rounded' },
+      });
+    });
+
+    it('keeps the corrections out of the stored component and the engine payload', () => {
+      const built = platformFromTool({ speed: 99999 });
+      store.getState().addGameComponent('e1', built.component, built);
+
+      // Exactly the four fields, nothing smuggled in beside them — this object is
+      // what the winnability gate, the chat context and the scene tools read.
+      const stored = store.getState().allGameComponents['e1'][0];
+      expect(stored).toEqual({
+        type: 'movingPlatform',
+        movingPlatform: { speed: 1000, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration: 0.5, loopMode: 'pingPong' },
+      });
+      expect(mockDispatch).toHaveBeenLastCalledWith('add_game_component', {
+        entityId: 'e1',
+        componentType: 'moving_platform',
+        properties: { speed: 1000, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration: 0.5, loopMode: 'pingPong' },
+      });
+    });
+
+    it('refuses a report whose applied value the stored field does not hold', () => {
+      const stale = platformFromTool({ speed: 99999 });
+      const fresh = platformFromTool({ speed: 7 });
+      // A caller pairing one write's report with another write's component.
+      store.getState().addGameComponent('e1', fresh.component, stale);
+      expect(store.getState().gameComponentAdjustments).toEqual({});
+    });
+
+    it('keeps a marker while a different field is edited, and clears it when its own field is', () => {
+      const built = platformFromTool({ speed: 99999, waypoints: route(300) });
+      store.getState().addGameComponent('e1', built.component, built);
+      const current = store.getState().allGameComponents['e1'][0];
+      if (current.type !== 'movingPlatform') throw new Error('expected a movingPlatform');
+
+      // An inspector edit to the pause: both markers still describe their fields.
+      store.getState().updateGameComponent('e1', {
+        type: 'movingPlatform',
+        movingPlatform: { ...current.movingPlatform, pauseDuration: 2 },
+      });
+      expect(Object.keys(adjustmentsOf('e1', 'movingPlatform') ?? {}).sort()).toEqual(['speed', 'waypoints']);
+
+      // An inspector edit to the speed, in range: that marker is now false.
+      store.getState().updateGameComponent('e1', {
+        type: 'movingPlatform',
+        movingPlatform: { ...current.movingPlatform, pauseDuration: 2, speed: 4 },
+      });
+      expect(Object.keys(adjustmentsOf('e1', 'movingPlatform') ?? {})).toEqual(['waypoints']);
+    });
+
+    it('clears a marker when a tool sets that field explicitly, even to the value it already held', () => {
+      const first = platformFromTool({ speed: 99999 });
+      store.getState().addGameComponent('e1', first.component, first);
+      expect(adjustmentsOf('e1', 'movingPlatform')).toBeDefined();
+
+      // "Set the speed to 1000" — no correction this time, and the marker saying
+      // "you asked for 99999" is no longer what the author asked for.
+      const second = platformFromTool({ speed: 1000 });
+      store.getState().updateGameComponent('e1', second.component, second);
+      expect(adjustmentsOf('e1', 'movingPlatform')).toBeUndefined();
+    });
+
+    it('replaces the markers on add, which replaces the whole component', () => {
+      const first = platformFromTool({ speed: 99999 });
+      store.getState().addGameComponent('e1', first.component, first);
+      const second = platformFromTool({ waypoints: route(70) });
+      store.getState().addGameComponent('e1', second.component, second);
+      expect(Object.keys(adjustmentsOf('e1', 'movingPlatform') ?? {})).toEqual(['waypoints']);
+    });
+
+    it('drops a component’s markers when the component is removed', () => {
+      const built = platformFromTool({ speed: 99999 });
+      store.getState().addGameComponent('e1', built.component, built);
+      store.getState().removeGameComponent('e1', 'moving_platform');
+      expect(store.getState().gameComponentAdjustments).toEqual({});
+    });
+
+    it('keeps markers per entity', () => {
+      const built = platformFromTool({ speed: 99999 });
+      store.getState().addGameComponent('e1', built.component, built);
+      store.getState().addGameComponent('e2', platformFromTool({}).component);
+      expect(adjustmentsOf('e1', 'movingPlatform')).toBeDefined();
+      expect(adjustmentsOf('e2', 'movingPlatform')).toBeUndefined();
     });
   });
 

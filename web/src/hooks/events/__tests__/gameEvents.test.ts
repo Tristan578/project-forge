@@ -54,7 +54,7 @@ describe('handleGameEvent', () => {
     vi.clearAllMocks();
     actions = createMockActions();
     mockSetGet = createMockSetGet();
-    vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
+    vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {}, gameComponentAdjustments: {} } as unknown as StoreState);
   });
 
   it('returns false for unknown event types', () => {
@@ -70,7 +70,7 @@ describe('handleGameEvent', () => {
   describe('GAME_COMPONENT_CHANGED', () => {
     it('updates allGameComponents for non-selected entity', () => {
       // Entity is not the primary selected entity
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'other-entity', primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'other-entity', primaryGameComponents: [], allGameComponents: {}, gameComponentAdjustments: {} } as unknown as StoreState);
 
       // The engine's `GameComponentData` is `#[serde(tag = "type", rename_all =
       // "camelCase")]`, so what arrives is FLAT — engine field names sitting beside
@@ -105,7 +105,7 @@ describe('handleGameEvent', () => {
 
     it('updates both allGameComponents and primaryGameComponents for selected entity', () => {
       // Entity IS the primary selected entity
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: [], allGameComponents: {}, gameComponentAdjustments: {} } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',
@@ -243,7 +243,7 @@ describe('handleGameEvent', () => {
       const existingComponents = {
         'entity-0': [{ type: 'health', health: { maxHp: 50, currentHp: 50, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: [0, 0, 0], despawnOnDeath: false } }],
       };
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: existingComponents } as unknown as StoreState);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: existingComponents, gameComponentAdjustments: {} } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',
@@ -271,7 +271,7 @@ describe('handleGameEvent', () => {
 
     it('handles empty components array', () => {
       const stale = [{ type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: [0, 0, 0], despawnOnDeath: false } }];
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: stale, allGameComponents: {} } as unknown as StoreState);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: stale, allGameComponents: {}, gameComponentAdjustments: {} } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',
@@ -289,6 +289,59 @@ describe('handleGameEvent', () => {
       expect(useEditorStore.setState).toHaveBeenCalledWith({
         allGameComponents: { 'entity-1': [] },
         primaryGameComponents: [],
+      });
+    });
+
+    // PF-1148: an adjustment marker is only true while the field still holds the
+    // value it says was applied. Undo, a scene load and a play session all move
+    // values through the engine without the store action that clears markers, so
+    // the engine's own report is where a stale one is dropped.
+    describe('adjustment markers', () => {
+      const speedClamp = {
+        component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
+      } as const;
+      const pauseClamp = {
+        component: 'movingPlatform', field: 'pauseDuration', requested: 600, applied: 60, reason: 'clamped',
+      } as const;
+      const emitted = (speed: number, pauseDuration: number) => ({
+        entityId: 'entity-1',
+        components: [{
+          type: 'movingPlatform', speed, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration, loopMode: 'pingPong',
+        }],
+      });
+      const withMarkers = () => {
+        vi.mocked(useEditorStore.getState).mockReturnValue({
+          ...actions,
+          primaryId: 'entity-1',
+          primaryGameComponents: [],
+          allGameComponents: {},
+          gameComponentAdjustments: { 'entity-1': { movingPlatform: { speed: speedClamp, pauseDuration: pauseClamp } } },
+        } as unknown as StoreState);
+      };
+
+      it('drops a marker once the engine reports its field at a different value', () => {
+        withMarkers();
+        // The speed went back to 2 (an undo); the pause is still the capped 60.
+        handleGameEvent('GAME_COMPONENT_CHANGED', emitted(2, 60), mockSetGet.set, mockSetGet.get);
+        expect(useEditorStore.setState).toHaveBeenCalledWith(expect.objectContaining({
+          gameComponentAdjustments: { 'entity-1': { movingPlatform: { pauseDuration: pauseClamp } } },
+        }));
+      });
+
+      it('drops every marker of a component the engine no longer reports', () => {
+        withMarkers();
+        handleGameEvent('GAME_COMPONENT_CHANGED', { entityId: 'entity-1', components: [] }, mockSetGet.set, mockSetGet.get);
+        expect(useEditorStore.setState).toHaveBeenCalledWith(expect.objectContaining({
+          gameComponentAdjustments: {},
+        }));
+      });
+
+      it('leaves the markers alone when the engine echoes the applied values', () => {
+        withMarkers();
+        handleGameEvent('GAME_COMPONENT_CHANGED', emitted(1000, 60), mockSetGet.set, mockSetGet.get);
+        const written = vi.mocked(useEditorStore.setState).mock.calls.at(-1)?.[0] as unknown as Record<string, unknown>;
+        // Not rewritten at all: an unchanged map is not a state change.
+        expect(Object.keys(written).sort()).toEqual(['allGameComponents', 'primaryGameComponents']);
       });
     });
   });
@@ -374,7 +427,7 @@ describe('handleGameEvent', () => {
 
       for (const mode of modes) {
         vi.clearAllMocks();
-        vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
+        vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {}, gameComponentAdjustments: {} } as unknown as StoreState);
 
         const result = handleGameEvent(
           'GAME_CAMERA_CHANGED',
