@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useId } from 'react';
 import { useEditorStore, type ParticleData, type ParticlePreset, type EmissionShape, type GradientStop } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { Play, StopCircle, Zap, Trash2, Plus, Minus, HelpCircle } from 'lucide-react';
@@ -17,13 +17,15 @@ interface SliderRowProps {
 }
 
 function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, term }: SliderRowProps & { term?: string }) {
+  const inputId = useId();
   return (
     <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+      <label htmlFor={inputId} className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
         {label}
         {term && <InfoTooltip term={term} />}
       </label>
       <input
+        id={inputId}
         type="range"
         min={min}
         max={max}
@@ -111,6 +113,10 @@ function Vec3InputRow({ label, value, onChange, step = 0.1, term }: Vec3InputRow
 }
 
 export function ParticleInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryParticle = useEditorStore((s) => s.primaryParticle);
   const particleEnabled = useEditorStore((s) => s.particleEnabled);
@@ -279,11 +285,12 @@ export function ParticleInspector() {
         <div className="space-y-3">
           {/* Preset Dropdown */}
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+            <label htmlFor={fieldId('preset')} className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
               Preset
               <InfoTooltip term="particlePreset" />
             </label>
             <select
+              id={fieldId('preset')}
               value={primaryParticle.preset}
               onChange={(e) => handlePresetChange(e.target.value as ParticlePreset)}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -309,11 +316,12 @@ export function ParticleInspector() {
           <div className="border-t border-zinc-700 pt-3 space-y-2">
             <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Spawner</h4>
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              <label htmlFor={fieldId('mode')} className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Mode
                 <InfoTooltip term="spawnMode" />
               </label>
               <select
+                id={fieldId('mode')}
                 value={primaryParticle.spawnerMode.type}
                 onChange={(e) => handleSpawnerModeChange(e.target.value as 'continuous' | 'burst' | 'once')}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -388,11 +396,12 @@ export function ParticleInspector() {
           <div className="border-t border-zinc-700 pt-3 space-y-2">
             <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Emission Shape</h4>
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              <label htmlFor={fieldId('shape')} className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Shape
                 <InfoTooltip term="emissionShape" />
               </label>
               <select
+                id={fieldId('shape')}
                 value={primaryParticle.emissionShape.type}
                 onChange={(e) => handleEmissionShapeChange(e.target.value as EmissionShape['type'])}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -614,11 +623,12 @@ export function ParticleInspector() {
           <div className="border-t border-zinc-700 pt-3 space-y-2">
             <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Rendering</h4>
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              <label htmlFor={fieldId('blend-mode')} className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Blend Mode
                 <InfoTooltip term="blendMode" />
               </label>
               <select
+                id={fieldId('blend-mode')}
                 value={primaryParticle.blendMode}
                 onChange={(e) => handleUpdate({ blendMode: e.target.value as 'additive' | 'alpha_blend' | 'premultiply' })}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -630,11 +640,12 @@ export function ParticleInspector() {
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              <label htmlFor={fieldId('orientation')} className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Orientation
                 <InfoTooltip term="particleOrientation" />
               </label>
               <select
+                id={fieldId('orientation')}
                 value={primaryParticle.orientation}
                 onChange={(e) => handleUpdate({ orientation: e.target.value as 'billboard' | 'velocity_aligned' | 'fixed' })}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
