@@ -104,7 +104,7 @@ describe('planClerkTesting', () => {
 
   it('fails when keys are absent on a run that requires them (trusted CI)', () => {
     expect(() => planClerkTesting({ E2E_CLERK_TEST_REQUIRED: 'true' })).toThrow(
-      /E2E_CLERK_TEST_REQUIRED=true.*CLERK_TEST_SECRET_KEY/s,
+      /E2E_CLERK_TEST_REQUIRED=true[\s\S]*CLERK_TEST_SECRET_KEY/,
     );
   });
 

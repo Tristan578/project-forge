@@ -93,7 +93,8 @@ export default class RequiredRunReporter implements Reporter {
     this.suite = suite;
   }
 
-  onEnd(result: FullResult): { status: FullResult['status'] } | undefined {
+  // Playwright only honours a status override returned through a Promise.
+  async onEnd(_result: FullResult): Promise<{ status: FullResult['status'] } | undefined> {
     const counts = countOutcomes(this.suite?.allTests() ?? []);
     const required = this.isRequired();
     console.log(

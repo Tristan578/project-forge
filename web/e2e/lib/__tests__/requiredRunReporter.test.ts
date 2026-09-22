@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe('countOutcomes', () => {
-  it('counts flaky as passed and unexpected as failed', () => {
+  it('counts flaky as passed and unexpected as failed', async () => {
     const suite = fakeSuite(['expected', 'flaky', 'unexpected', 'skipped', 'skipped']);
     expect(countOutcomes((suite as unknown as { allTests: () => never[] }).allTests())).toEqual({
       passed: 2,
@@ -44,68 +44,68 @@ describe('countOutcomes', () => {
 });
 
 describe('requiredRunProblems', () => {
-  it('accepts a run where every selected test passed and the floor is met', () => {
+  it('accepts a run where every selected test passed and the floor is met', async () => {
     expect(requiredRunProblems({ passed: 2, failed: 0, skipped: 0, total: 2 }, { minPassed: 2 })).toEqual([]);
   });
 
-  it('rejects an empty selection', () => {
+  it('rejects an empty selection', async () => {
     const problems = requiredRunProblems({ passed: 0, failed: 0, skipped: 0, total: 0 }, { minPassed: 2 });
     expect(problems.join('\n')).toMatch(/zero tests/);
   });
 
-  it('rejects any skip, naming the count', () => {
+  it('rejects any skip, naming the count', async () => {
     const problems = requiredRunProblems({ passed: 2, failed: 0, skipped: 1, total: 3 }, { minPassed: 2 });
     expect(problems.join('\n')).toMatch(/1 test\(s\) skipped/);
   });
 
-  it('rejects a pass count below the floor', () => {
+  it('rejects a pass count below the floor', async () => {
     const problems = requiredRunProblems({ passed: 1, failed: 0, skipped: 0, total: 1 }, { minPassed: 2 });
     expect(problems.join('\n')).toMatch(/1 passed, expected at least 2/);
   });
 });
 
 describe('RequiredRunReporter', () => {
-  it('fails a required run that skipped a test, and says why', () => {
+  it('fails a required run that skipped a test, and says why', async () => {
     vi.stubEnv('E2E_CLERK_TEST_REQUIRED', 'true');
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    const result = runReporter(new RequiredRunReporter({ minPassed: 2 }), ['expected', 'expected', 'skipped']);
+    const result = await runReporter(new RequiredRunReporter({ minPassed: 2 }), ['expected', 'expected', 'skipped']);
 
     expect(result).toEqual({ status: 'failed' });
     expect(error.mock.calls.flat().join('\n')).toMatch(/skipped/);
   });
 
-  it('fails a required run whose pass count is below the floor', () => {
+  it('fails a required run whose pass count is below the floor', async () => {
     vi.stubEnv('E2E_CLERK_TEST_REQUIRED', 'true');
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    expect(runReporter(new RequiredRunReporter({ minPassed: 2 }), ['expected'])).toEqual({ status: 'failed' });
+    expect(await runReporter(new RequiredRunReporter({ minPassed: 2 }), ['expected'])).toEqual({ status: 'failed' });
   });
 
-  it('leaves a healthy required run alone', () => {
+  it('leaves a healthy required run alone', async () => {
     vi.stubEnv('E2E_CLERK_TEST_REQUIRED', 'true');
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    expect(runReporter(new RequiredRunReporter({ minPassed: 2 }), ['expected', 'flaky'])).toBeUndefined();
+    expect(await runReporter(new RequiredRunReporter({ minPassed: 2 }), ['expected', 'flaky'])).toBeUndefined();
     expect(log.mock.calls.flat().join('\n')).toMatch(/2 passed, 0 skipped, 0 failed of 2/);
   });
 
-  it('only reports on a run that does not require Clerk (fork PRs skip by design)', () => {
+  it('only reports on a run that does not require Clerk (fork PRs skip by design)', async () => {
     for (const value of [undefined, 'false', 'TRUE', '1']) {
       vi.stubEnv('E2E_CLERK_TEST_REQUIRED', value);
       vi.spyOn(console, 'log').mockImplementation(() => {});
-      expect(runReporter(new RequiredRunReporter({ minPassed: 2 }), ['skipped', 'skipped'])).toBeUndefined();
+      expect(await runReporter(new RequiredRunReporter({ minPassed: 2 }), ['skipped', 'skipped'])).toBeUndefined();
     }
   });
 
-  it('does not mask a run that already failed', () => {
+  it('does not mask a run that already failed', async () => {
     vi.stubEnv('E2E_CLERK_TEST_REQUIRED', 'true');
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    expect(runReporter(new RequiredRunReporter({ minPassed: 2 }), ['unexpected', 'expected'], 'failed')).toEqual({
+    expect(await runReporter(new RequiredRunReporter({ minPassed: 2 }), ['unexpected', 'expected'], 'failed')).toEqual({
       status: 'failed',
     });
   });

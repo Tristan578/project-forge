@@ -80,7 +80,7 @@ describe('prepareClerkTesting', () => {
 
   it('names a seeded user that does not exist on the test instance', async () => {
     await expect(prepareClerkTesting({ ...keys, ...creds }, deps(null))).rejects.toThrow(
-      /no user.*E2E_CLERK_TEST_EMAIL.*e2e-clerk-test-user\.md/s,
+      /no user[\s\S]*E2E_CLERK_TEST_EMAIL[\s\S]*e2e-clerk-test-user\.md/,
     );
   });
 
