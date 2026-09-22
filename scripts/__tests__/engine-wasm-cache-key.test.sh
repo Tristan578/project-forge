@@ -613,15 +613,20 @@ else
       pass "build-wasm has no continue-on-error field to mask a failed restore action"
     fi
 
-    # 5. Every BUILD step is gated on a cache MISS. On a hit the four variants
-    #    were restored, so installing a toolchain and rebuilding all four is pure
-    #    waste; more importantly, if any of these `if:` guards is ever dropped
-    #    (an edit near the block, a bad merge resolution) build-wasm silently
-    #    reverts to ALWAYS rebuilding — the exact silent-reuse-breakage #9525
-    #    exists to fix, and nothing would go red to say so. Each guarded step is
-    #    checked by name (or by its `uses:` for the two unnamed action steps) so
-    #    a dropped guard names the specific step that lost it.
-    guard="if: steps.engine-cache-all4.outputs.cache-hit != 'true'"
+    # 5. Every BUILD step is gated on the single build decision (wasm-plan),
+    #    which is 'true' only when neither the all4 cache nor the PR's CI
+    #    artifact supplied the four variants. On a reuse, installing a toolchain
+    #    and rebuilding all four is pure waste; more importantly, if any of these
+    #    `if:` guards is ever dropped (an edit near the block, a bad merge
+    #    resolution) build-wasm silently reverts to ALWAYS rebuilding — the
+    #    exact silent-reuse-breakage #9525 exists to fix, and nothing would go
+    #    red to say so. Each guarded step is checked by name (or by its `uses:`
+    #    for the two unnamed action steps) so a dropped guard names the specific
+    #    step that lost it.
+    guard="if: steps.wasm-plan.outputs.build == 'true'"
+    # The all4-miss guard, for the steps that must run only when the cache did
+    # not hit: the PR-artifact lookup, and the Persist save.
+    miss_guard="if: steps.engine-cache-all4.outputs.cache-hit != 'true'"
     # Extract a single step's block (its opening `- ` line through the line
     # before the next `- ` step) and report whether it carries the guard:
     # 0 = guarded, 1 = present but unguarded, 2 = no such step.
@@ -641,7 +646,7 @@ else
     }
     # label => identifying substring of the step's opening line. The three setup
     # steps (toolchain, cargo cache, wasm-bindgen-cli) plus the six cargo
-    # build/bindgen steps are the nine that must never run on a hit.
+    # build/bindgen steps are the nine that must never run on a reuse.
     gated_steps=(
       "rust toolchain install|dtolnay/rust-toolchain"
       "cargo target cache|Swatinem/rust-cache"
@@ -659,24 +664,36 @@ else
       step_has_guard "$ident"
       rc=$?
       if [ "$rc" -eq 0 ]; then
-        pass "build-wasm's '$label' step is gated on a cache miss"
+        pass "build-wasm's '$label' step is gated on the build decision"
       elif [ "$rc" -eq 2 ]; then
-        fail "build-wasm has no step matching '$ident' — the '$label' build step was renamed or removed, so its cache-miss gate is unverifiable"
+        fail "build-wasm has no step matching '$ident' — the '$label' build step was renamed or removed, so its build gate is unverifiable"
       else
         fail "build-wasm's '$label' step lost its '$guard' guard — on a MISS a dropped guard is invisible, but a merge that drops it silently reverts build-wasm to rebuilding on every run (#9525)"
       fi
     done
 
-    # The guard total pins the whole set at once: nine build steps above, the
-    # Persist save below, and the reuse-miss notice just after the restore = 11.
-    # A guard silently dropped from any one of them takes this count off 11 even
-    # if a step was also renamed past the per-step checks above, so this catches
-    # the drop the per-step loop would miss.
-    guard_count="$(grep -cF "$guard" <<<"$buildwasm")"
-    if [ "$guard_count" -eq 11 ]; then
-      pass "build-wasm carries exactly 11 cache-miss guards (9 build steps + the Persist save + the reuse-miss notice)"
+    # The guard totals pin the whole set at once. Exact LINES, not substrings:
+    # the download and adopt steps carry the all4-miss guard as the first half
+    # of a compound condition, and a substring count would conflate the two.
+    # A guard silently dropped from any step takes its count off even if the
+    # step was also renamed past the per-step checks above.
+    guard_count="$(grep -cxF "        ${guard}" <<<"$buildwasm")"
+    if [ "$guard_count" -eq 9 ]; then
+      pass "build-wasm carries exactly 9 build-decision guards (the 9 build steps)"
     else
-      fail "build-wasm has $guard_count cache-miss guards (expected 11) — a guard was added or dropped; a dropped one silently reverts build-wasm to rebuilding on every run"
+      fail "build-wasm has $guard_count build-decision guards (expected 9) — a guard was added or dropped; a dropped one silently reverts build-wasm to rebuilding on every run"
+    fi
+    miss_count="$(grep -cxF "        ${miss_guard}" <<<"$buildwasm")"
+    if [ "$miss_count" -eq 2 ]; then
+      pass "build-wasm carries exactly 2 bare all4-miss guards (the PR-artifact lookup and the Persist save)"
+    else
+      fail "build-wasm has $miss_count bare all4-miss guards (expected 2: the PR-artifact lookup and the Persist save)"
+    fi
+    both_count="$(grep -cxF "        ${miss_guard} && steps.ci-artifact.outputs.run-id != ''" <<<"$buildwasm")"
+    if [ "$both_count" -eq 2 ]; then
+      pass "build-wasm carries exactly 2 miss-and-run-found guards (the download and the adopt step)"
+    else
+      fail "build-wasm has $both_count miss-and-run-found guards (expected 2: the download and the adopt step)"
     fi
 
     # 6. The `Persist all 4 WASM variants` save step exists, is itself gated on a
@@ -694,10 +711,12 @@ else
       fail "build-wasm has no 'Persist all 4 WASM variants' step — the four-variant set is never written to the content-addressed cache from CD, so every later run rebuilds it"
     else
       pass "build-wasm has the 'Persist all 4 WASM variants' save step"
-      if grep -qF "$guard" <<<"$persist"; then
-        pass "the Persist step is gated on a cache miss (no redundant re-save on a hit)"
+      # On the all4 miss, not on the build decision: a set adopted from the PR's
+      # CI run must be persisted too, so a CD re-run hits the cache.
+      if grep -qxF "        ${miss_guard}" <<<"$persist"; then
+        pass "the Persist step is gated on an all4 miss (no redundant re-save on a hit; an adopted set is still persisted)"
       else
-        fail "the Persist step is not gated on '$guard' — on a hit it re-saves a key that already exists (warns/no-ops), and losing the gate here hides the reuse's write path"
+        fail "the Persist step is not gated on exactly '$miss_guard' — on a hit it re-saves a key that already exists (warns/no-ops), gated on the build decision it would skip persisting an adopted set, and losing the gate hides the reuse's write path"
       fi
       if grep -qE '^[[:space:]]*uses:[[:space:]]*actions/cache/save' <<<"$persist"; then
         pass "the Persist step uses actions/cache/save"
@@ -718,26 +737,90 @@ else
       fi
     fi
 
-    # 7. Successful restore actions without an exact hit rebuild visibly.
-    # SDK-internally handled errors can return a miss; errors escaping the SDK
-    # fail the restore action and stop subsequent default-guarded steps.
-    miss_step="$(awk '
-      /^      - / { instep = (index($0, "Note engine WASM reuse miss") > 0) }
+    # 7. The build decision, EXECUTED. Restore actions without an exact hit,
+    #    and PR artifacts that are absent or fail their key check, rebuild
+    #    visibly. SDK-internally handled errors can return a miss; errors
+    #    escaping the SDK (or the download) fail the step and stop subsequent
+    #    default-guarded steps. The step body is run from this very file, so
+    #    what is tested is what CD runs.
+    plan_step="$(awk '
+      /^      - / { instep = (index($0, "Decide whether to build all four variants") > 0) }
       instep { print }
     ' <<<"$buildwasm")"
-    if [ -z "$miss_step" ]; then
-      fail "build-wasm has no 'Note engine WASM reuse miss' step — a cold key or a suppressed cache-service error is a silent rebuild with nothing in the log naming it (#9525)"
+    plan_script="$(awk '
+      /^        run: \|/ { in_run = 1; next }
+      in_run && /^          / { sub(/^          /, ""); print; next }
+      in_run && /^[[:space:]]*$/ { print ""; next }
+      in_run { exit }
+    ' <<<"$plan_step")"
+    if [ -z "$plan_step" ] || [ -z "$plan_script" ]; then
+      fail "build-wasm has no executable 'Decide whether to build all four variants' step — nothing decides between reuse and a rebuild, and a miss is a silent rebuild with nothing in the log naming it (#9525)"
     else
-      pass "build-wasm has the reuse-miss notice step"
-      if grep -qF "$guard" <<<"$miss_step"; then
-        pass "the reuse-miss notice is gated on a cache miss (it fires only when reuse did not hit)"
+      pass "build-wasm has the build-decision step"
+      if grep -qxF '        id: wasm-plan' <<<"$plan_step"; then
+        pass "the decision publishes wasm-plan, the id every build guard reads"
       else
-        fail "the reuse-miss notice is not gated on '$guard' — it would fire on every run, including a genuine hit"
+        fail "the decision step's id is not wasm-plan, so every build guard reads an empty output and nothing builds"
       fi
-      if grep -q '::notice::' <<<"$miss_step"; then
-        pass "the reuse-miss notice emits a ::notice:: line naming the miss"
+      if grep -qE '^        if:' <<<"$plan_step"; then
+        fail "the decision step is conditional — when skipped, build is empty and no build step runs, whatever the reuse did"
       else
-        fail "the reuse-miss notice does not emit a ::notice:: line — the miss stays invisible in the log"
+        pass "the decision step always runs"
+      fi
+      for wiring in \
+        '          CACHE_HIT: ${{ steps.engine-cache-all4.outputs.cache-hit }}' \
+        '          CI_REUSED: ${{ steps.ci-reuse.outputs.reused }}' \
+        '          CI_RUN_ID: ${{ steps.ci-artifact.outputs.run-id }}'; do
+        if grep -qxF "$wiring" <<<"$plan_step"; then
+          pass "the decision reads ${wiring#          }"
+        else
+          fail "the decision does not read '${wiring#          }' — it is deciding on something other than the two reuse tiers"
+        fi
+      done
+
+      # decide <cache-hit> <reused> -> "<build value>|<log>"
+      decide() {
+        local out_file log
+        out_file="$(mktemp)"
+        log="$(CACHE_HIT="$1" CI_REUSED="$2" CI_RUN_ID=777 KEY=engine-wasm-all4-k GITHUB_OUTPUT="$out_file" bash -c "$plan_script" 2>&1)"
+        printf '%s|%s' "$(sed -n 's/^build=//p' "$out_file" | tr '\n' ',')" "$log"
+        rm -f "$out_file"
+      }
+      # Explicit cases rather than a table: each asserts different log content.
+      r="$(decide true '')"
+      if [ "${r%%|*}" = "false," ] && ! grep -qF '::notice::' <<<"${r#*|}"; then
+        pass "all4 hit -> build=false, and no miss notice"
+      else
+        fail "all4 hit -> expected build=false with no notice, got build='${r%%|*}' log='${r#*|}'"
+      fi
+      r="$(decide '' true)"
+      if [ "${r%%|*}" = "false," ] && grep -qF '::notice::' <<<"${r#*|}" && grep -qF 'run 777' <<<"${r#*|}"; then
+        pass "PR CI artifact adopted -> build=false, with a notice naming the run it came from"
+      else
+        fail "adopted -> expected build=false and a notice naming run 777, got build='${r%%|*}' log='${r#*|}'"
+      fi
+      r="$(decide '' false)"
+      if [ "${r%%|*}" = "true," ] && grep -qF '::notice::engine WASM reuse MISS' <<<"${r#*|}"; then
+        pass "all4 miss + PR artifact refused -> build=true, with a MISS notice"
+      else
+        fail "refused -> expected build=true and a MISS notice, got build='${r%%|*}' log='${r#*|}'"
+      fi
+      r="$(decide '' '')"
+      if [ "${r%%|*}" = "true," ] && grep -qF '::notice::engine WASM reuse MISS' <<<"${r#*|}"; then
+        pass "all4 miss + no PR run found (adopt never ran) -> build=true, with a MISS notice"
+      else
+        fail "no PR run -> expected build=true and a MISS notice, got build='${r%%|*}' log='${r#*|}'"
+      fi
+
+      # Placed after both reuse tiers and before the first build step, or it
+      # decides before the reuse has happened.
+      ln_plan="$(grep -nF 'Decide whether to build all four variants' <<<"$buildwasm" | head -1 | cut -d: -f1)"
+      ln_adopt="$(grep -nF "Adopt the PR's WASM only on an exact key match" <<<"$buildwasm" | head -1 | cut -d: -f1)"
+      ln_toolchain="$(grep -nF 'dtolnay/rust-toolchain' <<<"$buildwasm" | head -1 | cut -d: -f1)"
+      if [ -n "$ln_plan" ] && [ -n "$ln_adopt" ] && [ -n "$ln_toolchain" ] && [ "$ln_adopt" -lt "$ln_plan" ] && [ "$ln_plan" -lt "$ln_toolchain" ]; then
+        pass "the decision runs after the adopt step and before the first build step"
+      else
+        fail "the decision is out of place (adopt=$ln_adopt decide=$ln_plan toolchain=$ln_toolchain)"
       fi
     fi
 
