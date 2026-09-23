@@ -245,8 +245,8 @@ describe('save and reopen', () => {
     expect(useEditorStore.getState().completionModeHistory).toEqual({ past: [], future: [] });
   });
 
-  it('a sandbox scene with no goal plays both before and after save/reopen', async () => {
-    await setMode('ai', 'sandbox');
+  it.each(['manual', 'ai'] as const)('a sandbox scene with no goal set by the %s surface plays both before and after save/reopen', async (surface) => {
+    await setMode(surface, 'sandbox');
     expect(pressPlay()).toBe(true);
 
     const saved = exportScene(engineExport('Saved'));
