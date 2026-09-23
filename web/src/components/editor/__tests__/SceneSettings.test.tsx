@@ -28,6 +28,11 @@ vi.mock('@/components/editor/SceneStatistics', () => ({
   SceneStatistics: () => <div data-testid="scene-statistics">Stats</div>,
 }));
 
+// The picker drives the real store in its own suite (CompletionModeSection.test.tsx).
+vi.mock('@/components/editor/CompletionModeSection', () => ({
+  CompletionModeSection: () => <div data-testid="completion-mode-section">Completion mode</div>,
+}));
+
 vi.mock('@/components/ui/InfoTooltip', () => ({
   InfoTooltip: ({ term, text }: { term?: string; text?: string }) => (
     <span data-testid={`tooltip-${term || 'text'}`}>{text}</span>
@@ -155,6 +160,17 @@ describe('SceneSettings', () => {
     setupStore();
     render(<SceneSettings />);
     expect(screen.getByTestId('scene-statistics')).toBeInTheDocument();
+  });
+
+  it('renders the completion-mode picker outside the a11y-deferred subtree (#9998)', () => {
+    // The E2E axe audits exclude `[data-a11y-defer="scene-settings"]`; the
+    // picker is new and built accessible, so it must stay where they can see it.
+    setupStore();
+    render(<SceneSettings />);
+    const picker = screen.getByTestId('completion-mode-section');
+    expect(picker.closest('[data-a11y-defer]')).toBeNull();
+    // The legacy controls are still deferred — the wrapper did not un-defer them.
+    expect(screen.getByTestId('scene-statistics').closest('[data-a11y-defer="scene-settings"]')).not.toBeNull();
   });
 
   it('renders Quality Preset section', () => {
