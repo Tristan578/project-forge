@@ -51,3 +51,10 @@ export const E2E_TIMEOUT_ENGINE_FULL_MS = 90_000;
  * cap is sized for the worst plausible cold start rather than that median.
  */
 export const E2E_TIMEOUT_PIPELINE_LIVE_MS = 180_000;
+
+/**
+ * Slack added on top of a performance capture's warm-up + capture window
+ * (`e2e/perf/fixtureCapture.spec.ts`, #10013): cold WASM fetch and compile,
+ * scene load, the exporter's play settle and environment collection.
+ */
+export const E2E_PERF_CAPTURE_SLACK_MS = 120_000;
