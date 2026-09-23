@@ -414,6 +414,72 @@ gen "$F" --check; expect_rc 0 "a comment containing a bracket does not close the
 printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y",\n    "@scope/pkg@latest",\n]\nenv_vars = [\n    "ALPHA_TOKEN",\n]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "the multi-line array form the Codex app writes is parity, not drift"
 
+# STRINGS are compared DECODED, the way Codex reads them: a basic string ("…")
+# decodes TOML's escapes, and a literal string ('…') has none. The first cut took
+# the raw text between the quotes, so a Windows path written the ordinary TOML way,
+# "C:\\Users\\…", read as C:\\Users\\… against .mcp.json's decoded C:\Users\… and
+# failed parity, and an escaped quote ended the string early (found writing the
+# Windows launch-path rows below, board round 3 on #10135). Each row is in parity:
+# .mcp.json holds the decoded value as JSON, config.toml the same value as TOML.
+# The values go through printf's %s, never its format, so no backslash is eaten.
+FS="$(mkfix)"; gen "$FS" --write
+STRING_ROWS=0
+while IFS='|' read -r LABEL JSON_ARGS TOML_ARGS; do
+  [ -n "$LABEL" ] || continue
+  STRING_ROWS=$((STRING_ROWS + 1))
+  printf '{"mcpServers":{"alpha":{"command":"node","args":%s}}}\n' "$JSON_ARGS" > "$FS/.mcp.json"
+  printf '[mcp_servers.alpha]\ncommand = "node"\nargs = %s\ndefault_tools_approval_mode = "prompt"\n' "$TOML_ARGS" > "$FS/.codex/config.toml"
+  gen "$FS" --check
+  if [ "$RC" -eq 0 ] && ! grep -qF 'mcp:' <<<"$OUT" && grep -qF '1 MCP servers declared for Codex, matching .mcp.json' <<<"$OUT"; then
+    ok "a TOML string is compared decoded: $LABEL"
+  else
+    bad "a TOML string was not read as Codex reads it ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-300)"
+  fi
+done <<'MCP_STRING_TABLE'
+escaped backslashes in a basic string (a Windows path)|["C:\\Users\\fixture\\run.mjs"]|["C:\\Users\\fixture\\run.mjs"]
+an escaped double quote, which does not end the string|["-e", "console.log(\"a # [x]\")"]|["-e", "console.log(\"a # [x]\")"]
+a \u escape|["x-y"]|["x\u002Dy"]
+a \U escape|["x-y"]|["x\U0000002Dy"]
+the short escapes \t \n \b \f \r|["a\tb\nc\bd\fe\rf"]|["a\tb\nc\bd\fe\rf"]
+a literal string, whose backslashes are not escapes|["C:\\Users\\fixture\\run.mjs"]|['C:\Users\fixture\run.mjs']
+MCP_STRING_TABLE
+if [ "$STRING_ROWS" -eq 6 ]; then ok "all 6 MCP string rows were driven"; else bad "the MCP string table was not walked: $STRING_ROWS of 6"; fi
+# A string the reader cannot decode is REPORTED, never compared as whatever text it
+# happened to hold. Codex itself refuses a config with an invalid escape or an
+# unclosed string, and a multi-line string ("""…""" or '''…''') spans lines this
+# line-based reader would otherwise take for keys. .mcp.json is in parity with the
+# readable spelling of every row, so only the unreadable string can fail it.
+printf '{"mcpServers":{"alpha":{"command":"node","args":["x"]}}}\n' > "$FS/.mcp.json"
+UNREADABLE_ROWS=0
+while IFS='|' read -r LABEL TOML_COMMAND TOML_ARGS NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  UNREADABLE_ROWS=$((UNREADABLE_ROWS + 1))
+  printf '[mcp_servers.alpha]\ncommand = %s\nargs = %s\ndefault_tools_approval_mode = "prompt"\n' "$TOML_COMMAND" "$TOML_ARGS" > "$FS/.codex/config.toml"
+  gen "$FS" --check
+  if [ "$RC" -eq 1 ] && grep -qF 'alpha could not be read from .codex/config.toml' <<<"$OUT" && grep -qF -- "$NEEDLE" <<<"$OUT"; then
+    ok "an unreadable TOML string is reported, not compared: $LABEL"
+  else
+    bad "an unreadable TOML string was not reported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-300)"
+  fi
+done <<'MCP_UNREADABLE_TABLE'
+a Windows path in a basic string with single backslashes (\U then non-hex), which Codex refuses to load|"node"|["C:\Users\x"]|args: invalid escape \U in a basic string
+an escape TOML does not define|"node"|["a\qb"]|args: invalid escape \q in a basic string
+a \u escape with too few hex digits|"node"|["\u12"]|args: invalid escape \u12 in a basic string
+a \u escape naming a surrogate, which is not a Unicode scalar value|"node"|["\uD800"]|args: invalid escape \uD800 in a basic string
+an unclosed basic string|"node|["x"]|command: a string is not closed
+an unclosed literal string|'node|["x"]|command: a string is not closed
+a multi-line basic string|"""node"""|["x"]|command: a multi-line string
+a multi-line literal string|'''node'''|["x"]|command: a multi-line string
+MCP_UNREADABLE_TABLE
+if [ "$UNREADABLE_ROWS" -eq 8 ]; then ok "all 8 unreadable-string rows were driven"; else bad "the unreadable-string table was not walked: $UNREADABLE_ROWS of 8"; fi
+# A multi-line string in a key the check does not compare is still reported: its
+# body can hold lines that look like keys. Here the real command is "evil" and the
+# decoy inside the string restates the parity values — read line by line, the
+# decoy is the LAST command and the server would pass as parity.
+printf '[mcp_servers.alpha]\ncommand = "evil"\nnote = """\ncommand = "node"\nargs = ["x"]\n"""\ndefault_tools_approval_mode = "prompt"\n' > "$FS/.codex/config.toml"
+gen "$FS" --check; expect_rc 1 "a multi-line string in a key that is not compared still fails the check"
+expect_out 'alpha could not be read from .codex/config.toml (note: a multi-line string' "…naming the key that holds it, so its body is never read as keys"
+
 # APPROVAL MODE, which has no .mcp.json counterpart, so parity alone never saw it.
 # docs/guides/codex-cli-support-matrix.md ("MCP servers") has every server set
 # default_tools_approval_mode = "prompt", so its tools stay human-gated if Codex's
@@ -491,8 +557,43 @@ a script path relative to the repository root, in args (taskboard's shape before
 an explicitly relative ./ path, even one that does not exist|node|["./launch.mjs", "mcp"]||alpha runs "./launch.mjs", a path relative to the repository root
 a command that is itself a repo-relative path|.claude/hooks/launch.mjs|["mcp"]||alpha runs ".claude/hooks/launch.mjs", a path relative to the repository root
 a relative cwd, which Codex resolves against the start directory, not .codex/|node|["-e", "0"]|..|alpha sets cwd = "..", a relative path
+a repo-relative script path written with Windows separators|node|[".claude\\hooks\\launch.mjs", "mcp"]||alpha runs ".claude\\hooks\\launch.mjs", a path relative to the repository root
 MCP_LAUNCH_TABLE
-if [ "$LAUNCH_ROWS" -eq 4 ]; then ok "all 4 MCP launch-path rows were driven"; else bad "the MCP launch-path table was not walked: $LAUNCH_ROWS of 4"; fi
+if [ "$LAUNCH_ROWS" -eq 5 ]; then ok "all 5 MCP launch-path rows were driven"; else bad "the MCP launch-path table was not walked: $LAUNCH_ROWS of 5"; fi
+# ABSOLUTE on either convention is not start-directory relative. isAbs() accepts
+# a Windows absolute path as well as a POSIX one, since this config is shared by
+# sessions on both, and nothing pinned that half: board round 3 on #10135 dropped
+# the win32 branch and this suite stayed green. Every row is in parity and
+# prompt-gated, and must pass with no launch-path line.
+#   - The cwd rows (a drive letter with either separator, and a UNC share) go red
+#     without the win32 branch, because the cwd check flags anything not absolute.
+#   - The command and arg rows use `\…`, which win32 reads as the root of the
+#     current drive. It is the one Windows-absolute shape that ALSO names a file
+#     relative to the repository root, so it is where dropping the branch turns
+#     into a false positive on a command or an arg.
+#   - A drive-letter arg (`C:\…`) names nothing under the root and passes either
+#     way; its row pins the string decoding instead (read raw, "C:\\…" fails
+#     parity against .mcp.json).
+WIN_ROWS=0
+while IFS='|' read -r LABEL COMMAND ARGS CWD; do
+  [ -n "$LABEL" ] || continue
+  WIN_ROWS=$((WIN_ROWS + 1))
+  mcp_launch "$COMMAND" "$ARGS" "$CWD"
+  gen "$F" --check
+  if [ "$RC" -eq 0 ] && ! grep -qF 'mcp:' <<<"$OUT" && grep -qF 'approval mode and launch paths' <<<"$OUT"; then
+    ok "a Windows-absolute launch path is not start-directory relative: $LABEL"
+  else
+    bad "a Windows-absolute launch path was misreported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-300)"
+  fi
+done <<'MCP_WINDOWS_ABSOLUTE_TABLE'
+a drive-letter cwd written with backslashes|node|["-e", "0"]|C:\\Users\\fixture
+a drive-letter cwd written with forward slashes|node|["-e", "0"]|C:/Users/fixture
+a UNC cwd|node|["-e", "0"]|\\\\fixture-host\\share
+a script path rooted at the current drive, in args|node|["\\.claude\\hooks\\launch.mjs", "mcp"]|
+a command rooted at the current drive|\\.claude\\hooks\\launch.mjs|["mcp"]|
+a drive-letter script path in args|node|["C:\\Users\\fixture\\.claude\\hooks\\launch.mjs", "mcp"]|
+MCP_WINDOWS_ABSOLUTE_TABLE
+if [ "$WIN_ROWS" -eq 6 ]; then ok "all 6 Windows-absolute launch rows were driven"; else bad "the Windows-absolute launch table was not walked: $WIN_ROWS of 6"; fi
 # The fix taskboard uses: git runs a `!` alias from the repository's top-level
 # directory (git-config(1), alias.*), so the SAME relative path resolves from any
 # start directory. The path sits inside one argument there, not as one, and must
