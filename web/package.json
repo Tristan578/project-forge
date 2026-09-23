@@ -49,6 +49,7 @@
     "db:baseline": "tsx scripts/baseline-drizzle-journal.ts",
     "db:migrate": "tsx scripts/baseline-drizzle-journal.ts --guard-migrate && tsx scripts/apply-migrations.ts",
     "db:push": "tsx scripts/assert-push-allowed.ts && drizzle-kit push",
+    "perf:fixtures": "tsx scripts/generate-perf-fixtures.ts",
     "db:studio": "drizzle-kit studio",
     "typecheck": "NODE_OPTIONS='--max-old-space-size=4096' tsc --noEmit",
     "check:command-parity": "node scripts/check-command-parity.js",
