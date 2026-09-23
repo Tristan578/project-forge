@@ -1871,10 +1871,13 @@ jobs:
   # Engine smoke gate (#8602 F10). The FIRST per-PR job that actually boots the
   # WASM engine: it builds ONLY the WebGL2 variant, serves it same-origin, and
   # runs the curated `@engine-smoke` set under ANGLE/SwiftShader software WebGL2
-  # — two specs: `engine-smoke.spec.ts` (load -> spawn -> inspect -> play -> stop
-  # -> export, the breadth check) and `pipeline-live-engine.spec.ts` (the real
+  # — three specs: `engine-smoke.spec.ts` (load -> spawn -> inspect -> play ->
+  # stop -> export, the breadth check), `pipeline-live-engine.spec.ts` (the real
   # game-creation pipeline -> real Play button -> engineMode === 'play', the
-  # depth check). NOT `--disable-gpu`,
+  # depth check) and `e2e/engine/referenceGames.spec.ts` (each versioned
+  # reference game built through real engine commands and checked against its
+  # expected-state record before Play, #10159) — plus the `@engine-ui` tests
+  # (#9586). NOT `--disable-gpu`,
   # which leaves wgpu with no GL context and hangs `init_engine` (the exact reason
   # every other CI Playwright config can only run store-less @ui/@journey specs).
   #
@@ -2071,13 +2074,13 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: npx next build
 
-      # Runs the curated @engine-smoke set (two specs — see the job comment
+      # Runs the curated @engine-smoke set (three specs — see the job comment
       # above), under SwiftShader software WebGL2. Launch flags and testMatch
       # live in playwright.engine.config.ts, which also carries the 90s DEFAULT
       # per-test budget (E2E_TIMEOUT_ENGINE_FULL_MS) that engine-smoke.spec.ts
-      # runs under; only pipeline-live-engine.spec.ts raises its own describe
-      # block to 180s via `test.describe.configure({ timeout:
-      # E2E_TIMEOUT_PIPELINE_LIVE_MS })`. Both numbers are defined in
+      # and referenceGames.spec.ts run under; only pipeline-live-engine.spec.ts
+      # raises its own describe block to 180s via `test.describe.configure({
+      # timeout: E2E_TIMEOUT_PIPELINE_LIVE_MS })`. Both numbers are defined in
       # e2e/constants.ts — no spec may inline a timeout literal — so raising a
       # budget for this gate means editing the config default or the spec's
       # configure call, not this workflow. The editor fixture's load() seeds
