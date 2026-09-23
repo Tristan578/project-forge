@@ -745,10 +745,47 @@ echo "=== cd.yml adopts the artifact only after proving it ==="
 if [ -n "${CD_BW:-}" ]; then
   miss="steps.engine-cache-all4.outputs.cache-hit != 'true'"
 
-  if grep -qE '^      actions: read$' <<<"$CD_BW"; then
-    pass "build-wasm's token can read another run's artifacts (actions: read)"
+  # The job token's scopes, read from the job's own permissions: block with
+  # comments and blank lines stripped, so a commented-out scope counts as gone.
+  # Every scope the reuse path needs is tied to the call that needs it, and a
+  # missing one fails SAFE (no_reuse, then a full build), which is exactly why
+  # nothing else would ever notice it: CD stays green and rebuilds forever.
+  cd_perms="$(awk '/^    permissions:$/ {f=1; next} f && /^    [^ ]/ {exit} f' <<<"$CD_BW" \
+    | grep -vE '^[[:space:]]*(#.*)?$' || true)"
+  resolver_code="$(grep -vE '^[[:space:]]*#' "$SCRIPT")"
+  if [ -z "$cd_perms" ]; then
+    fail "could not extract build-wasm's permissions: block from cd.yml — every scope check below would pass vacuously"
   else
-    fail "build-wasm lacks 'actions: read' — the cross-run download would fail on every run"
+    # shellcheck disable=SC2016  # the literal ${repo} IS the text the resolver carries
+    if grep -qF '"$gh" api "repos/${repo}/pulls/${pr_number}"' <<<"$resolver_code"; then
+      if grep -qx '      pull-requests: read' <<<"$cd_perms"; then
+        pass "build-wasm's token can read the merged PR the resolver looks up (pull-requests: read)"
+      else
+        fail "build-wasm lacks 'pull-requests: read' — the resolver's GET repos/{repo}/pulls/{n} would 403, answer no_reuse, and CD would rebuild on every run with nothing going red"
+      fi
+    else
+      fail "the resolver no longer calls repos/\${repo}/pulls/\${pr_number} — re-derive the scopes build-wasm needs before trusting this pin"
+    fi
+
+    # shellcheck disable=SC2016  # the literal ${repo} IS the text the resolver carries
+    if grep -qF '"$gh" api "repos/${repo}/actions/runs/${run_id}/artifacts?' <<<"$resolver_code"; then
+      if grep -qx '      actions: read' <<<"$cd_perms"; then
+        pass "build-wasm's token can list and download another run's artifacts (actions: read)"
+      else
+        fail "build-wasm lacks 'actions: read' — the resolver's run/artifact lookups and the cross-run download would fail on every run"
+      fi
+    else
+      fail "the resolver no longer lists repos/\${repo}/actions/runs/\${run_id}/artifacts — re-derive the scopes build-wasm needs before trusting this pin"
+    fi
+
+    # The whole set, exactly: a dropped scope and an escalated one (a write, or
+    # a new scope nobody justified) are both a change someone must look at.
+    expected_perms="$(printf '      %s\n' 'actions: read' 'contents: read' 'pull-requests: read')"
+    if [ "$(LC_ALL=C sort <<<"$cd_perms")" = "$expected_perms" ]; then
+      pass "build-wasm's token scopes are exactly actions/contents/pull-requests: read"
+    else
+      fail "build-wasm's token scopes changed: expected [$(tr '\n' ' ' <<<"$expected_perms")] got [$(LC_ALL=C sort <<<"$cd_perms" | tr '\n' ' ')]"
+    fi
   fi
 
   find_step="$(step_block "$CD_BW" 'Find the PR CI run that built this engine tree')"
