@@ -262,6 +262,42 @@ describe('Scenario: boundary and recovery — baseline compatibility', () => {
     expect(fields(compareReports(report({ protocol: shortProtocol, frameTimestampsMs: timestamps(10, shortProtocol) }), report()))).toEqual(['protocol']);
   });
 
+
+  it.each(['current', 'baseline'] as const)('rejects a hidden-tab capture on the %s side', (side) => {
+    const hidden = report({ hiddenDuringCapture: true, frameTimestampsMs: timestamps(10) });
+    const visible = report({ frameTimestampsMs: timestamps(15) });
+    const cmp = side === 'current' ? compareReports(hidden, visible) : compareReports(visible, hidden);
+    expect(cmp).toMatchObject({ compatible: false, claim: 'incompatible-baseline', metrics: null });
+    expect(cmp.incompatibilities.map((d) => d.field)).toContain('hiddenDuringCapture');
+  });
+
+  it('rejects editor versus exported measurements even with the same fixture and browser', () => {
+    const editor = report({ source: 'editor', firstInteractiveBasis: 'editor-navigation-to-engine-ready' });
+    const cmp = compareReports(editor, report());
+    expect(cmp).toMatchObject({ compatible: false, claim: 'incompatible-baseline', metrics: null });
+    expect(cmp.incompatibilities.map((d) => d.field)).toEqual(['source', 'firstInteractiveBasis']);
+  });
+
+  it('rejects different timing bases even when the source matches', () => {
+    const cmp = compareReports(report({ firstInteractiveBasis: 'editor-navigation-to-engine-ready' }), report());
+    expect(cmp).toMatchObject({ compatible: false, claim: 'incompatible-baseline', metrics: null });
+    expect(cmp.incompatibilities.map((d) => d.field)).toEqual(['firstInteractiveBasis']);
+  });
+
+  it.each([
+    [UNKNOWN, 'cold'],
+    ['warm', UNKNOWN],
+    [UNKNOWN, UNKNOWN],
+  ] as const)('keeps unknown cache state advisory (%s versus %s)', (currentCache, baselineCache) => {
+    const cmp = compareReports(
+      report({ frameTimestampsMs: timestamps(10) }, { cacheState: currentCache }),
+      report({ frameTimestampsMs: timestamps(15) }, { cacheState: baselineCache }),
+    );
+    expect(cmp).toMatchObject({ compatible: true, claim: 'improved' });
+    expect(cmp.metrics).not.toBeNull();
+    expect(cmp.advisories.map((d) => d.field)).toContain('cacheState');
+  });
+
   it('compares a like-for-like pair and names the direction of the p95 change', () => {
     const baseline = report({ frameTimestampsMs: timestamps(15) });
     const improved = compareReports(report({ frameTimestampsMs: timestamps(10) }), baseline);

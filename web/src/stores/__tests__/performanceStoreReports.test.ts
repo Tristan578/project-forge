@@ -14,7 +14,7 @@ import {
   loadStoredBaseline,
 } from '../performanceStore';
 import { UNKNOWN } from '@/lib/config/measurementManifest';
-import { buildPerformanceReport, type PerformanceReport } from '@/lib/perf/performanceReport';
+import { buildPerformanceReport, compareReports, type PerformanceReport } from '@/lib/perf/performanceReport';
 import { DEFAULT_CAPTURE_PROTOCOL } from '@/lib/perf/frameCapture';
 
 function report(id: string): PerformanceReport {
@@ -96,6 +96,31 @@ describe('performanceStore — reports and baseline (performance.FR-3.OP-01)', (
     expect(ids).toHaveLength(MAX_STORED_REPORTS);
     expect(ids[ids.length - 1]).toBe(`r${MAX_STORED_REPORTS + 2}`);
     expect(ids[0]).toBe('r3');
+  });
+
+
+  it('clears a comparison when a newer report becomes the displayed report', () => {
+    const baseline = report('baseline');
+    const previous = report('previous');
+    const state = usePerformanceStore.getState();
+    state.addPerformanceReport(previous);
+    state.setBaselineReport(baseline);
+    state.setLastComparison(compareReports(previous, baseline));
+    state.addPerformanceReport(report('newer'));
+    expect(usePerformanceStore.getState().lastComparison).toBeNull();
+    expect(usePerformanceStore.getState().baselineReport?.reportId).toBe('baseline');
+  });
+
+  it.each([report('replacement'), null])('clears a comparison when the baseline changes to %s', (next) => {
+    const state = usePerformanceStore.getState();
+    const current = report('current');
+    const baseline = report('baseline');
+    state.addPerformanceReport(current);
+    state.setBaselineReport(baseline);
+    state.setLastComparison(compareReports(current, baseline));
+    state.setBaselineReport(next);
+    expect(usePerformanceStore.getState().lastComparison).toBeNull();
+    expect(usePerformanceStore.getState().performanceReports.at(-1)?.reportId).toBe('current');
   });
 
   it('persists the pinned baseline so it survives a reload, and clears it', () => {

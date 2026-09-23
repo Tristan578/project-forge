@@ -1815,7 +1815,7 @@ Scope: `performance:read` | Token cost: 0
 
 ### `compare_performance_reports`
 
-Compare a performance report (default: the latest) with a baseline (default: the pinned one). Two reports are only compared like-for-like when fixture checksum, exact browser version, backend, cache state, device profile and capture protocol all match; otherwise the result is claim 'incompatible-baseline' with the differing fields and no improvement or regression is claimed. When compatible, returns p50/p95/p99 and first-interactive deltas and a claim of improved, regressed, unchanged (within 5% on p95) or inconclusive.
+Compare a performance report (default: latest) with a baseline (default: pinned). Fixture checksum, exact browser version and backend must be known and equal; source, first-interactive timing basis, device profile and capture protocol must match. Hidden-tab captures and known warm-versus-cold cache states are incompatible: no deltas or directional claim. Unknown cache state on either side is an advisory and retains deltas; equal cache conditions are not established. Compatible reports return p50/p95/p99 and first-interactive deltas with improved, regressed, unchanged (within 5% on p95), or inconclusive.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -8672,7 +8672,7 @@ Start a timed, manifest-pinned performance capture of the running scene: a warm-
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `warmupSeconds` | integer | No | Warm-up before measuring, whole seconds 0-60 (default 10). Budgets are only judged on the profile protocol (10 s warm-up, 60 s capture). |
+| `warmupSeconds` | integer | No | Warm-up before measuring, whole seconds 0-60 (default 10). The frame-time budget is only judged on the profile protocol (10 s warm-up, 60 s capture). |
 | `captureSeconds` | integer | No | Capture window, whole seconds 5-300 (default 60). |
 | `profileId` | string | No | Device profile whose budgets judge the run, as id@version (default 'desktop@1': p95 frame time <= 16.7 ms, cold first interactive <= 5 s). |
 | `cacheState` | `"warm"` \| `"cold"` \| `"unknown"` | No | Declare the asset-cache state of the run. Omit to detect it from the engine binary's resource timing (unknown when it cannot be told). |

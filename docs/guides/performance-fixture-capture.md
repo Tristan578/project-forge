@@ -133,9 +133,19 @@ the page needed per frame. `run-environment.json` records which mode was used.
 ## Comparing reports
 
 Two reports compare like-for-like only when fixture checksum, exact browser
-version and backend are known and equal, and cache state, device profile and
-capture protocol are equal. Otherwise the comparison's claim is
-`incompatible-baseline`, it lists the differing fields, and it carries no
-deltas. OS, GPU, viewport and device-memory differences are reported as
-advisories. A compatible comparison claims `improved` / `regressed` only for a
-p95 frame-time change beyond 5 %.
+version and backend are known and equal, and source, first-interactive timing
+basis, device profile and capture protocol match. Editor navigation-to-ready
+timings cannot be compared with exported-game initialization-to-first-frame
+timings. A capture hidden at any point is also incompatible because browser
+throttling can distort its frame samples.
+
+Known warm versus cold cache states are incompatible. If either cache state
+is unknown, the comparison retains its metric deltas and adds a cache-state
+advisory; it does not establish equal cache conditions. OS, GPU, viewport and
+device-memory differences are also advisories.
+
+An incompatible comparison claims `incompatible-baseline`, lists the reasons,
+and carries no deltas. A compatible comparison claims `improved` / `regressed`
+only for a p95 frame-time change beyond 5 %. Capturing a new report or changing
+the pinned baseline clears the previous comparison so an old claim cannot
+appear beneath new measurements.

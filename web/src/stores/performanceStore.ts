@@ -376,11 +376,11 @@ export const usePerformanceStore = create<PerformanceState>((set) => ({
   setTimedCapture: (next) => set((state) => ({ timedCapture: { ...state.timedCapture, ...next } })),
 
   addPerformanceReport: (report) =>
-    set((state) => ({ performanceReports: [...state.performanceReports, report].slice(-MAX_STORED_REPORTS) })),
+    set((state) => ({ performanceReports: [...state.performanceReports, report].slice(-MAX_STORED_REPORTS), lastComparison: null })),
 
   setBaselineReport: (report) => {
     storeBaseline(report);
-    set({ baselineReport: report });
+    set({ baselineReport: report, lastComparison: null });
   },
 
   setLastComparison: (comparison) => set({ lastComparison: comparison }),

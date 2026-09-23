@@ -12,13 +12,14 @@
  *
  * Three rules, each pinned by `__tests__/performanceReport.test.ts`:
  *  1. Unknown is never zero and never a pass. A budget whose metric is unknown,
- *     whose capture was throttled, or whose protocol differs from the profile's
- *     is `unknown`; the verdict is only `pass` when nothing is unknown.
+ *     is `unknown`; a throttled capture or non-profile protocol also makes the
+ *     frame-time budget unknown. A pass requires no unknown budget.
  *  2. A failure is reported with the observed and the expected value.
  *  3. Two reports compare like-for-like only when fixture checksum, exact
- *     browser version, backend, cache state, profile and protocol all match —
- *     otherwise the comparison says `incompatible-baseline` and carries no
- *     improvement or regression claim.
+ *     browser version and backend are known and equal; source, timing basis,
+ *     profile and protocol match; and neither capture was hidden. Known warm
+ *     versus cold is incompatible; unknown cache state is advisory. An
+ *     incompatible pair carries no deltas or directional claim.
  */
 import { z } from 'zod';
 import {
@@ -324,6 +325,27 @@ export function compareReports(current: PerformanceReport, baseline: Performance
       incompatibilities.push({ field, current: c, baseline: b, reason: `${field} differs` });
     }
   }
+
+  if (current.source !== baseline.source) {
+    incompatibilities.push({ field: 'source', current: current.source, baseline: baseline.source, reason: 'editor and exported-game measurements have different workloads' });
+  }
+  if (current.capture.firstInteractiveBasis !== baseline.capture.firstInteractiveBasis) {
+    incompatibilities.push({
+      field: 'firstInteractiveBasis',
+      current: current.capture.firstInteractiveBasis,
+      baseline: baseline.capture.firstInteractiveBasis,
+      reason: 'first-interactive timings use different start and end points',
+    });
+  }
+  if (current.capture.hiddenDuringCapture || baseline.capture.hiddenDuringCapture) {
+    incompatibilities.push({
+      field: 'hiddenDuringCapture',
+      current: current.capture.hiddenDuringCapture,
+      baseline: baseline.capture.hiddenDuringCapture,
+      reason: 'a hidden tab can throttle frame sampling, so the runs cannot support a performance comparison',
+    });
+  }
+
   const cCache = current.manifest.cacheState;
   const bCache = baseline.manifest.cacheState;
   if (cCache !== UNKNOWN && bCache !== UNKNOWN && cCache !== bCache) {
