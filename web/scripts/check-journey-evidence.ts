@@ -74,7 +74,9 @@ export interface CliResult {
 
 export function runCheckJourneyEvidence(
   argv: readonly string[],
-  env: { GITHUB_ACTIONS?: string },
+  // A record, not `{ GITHUB_ACTIONS?: string }`: process.env has only an index
+  // signature, which TypeScript's weak-type check refuses against all-optional props.
+  env: Readonly<Record<string, string | undefined>>,
 ): CliResult {
   let options: JourneyEvidenceCheckOptions;
   try {
