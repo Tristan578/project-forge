@@ -63,7 +63,11 @@ if [ -z "$ui_job" ]; then
   # Fall back to locating by the sharded @ui run line (playwright.ci.config.ts
   # with --shard — the @api job uses the same config WITHOUT --shard), so a job
   # rename does not silently turn this whole suite into a no-op.
-  ui_job="$(grep -n -B40 -E 'playwright.ci.config.ts.*--shard' "$CI_YML" | sed 's/^[0-9]*[-:]//')"
+  # Every raw-file search in this suite is anchored `^[^#]*`: a YAML comment
+  # that NAMES a command must not stand in for the command
+  # (scripts/check-pin-strength.sh, lessons-learned #16).
+  # raw-grep-ok: anchored ^[^#]* like the rest; the gate's pattern parser stops at -B40 and cannot see the anchor.
+  ui_job="$(grep -n -B40 -E '^[^#]*playwright.ci.config.ts.*--shard' "$CI_YML" | sed 's/^[0-9]*[-:]//')"
 fi
 if [ -z "$ui_job" ]; then
   fail "could not locate the @ui E2E job in ci.yml — this suite would pass vacuously"
@@ -104,6 +108,97 @@ else
 fi
 
 echo ""
+echo "=== the Clerk auth journey runs in its own job, on test-instance keys only (#8632) ==="
+# The @auth specs need Clerk keys, and keys cannot go on the @ui shard: with
+# them the proxy switches to clerkMiddleware for every request and, under
+# `next start`, drops /dev from the public routes -- every editor spec would be
+# redirected to /sign-in. So the journey has a job of its own, and these pins
+# keep it real: mapped from the CI-only TEST-instance secrets, required on
+# trusted runs, confined to that one job, and actually running the @auth config.
+auth_job="$(awk '/^  test-e2e-auth:/{f=1} f{print} f && /^  [a-z][a-z0-9-]*:$/ && !/test-e2e-auth/{exit}' "$CI_YML")"
+if [ -z "$auth_job" ]; then
+  fail "no test-e2e-auth job in ci.yml — the @auth specs (auth-journey.spec.ts) run nowhere with Clerk keys, so the signup/auth journey is untested (#8632)"
+else
+  auth_exec="$(grep -v '^[[:space:]]*#' <<<"$auth_job")"
+  # GitHub expressions are literal fixture text here; single quotes deliberately prevent shell expansion.
+  # shellcheck disable=SC2016
+  for mapping in \
+    'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}' \
+    'CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}'; do
+    # BOTH steps: NEXT_PUBLIC_* is inlined into the client bundle by `next
+    # build`, and the secret key is read by `next start` at runtime.
+    n="$(grep -cF "$mapping" <<<"$auth_exec" || true)"
+    if [ "${n:-0}" -ge 2 ]; then
+      pass "test-e2e-auth maps '${mapping%%:*}' from the TEST-instance secret on both the build and the test step"
+    else
+      fail "test-e2e-auth maps '${mapping%%:*}' from the TEST-instance secret on ${n:-0} step(s), expected the build AND the test step"
+    fi
+  done
+  # shellcheck disable=SC2016
+  for mapping in \
+    'E2E_CLERK_TEST_EMAIL: ${{ secrets.E2E_CLERK_TEST_EMAIL }}' \
+    'E2E_CLERK_TEST_PASSWORD: ${{ secrets.E2E_CLERK_TEST_PASSWORD }}' \
+    "E2E_CLERK_TEST_REQUIRED: \${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}" \
+    "STAGING_URL: 'http://localhost:3000'"; do
+    if grep -qF "$mapping" <<<"$auth_exec"; then
+      pass "test-e2e-auth sets ${mapping%%:*}"
+    else
+      fail "test-e2e-auth does not set '${mapping}' — without it the job skips on trusted runs, has no user to sign in, or the proxy rejects the localhost session's azp claim"
+    fi
+  done
+  if grep -qE '^[[:space:]]+run: npx playwright test --config playwright\.auth\.config\.ts[[:space:]]*$' <<<"$auth_exec"; then
+    pass "test-e2e-auth runs the @auth config as its whole run: line"
+  else
+    fail "test-e2e-auth does not run 'npx playwright test --config playwright.auth.config.ts' as a whole run: line"
+  fi
+fi
+
+leaked="$(awk '/^  test-e2e-auth:/{skip=1; next} skip && /^  [a-z][a-z0-9-]*:$/{skip=0} !skip{print}' "$CI_YML" \
+  | grep -v '^[[:space:]]*#' | grep -cE 'secrets\.(CLERK_TEST_|E2E_CLERK_TEST_)' || true)"
+if [ "${leaked:-0}" -eq 0 ]; then
+  pass "no other ci.yml job receives the Clerk test-instance secrets (keys on the @ui shard would send every /dev editor spec to /sign-in)"
+else
+  fail "${leaked} line(s) outside test-e2e-auth reference the Clerk test-instance secrets — on the @ui shard they switch the proxy to clerkMiddleware and take /dev out of the public routes"
+fi
+
+if grep -v '^[[:space:]]*#' "$CI_YML" | grep -qE 'secrets\.(CLERK_SECRET_KEY|NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)([^A-Za-z0-9_]|$)'; then
+  fail "ci.yml references a production-named Clerk secret — the E2E job may only use the CLERK_TEST_* test-instance keys"
+else
+  pass "ci.yml never references the production-named Clerk secrets"
+fi
+
+AUTH_CFG="$(cd "$E2E_DIR/.." 2>/dev/null && pwd)/playwright.auth.config.ts"
+if [ ! -f "$AUTH_CFG" ]; then
+  fail "playwright.auth.config.ts not found — test-e2e-auth has no config to run"
+else
+  auth_cfg_exec="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$AUTH_CFG")"
+  if grep -qE "^[[:space:]]*grep: /@auth/,?[[:space:]]*$" <<<"$auth_cfg_exec"; then
+    pass "playwright.auth.config.ts selects @auth"
+  else
+    fail "playwright.auth.config.ts does not select 'grep: /@auth/'"
+  fi
+  if grep -qE "^[[:space:]]*globalSetup: '\./e2e/lib/clerkGlobalSetup\.ts',?[[:space:]]*$" <<<"$auth_cfg_exec"; then
+    pass "playwright.auth.config.ts runs the Clerk global setup (testing token, test-key guard)"
+  else
+    fail "playwright.auth.config.ts does not run './e2e/lib/clerkGlobalSetup.ts' as its globalSetup"
+  fi
+  if grep -qE "^[[:space:]]*\['\./e2e/lib/requiredRunReporter\.ts'" <<<"$auth_cfg_exec"; then
+    pass "playwright.auth.config.ts registers requiredRunReporter (a skipped required run fails)"
+  else
+    fail "playwright.auth.config.ts does not register requiredRunReporter — a required run that skipped every @auth test would report green"
+  fi
+fi
+
+auth_titles="$(grep -rhE "(test|describe)\((['\"])[^'\"]*@auth\b" "$E2E_DIR" --include=*.spec.ts 2>/dev/null || true)"
+if [ -z "$auth_titles" ]; then
+  fail "no spec title carries @auth — test-e2e-auth would select zero tests"
+elif grep -q '@ui' <<<"$auth_titles"; then
+  fail "an @auth title is also @ui — the keyless @ui shard can only skip it"
+else
+  pass "@auth is applied ($(grep -c . <<<"$auth_titles") title(s)) and never together with @ui"
+fi
+
+echo ""
 echo "=== no tag may be excluded from the @ui selection without another job running it ==="
 
 # The excluded set is the reporter's EXCLUDE_TAGS (#9636), not a --grep-invert.
@@ -121,7 +216,7 @@ else
       # Some OTHER playwright job or config must select this tag, or the specs
       # carrying it run nowhere at all. Match a config's `grep:` selector rather
       # than any mention, so a comment naming the tag cannot credit it.
-      if grep -E "playwright test" "$CI_YML" | grep -v -- "--grep-invert" | grep -qF -- "@${tag}" \
+      if grep -E "^[^#]*playwright test" "$CI_YML" | grep -v -- "--grep-invert" | grep -qF -- "@${tag}" \
          || grep -rhE "grep:[^#]*${tag}" "$HERE/../../web/playwright."*.config.ts 2>/dev/null | grep -q .; then
         pass "'${tag}' is excluded from @ui but selected by another job or config"
       else
@@ -147,11 +242,11 @@ if [ ! -f "$CD_YML" ]; then
 else
   # The sharded @ui run in each workflow (the @api job uses the same config
   # WITHOUT --shard, so this anchor does not catch it).
-  ci_ui_run="$(grep -E 'playwright test.*playwright.ci.config.ts.*--shard' "$CI_YML" | head -1)"
-  cd_ui_run="$(grep -E 'playwright test.*playwright.ci.config.ts.*--shard' "$CD_YML" | head -1)"
+  ci_ui_run="$(grep -E '^[^#]*playwright test.*playwright.ci.config.ts.*--shard' "$CI_YML" | head -1)"
+  cd_ui_run="$(grep -E '^[^#]*playwright test.*playwright.ci.config.ts.*--shard' "$CD_YML" | head -1)"
   # cd.yml's @ui job is not named test-e2e-ui, so read its enclosing block as a
   # window ending at the run line (captures both job- and step-level env).
-  cd_anchor="$(grep -nE 'playwright test.*playwright.ci.config.ts.*--shard' "$CD_YML" | head -1 | cut -d: -f1)"
+  cd_anchor="$(grep -nE '^[^#]*playwright test.*playwright.ci.config.ts.*--shard' "$CD_YML" | head -1 | cut -d: -f1)"
   if [ -n "$cd_anchor" ]; then
     cd_start=$(( cd_anchor > 60 ? cd_anchor - 60 : 1 ))
     cd_job="$(sed -n "${cd_start},${cd_anchor}p" "$CD_YML")"
@@ -190,7 +285,7 @@ echo "=== @dev must no longer be used as an exclusion ==="
 # route a spec happens to use.
 if grep -qE "grep-invert '[^']*@dev" "$CI_YML"; then
   fail "ci.yml still grep-inverts @dev — that is the filter that removed 331 of 422 tests while the job read as an application gate (#9586)"
-elif [ -f "$REPORTER_TS" ] && grep -E '^export const EXCLUDE_TAGS' "$REPORTER_TS" | grep -qw 'dev'; then
+elif [ -f "$REPORTER_TS" ] && grep -qE "^export const EXCLUDE_TAGS.*['\"]@?dev['\"]" "$REPORTER_TS"; then
   fail "uiSuiteReporter.ts excludes @dev — that empties the @ui gate the same way the old grep-invert did (#9586)"
 else
   pass "no job or reporter excludes @dev (editor specs are routed by capability, not by route)"
@@ -365,7 +460,7 @@ done
 # section still reported green when join_continuations was removed and one
 # wrapped invocation went invisible. Adding a playwright job raises this;
 # removing one lowers it, and either way the number is checked by a human.
-EXPECTED_PROD_WEBSERVER_INVOCATIONS=6
+EXPECTED_PROD_WEBSERVER_INVOCATIONS=7
 if [ "$prod_checked" -eq "$EXPECTED_PROD_WEBSERVER_INVOCATIONS" ]; then
   pass "checked ${prod_checked} playwright invocations against a production webServer (a walk over zero would pass vacuously)"
 else
