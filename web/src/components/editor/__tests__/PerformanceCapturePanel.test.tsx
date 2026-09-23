@@ -8,7 +8,17 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render, screen, fireEvent, cleanup, within } from '@/test/utils/componentTestUtils';
+import {
+  PRIMITIVE_ATTR,
+  controlsIn,
+  expectedPrimitive,
+  findColourLiterals,
+  findRawControls,
+  hasMobileTouchTarget,
+} from '@/test/utils/designSystemAudit';
 import { PerformanceCapturePanel } from '../PerformanceCapturePanel';
 import { usePerformanceStore, IDLE_TIMED_CAPTURE } from '@/stores/performanceStore';
 import {
@@ -28,6 +38,12 @@ vi.mock('@/hooks/useEngine', () => ({
   getEngineWasmMemory: vi.fn(() => null),
 }));
 
+// The REAL library components, each marking the element it renders so a test
+// can tell a library <Button> from a raw <button> styled to look like one.
+vi.mock('@spawnforge/ui', async (importOriginal) =>
+  (await import('@/test/utils/designSystemAudit')).tagUiPrimitives(await importOriginal()),
+);
+
 const env: CaptureEnvironment = {
   requestFrame: () => 1,
   cancelFrame: () => undefined,
@@ -44,7 +60,12 @@ const env: CaptureEnvironment = {
   now: () => new Date('2026-09-22T12:00:00.000Z'),
 };
 
-function report(id: string, browserVersion: string, intervalMs = 10): PerformanceReport {
+function report(
+  id: string,
+  browserVersion: string,
+  intervalMs = 10,
+  cacheState: 'warm' | 'cold' | typeof UNKNOWN = 'warm',
+): PerformanceReport {
   return buildPerformanceReport({
     raw: {
       captureProtocolVersion: 1,
@@ -68,7 +89,7 @@ function report(id: string, browserVersion: string, intervalMs = 10): Performanc
       backend: 'webgpu',
       viewport: { width: 1280, height: 720, devicePixelRatio: 1 },
       deviceMemory: 8,
-      cacheState: 'warm',
+      cacheState,
       sampleCount: UNKNOWN,
     },
     profileKey: 'desktop@1',
@@ -199,5 +220,109 @@ describe('PerformanceCapturePanel', () => {
     render(<PerformanceCapturePanel />);
     fireEvent.click(screen.getByRole('button', { name: 'Compare with baseline' }));
     expect(screen.getByRole('alert').textContent).toMatch(/No baseline is pinned/);
+  });
+});
+
+/**
+ * #9904 board round 1 (ux): the panel was built from raw <input>/<select>/
+ * <button> elements, a hand-rolled progress bar and fixed Tailwind palette
+ * colours, so it bypassed @spawnforge/ui and could not follow the seven themes.
+ */
+describe('PerformanceCapturePanel design system', () => {
+  const SOURCE = readFileSync(resolve(__dirname, '../PerformanceCapturePanel.tsx'), 'utf-8');
+
+  /** The idle panel with a report, then the running panel, then an error: every control state. */
+  function renderEveryControlState() {
+    usePerformanceStore.getState().addPerformanceReport(report('perf-a', 'Chrome 153.0.8010.53'));
+    const { container } = render(<PerformanceCapturePanel />);
+    const idle = controlsIn(container);
+    fireEvent.click(screen.getByRole('button', { name: 'Compare with baseline' }));
+    const alert = screen.getByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: 'Run capture' }));
+    const running = controlsIn(container);
+    return { container, idle, running, alert };
+  }
+
+  it('renders every control through the @spawnforge/ui primitives', () => {
+    const { container, idle, running, alert } = renderEveryControlState();
+
+    // Name each control so a failure says which one.
+    const nameOf = (el: HTMLElement) => el.getAttribute('aria-label') || el.textContent?.trim() || el.tagName.toLowerCase();
+    const primitiveOf = (el: HTMLElement) => `${nameOf(el)}: ${el.getAttribute(PRIMITIVE_ATTR)}`;
+    const expected = (el: HTMLElement) => `${nameOf(el)}: ${expectedPrimitive(el)}`;
+
+    // 2 number inputs, 2 selects, Run + Download + Pin + Compare.
+    expect(idle).toHaveLength(8);
+    expect(idle.map(primitiveOf)).toEqual(idle.map(expected));
+    // Cancel replaces Run, and the progress bar appears.
+    expect(running).toHaveLength(9);
+    expect(running.map(primitiveOf)).toEqual(running.map(expected));
+    expect(running.filter((el) => el.getAttribute('role') === 'progressbar')).toHaveLength(1);
+
+    // Field labels and the error notice come from the library too.
+    const labels = Array.from(container.querySelectorAll('label'));
+    expect(labels.map((l) => `${l.textContent}: ${l.getAttribute(PRIMITIVE_ATTR)}`)).toEqual([
+      'Warm-up (s): Label',
+      'Capture (s): Label',
+      'Device profile: Label',
+      'Cache state: Label',
+    ]);
+    expect(alert.getAttribute(PRIMITIVE_ATTR)).toBe('InlineAlert');
+  });
+
+  it('gives every control a 44px touch target below the sm breakpoint', () => {
+    const { idle, running } = renderEveryControlState();
+    const interactive = [...idle, ...running].filter((el) => el.getAttribute('role') !== 'progressbar');
+    expect(interactive.length).toBeGreaterThan(0);
+    const short = interactive
+      .filter((el) => !hasMobileTouchTarget(el))
+      .map((el) => `${el.textContent?.trim() || el.tagName.toLowerCase()}: ${el.className}`);
+    expect(short).toEqual([]);
+  });
+
+  const STATUS_TOKEN = {
+    pass: 'text-[var(--sf-status-healthy-indicator)]',
+    fail: 'text-[var(--sf-status-down-indicator)]',
+    unknown: 'text-[var(--sf-status-unknown-indicator)]',
+    not_applicable: 'text-[var(--sf-text-secondary)]',
+  } as const;
+
+  it.each([
+    ['pass', report('perf-pass', 'Chrome 153.0.8010.53', 10), { 'frame-time-p95': 'pass', 'first-interactive-cold': 'not_applicable' }],
+    ['fail', report('perf-fail', 'Chrome 153.0.8010.53', 20), { 'frame-time-p95': 'fail', 'first-interactive-cold': 'not_applicable' }],
+    ['unknown', report('perf-unknown', 'Chrome 153.0.8010.53', 10, UNKNOWN), { 'frame-time-p95': 'pass', 'first-interactive-cold': 'unknown' }],
+  ] as const)('colours a %s verdict and its budgets with the per-theme status tokens', (verdict, r, budgetStatuses) => {
+    usePerformanceStore.getState().addPerformanceReport(r);
+    render(<PerformanceCapturePanel />);
+    const verdictEl = screen.getByText('Verdict').nextElementSibling!;
+    expect(verdictEl.textContent).toBe(verdict);
+    expect(verdictEl.classList).toContain(STATUS_TOKEN[verdict]);
+
+    const budgets = within(screen.getByLabelText('Budgets'));
+    for (const [id, status] of Object.entries(budgetStatuses) as Array<[string, keyof typeof STATUS_TOKEN]>) {
+      const statusEl = budgets.getByText(id).nextElementSibling!;
+      expect(statusEl.textContent?.startsWith(`${status} (`), `${id}: ${statusEl.textContent}`).toBe(true);
+      expect(statusEl.classList, `${id}: ${statusEl.className}`).toContain(STATUS_TOKEN[status]);
+    }
+  });
+
+  it('reports an incompatible baseline in the library warning notice', () => {
+    usePerformanceStore.getState().addPerformanceReport(report('perf-old', 'Chrome 152.0.7990.10', 15));
+    render(<PerformanceCapturePanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Pin as baseline' }));
+    usePerformanceStore.getState().addPerformanceReport(report('perf-new', 'Chrome 153.0.8010.53', 10));
+    fireEvent.click(screen.getByRole('button', { name: 'Compare with baseline' }));
+    const notice = within(screen.getByLabelText('Baseline comparison')).getByRole('status');
+    expect(notice.getAttribute(PRIMITIVE_ATTR)).toBe('InlineAlert');
+    expect(notice.textContent).toContain('Incompatible baseline — no improvement or regression is claimed');
+  });
+
+  // A DOM walk only covers rendered branches; the source scan covers all of them.
+  it('names every colour through a var(--sf-*) token, in every branch', () => {
+    expect(findColourLiterals(SOURCE)).toEqual([]);
+  });
+
+  it('renders no raw form control where a library primitive exists', () => {
+    expect(findRawControls(SOURCE)).toEqual([]);
   });
 });

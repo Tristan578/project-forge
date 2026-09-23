@@ -1,4 +1,5 @@
 import React, { useCallback, useId, useState } from 'react';
+import { Button, InlineAlert, Input, Label, Progress, Select, cn } from '@spawnforge/ui';
 import { usePerformanceStore } from '@/stores/performanceStore';
 import { UNKNOWN } from '@/lib/config/measurementManifest';
 import { DEFAULT_DEVICE_PROFILE_KEY, DEVICE_PROFILE_KEYS } from '@/lib/perf/deviceProfiles';
@@ -19,6 +20,10 @@ import { reportFileName, serializeReport, type BudgetResult, type PerformanceRep
  * error text that function returns — manual/AI parity by construction. The
  * inputs are deliberately free-form numbers so an out-of-range value reaches
  * the shared validator instead of being clamped away by the UI.
+ *
+ * Built from the @spawnforge/ui primitives and coloured only through
+ * `var(--sf-*)` tokens, so it follows every theme. It sits on the
+ * `--sf-bg-surface` the host PerformanceProfiler paints.
  */
 
 const PHASE_LABELS: Record<string, string> = {
@@ -42,12 +47,41 @@ function mb(value: number | typeof UNKNOWN): string {
   return value === UNKNOWN ? 'unknown' : `${value} MB`;
 }
 
+/**
+ * Budget and verdict colours. The `--sf-status-*-indicator` tokens are the
+ * theme's foregrounds for unfilled status text, and every one of them is
+ * pinned at >= 4.5:1 on `--sf-bg-surface` in all seven themes
+ * (packages/ui/src/tokens/__tests__/themes.test.ts) — the surface the host
+ * PerformanceProfiler paints. `not_applicable` is not a status, so it reads
+ * as secondary text. The words themselves (`pass`, `fail`, …) are always
+ * rendered, so colour is never the only signal.
+ */
 const STATUS_CLASS: Record<BudgetResult['status'], string> = {
-  pass: 'text-green-400',
-  fail: 'text-red-400',
-  unknown: 'text-gray-400 italic',
-  not_applicable: 'text-gray-400',
+  pass: 'text-[var(--sf-status-healthy-indicator)]',
+  fail: 'text-[var(--sf-status-down-indicator)]',
+  unknown: 'text-[var(--sf-status-unknown-indicator)] italic',
+  not_applicable: 'text-[var(--sf-text-secondary)]',
 };
+
+/** Secondary-text label for a field or a report row. */
+const LABEL_CLASS = 'text-xs font-normal text-[var(--sf-text-secondary)]';
+
+/**
+ * Keep inputs and selects at 44px below the `sm` breakpoint, the same rule the
+ * library's small Button follows, so the panel is usable on the mobile PWA.
+ */
+const FIELD_CLASS = 'min-h-[44px] sm:min-h-0';
+
+type CacheChoice = 'auto' | 'warm' | 'cold' | 'unknown';
+
+const CACHE_OPTIONS: Array<{ value: CacheChoice; label: string }> = [
+  { value: 'auto', label: 'Detect' },
+  { value: 'warm', label: 'Warm' },
+  { value: 'cold', label: 'Cold' },
+  { value: 'unknown', label: 'Unknown' },
+];
+
+const PROFILE_OPTIONS = DEVICE_PROFILE_KEYS.map((key) => ({ value: key, label: key }));
 
 function downloadReport(report: PerformanceReport): void {
   const blob = new Blob([serializeReport(report)], { type: 'application/json' });
@@ -61,13 +95,23 @@ function downloadReport(report: PerformanceReport): void {
   URL.revokeObjectURL(url);
 }
 
+/** One label/value line of the latest report. */
+function ReportRow({ label, valueClassName, children }: { label: string; valueClassName?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <span className="text-[var(--sf-text-secondary)]">{label}</span>
+      <span className={cn('text-right', valueClassName)}>{children}</span>
+    </div>
+  );
+}
+
 export function PerformanceCapturePanel() {
   const { timedCapture, performanceReports, baselineReport, lastComparison } = usePerformanceStore();
   const ids = useId();
   const [warmup, setWarmup] = useState('10');
   const [capture, setCapture] = useState('60');
   const [profile, setProfile] = useState(DEFAULT_DEVICE_PROFILE_KEY);
-  const [cache, setCache] = useState<'auto' | 'warm' | 'cold' | 'unknown'>('auto');
+  const [cache, setCache] = useState<CacheChoice>('auto');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -108,93 +152,85 @@ export function PerformanceCapturePanel() {
   const isBaseline = !!(latest && baselineReport && baselineReport.reportId === latest.reportId);
 
   return (
-    <section className="mt-3 pt-3 border-t border-gray-700 space-y-2" aria-labelledby={`${ids}-title`}>
-      <h3 id={`${ids}-title`} className="text-xs uppercase tracking-wide text-gray-400">
+    <section className="mt-3 pt-3 border-t border-[var(--sf-border)] space-y-2" aria-labelledby={`${ids}-title`}>
+      <h3 id={`${ids}-title`} className="text-xs uppercase tracking-wide text-[var(--sf-text-secondary)]">
         Timed capture
       </h3>
 
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <label className="flex flex-col gap-0.5">
-          <span className="text-gray-400">Warm-up (s)</span>
-          <input
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`${ids}-warmup`} className={LABEL_CLASS}>
+            Warm-up (s)
+          </Label>
+          <Input
+            id={`${ids}-warmup`}
             type="number"
             inputMode="numeric"
             value={warmup}
             onChange={(e) => setWarmup(e.target.value)}
             disabled={running}
-            className="px-1.5 py-1 rounded bg-gray-800 border border-gray-700"
+            className={FIELD_CLASS}
           />
-        </label>
-        <label className="flex flex-col gap-0.5">
-          <span className="text-gray-400">Capture (s)</span>
-          <input
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`${ids}-capture`} className={LABEL_CLASS}>
+            Capture (s)
+          </Label>
+          <Input
+            id={`${ids}-capture`}
             type="number"
             inputMode="numeric"
             value={capture}
             onChange={(e) => setCapture(e.target.value)}
             disabled={running}
-            className="px-1.5 py-1 rounded bg-gray-800 border border-gray-700"
+            className={FIELD_CLASS}
           />
-        </label>
-        <label className="flex flex-col gap-0.5">
-          <span className="text-gray-400">Device profile</span>
-          <select
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`${ids}-profile`} className={LABEL_CLASS}>
+            Device profile
+          </Label>
+          <Select
+            id={`${ids}-profile`}
             value={profile}
             onChange={(e) => setProfile(e.target.value)}
             disabled={running}
-            className="px-1.5 py-1 rounded bg-gray-800 border border-gray-700"
-          >
-            {DEVICE_PROFILE_KEYS.map((key) => (
-              <option key={key} value={key}>
-                {key}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-0.5">
-          <span className="text-gray-400">Cache state</span>
-          <select
+            options={PROFILE_OPTIONS}
+            className={FIELD_CLASS}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`${ids}-cache`} className={LABEL_CLASS}>
+            Cache state
+          </Label>
+          <Select
+            id={`${ids}-cache`}
             value={cache}
-            onChange={(e) => setCache(e.target.value as typeof cache)}
+            onChange={(e) => setCache(e.target.value as CacheChoice)}
             disabled={running}
-            className="px-1.5 py-1 rounded bg-gray-800 border border-gray-700"
-          >
-            <option value="auto">Detect</option>
-            <option value="warm">Warm</option>
-            <option value="cold">Cold</option>
-            <option value="unknown">Unknown</option>
-          </select>
-        </label>
+            options={CACHE_OPTIONS}
+            className={FIELD_CLASS}
+          />
+        </div>
       </div>
 
-      <div className="flex gap-2">
-        {running ? (
-          <button type="button" onClick={handleCancel} className="flex-1 px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600">
-            Cancel capture
-          </button>
-        ) : (
-          <button type="button" onClick={handleRun} className="flex-1 px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500">
-            Run capture
-          </button>
-        )}
-      </div>
+      {running ? (
+        <Button type="button" size="sm" variant="outline" onClick={handleCancel} className="w-full">
+          Cancel capture
+        </Button>
+      ) : (
+        <Button type="button" size="sm" onClick={handleRun} className="w-full">
+          Run capture
+        </Button>
+      )}
 
-      <div aria-live="polite" className="text-xs text-gray-300">
+      <div aria-live="polite" className="text-xs text-[var(--sf-text-secondary)]">
         {running && (
           <div className="space-y-1">
             <div>
               {phaseLabel} — {progressPct}%
             </div>
-            <div
-              className="h-1.5 bg-gray-800 rounded overflow-hidden"
-              role="progressbar"
-              aria-label="Capture progress"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={progressPct}
-            >
-              <div className="h-full bg-blue-500" style={{ width: `${progressPct}%` }} />
-            </div>
+            <Progress value={progressPct} label="Capture progress" />
           </div>
         )}
         {timedCapture?.status === 'cancelled' && <div>Capture cancelled.</div>}
@@ -202,65 +238,45 @@ export function PerformanceCapturePanel() {
       </div>
 
       {(error || (timedCapture?.status === 'failed' && timedCapture.error)) && (
-        <div role="alert" className="text-xs text-red-400">
-          {error ?? timedCapture.error}
-        </div>
+        <InlineAlert variant="error">{error ?? timedCapture.error}</InlineAlert>
       )}
 
       {latest && (
         <div className="space-y-1 text-xs" aria-label="Latest performance report">
-          <div className="flex justify-between">
-            <span className="text-gray-400">Verdict</span>
-            <span className={latest.verdict === 'pass' ? 'text-green-400' : latest.verdict === 'fail' ? 'text-red-400' : 'text-gray-400 italic'}>
-              {latest.verdict}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Fixture</span>
-            <span>
-              {String(latest.fixture.id)} ({String(latest.fixture.checksum)})
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Frame p50 / p95 / p99</span>
-            <span>
-              {ms(latest.aggregates.frameTime.p50Ms)} / {ms(latest.aggregates.frameTime.p95Ms)} / {ms(latest.aggregates.frameTime.p99Ms)}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">First interactive</span>
-            <span>{ms(latest.aggregates.firstInteractiveMs)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">JS heap / WASM memory</span>
-            <span>
-              {mb(latest.aggregates.memory.jsHeapUsedMb)} / {mb(latest.aggregates.memory.wasmLinearMemoryMb)}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Samples</span>
-            <span>{latest.aggregates.frameTime.sampleCount}</span>
-          </div>
+          <ReportRow label="Verdict" valueClassName={STATUS_CLASS[latest.verdict]}>
+            {latest.verdict}
+          </ReportRow>
+          <ReportRow label="Fixture">
+            {String(latest.fixture.id)} ({String(latest.fixture.checksum)})
+          </ReportRow>
+          <ReportRow label="Frame p50 / p95 / p99">
+            {ms(latest.aggregates.frameTime.p50Ms)} / {ms(latest.aggregates.frameTime.p95Ms)} / {ms(latest.aggregates.frameTime.p99Ms)}
+          </ReportRow>
+          <ReportRow label="First interactive">{ms(latest.aggregates.firstInteractiveMs)}</ReportRow>
+          <ReportRow label="JS heap / WASM memory">
+            {mb(latest.aggregates.memory.jsHeapUsedMb)} / {mb(latest.aggregates.memory.wasmLinearMemoryMb)}
+          </ReportRow>
+          <ReportRow label="Samples">{latest.aggregates.frameTime.sampleCount}</ReportRow>
           <ul className="space-y-0.5" aria-label="Budgets">
             {latest.budgets.map((b) => (
               <li key={b.id} className="flex justify-between gap-2">
-                <span className="text-gray-400">{b.id}</span>
-                <span className={STATUS_CLASS[b.status]}>
+                <span className="text-[var(--sf-text-secondary)]">{b.id}</span>
+                <span className={cn('text-right', STATUS_CLASS[b.status])}>
                   {b.status} ({b.observed === UNKNOWN ? 'unknown' : `${b.observed}`} / {b.limit} {b.unit})
                 </span>
               </li>
             ))}
           </ul>
           <div className="flex flex-wrap gap-2 pt-1">
-            <button type="button" onClick={() => downloadReport(latest)} className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700">
+            <Button type="button" size="sm" variant="outline" onClick={() => downloadReport(latest)}>
               Download report (JSON)
-            </button>
-            <button type="button" onClick={handlePin} className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700">
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={handlePin}>
               {isBaseline ? 'Unpin baseline' : 'Pin as baseline'}
-            </button>
-            <button type="button" onClick={handleCompare} className="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700">
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={handleCompare}>
               Compare with baseline
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -272,10 +288,10 @@ export function PerformanceCapturePanel() {
               Compared with baseline {lastComparison.baselineReportId}: <strong>{lastComparison.claim}</strong>
             </div>
           ) : (
-            <div className="text-yellow-400">
+            <InlineAlert variant="warning">
               Incompatible baseline — no improvement or regression is claimed:{' '}
               {lastComparison.incompatibilities.map((d) => `${d.field} (${show(d.current)} vs ${show(d.baseline)})`).join('; ')}
-            </div>
+            </InlineAlert>
           )}
         </div>
       )}
