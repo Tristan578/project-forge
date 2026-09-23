@@ -136,7 +136,10 @@ describe.each(['manual', 'ai'] as const)('the %s surface', (surface) => {
   it('records the change for undo, so the other surface can revert it', async () => {
     await setMode(surface, 'sandbox');
 
-    expect(useEditorStore.getState().undoCompletionMode()).toBe(true);
+    const undone = surface === 'manual'
+      ? (await executeToolCall('undo', { scope: 'completion_mode' }, useEditorStore.getState())).success
+      : useEditorStore.getState().undoCompletionMode();
+    expect(undone).toBe(true);
     expect(useEditorStore.getState().sceneGraph.completionMode).toBeUndefined();
   });
 });
@@ -271,5 +274,25 @@ describe('save and reopen', () => {
 
     // Resaving writes exactly what the engine exported: nothing added, nothing dropped.
     expect(exportScene(legacy)).toBe(legacy);
+  });
+});
+
+
+describe('AI completion-mode history scope', () => {
+  it('undoes and redoes without dispatching engine history', async () => {
+    await setMode('ai', 'sandbox');
+    dispatch.mockClear();
+    expect((await executeToolCall('undo', { scope: 'completion_mode' }, useEditorStore.getState())).success).toBe(true);
+    expect(useEditorStore.getState().sceneGraph.completionMode).toBeUndefined();
+    expect((await executeToolCall('redo', { scope: 'completion_mode' }, useEditorStore.getState())).success).toBe(true);
+    expect(useEditorStore.getState().sceneGraph.completionMode).toBe('sandbox');
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each(['undo', 'redo'])('%s refuses empty history and invalid scopes without touching the engine', async (tool) => {
+    dispatch.mockClear();
+    expect((await executeToolCall(tool, { scope: 'completion_mode' }, useEditorStore.getState())).success).toBe(false);
+    expect((await executeToolCall(tool, { scope: 'typo' }, useEditorStore.getState())).success).toBe(false);
+    expect(dispatch).not.toHaveBeenCalled();
   });
 });

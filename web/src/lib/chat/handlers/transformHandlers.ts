@@ -170,12 +170,24 @@ export const transformHandlers: Record<string, ToolHandler> = {
     return { success: true, result: { message: 'Entity selected. User can press F to focus camera.' } };
   },
 
-  undo: async (_args, { store }) => {
+  undo: async (args, { store }) => {
+    const p = parseArgs(z.object({ scope: z.enum(['engine', 'completion_mode']).optional() }), args);
+    if (p.error) return p.error;
+    if (p.data.scope === 'completion_mode') {
+      if (!store.undoCompletionMode()) return { success: false, error: 'No completion-mode change to undo.' };
+      return { success: true, result: { scope: 'completion_mode' } };
+    }
     store.undo();
     return { success: true };
   },
 
-  redo: async (_args, { store }) => {
+  redo: async (args, { store }) => {
+    const p = parseArgs(z.object({ scope: z.enum(['engine', 'completion_mode']).optional() }), args);
+    if (p.error) return p.error;
+    if (p.data.scope === 'completion_mode') {
+      if (!store.redoCompletionMode()) return { success: false, error: 'No completion-mode change to redo.' };
+      return { success: true, result: { scope: 'completion_mode' } };
+    }
     store.redo();
     return { success: true };
   },

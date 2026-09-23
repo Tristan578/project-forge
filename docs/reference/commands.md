@@ -1506,7 +1506,11 @@ Scope: `scene:read` | Token cost: 0
 
 ### `undo`
 
-Undo the last action
+Undo an action. Defaults to engine history. Use scope completion_mode for changes made by set_completion_mode or the completion-mode picker.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | `"engine"` \| `"completion_mode"` | No | History to step: engine (default) or completion_mode. Completion-mode history is separate from engine entity history. |
 
 **Example:**
 ```json
@@ -1522,7 +1526,11 @@ Scope: `scene:write` | Token cost: 0
 
 ### `redo`
 
-Redo the last undone action
+Redo an action. Defaults to engine history. Use scope completion_mode for changes made by set_completion_mode or the completion-mode picker.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | `"engine"` \| `"completion_mode"` | No | History to step: engine (default) or completion_mode. Completion-mode history is separate from engine entity history. |
 
 **Example:**
 ```json
