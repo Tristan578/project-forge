@@ -32,6 +32,7 @@ const HOOKS_BUILD_REQUIRED =
 function chatMessages(page: Page) {
   return page.locator('[aria-label="Chat messages"]');
 }
+
 test.describe('AI Game Creation Flow @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
