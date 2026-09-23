@@ -212,7 +212,10 @@ export function validateWinnability(
       winnable: false,
       issues: [{
         code: 'NO_WIN_CONDITION',
-        message: 'This scene has no win condition, so the game can never be won. Add a Win Condition component — for example "reach goal" tied to a goal entity, or "collect all" with collectible items.',
+        // The last sentence (#9998): the Play toast and the AI tool result both
+        // carry this text, and it is where a creator of a goal-free game first
+        // learns the requirement is a choice, not a rule.
+        message: 'This scene has no win condition, so the game can never be won. Add a Win Condition component — for example "reach goal" tied to a goal entity, or "collect all" with collectible items. If the game is not meant to be won, set its completion mode to endless, sandbox or narrative instead.',
       }],
     };
   }

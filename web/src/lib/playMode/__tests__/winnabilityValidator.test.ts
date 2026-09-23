@@ -329,6 +329,14 @@ describe('completionMode gating (idea.FR-1.OP-04)', () => {
       expect(report.issues[0].code).toBe('NO_WIN_CONDITION');
     });
 
+    // #9998: the one place a creator runs into the requirement is also the
+    // place to learn it is a choice. Both the Play toast and the AI tool
+    // result carry this text, so it names the modes in plain words.
+    it('tells the creator a goal-free game can pick a mode that does not need one', () => {
+      const report = validateWinnability(graph(['player']), { player: [player] }, 'win');
+      expect(report.issues[0].message).toMatch(/set its completion mode to endless, sandbox or narrative/);
+    });
+
     it('treats a legacy scene (undefined mode) exactly like explicit "win"', () => {
       const legacy = validateWinnability(graph(['player', 'goal']), { player: [player] });
       const explicitWin = validateWinnability(
