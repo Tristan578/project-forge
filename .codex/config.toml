@@ -8,7 +8,8 @@
 # enforced from the first declaration, so adding or removing a server here means
 # doing the same in .mcp.json. The same check requires
 # default_tools_approval_mode = "prompt" on every server, which .mcp.json has no
-# counterpart for.
+# counterpart for, and fails a command, arg or cwd that is a relative path: Codex
+# resolves those against the directory the session started in (see taskboard).
 
 # Model & approval
 model = "gpt-5.3-codex"
@@ -69,9 +70,13 @@ args = ["-y", "@stripe/mcp@latest"]
 env_vars = ["STRIPE_SECRET_KEY"]
 default_tools_approval_mode = "prompt"
 
+# Launched through a git alias, because git runs a `!` alias from the repository's
+# top-level directory (git-config(1), alias.*). A bare `node .claude/hooks/...`
+# resolves against the directory the Codex session started in, so it fails to
+# start from web/ or any other subdirectory; so does a relative `cwd`.
 [mcp_servers.taskboard]
-command = "node"
-args = [".claude/hooks/taskboard-launch.mjs", "mcp"]
+command = "git"
+args = ["-c", "alias.spawnforge-taskboard=!node .claude/hooks/taskboard-launch.mjs", "spawnforge-taskboard", "mcp"]
 default_tools_approval_mode = "prompt"
 
 [mcp_servers.upstash]

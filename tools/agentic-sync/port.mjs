@@ -92,7 +92,7 @@ import {
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { dirname, join, posix, resolve, sep } from 'node:path';
+import { dirname, join, posix, resolve, sep, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -777,7 +777,10 @@ function ownedByGenerator(m, rel) {
 // STRUCTURALLY — a `${VAR}` value must appear in `env_vars`, a literal value must
 // appear verbatim in the `[…env]` sub-table — and command/args are compared exactly.
 // One key with no `.mcp.json` counterpart is checked too: every server must set
-// `default_tools_approval_mode = "prompt"` (see the loop at the end of mcpParity).
+// `default_tools_approval_mode = "prompt"` (see the approval loop in mcpParity).
+// And every server's launch must work from any directory in the checkout: no
+// command, arg or `cwd` may be a path Codex resolves against the directory the
+// session started in (the launch-path loop at the end of mcpParity).
 //
 // config.toml is hand-authored, so this is a check the generator cannot fix; it
 // reports and a person edits. It runs in CI, AFTER an edit is on disk; the
@@ -797,7 +800,7 @@ function codexServerBlocks(text) {
   let name = null;
   let isEnv = false;
   const ensure = (n) => {
-    if (!blocks.has(n)) blocks.set(n, { command: undefined, args: [], envVars: [], env: {}, approvalMode: undefined, parseError: '' });
+    if (!blocks.has(n)) blocks.set(n, { command: undefined, args: [], envVars: [], env: {}, approvalMode: undefined, cwd: undefined, parseError: '' });
     return blocks.get(n);
   };
   // ONE PASS PER LINE, string-aware. Counting brackets over the raw text let a
@@ -861,6 +864,11 @@ function codexServerBlocks(text) {
       if (v.length) block.approvalMode = v[0];
       continue;
     }
+    if (key === 'cwd') {
+      const v = scalars(rest);
+      if (v.length) block.cwd = v[0];
+      continue;
+    }
     if (key === 'args' || key === 'env_vars') {
       // Consume until the array closes, so the multi-line form reads the same as
       // the inline one. An unterminated array is a parseError, never an empty list.
@@ -900,8 +908,9 @@ function mcpParity() {
   // scripts/check-codex-config-safety.sh does and for the same reason: a
   // contributor may have an uncommitted `[mcp_servers.*]` edit in the working
   // tree, and that must not turn a local --check red. It is tolerated, NOT
-  // recommended: docs/guides/taskboard-sync.md sends personal servers to the
-  // user-level ~/.codex/config.toml, because in a linked worktree
+  // recommended: personal servers belong in the user-level
+  // ~/.codex/config.toml (docs/guides/codex-cli-support-matrix.md, "MCP
+  // servers"), because in a linked worktree
   // worktree-safety-commit.sh commits whatever is in the tree when a session
   // stops — after which the block IS committed and this check goes red. In CI
   // the checkout IS the ref under test: "what does the repository declare?".
@@ -981,7 +990,39 @@ function mcpParity() {
       out.problems.push(`mcp:      ${n} ${what} in .codex/config.toml — every server needs "prompt" so its tools stay human-gated if Codex's default approval changes`);
     }
   }
-  if (out.problems.length === 0) out.note = `${have.length} MCP servers declared for Codex, matching .mcp.json (name, command, args, secret names and approval mode).`;
+  // LAUNCH PATHS, on every server Codex would run. Codex starts a stdio server in
+  // the directory the SESSION started in, and resolves a relative `cwd` against
+  // that same directory — not against .codex/ and not against the repository root
+  // (observed with codex-cli 0.144.1; docs/guides/codex-cli-support-matrix.md,
+  // "MCP servers"). So a path written relative to the repository root launches
+  // only when the session starts at the root: board round 2 on #10135 found
+  // taskboard committed as `node .claude/hooks/taskboard-launch.mjs`, which fails
+  // its handshake in a session started in web/. taskboard now goes through a git
+  // `!` alias, which git runs from the repository's top-level directory
+  // (git-config(1), alias.*); there the path sits INSIDE one argument rather than
+  // being one, and is not flagged. A value counts as start-directory-relative when
+  // it is not absolute and is either explicitly relative (`.`, `..`, `./…`, `../…`)
+  // or names something that exists relative to the repository root. A bare word
+  // that names nothing here (`npx`, `-y`, `mcp`, a package spec) is not a path.
+  const isAbs = (v) => posix.isAbsolute(v) || win32.isAbsolute(v);
+  const startDirPath = (v) => {
+    if (typeof v !== 'string' || v === '' || isAbs(v)) return false;
+    if (/^\.\.?([/\\]|$)/.test(v)) return true;
+    return existsSync(join(ROOT, ...v.split(/[/\\]/)));
+  };
+  for (const n of have) {
+    const got = blocks.get(n);
+    if (!got || got.parseError) continue;
+    for (const v of [got.command, ...got.args]) {
+      if (startDirPath(v)) {
+        out.problems.push(`mcp:      ${n} runs ${JSON.stringify(v)}, a path relative to the repository root — Codex resolves it against the directory the session started in, so a session started anywhere else cannot launch this server`);
+      }
+    }
+    if (typeof got.cwd === 'string' && !isAbs(got.cwd)) {
+      out.problems.push(`mcp:      ${n} sets cwd = ${JSON.stringify(got.cwd)}, a relative path — Codex resolves it against the directory the session started in, not against .codex/ or the repository root`);
+    }
+  }
+  if (out.problems.length === 0) out.note = `${have.length} MCP servers declared for Codex, matching .mcp.json (name, command, args, secret names, approval mode and launch paths).`;
   return out;
 }
 
@@ -1202,7 +1243,7 @@ function main() {
       console.error('Fix `extra`/`modified`: --write never deletes a file it cannot prove it wrote; each line above says what to do with that file.');
     }
     if (has(/^ref:/)) console.error('Fix `ref`: correct the path in the SOURCE under .claude/ (or the hand-authored .codex/ file) — the generator copies text, it does not invent paths.');
-    if (has(/^mcp:/)) console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files; an approval-mode line is fixed by adding default_tools_approval_mode = "prompt" to that server\'s own table. If the COMMITTED .codex/config.toml carries a personal server block that was swept into a commit by accident (a `git add -A`, a safety commit), take it back out of the commit — personal servers belong in ~/.codex/config.toml.');
+    if (has(/^mcp:/)) console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files; an approval-mode line is fixed by adding default_tools_approval_mode = "prompt" to that server\'s own table; a launch-path line is fixed, in BOTH files, by launching it through a git alias, which git runs from the repository\'s top-level directory (taskboard does this) — never with a relative cwd. If the COMMITTED .codex/config.toml carries a personal server block that was swept into a commit by accident (a `git add -A`, a safety commit), take it back out of the commit — personal servers belong in ~/.codex/config.toml.');
     process.exit(1);
   }
   console.log('codex-port: generated Codex surface is in sync with .claude/.');

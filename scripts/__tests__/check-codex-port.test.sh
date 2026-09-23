@@ -1320,7 +1320,7 @@ else
   git -C "$F" add -A; git -C "$F" commit -q -m fixture
   gen "$F" --check; expect_rc 0 "committed config in parity passes"
   printf 'model = "x"\n[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
-  gen "$F" --check; expect_rc 0 "an UNCOMMITTED local edit to config.toml (the taskboard guide suggests one) does not turn a local check red"
+  gen "$F" --check; expect_rc 0 "an UNCOMMITTED local edit to config.toml (a contributor trying out a server) does not turn a local check red"
   git -C "$F" add -A; git -C "$F" commit -q -m "commit the partial block"
   gen "$F" --check; expect_rc 1 "…but once COMMITTED, a partial server list is a failure"
   expect_out "beta is in .mcp.json but not in .codex/config.toml" "…naming the missing server"
