@@ -167,6 +167,17 @@ These checks cover authored metadata. Runtime tilemap colliders remain unimpleme
 - [ ] Pause → verify simulation frozen
 - [ ] Stop → verify scene restored to edit state
 
+### Completion Modes (#9998)
+Leave these unchecked until exercised in a running editor.
+- [ ] Scene Settings → Completion mode: pick each of Win / Endless / Sandbox / Narrative with the keyboard (Tab to the group, arrow keys). Verify the screen reader reads each option's consequence and the status line announces the change.
+- [ ] On a scene with a player and no win condition: Sandbox → Play starts; Win → Play refuses with the NO_WIN_CONDITION message in chat.
+- [ ] Undo / Redo buttons next to the heading step through mode changes, including back to the unsaved legacy default.
+- [ ] Ask the AI "make this a sandbox" → it calls `set_completion_mode`; the picker shows Sandbox. Ask it for an unknown mode → it reports the same error text the store action returns.
+- [ ] Set a mode by hand, then ask the AI to rename or move an entity → the mode is unchanged.
+- [ ] Save (.forge download, and cloud save), reload the tab, reopen the project → the chosen mode is back; Play behaves as before the reload.
+- [ ] Open a `.forge` file saved before this change → the picker shows Win with the "not saved with this scene yet" note; re-download it and verify the file gained no `completionMode` key.
+- [ ] Generate a game from "a sandbox toy where I roll a ball around" → the plan has no invented win condition, verification passes, the picker shows Sandbox.
+
 ### Game Templates
 - [ ] Create new project from Platformer template → verify entities and scripts loaded
 - [ ] Enter Play mode → verify game mechanics work
