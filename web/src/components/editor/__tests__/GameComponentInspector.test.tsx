@@ -778,6 +778,17 @@ describe('GameComponentInspector', () => {
         render(<GameComponentInspector />);
         const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
         expect(Array.from(note.querySelectorAll('li')).map((li) => li.textContent)).toEqual([routeSentence]);
+
+        // The Waypoints row marks itself too, through its own lookup — the
+        // note above is built from the section's list and would still read
+        // correctly with this row's wiring gone, so it cannot stand in for it.
+        const group = screen.getByRole('group', { name: 'Waypoints' });
+        const describedBy = group.getAttribute('aria-describedby');
+        expect(describedBy === null ? null : document.getElementById(describedBy)?.textContent).toBe(routeSentence);
+        const badges = screen.getAllByText('Adjusted');
+        expect(badges).toHaveLength(1);
+        // Beside the row's own label, not somewhere else in the section.
+        expect(screen.getByText('Waypoints').parentElement?.contains(badges[0])).toBe(true);
       });
 
       it('shows nothing once the field holds a different route with the same number of points', () => {
@@ -789,6 +800,91 @@ describe('GameComponentInspector', () => {
         expect(screen.getByText('Moving Platform')).toBeDefined();
         expect(screen.queryByRole('status')).toBeNull();
         expect(screen.queryByText(/adjusted/i)).toBeNull();
+        expect(screen.getByRole('group', { name: 'Waypoints' }).getAttribute('aria-describedby')).toBeNull();
+      });
+    });
+
+    // ── Vector rows ──
+    //
+    // `Vec3Row` has no single input to hang the note on, so it marks a named
+    // group around the three axes and puts the badge beside it. That is its own
+    // lookup by `field`: a typo there, or the group losing `aria-describedby`,
+    // leaves the section note above (driven by the section's list, not by the
+    // row) reading exactly as before. So these assert on the row, per field.
+    describe('a vector row', () => {
+      const notAVector = { description: '[1, 2]' };
+      const vectorRows: readonly {
+        label: string;
+        component: GameComponentData;
+        /** A correction on the row's own vector field. */
+        vector: { component: string; field: string } & Record<string, unknown>;
+        sentence: string;
+        /** A correction on another field in the same section. */
+        other: { component: string; field: string } & Record<string, unknown>;
+      }[] = [
+        {
+          label: 'Respawn Pt',
+          component: {
+            type: 'health',
+            health: { maxHp: 1_000_000, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true },
+          },
+          vector: { component: 'health', field: 'respawnPoint', requested: notAVector, applied: [0, 1, 0], reason: 'invalid-replaced' },
+          sentence: 'Health respawn point: [1, 2] is not a value this field accepts, so [0, 1, 0] was used instead.',
+          other: { component: 'health', field: 'maxHp', requested: 5_000_000, applied: 1_000_000, reason: 'clamped' },
+        },
+        {
+          label: 'Target Pos',
+          component: { type: 'teleporter', teleporter: { targetPosition: [0, 1, 0], cooldownSecs: 300 } },
+          vector: { component: 'teleporter', field: 'targetPosition', requested: notAVector, applied: [0, 1, 0], reason: 'invalid-replaced' },
+          sentence: 'Teleporter target position: [1, 2] is not a value this field accepts, so [0, 1, 0] was used instead.',
+          other: { component: 'teleporter', field: 'cooldownSecs', requested: 900, applied: 300, reason: 'clamped' },
+        },
+        {
+          label: 'Offset',
+          component: {
+            type: 'spawner',
+            spawner: { entityType: 'cube', intervalSecs: 3, maxCount: 1000, spawnOffset: [0, 1, 0], onTrigger: null },
+          },
+          vector: { component: 'spawner', field: 'spawnOffset', requested: notAVector, applied: [0, 1, 0], reason: 'invalid-replaced' },
+          sentence: 'Spawner spawn offset: [1, 2] is not a value this field accepts, so [0, 1, 0] was used instead.',
+          other: { component: 'spawner', field: 'maxCount', requested: 5000, applied: 1000, reason: 'clamped' },
+        },
+      ];
+
+      it.each(vectorRows)('marks the $label row itself when its field was adjusted', ({ label, component, vector, sentence }) => {
+        setupStore({
+          primaryGameComponents: [component],
+          gameComponentAdjustments: { 'ent-1': { [component.type]: { [vector.field]: vector } } },
+        });
+        render(<GameComponentInspector />);
+
+        // A screen reader entering any axis hears what was asked for.
+        const group = screen.getByRole('group', { name: label });
+        const describedBy = group.getAttribute('aria-describedby');
+        expect(describedBy === null ? null : document.getElementById(describedBy)?.textContent).toBe(sentence);
+
+        // The one visible mark in the section, on this row.
+        const badges = screen.getAllByText('Adjusted');
+        expect(badges).toHaveLength(1);
+        expect(group.parentElement?.contains(badges[0])).toBe(true);
+      });
+
+      it.each(vectorRows)('leaves the $label row unmarked when only another field was adjusted', ({ label, component, other }) => {
+        setupStore({
+          primaryGameComponents: [component],
+          gameComponentAdjustments: { 'ent-1': { [component.type]: { [other.field]: other } } },
+        });
+        render(<GameComponentInspector />);
+
+        // Non-vacuous: the section is marking a field — just not this one.
+        const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+        expect(note.querySelectorAll('li')).toHaveLength(1);
+        const badges = screen.getAllByText('Adjusted');
+        expect(badges).toHaveLength(1);
+
+        const group = screen.getByRole('group', { name: label });
+        expect(group.getAttribute('aria-describedby')).toBeNull();
+        expect(group.parentElement?.contains(badges[0])).toBe(false);
       });
     });
 
