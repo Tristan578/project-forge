@@ -711,6 +711,40 @@ describe('command counts quoted across the repo', () => {
       `\ncounts matching none of ${[...allowedCommands].join('/')} commands or ${categoryCount} categories:\n${offenders.join('\n')}\n`,
     ).toEqual([]);
   });
+
+  // The date is part of a dated count. `.claude/docs/engine-api-reference.md`
+  // said "379 commands across 41 categories, measured 2026-09-05" — a day the
+  // manifest held 374 — because the count pins above forced the digit to move
+  // and nothing moved the date beside it, while README.md's copy of the same
+  // measurement said 2026-09-22 (#9904). Every count in these files comes from
+  // one manifest, so every "measured <date>" in them must name one
+  // measurement, and no file's "Last updated" header may predate the counts it
+  // quotes — every one of them had to change when those counts did.
+  it('dates every quoted count to one measurement, and no counted file is "last updated" before it', () => {
+    const MEASURED = /\bmeasured\s+(\d{4}-\d{2}-\d{2})\b/g;
+    // "> Last updated: 2026-09-05" and "> **Last updated:** 2026-09-16" both occur.
+    const LAST_UPDATED = /Last updated:?\**:?\s*(\d{4}-\d{2}-\d{2})/;
+    const measurements: { path: string; date: string }[] = [];
+    const lastUpdated: { path: string; date: string }[] = [];
+    for (const doc of docs) {
+      const text = read(doc.path);
+      for (const match of text.matchAll(MEASURED)) measurements.push({ path: doc.path, date: match[1] });
+      const updated = LAST_UPDATED.exec(text);
+      if (updated) lastUpdated.push({ path: doc.path, date: updated[1] });
+    }
+    // Agreement needs at least two dated quotes; a header walk that finds none
+    // would pass the ordering check below vacuously (lesson #9).
+    expect(measurements.length, 'fewer than two counted docs date their measurement').toBeGreaterThanOrEqual(2);
+    expect(lastUpdated.length, 'no counted doc carries a "Last updated" header').toBeGreaterThanOrEqual(1);
+    const dates = [...new Set(measurements.map((m) => m.date))];
+    expect(
+      dates,
+      `counted docs cite different measurement dates:\n${measurements.map((m) => `${m.path}: ${m.date}`).join('\n')}\n`,
+    ).toHaveLength(1);
+    // ISO dates order correctly as strings.
+    const stale = lastUpdated.filter((u) => u.date < dates[0]).map((u) => `${u.path}: last updated ${u.date}`);
+    expect(stale, `\nlast updated before the ${dates[0]} measurement their counts come from:\n${stale.join('\n')}\n`).toEqual([]);
+  });
 });
 
 describe('tableUnderHeading on synthetic input', () => {
