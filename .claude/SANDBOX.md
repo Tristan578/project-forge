@@ -65,6 +65,11 @@ What `ask` means, per Claude Code's permission docs
 The path is root-anchored (`/.codex/config.toml`) and listed for BOTH `Edit` and
 `Write`, for the same reason as the deny above.
 
+### How this file actually changes
+
+A human edits it in a normal editor, or approves an agent's `Edit`/`Write` when
+Claude Code prompts. Either way the change then has to pass the CI checks below.
+
 What it does NOT cover, stated plainly:
 
 - **Shell writes.** Claude Code checks a shell redirect target against `Edit`
