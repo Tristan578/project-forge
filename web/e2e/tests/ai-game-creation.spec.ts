@@ -15,6 +15,11 @@ import {
  *
  * In CI (strict mode): tests throw if stores are unavailable.
  * Locally: tests skip assertions gracefully when stores aren't exposed.
+ *
+ * Every test that injects store state in place of the component it exercises
+ * declares that substitution (#10158, e2e/lib/substitution.ts): an annotation
+ * `{ type: 'substitution', description }` plus a `[substituted: <component>]`
+ * title marker, checked by scripts/check-substitution-naming.ts.
  */
 test.describe('AI Game Creation Flow @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
@@ -40,7 +45,9 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
   // -------------------------------------------------------------------------
   // 2. Tool call cards appear in chat when AI executes commands
   // -------------------------------------------------------------------------
-  test('tool call card renders for a spawn_entity command', async ({ page, editor }) => {
+  test('tool call card renders for a spawn_entity command [substituted: AI generation]', {
+    annotation: { type: 'substitution', description: 'AI generation' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     const injected = await injectStore(page, '__CHAT_STORE', `
@@ -77,7 +84,9 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
   // -------------------------------------------------------------------------
   // 3. Entity name appears in hierarchy after AI creates it via store action
   // -------------------------------------------------------------------------
-  test('entity appears in scene hierarchy after AI creation via store', async ({ page, editor }) => {
+  test('entity appears in scene hierarchy after AI creation via store [substituted: AI generation]', {
+    annotation: { type: 'substitution', description: 'AI generation' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     const injected = await injectStore(page, '__EDITOR_STORE', `
@@ -103,7 +112,9 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
   // -------------------------------------------------------------------------
   // 4. Multiple tool calls show in sequence inside the chat panel
   // -------------------------------------------------------------------------
-  test('chat panel shows multiple sequential tool call entries', async ({ page, editor }) => {
+  test('chat panel shows multiple sequential tool call entries [substituted: AI generation]', {
+    annotation: { type: 'substitution', description: 'AI generation' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     await injectStore(page, '__CHAT_STORE', `
@@ -136,7 +147,9 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
   // -------------------------------------------------------------------------
   // 5. Approval mode UI: pending tool calls show Approve / Reject buttons
   // -------------------------------------------------------------------------
-  test('approval mode shows Approve and Reject buttons for preview tool calls', async ({ page, editor }) => {
+  test('approval mode shows Approve and Reject buttons for preview tool calls [substituted: AI generation]', {
+    annotation: { type: 'substitution', description: 'AI generation' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     const injected = await injectStore(page, '__CHAT_STORE', `
@@ -174,7 +187,9 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
   // -------------------------------------------------------------------------
   // 6. Error messages display correctly when a command fails
   // -------------------------------------------------------------------------
-  test('error status tool call displays with error indicator', async ({ page, editor }) => {
+  test('error status tool call displays with error indicator [substituted: AI generation]', {
+    annotation: { type: 'substitution', description: 'AI generation' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     const injected = await injectStore(page, '__CHAT_STORE', `
@@ -233,7 +248,9 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
   // -------------------------------------------------------------------------
   // 8. Approval mode toggle is reflected in the store
   // -------------------------------------------------------------------------
-  test('approval mode can be toggled on and off', async ({ page, editor }) => {
+  test('approval mode can be toggled on and off [substituted: approval toggle]', {
+    annotation: { type: 'substitution', description: 'approval toggle' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     await injectStore(page, '__CHAT_STORE', `
