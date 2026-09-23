@@ -84,6 +84,11 @@ const ACCOUNTED_FOR: Record<string, { calls: number; reason: string }> = {
       'prose in a doc comment explaining why the batch dispatcher can be unset; it reaches the engine only through ctx.dispatchCommand / ctx.dispatchCommandBatch, which orchestratorSlice fills from the store dispatchers this list already guards',
   },
   'lib/ai/smartCamera.ts': { calls: 0, reason: 'comment' },
+  'stores/editorStore.ts': {
+    calls: 0,
+    reason:
+      'prose: the scene-replacement comments cite that the engine entry points dispatch before they serialize their answer, which is why a caught throw is not a refusal. The store is the guard for both paths and reaches the engine only through the dispatchers useEngineEvents registers',
+  },
   'lib/monitoring/sentryConfig.ts': { calls: 0, reason: 'regex matched against error message text' },
   'lib/perf/baselines.ts': { calls: 1, reason: 'benchmark description string' },
   'app/blog/content/spawnforge-browser-ai-game-engine.tsx': { calls: 1, reason: 'prose code sample' },

@@ -282,6 +282,18 @@ function forgetOutgoingSceneAdjustments(): void {
   useEditorStore.setState({ gameComponentAdjustments: {} });
 }
 
+/**
+ * Did the engine itself, or a guard in front of it, refuse the command?
+ *
+ * An explicit `success: false`, and not one the dispatcher built from a
+ * CAUGHT throw (`threw`). Those have the same `success` and opposite meanings
+ * for a scene replacement: a refusal left the scene on screen, while a throw
+ * may have arrived after the engine had already queued the new one.
+ */
+function isEngineRefusal(response: CommandResponse | void): boolean {
+  return !!response && response.success === false && response.threw !== true;
+}
+
 // Command dispatcher type - will be set by useEngine hook.
 // The return value is what makes an engine rejection observable; callers that
 // do not care may still ignore it (a value-returning function is assignable to
@@ -313,11 +325,16 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
     try {
       response = dispatcher(command, payload);
     } finally {
-      // Anything but an explicit refusal replaced the scene, a throw included:
-      // a thrown dispatch can have despawned the outgoing scene mid-apply (see
-      // `sceneSlice.loadScene`), and a marker on a scene that may be gone is
-      // the false report this must not leave behind.
-      if (SCENE_REPLACING_COMMANDS.has(command) && !(response && response.success === false)) {
+      // Anything but the engine's own refusal may have replaced the scene, and
+      // a marker on a scene that may be gone is the false report this must not
+      // leave behind. A throw counts however it arrives: rethrown (`response`
+      // is still undefined here), or caught by the dispatcher and answered as
+      // `{ success: false, threw: true }`, which is what `useEngineEvents` —
+      // the dispatcher the editor registers — does. `handle_command` queues
+      // the replacement before it serializes its answer, and the `Err` it
+      // returns after dispatching comes from that serialization
+      // (`engine/src/bridge/mod.rs`).
+      if (SCENE_REPLACING_COMMANDS.has(command) && !isEngineRefusal(response)) {
         forgetOutgoingSceneAdjustments();
       }
     }
@@ -395,11 +412,18 @@ export function setCommandBatchDispatcher(dispatcher: BatchCommandDispatcher | u
       result = dispatcher(commands);
       return result;
     } finally {
-      // Item by item, on the item's own answer: `useEngineEvents` answers a
-      // batch it never ran with no results at all, and that replaced nothing.
-      // A throw is taken as the single path takes it.
+      // Item by item, on the item's own answer, EXCEPT when there is no answer
+      // to read because the engine call threw. `useEngineEvents` answers both a
+      // batch it never sent and a batch whose engine call threw with no
+      // results; only `threw` tells them apart, and they are opposite facts.
+      // A batch never sent replaced nothing. A thrown one may have replaced
+      // the scene: `handle_command_batch` runs every command, queueing any
+      // scene replacement, before it serializes the answers, and that
+      // serialization is the only `Err` it returns (`engine/src/bridge/mod.rs`).
+      // A rethrown throw leaves `result` undefined, and is read the same way.
+      const outcomeUnknown = result === undefined || result.threw === true;
       const replaced = commands.some(({ command }, i) => SCENE_REPLACING_COMMANDS.has(command)
-        && (result === undefined || result.results[i]?.success === true));
+        && (outcomeUnknown || result?.results[i]?.success === true));
       if (replaced) forgetOutgoingSceneAdjustments();
     }
   };

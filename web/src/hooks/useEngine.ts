@@ -44,11 +44,30 @@ export function useLoadingState(): LoadingState {
 export interface CommandResponse {
   success: boolean;
   error?: string;
+  /**
+   * Set only by a dispatcher that CAUGHT a throw from the engine call and
+   * answered with `success: false` instead of rethrowing. It separates "the
+   * engine said no" from "the engine threw, and may already have acted":
+   * `handle_command` dispatches the command before it serializes its answer,
+   * and the `Err` it returns after dispatching comes from that serialization
+   * (`engine/src/bridge/mod.rs`); a panic part-way through a handler throws
+   * too. A caller that must not treat an unknown outcome as a refusal reads
+   * this. The engine's own answer never carries it.
+   */
+  threw?: true;
 }
 
 export interface BatchResult {
   success: boolean;
   results: CommandResponse[];
+  /**
+   * The batch counterpart of {@link CommandResponse.threw}: the engine call
+   * threw, so `results` is empty and says nothing about which commands ran.
+   * `handle_command_batch` runs the whole batch before it serializes the
+   * answers, so every command in it may have taken effect. Absent when the
+   * batch was never sent (too long, or no engine entry point).
+   */
+  threw?: true;
 }
 
 export type WasmModule = {
@@ -690,7 +709,8 @@ export function dispatchGuardedBatch(
       phase: 'handle_command_batch',
       batchSize: commands.length,
     });
-    return { success: false, results: [] };
+    // `threw`: the engine may have run the batch before its answer failed.
+    return { success: false, results: [], threw: true };
   }
 }
 
