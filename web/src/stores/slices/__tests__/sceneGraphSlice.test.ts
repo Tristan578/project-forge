@@ -672,9 +672,9 @@ describe('sceneGraphSlice', () => {
       expect(store.getState().completionModeHistory.past).toHaveLength(COMPLETION_MODE_HISTORY_LIMIT);
     });
 
-    it('hydrates a persisted mode as the starting point: no undo step, not an unsaved edit', () => {
+    it('hydrates a persisted mode without inheriting outgoing dirty state or history', () => {
       store.getState().setCompletionMode('endless');
-      store.setState({ sceneModified: false });
+      expect(store.getState().sceneModified).toBe(true);
 
       store.getState().hydrateCompletionMode('narrative');
 

@@ -518,6 +518,7 @@ export const createSceneGraphSlice: StateCreator<
 
   hydrateCompletionMode: (mode) => {
     set({
+      sceneModified: false,
       sceneGraph: { ...get().sceneGraph, completionMode: mode },
       completionModeHistory: emptyCompletionModeHistory(),
     });
