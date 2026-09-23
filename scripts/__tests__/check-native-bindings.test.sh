@@ -211,6 +211,9 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 # else the job's defaults, else the repo root. Comment lines and name: values
 # never count. Emits `D<TAB>job` (direct) and `W<TAB>job<TAB>dir` (via a
 # workspace build script) rows; next_build_jobs() below resolves the W rows.
+# shellcheck disable=SC2016  # an awk program, not a shell string: $0/$1 are
+# awk fields and must NOT expand here. shellcheck suppresses SC2016 for a
+# literal `awk '...'` but cannot see through the variable it is passed in.
 NEXT_BUILD_JOBS_AWK='
 function flush() {
   if (nb_step) print "W\t" job "\t" (wd != "" ? wd : (job_wd != "" ? job_wd : "."))
