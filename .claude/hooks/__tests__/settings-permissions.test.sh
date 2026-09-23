@@ -189,6 +189,23 @@ docs_name_governed_paths() {
   [ "$problems" -eq 0 ]
 }
 
+# indent_detail <text> — print <text> under a FAIL row, every line indented.
+# Parameter expansion, not `sed 's/^/<pad>/' <<<"$text"`: that form is SC2001, and
+# this file is in CI's "Shellcheck the hooks owned by this change" scope.
+# Callers pass `$(...)` output, which has its trailing newlines stripped.
+indent_detail() { printf '       %s\n' "${1//$'\n'/$'\n'       }"; }
+
+# The FAIL detail printer must keep EVERY line and indent each one under its
+# row. Assert the exact bytes (lesson 11), on a multi-line input, so a printer
+# that drops lines or indents only the first one goes red.
+indent_got="$(indent_detail $'first line\nsecond line' 2>&1)"
+if [ "$indent_got" = $'       first line\n       second line' ]; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "indent_detail: indents every line of a multi-line FAIL detail"
+else
+  fail=$((fail + 1)); printf '  FAIL %s\n' "indent_detail: indents every line of a multi-line FAIL detail"
+  printf '       got: %q\n' "$indent_got"
+fi
+
 # Hermetic self-tests for docs_name_governed_paths(): synthetic fixtures OUTSIDE
 # the repo tree, so the helper's own logic has red coverage no matter what the
 # real docs currently say (lesson 16 — a pin you have not watched fail is a pin
@@ -205,7 +222,7 @@ docs_case() {
     pass=$((pass + 1)); printf '  ok   %s\n' "$desc"
   else
     fail=$((fail + 1)); printf '  FAIL %s\n' "$desc"
-    [ -n "$out" ] && sed 's/^/       /' <<<"$out"
+    [ -n "$out" ] && indent_detail "$out"
   fi
 }
 
@@ -267,7 +284,7 @@ if docs_out="$(docs_name_governed_paths "$SETTINGS" "$HERE/../../SANDBOX.md" "$H
   pass=$((pass + 1)); printf '  ok   %s\n' "docs: SANDBOX.md and CONTRIBUTING.md name every deny/ask-governed file, each under its kind"
 else
   fail=$((fail + 1)); printf '  FAIL %s\n' "docs: SANDBOX.md and CONTRIBUTING.md name every deny/ask-governed file, each under its kind"
-  sed 's/^/       /' <<<"$docs_out"
+  indent_detail "$docs_out"
 fi
 
 # --- Negative guards (dangerous): never auto-allowed by EITHER layer.
