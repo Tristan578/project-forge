@@ -472,9 +472,63 @@ interface MovingPlatformSectionProps {
   onRemove: () => void;
 }
 
+interface WaypointsRowProps {
+  waypoints: [number, number, number][];
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onUpdate: (index: number, value: [number, number, number]) => void;
+}
+
+/**
+ * The route editor, as a named group carrying the route's adjustment mark.
+ *
+ * Its own component rather than inline in `MovingPlatformSection`: the note ids
+ * are provided INSIDE `ComponentSection`, so a lookup made in the section's own
+ * body sits above that provider, reads the empty default, and never marks the
+ * row — which is how the route row shipped unmarked while the section note
+ * above it listed the route correctly.
+ */
+function WaypointsRow({ waypoints, onAdd, onRemove, onUpdate }: WaypointsRowProps) {
+  const labelId = useId();
+  const noteId = useAdjustmentNote('waypoints');
+  return (
+    <div
+      role="group"
+      aria-labelledby={labelId}
+      aria-describedby={noteId}
+      className="space-y-1"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <span id={labelId} className="text-xs text-zinc-400">Waypoints</span>
+          <AdjustedBadge noteId={noteId} />
+        </div>
+        <button
+          onClick={onAdd}
+          aria-label="Add waypoint"
+          className="rounded bg-zinc-800 p-1 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+        >
+          <Plus size={12} />
+        </button>
+      </div>
+      {waypoints.map((wp, i) => (
+        <div key={i} className="flex items-center gap-1">
+          <span className="w-8 text-xs text-zinc-400">{i}</span>
+          <Vec3Input label="" value={wp} onChange={(v) => onUpdate(i, v)} />
+          <button
+            onClick={() => onRemove(i)}
+            aria-label={`Remove waypoint ${i}`}
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MovingPlatformSection({ data, onChange, onRemove }: MovingPlatformSectionProps) {
-  const waypointsLabelId = useId();
-  const waypointsNoteId = useAdjustmentNote('waypoints');
   const addWaypoint = () => {
     onChange({ ...data, waypoints: [...data.waypoints, [0, 0, 0]] });
   };
@@ -502,39 +556,12 @@ function MovingPlatformSection({ data, onChange, onRemove }: MovingPlatformSecti
         onChange={(v) => onChange({ ...data, loopMode: v as import('@/stores/editorStore').PlatformLoopMode })}
         tooltipTerm="gcLoopMode" field="loopMode"
       />
-      <div
-        role="group"
-        aria-labelledby={waypointsLabelId}
-        aria-describedby={waypointsNoteId}
-        className="space-y-1"
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1">
-            <span id={waypointsLabelId} className="text-xs text-zinc-400">Waypoints</span>
-            <AdjustedBadge noteId={waypointsNoteId} />
-          </div>
-          <button
-            onClick={addWaypoint}
-            aria-label="Add waypoint"
-            className="rounded bg-zinc-800 p-1 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
-          >
-            <Plus size={12} />
-          </button>
-        </div>
-        {data.waypoints.map((wp, i) => (
-          <div key={i} className="flex items-center gap-1">
-            <span className="w-8 text-xs text-zinc-400">{i}</span>
-            <Vec3Input label="" value={wp} onChange={(v) => updateWaypoint(i, v)} />
-            <button
-              onClick={() => removeWaypoint(i)}
-              aria-label={`Remove waypoint ${i}`}
-              className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
-            >
-              <Trash2 size={12} />
-            </button>
-          </div>
-        ))}
-      </div>
+      <WaypointsRow
+        waypoints={data.waypoints}
+        onAdd={addWaypoint}
+        onRemove={removeWaypoint}
+        onUpdate={updateWaypoint}
+      />
     </ComponentSection>
   );
 }
