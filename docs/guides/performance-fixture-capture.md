@@ -61,6 +61,13 @@ percentiles, first interactive, memory and each budget. **Download report
 persists the report in this browser; **Compare with baseline** compares the
 latest report with it.
 
+Keep the editor workload unchanged from scene reading through report completion.
+Authoring commands, scene/project changes, native edits and engine restarts
+invalidate the capture, even if Undo restores the original scene. No report is
+published for that run; retry after the scene is stable. Selection or scene-graph
+refreshes in edit mode can conservatively invalidate a run too. Normal gameplay
+physics and script history events continue without invalidating the capture.
+
 The in-app AI has the same five operations, with the same argument checks and
 the same error text: `capture_performance_report`, `get_performance_report`,
 `compare_performance_reports`, `set_performance_baseline` and

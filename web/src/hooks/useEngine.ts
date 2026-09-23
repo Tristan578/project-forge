@@ -1,3 +1,4 @@
+import { notifyCaptureWorkloadChange } from '@/lib/perf/captureStability';
 import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { logInitEvent, type InitPhase } from '@/lib/initLog';
 import { emitStatusEvent } from './useEngineStatus';
@@ -150,6 +151,7 @@ export function getEngineCrashMessage(): string | null {
 
 /** Mark the engine as crashed and notify all listeners. */
 function setEngineCrashed(message: string): void {
+  notifyCaptureWorkloadChange();
   _engineCrashed = true;
   _engineCrashMessage = message;
   wasmModule = null;
@@ -578,6 +580,7 @@ async function loadWasm(): Promise<WasmModule> {
 
 // Reset for retry
 export function resetEngine(): void {
+  notifyCaptureWorkloadChange();
   if (loadAbortController) {
     loadAbortController.abort();
     loadAbortController = null;

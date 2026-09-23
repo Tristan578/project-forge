@@ -27,6 +27,7 @@ function fakeEnvironment(overrides: Partial<CaptureEnvironment> = {}) {
   let rafCallback: ((ts: number) => void) | null = null;
   let visibilityListener: (() => void) | null = null;
   let hidden = false;
+  let sceneListener: (() => void) | null = null;
   const env: CaptureEnvironment = {
     requestFrame: (cb) => {
       rafCallback = cb;
@@ -41,6 +42,10 @@ function fakeEnvironment(overrides: Partial<CaptureEnvironment> = {}) {
       return () => {
         visibilityListener = null;
       };
+    },
+    onSceneChange: (cb) => {
+      sceneListener = cb;
+      return () => { sceneListener = null; };
     },
     backend: () => 'webgpu',
     engineReadyMs: () => 2300,
@@ -89,6 +94,8 @@ function fakeEnvironment(overrides: Partial<CaptureEnvironment> = {}) {
       hidden = true;
       visibilityListener?.();
     },
+    changeScene() { sceneListener?.(); },
+    get subscribed() { return sceneListener !== null || visibilityListener !== null; },
     get waiting() {
       return rafCallback !== null;
     },
@@ -233,6 +240,77 @@ describe('startPerformanceCapture — a full run', () => {
     expect(state.timedCapture.status).toBe('failed');
     expect(state.timedCapture.error).toMatch(/engine stopped/);
     expect(state.performanceReports).toHaveLength(0);
+  });
+
+
+  it.each(['warmup', 'capturing'] as const)('rejects edits during %s even after an undo restores the checksum', async (phase) => {
+    const fake = fakeEnvironment();
+    setCaptureEnvironment(fake.env);
+    startPerformanceCapture({ warmupSeconds: 10, captureSeconds: 60 });
+    await fake.untilFrames();
+    fake.frame(1000);
+    if (phase === 'capturing') fake.frame(11000);
+    fake.changeScene();
+    fake.changeScene(); // Undo: final checksum is unchanged, but samples are mixed.
+    await vi.waitFor(() => expect(usePerformanceStore.getState().timedCapture.status).toBe('failed'));
+    expect(usePerformanceStore.getState().timedCapture.error).toMatch(/scene or engine changed/);
+    expect(usePerformanceStore.getState().performanceReports).toHaveLength(0);
+    expect(fake.waiting).toBe(false);
+    expect(fake.subscribed).toBe(false);
+    expect(startPerformanceCapture({ warmupSeconds: 0, captureSeconds: 5 }).ok).toBe(true);
+    await fake.untilFrames();
+    await fake.runFrames(10);
+    expect(usePerformanceStore.getState().performanceReports).toHaveLength(1);
+  });
+
+  it('arms the guard before scene reading and prevents a stale read from overwriting a new capture', async () => {
+    let resolveChecksum!: (checksum: string) => void;
+    const fake = fakeEnvironment({ readSceneChecksum: () => new Promise((resolve) => { resolveChecksum = resolve; }) });
+    setCaptureEnvironment(fake.env);
+    startPerformanceCapture({});
+    fake.changeScene();
+    expect(usePerformanceStore.getState().timedCapture.status).toBe('failed');
+    const next = fakeEnvironment();
+    setCaptureEnvironment(next.env);
+    startPerformanceCapture({ warmupSeconds: 0, captureSeconds: 5 });
+    await next.untilFrames();
+    resolveChecksum(PERF_FIXTURES[1].checksum);
+    await Promise.resolve();
+    expect(fake.waiting).toBe(false);
+    expect(usePerformanceStore.getState().timedCapture.status).toBe('running');
+    await next.runFrames(10);
+    expect(usePerformanceStore.getState().performanceReports).toHaveLength(1);
+  });
+
+  it('rejects a scene change while asynchronous report metadata is being read', async () => {
+    let resolveVersion!: (value: { fullVersionList: { brand: string; version: string }[] }) => void;
+    const fake = fakeEnvironment({
+      navigator: () => ({
+        userAgentData: { getHighEntropyValues: () => new Promise((resolve) => { resolveVersion = resolve; }) },
+      }),
+    });
+    setCaptureEnvironment(fake.env);
+    startPerformanceCapture({ warmupSeconds: 0, captureSeconds: 5 });
+    await fake.untilFrames();
+    fake.frame(1000);
+    fake.frame(6010);
+    await vi.waitFor(() => expect(usePerformanceStore.getState().timedCapture.phase).toBe('building-report'));
+    fake.changeScene();
+    resolveVersion({ fullVersionList: [{ brand: 'Google Chrome', version: '153.0.8010.53' }] });
+    await vi.waitFor(() => expect(usePerformanceStore.getState().timedCapture.status).toBe('failed'));
+    expect(usePerformanceStore.getState().performanceReports).toHaveLength(0);
+    expect(fake.subscribed).toBe(false);
+  });
+
+  it('cancels frames using the captured environment even after the test seam changes', async () => {
+    const fake = fakeEnvironment();
+    setCaptureEnvironment(fake.env);
+    startPerformanceCapture({});
+    await fake.untilFrames();
+    setCaptureEnvironment(fakeEnvironment().env);
+    cancelPerformanceCapture();
+    expect(fake.waiting).toBe(false);
+    expect(fake.subscribed).toBe(false);
   });
 
   it('cancels: frames stop, no report is kept, and the status says so', async () => {

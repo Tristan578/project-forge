@@ -1,3 +1,4 @@
+import { onCaptureWorkloadChange } from './captureStability';
 /**
  * Editor performance capture: the single implementation behind BOTH the
  * profiler's manual controls and the in-app AI operations (#9904 / #10013,
@@ -19,7 +20,8 @@
  * A capture measures the editor's live engine: a warm-up, then a capture window
  * of animation-frame intervals (default 10 s + 60 s), pinned to a manifest whose
  * fixture checksum is the canonical checksum of the scene read back from the
- * engine at the start. Capturing the pinned fixtures themselves on the EXPORTED
+ * engine at the start. Authoring changes, scene replacement and engine restarts
+ * invalidate the entire capture, even if an undo restores the original scene. Capturing the pinned fixtures themselves on the EXPORTED
  * runtime is `e2e/perf/fixtureCapture.spec.ts`; both produce the same report.
  */
 import { z } from 'zod';
@@ -106,6 +108,8 @@ export interface CaptureEnvironment {
   cancelFrame(id: number): void;
   isHidden(): boolean;
   onVisibilityChange(cb: () => void): () => void;
+  /** Subscribe synchronously before the initial scene read; every change is terminal. */
+  onSceneChange(cb: () => void): () => void;
   /** The engine's selected backend, or unknown when no engine is running. */
   backend(): RenderBackend | Unknown;
   /** Navigation start -> engine ready, ms. */
@@ -143,6 +147,7 @@ function browserEnvironment(): CaptureEnvironment {
       document.addEventListener('visibilitychange', cb);
       return () => document.removeEventListener('visibilitychange', cb);
     },
+    onSceneChange: onCaptureWorkloadChange,
     backend: () => getActiveEngineBackend(),
     engineReadyMs: () => getEngineReadyMs(),
     readSceneChecksum: readLiveSceneChecksum,
@@ -182,7 +187,9 @@ export function resetCaptureEnvironment(): void {
 
 interface ActiveCapture {
   captureId: string;
-  cancelled: boolean;
+  finished: boolean;
+  env: CaptureEnvironment;
+  resolveFrames: (() => void) | null;
   frameId: number | null;
   unsubscribe: () => void;
 }
@@ -208,8 +215,12 @@ export interface CaptureStarted {
 }
 
 function finishActive(capture: ActiveCapture): void {
+  capture.finished = true;
   capture.unsubscribe();
-  if (capture.frameId !== null) environment.cancelFrame(capture.frameId);
+  capture.unsubscribe = () => undefined;
+  capture.resolveFrames?.();
+  capture.resolveFrames = null;
+  if (capture.frameId !== null) capture.env.cancelFrame(capture.frameId);
   capture.frameId = null;
   if (active === capture) active = null;
 }
@@ -243,7 +254,7 @@ export function startPerformanceCapture(input: unknown): CaptureStarted | Failur
   };
   const declaredCache: CacheState | Unknown | undefined =
     args.cacheState === undefined ? undefined : args.cacheState === 'unknown' ? UNKNOWN : args.cacheState;
-  const capture: ActiveCapture = { captureId: newCaptureId(), cancelled: false, frameId: null, unsubscribe: () => undefined };
+  const capture: ActiveCapture = { captureId: newCaptureId(), finished: false, env, resolveFrames: null, frameId: null, unsubscribe: () => undefined };
   active = capture;
   const store = usePerformanceStore.getState();
   store.setTimedCapture({
@@ -278,9 +289,14 @@ async function runCapture(
 ): Promise<void> {
   const setStatus = usePerformanceStore.getState().setTimedCapture;
   const fail = (error: string) => {
+    if (capture.finished) return;
     finishActive(capture);
     setStatus({ status: 'failed', phase: null, error });
   };
+
+  capture.unsubscribe = env.onSceneChange(() => {
+    fail('The scene or engine changed during the capture; no report was produced. Keep the scene unchanged and run the capture again.');
+  });
 
   let checksum: string | Unknown;
   try {
@@ -289,23 +305,27 @@ async function runCapture(
     // The scene could not be read back: its identity is unknown, not guessed.
     checksum = UNKNOWN;
   }
-  if (capture.cancelled) return;
+  if (capture.finished) return;
 
   const recorder = createFrameRecorder(opts.protocol);
   let hidden = env.isHidden();
-  capture.unsubscribe = env.onVisibilityChange(() => {
+  const unsubscribeScene = capture.unsubscribe;
+  const unsubscribeVisibility = env.onVisibilityChange(() => {
     if (env.isHidden()) hidden = true;
   });
+  capture.unsubscribe = () => { unsubscribeScene(); unsubscribeVisibility(); };
   const startedAt = env.now().toISOString();
   let lastProgressAt = Number.NEGATIVE_INFINITY;
   setStatus({ phase: 'warmup', progress: 0 });
 
   await new Promise<void>((resolve) => {
+    capture.resolveFrames = resolve;
     const onFrame = (ts: number) => {
-      if (capture.cancelled) return resolve();
+      if (capture.finished) return resolve();
       const phase = recorder.onFrame(ts);
       if (phase === 'complete') {
         capture.frameId = null;
+        capture.resolveFrames = null;
         return resolve();
       }
       if (ts - lastProgressAt >= CAPTURE_PROGRESS_INTERVAL_MS) {
@@ -316,7 +336,7 @@ async function runCapture(
     };
     capture.frameId = env.requestFrame(onFrame);
   });
-  if (capture.cancelled) return;
+  if (capture.finished) return;
 
   setStatus({ phase: 'building-report', progress: 1 });
   const backendNow = env.backend();
@@ -327,7 +347,7 @@ async function runCapture(
   try {
     const nav = env.navigator();
     const [browserVersion, gpuDriver] = await Promise.all([readExactBrowserVersion(nav), readGpuDriver(nav, opts.backend)]);
-    if (capture.cancelled) return;
+    if (capture.finished) return;
     const manifest = buildMeasurementManifest({
       nav,
       win: env.window(),
@@ -372,7 +392,7 @@ export function cancelPerformanceCapture(input: unknown = {}): { ok: true; messa
   if (!parsed.ok) return parsed;
   const capture = active;
   if (!capture) return { ok: false, error: 'No performance capture is running.' };
-  capture.cancelled = true;
+  capture.finished = true;
   finishActive(capture);
   usePerformanceStore.getState().setTimedCapture({ status: 'cancelled', phase: null, error: null });
   return { ok: true, message: `Performance capture ${capture.captureId} cancelled; no report was kept.` };

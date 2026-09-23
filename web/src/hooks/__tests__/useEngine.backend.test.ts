@@ -14,6 +14,7 @@ const glInit = vi.fn();
 const gpuDownload = vi.fn(async () => {});
 const glDownload = vi.fn(async () => {});
 let engine: typeof import('../useEngine');
+let stability: typeof import('@/lib/perf/captureStability');
 
 beforeAll(async () => {
   vi.resetModules();
@@ -30,6 +31,7 @@ beforeAll(async () => {
     set_event_callback: vi.fn(), handle_command: vi.fn(), handle_command_batch: vi.fn(),
   }));
   engine = await import('../useEngine');
+  stability = await import('@/lib/perf/captureStability');
 });
 
 beforeEach(() => {
@@ -85,9 +87,13 @@ describe('actual engine backend reporting', () => {
     const { result } = renderHook(() => engine.useEngine('forge-canvas'));
     await waitFor(() => expect(result.current.isReady).toBe(true));
     expect(engine.getActiveEngineBackend()).toBe('webgpu');
+    const changed = vi.fn();
+    const unsubscribe = stability.onCaptureWorkloadChange(changed);
     const crash = new Event('unhandledrejection');
     Object.defineProperty(crash, 'reason', { value: new WebAssembly.RuntimeError('unreachable') });
     await act(async () => { window.dispatchEvent(crash); });
+    expect(changed).toHaveBeenCalledTimes(1);
+    unsubscribe();
     expect(engine.isEngineCrashed()).toBe(true);
     expect(engine.getActiveEngineBackend()).toBe('unknown');
     engine.resetEngine();
@@ -99,7 +105,11 @@ describe('actual engine backend reporting', () => {
     const { result } = renderHook(() => engine.useEngine('forge-canvas'));
     await waitFor(() => expect(result.current.isReady).toBe(true));
     expect(engine.getActiveEngineBackend()).toBe('webgpu');
+    const changed = vi.fn();
+    const unsubscribe = stability.onCaptureWorkloadChange(changed);
     engine.resetEngine();
+    expect(changed).toHaveBeenCalledTimes(1);
+    unsubscribe();
     expect(engine.getActiveEngineBackend()).toBe('unknown');
   });
 });

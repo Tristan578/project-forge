@@ -1,3 +1,4 @@
+import { notifyCaptureWorkloadChange } from '@/lib/perf/captureStability';
 /**
  * Event handlers for transform/scene graph/selection/history/snap/mode.
  */
@@ -37,6 +38,15 @@ export function handleTransformEvent(
   _set: SetFn,
   _get: GetFn
 ): boolean {
+  // Native gizmos and keyboard undo bypass the authoring command dispatcher.
+  // Observe occurrences, not history labels: repeated edits can share labels.
+  // Runtime transforms are part of the measured game, not authoring changes.
+  if (useEditorStore.getState().engineMode === 'edit' && [
+        'HISTORY_CHANGED', 'SELECTION_CHANGED', 'TRANSFORM_CHANGED', 'SCENE_GRAPH_UPDATE',
+        'SCENE_NODE_ADDED', 'SCENE_NODE_REMOVED', 'SCENE_NODE_UPDATED',
+      ].includes(type)) {
+    notifyCaptureWorkloadChange();
+  }
   switch (type) {
     case 'SELECTION_CHANGED': {
       const payload = castPayload<{ selectedIds: string[]; primaryId: string | null; primaryName: string | null }>(data);

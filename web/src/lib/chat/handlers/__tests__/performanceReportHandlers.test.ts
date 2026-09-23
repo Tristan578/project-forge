@@ -40,6 +40,7 @@ const env: CaptureEnvironment = {
   },
   isHidden: () => false,
   onVisibilityChange: () => () => undefined,
+  onSceneChange: () => () => undefined,
   backend: () => 'webgpu',
   engineReadyMs: () => 2000,
   readSceneChecksum: async () => '5e285ced',

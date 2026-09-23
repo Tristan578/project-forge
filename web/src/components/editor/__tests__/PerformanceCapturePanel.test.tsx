@@ -49,6 +49,7 @@ const env: CaptureEnvironment = {
   cancelFrame: () => undefined,
   isHidden: () => false,
   onVisibilityChange: () => () => undefined,
+  onSceneChange: () => () => undefined,
   backend: () => 'webgpu',
   engineReadyMs: () => UNKNOWN,
   readSceneChecksum: () => new Promise(() => undefined),
