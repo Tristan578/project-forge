@@ -1260,44 +1260,166 @@ fn system_collectible(
 
 /// Collision tracking system: reads Rapier CollisionEvents and updates the runtime's
 /// active_collisions set. Must run before all game component systems that need overlap info.
+///
+/// Reads BOTH simulations. A 2D project's bodies are stepped by `bevy_rapier2d`
+/// (`physics_2d_sim.rs`), whose contacts arrive as `bevy_rapier2d`'s own
+/// `CollisionEvent` type; until #10194 only the 3D reader fed this set, so in a
+/// 2D game no Collectible, Damage Zone, Checkpoint, Teleporter, Trigger Zone or
+/// `reachGoal` win condition ever saw a contact. The two message streams are
+/// merged here rather than in a sibling system so `prev_collisions` rotates
+/// exactly once per frame.
 fn system_track_collisions(
     mut collision_events: MessageReader<CollisionEvent>,
+    mut collision_events_2d: MessageReader<bevy_rapier2d::prelude::CollisionEvent>,
     entity_id_query: Query<&EntityId>,
     runtime: Option<ResMut<GameComponentRuntime>>,
 ) {
     let Some(mut runtime) = runtime else {
         collision_events.clear();
+        collision_events_2d.clear();
         return;
     };
 
     // Rotate: current -> prev, then rebuild current from events
     runtime.prev_collisions = runtime.active_collisions.clone();
 
+    let transitions_3d = collision_events.read().map(|event| match event {
+        CollisionEvent::Started(a, b, _) => (*a, *b, true),
+        CollisionEvent::Stopped(a, b, _) => (*a, *b, false),
+    });
+    let transitions_2d = collision_events_2d.read().map(|event| match event {
+        bevy_rapier2d::prelude::CollisionEvent::Started(a, b, _) => (*a, *b, true),
+        bevy_rapier2d::prelude::CollisionEvent::Stopped(a, b, _) => (*a, *b, false),
+    });
+
     // Process collision events: Started adds pairs, Stopped removes them
-    for event in collision_events.read() {
-        match event {
-            CollisionEvent::Started(a, b, _) => {
-                if let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(*a), entity_id_query.get(*b)) {
-                    // Store in canonical order for consistent lookups
-                    let pair = if id_a.0 <= id_b.0 {
-                        (id_a.0.clone(), id_b.0.clone())
-                    } else {
-                        (id_b.0.clone(), id_a.0.clone())
-                    };
-                    runtime.active_collisions.insert(pair);
-                }
-            }
-            CollisionEvent::Stopped(a, b, _) => {
-                if let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(*a), entity_id_query.get(*b)) {
-                    let pair = if id_a.0 <= id_b.0 {
-                        (id_a.0.clone(), id_b.0.clone())
-                    } else {
-                        (id_b.0.clone(), id_a.0.clone())
-                    };
-                    runtime.active_collisions.remove(&pair);
-                }
-            }
+    for (a, b, started) in transitions_3d.chain(transitions_2d) {
+        let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(a), entity_id_query.get(b)) else {
+            continue;
+        };
+        // Store in canonical order for consistent lookups
+        let pair = if id_a.0 <= id_b.0 {
+            (id_a.0.clone(), id_b.0.clone())
+        } else {
+            (id_b.0.clone(), id_a.0.clone())
+        };
+        if started {
+            runtime.active_collisions.insert(pair);
+        } else {
+            runtime.active_collisions.remove(&pair);
         }
+    }
+}
+
+#[cfg(test)]
+mod track_collisions_tests {
+    use super::{system_track_collisions, GameComponentRuntime};
+    use crate::core::entity_id::EntityId;
+    use bevy::prelude::*;
+    use bevy_rapier2d::prelude::CollisionEvent as CollisionEvent2d;
+    use bevy_rapier2d::rapier::geometry::CollisionEventFlags as Flags2d;
+    use bevy_rapier3d::prelude::CollisionEvent as CollisionEvent3d;
+    use bevy_rapier3d::rapier::geometry::CollisionEventFlags as Flags3d;
+
+    /// A world with both Rapier message streams registered, the play-mode
+    /// runtime present, and a persistent schedule running the tracker — the
+    /// reader's cursor must survive across runs, which `run_system_once`'s
+    /// fresh system per call would not give.
+    fn play_world() -> (World, Schedule, Entity, Entity) {
+        let mut world = World::new();
+        world.init_resource::<Messages<CollisionEvent2d>>();
+        world.init_resource::<Messages<CollisionEvent3d>>();
+        world.insert_resource(GameComponentRuntime::default());
+        let player = world.spawn(EntityId::new("player")).id();
+        let coin = world.spawn(EntityId::new("coin")).id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_track_collisions);
+        (world, schedule, player, coin)
+    }
+
+    fn active(world: &World) -> Vec<(String, String)> {
+        let mut pairs: Vec<_> = world
+            .resource::<GameComponentRuntime>()
+            .active_collisions
+            .iter()
+            .cloned()
+            .collect();
+        pairs.sort();
+        pairs
+    }
+
+    /// The #10194 case: a contact reported by the 2D simulation reaches
+    /// `active_collisions`, in the same canonical order the 3D path uses, so
+    /// every contact-driven component works in a 2D project.
+    #[test]
+    fn a_2d_contact_reaches_active_collisions() {
+        let (mut world, mut schedule, player, coin) = play_world();
+
+        world.write_message(CollisionEvent2d::Started(coin, player, Flags2d::SENSOR));
+        schedule.run(&mut world);
+
+        assert_eq!(active(&world), vec![("coin".to_string(), "player".to_string())]);
+
+        world.write_message(CollisionEvent2d::Stopped(player, coin, Flags2d::SENSOR));
+        schedule.run(&mut world);
+
+        assert_eq!(active(&world), Vec::<(String, String)>::new());
+        // The frame before the stop is still visible as the previous set.
+        assert_eq!(
+            world.resource::<GameComponentRuntime>().prev_collisions.len(),
+            1,
+            "prev_collisions rotates once per frame"
+        );
+    }
+
+    /// 3D behaviour is unchanged by the merge.
+    #[test]
+    fn a_3d_contact_still_reaches_active_collisions() {
+        let (mut world, mut schedule, player, coin) = play_world();
+
+        world.write_message(CollisionEvent3d::Started(player, coin, Flags3d::empty()));
+        schedule.run(&mut world);
+
+        assert_eq!(active(&world), vec![("coin".to_string(), "player".to_string())]);
+    }
+
+    /// Both streams in one frame land in one set, and a contact against an
+    /// entity with no `EntityId` (a Rapier-internal body) is ignored rather
+    /// than panicking.
+    #[test]
+    fn both_streams_merge_and_unknown_entities_are_skipped() {
+        let (mut world, mut schedule, player, coin) = play_world();
+        let goal = world.spawn(EntityId::new("goal")).id();
+        let anonymous = world.spawn_empty().id();
+
+        world.write_message(CollisionEvent3d::Started(player, coin, Flags3d::empty()));
+        world.write_message(CollisionEvent2d::Started(player, goal, Flags2d::SENSOR));
+        world.write_message(CollisionEvent2d::Started(player, anonymous, Flags2d::empty()));
+        schedule.run(&mut world);
+
+        assert_eq!(
+            active(&world),
+            vec![
+                ("coin".to_string(), "player".to_string()),
+                ("goal".to_string(), "player".to_string()),
+            ]
+        );
+    }
+
+    /// Outside Play (no runtime) both readers are drained so a stale contact
+    /// from Edit mode cannot be counted on the first Play frame.
+    #[test]
+    fn without_a_runtime_both_streams_are_cleared() {
+        let (mut world, mut schedule, player, coin) = play_world();
+        world.remove_resource::<GameComponentRuntime>();
+        world.write_message(CollisionEvent2d::Started(player, coin, Flags2d::SENSOR));
+        world.write_message(CollisionEvent3d::Started(player, coin, Flags3d::empty()));
+        schedule.run(&mut world);
+
+        world.insert_resource(GameComponentRuntime::default());
+        schedule.run(&mut world);
+
+        assert_eq!(active(&world), Vec::<(String, String)>::new());
     }
 }
 
