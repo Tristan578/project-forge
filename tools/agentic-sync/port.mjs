@@ -790,37 +790,67 @@ function ownedByGenerator(m, rel) {
 // what guards the file and what does not.
 //
 // `[mcp_servers.<name>]` blocks out of a config.toml, as { command, args, envVars,
-// env, approvalMode }. Deliberately NOT a TOML parser — it reads the shapes this file is
-// allowed to use, and anything else it cannot read becomes a `parseError` that is
-// REPORTED rather than silently treated as parity (the failure mode that matters
-// here is a wrong comparison reading as a right one).
+// env, approvalMode, cwd }. Deliberately NOT a TOML parser — it reads the shapes this
+// file is allowed to use, and anything else it cannot read becomes a `parseError` that
+// is REPORTED rather than silently treated as parity (the failure mode that matters
+// here is a wrong comparison reading as a right one). Returns { blocks, unreadable }:
+// `unreadable` is the first line OUTSIDE every server table that it cannot read, and
+// since a multi-line string there could hold lines that look like server tables,
+// nothing it read can be trusted once that is set.
 function codexServerBlocks(text) {
   const lines = String(text).split(/\r?\n/);
   const blocks = new Map();
+  let unreadable = '';
   let name = null;
   let isEnv = false;
   const ensure = (n) => {
     if (!blocks.has(n)) blocks.set(n, { command: undefined, args: [], envVars: [], env: {}, approvalMode: undefined, cwd: undefined, parseError: '' });
     return blocks.get(n);
   };
+  const fail = (block, msg) => { if (!block.parseError) block.parseError = msg; };
+  // TOML 1.0's basic-string escapes (toml.io/en/v1.0.0#string). A literal string
+  // ('…') has none. Anything else after a backslash is an error in TOML 1.0, so it
+  // is reported rather than guessed at: a spelling a later TOML accepts reads as
+  // unreadable here, never as a wrong value.
+  const SHORT_ESCAPES = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\' };
   // ONE PASS PER LINE, string-aware. Counting brackets over the raw text let a
   // trailing comment containing a stray `]` close the array early: the elements
   // after it were dropped, no parseError was raised, and mcpParity() then reported
   // PARITY on a config that really differed — a server silently carrying an extra
   // argument. A `#` inside a quoted value is not a comment either, and a bracket
   // inside one is not a delimiter, so quotes have to be tracked to get any of it
-  // right. Returns the quoted scalars and the bracket depth change, comment excluded.
+  // right. Returns the DECODED quoted scalars — what Codex reads, which is what
+  // .mcp.json's JSON-decoded values are compared with — and the bracket depth
+  // change, comment excluded; or an `error` for a string it cannot decode. Taking the
+  // raw text between the quotes, as the first cut did, read "C:\\x" as C:\\x (so a
+  // Windows path failed parity), ended a string at an escaped quote, read an
+  // unclosed string as closed, and read the body of a multi-line string as keys.
   const readLine = (s) => {
     const values = [];
     let depth = 0;
     let i = 0;
+    const error = (msg) => ({ values, depth, error: msg });
     while (i < s.length) {
       const c = s[i];
       if (c === '"' || c === "'") {
-        const end = s.indexOf(c, i + 1);
-        if (end === -1) { values.push(s.slice(i + 1)); i = s.length; break; } // unterminated
-        values.push(s.slice(i + 1, end));
-        i = end + 1;
+        if (s.startsWith(c.repeat(3), i)) {
+          return error(`a multi-line string (""" or ''') cannot be read here, and its body would be read as keys; write the value on one line`);
+        }
+        let v = '';
+        let j = i + 1;
+        while (j < s.length && s[j] !== c) {
+          if (c === "'" || s[j] !== '\\') { v += s[j]; j += 1; continue; }
+          const e = s[j + 1];
+          if (e !== undefined && Object.hasOwn(SHORT_ESCAPES, e)) { v += SHORT_ESCAPES[e]; j += 2; continue; }
+          const width = e === 'u' ? 4 : e === 'U' ? 8 : 0;
+          const hex = width ? /^[0-9A-Fa-f]*/.exec(s.slice(j + 2, j + 2 + width))[0] : '';
+          const cp = hex.length === width && width ? parseInt(hex, 16) : NaN;
+          if (cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff)) { v += String.fromCodePoint(cp); j += 2 + width; continue; }
+          return error(`invalid escape \\${e ?? ''}${hex} in a basic string; write a backslash as \\\\, or use a 'literal string'`);
+        }
+        if (j >= s.length) return error('a string is not closed');
+        values.push(v);
+        i = j + 1;
         continue;
       }
       if (c === '#') break; // unquoted: the rest of the line is a comment
@@ -828,9 +858,8 @@ function codexServerBlocks(text) {
       if (c === ']') depth -= 1;
       i += 1;
     }
-    return { values, depth };
+    return { values, depth, error: '' };
   };
-  const scalars = (s) => readLine(s).values;
   for (let i = 0; i < lines.length; i += 1) {
     const raw = lines[i];
     const line = raw.replace(/^\s+/, '');
@@ -843,52 +872,58 @@ function codexServerBlocks(text) {
       continue;
     }
     if (/^\[/.test(line)) { name = null; isEnv = false; continue; } // some other table
-    if (!name) continue;
+    // EVERY other line is read, not only the keys compared below: a string that
+    // cannot be decoded anywhere is reported, and a multi-line string in a key
+    // nothing compares could otherwise hide a decoy `command = …` in its body.
     const kv = /^([A-Za-z_][A-Za-z0-9_-]*|"[^"]+")\s*=\s*(.*)$/.exec(line);
-    if (!kv) continue;
-    const key = kv[1].replace(/^"|"$/g, '');
-    let rest = kv[2];
+    const first = readLine(kv ? kv[2] : line);
+    if (!name) {
+      if (first.error && !unreadable) unreadable = `line ${i + 1}: ${first.error}`;
+      continue;
+    }
     const block = ensure(name);
+    const key = kv ? kv[1].replace(/^"|"$/g, '') : `line ${i + 1}`;
+    if (first.error) { fail(block, `${key}: ${first.error}`); continue; }
+    if (!kv) continue;
+    const v = first.values;
     if (isEnv) {
-      const v = scalars(rest);
       if (v.length) block.env[key] = v[0];
       continue;
     }
     if (key === 'command') {
-      const v = scalars(rest);
       if (v.length) block.command = v[0];
       continue;
     }
     if (key === 'default_tools_approval_mode') {
-      const v = scalars(rest);
       if (v.length) block.approvalMode = v[0];
       continue;
     }
     if (key === 'cwd') {
-      const v = scalars(rest);
       if (v.length) block.cwd = v[0];
       continue;
     }
     if (key === 'args' || key === 'env_vars') {
       // Consume until the array closes, so the multi-line form reads the same as
       // the inline one. An unterminated array is a parseError, never an empty list.
-      const first = readLine(rest);
       let depth = first.depth;
-      let collected = first.values;
+      let collected = v;
+      let contError = '';
       let guard = 0;
       while (depth > 0 && i + 1 < lines.length) {
         i += 1;
         const cont = readLine(lines[i]);
+        if (cont.error) { contError = cont.error; break; }
         collected = collected.concat(cont.values);
         depth += cont.depth;
         if ((guard += 1) > 500) break;
       }
-      if (depth > 0) block.parseError = `${key} array is not closed`;
+      if (contError) fail(block, `${key}: ${contError}`);
+      else if (depth > 0) fail(block, `${key} array is not closed`);
       else if (key === 'args') block.args = collected;
       else block.envVars = collected;
     }
   }
-  return blocks;
+  return { blocks, unreadable };
 }
 
 function mcpParity() {
@@ -923,6 +958,14 @@ function mcpParity() {
   } catch {
     config = readFileSync(abs('.codex/config.toml'), 'utf8'); // no git, or not yet committed
   }
+  // A string the reader cannot decode OUTSIDE every server table stops the check
+  // before anything is compared: a multi-line string there could hold lines that
+  // look like `[mcp_servers.…]` tables, so the server list itself is in doubt.
+  const { blocks, unreadable } = codexServerBlocks(config);
+  if (unreadable) {
+    out.problems.push(`mcp:      .codex/config.toml cannot be read at ${unreadable} — no server was compared; fix that line, then re-run`);
+    return out;
+  }
   const have = [];
   for (const line of config.split(/\r?\n/)) {
     // The table header of a server itself, not of a sub-table (`…sentry.env`).
@@ -943,8 +986,8 @@ function mcpParity() {
   // the next one; a `[name.env]` sub-table is collected separately. Both the inline
   // (`args = ["-y", "x"]`) and the multi-line array forms are accepted, because the
   // Codex app itself rewrites this file into the multi-line form and that is the
-  // same TOML — a formatting difference must not read as drift.
-  const blocks = codexServerBlocks(config);
+  // same TOML — a formatting difference must not read as drift. `blocks` was read
+  // above, before the names, so an unreadable file is refused before either.
   for (const n of want) {
     if (!have.includes(n)) continue; // already reported as missing
     const got = blocks.get(n);

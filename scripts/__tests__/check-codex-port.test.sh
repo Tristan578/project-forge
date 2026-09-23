@@ -445,8 +445,8 @@ a literal string, whose backslashes are not escapes|["C:\\Users\\fixture\\run.mj
 MCP_STRING_TABLE
 if [ "$STRING_ROWS" -eq 6 ]; then ok "all 6 MCP string rows were driven"; else bad "the MCP string table was not walked: $STRING_ROWS of 6"; fi
 # A string the reader cannot decode is REPORTED, never compared as whatever text it
-# happened to hold. Codex itself refuses a config with an invalid escape or an
-# unclosed string, and a multi-line string ("""…""" or '''…''') spans lines this
+# happened to hold. TOML 1.0 makes an undefined escape and an unclosed string
+# errors, and a multi-line string ("""…""" or '''…''') spans lines this
 # line-based reader would otherwise take for keys. .mcp.json is in parity with the
 # readable spelling of every row, so only the unreadable string can fail it.
 printf '{"mcpServers":{"alpha":{"command":"node","args":["x"]}}}\n' > "$FS/.mcp.json"
@@ -462,7 +462,7 @@ while IFS='|' read -r LABEL TOML_COMMAND TOML_ARGS NEEDLE; do
     bad "an unreadable TOML string was not reported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-300)"
   fi
 done <<'MCP_UNREADABLE_TABLE'
-a Windows path in a basic string with single backslashes (\U then non-hex), which Codex refuses to load|"node"|["C:\Users\x"]|args: invalid escape \U in a basic string
+a Windows path in a basic string with single backslashes (\U then non-hex), an error in TOML 1.0|"node"|["C:\Users\x"]|args: invalid escape \U in a basic string
 an escape TOML does not define|"node"|["a\qb"]|args: invalid escape \q in a basic string
 a \u escape with too few hex digits|"node"|["\u12"]|args: invalid escape \u12 in a basic string
 a \u escape naming a surrogate, which is not a Unicode scalar value|"node"|["\uD800"]|args: invalid escape \uD800 in a basic string
@@ -472,6 +472,11 @@ a multi-line basic string|"""node"""|["x"]|command: a multi-line string
 a multi-line literal string|'''node'''|["x"]|command: a multi-line string
 MCP_UNREADABLE_TABLE
 if [ "$UNREADABLE_ROWS" -eq 8 ]; then ok "all 8 unreadable-string rows were driven"; else bad "the unreadable-string table was not walked: $UNREADABLE_ROWS of 8"; fi
+# The same holds on a CONTINUATION line of a multi-line array, which is read by the
+# array loop rather than as a key.
+printf '[mcp_servers.alpha]\ncommand = "node"\nargs = [\n    %s,\n]\ndefault_tools_approval_mode = "prompt"\n' '"a\qb"' > "$FS/.codex/config.toml"
+gen "$FS" --check; expect_rc 1 "an invalid escape on an array's continuation line fails the check"
+expect_out 'alpha could not be read from .codex/config.toml (args: invalid escape \q in a basic string' "…naming the array and the escape, not 'array is not closed'"
 # A multi-line string in a key the check does not compare is still reported: its
 # body can hold lines that look like keys. Here the real command is "evil" and the
 # decoy inside the string restates the parity values — read line by line, the
@@ -479,6 +484,19 @@ if [ "$UNREADABLE_ROWS" -eq 8 ]; then ok "all 8 unreadable-string rows were driv
 printf '[mcp_servers.alpha]\ncommand = "evil"\nnote = """\ncommand = "node"\nargs = ["x"]\n"""\ndefault_tools_approval_mode = "prompt"\n' > "$FS/.codex/config.toml"
 gen "$FS" --check; expect_rc 1 "a multi-line string in a key that is not compared still fails the check"
 expect_out 'alpha could not be read from .codex/config.toml (note: a multi-line string' "…naming the key that holds it, so its body is never read as keys"
+# OUTSIDE every server table the check stops before comparing anything, because
+# there a multi-line string's body can pose as a whole server table. Here the only
+# [mcp_servers.alpha] is inside a string, so Codex has NO server; read line by
+# line, it passed as parity.
+printf 'developer_instructions = """\n[mcp_servers.alpha]\ncommand = "node"\nargs = ["x"]\ndefault_tools_approval_mode = "prompt"\n"""\n' > "$FS/.codex/config.toml"
+gen "$FS" --check; expect_rc 1 "a multi-line string outside every server table stops the check"
+expect_out '.codex/config.toml cannot be read at line 1: a multi-line string' "…naming the line that could not be read"
+expect_no_out 'MCP servers declared for Codex' "…and printing no parity note for a server list it could not trust"
+# A string it cannot decode outside the server tables is reported the same way,
+# even though the servers after it are in parity.
+printf '%s\n[mcp_servers.alpha]\ncommand = "node"\nargs = ["x"]\ndefault_tools_approval_mode = "prompt"\n' 'model = "a\qb"' > "$FS/.codex/config.toml"
+gen "$FS" --check; expect_rc 1 "an invalid escape outside every server table fails the check"
+expect_out '.codex/config.toml cannot be read at line 1: invalid escape \q in a basic string' "…naming the line and the escape"
 
 # APPROVAL MODE, which has no .mcp.json counterpart, so parity alone never saw it.
 # docs/guides/codex-cli-support-matrix.md ("MCP servers") has every server set
