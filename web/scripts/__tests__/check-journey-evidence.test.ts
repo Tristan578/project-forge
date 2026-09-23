@@ -63,6 +63,7 @@ async function writeValidDir(prHead: string | null = HEAD): Promise<void> {
       kind: 'journey-evidence-index',
       tag: JOURNEY_TAG,
       generatedAt: '2026-09-22T12:00:00.000Z',
+      problems: [],
       tests: [{ test, evidence: 'j/evidence.json', problem: null }],
     }),
   );
@@ -98,7 +99,7 @@ describe('runCheckJourneyEvidence', () => {
     await writeValidDir();
     const out = runCheckJourneyEvidence([dir, '--expect-github-sha', SHA, '--expect-pr-head-sha', HEAD], {});
     expect(out.exitCode).toBe(0);
-    expect(out.lines).toContain(`journey-evidence: 1 journey-tagged test(s) in ${dir}`);
+    expect(out.lines).toContain(`journey-evidence: 1 journey-tagged test(s) in ${dir}, 1 with a record`);
     expect(out.lines).toContainEqual(expect.stringMatching(/^ {2}pass +jrn:dev-canary@1 +Journey canary › opens the editor/));
     expect(out.lines).toContain('proven 1 | pass 1 | flaky 0 | fail 0 | not-run 0');
     expect(out.lines.at(-1)).toBe('journey-evidence check passed');

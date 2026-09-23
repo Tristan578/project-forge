@@ -39,6 +39,7 @@ import {
   JOURNEY_TAG,
   buildJourneyEvidence,
   evidenceSlug,
+  mixedJourneyFileProblems,
   specPath,
   zJourneyEvidenceIndex,
   type JourneyEvidenceIndex,
@@ -71,6 +72,7 @@ export default class JourneyEvidenceReporter implements Reporter {
   private outputDir = '';
   private baseDir = '';
   private journeyTests: TestCase[] = [];
+  private runProblems: string[] = [];
   private readonly attempts = new Map<string, RawAttempt[]>();
 
   constructor(private readonly options: JourneyEvidenceReporterOptions = {}) {}
@@ -90,7 +92,16 @@ export default class JourneyEvidenceReporter implements Reporter {
       );
     }
     fs.rmSync(this.outputDir, { recursive: true, force: true });
-    this.journeyTests = suite.allTests().filter((t) => t.tags.includes(JOURNEY_TAG));
+    const all = suite.allTests();
+    this.journeyTests = all.filter((t) => t.tags.includes(JOURNEY_TAG));
+    // describeJourney() turns trace and video on for its whole spec file, so a
+    // non-journey test sharing that file would silently record everything too.
+    this.runProblems = mixedJourneyFileProblems(
+      all.map((t) => {
+        const id = this.identify(t);
+        return { file: id.file, title: id.title, tags: t.tags };
+      }),
+    );
   }
 
   onTestEnd(test: TestCase, result: TestResult): void {
@@ -120,6 +131,7 @@ export default class JourneyEvidenceReporter implements Reporter {
       kind: 'journey-evidence-index',
       tag: JOURNEY_TAG,
       generatedAt: new Date().toISOString(),
+      problems: this.runProblems,
       tests: [],
     };
 

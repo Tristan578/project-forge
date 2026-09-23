@@ -229,6 +229,38 @@ export function readSubstitutions(annotations: readonly AnnotationLike[]): strin
     .map((a) => (a.description ?? '').trim());
 }
 
+/** Playwright's `trace` / `video` option: a mode string or `{ mode, ... }`. */
+export type RecordingOption = string | { mode: string };
+
+/**
+ * Why a journey attempt would NOT keep a trace and a video, or null when it
+ * will. Every journey attempt must: `retain-on-failure` / `on-first-retry`
+ * keep nothing for a passing first attempt, which is exactly the evidence a
+ * "journey passed" claim needs.
+ */
+export function journeyRecordingProblem(trace: RecordingOption, video: RecordingOption): string | null {
+  const mode = (o: RecordingOption) => (typeof o === 'string' ? o : o.mode);
+  if (mode(trace) === 'on' && mode(video) === 'on') return null;
+  return (
+    `a journey must record a trace and a video on every attempt (trace: ${mode(trace)}, video: ${mode(video)}); ` +
+    'declare it with describeJourney() at the top level of its spec file'
+  );
+}
+
+/** Tests that share a spec file with a journey but are not journeys themselves. */
+export function mixedJourneyFileProblems(
+  tests: readonly { file: string; title: string; tags: readonly string[] }[],
+): string[] {
+  const journeyFiles = new Set(tests.filter((t) => t.tags.includes(JOURNEY_TAG)).map((t) => t.file));
+  return tests
+    .filter((t) => journeyFiles.has(t.file) && !t.tags.includes(JOURNEY_TAG))
+    .map(
+      (t) =>
+        `${t.file} mixes journeys with non-journey test "${t.title}": describeJourney() turns trace and video ` +
+        `on for the whole file, so a spec file with a ${JOURNEY_TAG} test may hold only journeys`,
+    );
+}
+
 /** A full commit SHA from the environment, or null when unset/empty. A value
  *  that is present but is not a SHA is refused rather than recorded as one. */
 export function normalizeSha(value: string | undefined): string | null {
@@ -595,6 +627,8 @@ export const zJourneyEvidenceIndex = z.object({
   kind: z.literal('journey-evidence-index'),
   tag: z.literal(JOURNEY_TAG),
   generatedAt: z.iso.datetime({ offset: false }),
+  /** Run-level problems not tied to one test, e.g. {@link mixedJourneyFileProblems}. */
+  problems: z.array(z.string()),
   tests: z.array(
     z
       .object({

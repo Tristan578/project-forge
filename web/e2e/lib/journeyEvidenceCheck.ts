@@ -49,6 +49,8 @@ export interface JourneyEvidenceCheckOptions {
 
 export interface JourneyEvidenceCheckResult {
   problems: string[];
+  /** Journey-tagged tests the run selected (index entries), with or without a record. */
+  selected: number;
   journeys: Array<{ title: string; journeyId: string; outcome: JourneyOutcome; evidence: string }>;
   counts: ReturnType<typeof countJourneyOutcomes>;
 }
@@ -103,7 +105,8 @@ export function checkJourneyEvidence(options: JourneyEvidenceCheckOptions): Jour
   const problems: string[] = [];
   const journeys: JourneyEvidenceCheckResult['journeys'] = [];
   const evidences: JourneyEvidence[] = [];
-  const result = () => ({ problems, journeys, counts: countJourneyOutcomes(evidences) });
+  let selected = 0;
+  const result = () => ({ problems, selected, journeys, counts: countJourneyOutcomes(evidences) });
 
   const indexFile = path.join(dir, 'index.json');
   if (!fs.existsSync(indexFile)) {
@@ -124,7 +127,9 @@ export function checkJourneyEvidence(options: JourneyEvidenceCheckOptions): Jour
     return result();
   }
 
+  problems.push(...index.data.problems);
   const tests = index.data.tests;
+  selected = tests.length;
   if (tests.length < minJourneys) {
     problems.push(
       `the run selected ${tests.length} journey-tagged tests; expected at least ${minJourneys} — ` +

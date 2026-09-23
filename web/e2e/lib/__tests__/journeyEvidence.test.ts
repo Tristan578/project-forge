@@ -24,6 +24,8 @@ import {
   SUBSTITUTION_ANNOTATION_TYPE,
   countJourneyOutcomes,
   isProvenJourney,
+  journeyRecordingProblem,
+  mixedJourneyFileProblems,
   normalizeSha,
   readJourneyId,
   readSubstitutions,
@@ -367,6 +369,37 @@ describe('annotation readers', () => {
 
   it('uses the @release-journey tag, distinct from the store-injected @journey gate', () => {
     expect(JOURNEY_TAG).toBe('@release-journey');
+  });
+});
+
+describe('journeyRecordingProblem', () => {
+  it('accepts trace and video both on, in either option shape', () => {
+    expect(journeyRecordingProblem('on', 'on')).toBeNull();
+    expect(journeyRecordingProblem({ mode: 'on' }, { mode: 'on' })).toBeNull();
+  });
+
+  it('refuses the engine config defaults, which keep nothing for a passing first attempt', () => {
+    expect(journeyRecordingProblem('on-first-retry', 'retain-on-failure')).toMatch(
+      /trace: on-first-retry, video: retain-on-failure.*describeJourney\(\) at the top level/,
+    );
+    expect(journeyRecordingProblem('on', { mode: 'off' })).toMatch(/video: off/);
+  });
+});
+
+describe('mixedJourneyFileProblems', () => {
+  it('flags a non-journey test that shares a spec file with a journey', () => {
+    expect(
+      mixedJourneyFileProblems([
+        { file: 'e2e/tests/a.spec.ts', title: 'J › journey', tags: [JOURNEY_TAG, '@engine-smoke'] },
+        { file: 'e2e/tests/a.spec.ts', title: 'E › stowaway', tags: ['@engine-ui'] },
+        { file: 'e2e/tests/b.spec.ts', title: 'E › elsewhere', tags: ['@engine-ui'] },
+      ]),
+    ).toEqual([expect.stringMatching(/^e2e\/tests\/a\.spec\.ts mixes journeys with non-journey test "E › stowaway"/)]);
+  });
+
+  it('is empty for journey-only files and for runs with no journeys', () => {
+    expect(mixedJourneyFileProblems([{ file: 'a', title: 't', tags: [JOURNEY_TAG] }])).toEqual([]);
+    expect(mixedJourneyFileProblems([{ file: 'a', title: 't', tags: ['@engine-ui'] }])).toEqual([]);
   });
 });
 

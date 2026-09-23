@@ -48,11 +48,13 @@ interface FakeTest {
   describe: string;
   tags: string[];
   journeyId?: string;
+  /** Spec path relative to testDir; defaults to the canary's file. */
+  file?: string;
 }
 
 function fakeTest(t: FakeTest): TestCase {
   const project = { name: 'chromium' };
-  const rel = 'tests/journey-evidence-canary.spec.ts';
+  const rel = t.file ?? 'tests/journey-evidence-canary.spec.ts';
   const rootSuite = { type: 'root', title: '', project: () => undefined };
   const projectSuite = { type: 'project', title: 'chromium', parent: rootSuite, project: () => project };
   const fileSuite = { type: 'file', title: rel, parent: projectSuite, project: () => project };
@@ -131,7 +133,7 @@ function result(
 
 const JOURNEY_A: FakeTest = { id: 'aaaa-1111', title: 'opens the editor', describe: 'Journey canary', tags: ['@engine-smoke', JOURNEY_TAG], journeyId: 'jrn:dev-canary@1' };
 const JOURNEY_B: FakeTest = { id: 'bbbb-2222', title: 'survives a retry', describe: 'Journey canary', tags: [JOURNEY_TAG, '@engine-smoke'], journeyId: 'jrn:dev-canary@1' };
-const NOT_A_JOURNEY: FakeTest = { id: 'cccc-3333', title: 'plain engine-ui test', describe: 'Editor', tags: ['@engine-ui'] };
+const NOT_A_JOURNEY: FakeTest = { id: 'cccc-3333', title: 'plain engine-ui test', describe: 'Editor', tags: ['@engine-ui'], file: 'tests/editor.spec.ts' };
 
 async function runReporter(
   tests: TestCase[],
@@ -211,6 +213,21 @@ describe('JourneyEvidenceReporter', () => {
     await runReporter([a], []);
     expect(checkJourneyEvidence({ dir: evidenceDir() }).problems).toEqual([
       expect.stringMatching(/has no record: .*no attempt/),
+    ]);
+  });
+
+  it('fails a spec file that mixes a journey with a non-journey test', async () => {
+    const a = fakeTest(JOURNEY_A);
+    const stowaway = fakeTest({ ...NOT_A_JOURNEY, file: 'tests/journey-evidence-canary.spec.ts' });
+    await runReporter(
+      [a, stowaway],
+      [
+        [a, result(a, 0, 'passed', await record(a, 0, 'passed'))],
+        [stowaway, result(stowaway, 0, 'passed', null)],
+      ],
+    );
+    expect(checkJourneyEvidence({ dir: evidenceDir() }).problems).toEqual([
+      expect.stringMatching(/journey-evidence-canary\.spec\.ts mixes journeys with non-journey test "Editor › plain engine-ui test"/),
     ]);
   });
 

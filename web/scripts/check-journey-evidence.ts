@@ -84,7 +84,9 @@ export function runCheckJourneyEvidence(
   }
 
   const result = checkJourneyEvidence(options);
-  const lines = [`journey-evidence: ${result.counts.total} journey-tagged test(s) in ${options.dir}`];
+  const lines = [
+    `journey-evidence: ${result.selected} journey-tagged test(s) in ${options.dir}, ${result.counts.total} with a record`,
+  ];
   for (const j of result.journeys) {
     lines.push(`  ${j.outcome.padEnd(8)} ${j.journeyId.padEnd(24)} ${j.title}  (${j.evidence})`);
   }

@@ -84,12 +84,16 @@ async function evidenceFor(
 }
 
 /** Write evidence + artifacts + index the way the reporter lays them out. */
-function writeDir(entries: Array<{ test: JourneyTestIdentity; evidence: JourneyEvidence | null; problem?: string }>, opts: { artifacts?: boolean } = {}) {
+function writeDir(
+  entries: Array<{ test: JourneyTestIdentity; evidence: JourneyEvidence | null; problem?: string }>,
+  opts: { artifacts?: boolean; runProblems?: string[] } = {},
+) {
   const index: JourneyEvidenceIndex = {
     schemaVersion: JOURNEY_EVIDENCE_SCHEMA_VERSION,
     kind: 'journey-evidence-index',
     tag: JOURNEY_TAG,
     generatedAt: '2026-09-22T12:00:00.000Z',
+    problems: opts.runProblems ?? [],
     tests: [],
   };
   for (const { test, evidence, problem } of entries) {
@@ -162,6 +166,9 @@ describe('checkJourneyEvidence — rejects', () => {
     expect(result.problems).toEqual([
       expect.stringMatching(/"Journey 2 › runs" \(e2e\/tests\/j\.spec\.ts\) has no record: no "journey-evidence" record attached/),
     ]);
+    // The unrecorded test still counts as selected, so the summary cannot read "all recorded".
+    expect(result.selected).toBe(2);
+    expect(result.counts.total).toBe(1);
   });
 
   it('an evidence file the index names but the directory lacks', async () => {
@@ -240,6 +247,13 @@ describe('checkJourneyEvidence — rejects', () => {
     expect(checkJourneyEvidence({ dir, expectPrHeadSha: null }).problems).toEqual([
       expect.stringMatching(/PR head e{40}, expected none/),
     ]);
+  });
+
+  it('a run-level problem the reporter recorded, such as a mixed spec file', async () => {
+    writeDir([{ test: identity(1), evidence: await evidenceFor(identity(1), ['passed']) }], {
+      runProblems: ['e2e/tests/j.spec.ts mixes journeys with non-journey test "E › x"'],
+    });
+    expect(checkJourneyEvidence({ dir }).problems).toEqual([expect.stringMatching(/^e2e\/tests\/j\.spec\.ts mixes journeys/)]);
   });
 
   it('a raised minimum', async () => {
