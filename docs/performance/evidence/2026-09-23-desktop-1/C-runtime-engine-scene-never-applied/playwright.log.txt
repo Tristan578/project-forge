@@ -1,0 +1,21 @@
+
+Running 1 test using 1 worker
+  x  1 e2e\perf\fixtureCapture.spec.ts:224:11 > Exported fixture performance capture @perf-gpu > perf-3d@1 run 1/1 (cold) (1.2m)
+  1) e2e\perf\fixtureCapture.spec.ts:224:11 > Exported fixture performance capture @perf-gpu > perf-3d@1 run 1/1 (cold) 
+    Error: The engine accepted load_scene but never applied the fixture scene (no SCENE_LOADED event); this engine build does not load scenes (the runtime build, #10195), so the run measured its default scene.
+    page errors: 
+    expect(received).toBe(expected) // Object.is equality
+    Expected: true
+    Received: false
+      288 |             declaredCacheState: CACHE === 'cold' ? 'cold' : undefined,
+      289 |           });
+    > 290 |           expect(result.ok, result.ok ? '' : `${result.error}\npage errors: ${pageErrors.join(' | ')}`).toBe(true);
+          |                                                                                                         ^
+      291 |           if (!result.ok) return;
+      292 |           const report = result.report;
+      293 |           const file = `${fixtureId.replace('@', '-v')}-${CACHE}${CPU_THROTTLE > 1 ? `-cpu${CPU_THROTTLE}x` : ''}-run${run}.json`;
+        at D:\repos\into-rust\worktrees\pf-9904\web\e2e\perf\fixtureCapture.spec.ts:290:105
+    Error Context: test-results\fixtureCapture-Exported-fi-9a987-gpu-perf-3d-1-run-1-1-cold-\error-context.md
+    Error Context: test-results\fixtureCapture-Exported-fi-9a987-gpu-perf-3d-1-run-1-1-cold-\error-context.md
+  1 failed
+    e2e\perf\fixtureCapture.spec.ts:224:11 > Exported fixture performance capture @perf-gpu > perf-3d@1 run 1/1 (cold) 

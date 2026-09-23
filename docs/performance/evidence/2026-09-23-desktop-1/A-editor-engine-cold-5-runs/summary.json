@@ -1,0 +1,182 @@
+[
+  {
+    "fixture": "perf-2d@1",
+    "run": 1,
+    "file": "perf-2d-v1-cold-run1.json",
+    "verdict": "pass",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 4480,
+    "p50Ms": 13.300000000745058,
+    "p95Ms": 15.200000002980232,
+    "p99Ms": 18.79999999780208,
+    "firstInteractiveMs": 2891.4,
+    "distinctColours": 178,
+    "budgets": {
+      "frame-time-p95": "pass (observed 15.200000002980232, limit 16.7)",
+      "first-interactive-cold": "pass (observed 2891.4, limit 5000)"
+    }
+  },
+  {
+    "fixture": "perf-2d@1",
+    "run": 2,
+    "file": "perf-2d-v1-cold-run2.json",
+    "verdict": "fail",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 4613,
+    "p50Ms": 13,
+    "p95Ms": 17.200000000745057,
+    "p99Ms": 39.46399999991063,
+    "firstInteractiveMs": 3096.3,
+    "distinctColours": 176,
+    "budgets": {
+      "frame-time-p95": "fail (observed 17.200000000745057, limit 16.7)",
+      "first-interactive-cold": "pass (observed 3096.3, limit 5000)"
+    }
+  },
+  {
+    "fixture": "perf-2d@1",
+    "run": 3,
+    "file": "perf-2d-v1-cold-run3.json",
+    "verdict": "pass",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 5006,
+    "p50Ms": 12.599999997764826,
+    "p95Ms": 14.699999999254942,
+    "p99Ms": 17.400000002235174,
+    "firstInteractiveMs": 3078.7,
+    "distinctColours": 165,
+    "budgets": {
+      "frame-time-p95": "pass (observed 14.699999999254942, limit 16.7)",
+      "first-interactive-cold": "pass (observed 3078.7, limit 5000)"
+    }
+  },
+  {
+    "fixture": "perf-2d@1",
+    "run": 4,
+    "file": "perf-2d-v1-cold-run4.json",
+    "verdict": "pass",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 5358,
+    "p50Ms": 10.200000001117587,
+    "p95Ms": 14.514999999664688,
+    "p99Ms": 16.942999999150665,
+    "firstInteractiveMs": 3243.6,
+    "distinctColours": 172,
+    "budgets": {
+      "frame-time-p95": "pass (observed 14.514999999664688, limit 16.7)",
+      "first-interactive-cold": "pass (observed 3243.6, limit 5000)"
+    }
+  },
+  {
+    "fixture": "perf-2d@1",
+    "run": 5,
+    "file": "perf-2d-v1-cold-run5.json",
+    "verdict": "pass",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 4607,
+    "p50Ms": 13,
+    "p95Ms": 14.800000000745058,
+    "p99Ms": 18.493999999910553,
+    "firstInteractiveMs": 3049.6,
+    "distinctColours": 170,
+    "budgets": {
+      "frame-time-p95": "pass (observed 14.800000000745058, limit 16.7)",
+      "first-interactive-cold": "pass (observed 3049.6, limit 5000)"
+    }
+  },
+  {
+    "fixture": "perf-3d@1",
+    "run": 1,
+    "file": "perf-3d-v1-cold-run1.json",
+    "verdict": "fail",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 3864,
+    "p50Ms": 15.400000002235174,
+    "p95Ms": 17.5,
+    "p99Ms": 21.300000000745058,
+    "firstInteractiveMs": 2849.6,
+    "distinctColours": 301,
+    "budgets": {
+      "frame-time-p95": "fail (observed 17.5, limit 16.7)",
+      "first-interactive-cold": "pass (observed 2849.6, limit 5000)"
+    }
+  },
+  {
+    "fixture": "perf-3d@1",
+    "run": 2,
+    "file": "perf-3d-v1-cold-run2.json",
+    "verdict": "fail",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 3709,
+    "p50Ms": 15.600000001490116,
+    "p95Ms": 20.199999999254942,
+    "p99Ms": 31.300000000745058,
+    "firstInteractiveMs": 6072.8,
+    "distinctColours": 348,
+    "budgets": {
+      "frame-time-p95": "fail (observed 20.199999999254942, limit 16.7)",
+      "first-interactive-cold": "fail (observed 6072.8, limit 5000)"
+    }
+  },
+  {
+    "fixture": "perf-3d@1",
+    "run": 3,
+    "file": "perf-3d-v1-cold-run3.json",
+    "verdict": "fail",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 3926,
+    "p50Ms": 15.300000000745058,
+    "p95Ms": 17.700000002980232,
+    "p99Ms": 21.124999999068677,
+    "firstInteractiveMs": 3026,
+    "distinctColours": 284,
+    "budgets": {
+      "frame-time-p95": "fail (observed 17.700000002980232, limit 16.7)",
+      "first-interactive-cold": "pass (observed 3026, limit 5000)"
+    }
+  },
+  {
+    "fixture": "perf-3d@1",
+    "run": 4,
+    "file": "perf-3d-v1-cold-run4.json",
+    "verdict": "fail",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 3905,
+    "p50Ms": 14.900000002235174,
+    "p95Ms": 19.300000000745058,
+    "p99Ms": 25.992000000029808,
+    "firstInteractiveMs": 2788.2,
+    "distinctColours": 304,
+    "budgets": {
+      "frame-time-p95": "fail (observed 19.300000000745058, limit 16.7)",
+      "first-interactive-cold": "pass (observed 2788.2, limit 5000)"
+    }
+  },
+  {
+    "fixture": "perf-3d@1",
+    "run": 5,
+    "file": "perf-3d-v1-cold-run5.json",
+    "verdict": "fail",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 4071,
+    "p50Ms": 14.899999998509884,
+    "p95Ms": 16.800000000745058,
+    "p99Ms": 20.43000000156464,
+    "firstInteractiveMs": 2942.8,
+    "distinctColours": 328,
+    "budgets": {
+      "frame-time-p95": "fail (observed 16.800000000745058, limit 16.7)",
+      "first-interactive-cold": "pass (observed 2942.8, limit 5000)"
+    }
+  }
+]
