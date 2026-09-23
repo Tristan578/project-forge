@@ -12,6 +12,10 @@
     "deny": [
       "Edit(/.claude/settings.json)",
       "Write(/.claude/settings.json)"
+    ],
+    "ask": [
+      "Edit(/.codex/config.toml)",
+      "Write(/.codex/config.toml)"
     ]
   },
   "hooks": {

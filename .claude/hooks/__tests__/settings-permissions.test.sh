@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Tests for the committed permission posture in .claude/settings.json:
 #   * a `permissions.allow` allow-list of safe read/build/test commands,
-#   * a `permissions.deny` guard protecting the off-limits config file
+#   * a `permissions.deny` guard hard-blocking the off-limits config file
 #     (.claude/settings.json) for BOTH Edit and Write,
-#   * the auto-approve-safe-commands.sh hook wired as a PreToolUse Bash hook.
+#   * a `permissions.ask` guard making the ask-first config file
+#     (.codex/config.toml) prompt a human for BOTH Edit and Write,
+#   * the auto-approve-safe-commands.sh hook wired as a PreToolUse Bash hook,
+#   * the two docs that describe this posture (.claude/SANDBOX.md and the
+#     CONTRIBUTING.md row pointing at it) naming every file it governs.
 #
-# The deny path uses the gitignore-anchored, project-root form `/<path>` so it
-# matches regardless of the agent's current working directory. Edit and Write are
-# distinct permission tools, so the off-limits file is denied for both.
+# The deny and ask paths use the gitignore-anchored, project-root form `/<path>`
+# so they match regardless of the agent's current working directory. Edit and
+# Write are distinct permission tools, so each governed file is listed for both.
 #
 # Run: bash .claude/hooks/__tests__/settings-permissions.test.sh
 set -uo pipefail
@@ -78,34 +82,193 @@ done
 # auto-allow rule must be added to the loop above (and justified) before it lands.
 assert_jq "allow-list has exactly 7 entries" '.permissions.allow | length == 7'
 
-# --- Off-limits file guards: project-root-anchored, Edit AND Write ---
-# `.codex/config.toml` was here too and is NOT any more. That entry stopped ONE
-# agent from editing the file; what it guarded against is a SECRET reaching a
-# public repo, and it blocked maintenance of a file the README calls hand-edited.
-#
-# The control for that is GITHUB SECRET SCANNING WITH PUSH PROTECTION, verified
-# enabled on this repo (`gh api repos/{owner}/{repo}` →
-# `security_and_analysis.secret_scanning_push_protection.status: "enabled"`). It
-# rejects a recognised credential AT PUSH TIME, for every file, every actor and
-# every TOML spelling — including the Codex app, which rewrites this file
-# unprompted. That is the mandatory single path a secret must pass through, which
-# is where a control belongs (lessons-learned #21).
-#
-# A hand-written scanner was tried here first and abandoned: two review rounds
-# found five separate bypasses of it (case, triple quotes, a whole-file
-# short-circuit, dotted keys, multi-line strings) because a grep cannot carry a
-# security property over TOML's grammar. Do not re-add one.
-#
-# HONEST RESIDUAL: push protection matches KNOWN provider patterns, so an
-# arbitrary internal credential with no recognisable shape is not caught by it.
-# That gap predates this change and the deny never closed it either — the deny
-# only ever restrained one writer, not the file's content.
+# --- Off-limits file guards (hard block): project-root-anchored, Edit AND Write ---
 for rule in \
   'Edit(/.claude/settings.json)' \
   'Write(/.claude/settings.json)' ; do
   # shellcheck disable=SC2016  # $r is a jq variable bound via --arg, not a shell var
   assert_jq "deny contains $rule" --arg r "$rule" '.permissions.deny | index($r) != null'
 done
+
+# --- Ask-first file guards (human prompt): project-root-anchored, Edit AND Write ---
+# `.codex/config.toml` declares the MCP servers a Codex session LAUNCHES: every
+# `[mcp_servers.*]` table is a command + args run on the developer's machine with
+# the forwarded credentials, so an edit there is code execution the next time
+# someone starts Codex. It used to sit in `deny` beside settings.json. That hard
+# block was lifted (#10134) because it made the file — hand-maintained, it mirrors
+# .mcp.json — unmaintainable by an agent even with a human watching. Lifting it
+# outright left NOTHING between an agent's Edit/Write and that launch path until
+# CI ran (review board, round 5 at 854b2dda), so it is `ask` now:
+#
+#   * `ask` is evaluated after deny and BEFORE allow, so no allow rule can
+#     pre-approve it;
+#   * it is on Claude Code's list of "actions no mode auto-approves", so it prompts
+#     in manual, acceptEdits, auto AND bypassPermissions alike, and an unattended
+#     `-p` run DENIES the call instead of prompting.
+#     Source: https://code.claude.com/docs/en/permission-modes ("Actions no mode
+#     auto-approves") and /docs/en/permissions ("Manage permissions").
+#
+# RESIDUAL, stated plainly: this gates Claude Code's Edit and Write tools only.
+# Claude Code checks a shell redirect target against Edit allow/deny rules and
+# protected paths, NOT against ask rules, so `> .codex/config.toml`, `sed -i`,
+# `cp` or an interpreter write is not prompted by it; neither is the Codex app,
+# which rewrites this file unprompted. Behind every writer: the CI profile guard
+# (scripts/check-codex-config-safety.sh), the MCP parity check
+# (tools/agentic-sync/port.mjs --check), GitHub push protection, and PR review.
+# shellcheck disable=SC2016  # jq filter; no shell expansion intended
+assert_jq "permissions.ask is a non-empty array" '(.permissions.ask | type == "array") and (.permissions.ask | length > 0)'
+for rule in \
+  'Edit(/.codex/config.toml)' \
+  'Write(/.codex/config.toml)' ; do
+  # shellcheck disable=SC2016  # $r is a jq variable bound via --arg, not a shell var
+  assert_jq "ask contains $rule" --arg r "$rule" '.permissions.ask | index($r) != null'
+done
+
+# --- The docs that describe this posture must name every file it governs ---
+# .claude/SANDBOX.md explains the posture and CONTRIBUTING.md's "Deeper
+# Reference" table points at it. Both used to state a COUNT ("the two off-limits
+# config files"), and the count went stale the moment a deny entry moved: a
+# contributor was told to expect two hard-blocked files and found one (review
+# board, round 5 at 854b2dda). So nothing here restates the posture (lesson 18):
+# the governed paths and their kind are DERIVED from the settings file at run
+# time, and each one must appear —
+#   * in SANDBOX.md as a table row `| `<path>` |` under a `## ` heading naming its
+#     kind — "hard-blocked" for a deny rule, "ask-first" for an ask rule;
+#   * in backticks in CONTRIBUTING.md's single pointer row for SANDBOX.md.
+# A settings file with no Edit/Write deny or ask rule at all FAILS (lesson 9: a
+# check that scans nothing proves nothing).
+#
+# docs_name_governed_paths <settings.json> <SANDBOX.md> <CONTRIBUTING.md>
+# Prints one `  - <problem>` line per mismatch; returns 0 iff there are none.
+docs_name_governed_paths() {
+  local settings="$1" sandbox="$2" contributing="$3"
+  local governed rows kind path want section problems=0
+  # `tr -d '\r'`: jq.exe on Windows ends lines with CRLF, and command
+  # substitution strips only the LAST line's CR — every other path would carry a
+  # trailing CR and match nothing. pipefail (set at the top) keeps jq's own exit
+  # status as the pipeline's.
+  # shellcheck disable=SC2016  # jq program; no shell expansion intended
+  governed="$(jq -r '
+    [ ((.permissions.deny // [])[] | strings | {k: "deny", r: .}),
+      ((.permissions.ask  // [])[] | strings | {k: "ask",  r: .}) ]
+    | map(select(.r | test("^(Edit|Write)\\(/[^)]+\\)$"))
+          | "\(.k)\t\(.r | capture("^(Edit|Write)\\(/(?<p>[^)]+)\\)$").p)")
+    | unique | .[]' "$settings" 2>/dev/null | tr -d '\r')" || {
+    echo "  - could not read the Edit/Write rules from $settings"; return 1; }
+  if [ -z "$governed" ]; then
+    echo "  - no Edit/Write deny or ask rule found in $settings (a check that scans nothing proves nothing)"
+    return 1
+  fi
+  [ -r "$sandbox" ] || { echo "  - $sandbox is missing or unreadable"; return 1; }
+  [ -r "$contributing" ] || { echo "  - $contributing is missing or unreadable"; return 1; }
+  rows="$(grep -E '^\| \[\.claude/SANDBOX\.md\]\(\.claude/SANDBOX\.md\) \|' "$contributing")"
+  if [ "$(grep -c . <<<"$rows")" -ne 1 ]; then
+    echo "  - CONTRIBUTING.md must carry exactly one pointer row for .claude/SANDBOX.md"
+    return 1
+  fi
+  while IFS=$'\t' read -r kind path; do
+    [ -n "$path" ] || continue
+    case "$kind" in
+      deny) want='hard-blocked' ;;
+      ask)  want='ask-first' ;;
+      *)    want="<unknown kind $kind>" ;;
+    esac
+    section="$(awk -v p="| \`$path\` |" '/^## / { h = $0 } index($0, p) == 1 { print h; exit }' "$sandbox")"
+    if [ -z "$section" ]; then
+      echo "  - SANDBOX.md has no table row for \`$path\` (settings.json: $kind rule)"
+      problems=$((problems + 1))
+    elif ! grep -qF "$want" <<<"$section"; then
+      echo "  - SANDBOX.md lists \`$path\` under \"$section\", but settings.json makes it a $kind rule (expected a heading naming \"$want\")"
+      problems=$((problems + 1))
+    fi
+    if ! grep -qF "\`$path\`" <<<"$rows"; then
+      echo "  - CONTRIBUTING.md's pointer row for SANDBOX.md does not name \`$path\` (settings.json: $kind rule)"
+      problems=$((problems + 1))
+    fi
+  done <<<"$governed"
+  [ "$problems" -eq 0 ]
+}
+
+# Hermetic self-tests for docs_name_governed_paths(): synthetic fixtures OUTSIDE
+# the repo tree, so the helper's own logic has red coverage no matter what the
+# real docs currently say (lesson 16 — a pin you have not watched fail is a pin
+# you have not tested). Each negative case changes ONE thing from the good set.
+#
+# docs_case <desc> <want: pass|fail> <expect-substr-or-empty> <settings> <sandbox> <contributing>
+docs_case() {
+  local desc="$1" want="$2" expect="$3" out rc
+  out="$(docs_name_governed_paths "$4" "$5" "$6")"
+  rc=$?
+  if [ "$want" = pass ] && [ "$rc" -eq 0 ]; then
+    pass=$((pass + 1)); printf '  ok   %s\n' "$desc"
+  elif [ "$want" = fail ] && [ "$rc" -ne 0 ] && [ -n "$expect" ] && grep -qF -- "$expect" <<<"$out"; then
+    pass=$((pass + 1)); printf '  ok   %s\n' "$desc"
+  else
+    fail=$((fail + 1)); printf '  FAIL %s\n' "$desc"
+    [ -n "$out" ] && printf '         %s\n' "$out"
+  fi
+}
+
+# The backticks below are Markdown code spans, in fixture text and in the
+# expected messages — literal on purpose, never a command substitution.
+# shellcheck disable=SC2016
+docs_selftests() {
+local DOCS_TMPROOT D
+DOCS_TMPROOT="$(mktemp -d)" || { echo "mktemp -d failed"; exit 1; }
+printf '%s\n' '{"permissions":{"deny":["Edit(/a.json)","Write(/a.json)","Bash(rm:*)"],"ask":["Edit(/b.toml)","Write(/b.toml)"]}}' > "$DOCS_TMPROOT/settings.json"
+printf '%s\n' '{"permissions":{"deny":["Bash(rm:*)"],"ask":[]}}' > "$DOCS_TMPROOT/settings-no-file-rules.json"
+printf '%s\n' \
+  '# Sandbox' \
+  '## One off-limits file (hard-blocked, not prompted)' \
+  '| File | Why |' '|---|---|' '| `a.json` | self-governance |' \
+  '## One ask-first file (prompted in every mode)' \
+  '| File | Why |' '|---|---|' '| `b.toml` | launches processes |' > "$DOCS_TMPROOT/sandbox-good.md"
+printf '%s\n' \
+  '# Sandbox' \
+  '## One off-limits file (hard-blocked, not prompted)' \
+  '| File | Why |' '|---|---|' '| `a.json` | self-governance |' '| `b.toml` | launches processes |' > "$DOCS_TMPROOT/sandbox-wrong-section.md"
+printf '%s\n' \
+  '# Sandbox' \
+  '## One off-limits file (hard-blocked, not prompted)' \
+  'Only `a.json` is mentioned here, in prose, never as a table row.' \
+  '## One ask-first file (prompted in every mode)' \
+  '| File | Why |' '|---|---|' '| `b.toml` | launches processes |' > "$DOCS_TMPROOT/sandbox-prose-only.md"
+printf '%s\n' '| Document | Contents |' '|---|---|' \
+  '| [.claude/SANDBOX.md](.claude/SANDBOX.md) | Posture: the hard-blocked `a.json`, the ask-first `b.toml` |' > "$DOCS_TMPROOT/contrib-good.md"
+printf '%s\n' '| Document | Contents |' '|---|---|' \
+  '| [.claude/SANDBOX.md](.claude/SANDBOX.md) | Posture: the hard-blocked `a.json` only |' > "$DOCS_TMPROOT/contrib-missing-one.md"
+printf '%s\n' '| Document | Contents |' '|---|---|' \
+  '| [.claude/SANDBOX.md](.claude/SANDBOX.md) | Agent permission posture: what is auto-approved, the two off-limits config files (and why), how a human changes them |' > "$DOCS_TMPROOT/contrib-stale-count.md"
+printf '%s\n' '| Document | Contents |' '|---|---|' '| [README.md](README.md) | Overview |' > "$DOCS_TMPROOT/contrib-no-row.md"
+
+D="$DOCS_TMPROOT"
+docs_case "docs check: posture named in both docs, each under its kind, passes" pass "" \
+  "$D/settings.json" "$D/sandbox-good.md" "$D/contrib-good.md"
+docs_case "docs check: CONTRIBUTING row that omits an ask-first path fails, naming it" fail 'does not name `b.toml`' \
+  "$D/settings.json" "$D/sandbox-good.md" "$D/contrib-missing-one.md"
+docs_case "docs check: the stale 'two off-limits config files' row (round 5 finding) fails" fail 'does not name `a.json`' \
+  "$D/settings.json" "$D/sandbox-good.md" "$D/contrib-stale-count.md"
+docs_case "docs check: CONTRIBUTING with no SANDBOX.md pointer row fails" fail 'exactly one pointer row' \
+  "$D/settings.json" "$D/sandbox-good.md" "$D/contrib-no-row.md"
+docs_case "docs check: an ask rule documented under the hard-blocked heading fails" fail 'expected a heading naming "ask-first"' \
+  "$D/settings.json" "$D/sandbox-wrong-section.md" "$D/contrib-good.md"
+docs_case "docs check: a governed path mentioned only in prose (no table row) fails" fail 'no table row for `a.json`' \
+  "$D/settings.json" "$D/sandbox-prose-only.md" "$D/contrib-good.md"
+docs_case "docs check: settings with no Edit/Write deny or ask rule fails (vacuity guard)" fail 'scans nothing' \
+  "$D/settings-no-file-rules.json" "$D/sandbox-good.md" "$D/contrib-good.md"
+docs_case "docs check: a missing SANDBOX.md fails closed" fail 'missing or unreadable' \
+  "$D/settings.json" "$D/does-not-exist.md" "$D/contrib-good.md"
+rm -rf "$DOCS_TMPROOT"
+}
+docs_selftests
+
+# Real check: the committed docs against the settings file under test.
+if docs_out="$(docs_name_governed_paths "$SETTINGS" "$HERE/../../SANDBOX.md" "$HERE/../../../CONTRIBUTING.md")"; then
+  pass=$((pass + 1)); printf '  ok   %s\n' "docs: SANDBOX.md and CONTRIBUTING.md name every deny/ask-governed file, each under its kind"
+else
+  fail=$((fail + 1)); printf '  FAIL %s\n' "docs: SANDBOX.md and CONTRIBUTING.md name every deny/ask-governed file, each under its kind"
+  printf '         %s\n' "$docs_out"
+fi
 
 # --- Negative guards (dangerous): never auto-allowed by EITHER layer.
 #     `npm exec` runs arbitrary package binaries; `git branch`/`git tag` look
@@ -490,6 +653,13 @@ if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-
     local out="$SEAM_TMPROOT/badcfg/$1"
     jq "$2" "$SETTINGS" > "$out" || { echo "fixture generation failed for $1"; exit 1; }
     jq -e . "$out" >/dev/null || { echo "invalid derived fixture $out"; exit 1; }
+    # Lesson 19: a mutation that did not apply proves nothing. A `-=` naming an
+    # entry the real file no longer has leaves the fixture IDENTICAL to the real
+    # posture, and every "rejected by child" below would then be judging the
+    # real file, not a broken one. Refuse to continue on a no-op mutation.
+    if [ "$(jq -S -c . "$SETTINGS")" = "$(jq -S -c . "$out")" ]; then
+      echo "mutation for $1 changed nothing — the fixture would not test a broken posture"; exit 1
+    fi
   }
 
   mkdir -p "$SEAM_TMPROOT/badcfg"
@@ -501,6 +671,11 @@ if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-
   make_bad_fixture "disable-bypass-allow.json"     '.permissions.disableBypassPermissionsMode = "allow"'
   make_bad_fixture "disable-auto-allow.json"       '.permissions.disableAutoMode = "allow"'
   make_bad_fixture "default-mode-plan.json"        '.permissions.defaultMode = "plan"'
+  make_bad_fixture "ask-removed.json"              'del(.permissions.ask)'
+  make_bad_fixture "ask-codex-edit-dropped.json"   '.permissions.ask -= ["Edit(/.codex/config.toml)"]'
+  make_bad_fixture "ask-codex-write-dropped.json"  '.permissions.ask -= ["Write(/.codex/config.toml)"]'
+  make_bad_fixture "deny-settings-edit-dropped.json"  '.permissions.deny -= ["Edit(/.claude/settings.json)"]'
+  make_bad_fixture "deny-settings-write-dropped.json" '.permissions.deny -= ["Write(/.claude/settings.json)"]'
 
   assert_child_rejects "self-test: defaultMode=bypassPermissions rejected by child re-exec" "$SEAM_TMPROOT/badcfg/default-mode-bypass.json" "defaultMode absent"
   assert_child_rejects "self-test: defaultMode=acceptEdits rejected by child re-exec" "$SEAM_TMPROOT/badcfg/default-mode-acceptedits.json" "defaultMode absent"
@@ -510,6 +685,13 @@ if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-
   assert_child_rejects "self-test: disableBypassPermissionsMode=allow rejected by child re-exec" "$SEAM_TMPROOT/badcfg/disable-bypass-allow.json" "disableBypassPermissionsMode absent"
   assert_child_rejects "self-test: disableAutoMode=allow rejected by child re-exec" "$SEAM_TMPROOT/badcfg/disable-auto-allow.json" "disableAutoMode absent"
   assert_child_accepts "self-test: defaultMode=plan accepted by child re-exec (positive control)" "$SEAM_TMPROOT/badcfg/default-mode-plan.json"
+  # Each ask/deny entry dropped ALONE (lesson 19: a two-site rule mutated only as
+  # a pair would leave either site unpinned without anything going red).
+  assert_child_rejects "self-test: permissions.ask removed entirely rejected by child re-exec" "$SEAM_TMPROOT/badcfg/ask-removed.json" "permissions.ask is a non-empty array"
+  assert_child_rejects "self-test: ask without Edit(/.codex/config.toml) rejected by child re-exec" "$SEAM_TMPROOT/badcfg/ask-codex-edit-dropped.json" "ask contains Edit(/.codex/config.toml)"
+  assert_child_rejects "self-test: ask without Write(/.codex/config.toml) rejected by child re-exec" "$SEAM_TMPROOT/badcfg/ask-codex-write-dropped.json" "ask contains Write(/.codex/config.toml)"
+  assert_child_rejects "self-test: deny without Edit(/.claude/settings.json) rejected by child re-exec" "$SEAM_TMPROOT/badcfg/deny-settings-edit-dropped.json" "deny contains Edit(/.claude/settings.json)"
+  assert_child_rejects "self-test: deny without Write(/.claude/settings.json) rejected by child re-exec" "$SEAM_TMPROOT/badcfg/deny-settings-write-dropped.json" "deny contains Write(/.claude/settings.json)"
 
   # Regression probe for the orphan-child arm (S-NEW, round 6): a bare
   # --selftest-child invocation with no parent-provided fixture seam must be

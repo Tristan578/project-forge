@@ -2,8 +2,13 @@
 
 This file explains the permission posture committed in `.claude/settings.json`:
 what an autonomous agent (Claude Code) is auto-allowed to run, what it is
-hard-blocked from touching, and how a human changes any of it. Read this if a
-tool call was unexpectedly **denied** or unexpectedly **auto-approved**.
+hard-blocked from touching, what it must stop and ask a human before editing, and
+how a human changes any of it. Read this if a tool call was unexpectedly
+**denied**, unexpectedly **prompted**, or unexpectedly **auto-approved**.
+
+`.claude/hooks/__tests__/settings-permissions.test.sh` derives the governed files
+from `settings.json` and fails unless each one has a table row below, under the
+heading for its kind, and is named in CONTRIBUTING.md's pointer row for this file.
 
 ## One off-limits file (hard-blocked, not prompted)
 
@@ -12,26 +17,6 @@ The `permissions.deny` block blocks `Edit` and `Write` to exactly one path:
 | File | Why it is off-limits |
 |------|----------------------|
 | `.claude/settings.json` | It defines the agent's OWN permissions, hooks, and deny rules. Letting an agent edit it would let the agent widen its own sandbox — rules cannot constrain the thing that governs them. |
-
-`.codex/config.toml` used to be here too, for the same self-governance reason.
-That entry was removed in #10134, because it restrained ONE writer rather than the
-file's content while blocking maintenance of a file this repo hand-maintains (the
-MCP server declarations live there). What guards it now:
-
-- **Its dangerous PROFILE** — `scripts/check-codex-config-safety.sh` in CI rejects
-  a committed `approval_policy = "never"` together with `network_access = true`,
-  whoever wrote it. That is the regression the old entry was reacting to, and it
-  was always the check doing the work rather than the deny.
-- **Secret-shaped CONTENT** — GitHub secret-scanning push protection, enabled
-  repo-wide, rejects a recognised credential at push time for every file and every
-  actor. Verify with
-  `gh api repos/Tristan578/project-forge --jq .security_and_analysis`.
-- **Drift from `.mcp.json`** — `tools/agentic-sync/port.mjs --check` compares the
-  declared servers' names, command, args and secret names.
-
-Residual, stated plainly: push protection matches KNOWN provider patterns, so an
-arbitrary internal credential with no recognisable shape is not caught by it. The
-deny never closed that either.
 
 `deny` is a HARD block: the agent gets a refusal, not a "do you want to allow
 this?" prompt. The path is root-anchored (`/.claude/settings.json`) and denied for
@@ -44,7 +29,7 @@ A human edits it by hand, in a normal editor or via Claude Code's interactive
 `/permissions` UI — neither path goes through the `Edit`/`Write` tools the deny
 rule gates. CI re-checks the posture on every change with
 `settings-permissions.test.sh`, and the Codex guard in `ci.yml` independently
-rejects a permissive Codex profile whether or not any deny rule exists.
+rejects a permissive Codex profile whether or not any rule exists.
 
 ### If an agent legitimately needs it changed
 
@@ -52,6 +37,60 @@ It cannot do it itself, by design. It should surface the exact change it wants a
 why, and let a human make the edit (or temporarily lift the rule via
 `/permissions`). Widening the sandbox is a human decision recorded in a reviewable
 diff — not something the agent can do mid-task.
+
+## One ask-first file (prompted in every mode, never auto-approved)
+
+The `permissions.ask` block makes `Edit` and `Write` to exactly one path stop for a
+human's yes:
+
+| File | Why it is ask-first |
+|------|---------------------|
+| `.codex/config.toml` | It declares the MCP servers a Codex session LAUNCHES. Every `[mcp_servers.*]` table is a `command` + `args` run on the developer's machine with the credentials named in its `env_vars`, so an edit there is code execution the next time someone starts Codex. It is not hard-blocked because it is hand-maintained (its eight server tables mirror `.mcp.json`), and a hard block made that maintenance impossible for an agent even with a human watching. |
+
+It sat in `deny` beside `settings.json` until #10134 lifted that block for
+maintainability. Lifting it outright left nothing between an agent's
+`Edit`/`Write` and the Codex launch path until CI ran, so it is `ask` instead.
+What `ask` means, per Claude Code's permission docs
+([permissions](https://code.claude.com/docs/en/permissions),
+[permission modes](https://code.claude.com/docs/en/permission-modes)):
+
+- Rules are evaluated deny, then ask, then allow — so no `allow` rule can
+  pre-approve an edit to this file.
+- An explicit ask rule is on the list of "actions no mode auto-approves": it
+  prompts in manual, `acceptEdits`, `auto` **and** `bypassPermissions` mode. An
+  unattended `-p` run denies the call instead of prompting.
+- The person approving sees the proposed edit, so a changed `command`, `args` or
+  `env` is in front of a human before it is on disk.
+
+The path is root-anchored (`/.codex/config.toml`) and listed for BOTH `Edit` and
+`Write`, for the same reason as the deny above.
+
+What it does NOT cover, stated plainly:
+
+- **Shell writes.** Claude Code checks a shell redirect target against `Edit`
+  allow/deny rules and protected paths, not against ask rules, so
+  `> .codex/config.toml`, `sed -i`, `cp` or an interpreter write is not prompted by
+  this rule. (The old deny stopped a redirect, but not `sed -i`, `cp` or an
+  interpreter either.)
+- **Codex itself**, which never reads Claude Code's permission rules — the Codex
+  app rewrites this file unprompted — and a human's own editor.
+
+Behind every writer, at CI and at push time:
+
+- **Its dangerous PROFILE** — `scripts/check-codex-config-safety.sh` in CI rejects
+  a committed `approval_policy = "never"` together with `network_access = true`,
+  whoever wrote it.
+- **Drift from `.mcp.json`** — `tools/agentic-sync/port.mjs --check` requires the
+  same server names, each with the exact `command` and `args` of its `.mcp.json`
+  entry and every `${VAR}` secret forwarded by name in `env_vars`. It does not
+  compare any other key in a server table, nor an `env` entry `.mcp.json` does not
+  have; the prompt above and PR review are what see those.
+- **Secret-shaped CONTENT** — GitHub secret-scanning push protection, enabled
+  repo-wide, rejects a recognised credential at push time for every file and every
+  actor. Verify with
+  `gh api repos/Tristan578/project-forge --jq .security_and_analysis`. It matches
+  KNOWN provider patterns, so an arbitrary internal credential with no
+  recognisable shape is not caught by it.
 
 ## What IS auto-approved (two complementary layers)
 
