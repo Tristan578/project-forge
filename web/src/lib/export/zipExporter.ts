@@ -29,6 +29,8 @@ export interface ZipExportOptions {
   bgColor: string;
   includeDebug: boolean;
   orientationLock?: 'landscape' | 'portrait' | 'none';
+  /** Project dimension; see `GameTemplateOptions.projectType`. */
+  projectType?: '2d' | '3d';
   signal?: AbortSignal;
 }
 
@@ -172,6 +174,7 @@ export async function exportAsZip(
     embedBridge: isEmbed ? generatePostMessageBridge() : undefined,
     orientationLock: options.orientationLock,
     isPwa,
+    projectType: options.projectType,
   });
 
   entries.push({
@@ -254,8 +257,9 @@ export function generateZipIndexHtml(options: {
   embedBridge?: string;
   orientationLock?: 'landscape' | 'portrait' | 'none';
   isPwa?: boolean;
+  projectType?: '2d' | '3d';
 }): string {
-  const { title, bgColor: rawBgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock, isPwa } = options;
+  const { title, bgColor: rawBgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock, isPwa, projectType } = options;
   const bgColor = validateCssColor(rawBgColor);
 
   const debugScript = includeDebug
@@ -391,6 +395,8 @@ ${generateSceneLoadFragment({ indent: '    ' })}
       // a bare JSON string was refused and the game started empty (#10013).
       var sceneLoad = await __forgeLoadScene(wasm.handle_command, window.__forgeSceneData);
       if (window.__forgePerfHooks) window.__forgePerfHooks.sceneLoad(sceneLoad);
+      // Project dimension: 2D games need the engine's 2D camera, the only one sprites render through.
+      ${projectType === '2d' ? "wasm.handle_command('set_project_type', { projectType: '2d' });" : ''}
 
       // Auto-play after short delay to let the engine settle
       await new Promise(function(r) { setTimeout(r, 500); });

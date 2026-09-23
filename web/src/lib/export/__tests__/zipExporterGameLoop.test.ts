@@ -70,3 +70,17 @@ describe('ZIP export scene load and perf harness (#10013)', () => {
     expect(webgl2Only.indexOf("var variant = 'webgl2';")).toBeLessThan(webgl2Only.indexOf('window.__forgePerfHooks.backend(variant)'));
   });
 });
+
+describe('ZIP export project dimension (#10013)', () => {
+  it('switches a 2D game to the engine 2D camera after the scene loads', () => {
+    const html = generateZipIndexHtml({ ...makeOptions(), projectType: '2d' as const });
+    const call = "wasm.handle_command('set_project_type', { projectType: '2d' });";
+    expect(html).toContain(call);
+    expect(html.indexOf('await __forgeLoadScene(')).toBeLessThan(html.indexOf(call));
+  });
+
+  it('leaves a 3D (or unspecified) game on the default 3D camera', () => {
+    expect(generateZipIndexHtml({ ...makeOptions(), projectType: '3d' as const })).not.toContain("'set_project_type'");
+    expect(generateZipIndexHtml(makeOptions())).not.toContain("'set_project_type'");
+  });
+});

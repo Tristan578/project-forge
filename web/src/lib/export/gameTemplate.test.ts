@@ -157,6 +157,15 @@ describe('gameTemplate', () => {
       expect(html).toMatch(/async function init\(\) \{\s+if \(window\.__forgePerfHooks\) window\.__forgePerfHooks\.initStart\(\);/);
     });
 
+    it('switches a 2D game to the engine 2D camera once its scene has loaded (#10013)', () => {
+      const html = generateGameHTML({ ...baseOptions, projectType: '2d' });
+      const call = "handle_command('set_project_type', { projectType: '2d' });";
+      expect(html).toContain(call);
+      expect(html.indexOf('await __forgeLoadScene(')).toBeLessThan(html.indexOf(call));
+      expect(generateGameHTML({ ...baseOptions, projectType: '3d' })).not.toContain("'set_project_type'");
+      expect(generateGameHTML(baseOptions)).not.toContain("'set_project_type'");
+    });
+
     it('reports webgl2 as the backend when the embedded WebGPU binary is missing', () => {
       const html = generateGameHTML({
         ...baseOptions,
