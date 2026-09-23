@@ -162,6 +162,7 @@ export function EditModeInspector() {
           </button>
           <input
             type="range"
+            aria-label="Extrude distance"
             min="0.1"
             max="5"
             step="0.1"
@@ -183,6 +184,7 @@ export function EditModeInspector() {
           </button>
           <input
             type="range"
+            aria-label="Inset amount"
             min="0.01"
             max="1"
             step="0.01"
@@ -203,6 +205,7 @@ export function EditModeInspector() {
           </button>
           <input
             type="range"
+            aria-label="Subdivision level"
             min="1"
             max="4"
             step="1"

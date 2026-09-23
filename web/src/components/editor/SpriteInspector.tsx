@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, useId } from 'react';
 import { X, Image as ImageIcon, Pencil } from 'lucide-react';
 import { useEditorStore, type SpriteData, type SpriteAnchor } from '@/stores/editorStore';
 import { PixelArtEditor } from './PixelArtEditor';
@@ -13,6 +13,10 @@ const ANCHOR_GRID: SpriteAnchor[][] = [
 ];
 
 export function SpriteInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const spriteData = useEditorStore((s) => primaryId ? s.sprites[primaryId] : null);
   const sortingLayers = useEditorStore((s) => s.sortingLayers);
@@ -69,7 +73,7 @@ export function SpriteInspector() {
       <div className="space-y-3">
         {/* Texture Section */}
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400">Texture</label>
+          <label htmlFor={fieldId('texture')} className="text-xs text-zinc-400">Texture</label>
 
           {/* Texture Preview */}
           {spriteData.textureAssetId && (
@@ -86,6 +90,7 @@ export function SpriteInspector() {
           {textureAssets.length > 0 ? (
             <div className="flex items-center gap-2">
               <select
+                id={fieldId('texture')}
                 value={spriteData.textureAssetId ?? '__none__'}
                 onChange={(e) => {
                   if (e.target.value === '__upload__') {
@@ -304,8 +309,9 @@ export function SpriteInspector() {
           </h4>
 
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400">Layer</label>
+            <label htmlFor={fieldId('sorting-layer')} className="w-20 shrink-0 text-xs text-zinc-400">Layer</label>
             <select
+              id={fieldId('sorting-layer')}
               value={spriteData.sortingLayer}
               onChange={(e) => handleUpdate({ sortingLayer: e.target.value })}
               className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
