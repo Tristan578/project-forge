@@ -17,7 +17,7 @@ import type { EditorState, LightData } from '@/stores/editorStore';
 import {
   colourRangeSelect,
   expectEveryControlNamed,
-  expectNoAxeViolations,
+  axeViolations,
   formControls,
   staticControlCount,
 } from './formControlA11y';
@@ -81,7 +81,7 @@ describe('LightInspector accessible names (#9677)', () => {
 
     expect(formControls(container)).toHaveLength(expected);
     expectEveryControlNamed(container);
-    await expectNoAxeViolations(container);
+    expect(await axeViolations(container)).toEqual([]);
   });
 
   it('renders every colour/range control the source declares, each under its visible label', () => {
@@ -122,6 +122,6 @@ describe('LightInspector accessible names (#9677)', () => {
     expect(ids.every((id) => id.length > 0)).toBe(true);
     expect(new Set(ids).size).toBe(ids.length);
     expect(screen.getAllByLabelText('Color')).toHaveLength(2);
-    await expectNoAxeViolations(container);
+    expect(await axeViolations(container)).toEqual([]);
   });
 });

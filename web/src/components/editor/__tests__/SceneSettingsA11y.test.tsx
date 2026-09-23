@@ -20,7 +20,7 @@ import type { EditorState } from '@/stores/editorStore';
 import {
   colourRangeSelect,
   expectEveryControlNamed,
-  expectNoAxeViolations,
+  axeViolations,
   formControls,
   staticControlCount,
 } from './formControlA11y';
@@ -64,11 +64,9 @@ function everythingOn(): EditorState {
       },
       motionBlur: { shutterAngle: 0.5, samples: 4 },
     },
-    mobileTouchConfig: {
-      ...initial.mobileTouchConfig,
-      enabled: true,
-      joystick: initial.mobileTouchConfig.joystick ?? { position: 'bottom-left', size: 120, opacity: 0.7 },
-    },
+    // The default touch config already carries a joystick, whose controls
+    // render only while touch controls are enabled.
+    mobileTouchConfig: { ...initial.mobileTouchConfig, enabled: true },
   };
 }
 
@@ -83,7 +81,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  if (!hadGpu) delete (navigator as Navigator & { gpu?: unknown }).gpu;
+  if (!hadGpu) Reflect.deleteProperty(navigator, 'gpu');
 });
 
 describe('SceneSettings accessible names (#9677)', () => {
@@ -102,7 +100,7 @@ describe('SceneSettings accessible names (#9677)', () => {
 
   it('has zero axe violations with every effect enabled', async () => {
     const { container } = render(<SceneSettings />);
-    await expectNoAxeViolations(container);
+    expect(await axeViolations(container)).toEqual([]);
   });
 
   it('associates controls with their visible labels, scoped by section', () => {
@@ -144,6 +142,6 @@ describe('SceneSettings accessible names (#9677)', () => {
     const ids = formControls(container).map((c) => c.id).filter((id) => id.length > 0);
     expect(ids.length).toBeGreaterThanOrEqual(100);
     expect(new Set(ids).size).toBe(ids.length);
-    await expectNoAxeViolations(container);
+    expect(await axeViolations(container)).toEqual([]);
   });
 });

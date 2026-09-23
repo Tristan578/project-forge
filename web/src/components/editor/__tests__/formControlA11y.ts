@@ -15,9 +15,11 @@ import { scanControls } from './controlNameScan';
 
 const EDITOR_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** One-line-per-rule summary so a failure names the rule, not just a count. */
-export function summarize(violations: { id: string; impact?: string | null; help?: string }[]): string {
-  return violations.map((v) => `[${v.impact ?? 'unknown'}] ${v.id}: ${v.help ?? ''}`).join('\n');
+type Violation = { id: string; impact?: string | null; help?: string };
+
+/** One line per rule, so a failure names the rule rather than a count. */
+function describeViolation(v: Violation): string {
+  return `[${v.impact ?? 'unknown'}] ${v.id}: ${v.help ?? ''}`;
 }
 
 /** Every labelable form control under `root`. */
@@ -53,8 +55,12 @@ export function expectEveryControlNamed(root: ParentNode): void {
   }
 }
 
-/** Run axe over `root` and fail with the rule list if anything is reported. */
-export async function expectNoAxeViolations(root: Element): Promise<void> {
+/**
+ * Run axe over `root` and return one `[impact] rule: help` line per
+ * violation, so `expect(await axeViolations(el)).toEqual([])` fails naming
+ * the rules rather than printing a bare count.
+ */
+export async function axeViolations(root: Element): Promise<string[]> {
   const results = await axe(root);
-  expect(results.violations, summarize(results.violations)).toEqual([]);
+  return results.violations.map(describeViolation);
 }

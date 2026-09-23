@@ -19,7 +19,7 @@ import type { EditorState, MaterialData } from '@/stores/editorStore';
 import {
   colourRangeSelect,
   expectEveryControlNamed,
-  expectNoAxeViolations,
+  axeViolations,
   formControls,
 } from './formControlA11y';
 
@@ -128,7 +128,7 @@ describe('MaterialInspector accessible names (#9677)', () => {
 
   it('has zero axe violations with every section open', async () => {
     const container = await renderOpen(<MaterialInspector />);
-    await expectNoAxeViolations(container);
+    expect(await axeViolations(container)).toEqual([]);
   });
 
   it('associates controls with their visible labels', async () => {
@@ -167,6 +167,6 @@ describe('MaterialInspector accessible names (#9677)', () => {
     expect(ids.length).toBeGreaterThanOrEqual(80);
     expect(new Set(ids).size).toBe(ids.length);
     expect(within(container).getAllByRole('slider', { name: /^Metallic/ })).toHaveLength(2);
-    await expectNoAxeViolations(container);
+    expect(await axeViolations(container)).toEqual([]);
   });
 });
