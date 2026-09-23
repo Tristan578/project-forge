@@ -57,8 +57,11 @@ describe('CompletionModeSection', () => {
     });
 
     expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
-    // Non-vacuous: the audit actually walked the radios.
-    expect(results.passes.some((p) => p.nodes.some((n) => String(n.html).includes('type="radio"')))).toBe(true);
+    // Non-vacuous: the audit actually walked the radios. jest-axe types the
+    // result loosely, so name the slice of axe's result shape read here rather
+    // than import `axe-core`, which web/ does not depend on directly.
+    const { passes } = results as unknown as { passes: Array<{ nodes: Array<{ html: string }> }> };
+    expect(passes.some((p) => p.nodes.some((n) => n.html.includes('type="radio"')))).toBe(true);
   });
 
   it('shows a legacy scene (no mode) as Win, the rule it plays by', () => {
