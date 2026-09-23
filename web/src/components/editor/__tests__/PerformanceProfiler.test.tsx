@@ -153,11 +153,53 @@ describe('PerformanceProfiler', () => {
     expect(screen.getByText('42')).toBeInTheDocument();
   });
 
-  it('shows memory usage when expanded', () => {
+  it('shows the engine mesh memory when expanded', () => {
     setupStore({ isProfilerOpen: true, stats: { ...defaultStats, memoryUsage: 64.3 } });
     render(<PerformanceProfiler />);
-    expect(screen.getByText('Memory')).toBeInTheDocument();
-    expect(screen.getByText(/64\.3 MB/)).toBeInTheDocument();
+    const row = screen.getByText('Mesh memory').parentElement!;
+    expect(row.textContent).toContain('64.3 MB');
+  });
+
+  // #10013: a missing measurement must read "unknown", never "0.0 MB".
+  it('shows mesh memory and JS heap as unknown until measured', () => {
+    setupStore({ isProfilerOpen: true, stats: { ...defaultStats, memoryUsage: 'unknown', jsHeapMb: 'unknown' } as never });
+    render(<PerformanceProfiler />);
+    expect(screen.getByText('Mesh memory').parentElement!.textContent).toBe('Mesh memoryunknown');
+    expect(screen.getByText('JS heap').parentElement!.textContent).toBe('JS heapunknown');
+    expect(screen.queryByText(/0\.0 MB/)).toBeNull();
+  });
+
+  it('shows the JS heap when the browser measures it', () => {
+    setupStore({ isProfilerOpen: true, stats: { ...defaultStats, jsHeapMb: 42.5 } as never });
+    render(<PerformanceProfiler />);
+    expect(screen.getByText('JS heap').parentElement!.textContent).toContain('42.5 MB');
+  });
+
+  it('reports the JS heap as unknown — not 0 MB — where performance.memory does not exist (#10013)', () => {
+    // jsdom, like Firefox and Safari, has no performance.memory.
+    expect((performance as unknown as { memory?: unknown }).memory).toBeUndefined();
+    setupStore({ isProfilerOpen: true });
+    render(<PerformanceProfiler />);
+    vi.advanceTimersByTime(1100);
+    expect(mockUpdateStats).toHaveBeenCalled();
+    const update = mockUpdateStats.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(update.jsHeapMb).toBe('unknown');
+    // And the profiler no longer overwrites the engine's mesh-memory figure.
+    expect(update).not.toHaveProperty('memoryUsage');
+  });
+
+  it('reports the measured JS heap in MB where performance.memory exists', () => {
+    const perf = performance as unknown as { memory?: unknown };
+    perf.memory = { usedJSHeapSize: 50 * 1024 * 1024, jsHeapSizeLimit: 4096 * 1024 * 1024 };
+    try {
+      setupStore({ isProfilerOpen: true });
+      render(<PerformanceProfiler />);
+      vi.advanceTimersByTime(1100);
+      const update = mockUpdateStats.mock.calls.at(-1)![0] as Record<string, unknown>;
+      expect(update.jsHeapMb).toBe(50);
+    } finally {
+      delete perf.memory;
+    }
   });
 
   it('shows warnings when present', () => {

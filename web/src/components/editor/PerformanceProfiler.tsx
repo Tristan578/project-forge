@@ -8,6 +8,8 @@ import {
   type ManifestViewport,
 } from '@/lib/config/measurementManifest';
 import { getActiveEngineBackend, getWasmModule } from '@/hooks/useEngine';
+import { readMemoryAvailability, type PerformanceMemoryLike } from '@/lib/perf/frameCapture';
+import { PerformanceCapturePanel } from './PerformanceCapturePanel';
 
 /**
  * Render a manifest field for display. The `'unknown'` sentinel and a null
@@ -88,9 +90,10 @@ export function PerformanceProfiler() {
         updateStats({
           fps,
           frameTime,
-          memoryUsage: (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory
-            ? Math.round(((performance as unknown as { memory: { usedJSHeapSize: number } }).memory.usedJSHeapSize / 1024 / 1024) * 10) / 10
-            : 0,
+          // performance.memory is Chromium-only. Where it is missing the heap is
+          // unknown — this used to write 0 MB into `memoryUsage`, overwriting
+          // the engine's mesh-memory figure with a fake measurement (#10013).
+          jsHeapMb: readMemoryAvailability(performance as unknown as PerformanceMemoryLike, undefined).jsHeapUsedMb,
         });
 
         frameCount = 0;
@@ -199,7 +202,7 @@ export function PerformanceProfiler() {
 
       {/* Expanded view */}
       {isProfilerOpen && (
-        <div className="p-4 space-y-3 border-t border-gray-700">
+        <div className="p-4 space-y-3 border-t border-gray-700 max-h-[75vh] overflow-y-auto">
           {/* FPS Counter */}
           <div>
             <div className="flex justify-between text-sm mb-1">
@@ -283,10 +286,18 @@ export function PerformanceProfiler() {
             <span>{stats.entityCount}</span>
           </div>
 
-          {/* Memory Usage */}
+          {/* Memory: engine mesh memory and the JS heap, each unknown until measured */}
           <div className="flex justify-between text-sm">
-            <span className="text-gray-400">Memory</span>
-            <span>{stats.memoryUsage.toFixed(1)} MB</span>
+            <span className="text-gray-400">Mesh memory</span>
+            <span className={stats.memoryUsage === UNKNOWN ? 'text-gray-400 italic' : ''}>
+              {stats.memoryUsage === UNKNOWN ? 'unknown' : `${stats.memoryUsage.toFixed(1)} MB`}
+            </span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-400">JS heap</span>
+            <span className={stats.jsHeapMb === UNKNOWN || stats.jsHeapMb === undefined ? 'text-gray-400 italic' : ''}>
+              {stats.jsHeapMb === UNKNOWN || stats.jsHeapMb === undefined ? 'unknown' : `${stats.jsHeapMb.toFixed(1)} MB`}
+            </span>
           </div>
 
           {/* Warnings */}
@@ -340,6 +351,9 @@ export function PerformanceProfiler() {
               Capture report
             </button>
           </div>
+
+          {/* Timed, manifest-pinned capture shared with the in-app AI (#10013) */}
+          <PerformanceCapturePanel />
 
           {/* Captured report — stats pinned to a measurement manifest */}
           {capturedReport && (
