@@ -14,6 +14,8 @@ import {
   GPU_INIT_TIMEOUT_MS,
   WASM_FETCH_TIMEOUT_MS,
   ENGINE_GLOBAL_TIMEOUT_MS,
+  EXPORTED_SCENE_LOAD_TIMEOUT_MS,
+  EXPORTED_SCENE_LOAD_RETRY_MS,
   API_MAX_DURATION_DEFAULT_S,
   API_MAX_DURATION_CHAT_S,
   API_MAX_DURATION_HEAVY_GEN_S,
@@ -115,6 +117,12 @@ describe('Engine / WASM loading timeouts', () => {
 
   it('ENGINE_GLOBAL_TIMEOUT_MS is 30 seconds', () => {
     expect(ENGINE_GLOBAL_TIMEOUT_MS).toBe(30_000);
+  });
+
+  it('the exported scene load waits up to 30 s, polling every 50 ms (#10013)', () => {
+    expect(EXPORTED_SCENE_LOAD_TIMEOUT_MS).toBe(30_000);
+    expect(EXPORTED_SCENE_LOAD_RETRY_MS).toBe(50);
+    expect(EXPORTED_SCENE_LOAD_RETRY_MS).toBeLessThan(EXPORTED_SCENE_LOAD_TIMEOUT_MS);
   });
 
   it('WASM fetch timeout is longer than GPU init timeout', () => {

@@ -19,11 +19,13 @@
  * surfaced at once.
  */
 
+import { EXPORTED_SCENE_LOAD_RETRY_MS, EXPORTED_SCENE_LOAD_TIMEOUT_MS } from '@/lib/config/timeouts';
+
 /** Longest the loader waits for the engine to accept commands. */
-export const SCENE_LOAD_TIMEOUT_MS = 30_000;
+export const SCENE_LOAD_TIMEOUT_MS = EXPORTED_SCENE_LOAD_TIMEOUT_MS;
 
 /** Poll interval while the engine initialises. */
-export const SCENE_LOAD_RETRY_MS = 50;
+export const SCENE_LOAD_RETRY_MS = EXPORTED_SCENE_LOAD_RETRY_MS;
 
 /**
  * JS source defining `async function __forgeLoadScene(send, sceneData)`, where
