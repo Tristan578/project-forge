@@ -45,3 +45,28 @@ describe('ZIP export game loop (#8754)', () => {
     );
   });
 });
+
+describe('ZIP export scene load and perf harness (#10013)', () => {
+  it('loads the scene with a { json } payload once the engine accepts commands', () => {
+    const html = generateZipIndexHtml(makeOptions());
+    expect(html).toContain('async function __forgeLoadScene(send, sceneData)');
+    expect(html).toContain('var sceneLoad = await __forgeLoadScene(wasm.handle_command, window.__forgeSceneData);');
+    expect(html).not.toContain("wasm.handle_command('load_scene', JSON.stringify(");
+    expect(html.indexOf("wasm.init_engine('game-canvas')")).toBeLessThan(html.indexOf('await __forgeLoadScene('));
+    expect(html.indexOf('await __forgeLoadScene(')).toBeLessThan(html.indexOf("wasm.handle_command('play', '{}')"));
+  });
+
+  it('wires every perf-harness hook behind a guard, after the dormant bootstrap', () => {
+    const html = generateZipIndexHtml(makeOptions());
+    for (const hook of ['initStart()', 'backend(variant)', 'wasm(wasmExports)', 'sceneLoad(sceneLoad)', 'fail(err)', 'frame(now)']) {
+      expect(html).toContain(`if (window.__forgePerfHooks) window.__forgePerfHooks.${hook}`);
+    }
+    expect(html.indexOf('window.__forgePerfHooks = {')).toBeLessThan(html.indexOf('<script type="module">'));
+  });
+
+  it('reports the variant it will actually load for single-backend exports', () => {
+    const webgl2Only = generateZipIndexHtml({ ...makeOptions(), hasWebGPU: false });
+    expect(webgl2Only).toContain("var variant = 'webgl2';");
+    expect(webgl2Only.indexOf("var variant = 'webgl2';")).toBeLessThan(webgl2Only.indexOf('window.__forgePerfHooks.backend(variant)'));
+  });
+});

@@ -15,6 +15,8 @@ import { compressTexture, COMPRESSION_PRESETS, type CompressionConfig } from './
 import { escapeHtml, escapeScriptContent, validateCssColor } from './exportUtils';
 import { generateGameLoopFragment } from './gameLoopFragment';
 import { generateEventCallbackFragment } from './eventCallbackFragment';
+import { generateSceneLoadFragment } from './sceneLoadFragment';
+import { generatePerfHarnessBootstrap } from './perfHarnessFragment';
 
 export interface ZipExportOptions {
   format: ExportFormat;
@@ -317,7 +319,16 @@ export function generateZipIndexHtml(options: {
     ${embedBridge ? escapeScriptContent(embedBridge) : ''}
   </script>
 
+  <script>
+    // Performance-capture harness: dormant unless the page is opened with
+    // ?forgePerf=1 (see perfHarnessFragment.ts, #10013).
+    ${generatePerfHarnessBootstrap()}
+  </script>
+
   <script type="module">
+    // Scene load helper shared with the single-HTML exporter (sceneLoadFragment.ts).
+${generateSceneLoadFragment({ indent: '    ' })}
+
     // Load game data and scripts
     var sceneData;
     try {
@@ -345,8 +356,10 @@ export function generateZipIndexHtml(options: {
 
     // Initialize WASM engine
     async function initializeEngine() {
+      if (window.__forgePerfHooks) window.__forgePerfHooks.initStart();
       ${includeDebug ? "console.log('[Game] Detecting rendering backend...');" : ''}
       ${wasmAvailability}
+      if (window.__forgePerfHooks) window.__forgePerfHooks.backend(variant);
       ${includeDebug ? "console.log('[Game] Using ' + variant + ' renderer');" : ''}
 
       var basePath = './engine-pkg-' + variant;
@@ -355,7 +368,8 @@ export function generateZipIndexHtml(options: {
       ${includeDebug ? "console.log('[Game] Loading WASM from ' + jsUrl);" : ''}
 
       var wasm = await import(jsUrl);
-      await wasm.default(basePath + '/forge_engine_bg.wasm');
+      var wasmExports = await wasm.default(basePath + '/forge_engine_bg.wasm');
+      if (window.__forgePerfHooks) window.__forgePerfHooks.wasm(wasmExports);
 
       // Set up event callback for script integration (shared with the
       // single-HTML exporter — see eventCallbackFragment.ts).
@@ -372,8 +386,11 @@ export function generateZipIndexHtml(options: {
         : '// No orientation lock requested'
       }
 
-      // Load scene data
-      wasm.handle_command('load_scene', JSON.stringify(window.__forgeSceneData));
+      // Load scene data. The engine reads payload.json and refuses commands
+      // until its first update, so this waits (bounded) and sends { json } —
+      // a bare JSON string was refused and the game started empty (#10013).
+      var sceneLoad = await __forgeLoadScene(wasm.handle_command, window.__forgeSceneData);
+      if (window.__forgePerfHooks) window.__forgePerfHooks.sceneLoad(sceneLoad);
 
       // Auto-play after short delay to let the engine settle
       await new Promise(function(r) { setTimeout(r, 500); });
@@ -406,6 +423,7 @@ ${generateGameLoopFragment({ handleCommand: 'wasm.handle_command', indent: '    
       document.removeEventListener('click', startGame);
       if (loadingText) loadingText.textContent = 'Loading...';
       initializeEngine().catch(function(err) {
+        if (window.__forgePerfHooks) window.__forgePerfHooks.fail(err);
         console.error('[Game] Failed to initialize:', err);
         if (loadingText) loadingText.textContent = 'Failed to load game. ' + err.message;
       });

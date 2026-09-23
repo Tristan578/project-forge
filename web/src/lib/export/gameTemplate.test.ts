@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
 import { generateGameHTML, type GameTemplateOptions } from './gameTemplate';
+import { getDefaultTouchPreset } from './touchControls';
 
 describe('gameTemplate', () => {
   describe('generateGameHTML', () => {
@@ -50,9 +51,12 @@ describe('gameTemplate', () => {
         ...baseOptions,
         scriptBundle: '',
       });
-      // Should not have extra script tags beyond the scene data and module
-      const scriptCount = html.split('<script>').length - 1;
-      expect(scriptCount).toBe(1); // Only the scene data script
+      // Classic scripts: the scene data and the (dormant) perf-harness
+      // bootstrap. No third tag for an empty script bundle.
+      const classic = html.split('<script>').slice(1);
+      expect(classic).toHaveLength(2);
+      expect(classic[0]).toContain('window.__forgeSceneData');
+      expect(classic[1]).toContain('window.__forgePerfConfig');
     });
 
     it('applies responsive mode styling', () => {
@@ -115,13 +119,50 @@ describe('gameTemplate', () => {
     it('includes WASM loader code with WebGPU detection', () => {
       const html = generateGameHTML(baseOptions);
       expect(html).toContain('const hasWebGPU = !!navigator.gpu');
-      expect(html).toContain("const variant = hasWebGPU ? 'webgpu' : 'webgl2'");
+      expect(html).toContain("let variant = hasWebGPU ? 'webgpu' : 'webgl2'");
       expect(html).toContain("await import(basePath + '/engine-pkg-' + variant + '/forge_engine.js')");
     });
 
-    it('includes scene loading logic', () => {
+    it('loads the scene with a { json } payload once the engine accepts commands (#10013)', () => {
       const html = generateGameHTML(baseOptions);
-      expect(html).toContain("handle_command('load_scene', JSON.stringify(window.__forgeSceneData))");
+      // The shared helper is defined in the module script and awaited after
+      // init_engine. The old bare-string call was refused by the engine
+      // ("Missing 'json' field") and fired before its command queue existed.
+      expect(html).toContain('async function __forgeLoadScene(send, sceneData)');
+      expect(html).toContain('const sceneLoad = await __forgeLoadScene(handle_command, window.__forgeSceneData);');
+      expect(html).not.toContain("handle_command('load_scene', JSON.stringify(");
+      expect(html.indexOf("init_engine('game-canvas')")).toBeLessThan(html.indexOf('await __forgeLoadScene('));
+      // Play is still issued after the load, on the settle timer.
+      expect(html.indexOf('await __forgeLoadScene(')).toBeLessThan(html.indexOf("handle_command('play', '{}')"));
+    });
+
+    it('sends set_quality as an object payload after the scene has loaded', () => {
+      const html = generateGameHTML({
+        ...baseOptions,
+        mobileTouchConfig: JSON.stringify({ ...getDefaultTouchPreset('platformer'), enabled: true, autoReduceQuality: true }),
+      });
+      expect(html).toContain("handle_command('set_quality', { preset: 'low' });");
+      expect(html).not.toContain("handle_command('set_quality', JSON.stringify(");
+      expect(html.indexOf('await __forgeLoadScene(')).toBeLessThan(html.indexOf("handle_command('set_quality'"));
+    });
+
+    it('wires every perf-harness hook, each guarded so a normal game is unaffected (#10013)', () => {
+      const html = generateGameHTML(baseOptions);
+      for (const hook of ['initStart()', 'backend(variant)', 'wasm(wasmExports)', 'sceneLoad(sceneLoad)', 'fail(err)', 'frame(now)']) {
+        expect(html).toContain(`if (window.__forgePerfHooks) window.__forgePerfHooks.${hook}`);
+      }
+      // The bootstrap runs before the module script that calls the hooks.
+      expect(html.indexOf('window.__forgePerfHooks = {')).toBeLessThan(html.indexOf('<script type="module">'));
+      // initStart is the first statement of init — the player's click.
+      expect(html).toMatch(/async function init\(\) \{\s+if \(window\.__forgePerfHooks\) window\.__forgePerfHooks\.initStart\(\);/);
+    });
+
+    it('reports webgl2 as the backend when the embedded WebGPU binary is missing', () => {
+      const html = generateGameHTML({
+        ...baseOptions,
+        embeddedWasm: { webgl2: { jsBase64: 'anM=', wasmBase64: 'AGFzbQ==' } },
+      });
+      expect(html).toMatch(/if \(!jsEl && variant === 'webgpu'\) \{[\s\S]*?variant = 'webgl2';/);
     });
 
     it('includes auto-play logic', () => {
