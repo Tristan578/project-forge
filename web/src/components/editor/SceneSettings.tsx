@@ -110,7 +110,7 @@ export function SceneSettings() {
     // it is new, built accessible, and should be gated by the axe audits.
     <div className="space-y-4">
       <CompletionModeSection />
-      <div className="space-y-4 border-t border-zinc-800 pt-4" data-a11y-defer="scene-settings">
+      <div className="space-y-4 border-t border-[var(--sf-border)] pt-4" data-a11y-defer="scene-settings">
         {/* Scene Statistics */}
         <SceneStatistics />
 

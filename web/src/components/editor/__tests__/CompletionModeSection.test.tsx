@@ -158,6 +158,17 @@ describe('CompletionModeSection', () => {
     },
   );
 
+  it.each(['external change', 'scene replacement'])('clears a local announcement after %s', (change) => {
+    render(<CompletionModeSection />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Sandbox' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Sandbox');
+    act(() => {
+      if (change === 'external change') useEditorStore.getState().setCompletionMode('win');
+      else resetScene();
+    });
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+  });
+
   it('reflects a change made elsewhere — the AI tool writes the same store field', () => {
     render(<CompletionModeSection />);
 

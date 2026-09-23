@@ -16,7 +16,7 @@
 
 import { useCallback, useId, useState } from 'react';
 import { Redo2, Undo2 } from 'lucide-react';
-import { Button } from '@spawnforge/ui';
+import { Button, Radio } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import {
   COMPLETION_MODES,
@@ -43,7 +43,13 @@ export function CompletionModeSection() {
   const setCompletionMode = useEditorStore((s) => s.setCompletionMode);
   const undoCompletionMode = useEditorStore((s) => s.undoCompletionMode);
   const redoCompletionMode = useEditorStore((s) => s.redoCompletionMode);
-  const [status, setStatus] = useState('');
+  const history = useEditorStore((s) => s.completionModeHistory);
+  const [announcement, setAnnouncement] = useState<{ history: typeof history; message: string } | null>(null);
+  // External edits and scene replacement invalidate the previous local message.
+  const status = announcement?.history === history ? announcement.message : '';
+  const announce = useCallback((message: string) => {
+    setAnnouncement({ history: useEditorStore.getState().completionModeHistory, message });
+  }, []);
   // Scoped ids: the panel can be mounted more than once in a dock layout.
   const idBase = useId();
   const headingId = `${idBase}-heading`;
@@ -55,15 +61,15 @@ export function CompletionModeSection() {
       const result = setCompletionMode(mode);
       // The radios only offer valid modes, but the action is the authority:
       // show its words rather than assuming it agreed.
-      setStatus(result.ok ? `Completion mode set to ${COMPLETION_MODE_INFO[result.mode].label}.` : result.error);
+      announce(result.ok ? `Completion mode set to ${COMPLETION_MODE_INFO[result.mode].label}.` : result.error);
     },
-    [setCompletionMode],
+    [setCompletionMode, announce],
   );
 
   const announceStep = useCallback((verb: 'undone' | 'redone') => {
     const now = useEditorStore.getState().sceneGraph.completionMode ?? DEFAULT_COMPLETION_MODE;
-    setStatus(`Completion mode change ${verb}. Now ${COMPLETION_MODE_INFO[now].label}.`);
-  }, []);
+    announce(`Completion mode change ${verb}. Now ${COMPLETION_MODE_INFO[now].label}.`);
+  }, [announce]);
 
   const handleUndo = useCallback(() => {
     if (undoCompletionMode()) announceStep('undone');
@@ -74,9 +80,9 @@ export function CompletionModeSection() {
   }, [redoCompletionMode, announceStep]);
 
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 rounded bg-[var(--sf-bg-surface)] p-2">
       <div className="mb-2 flex items-center justify-between">
-        <h3 id={headingId} className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+        <h3 id={headingId} className="text-xs font-semibold uppercase tracking-wide text-[var(--sf-text-secondary)]">
           Completion mode
         </h3>
         <div className="flex items-center gap-1">
@@ -111,46 +117,32 @@ export function CompletionModeSection() {
         {COMPLETION_MODES.map((mode) => {
           const info = COMPLETION_MODE_INFO[mode];
           const inputId = `${idBase}-${mode}`;
-          const descriptionId = `${idBase}-${mode}-desc`;
           return (
-            <div key={mode} className="flex items-start gap-2 rounded px-1 py-1 hover:bg-zinc-800/50">
-              <input
-                id={inputId}
-                type="radio"
-                name={`${idBase}-completion-mode`}
-                value={mode}
-                checked={effective === mode}
-                onChange={() => handleChoose(mode)}
-                // A legacy scene shows Win checked without having chosen it, and
-                // a checked radio fires no change event — so clicking it is the
-                // only way to record an explicit `win`. Guarded on the implicit
-                // state so an ordinary selection is not handled twice.
-                onClick={() => {
-                  if (completionMode === undefined && mode === effective) handleChoose(mode);
-                }}
-                aria-describedby={descriptionId}
-                className="mt-0.5 accent-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
-              />
-              <div className="min-w-0">
-                <label htmlFor={inputId} className="cursor-pointer text-xs text-zinc-200">
-                  {info.label}
-                </label>
-                <p id={descriptionId} className="text-[10px] leading-snug text-zinc-400">
-                  {info.description}
-                </p>
-              </div>
-            </div>
+            <Radio
+              key={mode}
+              id={inputId}
+              label={info.label}
+              description={info.description}
+              name={idBase + '-completion-mode'}
+              value={mode}
+              checked={effective === mode}
+              onChange={() => handleChoose(mode)}
+              // Choosing the already checked legacy default must persist Win too.
+              onClick={() => {
+                if (completionMode === undefined && mode === effective) handleChoose(mode);
+              }}
+            />
           );
         })}
       </div>
 
       {completionMode === undefined && (
-        <p className="mt-1 text-[10px] text-zinc-400">
-          Win is the default and is not saved with this scene yet. Choosing a mode saves it.
+        <p className="mt-1 text-[10px] text-[var(--sf-text-secondary)]">
+          Win is the default and is not saved with this scene yet. Choose a mode to include it when this scene is saved.
         </p>
       )}
 
-      <p role="status" aria-live="polite" className="mt-1 min-h-[1em] text-[10px] text-zinc-400">
+      <p role="status" aria-live="polite" className="mt-1 min-h-[1em] text-[10px] text-[var(--sf-text-secondary)]">
         {status}
       </p>
     </div>
