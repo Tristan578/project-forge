@@ -563,8 +563,10 @@ else
       fail "the reuse upload does not include ${p}"
     fi
   done
+  # if-no-files-found only fails when NOTHING matches. Completeness of the four
+  # packages is the verify step's job, asserted next, and adopt re-verifies.
   if grep -qE '^          if-no-files-found: error$' <<<"$upload"; then
-    pass "a missing file fails the reuse upload instead of publishing a partial artifact"
+    pass "an upload that matches no files fails instead of publishing an empty artifact"
   else
     fail "the reuse upload does not set if-no-files-found: error"
   fi
