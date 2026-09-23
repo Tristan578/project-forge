@@ -84,8 +84,14 @@ new_fixtures() {
   printf '%s' "$fx"
 }
 
-pull_json() { # $1 = head sha, $2 = head repo
-  printf '{"number":123,"head":{"sha":"%s","repo":{"full_name":"%s"}}}\n' "$1" "$2"
+# $1 = head sha, $2 = head repo, $3 = merge_commit_sha (default @HEAD@, which
+# the stub replaces with the checked-out commit), $4 = merged_at as a JSON
+# literal (default a timestamp; pass null for an unmerged PR).
+pull_json() {
+  local merge_sha="${3:-@HEAD@}" merged_at="${4:-}"
+  if [ -z "$merged_at" ]; then merged_at='"2026-09-22T00:00:00Z"'; fi
+  printf '{"number":123,"state":"closed","merged_at":%s,"merge_commit_sha":"%s","head":{"sha":"%s","repo":{"full_name":"%s"}}}\n' \
+    "$merged_at" "$merge_sha" "$1" "$2"
 }
 
 # One workflow_runs element. $1 id, $2 path, $3 event, $4 head repo, $5 head sha
@@ -160,10 +166,13 @@ esac
 path="$fixtures/$file.json"
 if [ ! -f "$path" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
 if [ "$(cat "$path")" = ERROR ]; then echo "gh: Server Error (HTTP 502)" >&2; exit 1; fi
+# @HEAD@ stands for the commit the caller has checked out: a fixture is written
+# before the throwaway repo that commit lives in exists.
+head="$(git rev-parse HEAD 2>/dev/null || true)"
 if [ -n "$filter" ]; then
-  jq -r "$filter" "$path" | tr -d '\r'
+  sed "s/@HEAD@/${head}/g" "$path" | jq -r "$filter" | tr -d '\r'
 else
-  tr -d '\r' < "$path"
+  sed "s/@HEAD@/${head}/g" "$path" | tr -d '\r'
 fi
 STUB
 chmod +x "$STUB_DIR/gh"
@@ -247,6 +256,21 @@ else
   pass "only ci.yml runs are inspected (the changeset-check run on the same head is ignored)"
 fi
 
+# This repo's PR titles often end in their own issue reference, so the squash
+# subject carries two: "<title> (#ISSUE) (#PR)". GitHub appends the PR number
+# last, and that is the one to resolve. Reading the first would query an issue
+# number as a pull request and never reuse anything, silently.
+echo ""
+echo "--- a title that already ends in an issue reference resolves the PR, not the issue ---"
+FX="$(happy_fixtures)"
+OUT="$(run_find "$FX" "fix(engine): a change (#9525) (#123)")"
+assert_run_id "subject '... (#9525) (#123)'" 222 "$OUT" "$FX"
+if grep -qF 'pulls/123' "$FX/calls.log" && ! grep -qF 'pulls/9525' "$FX/calls.log"; then
+  pass "only pull request #123 (the trailing reference) was queried"
+else
+  fail "the wrong reference was resolved: $(tr '\n' ' ' < "$FX/calls.log")"
+fi
+
 echo ""
 echo "--- a later run on the same head that does not qualify falls through to one that does ---"
 FX="$(happy_fixtures)"
@@ -293,6 +317,40 @@ if grep -qF 'fork' <<<"$OUT"; then
 else
   fail "the fork refusal does not mention the fork: $OUT"
 fi
+
+# The "(#N)" is text anyone with push access can type. Only the pull request's
+# own record proves it produced this commit: merged, with this commit as its
+# merge commit. Without that, a subject naming an open or unrelated PR would
+# point CD at a run built from code that never reached main.
+FX="$(happy_fixtures)"
+pull_json "$PR_HEAD" o/r dddddddddddddddddddddddddddddddddddddddd null > "$FX/pull.json"
+OUT="$(run_find "$FX")"
+assert_run_id "the referenced pull request is not merged" "" "$OUT" "$FX"
+if grep -qF 'not merged' <<<"$OUT"; then
+  pass "the unmerged refusal says why"
+else
+  fail "the unmerged refusal does not say the PR is not merged: $OUT"
+fi
+if grep -qF '/actions/runs' "$FX/calls.log"; then
+  fail "an unmerged PR still had its CI runs inspected"
+else
+  pass "an unmerged PR is refused before any CI run is inspected"
+fi
+
+FX="$(happy_fixtures)"
+pull_json "$PR_HEAD" o/r cccccccccccccccccccccccccccccccccccccccc > "$FX/pull.json"
+OUT="$(run_find "$FX")"
+assert_run_id "the referenced PR merged as a different commit than the one checked out" "" "$OUT" "$FX"
+if grep -qF 'cccccccccccccccccccccccccccccccccccccccc' <<<"$OUT"; then
+  pass "the merge-commit refusal names the commit the PR actually merged as"
+else
+  fail "the merge-commit refusal does not name the PR's merge commit: $OUT"
+fi
+
+FX="$(happy_fixtures)"
+printf '{"number":123,"merged_at":"2026-09-22T00:00:00Z","merge_commit_sha":null,"head":{"sha":"%s","repo":{"full_name":"o/r"}}}\n' "$PR_HEAD" > "$FX/pull.json"
+OUT="$(run_find "$FX")"
+assert_run_id "the referenced PR reports no merge commit at all" "" "$OUT" "$FX"
 
 FX="$(happy_fixtures)"; echo ERROR > "$FX/runs.json"
 OUT="$(run_find "$FX")"

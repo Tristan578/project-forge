@@ -4,9 +4,10 @@
 # same engine again (#9525).
 #
 #   resolve-ci-wasm-artifact.sh find
-#       Resolve HEAD's squash subject "(#N)" to that PR's head commit, and find
-#       the ci.yml pull_request run on it whose 'Quality Gates / WASM Build' job
-#       succeeded and whose wasm-binaries-cd-reuse artifact has not expired.
+#       Resolve HEAD's squash subject "(#N)" to that PR, check the PR merged as
+#       HEAD itself, and find the ci.yml pull_request run on its head commit
+#       whose 'Quality Gates / WASM Build' job succeeded and whose
+#       wasm-binaries-cd-reuse artifact has not expired.
 #       Prints and writes `run-id=<id>`, or `run-id=` when there is none.
 #
 #   resolve-ci-wasm-artifact.sh adopt <download-dir>
@@ -34,9 +35,10 @@
 # FAIL CLOSED, VISIBLY
 #
 # Every path that is not positive proof answers "no reuse" with a ::notice::
-# naming the reason, and CD builds. A lookup error, a fork, a run whose build
-# did not succeed, an expired artifact, a key that differs by one character, a
-# package that fails validation: none of them is a reason to guess. The cost of
+# naming the reason, and CD builds. A lookup error, a fork, a PR that did not
+# merge as this commit, a run whose build did not succeed, an expired artifact,
+# a key that differs by one character, a package that fails validation: none of
+# them is a reason to guess. The cost of
 # a false negative is one ~6-minute build; the cost of a false positive is a CDN
 # engine built from different sources than the deploy. They are not symmetric.
 #
@@ -75,7 +77,8 @@ usage() {
 }
 
 cmd_find() {
-  local repo gh subject pr_number pr_info pr_head pr_head_repo run_ids run_id conclusions artifact_ids
+  local repo gh subject pr_number pr_info pr_head pr_head_repo pr_merged_at pr_merge_sha this_commit
+  local run_ids run_id conclusions artifact_ids
 
   repo="${GITHUB_REPOSITORY:-}"
   if [ -z "$repo" ]; then
@@ -99,20 +102,37 @@ cmd_find() {
     no_reuse "HEAD's subject carries no '(#N)' pull-request reference (a direct push)"
   fi
 
-  # --- 2. Its head commit, from this repository -------------------------------
-  # A fork's pull_request run executes code nobody with write access has
-  # approved, and CD would publish its bytes with production credentials. The
-  # key check cannot tell that apart, so forks are refused before it.
-  if ! pr_info="$("$gh" api "repos/${repo}/pulls/${pr_number}" --jq '[.head.sha, (.head.repo.full_name // "")] | @tsv' 2>/dev/null)"; then
+  # --- 2. That PR, proven to be the one that produced this commit ------------
+  # One field per line, not @tsv: `read` collapses adjacent tabs, so an empty
+  # field (a deleted head repo, an unmerged PR) would shift the ones after it.
+  if ! pr_info="$("$gh" api "repos/${repo}/pulls/${pr_number}" \
+        --jq '.head.sha, (.head.repo.full_name // ""), (.merged_at // ""), (.merge_commit_sha // "")' 2>/dev/null)"; then
     no_reuse "could not read pull request #${pr_number}"
   fi
-  pr_head="${pr_info%%$'\t'*}"
-  pr_head_repo="${pr_info#*$'\t'}"
+  pr_head="$(sed -n 1p <<<"$pr_info")"
+  pr_head_repo="$(sed -n 2p <<<"$pr_info")"
+  pr_merged_at="$(sed -n 3p <<<"$pr_info")"
+  pr_merge_sha="$(sed -n 4p <<<"$pr_info")"
   if [[ ! "$pr_head" =~ ^[0-9a-f]{40}$ ]]; then
     no_reuse "pull request #${pr_number} gave head sha '${pr_head}'"
   fi
+  # A fork's pull_request run executes code nobody with write access has
+  # approved, and CD would publish its bytes with production credentials. The
+  # key check cannot tell that apart, so forks are refused before it.
   if [ "$pr_head_repo" != "$repo" ]; then
     no_reuse "pull request #${pr_number} comes from the fork '${pr_head_repo:-deleted}', whose CI run is built by code outside this repository's write access"
+  fi
+  # The "(#N)" is text anyone with push access can type. The pull request's own
+  # record is what proves it produced this commit: merged, and merged AS this
+  # commit (for a squash merge, merge_commit_sha is the squashed commit). An
+  # open PR's head, or an unrelated PR a subject happens to name, is code that
+  # never reached main, and its run is not a source for main's engine.
+  if [ -z "$pr_merged_at" ]; then
+    no_reuse "pull request #${pr_number} is not merged, so it did not produce this commit"
+  fi
+  this_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+  if [[ ! "$this_commit" =~ ^[0-9a-f]{40}$ ]] || [ "$pr_merge_sha" != "$this_commit" ]; then
+    no_reuse "pull request #${pr_number} merged as '${pr_merge_sha:-nothing}', not as the commit being deployed ('${this_commit:-unknown}')"
   fi
 
   # --- 3. The ci.yml pull_request runs on that head ---------------------------
