@@ -492,7 +492,14 @@ export function ToolCallCard({
           <p id={adjustmentsHeadingId} className="font-medium">Adjusted to fit the engine’s limits</p>
           <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
             {adjustments.map((c) => (
-              <li key={`${c.component}.${c.field}`}>{describeCorrection(c)}</li>
+              <li key={`${c.entityId ?? ''}.${c.component}.${c.field}`}>
+                {describeCorrection(
+                  c,
+                  // A compound tool tags each record with its entity; the name
+                  // is read live, like the header's, so a rename shows here too.
+                  c.entityId === undefined ? undefined : (lookupEntityName(c.entityId) ?? c.entityId),
+                )}
+              </li>
             ))}
           </ul>
         </InlineAlert>

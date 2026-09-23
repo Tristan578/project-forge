@@ -13,13 +13,14 @@
  *   9. setup_game_from_description
  */
 
-import type { ToolHandler, ExecutionResult } from './types';
+import type { ToolHandler, ExecutionResult, ToolCallContext } from './types';
 import type { EntityType, InputBinding, SceneNode } from './types';
 import { ownEntry, parseArgs, zSetupGameFromDescription } from './types';
 import { getPresetById } from '@/lib/materialPresets';
 import { getCapabilityUnavailability } from '@/lib/config/providers';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
-import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
+import { buildStoreComponent, buildStoreComponentWithReport } from '@/lib/engine/gameComponentWire';
+import { withCorrectionSummary, type GameComponentFieldCorrection } from '@/lib/engine/gameComponentCorrections';
 import type { GameplayAnalysis } from './helpers';
 import {
   buildCompoundResult,
@@ -31,6 +32,30 @@ import {
   mulberry32,
   wallFromStartEnd,
 } from './helpers';
+
+/**
+ * Attach a game component built from a MODEL-AUTHORED properties bag, and keep
+ * what the build did to the request (PF-1148).
+ *
+ * The store is handed the report so the inspector marks each adjusted field;
+ * the caller's `corrections` list gets a copy of each record tagged with the
+ * entity, because one compound call touches many and "speed was capped" is not
+ * actionable without "on which one". Returns `false` for an unknown component
+ * type, which the callers here have always skipped silently.
+ */
+function attachModelComponent(
+  ctx: ToolCallContext,
+  entityId: string,
+  componentType: string,
+  props: Record<string, unknown>,
+  corrections: GameComponentFieldCorrection[],
+): boolean {
+  const built = buildStoreComponentWithReport(componentType, props);
+  if (!built) return false;
+  ctx.store.addGameComponent(entityId, built.component, built);
+  for (const correction of built.corrections) corrections.push({ ...correction, entityId });
+  return true;
+}
 
 // ===== setup_game_from_description planner =====
 
@@ -421,6 +446,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const envSettings = args.environment as Record<string, unknown> | undefined;
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
     const nameToId: Record<string, string> = Object.create(null) as Record<string, string>;
+    const corrections: GameComponentFieldCorrection[] = [];
 
     // `newScene()` returns false when the engine refuses to clear the scene.
     // Discarding it would spawn every entity below on top of the scene the user
@@ -494,8 +520,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
           // field — `dialogueTrigger` is the one component whose store field names
           // diverge from the Rust struct's, so it is also the only one where the
           // choice is visible at all.
-          const component = buildStoreComponent(componentType, componentProps);
-          if (component) ctx.store.addGameComponent(entityId, component);
+          attachModelComponent(ctx, entityId, componentType, componentProps, corrections);
         }
 
         results.push({ action: `spawn "${entName}"`, success: true, entityId });
@@ -516,7 +541,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       }
     }
 
-    return { success: true, result: buildCompoundResult(results, nameToId) };
+    return { success: true, result: buildCompoundResult(results, nameToId, corrections) };
   },
 
   create_level_layout: async (args, ctx): Promise<ExecutionResult> => {
@@ -530,6 +555,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
     const nameToId: Record<string, string> = Object.create(null) as Record<string, string>;
+    const corrections: GameComponentFieldCorrection[] = [];
 
     const rootId = ctx.store.spawnEntity('cube', levelName);
     if (!rootId) return { success: false, error: 'Failed to create level root' };
@@ -643,11 +669,13 @@ export const compoundHandlers: Record<string, ToolHandler> = {
             ctx.store.updatePhysics(obstId, buildPhysicsFromPartial(obstacle.physics as Record<string, unknown>));
           }
           if (obstacle.gameComponent) {
-            const comp = buildStoreComponent(
+            attachModelComponent(
+              ctx,
+              obstId,
               obstacle.gameComponent as string,
-              (obstacle.gameComponentProps as Record<string, unknown>) ?? {}
+              (obstacle.gameComponentProps as Record<string, unknown>) ?? {},
+              corrections,
             );
-            if (comp) ctx.store.addGameComponent(obstId, comp);
           }
           ctx.store.reparentEntity(obstId, rootId);
           results.push({ action: `create obstacle "${obstName}"`, success: true, entityId: obstId });
@@ -701,11 +729,13 @@ export const compoundHandlers: Record<string, ToolHandler> = {
           ctx.store.updateMaterial(goalId, buildMaterialFromPartial({ baseColor: [1, 1, 0, 1], unlit: true }));
 
           if (goal.gameComponent) {
-            const comp = buildStoreComponent(
+            attachModelComponent(
+              ctx,
+              goalId,
               goal.gameComponent as string,
-              (goal.gameComponentProps as Record<string, unknown>) ?? {}
+              (goal.gameComponentProps as Record<string, unknown>) ?? {},
+              corrections,
             );
-            if (comp) ctx.store.addGameComponent(goalId, comp);
           } else if (goalType === 'reach') {
             const triggerComp = buildStoreComponent('trigger_zone', {
               eventName: 'goal_reached',
@@ -730,7 +760,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       ctx.store.setInputPreset(inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
     }
 
-    return { success: true, result: buildCompoundResult(results, nameToId) };
+    return { success: true, result: buildCompoundResult(results, nameToId, corrections) };
   },
 
   setup_character: async (args, ctx): Promise<ExecutionResult> => {
@@ -748,6 +778,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
     const nameToId: Record<string, string> = Object.create(null) as Record<string, string>;
+    const corrections: GameComponentFieldCorrection[] = [];
 
     try {
       const charId = ctx.store.spawnEntity(entityType as EntityType, charName);
@@ -767,12 +798,10 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       });
       ctx.store.updatePhysics(charId, physData);
 
-      const controllerComp = buildStoreComponent('character_controller', controller);
-      if (controllerComp) ctx.store.addGameComponent(charId, controllerComp);
+      attachModelComponent(ctx, charId, 'character_controller', controller, corrections);
 
       if (health !== null) {
-        const healthComp = buildStoreComponent('health', health ?? {});
-        if (healthComp) ctx.store.addGameComponent(charId, healthComp);
+        attachModelComponent(ctx, charId, 'health', health ?? {}, corrections);
       }
 
       // ONLY IF THE CALLER NAMED ONE. This ran unconditionally on a value that
@@ -799,7 +828,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       });
     }
 
-    return { success: true, result: buildCompoundResult(results, nameToId) };
+    return { success: true, result: buildCompoundResult(results, nameToId, corrections) };
   },
 
   configure_game_mechanics: async (args, ctx): Promise<ExecutionResult> => {
@@ -809,6 +838,8 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const qualityPreset = args.qualityPreset as string | undefined;
 
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
+    const corrections: GameComponentFieldCorrection[] = [];
+    const entityNames = new Map<string, string>();
 
     if (inputPreset) {
       ctx.store.setInputPreset(inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
@@ -854,12 +885,15 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         if (config.gameComponents) {
           const components = config.gameComponents as Array<Record<string, unknown>>;
           for (const comp of components) {
-            const builtComp = buildStoreComponent(
+            attachModelComponent(
+              ctx,
+              entityId,
               comp.type as string,
-              (comp.props as Record<string, unknown>) ?? {}
+              (comp.props as Record<string, unknown>) ?? {},
+              corrections,
             );
-            if (builtComp) ctx.store.addGameComponent(entityId, builtComp);
           }
+          entityNames.set(entityId, entityName);
         }
 
         if (config.script) {
@@ -890,7 +924,12 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       result: {
         configured: successCount,
         operations: results,
-        summary: `Configured ${successCount} settings/entities.`,
+        summary: withCorrectionSummary(
+          `Configured ${successCount} settings/entities.`,
+          corrections,
+          (entityId) => entityNames.get(entityId),
+        ),
+        corrections,
       },
     };
   },

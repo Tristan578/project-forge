@@ -11,6 +11,7 @@ import {
 } from '../gameComponentWire';
 import {
   describeCorrection,
+  withCorrectionSummary,
   correctionMatchesValue,
   currentAdjustments,
   isGameComponentFieldCorrection,
@@ -392,6 +393,28 @@ describe('describeCorrection', () => {
   });
 });
 
+describe('withCorrectionSummary', () => {
+  const clamp: GameComponentFieldCorrection = {
+    component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
+  };
+
+  it('returns the message untouched when nothing was adjusted', () => {
+    expect(withCorrectionSummary('Added moving_platform', [])).toBe('Added moving_platform');
+  });
+
+  it('names a tagged record’s entity, falling back to its id', () => {
+    expect(withCorrectionSummary(
+      'Created 2 entities.',
+      [{ ...clamp, entityId: 'id-1' }, { ...clamp, entityId: 'id-2' }],
+      (id) => (id === 'id-1' ? 'Lift' : undefined),
+    )).toBe(
+      'Created 2 entities. 2 values were adjusted to fit the engine’s limits: '
+      + '"Lift" Moving Platform speed: you asked for 99999, it was capped at 1000. '
+      + '"id-2" Moving Platform speed: you asked for 99999, it was capped at 1000.',
+    );
+  });
+});
+
 describe('correctionMatchesValue', () => {
   const clamp: GameComponentFieldCorrection = {
     component: 'spawner', field: 'intervalSecs', requested: 0, applied: 0.1, reason: 'clamped',
@@ -425,8 +448,18 @@ describe('readCorrections', () => {
   const good = { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' };
 
   it('keeps well-formed records and drops anything else', () => {
-    expect(readCorrections({ corrections: [good, { ...good, reason: 'guessed' }, 'x', null, { ...good, component: 'jetpack' }] }))
-      .toEqual([good]);
+    expect(readCorrections({
+      corrections: [
+        good,
+        { ...good, entityId: 'e1' },
+        { ...good, reason: 'guessed' },
+        'x',
+        null,
+        { ...good, component: 'jetpack' },
+        { ...good, entityId: 7 },
+        { ...good, requested: { nope: true } },
+      ],
+    })).toEqual([good, { ...good, entityId: 'e1' }]);
   });
 
   it('reads nothing from a result without its own corrections key', () => {

@@ -125,6 +125,16 @@ describe('ToolCallCard', () => {
       ]);
     });
 
+    it('names the entity for a record a multi-entity tool tagged', () => {
+      card({ summary: 'Created 1 entities.', corrections: [{ ...clamp, entityId: 'e-1' }, { ...cut, entityId: 'e-9' }] });
+      const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+      expect(Array.from(note.querySelectorAll('li')).map((li) => li.textContent)).toEqual([
+        // `e-1` is "Player" in the scene graph; `e-9` is unknown, so its id stands in.
+        '"Player" Moving Platform speed: you asked for 99999, it was capped at 1000.',
+        '"e-9" Moving Platform waypoints: you gave 300 points; only the first 64 points were kept, the most the engine supports.',
+      ]);
+    });
+
     it('shows no note when nothing was adjusted', () => {
       card({ message: 'Added moving_platform', corrections: [] });
       expect(screen.queryByRole('status')).toBeNull();

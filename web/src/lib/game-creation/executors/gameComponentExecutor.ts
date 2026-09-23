@@ -363,7 +363,7 @@ export const gameComponentExecutor: ExecutorDefinition = {
       entityId: data.entityId,
       componentType: data.type,
       ...(corrections.length > 0
-        ? { corrections, warnings: corrections.map(describeCorrection) }
+        ? { corrections, warnings: corrections.map((c) => describeCorrection(c)) }
         : {}),
     });
   },

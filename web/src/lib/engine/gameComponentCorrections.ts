@@ -68,6 +68,13 @@ export interface GameComponentFieldCorrection {
    * the values themselves. Only `waypoints` uses it today.
    */
   readonly unit?: 'points';
+  /**
+   * The entity the value landed on. The wire layer never sets it — a build
+   * knows nothing about entities — and the store keys markers by entity
+   * already. A tool result that spans several entities (the compound tools)
+   * tags each record so the author can tell which one it was.
+   */
+  readonly entityId?: string;
 }
 
 /**
@@ -193,9 +200,13 @@ function formatValue(value: CorrectionValue, unit: 'points' | undefined): string
 /**
  * One sentence per correction, in the author's terms: the component and field
  * by name, what was asked for, what was used, and why — never a raw diff.
+ *
+ * `entityName` prefixes the sentence with the entity, for a report that spans
+ * several of them.
  */
-export function describeCorrection(c: GameComponentFieldCorrection): string {
-  const where = `${COMPONENT_LABELS[c.component]} ${fieldLabel(c.component, c.field)}`;
+export function describeCorrection(c: GameComponentFieldCorrection, entityName?: string): string {
+  const field = `${COMPONENT_LABELS[c.component]} ${fieldLabel(c.component, c.field)}`;
+  const where = entityName === undefined ? field : `${JSON.stringify(entityName)} ${field}`;
   const requested = formatValue(c.requested, c.unit);
   const applied = formatValue(c.applied, c.unit);
   switch (c.reason) {
@@ -234,10 +245,15 @@ export function describeCorrection(c: GameComponentFieldCorrection): string {
 export function withCorrectionSummary(
   message: string,
   corrections: readonly GameComponentFieldCorrection[],
+  entityNameOf?: (entityId: string) => string | undefined,
 ): string {
   if (corrections.length === 0) return message;
   const count = corrections.length === 1 ? '1 value was' : `${corrections.length} values were`;
-  return `${message}. ${count} adjusted to fit the engine’s limits: ${corrections.map(describeCorrection).join(' ')}`;
+  const sentences = corrections.map((c) =>
+    describeCorrection(c, c.entityId === undefined ? undefined : (entityNameOf?.(c.entityId) ?? c.entityId)));
+  // A message that already ends a sentence is not given a second full stop.
+  const lead = /[.!?]$/.test(message) ? message : `${message}.`;
+  return `${lead} ${count} adjusted to fit the engine’s limits: ${sentences.join(' ')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +329,7 @@ export function isGameComponentFieldCorrection(value: unknown): value is GameCom
     && isCorrectionValue(c.requested)
     && isCorrectionValue(c.applied)
     && (c.unit === undefined || c.unit === 'points')
+    && (c.entityId === undefined || typeof c.entityId === 'string')
   );
 }
 
