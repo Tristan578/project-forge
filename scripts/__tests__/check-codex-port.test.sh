@@ -379,7 +379,7 @@ MCP_OK='[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]
 # shellcheck disable=SC2059  # the fixtures carry \n escapes that printf must expand
 printf "$MCP_OK" > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "a server matching on command, args and env is parity"
-expect_out 'name, command, args, secret names and approval mode' "…and the note says what was compared, so a name-only check cannot masquerade as this one"
+expect_out 'name, command, args, secret names, approval mode and launch paths' "…and the note says what was compared, so a name-only check cannot masquerade as this one"
 SHAPE_ROWS=0
 while IFS='|' read -r LABEL FIXTURE NEEDLE; do
   [ -n "$LABEL" ] || continue
@@ -456,6 +456,101 @@ expect_no_out 'alpha does not set' "…and not the server that has it"
 # must pass — a check that false-reds on valid spelling gets switched off.
 printf "[mcp_servers.alpha]\ncommand = \"npx\"\ndefault_tools_approval_mode = 'prompt' # ask first\n\n[mcp_servers.beta]\ncommand = \"node\"\ndefault_tools_approval_mode = \"prompt\"\n" > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "a literal-string 'prompt' with a trailing comment is read as prompt"
+
+# LAUNCH PATHS. Codex starts a stdio server in the directory the SESSION started
+# in, and resolves a relative `cwd` against that same directory — not against
+# .codex/ and not against the repository root (observed with codex-cli 0.144.1;
+# docs/guides/codex-cli-support-matrix.md, "MCP servers"). So a path written
+# relative to the repository root launches only from the root: board round 2 on
+# #10135 found taskboard committed as `node .claude/hooks/taskboard-launch.mjs`,
+# which fails its handshake in a session started in web/. Each row is otherwise
+# in parity and prompt-gated; only the launch path differs. The args are written
+# once and used in both files, since a JSON array of strings is also TOML.
+F="$(mkfix)"; gen "$F" --write
+printf '#!/usr/bin/env node\n' > "$F/.claude/hooks/launch.mjs"
+# mcp_launch <command> <args-array-text> <cwd or empty> — write both files.
+mcp_launch() {
+  local cwd_line=''
+  [ -z "$3" ] || cwd_line="cwd = \"$3\""$'\n'
+  printf '{"mcpServers":{"alpha":{"command":"%s","args":%s}}}\n' "$1" "$2" > "$F/.mcp.json"
+  printf '[mcp_servers.alpha]\ncommand = "%s"\nargs = %s\n%sdefault_tools_approval_mode = "prompt"\n' "$1" "$2" "$cwd_line" > "$F/.codex/config.toml"
+}
+LAUNCH_ROWS=0
+while IFS='|' read -r LABEL COMMAND ARGS CWD NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  LAUNCH_ROWS=$((LAUNCH_ROWS + 1))
+  mcp_launch "$COMMAND" "$ARGS" "$CWD"
+  gen "$F" --check
+  if [ "$RC" -eq 1 ] && grep -qF -- "$NEEDLE" <<<"$OUT"; then
+    ok "a launch path that depends on the start directory is caught: $LABEL"
+  else
+    bad "a start-directory-dependent launch path went unreported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-300)"
+  fi
+done <<'MCP_LAUNCH_TABLE'
+a script path relative to the repository root, in args (taskboard's shape before the fix)|node|[".claude/hooks/launch.mjs", "mcp"]||alpha runs ".claude/hooks/launch.mjs", a path relative to the repository root
+an explicitly relative ./ path, even one that does not exist|node|["./launch.mjs", "mcp"]||alpha runs "./launch.mjs", a path relative to the repository root
+a command that is itself a repo-relative path|.claude/hooks/launch.mjs|["mcp"]||alpha runs ".claude/hooks/launch.mjs", a path relative to the repository root
+a relative cwd, which Codex resolves against the start directory, not .codex/|node|["-e", "0"]|..|alpha sets cwd = "..", a relative path
+MCP_LAUNCH_TABLE
+if [ "$LAUNCH_ROWS" -eq 4 ]; then ok "all 4 MCP launch-path rows were driven"; else bad "the MCP launch-path table was not walked: $LAUNCH_ROWS of 4"; fi
+# The fix taskboard uses: git runs a `!` alias from the repository's top-level
+# directory (git-config(1), alias.*), so the SAME relative path resolves from any
+# start directory. The path sits inside one argument there, not as one, and must
+# not read as a start-directory-dependent path.
+mcp_launch git '["-c", "alias.fixture-launch=!node .claude/hooks/launch.mjs", "fixture-launch", "mcp"]' ''
+gen "$F" --check; expect_rc 0 "a repo script launched through a git alias is not a start-directory-dependent path"
+expect_out 'launch paths' "…and the parity note says launch paths were compared"
+mcp_launch node '[".claude/hooks/launch.mjs", "mcp"]' ''
+gen "$F" --check
+expect_out 'launching it through a git alias' "footer: a launch-path line says how to fix it"
+
+echo "== committed MCP config: taskboard launches from a subdirectory =="
+# The property a user depends on (lessons-learned #1), checked on the COMMITTED
+# files rather than a fixture: a session started anywhere in the checkout can
+# start taskboard, the one server whose launcher is a file in this repository.
+# Its committed command runs here from two directories below the root, with the
+# final `mcp` swapped for `db-path` — the one runtime command with no side
+# effect — so the answer proves the launcher was found, Python ran the runtime,
+# and the argument arrived. TASKBOARD_API and TASKBOARD_BIN point at nothing
+# usable: were the argument ever dropped, the runtime's default command
+# (`doctor`) would try to START a board, and this way it fails fast instead.
+TB_SPEC="$(node -e '
+  const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).mcpServers.taskboard || {};
+  process.stdout.write([s.command || "", ...(s.args || [])].join("\n"));
+' "$REPO_ROOT/.mcp.json")"
+mapfile -t TB <<<"$TB_SPEC"
+TB_N=${#TB[@]}
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import tomllib' >/dev/null 2>&1; then
+  TB_CODEX="$(python3 - "$REPO_ROOT/.codex/config.toml" <<'PY'
+import sys, tomllib
+s = tomllib.load(open(sys.argv[1], "rb")).get("mcp_servers", {}).get("taskboard", {})
+sys.stdout.buffer.write("\n".join([s.get("command", "")] + list(s.get("args", []))).encode())
+PY
+)"
+  if [ -n "$TB_CODEX" ] && [ "$TB_CODEX" = "$TB_SPEC" ]; then
+    ok "the committed .codex/config.toml launches taskboard exactly as .mcp.json does, so the run below covers both"
+  else
+    bad "taskboard's launch differs between the files, so the run below covers only .mcp.json: codex=[$TB_CODEX] mcp.json=[$TB_SPEC]"
+  fi
+elif [ "${CI:-}" = "true" ]; then
+  bad "python3 with tomllib is required in CI to read the committed .codex/config.toml taskboard launch"
+else
+  skip "python3/tomllib absent locally — the .codex/config.toml taskboard launch is not compared on this host"
+fi
+if [ "$TB_N" -lt 2 ] || [ "${TB[$((TB_N - 1))]}" != "mcp" ]; then
+  bad "the committed taskboard launch no longer ends in \`mcp\` (got: ${TB[*]}), so swapping in db-path would test something else"
+else
+  NATIVE_TMP="$(cd "$TMP_ROOT" && { pwd -W 2>/dev/null || pwd; })"
+  printf 'not a program\n' > "$TMP_ROOT/not-a-binary"
+  TB_OUT="$(cd "$REPO_ROOT/tools/agentic-sync" && TASKBOARD_DB="$NATIVE_TMP/sentinel-taskboard.db" TASKBOARD_API='http://127.0.0.1:9/api' TASKBOARD_BIN="$NATIVE_TMP/not-a-binary" "${TB[@]:0:TB_N-1}" db-path 2>&1)"; TB_RC=$?
+  if [ "$TB_RC" -eq 0 ] && grep -qF 'sentinel-taskboard.db' <<<"$TB_OUT"; then
+    ok "the committed taskboard command, started in tools/agentic-sync/, finds its launcher and delivers its argument (exit 0, db-path answered)"
+  elif grep -qF 'Taskboard requires Python 3' <<<"$TB_OUT" && [ "${CI:-}" != "true" ]; then
+    skip "no Python 3 on this host — the launcher was found, but the runtime could not run"
+  else
+    bad "the committed taskboard command does not start from a subdirectory (exit $TB_RC): $(printf '%s' "$TB_OUT" | tr '\n' ' ' | cut -c1-300)"
+  fi
+fi
 
 echo "== generator: --write may delete ONLY what it generated =="
 # The lock is a committed text file. A bad merge resolution, or an edit, can put
