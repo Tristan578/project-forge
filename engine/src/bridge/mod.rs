@@ -628,6 +628,10 @@ impl Plugin for SelectionPlugin {
         app
             // glTF scene spawn system (always-active): spawns loaded glTF scenes as children
             .add_systems(Update, scene_io::apply_gltf_scene_spawn)
+            // Scene load (always-active): an exported game boots by handing its
+            // scene to the runtime engine through `load_scene`, so the drain
+            // must exist in a `runtime` build too (#10195).
+            .add_systems(Update, scene_io::apply_scene_load)
             // Animation systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
                 animation::register_gltf_animations,
@@ -919,10 +923,7 @@ impl Plugin for SelectionPlugin {
                     core::terrain::collect_terrain_changes,
                     procedural::emit_terrain_changes,
                 ).chain().in_set(EditorSystemSet))
-                .add_systems(Update, (
-                    scene_io::apply_scene_export,
-                    scene_io::apply_scene_load,
-                ))
+                .add_systems(Update, scene_io::apply_scene_export)
                 .add_systems(Update, (
                     scene_io::apply_new_scene,
                     scene_io::apply_gltf_import,

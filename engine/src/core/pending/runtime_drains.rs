@@ -500,7 +500,6 @@ mod tests {
         ("game_component_removals", "editor-authoring: remove_game_component"),
         ("add_mesh_attachment2d_requests", "editor-authoring: add_skeleton2d_mesh_attachment"),
         ("scene_export_requests", "editor-authoring: export_scene"),
-        ("scene_load_requests", "editor-authoring: load_scene (an exported game boots from embedded scene data)"),
         ("new_scene_requests", "editor-authoring: new_scene"),
         ("gltf_import_requests", "editor-authoring: import_gltf"),
         ("texture_load_requests", "editor-authoring: load_texture"),
@@ -523,6 +522,12 @@ mod tests {
         ("set_lod_distances_requests", "runtime-gated dispatch: core/commands/performance.rs answers this under the runtime feature and queues nothing"),
         ("set_simplification_backend_requests", "runtime-gated dispatch: core/commands/performance.rs answers this under the runtime feature and queues nothing"),
     ];
+
+    /// The queue #10195 un-gated: `load_scene` is the ONLY way an exported
+    /// game hands its scene to the runtime engine, and the old waiver claimed
+    /// a boot path ("embedded scene data") that never existed. Pinned like
+    /// `FIXED_BY_9550` so the waiver list cannot re-absorb it.
+    const FIXED_BY_10195: &[&str] = &["scene_load_requests"];
 
     /// The queues #9550 un-gated. Named explicitly so the waiver list above
     /// cannot re-absorb them: these MUST be drained in a runtime build.
@@ -798,6 +803,16 @@ app.add_systems(Update, runtime_call);
             assert!(
                 !RUNTIME_UNDRAINED.iter().any(|(f, _)| f == field),
                 "`{field}` was fixed by #9550 and must not be waived"
+            );
+        }
+        for field in FIXED_BY_10195 {
+            assert!(
+                runtime_drained.iter().any(|f| f == field),
+                "`{field}` is the only boot path of an exported game but its drain is not reachable in a runtime build (#10195 regression)"
+            );
+            assert!(
+                !RUNTIME_UNDRAINED.iter().any(|(f, _)| f == field),
+                "`{field}` was fixed by #10195 and must not be waived"
             );
         }
         let waived: Vec<&str> = RUNTIME_UNDRAINED.iter().map(|(f, _)| *f).collect();
