@@ -17,7 +17,7 @@ The four entry points:
 
 | Status | Definition |
 |--------|------------|
-| `proven` | Exercised end to end against a running build, with the evidence named in Notes: a Playwright spec in the CI `@engine-smoke` gate (`web/playwright.engine.config.ts`), or a by-hand check on production on the date in the header. Nothing else earns this word. On a category row it means Notes names the spec and the commands it drives; the commands in that row the spec does not drive are implemented-unverified (#9714), and Notes says so. |
+| `proven` | Exercised end to end against a running build, with the evidence named in Notes: a Playwright spec in the CI `@engine-smoke` gate (`web/playwright.engine.config.ts`), or a by-hand check on production on the date in the header. Nothing else earns this word — in particular not a spec that declares a substitution (a test titled `[substituted: <component>]` because it stands store injection or a mock in for the component it names, #10158). On a category row it means Notes names the spec and the commands it drives; the commands in that row the spec does not drive are implemented-unverified (#9714), and Notes says so. |
 | `implemented-unverified` | The code path exists and unit or parity tests pin it, but there is no end-to-end evidence against the shipped artifact. The launch-readiness review that owns closing this gap is [#9714](https://github.com/Tristan578/project-forge/issues/9714). |
 | `partial` | Part of the row works through this entry point and part does not. Notes says which part; the issue names the gap. |
 | `unavailable` | Cannot be used through this entry point today, whatever the code says — a missing key, a missing gate, a missing engine arm. The issue names the fix. |
@@ -107,6 +107,7 @@ One row per `category` value in `mcp-server/manifest/commands.json`. The count i
 - any of the four entry-point cells is not exactly one of the five statuses, optionally followed by ` (#issue)` or ` (#issue, #issue)`;
 - a `partial`, `unavailable` or `implemented-unverified` cell carries no issue reference, or a `proven` cell carries one (evidence for `proven` belongs in Notes);
 - a row with an `excluded` cell has an empty Notes column;
+- a row with a `proven` cell cites, in Notes, a spec file that declares a substitution — a `{ type: 'substitution', description: '<component>' }` annotation with the matching `[substituted: <component>]` title marker ([#10158](https://github.com/Tristan578/project-forge/issues/10158)). Such a spec stands something in for the component it names, so it is not evidence. `web/scripts/check-substitution-naming.ts`, run by the required `test-e2e-journey` CI job, keeps every annotation and marker paired against Playwright's own listing;
 - the table under the `## Legend` heading stops defining one of the five statuses;
 - the manifest counts in the Facts section (374 commands, 41 categories, 301 public, 73 internal) or a `commands:` row's leading `public/internal` count in Notes disagree with `mcp-server/manifest/commands.json`;
 - a `generation:music` cell other than External MCP is anything but `unavailable (#9117)` — since #9522 moved music to ElevenLabs it follows `PLATFORM_ELEVENLABS_KEY` exactly like `sfx` and `voice`;
