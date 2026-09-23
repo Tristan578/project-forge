@@ -677,6 +677,7 @@ if [ -n "${CD_BW:-}" ]; then
   fi
 
   find_step="$(step_block "$CD_BW" 'Find the PR CI run that built this engine tree')"
+  # shellcheck disable=SC2016  # the literal ${{ github.token }} IS the text cd.yml must carry
   if grep -qxF '        run: bash scripts/resolve-ci-wasm-artifact.sh find' <<<"$find_step" \
      && grep -qxF '        id: ci-artifact' <<<"$find_step" \
      && grep -qxF "        if: ${miss}" <<<"$find_step" \
@@ -689,6 +690,7 @@ if [ -n "${CD_BW:-}" ]; then
   both="        if: ${miss} && steps.ci-artifact.outputs.run-id != ''"
   dl_step="$(step_block "$CD_BW" "Download the PR's pre-optimisation WASM")"
   dl_ok=1
+  # shellcheck disable=SC2016  # the literal ${{ ... }} expressions ARE the text cd.yml must carry
   for line in \
     "$both" \
     "          name: ${ARTIFACT}" \
@@ -697,7 +699,7 @@ if [ -n "${CD_BW:-}" ]; then
     '          github-token: ${{ github.token }}'; do
     if ! grep -qxF "$line" <<<"$dl_step"; then
       dl_ok=0
-      fail "the download step lacks '${line# *}'"
+      fail "the download step lacks '${line#"${line%%[![:space:]]*}"}'"
     fi
   done
   if ! grep -qE '^        uses: actions/download-artifact@[0-9a-f]{40} ' <<<"$dl_step"; then
@@ -713,6 +715,7 @@ if [ -n "${CD_BW:-}" ]; then
   fi
 
   adopt_step="$(step_block "$CD_BW" "Adopt the PR's WASM only on an exact key match")"
+  # shellcheck disable=SC2016  # the literal $RUNNER_TEMP IS the text cd.yml must carry
   if grep -qxF '        run: bash scripts/resolve-ci-wasm-artifact.sh adopt "$RUNNER_TEMP/ci-wasm"' <<<"$adopt_step" \
      && grep -qxF '        id: ci-reuse' <<<"$adopt_step" \
      && grep -qxF "$both" <<<"$adopt_step"; then

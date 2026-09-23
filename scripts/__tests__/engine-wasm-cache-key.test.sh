@@ -767,6 +767,7 @@ else
       else
         pass "the decision step always runs"
       fi
+      # shellcheck disable=SC2016  # the literal ${{ ... }} expressions ARE the text cd.yml must carry
       for wiring in \
         '          CACHE_HIT: ${{ steps.engine-cache-all4.outputs.cache-hit }}' \
         '          CI_REUSED: ${{ steps.ci-reuse.outputs.reused }}' \
