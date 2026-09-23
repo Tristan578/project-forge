@@ -361,7 +361,29 @@ type DispatchResult = { success: boolean; error?: string } | void;
 let dispatchCommand: ((command: string, payload: unknown) => DispatchResult) | null = null;
 
 /**
+ * The one scene load that arrived while no engine was attached, held until
+ * one is (#10192).
+ *
+ * The editor page calls `loadScene` with the project's stored scene inside
+ * its fetch, BEFORE `EditorLayout` mounts `useEngineEvents` and installs the
+ * dispatcher. That load used to return `false` and vanish: nothing re-issued
+ * it, so a project opened in a fresh tab showed the engine's starter scene,
+ * and the next autosave could write that starter scene over the stored one.
+ *
+ * Held as a closure over the store that deferred it, so the replay goes
+ * through that store's own `loadScene` — audio staging, prefab restore, the
+ * music arrangement and the completion mode all land the same way as any
+ * other load. Only the LATEST deferred load is kept: a later call describes
+ * a later intent and the earlier one would only be overwritten by it.
+ */
+let deferredSceneLoad: { json: string; replay: () => void } | null = null;
+
+/**
  * Attach the engine command dispatcher and matching scene validator.
+ *
+ * Attaching replays the load deferred while no engine was present, exactly
+ * once (#10192). Detaching (`null`) discards it: a deferred load belongs to
+ * the mount that deferred it, and a fresh mount issues its own.
  * @param dispatcher Engine dispatch function, or null when detached.
  * @returns Nothing.
  */
@@ -373,6 +395,26 @@ export function setSceneDispatcher(
     if (!dispatchCommand) return false;
     return dispatchCommand('validate_scene', { json })?.success === true;
   } : null);
+  const pending = deferredSceneLoad;
+  deferredSceneLoad = null;
+  if (!dispatcher || !pending) return;
+  try {
+    pending.replay();
+  } catch (error) {
+    // `loadScene` rethrows a THROWN dispatch after setting the save lockout
+    // (#10079). This runs inside the effect that installs the dispatcher, so
+    // letting it escape would unmount the editor through its error boundary
+    // instead of showing the lockout notice the throw already produced.
+    console.error('[Scenes] The deferred scene load threw while the engine attached:', error);
+  }
+}
+
+/**
+ * Whether a scene load is waiting for the engine to attach (#10192).
+ * @returns True while a deferred load is held.
+ */
+export function hasDeferredSceneLoad(): boolean {
+  return deferredSceneLoad !== null;
 }
 
 /** Outcome of {@link SceneSlice.loadTemplate}. */
@@ -744,7 +786,14 @@ export const createSceneSlice: StateCreator<
     // `EditorLayout` (and therefore `useEngineEvents`' `setCommandDispatcher`)
     // has mounted, so every healthy cold open takes this branch. Flagging it
     // would put an error banner on a working editor and block its saves.
-    if (!dispatchCommand) return false;
+    //
+    // Deferred means HELD, not dropped: `setSceneDispatcher` replays this
+    // exact call once the engine attaches (#10192), with the same options,
+    // so a rejection then strands the editor the same way a live one would.
+    if (!dispatchCommand) {
+      deferredSceneLoad = { json, replay: () => { get().loadScene(json, opts); } };
+      return false;
+    }
     // Restore the scene's linked prefab instances (and merge its embedded
     // definitions) into the prefab store before the engine load. Done
     // alongside the dispatch for the same reason audio is: with no

@@ -528,6 +528,101 @@ describe('sceneSlice', () => {
       expect(store.getState().sceneLoadError).toBeNull();
     });
 
+    // ---- Deferred cold-open load (#10192) ----------------------------------
+    //
+    // The editor page calls `loadScene` before `EditorLayout` mounts the
+    // engine. Returning `false` there is correct (it is a deferral, not a
+    // rejection) — but nothing ever re-issued that load, so a project opened
+    // in a fresh tab showed the engine's starter scene, and the next autosave
+    // could write that starter scene over the stored one.
+
+    it('replays the load deferred before the engine attached, exactly once', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const scene = JSON.stringify({ entities: [{ entityId: 'e1', name: 'Cube', parentId: null, visible: true }] });
+      expect(store.getState().loadScene(scene)).toBe(false);
+      expect(store.getState().sceneLoadError).toBeNull();
+      const revisionBefore = store.getState().sceneOperationRevision;
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+
+      const loads = engine.mock.calls.filter(([command]) => command === 'load_scene');
+      expect(loads).toEqual([['load_scene', { json: scene }]]);
+      // The replay went through `loadScene`'s accepted path, not a raw dispatch.
+      expect(store.getState().sceneOperationRevision).toBe(revisionBefore + 1);
+      expect(store.getState().sceneLoadError).toBeNull();
+
+      // Consumed: a later attach (a second engine, a test re-install) must not
+      // load the scene again over whatever the user has done since.
+      const later = createMockDispatch();
+      setSceneDispatcher(later);
+      expect(later.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('keeps only the latest deferred load', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const first = JSON.stringify({ entities: [], metadata: { name: 'first' } });
+      const second = JSON.stringify({ entities: [], metadata: { name: 'second' } });
+      store.getState().loadScene(first);
+      store.getState().loadScene(second);
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([
+        ['load_scene', { json: second }],
+      ]);
+    });
+
+    it('strands the editor when the engine rejects the replayed load, so nothing saves over the stored scene', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene);
+
+      const engine = vi.fn((command: string) =>
+        command === 'load_scene' ? { success: false, error: 'Scene JSON too large' } : undefined,
+      );
+      setSceneDispatcher(engine);
+
+      expect(store.getState().sceneLoadError?.reason).toContain('the engine refused');
+      // Every save path asks the engine to export first; a stranded editor
+      // never asks (#10056), so the starter scene cannot reach the project.
+      store.getState().saveScene();
+      expect(engine.mock.calls.filter(([command]) => command === 'export_scene')).toEqual([]);
+    });
+
+    it('locks saving and does not throw out of the attach when the replayed load throws', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene);
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        // `setSceneDispatcher` runs inside the effect that installs the
+        // engine; a throw escaping it would unmount the editor.
+        expect(() => setSceneDispatcher(vi.fn(() => { throw new Error('engine unreachable'); }))).not.toThrow();
+        expect(store.getState().sceneLoadError?.reason).toContain('the engine failed while loading it');
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('discards the deferred load when the engine detaches before attaching', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene);
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('holds nothing when the load was dispatched live', () => {
+      expect(store.getState().loadScene(healthyScene)).toBe(true);
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
     it('clears sceneLoadError once a scene loads successfully', () => {
       setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
       store.getState().loadScene(healthyScene);
