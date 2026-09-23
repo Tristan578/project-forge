@@ -13,6 +13,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { CompletionModeSection } from '../CompletionModeSection';
 import { useEditorStore } from '@/stores/editorStore';
 import { validateWinnability } from '@/lib/playMode/winnabilityValidator';
+import { axe } from 'jest-axe';
 
 function resetScene() {
   useEditorStore.setState({
@@ -41,6 +42,23 @@ describe('CompletionModeSection', () => {
     expect(screen.getByRole('radio', { name: 'Win' })).toHaveAccessibleDescription(
       'Goal-driven. Play requires at least one win condition the player can complete.',
     );
+  });
+
+  it('has no axe violations under the WCAG 2.1 A/AA rules the E2E audit gates on', async () => {
+    // The picker renders OUTSIDE SceneSettings' a11y-deferred subtree, so the
+    // E2E axe audit of the Inspector includes it. Catch a regression here first.
+    // Color contrast is disabled there too (dark theme, tracked as PF-572).
+    const { container } = render(<CompletionModeSection />);
+    fireEvent.click(screen.getByRole('radio', { name: 'Sandbox' }));
+
+    const results = await axe(container, {
+      runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },
+      rules: { 'color-contrast': { enabled: false } },
+    });
+
+    expect(results.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    // Non-vacuous: the audit actually walked the radios.
+    expect(results.passes.some((p) => p.nodes.some((n) => String(n.html).includes('type="radio"')))).toBe(true);
   });
 
   it('shows a legacy scene (no mode) as Win, the rule it plays by', () => {
