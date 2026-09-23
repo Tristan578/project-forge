@@ -14,10 +14,12 @@ request's CI run instead. Quality Gates uploads that run's four packages as
 `wasm-binaries-cd-reuse`, captured before `wasm-opt` because CD ships
 unoptimised bytes. It also records a `ci-reuse` key covering the engine inputs,
 both workflow recipes and the wasm-bindgen installer.
-`scripts/resolve-ci-wasm-artifact.sh` adopts the packages only when that key
-equals the one recomputed on main and every package validates. A fork, a
-failed or skipped WASM build, an expired artifact, a lookup error or a key
-mismatch each produce a `::notice::` naming the reason, and the job builds.
+`scripts/resolve-ci-wasm-artifact.sh` looks only at a pull request that merged
+as the commit being deployed. It adopts the packages only when that key equals
+the one recomputed on main and every package validates. A fork, a pull request
+that did not merge as this commit, a failed or skipped WASM build, an expired
+artifact, a lookup error or a key mismatch each produce a `::notice::` naming
+the reason, and the job builds.
 
 Any other miss builds and verifies all four packages before saving or
 publishing them. The separate WebGL2 cache warmer runs only when this job does

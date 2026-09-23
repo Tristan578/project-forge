@@ -542,8 +542,9 @@ jobs:
       #    merged PR's CI run built the same four variants on its merge ref and
       #    uploaded them, BEFORE wasm-opt, as `wasm-binaries-cd-reuse` together
       #    with their ci-reuse key. The resolver finds that run from the "(#N)"
-      #    squash subject, downloads the artifact from it, and adopts it only
-      #    when the recorded key equals the ci-reuse key recomputed here.
+      #    squash subject, once the PR's own record shows it merged AS this
+      #    commit, downloads the artifact from it, and adopts it only when the
+      #    recorded key equals the ci-reuse key recomputed here.
       #
       # Both are CONTENT-ADDRESSED, never SHA-addressed: the repo is squash-only,
       # so main's SHA is new to every CI run, and the squashed tree matches what
@@ -584,8 +585,9 @@ jobs:
           key: ${{ steps.engine-key-all4.outputs.key }}
 
       # Tier 2, only on an all4 miss. The resolver answers `run-id=` (with a
-      # ::notice:: naming why) for a direct push, a fork, a lookup error, a PR
-      # whose WASM Build did not succeed, or an expired artifact.
+      # ::notice:: naming why) for a direct push, a fork, a PR that did not
+      # merge as this commit, a lookup error, a PR whose WASM Build did not
+      # succeed, or an expired artifact.
       - name: Find the PR CI run that built this engine tree
         id: ci-artifact
         if: steps.engine-cache-all4.outputs.cache-hit != 'true'
