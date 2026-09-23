@@ -1,11 +1,15 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useId } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { Play, Pause, Square, RotateCcw } from 'lucide-react';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
 export function AnimationInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const animation = useEditorStore((s) => s.primaryAnimation);
   const playAnimation = useEditorStore((s) => s.playAnimation);
@@ -84,10 +88,11 @@ export function AnimationInspector() {
       {/* Clip selector */}
       <div className="mb-3">
         <div className="mb-1 flex items-center gap-1.5">
-          <label className="text-xs text-zinc-400">Clip</label>
+          <label htmlFor={fieldId('clip')} className="text-xs text-zinc-400">Clip</label>
           <InfoTooltip term="animationClip" />
         </div>
         <select
+          id={fieldId('clip')}
           value={animation.activeClipName ?? ''}
           onChange={(e) => {
             if (e.target.value) handlePlayClip(e.target.value);
@@ -107,10 +112,11 @@ export function AnimationInspector() {
       {/* Crossfade duration */}
       <div className="mb-3 flex items-center gap-2">
         <div className="flex w-20 shrink-0 items-center gap-1">
-          <label className="text-xs text-zinc-400">Crossfade</label>
+          <label htmlFor={fieldId('crossfade')} className="text-xs text-zinc-400">Crossfade</label>
           <InfoTooltip term="animationCrossfade" />
         </div>
         <input
+          id={fieldId('crossfade')}
           type="range"
           min={0}
           max={2}
@@ -187,6 +193,7 @@ export function AnimationInspector() {
           <div className="flex items-center gap-2">
             <input
               type="range"
+              aria-label="Playback position"
               min={0}
               max={duration}
               step={0.01}
@@ -207,10 +214,11 @@ export function AnimationInspector() {
       {/* Speed control */}
       <div className="mb-3 flex items-center gap-2">
         <div className="flex w-12 shrink-0 items-center gap-1">
-          <label className="text-xs text-zinc-400">Speed</label>
+          <label htmlFor={fieldId('speed')} className="text-xs text-zinc-400">Speed</label>
           <InfoTooltip term="animationSpeed" />
         </div>
         <input
+          id={fieldId('speed')}
           type="range"
           min={0.1}
           max={3}
@@ -251,12 +259,14 @@ export function AnimationInspector() {
             </h4>
             <InfoTooltip term="blendWeights" />
           </div>
-          {animation.availableClips.map((clip) => (
+          {animation.availableClips.map((clip, index) => (
             <div key={clip.name} className="mb-2 flex items-center gap-2">
-              <label className="w-20 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-zinc-400">
+              {/* Indexed, not named: clip names may hold spaces, which an id cannot. */}
+              <label htmlFor={fieldId(`blend-weight-${index}`)} className="w-20 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-zinc-400">
                 {clip.name}
               </label>
               <input
+                id={fieldId(`blend-weight-${index}`)}
                 type="range"
                 min={0}
                 max={1}

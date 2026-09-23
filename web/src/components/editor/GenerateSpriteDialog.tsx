@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { backgroundRemovalWarning } from '@/lib/generation/backgroundRemoval';
@@ -23,6 +23,10 @@ type SpriteSize = '32x32' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x
 type TabType = 'single' | 'sheet' | 'tileset';
 
 export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogProps) {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [activeTab, setActiveTab] = useState<TabType>('single');
   const [prompt, setPrompt] = useState('');
   const [style, setStyle] = useState<SpriteStyle>('pixel-art');
@@ -250,9 +254,9 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
                   a screen reader announced an unlabelled combobox and
                   `getByLabelText` could not find it either (#9741, while
                   correcting the style-dependent price below). */}
-              <label htmlFor="generate-sprite-style" className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
+              <label htmlFor={fieldId('generate-sprite-style')} className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
               <select
-                id="generate-sprite-style"
+                id={fieldId('generate-sprite-style')}
                 value={style}
                 onChange={(e) => setStyle(e.target.value as SpriteStyle)}
                 disabled={isSubmitting}
@@ -269,8 +273,9 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Size (single and sheet) */}
           {(activeTab === 'single' || activeTab === 'sheet') && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-300">Size</label>
+              <label htmlFor={fieldId('size')} className="mb-1 block text-xs font-medium text-zinc-300">Size</label>
               <select
+                id={fieldId('size')}
                 value={size}
                 onChange={(e) => setSize(e.target.value as SpriteSize)}
                 disabled={isSubmitting || gate.blocked}
@@ -289,10 +294,11 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Frame count (sheet only) */}
           {activeTab === 'sheet' && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-300">
+              <label htmlFor={fieldId('frame-count')} className="mb-1 block text-xs font-medium text-zinc-300">
                 Frame Count: {frameCount}
               </label>
               <input
+                id={fieldId('frame-count')}
                 type="range"
                 min="2"
                 max="8"
@@ -307,8 +313,9 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Tile size (tileset only) */}
           {activeTab === 'tileset' && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-300">Tile Size</label>
+              <label htmlFor={fieldId('tile-size')} className="mb-1 block text-xs font-medium text-zinc-300">Tile Size</label>
               <select
+                id={fieldId('tile-size')}
                 value={tileSize}
                 onChange={(e) => setTileSize(Number(e.target.value) as 16 | 32 | 48 | 64)}
                 disabled={isSubmitting || gate.blocked}
@@ -325,8 +332,9 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
           {/* Grid size (tileset only) */}
           {activeTab === 'tileset' && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-300">Grid Size</label>
+              <label htmlFor={fieldId('grid-size')} className="mb-1 block text-xs font-medium text-zinc-300">Grid Size</label>
               <select
+                id={fieldId('grid-size')}
                 value={gridSize}
                 onChange={(e) => setGridSize(e.target.value as '4x4' | '8x8' | '16x16')}
                 disabled={isSubmitting || gate.blocked}

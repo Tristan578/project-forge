@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, memo } from 'react';
+import { useState, useCallback, useMemo, memo, useId } from 'react';
 import { InlineAlert } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import {
@@ -43,6 +43,10 @@ const DEFAULT_HUMANOID_BONES = [
 ];
 
 export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const addClipKeyframe = useEditorStore((s) => s.addClipKeyframe);
   const createAnimationClip = useEditorStore((s) => s.createAnimationClip);
@@ -163,11 +167,11 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
       {/* Style & parameters */}
       <div className="space-y-3 border-b border-zinc-700 p-3">
         <div>
-          <label htmlFor="proc-anim-style" className="mb-1 block text-xs font-medium text-zinc-400">
+          <label htmlFor={fieldId('proc-anim-style')} className="mb-1 block text-xs font-medium text-zinc-400">
             Style
           </label>
           <select
-            id="proc-anim-style"
+            id={fieldId('proc-anim-style')}
             value={style}
             onChange={(e) => setStyle(e.target.value as AnimationParams['style'])}
             className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -180,11 +184,11 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
         </div>
 
         <div>
-          <label htmlFor="proc-anim-speed" className="mb-1 block text-xs font-medium text-zinc-400">
+          <label htmlFor={fieldId('proc-anim-speed')} className="mb-1 block text-xs font-medium text-zinc-400">
             Speed: {speed.toFixed(1)}x
           </label>
           <input
-            id="proc-anim-speed"
+            id={fieldId('proc-anim-speed')}
             type="range"
             min="0.2"
             max="3"
@@ -196,11 +200,11 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
         </div>
 
         <div>
-          <label htmlFor="proc-anim-amplitude" className="mb-1 block text-xs font-medium text-zinc-400">
+          <label htmlFor={fieldId('proc-anim-amplitude')} className="mb-1 block text-xs font-medium text-zinc-400">
             Amplitude: {amplitude.toFixed(1)}x
           </label>
           <input
-            id="proc-anim-amplitude"
+            id={fieldId('proc-anim-amplitude')}
             type="range"
             min="0.1"
             max="3"
