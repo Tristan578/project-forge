@@ -261,7 +261,10 @@ describe('add_game_component', () => {
       const data = result.result as { message: string; corrections: unknown[] };
       expect(data.corrections).toEqual([
         { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' },
-        { component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points' },
+        {
+          component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+          appliedPoints: route(64),
+        },
       ]);
       expect(data.message).toBe(
         'Added moving_platform. 2 values were adjusted to fit the engine’s limits: '

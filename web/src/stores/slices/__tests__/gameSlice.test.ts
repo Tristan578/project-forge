@@ -359,6 +359,7 @@ describe('gameSlice', () => {
         speed: { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' },
         waypoints: {
           component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+          appliedPoints: route(64),
         },
       });
     });

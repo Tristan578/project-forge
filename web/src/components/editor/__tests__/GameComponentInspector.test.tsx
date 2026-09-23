@@ -756,6 +756,42 @@ describe('GameComponentInspector', () => {
       expect(screen.getByLabelText('Speed').getAttribute('aria-describedby')).toBeNull();
     });
 
+    describe('a route marker', () => {
+      // "You gave 1 point" left the default route standing: two points, the
+      // same count as plenty of routes the author could put there next.
+      const routeReplaced = {
+        component: 'movingPlatform', field: 'waypoints', requested: 1, applied: 2, reason: 'invalid-replaced',
+        unit: 'points', appliedPoints: [[0, 0, 0], [0, 3, 0]],
+      };
+      const routeSentence = 'Moving Platform waypoints: you gave 1 point, but a route needs at least 2 usable points, '
+        + 'so the default route (2 points) was used instead.';
+      const withRoute = (waypoints: [number, number, number][]): GameComponentData => ({
+        type: 'movingPlatform',
+        movingPlatform: { speed: 2, waypoints, pauseDuration: 0.5, loopMode: 'pingPong' },
+      });
+
+      it('shows while the field holds the route it describes', () => {
+        setupStore({
+          primaryGameComponents: [withRoute([[0, 0, 0], [0, 3, 0]])],
+          gameComponentAdjustments: { 'ent-1': { movingPlatform: { waypoints: routeReplaced } } },
+        });
+        render(<GameComponentInspector />);
+        const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+        expect(Array.from(note.querySelectorAll('li')).map((li) => li.textContent)).toEqual([routeSentence]);
+      });
+
+      it('shows nothing once the field holds a different route with the same number of points', () => {
+        setupStore({
+          primaryGameComponents: [withRoute([[1, 1, 1], [4, 1, 1]])],
+          gameComponentAdjustments: { 'ent-1': { movingPlatform: { waypoints: routeReplaced } } },
+        });
+        render(<GameComponentInspector />);
+        expect(screen.getByText('Moving Platform')).toBeDefined();
+        expect(screen.queryByRole('status')).toBeNull();
+        expect(screen.queryByText(/adjusted/i)).toBeNull();
+      });
+    });
+
     it('shows nothing when nothing was adjusted', () => {
       setupStore({ primaryGameComponents: [platform(1000)] });
       render(<GameComponentInspector />);

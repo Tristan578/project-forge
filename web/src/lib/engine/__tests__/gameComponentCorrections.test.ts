@@ -20,8 +20,11 @@ import {
   withComponentAdjustments,
   componentAdjustmentsOf,
   pruneEntityAdjustments,
+  type CorrectionReason,
   type GameComponentFieldCorrection,
   type GameComponentAdjustments,
+  type PointsCorrection,
+  type ValueCorrection,
 } from '../gameComponentCorrections';
 import type { GameComponentData } from '@/stores/slices/types';
 
@@ -40,6 +43,10 @@ function report(name: string, props: Record<string, unknown>) {
 
 const route = (n: number): [number, number, number][] =>
   Array.from({ length: n }, (_, i) => [i, 0, 0] as [number, number, number]);
+
+/** As `route`, with the same count and different points — what an undo can put back. */
+const otherRoute = (n: number): [number, number, number][] =>
+  Array.from({ length: n }, (_, i) => [i, 5, 0] as [number, number, number]);
 
 describe('buildStoreComponentWithReport — what IS a correction', () => {
   it('reports a clamped speed with the number asked for and the number used', () => {
@@ -88,7 +95,7 @@ describe('buildStoreComponentWithReport — what IS a correction', () => {
     ]);
   });
 
-  it('reports a 300-point route as truncated to the engine cap, in counts', () => {
+  it('reports a 300-point route as truncated to the engine cap, in counts, carrying the route it kept', () => {
     const built = report('moving_platform', { waypoints: route(300) });
     expect(built.corrections).toEqual([
       {
@@ -98,10 +105,17 @@ describe('buildStoreComponentWithReport — what IS a correction', () => {
         applied: 64,
         reason: 'truncated',
         unit: 'points',
+        appliedPoints: route(64),
       },
     ]);
-    expect(built.component.type === 'movingPlatform' && built.component.movingPlatform.waypoints)
-      .toHaveLength(64);
+    if (built.component.type !== 'movingPlatform') throw new Error('expected a movingPlatform');
+    const kept = built.component.movingPlatform.waypoints;
+    expect(kept).toEqual(route(64));
+    // A copy, not the component's own arrays: an in-place edit of the stored
+    // route must not drag the record along with it and match itself.
+    const [cut] = built.corrections;
+    expect(cut.appliedPoints).not.toBe(kept);
+    expect(cut.appliedPoints?.[0]).not.toBe(kept[0]);
   });
 
   it('reports malformed points that were left out without reaching the cap as dropped', () => {
@@ -115,6 +129,7 @@ describe('buildStoreComponentWithReport — what IS a correction', () => {
         applied: 3,
         reason: 'dropped',
         unit: 'points',
+        appliedPoints: [[0, 0, 0], [4, 5, 6], [7, 8, 9]],
       },
     ]);
   });
@@ -132,11 +147,14 @@ describe('buildStoreComponentWithReport — what IS a correction', () => {
         applied: 64,
         reason: 'dropped',
         unit: 'points',
+        appliedPoints: route(64),
       },
     ]);
   });
 
   it('reports a route with fewer than two usable points as replaced by the default route', () => {
+    // The default route itself, which is what the platform now follows.
+    const defaultRoute = [[0, 0, 0], [0, 3, 0]];
     expect(report('moving_platform', { waypoints: [[1, 2, 3], 'junk'] }).corrections).toEqual([
       {
         component: 'movingPlatform',
@@ -145,6 +163,7 @@ describe('buildStoreComponentWithReport — what IS a correction', () => {
         applied: 2,
         reason: 'invalid-replaced',
         unit: 'points',
+        appliedPoints: defaultRoute,
       },
     ]);
     expect(report('moving_platform', { waypoints: 'not a list' }).corrections).toEqual([
@@ -155,6 +174,7 @@ describe('buildStoreComponentWithReport — what IS a correction', () => {
         applied: 2,
         reason: 'invalid-replaced',
         unit: 'points',
+        appliedPoints: defaultRoute,
       },
     ]);
   });
@@ -339,13 +359,23 @@ describe('normalizeGameComponentWithReport', () => {
 });
 
 describe('describeCorrection', () => {
-  const c = (overrides: Partial<GameComponentFieldCorrection>): GameComponentFieldCorrection => ({
+  const c = (overrides: Partial<ValueCorrection>): GameComponentFieldCorrection => ({
     component: 'movingPlatform',
     field: 'speed',
     requested: 99999,
     applied: 1000,
     reason: 'clamped',
     ...overrides,
+  });
+  /** A route record: counts in `requested` / `applied`, and the route it kept. */
+  const points = (requested: number, applied: number, reason: CorrectionReason): PointsCorrection => ({
+    component: 'movingPlatform',
+    field: 'waypoints',
+    requested,
+    applied,
+    reason,
+    unit: 'points',
+    appliedPoints: route(applied),
   });
 
   it('says what was asked for and what was used, in the author’s terms', () => {
@@ -357,12 +387,15 @@ describe('describeCorrection', () => {
   });
 
   it('describes list changes in points', () => {
-    expect(describeCorrection(c({ field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points' })))
+    expect(describeCorrection(points(300, 64, 'truncated')))
       .toBe('Moving Platform waypoints: you gave 300 points; only the first 64 points were kept, the most the engine supports.');
-    expect(describeCorrection(c({ field: 'waypoints', requested: 5, applied: 3, reason: 'dropped', unit: 'points' })))
+    expect(describeCorrection(points(5, 3, 'dropped')))
       .toBe('Moving Platform waypoints: you gave 5 points; 2 could not be used, so 3 points were kept.');
-    expect(describeCorrection(c({ field: 'waypoints', requested: 1, applied: 2, reason: 'invalid-replaced', unit: 'points' })))
+    expect(describeCorrection(points(1, 2, 'invalid-replaced')))
       .toBe('Moving Platform waypoints: you gave 1 point, but a route needs at least 2 usable points, so the default route (2 points) was used instead.');
+    // The route itself is carried for the marker check, never read out: the
+    // sentence speaks in counts whatever the points are.
+    expect(describeCorrection(points(300, 64, 'truncated'))).not.toMatch(/\[/);
   });
 
   it('quotes text, and describes what it did not echo', () => {
@@ -427,12 +460,54 @@ describe('correctionMatchesValue', () => {
     expect(correctionMatchesValue(clamp, '0.1')).toBe(false);
   });
 
-  it('matches a list-count correction by length', () => {
-    const cut: GameComponentFieldCorrection = {
-      component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
-    };
+  it('matches a route correction by the points it kept, not by how many there are', () => {
+    // The route is reported in counts, and a count-only match let a "truncated"
+    // marker survive an undo, a scene load or a collab sync that put back a
+    // DIFFERENT 64-point route: the marker kept saying "these are the first 64
+    // of the 300 you gave" about points nobody gave.
+    const [cut] = report('moving_platform', { waypoints: route(300) }).corrections;
     expect(correctionMatchesValue(cut, route(64))).toBe(true);
+
+    expect(correctionMatchesValue(cut, otherRoute(64))).toBe(false);
+    const nudged = route(64);
+    nudged[63] = [63, 0, 1];
+    expect(correctionMatchesValue(cut, nudged)).toBe(false);
+    // A hole where a point should be is not that point.
+    const holed = route(64);
+    delete (holed as unknown[])[5];
+    expect(correctionMatchesValue(cut, holed)).toBe(false);
+
     expect(correctionMatchesValue(cut, route(63))).toBe(false);
+    expect(correctionMatchesValue(cut, route(65))).toBe(false);
+    expect(correctionMatchesValue(cut, 'x')).toBe(false);
+  });
+
+  it('matches a route at f32 precision, which is how the engine echoes it', () => {
+    const fractional = Array.from({ length: 70 }, (_, i) => [i + 0.1, 0.2, 0.3]);
+    const [cut] = report('moving_platform', { waypoints: fractional }).corrections;
+    const echoed = fractional.slice(0, 64).map((point) => point.map(Math.fround));
+    // Non-vacuous: the echo really is a different double from the one applied.
+    expect(echoed[0][0]).not.toBe(0.1);
+    expect(correctionMatchesValue(cut, echoed)).toBe(true);
+    // And f32 precision is not a tolerance that swallows a real difference.
+    const moved = echoed.map((point) => [...point]);
+    moved[10][2] = 0.31;
+    expect(correctionMatchesValue(cut, moved)).toBe(false);
+  });
+
+  it('never matches a route correction that does not carry the route it describes', () => {
+    // Only a count is not enough to tell this route from another of the same
+    // length, so a record without the points cannot vouch for any value.
+    const countOnly = {
+      component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+    } as unknown as GameComponentFieldCorrection;
+    expect(correctionMatchesValue(countOnly, route(64))).toBe(false);
+    // Nor one whose count disagrees with the points it carries.
+    const inconsistent = {
+      component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 63, reason: 'truncated', unit: 'points',
+      appliedPoints: route(64),
+    } as unknown as GameComponentFieldCorrection;
+    expect(correctionMatchesValue(inconsistent, route(64))).toBe(false);
   });
 
   it('matches a vector elementwise', () => {
@@ -462,6 +537,39 @@ describe('readCorrections', () => {
     })).toEqual([good, { ...good, entityId: 'e1' }]);
   });
 
+  it('keeps a route record only when it carries the route its count describes', () => {
+    const cut = {
+      component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 2, reason: 'truncated', unit: 'points',
+      appliedPoints: [[0, 0, 0], [1, 0, 0]],
+    };
+    const holed: unknown[] = [[0, 0, 0], [1, 0, 0]];
+    delete holed[1];
+    expect(readCorrections({
+      corrections: [
+        cut,
+        // No route at all.
+        { ...cut, appliedPoints: undefined },
+        // A count the route does not have.
+        { ...cut, applied: 3 },
+        // A point that is not three numbers.
+        { ...cut, appliedPoints: [[0, 0, 0], [1, 0]] },
+        { ...cut, appliedPoints: [[0, 0, 0], [1, 'x', 0]] },
+        // A hole, which `every` would walk straight past.
+        { ...cut, appliedPoints: holed },
+        // A route on a record that is not about a route.
+        { ...good, appliedPoints: [[0, 0, 0], [1, 0, 0]] },
+        // A unit this build does not know.
+        { ...cut, unit: 'metres' },
+      ],
+    })).toEqual([cut]);
+  });
+
+  it('drops a vector with a hole in it', () => {
+    const holed: unknown[] = [0, 1, 0];
+    delete holed[1];
+    expect(readCorrections({ corrections: [{ ...good, applied: holed }] })).toEqual([]);
+  });
+
   it('reads nothing from a result without its own corrections key', () => {
     expect(readCorrections(undefined)).toEqual([]);
     expect(readCorrections('Added')).toEqual([]);
@@ -479,7 +587,13 @@ describe('the per-field marker map', () => {
     component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
   };
   const routeCut: GameComponentFieldCorrection = {
-    component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+    component: 'movingPlatform',
+    field: 'waypoints',
+    requested: 300,
+    applied: 64,
+    reason: 'truncated',
+    unit: 'points',
+    appliedPoints: route(64),
   };
 
   it('marks a field with the correction that set it', () => {
@@ -549,6 +663,18 @@ describe('the per-field marker map', () => {
     expect(currentAdjustments(markers, platform(1000, route(64)))).toEqual([speedClamp, routeCut]);
     expect(currentAdjustments(markers, platform(2, route(64)))).toEqual([routeCut]);
     expect(currentAdjustments(markers, platform(2, route(3)))).toEqual([]);
+    // Same number of points, different points: the route marker is false now.
+    expect(currentAdjustments(markers, platform(1000, otherRoute(64)))).toEqual([speedClamp]);
+  });
+
+  it('refuses a route correction the written route does not hold, however many points it has', () => {
+    expect(nextComponentAdjustments({
+      previous: undefined,
+      previousFields: undefined,
+      nextFields: gameComponentFields(platform(1000, otherRoute(64))),
+      corrections: [routeCut],
+      supplied: ['waypoints'],
+    })).toBeUndefined();
   });
 
   it('prunes the markers the engine’s latest report no longer bears out', () => {
@@ -561,5 +687,8 @@ describe('the per-field marker map', () => {
     expect(pruneEntityAdjustments(map, 'e1', [])).toEqual({});
     // Nothing changed: the same map comes back.
     expect(pruneEntityAdjustments(map, 'e1', [platform(1000, route(64))])).toBe(map);
+    // Undo put back a different 64-point route; the speed is still the capped one.
+    const swapped = pruneEntityAdjustments(map, 'e1', [platform(1000, otherRoute(64))]);
+    expect(componentAdjustmentsOf(swapped, 'e1', 'movingPlatform')).toEqual({ speed: speedClamp });
   });
 });

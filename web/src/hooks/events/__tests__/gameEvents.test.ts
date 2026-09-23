@@ -343,6 +343,48 @@ describe('handleGameEvent', () => {
         // Not rewritten at all: an unchanged map is not a state change.
         expect(Object.keys(written).sort()).toEqual(['allGameComponents', 'primaryGameComponents']);
       });
+
+      describe('a route marker', () => {
+        // The 64 points a 300-point request was cut to, at fractional
+        // coordinates so the engine's f32 echo is a different double.
+        const kept = Array.from({ length: 64 }, (_, i) => [i + 0.1, 0.2, 0.3]);
+        const routeCut = {
+          component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated',
+          unit: 'points', appliedPoints: kept,
+        } as const;
+        const withRouteMarker = () => {
+          vi.mocked(useEditorStore.getState).mockReturnValue({
+            ...actions,
+            primaryId: 'entity-1',
+            primaryGameComponents: [],
+            allGameComponents: {},
+            gameComponentAdjustments: { 'entity-1': { movingPlatform: { speed: speedClamp, waypoints: routeCut } } },
+          } as unknown as StoreState);
+        };
+        const emittedRoute = (waypoints: number[][]) => ({
+          entityId: 'entity-1',
+          components: [{ type: 'movingPlatform', speed: 1000, waypoints, pauseDuration: 0.5, loopMode: 'pingPong' }],
+        });
+
+        it('is dropped when the engine reports a different route with the same number of points', () => {
+          withRouteMarker();
+          // An undo, a scene load or a collab sync put back another 64-point
+          // route. The count alone cannot tell the two apart; the points can.
+          const other = kept.map(([x]) => [x, 9, 0]);
+          handleGameEvent('GAME_COMPONENT_CHANGED', emittedRoute(other), mockSetGet.set, mockSetGet.get);
+          expect(useEditorStore.setState).toHaveBeenCalledWith(expect.objectContaining({
+            gameComponentAdjustments: { 'entity-1': { movingPlatform: { speed: speedClamp } } },
+          }));
+        });
+
+        it('is kept while the engine echoes the route it describes, at f32 precision', () => {
+          withRouteMarker();
+          const echoed = kept.map((point) => point.map(Math.fround));
+          handleGameEvent('GAME_COMPONENT_CHANGED', emittedRoute(echoed), mockSetGet.set, mockSetGet.get);
+          const written = vi.mocked(useEditorStore.setState).mock.calls.at(-1)?.[0] as unknown as Record<string, unknown>;
+          expect(Object.keys(written).sort()).toEqual(['allGameComponents', 'primaryGameComponents']);
+        });
+      });
     });
   });
 

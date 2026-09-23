@@ -55,19 +55,16 @@ export type CorrectionValue =
   | readonly number[]
   | { readonly description: string };
 
-export interface GameComponentFieldCorrection {
+/** One waypoint as the store and the engine hold it. */
+export type CorrectionPoint = readonly [number, number, number];
+
+interface CorrectionCommon {
   /** The store discriminant, e.g. `movingPlatform`. */
   readonly component: GameComponentType;
   /** The store field name, e.g. `speed` or `waypoints`. */
   readonly field: string;
   readonly requested: CorrectionValue;
-  readonly applied: CorrectionValue;
   readonly reason: CorrectionReason;
-  /**
-   * Set when `requested` / `applied` are counts of list entries rather than
-   * the values themselves. Only `waypoints` uses it today.
-   */
-  readonly unit?: 'points';
   /**
    * The entity the value landed on. The wire layer never sets it — a build
    * knows nothing about entities — and the store keys markers by entity
@@ -76,6 +73,36 @@ export interface GameComponentFieldCorrection {
    */
   readonly entityId?: string;
 }
+
+/** A correction to one value: `applied` is the value the field now holds. */
+export interface ValueCorrection extends CorrectionCommon {
+  readonly applied: CorrectionValue;
+  readonly unit?: undefined;
+  readonly appliedPoints?: undefined;
+}
+
+/**
+ * A correction to a list of points, reported in counts: `requested` is how many
+ * entries the caller gave (or a description, for something that was not a list)
+ * and `applied` how many points the field now holds. Only `waypoints` uses it.
+ *
+ * A count cannot tell one route from another of the same length, so the record
+ * also carries `appliedPoints`, the route it applied. That is what lets a marker
+ * notice an undo or a scene load that put back a different route with as many
+ * points — see {@link correctionMatchesValue}. It is bounded by the engine's
+ * 64-point cap, the same cap the record reports, and the author never reads it:
+ * {@link describeCorrection} speaks in counts.
+ *
+ * Required, not optional, so a route record without its route is a compile error
+ * in the one place that builds them.
+ */
+export interface PointsCorrection extends CorrectionCommon {
+  readonly applied: number;
+  readonly unit: 'points';
+  readonly appliedPoints: readonly CorrectionPoint[];
+}
+
+export type GameComponentFieldCorrection = ValueCorrection | PointsCorrection;
 
 /**
  * What a write did to the caller's request: the corrections, and which fields
@@ -261,32 +288,53 @@ export function withCorrectionSummary(
 // ---------------------------------------------------------------------------
 
 /**
+ * Whether `actual` is a list of exactly these numbers, each compared at f32
+ * precision. Indexed, so a hole reads as `undefined` and fails rather than being
+ * skipped the way `every` would skip it.
+ */
+function sameNumbersAtF32(expected: readonly number[], actual: unknown): boolean {
+  if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+  for (let i = 0; i < expected.length; i += 1) {
+    const value: unknown = actual[i];
+    if (typeof value !== 'number' || Math.fround(value) !== Math.fround(expected[i])) return false;
+  }
+  return true;
+}
+
+/**
  * Whether `current` is still the value the correction applied.
  *
- * A marker is only true while the field holds the number it describes. Undo, a
+ * A marker is only true while the field holds the value it describes. Undo, a
  * scene load and a play session can all move a field without going through the
  * store actions that clear markers, and a marker left on a value it no longer
  * describes is exactly the false report this whole mechanism must not make.
  *
  * Numbers compare at f32 precision because the inspector reads the engine's
  * echo, which has been through an `f32` and back.
+ *
+ * A route compares point by point against `appliedPoints`, never by count
+ * alone: an undo can put back a different 64-point route, and "only the first
+ * 64 of the 300 you gave were kept" is false about points nobody gave. A route
+ * record whose points are missing, or disagree with its own count, matches
+ * nothing — it cannot vouch for any value.
  */
 export function correctionMatchesValue(c: GameComponentFieldCorrection, current: unknown): boolean {
-  const applied = c.applied;
   if (c.unit === 'points') {
-    return Array.isArray(current) && typeof applied === 'number' && current.length === applied;
-  }
-  if (typeof applied === 'number') {
-    return typeof current === 'number' && Math.fround(current) === Math.fround(applied);
-  }
-  if (Array.isArray(applied)) {
-    if (!Array.isArray(current) || current.length !== applied.length) return false;
-    for (let i = 0; i < applied.length; i += 1) {
-      const value: unknown = current[i];
-      if (typeof value !== 'number' || Math.fround(value) !== Math.fround(applied[i])) return false;
+    // Checked at runtime as well as by type: a record can arrive from a cast.
+    const route: unknown = c.appliedPoints;
+    if (!Array.isArray(route) || route.length !== c.applied) return false;
+    if (!Array.isArray(current) || current.length !== route.length) return false;
+    for (let i = 0; i < route.length; i += 1) {
+      const point: unknown = route[i];
+      if (!Array.isArray(point) || !sameNumbersAtF32(point as number[], current[i])) return false;
     }
     return true;
   }
+  const applied = c.applied;
+  if (typeof applied === 'number') {
+    return typeof current === 'number' && Math.fround(current) === Math.fround(applied);
+  }
+  if (Array.isArray(applied)) return sameNumbersAtF32(applied, current);
   if (applied === null || typeof applied !== 'object') return current === applied;
   // A `description` is never what the wire layer APPLIES — only requested
   // values are described — so there is nothing it could still match.
@@ -301,6 +349,18 @@ const REASONS: ReadonlySet<string> = new Set<CorrectionReason>([
   'clamped', 'rounded', 'truncated', 'dropped', 'invalid-replaced',
 ]);
 
+/**
+ * Whether `value` is an array of `length` numbers with no holes. Indexed rather
+ * than `every`, which skips a hole without ever calling its callback.
+ */
+function isNumberList(value: unknown, length?: number): value is readonly number[] {
+  if (!Array.isArray(value) || (length !== undefined && value.length !== length)) return false;
+  for (let i = 0; i < value.length; i += 1) {
+    if (typeof value[i] !== 'number') return false;
+  }
+  return true;
+}
+
 function isCorrectionValue(value: unknown): value is CorrectionValue {
   if (value === null) return true;
   switch (typeof value) {
@@ -309,28 +369,39 @@ function isCorrectionValue(value: unknown): value is CorrectionValue {
     case 'string':
       return true;
     case 'object':
-      if (Array.isArray(value)) return value.every((n) => typeof n === 'number');
+      if (Array.isArray(value)) return isNumberList(value);
       return typeof (value as { description?: unknown }).description === 'string';
     default:
       return false;
   }
 }
 
+/** Whether `value` is a list of points, each exactly three numbers. */
+function isRoute(value: unknown): value is readonly CorrectionPoint[] {
+  if (!Array.isArray(value)) return false;
+  for (let i = 0; i < value.length; i += 1) {
+    if (!isNumberList(value[i], 3)) return false;
+  }
+  return true;
+}
+
 /** Whether `value` is a well-formed correction record. */
 export function isGameComponentFieldCorrection(value: unknown): value is GameComponentFieldCorrection {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
-  return (
-    typeof c.component === 'string'
+  const common = typeof c.component === 'string'
     && Object.hasOwn(COMPONENT_LABELS, c.component)
     && typeof c.field === 'string'
     && typeof c.reason === 'string'
     && REASONS.has(c.reason)
     && isCorrectionValue(c.requested)
-    && isCorrectionValue(c.applied)
-    && (c.unit === undefined || c.unit === 'points')
-    && (c.entityId === undefined || typeof c.entityId === 'string')
-  );
+    && (c.entityId === undefined || typeof c.entityId === 'string');
+  if (!common) return false;
+  if (c.unit === undefined) return c.appliedPoints === undefined && isCorrectionValue(c.applied);
+  // A route record is only well formed with the route its count describes.
+  return c.unit === 'points'
+    && isRoute(c.appliedPoints)
+    && c.applied === c.appliedPoints.length;
 }
 
 /**

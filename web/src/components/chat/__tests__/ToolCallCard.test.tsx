@@ -101,6 +101,7 @@ describe('ToolCallCard', () => {
     };
     const cut = {
       component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+      appliedPoints: Array.from({ length: 64 }, (_, i) => [i, 0, 0]),
     };
     const card = (result: unknown, status: 'success' | 'undone' | 'error' = 'success') => render(
       <ToolCallCard

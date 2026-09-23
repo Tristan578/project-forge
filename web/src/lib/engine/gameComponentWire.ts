@@ -721,13 +721,31 @@ function fieldReader<T extends object>(
     requested: CorrectionValue,
     applied: CorrectionValue,
     reason: CorrectionReason,
-    unit?: 'points',
   ): void => {
-    sink?.corrections.push(
-      unit === undefined
-        ? { component, field, requested, applied, reason }
-        : { component, field, requested, applied, reason, unit },
-    );
+    sink?.corrections.push({ component, field, requested, applied, reason });
+  };
+  /**
+   * A route correction, in counts, carrying the route it applied so a marker
+   * can tell it apart from another route of the same length. The points are
+   * copied: the record must not share arrays with the component it describes,
+   * or an in-place edit of the stored route would move the record with it and
+   * the marker would go on matching itself.
+   */
+  const recordRoute = (
+    field: Field,
+    requested: CorrectionValue,
+    route: readonly (readonly [number, number, number])[],
+    reason: CorrectionReason,
+  ): void => {
+    sink?.corrections.push({
+      component,
+      field,
+      requested,
+      applied: route.length,
+      reason,
+      unit: 'points',
+      appliedPoints: route.map(([x, y, z]) => [x, y, z] as const),
+    });
   };
   /** The shared shape of every scalar field: coerce, then compare. */
   const scalar = <V extends CorrectionValue>(
@@ -769,7 +787,9 @@ function fieldReader<T extends object>(
     /**
      * Counts, not points: "you gave 300, 64 were kept" is the report an author
      * can act on, and echoing 300 coordinate triples back is the raw diff the
-     * issue asks us not to show.
+     * issue asks us not to show. The caller's list is never echoed; the route
+     * that was APPLIED rides along as `appliedPoints`, which the author never
+     * reads and a marker needs (see `recordRoute`).
      */
     waypoints: (
       field: Field,
@@ -781,11 +801,11 @@ function fieldReader<T extends object>(
       if (supplied) {
         if (parsed === null) {
           const requested = Array.isArray(v) ? v.length : summarizeValue(v);
-          record(field, requested, fallback.length, 'invalid-replaced', 'points');
+          recordRoute(field, requested, fallback, 'invalid-replaced');
         } else if (parsed.truncated) {
-          record(field, parsed.given, parsed.points.length, 'truncated', 'points');
+          recordRoute(field, parsed.given, parsed.points, 'truncated');
         } else if (parsed.points.length !== parsed.given) {
-          record(field, parsed.given, parsed.points.length, 'dropped', 'points');
+          recordRoute(field, parsed.given, parsed.points, 'dropped');
         }
       }
       return parsed?.points ?? fallback;
