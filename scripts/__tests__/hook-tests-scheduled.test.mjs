@@ -46,7 +46,10 @@ test('runner rejects empty suites, propagates failures, and runs later suites', 
 });
 
 test('scheduled failures create or update one issue and propagate API errors', () => {
-  assert.match(schedule, /if: failure\(\) && github.event_name == 'schedule'/);
+  const reportingStep = schedule.slice(schedule.indexOf('      - name: Report failure')).split(/\n      - /)[0];
+  const condition = /^        if: failure\(\) && github.event_name == 'schedule'$/m;
+  assert.match(reportingStep, condition);
+  assert.doesNotMatch(reportingStep.replace('        if:', '        # if:'), condition);
   const script = runBlock(schedule, 'Report failure');
   for (const existing of ['', '123']) {
     const mock = 'gh() { if [ "$2" = list ]; then printf "%s" "' + existing + '"; else printf "GH_CALL:"; printf "<%s>" "$@"; fi; }\n';
