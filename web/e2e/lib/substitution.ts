@@ -115,6 +115,8 @@ export interface SubstitutionReport {
   testCount: number;
   /** Distinct spec files holding at least one substitution-annotated test, sorted. */
   substitutedFiles: string[];
+  /** How many substitution-annotated tests each of `substitutedFiles` holds. */
+  substitutedTestsByFile: Record<string, number>;
   substitutedTestCount: number;
   problems: SubstitutionProblem[];
 }
@@ -236,11 +238,11 @@ export function checkSubstitutionNaming(listing: Listing): SubstitutionReport {
     });
   }
 
-  const substitutedFiles = new Set<string>();
+  const substitutedTestsByFile: Record<string, number> = {};
   let substitutedTestCount = 0;
   for (const test of tests) {
     if (test.annotations.some((a) => a.type === SUBSTITUTION_ANNOTATION_TYPE)) {
-      substitutedFiles.add(test.file);
+      substitutedTestsByFile[test.file] = (substitutedTestsByFile[test.file] ?? 0) + 1;
       substitutedTestCount += 1;
     }
     for (const reason of checkTest(test)) {
@@ -251,7 +253,8 @@ export function checkSubstitutionNaming(listing: Listing): SubstitutionReport {
   return {
     specFiles: [...new Set(tests.map((t) => t.file))].sort(),
     testCount: tests.length,
-    substitutedFiles: [...substitutedFiles].sort(),
+    substitutedFiles: Object.keys(substitutedTestsByFile).sort(),
+    substitutedTestsByFile,
     substitutedTestCount,
     problems,
   };
