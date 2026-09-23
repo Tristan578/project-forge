@@ -1,10 +1,34 @@
+import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures/editor.fixture';
-import { injectStore, readStore, isStrictMode } from '../helpers/store-injection';
+import { injectStore, readStore } from '../helpers/store-injection';
 import {
   E2E_TIMEOUT_SHORT_MS,
   E2E_TIMEOUT_ELEMENT_MS,
   E2E_TIMEOUT_LOAD_MS,
 } from '../constants';
+
+/**
+ * Why an injection can come back false: `injectStore` returns false (outside
+ * E2E_STRICT_STORES) when the store is not on window, which only happens in a
+ * build without the E2E hooks. Every injected subject below is asserted
+ * unconditionally (#10160), so that case fails here instead of passing.
+ */
+const HOOKS_BUILD_REQUIRED =
+  'is not on window: run against `next dev` or a NEXT_PUBLIC_E2E_HOOKS=true build';
+
+/** One row of the Scene hierarchy tree, by exact entity name (SceneNode sets aria-label={node.name}). */
+function hierarchyRow(page: Page, name: string) {
+  return page
+    .getByRole('tree', { name: 'Scene hierarchy' })
+    .getByRole('treeitem', { name, exact: true });
+}
+
+/** Shape of the editor store this file reads through `page.evaluate`. */
+type EditorStoreHandle = {
+  __EDITOR_STORE: {
+    getState: () => { sceneGraph: { nodes: Record<string, { name: string }> } };
+  };
+};
 
 /**
  * Game Creation E2E Proof — exercises the full user journey through the editor.
@@ -17,8 +41,9 @@ import {
  * 5. Play mode starts and stops correctly
  * 6. Export dialog opens and renders export options
  *
- * All tests use loadPage() (not load()) so no WASM build is required.
- * WASM-dependent assertions are guarded with isStrictMode.
+ * All tests use loadPage() (not load()) so no WASM build is required, except
+ * the ones tagged @engine-ui: they need the real engine and run in
+ * test-e2e-engine-smoke, never in the @ui job.
  * Store state is manipulated via injectStore / window.__EDITOR_STORE.setState.
  */
 test.describe('Game Creation Flow @ui @dev', () => {
@@ -84,58 +109,45 @@ test.describe('Game Creation Flow @ui @dev', () => {
     await expect(hierarchyPanel).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
-  test('scene graph contains at least a Camera node', async ({ page, editor }) => {
-    await editor.waitForEditorStore();
+  test('scene graph contains at least a Camera node @engine-ui', async ({ page, editor }) => {
+    // The Camera is spawned by the engine's startup scene ("Main Camera",
+    // engine/src/core/scene.rs) and reaches the store only through
+    // SCENE_GRAPH_UPDATE. The @ui job has no WASM and launches --disable-gpu,
+    // so this runs in test-e2e-engine-smoke. Nothing is injected here: every
+    // node counted below was created by the engine.
+    await editor.load();
+    await editor.waitForEntityCount(1);
 
-    // The scene always starts with a Camera entity — confirm the graph is non-empty
-    const nodeCount = await readStore<number>(
-      page,
-      '__EDITOR_STORE',
-      `Object.keys(window.__EDITOR_STORE?.getState?.()?.sceneGraph?.nodes ?? {}).length`,
+    const nodeNames = await page.evaluate(() =>
+      Object.values(
+        (window as unknown as EditorStoreHandle).__EDITOR_STORE.getState().sceneGraph.nodes,
+      ).map((node) => node.name),
     );
-
-    if (nodeCount !== null || isStrictMode) {
-      // In strict mode the store must exist and have at least one node (the camera)
-      if (isStrictMode) {
-        expect(nodeCount).toBeGreaterThanOrEqual(1);
-      }
-    }
-
-    // Regardless of store access, the hierarchy panel should render some content
-    const hierarchyContent = page.locator('.dv-dockview').first();
-    await expect(hierarchyContent).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    expect(nodeNames.length).toBeGreaterThanOrEqual(1);
+    expect(nodeNames).toContainEqual(expect.stringMatching(/Camera/));
   });
 
   test('Camera text appears in the scene hierarchy', async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
-    // Inject a Camera node so CI (which skips WASM) can verify hierarchy rendering
+    // Inject a Camera node so CI (which skips WASM) can verify hierarchy rendering.
+    // The node must have the store's SceneNode shape (sceneGraphSlice.addNode):
+    // SceneNode reads `children.length`, and the old `{ id, childIds }` payload
+    // crashed the editor to its error page. No `typeof` guard: a missing action
+    // must throw here, not skip silently.
     const injected = await injectStore(page, '__EDITOR_STORE', `
-      const store = window.__EDITOR_STORE;
-      const state = store?.getState?.();
-      // Only inject if there's no Camera node yet (prevents duplicate if WASM ran)
-      const nodes = state?.sceneGraph?.nodes ?? {};
-      const hasCamera = Object.values(nodes).some(n => n.name === 'Camera');
-      if (!hasCamera && typeof state?.addNode === 'function') {
-        state.addNode({
-          id: 'e2e-camera-node',
-          name: 'Camera',
-          type: 'Camera',
-          parentId: null,
-          visible: true,
-          locked: false,
-          childIds: [],
-        });
-      }
+      window.__EDITOR_STORE.getState().addNode({
+        entityId: 'e2e-camera-node',
+        name: 'Camera',
+        parentId: null,
+        children: [],
+        components: [],
+        visible: true,
+      });
     `);
+    expect(injected, `__EDITOR_STORE ${HOOKS_BUILD_REQUIRED}`).toBe(true);
 
-    if (injected || isStrictMode) {
-      const cameraNode = page.getByText(/Camera/i, { exact: false });
-      const count = await cameraNode.count();
-      if (count > 0) {
-        await expect(cameraNode.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
-      }
-    }
+    await expect(hierarchyRow(page, 'Camera')).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   // ---------------------------------------------------------------------------
@@ -152,40 +164,30 @@ test.describe('Game Creation Flow @ui @dev', () => {
   test('AI-created entity appears in scene hierarchy via store injection', async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
-    // Simulate the AI spawning a game entity
+    // Simulate the AI spawning a game entity (SceneNode shape, as above)
     const injected = await injectStore(page, '__EDITOR_STORE', `
-      const store = window.__EDITOR_STORE;
-      const addNode = store?.getState?.()?.addNode;
-      if (typeof addNode === 'function') {
-        addNode({
-          id: 'ai-player-cube',
-          name: 'PlayerCube',
-          type: 'Cube',
-          parentId: null,
-          visible: true,
-          locked: false,
-          childIds: [],
-        });
-      }
+      window.__EDITOR_STORE.getState().addNode({
+        entityId: 'ai-player-cube',
+        name: 'PlayerCube',
+        parentId: null,
+        children: [],
+        components: ['Mesh3d'],
+        visible: true,
+      });
     `);
+    expect(injected, `__EDITOR_STORE ${HOOKS_BUILD_REQUIRED}`).toBe(true);
 
-    if (injected || isStrictMode) {
-      const entityNode = page.getByText(/PlayerCube/i, { exact: false });
-      const count = await entityNode.count();
-      if (count > 0) {
-        await expect(entityNode.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
-      }
-    }
+    await expect(hierarchyRow(page, 'PlayerCube')).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('tool call card is visible in chat after AI spawns an entity', async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
+    // chatStore has no addMessage action (the old call here was a silent no-op
+    // and the chat stayed empty), so append through the store's own setState.
     const injected = await injectStore(page, '__CHAT_STORE', `
-      const store = window.__CHAT_STORE ?? window.__EDITOR_STORE;
-      const addMessage = store?.getState?.()?.addMessage;
-      if (typeof addMessage === 'function') {
-        addMessage({
+      window.__CHAT_STORE.setState((s) => ({
+        messages: [...s.messages, {
           id: 'e2e-spawn-msg',
           role: 'assistant',
           content: 'I created a player cube for your game.',
@@ -197,9 +199,10 @@ test.describe('Game Creation Flow @ui @dev', () => {
             undoable: true,
           }],
           timestamp: Date.now(),
-        });
-      }
+        }],
+      }));
     `);
+    expect(injected, `__CHAT_STORE ${HOOKS_BUILD_REQUIRED}`).toBe(true);
 
     // Open chat to reveal messages
     await page.keyboard.press('Control+k');
@@ -207,68 +210,55 @@ test.describe('Game Creation Flow @ui @dev', () => {
       page.locator('span').filter({ hasText: /AI Chat/i }).first()
     ).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
-    if (injected || isStrictMode) {
-      const toolLabel = page.getByText('Spawn Entity', { exact: false });
-      const count = await toolLabel.count();
-      if (count > 0) {
-        await expect(toolLabel.first()).toBeVisible();
-      }
-    }
+    // ToolCallCard's label for spawn_entity, inside the chat transcript.
+    await expect(
+      page.locator('[aria-label="Chat messages"]').getByText('Spawn Entity', { exact: true }),
+    ).toBeVisible();
   });
 
   // ---------------------------------------------------------------------------
   // 4. Inspector shows entity properties
   // ---------------------------------------------------------------------------
   test('selecting an entity via store shows inspector panel', async ({ page, editor }) => {
-    const strict = isStrictMode;
     await editor.waitForEditorStore();
 
-    // Add an entity to the graph and select it
+    // Add an entity to the graph (SceneNode shape, as above)
+    const added = await injectStore(page, '__EDITOR_STORE', `
+      window.__EDITOR_STORE.getState().addNode({
+        entityId: 'e2e-inspect-entity',
+        name: 'InspectTarget',
+        parentId: null,
+        children: [],
+        components: ['Mesh3d'],
+        visible: true,
+      });
+    `);
+    expect(added, `__EDITOR_STORE ${HOOKS_BUILD_REQUIRED}`).toBe(true);
+
+    // Select the entity via store — mirrors what clicking in the hierarchy does.
+    // selectEntity takes a mode; without one its switch matches nothing and
+    // the selection never changes. The engine answers a selection with
+    // TRANSFORM_CHANGED (transformEvents.ts -> setPrimaryTransform), and this
+    // job has no engine, so the test delivers that event's payload itself —
+    // the Inspector renders no Transform section without it.
     await injectStore(page, '__EDITOR_STORE', `
-      const store = window.__EDITOR_STORE;
-      const state = store?.getState?.();
-      if (typeof state?.addNode === 'function') {
-        state.addNode({
-          id: 'e2e-inspect-entity',
-          name: 'InspectTarget',
-          type: 'Cube',
-          parentId: null,
-          visible: true,
-          locked: false,
-          childIds: [],
-        });
-      }
+      const state = window.__EDITOR_STORE.getState();
+      state.selectEntity('e2e-inspect-entity', 'replace');
+      state.setPrimaryTransform({
+        entityId: 'e2e-inspect-entity',
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      });
     `);
 
-    // Select the entity via store — mirrors what clicking in the hierarchy does
-    await injectStore(page, '__EDITOR_STORE', `
-      const store = window.__EDITOR_STORE;
-      const state = store?.getState?.();
-      if (typeof state?.selectEntity === 'function') {
-        state.selectEntity('e2e-inspect-entity');
-      } else if (typeof state?.setSelectedIds === 'function') {
-        state.setSelectedIds(new Set(['e2e-inspect-entity']));
-      }
-    `);
-
-    // The dockview layout must be present for the inspector to render.
-    // In CI without WASM, dockview may not fully initialize — skip gracefully.
-    const dockview = page.locator('.dv-dockview').first();
-    const dockviewVisible = await dockview.isVisible().catch(() => false);
-
-    if (strict && !dockviewVisible) {
-      // CI: dockview didn't render — skip assertion, this is WASM-dependent
-      return;
-    }
-
-    if (dockviewVisible) {
-      // When an entity is selected the inspector should show a Transform section
-      const transformSection = page.getByText('Transform', { exact: false });
-      const transformCount = await transformSection.count();
-      if (transformCount > 0) {
-        await expect(transformSection.first()).toBeVisible();
-      }
-    }
+    const inspector = page.getByRole('region', { name: 'Inspector' });
+    await expect(inspector.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(
+      'InspectTarget',
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
+    );
+    // Rendered only inside the Transform section's header.
+    await expect(inspector.getByRole('button', { name: 'Copy transform', exact: true })).toBeVisible();
   });
 
   // ---------------------------------------------------------------------------
@@ -336,9 +326,7 @@ test.describe('Game Creation Flow @ui @dev', () => {
       `window.__EDITOR_STORE?.getState?.()?.engineMode ?? null`,
     );
 
-    if (mode !== null) {
-      expect(mode).toBe('play');
-    }
+    expect(mode).toBe('play');
 
     // Restore to edit for subsequent tests
     await page.evaluate(() => {
@@ -351,63 +339,32 @@ test.describe('Game Creation Flow @ui @dev', () => {
   // 6. Export dialog opens
   // ---------------------------------------------------------------------------
   test('export button is present in the toolbar', async ({ page }) => {
-    const exportBtn = page
-      .locator('button[title*="Export"], button[aria-label*="Export"]')
-      .first();
-
-    // The toolbar should render; if export button exists, verify it is visible
-    const count = await exportBtn.count();
-    if (count > 0) {
-      await expect(exportBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
-    } else {
-      // Fallback: button accessible via text
-      const textBtn = page.getByRole('button', { name: /export/i }).first();
-      const textCount = await textBtn.count();
-      // At minimum the dockview root must be present
-      await expect(page.locator('.dv-dockview').first()).toBeVisible();
-      if (textCount > 0) {
-        await expect(textBtn).toBeVisible();
-      }
-    }
+    // SceneToolbar's Export button: an icon with aria-label="Export game" and no text.
+    const exportBtn = page.getByRole('button', { name: 'Export game', exact: true });
+    await expect(exportBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    await expect(exportBtn).toBeEnabled();
   });
 
-  test('export dialog opens and renders options when triggered via store', async ({ page, editor }) => {
-    await editor.waitForEditorStore();
+  test('export dialog opens from the toolbar and renders options', async ({ page }) => {
+    // No store action opens this dialog: SceneToolbar holds it in local state,
+    // and the openExportDialog / setExportDialogOpen calls this test used to
+    // make never existed. Drive the real toolbar button instead.
+    const exportBtn = page.getByRole('button', { name: 'Export game', exact: true });
+    await expect(exportBtn).toBeEnabled({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    await exportBtn.click();
 
-    // Simulate opening the export dialog through the store
-    const injected = await injectStore(page, '__EDITOR_STORE', `
-      const store = window.__EDITOR_STORE;
-      const state = store?.getState?.();
-      if (typeof state?.openExportDialog === 'function') {
-        state.openExportDialog();
-      } else if (typeof state?.setExportDialogOpen === 'function') {
-        state.setExportDialogOpen(true);
-      }
-    `);
+    const exportDialog = page.getByRole('dialog', { name: 'Export Game' });
+    await expect(exportDialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
-    // If we could trigger via store, verify the dialog is present
-    if (injected) {
-      const exportDialog = page.locator('[data-testid="export-dialog"]');
-      const dialogCount = await exportDialog.count();
-      if (dialogCount > 0) {
-        await expect(exportDialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    // Export options (format selection) must be present
+    await expect(exportDialog.getByRole('radio', { name: 'Single HTML File' })).toBeVisible();
+    await expect(exportDialog.getByRole('radio', { name: /ZIP Bundle/ })).toBeVisible();
 
-        // Export options (format selection) must be present
-        const formatControl = page.locator('input[type="radio"], select').first();
-        const controlCount = await formatControl.count();
-        expect(controlCount).toBeGreaterThan(0);
+    // Close the dialog
+    await exportDialog.getByRole('button', { name: 'Close export dialog', exact: true }).click();
+    await expect(exportDialog).toBeHidden({ timeout: E2E_TIMEOUT_SHORT_MS });
 
-        // Close the dialog
-        const closeBtn = page.locator('button').filter({ hasText: /×|close/i }).first();
-        const closeCount = await closeBtn.count();
-        if (closeCount > 0) {
-          await closeBtn.click();
-          await expect(exportDialog).not.toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
-        }
-      }
-    }
-
-    // Regardless of store injection success, the main layout must still be intact
+    // The main layout must still be intact
     await expect(page.locator('.dv-dockview').first()).toBeVisible();
   });
 });
