@@ -20,6 +20,11 @@ import {
  * All tests use loadPage() (not load()) so no WASM build is required.
  * WASM-dependent assertions are guarded with isStrictMode.
  * Store state is manipulated via injectStore / window.__EDITOR_STORE.setState.
+ *
+ * Every test that injects store state in place of the component it exercises
+ * declares that substitution (#10158, e2e/lib/substitution.ts): an annotation
+ * `{ type: 'substitution', description }` plus a `[substituted: <component>]`
+ * title marker, checked by scripts/check-substitution-naming.ts.
  */
 test.describe('Game Creation Flow @ui @dev', () => {
   test.beforeEach(async ({ editor }) => {
@@ -106,7 +111,9 @@ test.describe('Game Creation Flow @ui @dev', () => {
     await expect(hierarchyContent).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
-  test('Camera text appears in the scene hierarchy', async ({ page, editor }) => {
+  test('Camera text appears in the scene hierarchy [substituted: WASM engine]', {
+    annotation: { type: 'substitution', description: 'WASM engine' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     // Inject a Camera node so CI (which skips WASM) can verify hierarchy rendering
@@ -149,7 +156,9 @@ test.describe('Game Creation Flow @ui @dev', () => {
     await expect(chatInput).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
-  test('AI-created entity appears in scene hierarchy via store injection', async ({ page, editor }) => {
+  test('AI-created entity appears in scene hierarchy via store injection [substituted: AI generation]', {
+    annotation: { type: 'substitution', description: 'AI generation' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     // Simulate the AI spawning a game entity
@@ -178,7 +187,9 @@ test.describe('Game Creation Flow @ui @dev', () => {
     }
   });
 
-  test('tool call card is visible in chat after AI spawns an entity', async ({ page, editor }) => {
+  test('tool call card is visible in chat after AI spawns an entity [substituted: AI generation]', {
+    annotation: { type: 'substitution', description: 'AI generation' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     const injected = await injectStore(page, '__CHAT_STORE', `
@@ -219,7 +230,12 @@ test.describe('Game Creation Flow @ui @dev', () => {
   // ---------------------------------------------------------------------------
   // 4. Inspector shows entity properties
   // ---------------------------------------------------------------------------
-  test('selecting an entity via store shows inspector panel', async ({ page, editor }) => {
+  test('selecting an entity via store shows inspector panel [substituted: WASM engine] [substituted: hierarchy click]', {
+    annotation: [
+      { type: 'substitution', description: 'WASM engine' },
+      { type: 'substitution', description: 'hierarchy click' },
+    ],
+  }, async ({ page, editor }) => {
     const strict = isStrictMode;
     await editor.waitForEditorStore();
 
@@ -285,7 +301,9 @@ test.describe('Game Creation Flow @ui @dev', () => {
     await expect(stopBtn).toBeDisabled();
   });
 
-  test('injecting play mode into store enables pause and stop buttons', async ({ page }) => {
+  test('injecting play mode into store enables pause and stop buttons [substituted: WASM engine]', {
+    annotation: { type: 'substitution', description: 'WASM engine' },
+  }, async ({ page }) => {
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__EDITOR_STORE?.setState({ engineMode: 'play' });
@@ -296,7 +314,9 @@ test.describe('Game Creation Flow @ui @dev', () => {
     await expect(page.locator('button[aria-label="Stop"]')).toBeEnabled();
   });
 
-  test('injecting play mode shows Playing indicator', async ({ page }) => {
+  test('injecting play mode shows Playing indicator [substituted: WASM engine]', {
+    annotation: { type: 'substitution', description: 'WASM engine' },
+  }, async ({ page }) => {
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__EDITOR_STORE?.setState({ engineMode: 'play' });
@@ -305,7 +325,9 @@ test.describe('Game Creation Flow @ui @dev', () => {
     await expect(page.getByText('Playing').first()).toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
   });
 
-  test('reverting to edit mode from play restores correct button states', async ({ page }) => {
+  test('reverting to edit mode from play restores correct button states [substituted: WASM engine]', {
+    annotation: { type: 'substitution', description: 'WASM engine' },
+  }, async ({ page }) => {
     // Set play, then revert to edit
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -322,7 +344,9 @@ test.describe('Game Creation Flow @ui @dev', () => {
     await expect(page.locator('button[aria-label="Stop"]')).toBeDisabled();
   });
 
-  test('engineMode in store reflects play state after injection', async ({ page, editor }) => {
+  test('engineMode in store reflects play state after injection [substituted: WASM engine]', {
+    annotation: { type: 'substitution', description: 'WASM engine' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     await page.evaluate(() => {
@@ -371,7 +395,9 @@ test.describe('Game Creation Flow @ui @dev', () => {
     }
   });
 
-  test('export dialog opens and renders options when triggered via store', async ({ page, editor }) => {
+  test('export dialog opens and renders options when triggered via store [substituted: Export button]', {
+    annotation: { type: 'substitution', description: 'Export button' },
+  }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
     // Simulate opening the export dialog through the store
