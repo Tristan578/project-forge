@@ -12,6 +12,7 @@ export { Select } from './primitives/Select';
 export { Textarea } from './primitives/Textarea';
 export { Switch } from './primitives/Switch';
 export { Checkbox } from './primitives/Checkbox';
+export { Radio } from './primitives/Radio';
 export { Separator } from './primitives/Separator';
 export { Tooltip } from './primitives/Tooltip';
 export { Dialog } from './primitives/Dialog';
