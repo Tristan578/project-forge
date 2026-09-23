@@ -9,9 +9,11 @@ import {
 /**
  * #8602 (F10): curated per-PR @engine-smoke journey.
  *
- * One of the two curated specs run by the test-e2e-engine-smoke CI job
- * (playwright.engine.config.ts; the other is `pipeline-live-engine.spec.ts`,
- * which drives the game-creation pipeline through the same engine). This job is
+ * One of the curated @engine-smoke specs run by the test-e2e-engine-smoke CI job
+ * (playwright.engine.config.ts; the others are `pipeline-live-engine.spec.ts`,
+ * which drives the game-creation pipeline through the same engine, and
+ * `e2e/engine/referenceGames.spec.ts`, which loads the versioned reference
+ * games). This job is
  * the only per-PR job that actually boots the
  * WASM engine, under ANGLE/SwiftShader software WebGL2 (NOT --disable-gpu, which
  * leaves wgpu with no GL context and hangs `init_engine`).

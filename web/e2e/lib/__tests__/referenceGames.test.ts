@@ -123,7 +123,7 @@ describe('the expected-state checker fails for the reasons it exists', () => {
     const problems = expectedStateProblems(bumped, expected);
 
     expect(problems).toContain(
-      `version: fixture is ${game.version + 1} but its expected-state record is for ${game.version}`,
+      `version: fixture is ${game.version + 1} but its expected-state record is for ${expected.version}`,
     );
   });
 

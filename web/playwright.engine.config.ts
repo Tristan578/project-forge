@@ -57,6 +57,10 @@ export default defineConfig({
   // (`dispatchCommand` returns void, so the fake-bridge integration suite can
   // never see one). Its describe block raises the cap to
   // E2E_TIMEOUT_PIPELINE_LIVE_MS.
+  // e2e/engine/referenceGames.spec.ts (#10159) is the third: it builds each
+  // versioned reference game through real engine commands and checks the
+  // engine's own export and scene graph against the fixture's expected-state
+  // record before pressing Play. It runs under the default cap.
   // The @engine-ui set (#9586) lives across nine editor spec files, so file
   // matching can no longer be the primary filter -- the TAG is. Every test
   // selected here still has to carry @engine-smoke or @engine-ui, so an
