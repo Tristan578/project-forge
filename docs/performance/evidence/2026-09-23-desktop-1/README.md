@@ -5,8 +5,9 @@ Real-hardware evidence for [#9904](https://github.com/Tristan578/project-forge/i
 `performance.FR-3.OP-01`. Captured with `web/e2e/perf/fixtureCapture.spec.ts`
 under `web/playwright.perf.config.ts`; how to reproduce and how to read a report
 is in [`docs/guides/performance-fixture-capture.md`](../../../guides/performance-fixture-capture.md).
-Every `*-run*.json` is the complete downloadable report: manifest, raw
-frame-time samples, aggregates and budget verdicts.
+Every `*-run*.json.gz` archive contains the complete original JSON report:
+manifest, raw frame-time samples, aggregates and budget verdicts. Table labels
+name the extracted JSON files; their links download the corresponding archives.
 
 `C-runtime-engine-scene-never-applied/playwright.log.txt` is the raw Playwright
 output with one edit: the stack frame's absolute checkout prefix is replaced by
@@ -100,16 +101,16 @@ git head 9a05928c2c62ceb28a2f32c1f56a02864f4e1473 (build SHA recorded: 9a05928c2
 
 | Report | Fixture (checksum) | Backend | Cache | Samples | p50 ms | p95 ms | p99 ms | First interactive ms | JS heap MB | WASM MB | frame-time-p95 | first-interactive-cold | Verdict |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| perf-2d-v1-cold-run1.json | perf-2d@1 (b620e09f) | webgpu | cold | 4480 | 13.3 | 15.2 | 18.8 | 2891.4 | 15 | 41.4 | pass (15.2 / 16.7) | pass (2891.4 / 5000) | pass |
-| perf-2d-v1-cold-run2.json | perf-2d@1 (b620e09f) | webgpu | cold | 4613 | 13 | 17.2 | 39.46 | 3096.3 | 33.4 | 41.4 | fail (17.2 / 16.7) | pass (3096.3 / 5000) | fail |
-| perf-2d-v1-cold-run3.json | perf-2d@1 (b620e09f) | webgpu | cold | 5006 | 12.6 | 14.7 | 17.4 | 3078.7 | 28.5 | 41.4 | pass (14.7 / 16.7) | pass (3078.7 / 5000) | pass |
-| perf-2d-v1-cold-run4.json | perf-2d@1 (b620e09f) | webgpu | cold | 5358 | 10.2 | 14.51 | 16.94 | 3243.6 | 20.8 | 41.4 | pass (14.51 / 16.7) | pass (3243.6 / 5000) | pass |
-| perf-2d-v1-cold-run5.json | perf-2d@1 (b620e09f) | webgpu | cold | 4607 | 13 | 14.8 | 18.49 | 3049.6 | 29.8 | 41.4 | pass (14.8 / 16.7) | pass (3049.6 / 5000) | pass |
-| perf-3d-v1-cold-run1.json | perf-3d@1 (5e285ced) | webgpu | cold | 3864 | 15.4 | 17.5 | 21.3 | 2849.6 | 27.8 | 46.1 | fail (17.5 / 16.7) | pass (2849.6 / 5000) | fail |
-| perf-3d-v1-cold-run2.json | perf-3d@1 (5e285ced) | webgpu | cold | 3709 | 15.6 | 20.2 | 31.3 | 6072.8 | 27.3 | 46.6 | fail (20.2 / 16.7) | fail (6072.8 / 5000) | fail |
-| perf-3d-v1-cold-run3.json | perf-3d@1 (5e285ced) | webgpu | cold | 3926 | 15.3 | 17.7 | 21.12 | 3026 | 27.6 | 46.1 | fail (17.7 / 16.7) | pass (3026 / 5000) | fail |
-| perf-3d-v1-cold-run4.json | perf-3d@1 (5e285ced) | webgpu | cold | 3905 | 14.9 | 19.3 | 25.99 | 2788.2 | 33.1 | 46.6 | fail (19.3 / 16.7) | pass (2788.2 / 5000) | fail |
-| perf-3d-v1-cold-run5.json | perf-3d@1 (5e285ced) | webgpu | cold | 4071 | 14.9 | 16.8 | 20.43 | 2942.8 | 36.5 | 46.6 | fail (16.8 / 16.7) | pass (2942.8 / 5000) | fail |
+| [perf-2d-v1-cold-run1.json](A-editor-engine-cold-5-runs/perf-2d-v1-cold-run1.json.gz) | perf-2d@1 (b620e09f) | webgpu | cold | 4480 | 13.3 | 15.2 | 18.8 | 2891.4 | 15 | 41.4 | pass (15.2 / 16.7) | pass (2891.4 / 5000) | pass |
+| [perf-2d-v1-cold-run2.json](A-editor-engine-cold-5-runs/perf-2d-v1-cold-run2.json.gz) | perf-2d@1 (b620e09f) | webgpu | cold | 4613 | 13 | 17.2 | 39.46 | 3096.3 | 33.4 | 41.4 | fail (17.2 / 16.7) | pass (3096.3 / 5000) | fail |
+| [perf-2d-v1-cold-run3.json](A-editor-engine-cold-5-runs/perf-2d-v1-cold-run3.json.gz) | perf-2d@1 (b620e09f) | webgpu | cold | 5006 | 12.6 | 14.7 | 17.4 | 3078.7 | 28.5 | 41.4 | pass (14.7 / 16.7) | pass (3078.7 / 5000) | pass |
+| [perf-2d-v1-cold-run4.json](A-editor-engine-cold-5-runs/perf-2d-v1-cold-run4.json.gz) | perf-2d@1 (b620e09f) | webgpu | cold | 5358 | 10.2 | 14.51 | 16.94 | 3243.6 | 20.8 | 41.4 | pass (14.51 / 16.7) | pass (3243.6 / 5000) | pass |
+| [perf-2d-v1-cold-run5.json](A-editor-engine-cold-5-runs/perf-2d-v1-cold-run5.json.gz) | perf-2d@1 (b620e09f) | webgpu | cold | 4607 | 13 | 14.8 | 18.49 | 3049.6 | 29.8 | 41.4 | pass (14.8 / 16.7) | pass (3049.6 / 5000) | pass |
+| [perf-3d-v1-cold-run1.json](A-editor-engine-cold-5-runs/perf-3d-v1-cold-run1.json.gz) | perf-3d@1 (5e285ced) | webgpu | cold | 3864 | 15.4 | 17.5 | 21.3 | 2849.6 | 27.8 | 46.1 | fail (17.5 / 16.7) | pass (2849.6 / 5000) | fail |
+| [perf-3d-v1-cold-run2.json](A-editor-engine-cold-5-runs/perf-3d-v1-cold-run2.json.gz) | perf-3d@1 (5e285ced) | webgpu | cold | 3709 | 15.6 | 20.2 | 31.3 | 6072.8 | 27.3 | 46.6 | fail (20.2 / 16.7) | fail (6072.8 / 5000) | fail |
+| [perf-3d-v1-cold-run3.json](A-editor-engine-cold-5-runs/perf-3d-v1-cold-run3.json.gz) | perf-3d@1 (5e285ced) | webgpu | cold | 3926 | 15.3 | 17.7 | 21.12 | 3026 | 27.6 | 46.1 | fail (17.7 / 16.7) | pass (3026 / 5000) | fail |
+| [perf-3d-v1-cold-run4.json](A-editor-engine-cold-5-runs/perf-3d-v1-cold-run4.json.gz) | perf-3d@1 (5e285ced) | webgpu | cold | 3905 | 14.9 | 19.3 | 25.99 | 2788.2 | 33.1 | 46.6 | fail (19.3 / 16.7) | pass (2788.2 / 5000) | fail |
+| [perf-3d-v1-cold-run5.json](A-editor-engine-cold-5-runs/perf-3d-v1-cold-run5.json.gz) | perf-3d@1 (5e285ced) | webgpu | cold | 4071 | 14.9 | 16.8 | 20.43 | 2942.8 | 36.5 | 46.6 | fail (16.8 / 16.7) | pass (2942.8 / 5000) | fail |
 
 perf-2d@1: 5 runs; p95 frame 14.51–17.2 ms (median 14.8); cold first interactive 2891.4–3243.6 ms (median 3078.7); verdicts pass, fail, pass, pass, pass; manifest: Windows, Chrome 153.0.8010.53, GPU "nvidia turing", viewport {"width":1280,"height":720,"devicePixelRatio":1}, device memory 32 GB
 
@@ -121,7 +122,7 @@ git head 5b659888050904f7f354ff61a8439e54293e60d6 (build SHA recorded: 5b6598880
 
 | Report | Fixture (checksum) | Backend | Cache | Samples | p50 ms | p95 ms | p99 ms | First interactive ms | JS heap MB | WASM MB | frame-time-p95 | first-interactive-cold | Verdict |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| perf-2d-v1-cold-cpu6x-run1.json | perf-2d@1 (b620e09f) | webgpu | cold | 453 | 135 | 184.28 | 240.12 | 23446.8 | 12.8 | 40.7 | fail (184.28 / 16.7) | fail (23446.8 / 5000) | fail |
+| [perf-2d-v1-cold-cpu6x-run1.json](B-editor-engine-cold-cpu6x-failing-budget/perf-2d-v1-cold-cpu6x-run1.json.gz) | perf-2d@1 (b620e09f) | webgpu | cold | 453 | 135 | 184.28 | 240.12 | 23446.8 | 12.8 | 40.7 | fail (184.28 / 16.7) | fail (23446.8 / 5000) | fail |
 
 perf-2d@1: 1 runs; p95 frame 184.28–184.28 ms (median 184.28); cold first interactive 23446.8–23446.8 ms (median 23446.8); verdicts fail; manifest: Windows, Chrome 153.0.8010.53, GPU "nvidia turing", viewport {"width":1280,"height":720,"devicePixelRatio":1}, device memory 32 GB
 
@@ -137,8 +138,8 @@ git head 9367b6de5496114d5eac00256c23d417298335aa (build SHA recorded: 9367b6de5
 
 | Report | Fixture (checksum) | Backend | Cache | Samples | p50 ms | p95 ms | p99 ms | First interactive ms | JS heap MB | WASM MB | frame-time-p95 | first-interactive-cold | Verdict |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| perf-3d-v1-cold-run1.json | perf-3d@1 (5e285ced) | webgpu | cold | 3941 | 15.4 | 17.6 | 21.5 | 3095.4 | 26.5 | 46.6 | fail (17.6 / 16.7) | pass (3095.4 / 5000) | fail |
+| [perf-3d-v1-cold-run1.json](D-edge-editor-engine-cold/perf-3d-v1-cold-run1.json.gz) | perf-3d@1 (5e285ced) | webgpu | cold | 3941 | 15.4 | 17.6 | 21.5 | 3095.4 | 26.5 | 46.6 | fail (17.6 / 16.7) | pass (3095.4 / 5000) | fail |
 
 perf-3d@1: 1 runs; p95 frame 17.6–17.6 ms (median 17.6); cold first interactive 3095.4–3095.4 ms (median 3095.4); verdicts fail; manifest: Windows, Edge 153.0.4234.48, GPU "nvidia turing", viewport {"width":1280,"height":720,"devicePixelRatio":1}, device memory 32 GB
 
-Raw numeric sample arrays use compact JSON whitespace so automated reviews can process the PR. Every recorded numeric value and all report metadata are preserved; parsed reports were verified identical before and after formatting.
+Raw reports are stored as `.json.gz` archives so their large sample arrays do not exceed automated code-review diff limits. Each archive decompresses byte-for-byte to the original recorded JSON report; no samples or metadata were removed. The tables and run summaries remain readable here. Extract a report with `python -m gzip -d path/to/report.json.gz`; the resulting `.json` is the original downloadable report.
