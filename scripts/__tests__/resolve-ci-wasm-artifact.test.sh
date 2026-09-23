@@ -636,15 +636,30 @@ else
     fail "quality-gates does not run verify-engine-wasm.mjs before the reuse upload"
   fi
 
-  # Pull requests only: the resolver reads pull_request runs and nothing else,
-  # so the same upload on a push or dispatch run would be storage for nobody.
+  # UNCONDITIONAL, on every event that runs build-wasm. The resolver reads only
+  # pull_request runs, so a push or dispatch upload is never adopted. Gating
+  # these steps on the event instead is refused by resolve-ci-diff-range.test.sh
+  # for all of quality-gates.yml (#9161): a step that skips on the dispatch path
+  # makes CI Success mean something different there than on a human PR. Any
+  # `if:` is refused here, so an event gate, or an input standing in for one,
+  # cannot come back on these three steps under another name.
+  unguarded=0
   for s in 'Verify the pre-optimisation WASM variants for CD reuse' 'Record the CD reuse key' 'Upload pre-optimisation WASM for CD reuse'; do
-    if grep -qxF "        if: github.event_name == 'pull_request'" <<<"$(step_block "$QG_BW" "$s")"; then
-      pass "'$s' runs on pull_request only"
+    blk="$(step_block "$QG_BW" "$s")"
+    if [ -z "$blk" ]; then
+      fail "'$s' not found in quality-gates.yml build-wasm, so its guard cannot be checked"
+    elif grep -qE '^        if:' <<<"$blk"; then
+      fail "'$s' carries an if: ($(grep -E '^        if:' <<<"$blk" | sed 's/^ *//')); it must run on every event that runs build-wasm (#9161)"
     else
-      fail "'$s' is not gated on github.event_name == 'pull_request'"
+      pass "'$s' has no if:, so it runs on every event that runs build-wasm"
+      unguarded=$((unguarded + 1))
     fi
   done
+  if [ "$unguarded" -eq 3 ]; then
+    pass "all three reuse steps checked for an if: (a scan of zero steps cannot pass)"
+  else
+    fail "only $unguarded of 3 reuse steps were found without an if:"
+  fi
 
   # BINARY FIDELITY. Production ships what cd.yml builds, and cd.yml runs no
   # wasm-opt, so the artifact must be captured BEFORE quality-gates optimises
