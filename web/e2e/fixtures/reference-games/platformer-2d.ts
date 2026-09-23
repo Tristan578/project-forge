@@ -23,15 +23,16 @@
  * `despawnOnDeath` is false. An engine query of the player's transform and
  * health observes it.
  *
- * KNOWN ENGINE GAP — in a 2D project the three game-component systems
- * above read their contacts from `GameComponentRuntime.active_collisions`, and
- * `system_track_collisions` fills that set from `bevy_rapier3d` events only. 2D
- * bodies are simulated by `bevy_rapier2d`, whose contacts reach JavaScript
- * (`read_collision_events_2d`, `engine/src/bridge/physics.rs`) but not that
- * set. This fixture declares the mechanics a 2D platformer needs; whether the
- * engine carries them out in 2D is what the journey that plays it (#10152) has
- * to observe, not something this file can promise. Loading it — which is all
- * #10159 asserts — does not depend on it.
+ * KNOWN ENGINE GAP (#10194) — in a 2D project the three game-component
+ * systems above read their contacts from `GameComponentRuntime.active_collisions`,
+ * and `system_track_collisions` fills that set from `bevy_rapier3d` events
+ * only. 2D bodies are simulated by `bevy_rapier2d`, whose contacts reach
+ * JavaScript (`read_collision_events_2d`, `engine/src/bridge/physics.rs`) but
+ * not that set; a probe recorded in #10194 saw a 2D collectible left in place
+ * under an overlapping player where the 3D equivalent was collected. This
+ * fixture declares the mechanics a 2D platformer needs; the journey that plays
+ * it (#10152) is where the outcome is observed. Loading it, which is all #10159
+ * asserts, does not depend on the gap.
  *
  * Coordinates are world units in the XY plane (a 2D project's camera looks down
  * -Z); each entity's 2D collider size equals its X/Y scale.
