@@ -104,6 +104,97 @@ else
 fi
 
 echo ""
+echo "=== the Clerk auth journey runs in its own job, on test-instance keys only (#8632) ==="
+# The @auth specs need Clerk keys, and keys cannot go on the @ui shard: with
+# them the proxy switches to clerkMiddleware for every request and, under
+# `next start`, drops /dev from the public routes -- every editor spec would be
+# redirected to /sign-in. So the journey has a job of its own, and these pins
+# keep it real: mapped from the CI-only TEST-instance secrets, required on
+# trusted runs, confined to that one job, and actually running the @auth config.
+auth_job="$(awk '/^  test-e2e-auth:/{f=1} f{print} f && /^  [a-z][a-z0-9-]*:$/ && !/test-e2e-auth/{exit}' "$CI_YML")"
+if [ -z "$auth_job" ]; then
+  fail "no test-e2e-auth job in ci.yml — the @auth specs (auth-journey.spec.ts) run nowhere with Clerk keys, so the signup/auth journey is untested (#8632)"
+else
+  auth_exec="$(grep -v '^[[:space:]]*#' <<<"$auth_job")"
+  # GitHub expressions are literal fixture text here; single quotes deliberately prevent shell expansion.
+  # shellcheck disable=SC2016
+  for mapping in \
+    'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}' \
+    'CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}'; do
+    # BOTH steps: NEXT_PUBLIC_* is inlined into the client bundle by `next
+    # build`, and the secret key is read by `next start` at runtime.
+    n="$(grep -cF "$mapping" <<<"$auth_exec" || true)"
+    if [ "${n:-0}" -ge 2 ]; then
+      pass "test-e2e-auth maps '${mapping%%:*}' from the TEST-instance secret on both the build and the test step"
+    else
+      fail "test-e2e-auth maps '${mapping%%:*}' from the TEST-instance secret on ${n:-0} step(s), expected the build AND the test step"
+    fi
+  done
+  # shellcheck disable=SC2016
+  for mapping in \
+    'E2E_CLERK_TEST_EMAIL: ${{ secrets.E2E_CLERK_TEST_EMAIL }}' \
+    'E2E_CLERK_TEST_PASSWORD: ${{ secrets.E2E_CLERK_TEST_PASSWORD }}' \
+    "E2E_CLERK_TEST_REQUIRED: \${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}" \
+    "STAGING_URL: 'http://localhost:3000'"; do
+    if grep -qF "$mapping" <<<"$auth_exec"; then
+      pass "test-e2e-auth sets ${mapping%%:*}"
+    else
+      fail "test-e2e-auth does not set '${mapping}' — without it the job skips on trusted runs, has no user to sign in, or the proxy rejects the localhost session's azp claim"
+    fi
+  done
+  if grep -qE '^[[:space:]]+run: npx playwright test --config playwright\.auth\.config\.ts[[:space:]]*$' <<<"$auth_exec"; then
+    pass "test-e2e-auth runs the @auth config as its whole run: line"
+  else
+    fail "test-e2e-auth does not run 'npx playwright test --config playwright.auth.config.ts' as a whole run: line"
+  fi
+fi
+
+leaked="$(awk '/^  test-e2e-auth:/{skip=1; next} skip && /^  [a-z][a-z0-9-]*:$/{skip=0} !skip{print}' "$CI_YML" \
+  | grep -v '^[[:space:]]*#' | grep -cE 'secrets\.(CLERK_TEST_|E2E_CLERK_TEST_)' || true)"
+if [ "${leaked:-0}" -eq 0 ]; then
+  pass "no other ci.yml job receives the Clerk test-instance secrets (keys on the @ui shard would send every /dev editor spec to /sign-in)"
+else
+  fail "${leaked} line(s) outside test-e2e-auth reference the Clerk test-instance secrets — on the @ui shard they switch the proxy to clerkMiddleware and take /dev out of the public routes"
+fi
+
+if grep -v '^[[:space:]]*#' "$CI_YML" | grep -qE 'secrets\.(CLERK_SECRET_KEY|NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)([^A-Za-z0-9_]|$)'; then
+  fail "ci.yml references a production-named Clerk secret — the E2E job may only use the CLERK_TEST_* test-instance keys"
+else
+  pass "ci.yml never references the production-named Clerk secrets"
+fi
+
+AUTH_CFG="$(cd "$E2E_DIR/.." 2>/dev/null && pwd)/playwright.auth.config.ts"
+if [ ! -f "$AUTH_CFG" ]; then
+  fail "playwright.auth.config.ts not found — test-e2e-auth has no config to run"
+else
+  auth_cfg_exec="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$AUTH_CFG")"
+  if grep -qE "^[[:space:]]*grep: /@auth/,?[[:space:]]*$" <<<"$auth_cfg_exec"; then
+    pass "playwright.auth.config.ts selects @auth"
+  else
+    fail "playwright.auth.config.ts does not select 'grep: /@auth/'"
+  fi
+  if grep -qE "^[[:space:]]*globalSetup: '\./e2e/lib/clerkGlobalSetup\.ts',?[[:space:]]*$" <<<"$auth_cfg_exec"; then
+    pass "playwright.auth.config.ts runs the Clerk global setup (testing token, test-key guard)"
+  else
+    fail "playwright.auth.config.ts does not run './e2e/lib/clerkGlobalSetup.ts' as its globalSetup"
+  fi
+  if grep -qE "^[[:space:]]*\['\./e2e/lib/requiredRunReporter\.ts'" <<<"$auth_cfg_exec"; then
+    pass "playwright.auth.config.ts registers requiredRunReporter (a skipped required run fails)"
+  else
+    fail "playwright.auth.config.ts does not register requiredRunReporter — a required run that skipped every @auth test would report green"
+  fi
+fi
+
+auth_titles="$(grep -rhE "(test|describe)\((['\"])[^'\"]*@auth\b" "$E2E_DIR" --include=*.spec.ts 2>/dev/null || true)"
+if [ -z "$auth_titles" ]; then
+  fail "no spec title carries @auth — test-e2e-auth would select zero tests"
+elif grep -q '@ui' <<<"$auth_titles"; then
+  fail "an @auth title is also @ui — the keyless @ui shard can only skip it"
+else
+  pass "@auth is applied ($(grep -c . <<<"$auth_titles") title(s)) and never together with @ui"
+fi
+
+echo ""
 echo "=== no tag may be excluded from the @ui selection without another job running it ==="
 
 # The excluded set is the reporter's EXCLUDE_TAGS (#9636), not a --grep-invert.
@@ -365,7 +456,7 @@ done
 # section still reported green when join_continuations was removed and one
 # wrapped invocation went invisible. Adding a playwright job raises this;
 # removing one lowers it, and either way the number is checked by a human.
-EXPECTED_PROD_WEBSERVER_INVOCATIONS=6
+EXPECTED_PROD_WEBSERVER_INVOCATIONS=7
 if [ "$prod_checked" -eq "$EXPECTED_PROD_WEBSERVER_INVOCATIONS" ]; then
   pass "checked ${prod_checked} playwright invocations against a production webServer (a walk over zero would pass vacuously)"
 else

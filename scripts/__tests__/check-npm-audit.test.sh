@@ -2643,6 +2643,7 @@ STEPS_EOF
   preview-deploy:
   test-e2e-ui:
   test-e2e-api:
+  test-e2e-auth:
   test-e2e-journey:
   test-e2e-engine-smoke:
   test-e2e-crossbrowser:
