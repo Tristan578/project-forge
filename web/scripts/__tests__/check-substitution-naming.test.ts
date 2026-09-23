@@ -130,6 +130,29 @@ describe('check-substitution-naming against a real Playwright listing', () => {
   );
 
   it(
+    'FAILS a declaration misspelled both ways: a marker without its colon and a typo in the annotation type',
+    () => {
+      const dir = project('misspelled', {
+        'misspelled.spec.ts': [
+          `test('plays [substituted WASM engine]', {`,
+          `  annotation: { type: 'substituion', description: 'WASM engine' },`,
+          `}, async () => {});`,
+        ].join('\n'),
+      });
+      const result = check(dir);
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain(
+        'misspelled.spec.ts:2 › plays [substituted WASM engine]: annotation type "substituion" is not exactly "substitution"',
+      );
+      expect(result.output).toContain(
+        'misspelled.spec.ts:2 › plays [substituted WASM engine]: malformed marker [substituted WASM engine] — write it exactly as [substituted: WASM engine]',
+      );
+      expect(result.output).toContain('FAIL: 2 problems');
+    },
+    LISTING_TIMEOUT_MS,
+  );
+
+  it(
     'FAILS when the listing finds zero specs, for example because the config glob matches nothing',
     () => {
       const dir = project('zero', {}, '**/nothing-matches-*.spec.ts');

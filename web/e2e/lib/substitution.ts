@@ -27,7 +27,12 @@
  * `checkSubstitutionNaming` fails when a test carries the annotation without
  * the marker, carries the marker without the annotation, spells either one
  * almost-but-not-quite right, or when the listing holds zero specs (a check
- * over nothing must not pass — lessons-learned #9). The CLI that feeds it a
+ * over nothing must not pass — lessons-learned #9). "Almost right" means an
+ * annotation type, or a marker word, that begins with `substitut` in any case
+ * or is within two typos of `substitution`/`substituted` (`substituion`); for
+ * the marker it also means a missing or respaced colon, the wrong brackets, a
+ * missing `]`, or the word placed later inside the brackets — see
+ * `findMarkerAttempts`. The CLI that feeds it a
  * real listing, and cross-checks the literal form the matrix gate scans for, is
  * `web/scripts/check-substitution-naming.ts`; the CI job that runs it is
  * `test-e2e-journey` in `.github/workflows/ci.yml`.
@@ -47,15 +52,149 @@ export function substitutionMarker(component: string): string {
   return `[substituted: ${component}]`;
 }
 
-/**
- * Anything shaped like a marker, canonical or not: any case, any spacing, and
- * any `substitut…` spelling. Deliberately loose so a near miss is REPORTED as
- * malformed rather than silently read as "no marker here".
- */
-const LOOSE_MARKER_RE = /\[\s*substitut\w*\s*:([^\]]*)\]/gi;
+/** The words a declaration is spelled with: the annotation type and the marker's first word. */
+const SUBSTITUTION_WORDS = [SUBSTITUTION_ANNOTATION_TYPE, 'substituted'] as const;
 
-/** An annotation type close enough to `substitution` to be a typo of it. */
-const NEAR_MISS_TYPE_RE = /^\s*substitut/i;
+/**
+ * How many single-character edits (insert, delete, replace, or swap two
+ * neighbours) a word may sit from one of SUBSTITUTION_WORDS and still be read
+ * as a misspelling of it. Two covers a dropped letter plus one more slip
+ * (`subsituion`); three would reach real, unrelated words — `constitution`,
+ * `institution` and `destitution` are each three edits from `substitution`.
+ */
+const MAX_TYPO_EDITS = 2;
+
+/**
+ * Optimal-string-alignment distance: the fewest inserts, deletes, replacements
+ * and adjacent swaps turning `a` into `b`, or `limit + 1` when the lengths
+ * alone put it past `limit`.
+ */
+function typoDistance(a: string, b: string, limit: number): number {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  let twoRowsUp: number[] = [];
+  let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      let cost = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        cost = Math.min(cost, twoRowsUp[j - 2] + 1);
+      }
+      current.push(cost);
+    }
+    twoRowsUp = previous;
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/**
+ * True when `word` reads as an attempt at `substitution` or `substituted`: in
+ * any case, it either begins with `substitut` (`substitutions`, `substitute`)
+ * or lies within MAX_TYPO_EDITS of one of them (`substituion`, `subsitution`,
+ * `sbustituted`). Unrelated words stay out, so real prose and other annotation
+ * types are never reported.
+ */
+export function isSubstitutionLikeWord(word: string): boolean {
+  const lower = word.trim().toLowerCase();
+  if (lower.startsWith('substitut')) return true;
+  return SUBSTITUTION_WORDS.some((target) => typoDistance(lower, target, MAX_TYPO_EDITS) <= MAX_TYPO_EDITS);
+}
+
+/** A canonical marker, whole: `[substituted: ` + a component with no surrounding whitespace and no `]` + `]`. */
+const CANONICAL_MARKER_RE = /^\[substituted: (\S(?:[^\]]*\S)?)\]$/;
+
+/** A square-bracket group: from `[` to its `]`, or to the end of the title when it is never closed. */
+const SQUARE_GROUP_RE = /\[[^\]]*(?:\]|$)/g;
+
+/** A round or curly group — a marker written with the wrong brackets — closed by any bracket, or unclosed. */
+const OTHER_GROUP_RE = /[({][^[\](){}]*(?:[\])}]|(?=[({])|$)/g;
+
+/** The bracket that closes a group, of whichever kind, so `[substituted: X)` still reads its component as `X`. */
+const GROUP_CLOSER_RE = /[\])}]$/;
+
+/** A word directly followed by a colon: the marker's `substituted:` written with no brackets at all. */
+const WORD_BEFORE_COLON_RE = /([A-Za-z]+)\s*:/g;
+
+const WORD_RE = /[A-Za-z]+/g;
+const LEADING_WORD_RE = /^\s*([A-Za-z]+)/;
+/** What may sit between a near-miss marker's word and its component: the colon, or a stand-in for it. */
+const MARKER_SEPARATOR_RE = /^[\s:;,.\-–—]+/;
+
+interface MarkerAttempt {
+  /** Where the attempt starts in the full title, to report attempts in reading order. */
+  index: number;
+  raw: string;
+  /** Set when `raw` is a canonical marker: the component it names. */
+  canonicalComponent: string | null;
+  /**
+   * For a near miss, the component it appears to name ('' when it names none),
+   * or null when it cannot be read — the word is not the group's first.
+   */
+  intendedComponent: string | null;
+}
+
+/** Blank out `[start, end)` spans with spaces, keeping every other index where it was. */
+function mask(text: string, spans: ReadonlyArray<readonly [number, number]>): string {
+  let out = text;
+  for (const [start, end] of spans) out = out.slice(0, start) + ' '.repeat(end - start) + out.slice(end);
+  return out;
+}
+
+/**
+ * Every place a title spells, or tries to spell, a substitution marker. A
+ * substitution-like word (see `isSubstitutionLikeWord`) is an ATTEMPT when it
+ * is the first word inside a bracket group of any kind, when it is anywhere
+ * inside square brackets, or when a colon follows it. Deliberately loose, so a
+ * near miss is REPORTED as malformed rather than silently read as "no marker
+ * here" — a malformed marker declares nothing and would leave a substituted
+ * spec eligible as `proven` evidence. The word in plain prose ("variable
+ * substitution expands") is not an attempt.
+ */
+function findMarkerAttempts(title: string): MarkerAttempt[] {
+  const attempts: MarkerAttempt[] = [];
+  const consider = (index: number, raw: string, content: string, squareBrackets: boolean) => {
+    const leading = LEADING_WORD_RE.exec(content);
+    const leadsWithWord = leading !== null && isSubstitutionLikeWord(leading[1]);
+    const anyWord = [...content.matchAll(WORD_RE)].some((m) => isSubstitutionLikeWord(m[0]));
+    const wordBeforeColon = [...content.matchAll(WORD_BEFORE_COLON_RE)].some((m) => isSubstitutionLikeWord(m[1]));
+    if (!leadsWithWord && !wordBeforeColon && !(squareBrackets && anyWord)) return;
+    const canonical = CANONICAL_MARKER_RE.exec(raw);
+    attempts.push({
+      index,
+      raw,
+      canonicalComponent: canonical ? canonical[1] : null,
+      intendedComponent:
+        leadsWithWord && leading ? content.slice(leading[0].length).replace(MARKER_SEPARATOR_RE, '').trim() : null,
+    });
+  };
+
+  const squareSpans: Array<[number, number]> = [];
+  for (const match of title.matchAll(SQUARE_GROUP_RE)) {
+    const start = match.index ?? 0;
+    squareSpans.push([start, start + match[0].length]);
+    consider(start, match[0], match[0].slice(1).replace(GROUP_CLOSER_RE, ''), true);
+  }
+
+  const withoutSquare = mask(title, squareSpans);
+  const otherSpans: Array<[number, number]> = [];
+  for (const match of withoutSquare.matchAll(OTHER_GROUP_RE)) {
+    const start = match.index ?? 0;
+    otherSpans.push([start, start + match[0].length]);
+    consider(start, match[0], match[0].slice(1).replace(GROUP_CLOSER_RE, ''), false);
+  }
+
+  for (const match of mask(withoutSquare, otherSpans).matchAll(WORD_BEFORE_COLON_RE)) {
+    if (!isSubstitutionLikeWord(match[1])) continue;
+    attempts.push({ index: match.index ?? 0, raw: `"${match[0]}"`, canonicalComponent: null, intendedComponent: null });
+  }
+
+  return attempts.sort((a, b) => a.index - b.index);
+}
 
 export interface ListingAnnotation {
   type: string;
@@ -163,7 +302,7 @@ function checkTest(test: ListedTest): string[] {
 
   for (const annotation of test.annotations) {
     if (annotation.type !== SUBSTITUTION_ANNOTATION_TYPE) {
-      if (NEAR_MISS_TYPE_RE.test(annotation.type)) {
+      if (isSubstitutionLikeWord(annotation.type)) {
         reasons.push(
           `annotation type "${annotation.type}" is not exactly "${SUBSTITUTION_ANNOTATION_TYPE}", ` +
             'so it declares nothing — spell it exactly',
@@ -196,17 +335,24 @@ function checkTest(test: ListedTest): string[] {
     }
   }
 
-  for (const match of test.fullTitle.matchAll(LOOSE_MARKER_RE)) {
-    const raw = match[0];
-    const component = match[1].trim();
-    const canonical = substitutionMarker(component);
-    if (raw !== canonical) {
-      reasons.push(`malformed marker ${raw} — write it exactly as ${canonical}`);
+  for (const attempt of findMarkerAttempts(test.fullTitle)) {
+    const component = attempt.canonicalComponent;
+    if (component === null) {
+      const intended = attempt.intendedComponent;
+      if (intended === '') {
+        reasons.push(
+          `malformed marker ${attempt.raw} — it names no component; write it as ${substitutionMarker('<component>')}`,
+        );
+      } else {
+        reasons.push(
+          `malformed marker ${attempt.raw} — write it exactly as ${substitutionMarker(intended ?? '<component>')}`,
+        );
+      }
       continue;
     }
     if (!declared.has(component)) {
       reasons.push(
-        `title carries ${canonical} but no substitution annotation declares "${component}" — ` +
+        `title carries ${substitutionMarker(component)} but no substitution annotation declares "${component}" — ` +
           `add { annotation: { type: '${SUBSTITUTION_ANNOTATION_TYPE}', description: '${component}' } }`,
       );
     }

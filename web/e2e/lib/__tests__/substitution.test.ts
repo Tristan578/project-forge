@@ -209,6 +209,112 @@ describe('checkSubstitutionNaming on synthetic listings (the check can fail)', (
     expect(report.problems).toEqual([]);
   });
 
+  // The two near misses PR #10191's review reproduced passing with zero problems.
+  it('FAILS a marker written without its colon', () => {
+    const report = checkSubstitutionNaming(
+      listing([fileSuite('tests/s.spec.ts', [spec('plays [substituted WASM engine]', [], { file: 'tests/s.spec.ts' })])]),
+    );
+    expect(report.problems.map((p) => p.reason)).toEqual([
+      'malformed marker [substituted WASM engine] — write it exactly as [substituted: WASM engine]',
+    ]);
+    expect(report.substitutedFiles).toEqual([]);
+  });
+
+  it('FAILS a misspelled annotation type that does not begin with "substitut"', () => {
+    const report = checkSubstitutionNaming(
+      listing([fileSuite('tests/s.spec.ts', [spec('plays', [sub('WASM engine', 'substituion')])])]),
+    );
+    expect(report.problems.map((p) => p.reason)).toEqual([
+      'annotation type "substituion" is not exactly "substitution", so it declares nothing — spell it exactly',
+    ]);
+    // A misspelled annotation declares nothing, so the file must not count as substituted.
+    expect(report.substitutedFiles).toEqual([]);
+  });
+
+  it('FAILS every marker-shaped near miss, naming the exact spelling to use', () => {
+    const cases: Array<[title: string, reason: string]> = [
+      ['t [substituted X]', 'malformed marker [substituted X] — write it exactly as [substituted: X]'],
+      ['t [substituted - X]', 'malformed marker [substituted - X] — write it exactly as [substituted: X]'],
+      ['t [substituion: X]', 'malformed marker [substituion: X] — write it exactly as [substituted: X]'],
+      ['t [subsituted: X]', 'malformed marker [subsituted: X] — write it exactly as [substituted: X]'],
+      ['t [sbustituted: X]', 'malformed marker [sbustituted: X] — write it exactly as [substituted: X]'],
+      ['t (substituted: X)', 'malformed marker (substituted: X) — write it exactly as [substituted: X]'],
+      ['t {substituted: X}', 'malformed marker {substituted: X} — write it exactly as [substituted: X]'],
+      ['t [substituted: X)', 'malformed marker [substituted: X) — write it exactly as [substituted: X]'],
+      ['t [substituted: X', 'malformed marker [substituted: X — write it exactly as [substituted: X]'],
+      ['t [substituted: ]', 'malformed marker [substituted: ] — it names no component; write it as [substituted: <component>]'],
+      ['t [X substituted]', 'malformed marker [X substituted] — write it exactly as [substituted: <component>]'],
+      ['t substituted: X', 'malformed marker "substituted:" — write it exactly as [substituted: <component>]'],
+    ];
+    for (const [title, reason] of cases) {
+      const report = checkSubstitutionNaming(listing([fileSuite('tests/s.spec.ts', [spec(title)])]));
+      expect(report.problems.map((p) => p.reason), title).toEqual([reason]);
+    }
+  });
+
+  it('reports a near-miss marker next to a canonical one, and checks the canonical one as usual', () => {
+    const report = checkSubstitutionNaming(
+      listing([fileSuite('tests/s.spec.ts', [spec('t [substituted: X] [substituted Y]', [sub('X')])])]),
+    );
+    expect(report.problems.map((p) => p.reason)).toEqual([
+      'malformed marker [substituted Y] — write it exactly as [substituted: Y]',
+    ]);
+  });
+
+  it('leaves the word alone in plain prose, and accepts a canonical component that holds parentheses', () => {
+    for (const title of [
+      'template variable substitution expands',
+      'falls back (text substitution) cleanly',
+      'substitutes the default material',
+    ]) {
+      expect(checkSubstitutionNaming(listing([fileSuite('tests/s.spec.ts', [spec(title)])])).problems, title).toEqual([]);
+    }
+    const parens = checkSubstitutionNaming(
+      listing([fileSuite('tests/s.spec.ts', [spec('t [substituted: engine (WASM)]', [sub('engine (WASM)')])])]),
+    );
+    expect(parens.problems).toEqual([]);
+    expect(parens.substitutedTestCount).toBe(1);
+  });
+
+  it('FAILS annotation types within two typos of the canonical spelling and leaves unrelated types alone', () => {
+    const nearMisses = [
+      'substituion',
+      'subsitution',
+      'sbustitution',
+      'subtitution',
+      'substition',
+      'substitued',
+      'Substituion',
+      'substitue',
+      'subsituion',
+    ];
+    for (const type of nearMisses) {
+      const report = checkSubstitutionNaming(listing([fileSuite('tests/s.spec.ts', [spec('t', [sub('X', type)])])]));
+      expect(report.problems.map((p) => p.reason), type).toEqual([
+        `annotation type "${type}" is not exactly "substitution", so it declares nothing — spell it exactly`,
+      ]);
+    }
+    const unrelated = [
+      'issue',
+      'slow',
+      'skip',
+      'fixme',
+      'fail',
+      'description',
+      'constitution',
+      'institution',
+      'destitution',
+      'substance',
+      'subscription',
+      'subtitle',
+      'sbusituion',
+    ];
+    const report = checkSubstitutionNaming(
+      listing([fileSuite('tests/s.spec.ts', [spec('t', unrelated.map((type) => ({ type, description: 'X' })))])]),
+    );
+    expect(report.problems).toEqual([]);
+  });
+
   it('FAILS when the listing finds zero specs instead of passing vacuously', () => {
     const report = checkSubstitutionNaming(listing([]));
     expect(report.testCount).toBe(0);
