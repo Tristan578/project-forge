@@ -6,6 +6,11 @@ import {
   E2E_TIMEOUT_TEST_MS,
 } from '../constants';
 import crystalRun3d from '../fixtures/gdd/crystal-run-3d.json';
+import {
+  collectEngineConsole,
+  expectNoEngineRejections,
+  type EngineConsole,
+} from '../helpers/engine-console';
 
 /**
  * PF-1202 (#9317): the live-engine gate for the game-creation pipeline.
@@ -277,44 +282,29 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
   // the WebGL2 backend preference (SwiftShader cannot drive WebGPU).
   test.describe.configure({ timeout: E2E_TIMEOUT_PIPELINE_LIVE_MS });
 
-  let consoleErrors: string[] = [];
-  let pageErrors: string[] = [];
   /**
-   * Diagnostics only — never asserted on, so it cannot weaken a gate.
-   * The engine answers an unknown entity id at `warn`, not `error`, so
-   * `consoleErrors` alone cannot see the single most useful line when a step
-   * fails with ENTITY_NOT_FOUND.
+   * Console errors, warnings and page errors for the whole test. The warnings
+   * are diagnostics only — never asserted on, so they cannot weaken a gate:
+   * the engine answers an unknown entity id at `warn`, not `error`, so the
+   * errors alone cannot show the single most useful line when a step fails
+   * with ENTITY_NOT_FOUND.
+   *
+   * `expectNoEngineRejections(engineConsole)` is the one assertion that can see
+   * a hard-rejected dispatch. `ExecutorContext.dispatchCommand` is `=> void`,
+   * so an executor whose payload the engine refuses still reports its step
+   * `completed`; the only trace is the `Engine rejected command '<name>': <err>`
+   * line `editorStore`'s `tracked` wrapper writes. The collection is shared with
+   * `e2e/engine/referenceGames.spec.ts` through `helpers/engine-console.ts`, so
+   * the two gates cannot disagree on what a rejection looks like.
    */
-  let consoleWarnings: string[] = [];
+  let engineConsole: EngineConsole;
 
   test.beforeEach(async ({ page, editor }) => {
-    consoleErrors = [];
-    pageErrors = [];
-    consoleWarnings = [];
-    // Registered before the first navigation, so these cover the whole test
-    // including engine boot — see `expectNoEngineRejections`.
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') consoleErrors.push(msg.text());
-      if (msg.type() === 'warning') consoleWarnings.push(msg.text());
-    });
-    page.on('pageerror', (err) => pageErrors.push(err.message));
+    // Registered before the first navigation, so it covers the whole test
+    // including engine boot.
+    engineConsole = collectEngineConsole(page);
     await editor.load();
   });
-
-  /**
-   * The one assertion that can see a hard-rejected dispatch.
-   *
-   * `ExecutorContext.dispatchCommand` is `=> void`, so an executor whose payload
-   * the engine refuses still reports its step `completed`. The only trace is the
-   * `Engine rejected command '<name>': <err>` line `editorStore`'s `tracked`
-   * wrapper writes (unthrottled — only the Sentry report is deduped). Page
-   * errors are asserted alongside it because an uncaught exception in the
-   * command path would likewise leave the step list looking healthy.
-   */
-  function expectNoEngineRejections(): void {
-    expect(consoleErrors.filter((line) => line.includes('Engine rejected command'))).toEqual([]);
-    expect(pageErrors).toEqual([]);
-  }
 
   test('generated game builds through the real engine and Play enters play mode', async ({
     page,
@@ -352,11 +342,7 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
         // The engine answers an unknown id by ignoring the command and writing
         // a line, never by failing the dispatch — so when a step cannot find an
         // entity, these lines are the only record of the engine's side of it.
-        ` / engine complaints: ${JSON.stringify(
-          [...consoleErrors, ...consoleWarnings]
-            .filter(l => /Engine rejected command|no entity with id|ignored/.test(l))
-            .slice(0, 20)
-        )}` +
+        ` / engine complaints: ${JSON.stringify(engineConsole.complaints())}` +
         ` / ${JSON.stringify(outcome.steps)}`
     ).toBe('completed');
     expect(outcome.planStatus).toBe('completed');
@@ -427,7 +413,7 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
     // Every step above reported `completed`, which on its own only means no
     // executor threw. This is the assertion that makes it mean the engine
     // accepted the commands those steps sent.
-    expectNoEngineRejections();
+    expectNoEngineRejections(engineConsole);
   });
 
   test('a game with nothing in the world fails verification and Play refuses', async ({
@@ -515,6 +501,6 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
       { timeout: E2E_TIMEOUT_INTERACTION_MS }
     );
 
-    expectNoEngineRejections();
+    expectNoEngineRejections(engineConsole);
   });
 });
