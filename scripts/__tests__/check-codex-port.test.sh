@@ -338,6 +338,7 @@ expect_rc 2 "no mode argument is a usage error"
 
 echo "== generator: MCP value types must match the Codex schema =="
 F="$(mkfix)"; gen "$F" --write
+# shellcheck disable=SC2016  # The fixture must preserve Claude interpolation syntax literally.
 printf '%s\n' '{"mcpServers":{"alpha":{"command":"npx","args":["mcp"],"env":{"TOKEN":"${TOKEN}","ORG":"acme"}}}}' > "$F/.mcp.json"
 TYPE_OK='[mcp_servers.alpha]
 command = "npx"
