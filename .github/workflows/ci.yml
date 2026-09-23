@@ -2383,6 +2383,12 @@ jobs:
 
       - run: npm ci
 
+      # apps/docs builds with the hoisted root `next`, so the npm/cli#4828 drop
+      # of @next/swc kills its `next build` exactly as it does web's — with an
+      # opaque "Failed to load SWC binary" three steps from the cause (PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Verify production workflow contracts
         run: node --test scripts/__tests__/production-ci-contract.test.mjs
 
