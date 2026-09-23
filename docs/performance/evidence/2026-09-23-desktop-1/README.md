@@ -140,3 +140,5 @@ git head 9367b6de5496114d5eac00256c23d417298335aa (build SHA recorded: 9367b6de5
 | perf-3d-v1-cold-run1.json | perf-3d@1 (5e285ced) | webgpu | cold | 3941 | 15.4 | 17.6 | 21.5 | 3095.4 | 26.5 | 46.6 | fail (17.6 / 16.7) | pass (3095.4 / 5000) | fail |
 
 perf-3d@1: 1 runs; p95 frame 17.6–17.6 ms (median 17.6); cold first interactive 3095.4–3095.4 ms (median 3095.4); verdicts fail; manifest: Windows, Edge 153.0.4234.48, GPU "nvidia turing", viewport {"width":1280,"height":720,"devicePixelRatio":1}, device memory 32 GB
+
+Raw numeric sample arrays use compact JSON whitespace so automated reviews can process the PR. Every recorded numeric value and all report metadata are preserved; parsed reports were verified identical before and after formatting.
