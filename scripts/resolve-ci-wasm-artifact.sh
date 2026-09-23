@@ -38,9 +38,9 @@
 # naming the reason, and CD builds. A lookup error, a fork, a PR that did not
 # merge as this commit, a run whose build did not succeed, an expired artifact,
 # a key that differs by one character, a package that fails validation: none of
-# them is a reason to guess. The cost of
-# a false negative is one ~6-minute build; the cost of a false positive is a CDN
-# engine built from different sources than the deploy. They are not symmetric.
+# them is a reason to guess. The cost of a false negative is one ~6-minute
+# build; the cost of a false positive is a CDN engine built from different
+# sources than the deploy. They are not symmetric.
 #
 # It exits non-zero only when it cannot give an answer at all: a usage error,
 # this tree's key being uncomputable (a build input moved; the all4 key step
