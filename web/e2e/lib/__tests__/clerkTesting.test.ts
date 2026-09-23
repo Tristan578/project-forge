@@ -23,6 +23,9 @@
  *   - Test emails: "Any email with the `+clerk_test` subaddress is a test email
  *     address" and verifies with the code `424242`.
  *     https://clerk.com/docs/guides/development/testing/test-emails-and-phones
+ *     The Playwright guide widens that to "Emails containing `+clerk_test`
+ *     (e.g., `testuser+clerk_test_123@example.com`)".
+ *     https://clerk.com/docs/guides/development/testing/playwright/test-sign-up-flows
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -313,11 +316,26 @@ describe('isClerkTestEmail', () => {
     expect(isClerkTestEmail('Jane+Clerk_Test@Example.com')).toBe(true);
   });
 
-  it('rejects anything else', () => {
+  // Clerk's Playwright sign-up guide: "Emails containing `+clerk_test` (e.g.,
+  // `testuser+clerk_test_123@example.com`) can be verified with the test OTP
+  // code `424242`", and its own example signs up
+  // `testuser+clerk_test_${Date.now()}@example.com`.
+  // https://clerk.com/docs/guides/development/testing/playwright/test-sign-up-flows
+  // A seeded user created that way is a test address; calling it "not a
+  // +clerk_test address" would fail a journey that 424242 completes.
+  it('recognises a +clerk_test subaddress with a suffix, as Clerk documents', () => {
+    expect(isClerkTestEmail('testuser+clerk_test_123@example.com')).toBe(true);
+    expect(isClerkTestEmail('spawnforge-e2e+clerk_test_ci@example.com')).toBe(true);
+  });
+
+  it('rejects addresses that do not contain +clerk_test in the local part', () => {
     expect(isClerkTestEmail('jane@example.com')).toBe(false);
-    expect(isClerkTestEmail('jane+clerk_testing@example.com')).toBe(false);
+    expect(isClerkTestEmail('jane+clerk@example.com')).toBe(false);
+    expect(isClerkTestEmail('jane_clerk_test@example.com')).toBe(false);
     expect(isClerkTestEmail('jane@clerk_test.example.com')).toBe(false);
+    expect(isClerkTestEmail('jane@example.com+clerk_test')).toBe(false);
     expect(isClerkTestEmail('+clerk_test@')).toBe(false);
+    expect(isClerkTestEmail('+clerk_test@example.com')).toBe(false);
   });
 
   it('exposes the documented fixed verification code', () => {

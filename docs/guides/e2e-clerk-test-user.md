@@ -59,7 +59,9 @@ needs:
    must have a password. The global setup reads the user from the Backend API and stops with a named error
    if the user is missing or has no password.
 2. **No multi-factor authentication.** The global setup rejects a user with two-factor enabled.
-3. **A `+clerk_test` email address**, such as `spawnforge-e2e+clerk_test@<your-domain>`. Clerk's Device
+3. **A `+clerk_test` email address**, such as `spawnforge-e2e+clerk_test@<your-domain>`. A suffix after
+   `+clerk_test` also counts (Clerk's own Playwright example uses `testuser+clerk_test_123@example.com`,
+   [docs](https://clerk.com/docs/guides/development/testing/playwright/test-sign-up-flows)). Clerk's Device
    Trust asks for a second factor "when a user enters a valid password, hasn't enabled MFA, and is signing
    in from a new device". It is on by default for applications created after November 14, 2025
    ([docs](https://clerk.com/docs/guides/secure/client-trust)). Every CI browser is a new device. On a

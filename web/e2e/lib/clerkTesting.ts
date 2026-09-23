@@ -323,11 +323,19 @@ export function bypassCaptcha(json: unknown): boolean {
 }
 
 /**
- * True for a Clerk test email — "Any email with the `+clerk_test` subaddress" —
- * which a development instance verifies with {@link CLERK_TEST_EMAIL_CODE}.
+ * True for a Clerk test email, which a development instance verifies with
+ * {@link CLERK_TEST_EMAIL_CODE}. Clerk documents it two ways: "Any email with
+ * the `+clerk_test` subaddress" (test-emails-and-phones), and "Emails
+ * containing `+clerk_test` (e.g., `testuser+clerk_test_123@example.com`)"
+ * (https://clerk.com/docs/guides/development/testing/playwright/test-sign-up-flows).
+ * The wider reading is the one that matters here: a seeded user created the
+ * way Clerk's own Playwright example creates one carries a suffix, and
+ * classifying it as a non-test address would fail a journey that 424242
+ * completes. A false positive costs nothing extra — Clerk rejects the code and
+ * the journey fails on the form's own error.
  * @param email Address to classify.
  * @returns Whether Clerk treats it as a test address.
  */
 export function isClerkTestEmail(email: string): boolean {
-  return /^[^@\s]+\+clerk_test@[^@\s]+\.[^@\s]+$/i.test(email);
+  return /^[^@\s]+\+clerk_test[^@\s]*@[^@\s]+\.[^@\s]+$/i.test(email);
 }
