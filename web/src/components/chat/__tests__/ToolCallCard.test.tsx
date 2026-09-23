@@ -92,6 +92,62 @@ describe('ToolCallCard', () => {
     expect(mockApprove).toHaveBeenCalledWith('tc-3');
   });
 
+  // ---------------------------------------------------------------------------
+  // PF-1148: the chat turn that caused an adjustment says so, without expanding.
+  // ---------------------------------------------------------------------------
+  describe('adjusted values', () => {
+    const clamp = {
+      component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
+    };
+    const cut = {
+      component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+    };
+    const card = (result: unknown, status: 'success' | 'undone' | 'error' = 'success') => render(
+      <ToolCallCard
+        toolCall={{
+          id: 'tc-adj',
+          name: 'add_game_component',
+          input: { entityId: 'e-1', componentType: 'moving_platform' },
+          status,
+          undoable: false,
+          result,
+        }}
+      />,
+    );
+
+    it('lists each adjustment in the author’s terms, visible without expanding', () => {
+      card({ message: 'Added moving_platform', corrections: [clamp, cut] });
+      const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+      const items = Array.from(note.querySelectorAll('li')).map((li) => li.textContent);
+      expect(items).toEqual([
+        'Moving Platform speed: you asked for 99999, it was capped at 1000.',
+        'Moving Platform waypoints: you gave 300 points; only the first 64 points were kept, the most the engine supports.',
+      ]);
+    });
+
+    it('shows no note when nothing was adjusted', () => {
+      card({ message: 'Added moving_platform', corrections: [] });
+      expect(screen.queryByRole('status')).toBeNull();
+      // The card itself did render, so the absence above is not a blank render.
+      expect(screen.getByText('Add Game Component')).toBeDefined();
+    });
+
+    it('shows no note for a result that carries no corrections at all', () => {
+      card('Added moving_platform');
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+
+    it('renders only well-formed records, never a note built from junk', () => {
+      card({ corrections: [{ component: 'movingPlatform', field: 'speed', reason: 'guessed' }, 'x', null] });
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+
+    it('drops the note once the call is undone — the adjusted value is gone', () => {
+      card({ message: 'Added moving_platform', corrections: [clamp] }, 'undone');
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+  });
+
   it('expands to show input JSON when header button is clicked', () => {
     render(
       <ToolCallCard
