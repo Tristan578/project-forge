@@ -186,9 +186,11 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui @dev', () => {
     }
   });
 
-  // Test 4 (ToolCallCard rendering) REMOVED — __CHAT_STORE is not exposed on
-  // window, making injectStore unable to execute the callback. ToolCallCard
-  // rendering is already covered by ai-game-creation.spec.ts tests 2-7.
+  // Test 4 (ToolCallCard rendering) REMOVED. ToolCallCard rendering is covered
+  // by ai-game-creation.spec.ts (tool call card, multiple tool calls, approval
+  // and error tests), which append messages through __CHAT_STORE.setState —
+  // chatStore has no addMessage action, which is why injecting through one
+  // rendered nothing (#10160).
 });
 
 // ---------------------------------------------------------------------------
