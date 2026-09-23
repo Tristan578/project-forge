@@ -19,6 +19,7 @@ import type { EditorState, MaterialData } from '@/stores/editorStore';
 import {
   colourRangeSelect,
   expectEveryControlNamed,
+  expectEveryLabelForResolves,
   axeViolations,
   formControls,
 } from './formControlA11y';
@@ -153,6 +154,61 @@ describe('MaterialInspector accessible names (#9677)', () => {
     const normalMaps = screen.getAllByRole('combobox', { name: /^Normal Map/ });
     expect(normalMaps).toHaveLength(2);
     expect(normalMaps[0]).not.toBe(normalMaps[1]);
+  });
+
+  it('points every label for= at a rendered control with every section open', async () => {
+    const container = await renderOpen(<MaterialInspector />);
+    // With a texture asset and a finite distance, the conditional controls
+    // are present, so their labels carry a `for` resolving to them.
+    expect(screen.getByText('Atten. Dist.').closest('label')?.control).toBe(
+      screen.getByRole('slider', { name: /^Atten\. Dist\./ }),
+    );
+    expect(screen.getByText('Base Color').closest('label')?.control).toBe(
+      screen.getByRole('combobox', { name: /^Base Color/ }),
+    );
+    expectEveryLabelForResolves(container);
+  });
+
+  it('points no label at a missing control with infinite attenuation and no texture assets', async () => {
+    // The two states that remove a labelled control: "Infinite" hides the
+    // distance slider, and with no texture asset each slot renders an Upload
+    // button in place of its select.
+    fixture = {
+      ...everythingOn(),
+      primaryMaterial: { ...material, attenuationDistance: null },
+      assetRegistry: {},
+    };
+    const container = await renderOpen(<MaterialInspector />);
+
+    expect(screen.getByRole('checkbox', { name: 'Infinite attenuation distance' })).toBeChecked();
+    expect(screen.queryAllByRole('slider', { name: /^Atten\. Dist\./ })).toEqual([]);
+    expect(screen.queryAllByRole('combobox', { name: /^(Base Color|Normal Map|Coat Map)/ })).toEqual([]);
+    // The labels stay visible but stop pointing at the controls that left.
+    expect(screen.getByText('Atten. Dist.').closest('label')).not.toHaveAttribute('for');
+    expect(screen.getByText('Base Color').closest('label')).not.toHaveAttribute('for');
+    expectEveryLabelForResolves(container);
+    expectEveryControlNamed(container);
+    expect(await axeViolations(container)).toEqual([]);
+  });
+
+  it('names each texture slot Upload button after its slot', async () => {
+    fixture = { ...everythingOn(), assetRegistry: {} };
+    await renderOpen(<MaterialInspector />);
+
+    // Nine slots; "Normal Map" is both a surface slot and a clearcoat slot.
+    const slots = [
+      'base color', 'normal map', 'metal/rough', 'emissive', 'occlusion',
+      'depth map', 'coat map', 'rough map', 'normal map',
+    ];
+    expect(screen.getAllByRole('button', { name: /^Upload .+ texture$/ })).toHaveLength(slots.length);
+    for (const slot of new Set(slots)) {
+      expect(screen.getAllByRole('button', { name: `Upload ${slot} texture` })).toHaveLength(
+        slots.filter((s) => s === slot).length,
+      );
+    }
+    // A bare "Upload" nine times over tells a screen-reader user nothing
+    // about which slot each button fills.
+    expect(screen.queryAllByRole('button', { name: 'Upload' })).toEqual([]);
   });
 
   it('keeps label pairings unique when two inspectors are mounted', async () => {

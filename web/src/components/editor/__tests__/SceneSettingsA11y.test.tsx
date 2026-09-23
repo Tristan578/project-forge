@@ -20,6 +20,7 @@ import type { EditorState } from '@/stores/editorStore';
 import {
   colourRangeSelect,
   expectEveryControlNamed,
+  expectEveryLabelForResolves,
   axeViolations,
   formControls,
   staticControlCount,
@@ -96,6 +97,7 @@ describe('SceneSettings accessible names (#9677)', () => {
     const { container } = render(<SceneSettings />);
     expect(formControls(container).length).toBeGreaterThanOrEqual(50);
     expectEveryControlNamed(container);
+    expectEveryLabelForResolves(container);
   });
 
   it('has zero axe violations with every effect enabled', async () => {

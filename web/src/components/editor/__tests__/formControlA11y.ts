@@ -56,6 +56,28 @@ export function expectEveryControlNamed(root: ParentNode): void {
 }
 
 /**
+ * Assert every `<label for>` under `root` names a labelable element that is
+ * in the tree right now.
+ *
+ * HTML requires `for` to be the id of a labelable element in the same tree.
+ * A label pointing at a control that is conditionally absent (a slider hidden
+ * behind an "Infinite" switch, a select replaced by an Upload button) names
+ * nothing. axe has no rule for a dangling `for`, and a control-centric check
+ * cannot see it because the missing control is not there to check, so this
+ * walks the labels instead. `HTMLLabelElement.control` is the spec's own
+ * resolution: null when `for` names no element, or a non-labelable one.
+ */
+export function expectEveryLabelForResolves(root: ParentNode): void {
+  const labels = Array.from(root.querySelectorAll<HTMLLabelElement>('label[for]'));
+  // A walk over zero labels would pass vacuously (lessons-learned #9).
+  expect(labels.length).toBeGreaterThan(0);
+  const dangling = labels
+    .filter((label) => label.control === null)
+    .map((label) => `for="${label.htmlFor}": ${(label.textContent ?? '').trim()}`);
+  expect(dangling, 'labels whose `for` names no rendered labelable element').toEqual([]);
+}
+
+/**
  * Run axe over `root` and return one `[impact] rule: help` line per
  * violation, so `expect(await axeViolations(el)).toEqual([])` fails naming
  * the rules rather than printing a bare count.

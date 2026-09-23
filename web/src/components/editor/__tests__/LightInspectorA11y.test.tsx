@@ -17,6 +17,7 @@ import type { EditorState, LightData } from '@/stores/editorStore';
 import {
   colourRangeSelect,
   expectEveryControlNamed,
+  expectEveryLabelForResolves,
   axeViolations,
   formControls,
   staticControlCount,
@@ -81,6 +82,7 @@ describe('LightInspector accessible names (#9677)', () => {
 
     expect(formControls(container)).toHaveLength(expected);
     expectEveryControlNamed(container);
+    expectEveryLabelForResolves(container);
     expect(await axeViolations(container)).toEqual([]);
   });
 

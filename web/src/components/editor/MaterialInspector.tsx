@@ -102,13 +102,17 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
     }
   }, [loadTexture, removeTexture, entityId, slot]);
 
+  const hasAssets = textureAssets.length > 0;
+
   return (
     <div className="flex items-center gap-2">
-      <label htmlFor={selectId} className="w-20 shrink-0 text-xs text-zinc-400">
+      {/* `for` must name an element that is there: with no texture asset
+          the select is replaced by an Upload button that names itself. */}
+      <label htmlFor={hasAssets ? selectId : undefined} className="w-20 shrink-0 text-xs text-zinc-400">
         {label}
         {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
       </label>
-      {textureAssets.length > 0 ? (
+      {hasAssets ? (
         <>
           <select
             id={selectId}
@@ -137,6 +141,7 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
           <button
             className="flex items-center gap-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-400 hover:border-[var(--sf-border-strong)] hover:text-zinc-200"
             onClick={() => fileRef.current?.click()}
+            aria-label={`Upload ${label.toLowerCase()} texture`}
             title={`Upload ${label.toLowerCase()} texture`}
           >
             <ImageIcon size={12} />
@@ -708,8 +713,11 @@ export const MaterialInspector = memo(function MaterialInspector() {
           <SliderRow label="Thickness" value={primaryMaterial.thickness ?? 0} min={0} max={10} step={0.01} onChange={(v) => handleUpdate({ thickness: v })} tooltipTerm="transmissionThickness" />
           <div className="flex items-center gap-2">
             {/* The label names the distance slider; the checkbox beside it
-                is the separate "Infinite" switch, named on its own. */}
-            <label htmlFor={fieldId('attenuation-distance')} className="w-20 shrink-0 text-xs text-zinc-400">Atten. Dist.<InfoTooltip term="attenuationDist" /></label>
+                is the separate "Infinite" switch, named on its own. The
+                slider is absent while "Infinite" is on, so `for` is too. */}
+            <label
+              htmlFor={primaryMaterial.attenuationDistance != null ? fieldId('attenuation-distance') : undefined}
+              className="w-20 shrink-0 text-xs text-zinc-400">Atten. Dist.<InfoTooltip term="attenuationDist" /></label>
             <input
               type="checkbox"
               checked={primaryMaterial.attenuationDistance == null}

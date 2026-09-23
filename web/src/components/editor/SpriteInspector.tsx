@@ -73,7 +73,11 @@ export function SpriteInspector() {
       <div className="space-y-3">
         {/* Texture Section */}
         <div className="space-y-2">
-          <label htmlFor={fieldId('texture')} className="text-xs text-zinc-400">Texture</label>
+          {/* `for` only while the select renders; with no texture asset the
+              "Upload Texture" button stands in and names itself. */}
+          <label htmlFor={textureAssets.length > 0 ? fieldId('texture') : undefined} className="text-xs text-zinc-400">
+            Texture
+          </label>
 
           {/* Texture Preview */}
           {spriteData.textureAssetId && (
