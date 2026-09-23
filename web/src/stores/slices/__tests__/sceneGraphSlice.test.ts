@@ -672,6 +672,20 @@ describe('sceneGraphSlice', () => {
       expect(store.getState().completionModeHistory.past).toHaveLength(COMPLETION_MODE_HISTORY_LIMIT);
     });
 
+    it('hydrates a persisted mode as the starting point: no undo step, not an unsaved edit', () => {
+      store.getState().setCompletionMode('endless');
+      store.setState({ sceneModified: false });
+
+      store.getState().hydrateCompletionMode('narrative');
+
+      expect(store.getState().sceneGraph.completionMode).toBe('narrative');
+      expect(store.getState().completionModeHistory).toEqual({ past: [], future: [] });
+      expect(store.getState().sceneModified).toBe(false);
+
+      store.getState().hydrateCompletionMode(undefined);
+      expect(store.getState().sceneGraph.completionMode).toBeUndefined();
+    });
+
     it('keeps a manually chosen mode through a later engine rebuild of the same scene', () => {
       // An AI edit to entities comes back as SCENE_GRAPH_UPDATE / node events,
       // none of which carry a mode. The creator's choice must survive them.

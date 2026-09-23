@@ -120,6 +120,14 @@ export interface SceneGraphSlice {
   undoCompletionMode: () => boolean;
   /** Re-apply the edit the last `undoCompletionMode` reverted. Returns false when there is none. */
   redoCompletionMode: () => boolean;
+  /**
+   * Adopt a mode read from persisted project data as the starting point: no
+   * undo step, and not an unsaved edit. The caller has already validated it
+   * (`readCompletionModeFromSceneData`). Used by the editor page's cold open,
+   * whose `loadScene` defers before the engine exists and so never reaches the
+   * `SCENE_LOADED` handoff — the same guarantee it gives the music arrangement.
+   */
+  hydrateCompletionMode: (mode: CompletionMode | undefined) => void;
 }
 
 /**
@@ -485,5 +493,13 @@ export const createSceneGraphSlice: StateCreator<
     });
     invalidateSceneCache();
     return true;
+  },
+
+  hydrateCompletionMode: (mode) => {
+    set({
+      sceneGraph: { ...get().sceneGraph, completionMode: mode },
+      completionModeHistory: emptyCompletionModeHistory(),
+    });
+    invalidateSceneCache();
   },
 });

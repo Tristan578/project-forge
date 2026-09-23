@@ -20,6 +20,7 @@ import {
 } from '@/lib/audio/sceneAudioManifest';
 import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
+import { stageSceneCompletionMode, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
 
 type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string } | void;
 
@@ -196,6 +197,27 @@ describe('sceneSlice.loadTemplate', () => {
       await harness.store.getState().loadTemplate('2d-platformer');
 
       expect(takeStagedSceneAudio()).toEqual({});
+    });
+
+    it('does not let an earlier scene\'s unclaimed completion mode follow the template in (#9998)', async () => {
+      // Same take-once handoff as the audio: a template file declares no mode,
+      // so it opens as a legacy `win` game rather than inheriting a refused
+      // load's `sandbox` — which would let it Play with no goal.
+      stageSceneCompletionMode('sandbox');
+      setSceneDispatcher(createFakeEngineDispatcher(harness.store));
+
+      await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('puts a previous completion-mode staging back when the engine refuses the template (#9998)', async () => {
+      stageSceneCompletionMode('narrative');
+      setSceneDispatcher(vi.fn<Dispatcher>(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(takeStagedSceneCompletionMode()).toBe('narrative');
     });
 
     it('applies every shipped template', async () => {

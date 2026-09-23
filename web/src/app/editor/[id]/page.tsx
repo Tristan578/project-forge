@@ -11,6 +11,7 @@ const EditorLayout = dynamic(
 );
 import { useEditorStore } from '@/stores/editorStore';
 import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
+import { readCompletionModeFromSceneData } from '@/lib/scenes/sceneCompletionMode';
 import { trackProjectOpen } from '@/lib/workspace/recentProjects';
 import { EditorErrorBoundary } from '@/components/editor/EditorErrorBoundary';
 import { WasmErrorBoundary } from '@/components/editor/WasmErrorBoundary';
@@ -69,6 +70,11 @@ function EditorPageContent() {
         // run even if `loadScene` bails out early on a dispatch that isn't
         // ready yet.
         useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(project.sceneData));
+        // Same guarantee for the completion mode (#9998). When `loadScene`
+        // does reach the engine it stages this very value for SCENE_LOADED, so
+        // the two agree; when it defers (the cold open), this is the only
+        // thing that stops a sandbox project reopening as a win game.
+        useEditorStore.getState().hydrateCompletionMode(readCompletionModeFromSceneData(project.sceneData));
         setLoading(false);
       } catch (err) {
         console.error('Failed to fetch project:', err);

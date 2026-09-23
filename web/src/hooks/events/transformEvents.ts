@@ -8,6 +8,8 @@ import { setLastExportedScene } from '@/lib/storage/autoSave';
 import { invalidateSceneCache } from '@/lib/ai/cachedContext';
 import { releaseEntityAudio, resetEntityAudioGraphForScene } from '@/lib/audio/entityAudioGraph';
 import { takeStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import { foldCompletionModeIntoSceneJson, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
+import { emptyCompletionModeHistory } from '@/stores/slices/sceneGraphSlice';
 import type { SceneNode } from '@/stores/slices/types';
 import { castPayload, type SetFn, type GetFn } from './types';
 import { applyWhenPrimary } from './primaryGate';
@@ -209,7 +211,18 @@ export function handleTransformEvent(
       // silently drop every instance and override. This is the single choke
       // point every one of them passes through; `foldExportedSceneJson` owns
       // which registry snapshot it folds, and why.
-      const json = foldExportedSceneJson(rawJson, requestId);
+      //
+      // The completion mode (#9998) is folded at the same choke point and for
+      // the same reason: it is frontend-only, so the engine's export never
+      // carries it, and every consumer below — plus the `.forge` download and
+      // the cloud PUT listening for the DOM event — must see it. Read LIVE: an
+      // export answers within a frame, and the scene-switch capture that could
+      // race a load always finishes before that load is dispatched. A scene
+      // whose mode was never chosen passes through byte-identical.
+      const json = foldCompletionModeIntoSceneJson(
+        foldExportedSceneJson(rawJson, requestId),
+        state.sceneGraph?.completionMode,
+      );
 
       // Cache for periodic IndexedDB auto-save
       setLastExportedScene(json, name);
@@ -263,12 +276,19 @@ export function handleTransformEvent(
         // in-place incremental rebuild of the SAME scene. SCENE_LOADED is the
         // one unambiguous "a different scene is replacing this one" boundary
         // — new_scene and a real load both emit it — so it is the one place
-        // that must clear the mode explicitly rather than let it leak from
-        // whatever scene was open before. The SCENE_GRAPH_UPDATE that follows
-        // then starts from `undefined` and correctly stays there (legacy
-        // default) until the persisted-mode write path (child of #9901) has
-        // something to set.
-        sceneGraph: { ...useEditorStore.getState().sceneGraph, completionMode: undefined },
+        // that replaces the mode explicitly rather than let it leak from
+        // whatever scene was open before.
+        //
+        // The INCOMING scene's mode arrives here too (#9998): `dispatchSceneLoad`
+        // stages it from the scene JSON (and `newScene` from its caller), the
+        // same take-once handoff as the audio above. Nothing staged means a
+        // legacy scene, i.e. `undefined`, which the validator treats as `win`.
+        // The SCENE_GRAPH_UPDATE that follows carries no mode and so keeps
+        // this one.
+        sceneGraph: { ...useEditorStore.getState().sceneGraph, completionMode: takeStagedSceneCompletionMode() },
+        // The outgoing scene's mode edits are not steps anyone can undo back
+        // to in this one.
+        completionModeHistory: emptyCompletionModeHistory(),
       });
       resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context

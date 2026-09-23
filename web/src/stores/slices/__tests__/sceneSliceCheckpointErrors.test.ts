@@ -8,6 +8,7 @@ import { attachCheckpointEngine, projectFixture, sceneFixture } from '@/lib/scen
 import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
 import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
+import { takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
 
 describe('checkpoint recovery transaction', () => {
   let store: ReturnType<typeof createSceneTestStore>['store'];
@@ -60,6 +61,37 @@ describe('checkpoint recovery transaction', () => {
     // emptied one over the restored scene.
     await expect(store.getState().restoreCheckpoint(checkpoint!.id)).resolves.toBe(true);
     expect(loadPrefabInstances()).toEqual(seeded);
+  });
+
+  // #9998: the checkpoint read-back skips the SCENE_EXPORTED fold on purpose,
+  // so the capture must add the live completion mode itself — or restoring a
+  // sandbox checkpoint would reopen it as a win game that refuses to Play.
+  it('records the live completion mode in a checkpoint and hands it to SCENE_LOADED on restore', async () => {
+    store.setState({ sceneGraph: { nodes: {}, rootIds: [], completionMode: 'sandbox' } });
+
+    const checkpoint = await store.getState().createCheckpoint('Sandbox');
+    expect(checkpoint).not.toBeNull();
+    const stored = listCheckpoints().find((c) => c.id === checkpoint!.id)!;
+    expect(stored.snapshot.scenes[0].data?.completionMode).toBe('sandbox');
+
+    store.setState({ sceneGraph: { nodes: {}, rootIds: [], completionMode: 'endless' } });
+    takeStagedSceneCompletionMode();
+    await expect(store.getState().restoreCheckpoint(checkpoint!.id)).resolves.toBe(true);
+
+    expect(takeStagedSceneCompletionMode()).toBe('sandbox');
+  });
+
+  it('re-stages the live mode, not the legacy default, when a failed restore recovers the prior scene', async () => {
+    vi.useFakeTimers();
+    store.setState({ sceneGraph: { nodes: {}, rootIds: [], completionMode: 'endless' } });
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    engine.setMode('silent');
+
+    const pending = store.getState().restoreCheckpoint(cp.id);
+    await vi.advanceTimersByTimeAsync(10000);
+    await expect(pending).resolves.toBe(false);
+
+    expect(takeStagedSceneCompletionMode()).toBe('endless');
   });
 
   it('does not persist or claim success on the synchronous queued response', async () => {

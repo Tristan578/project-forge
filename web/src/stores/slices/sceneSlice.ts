@@ -3,7 +3,7 @@
  */
 
 import { StateCreator, StoreApi } from 'zustand';
-import type { GameComponentData, SceneGraph, SceneTransitionConfig, TerrainDataState } from './types';
+import type { CompletionMode, GameComponentData, SceneGraph, SceneTransitionConfig, TerrainDataState } from './types';
 import { DEFAULT_TRANSITION } from './types';
 import {
   loadProjectScenes,
@@ -43,6 +43,12 @@ import {
 } from '@/lib/prefabs/prefabStore';
 import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
 import { stageSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import {
+  clearStagedSceneCompletionMode,
+  readCompletionModeFromSceneJson,
+  stageSceneCompletionMode,
+  withCompletionMode,
+} from '@/lib/scenes/sceneCompletionMode';
 import { showError } from '@/lib/toast';
 import {
   buildTemplateSceneFile,
@@ -216,10 +222,15 @@ export interface SceneSlice {
    * A thrown dispatch sets a save lockout before audio/prefab-instance rollback,
    * logs any storage rollback failure, and rethrows the original engine error.
    *
+   * @param opts.completionMode The mode the empty scene opens with (#9998).
+   *   Staged for the `SCENE_LOADED` this command emits — the same boundary
+   *   that clears the outgoing scene's mode, so writing it any earlier would be
+   *   wiped. `scene_create` passes the brief's mode here; omitted, the new
+   *   scene is legacy `win`.
    * @returns Whether the engine accepted a new scene.
    * @throws The original dispatch error; prefab rollback may remain partial.
    */
-  newScene: () => boolean;
+  newScene: (opts?: { completionMode?: CompletionMode }) => boolean;
   /**
    * Is the engine's command dispatcher attached to this slice yet?
    *
@@ -650,19 +661,27 @@ function rollbackPrefabState(snapshot: PrefabRestoreSnapshot): void {
  * additional state (the prefab registry/library via
  * `restorePrefabInstances`/`rollbackPrefabState` above), since this primitive
  * only owns the audio stash and the dispatch itself.
+ *
+ * The scene's completion mode (#9998) is staged alongside the audio for the
+ * same reason — `SCENE_LOADED` carries only a name, and it is the boundary that
+ * clears the outgoing scene's mode — and rolls back with it. A legacy scene
+ * stages `undefined`, which displaces anything a rejected load left behind.
  */
 function dispatchSceneLoad(json: string): boolean {
   if (!dispatchCommand) return false;
   const rollbackAudio = stageSceneAudio(json);
+  const rollbackMode = stageSceneCompletionMode(readCompletionModeFromSceneJson(json));
   try {
     const response = dispatchCommand('load_scene', { json });
     if (response?.success === false) {
       rollbackAudio();
+      rollbackMode();
       return false;
     }
     return true;
   } catch (error) {
     rollbackAudio();
+    rollbackMode();
     throw error;
   }
 }
@@ -796,7 +815,7 @@ export const createSceneSlice: StateCreator<
     syncArrangementFromLoadedScene(json);
     return true;
   },
-  newScene: () => {
+  newScene: (opts) => {
     if (!dispatchCommand) {
       // No engine to change scenes at all — the scene, and therefore its
       // registry, is unchanged. Clearing here (as the dispatched path below
@@ -807,6 +826,11 @@ export const createSceneSlice: StateCreator<
     // new_scene emits SCENE_LOADED too. Anything staged by a load the engine
     // rejected would otherwise be adopted by this empty scene.
     const rollbackAudio = clearStagedSceneAudio();
+    // Same handoff for the completion mode (#9998): the caller's mode for the
+    // empty scene, or nothing (legacy `win`) — never a rejected load's leftover.
+    const rollbackMode = opts?.completionMode === undefined
+      ? clearStagedSceneCompletionMode()
+      : stageSceneCompletionMode(opts.completionMode);
     const previousInstances = loadPrefabInstances();
     // The new scene has no linked instances of its own — leaving the outgoing
     // scene's registry in place would attach its instances to this empty
@@ -820,6 +844,7 @@ export const createSceneSlice: StateCreator<
       const response = dispatchCommand('new_scene', {});
       if (response?.success === false) {
         rollbackAudio();
+        rollbackMode();
         // The engine never accepted the new scene — the scene on screen is
         // unchanged, so its registry must come back rather than stay cleared
         // out from under it (scene.FR-1 N1 BUG-4).
@@ -855,6 +880,7 @@ export const createSceneSlice: StateCreator<
       });
       // The engine lockout must stand even if registry rollback storage fails.
       rollbackAudio();
+      rollbackMode();
       try {
         savePrefabInstancesToStorage(previousInstances);
       } catch (rollbackError) {
@@ -1023,7 +1049,15 @@ export const createSceneSlice: StateCreator<
     // it runs even though no template currently declares audio. The accepted
     // stash remains armed across a timeout because the queued load may still
     // emit SCENE_LOADED.
-    const rollbackAudio = stageSceneAudio(sceneJson);
+    const rollbackSceneAudio = stageSceneAudio(sceneJson);
+    // And the completion mode (#9998), same contract: a template file carries
+    // none, so this stages the legacy `win` and displaces a rejected load's
+    // leftover. Rolled back together with the audio on every refusal below.
+    const rollbackMode = stageSceneCompletionMode(readCompletionModeFromSceneJson(sceneJson));
+    const rollbackAudio = () => {
+      rollbackSceneAudio();
+      rollbackMode();
+    };
     // Same registry handling as `loadScene` (scene.FR-1 N1) — this used to
     // dispatch `load_scene` directly and never touch the prefab-instance
     // registry at all, so the OUTGOING scene's instances rode along into the
@@ -1246,8 +1280,13 @@ export const createSceneSlice: StateCreator<
     try {
       // Fold the live prefab registry into the captured scene so the checkpoint
       // records the linked instances/definitions the engine export omits
-      // (scene.FR-1 N1) — otherwise restoring silently discards them.
-      const captured = withCheckpointPrefabData(await captureCheckpointScene(requestSceneExport));
+      // (scene.FR-1 N1) — otherwise restoring silently discards them. The
+      // completion mode (#9998) is omitted by the engine for the same reason and
+      // this read-back skips the SCENE_EXPORTED fold, so it is added here too.
+      const captured = withCompletionMode(
+        withCheckpointPrefabData(await captureCheckpointScene(requestSceneExport)),
+        get().sceneGraph.completionMode,
+      );
       if (!isCurrent()) throw new Error('The project or scene changed while capturing. Try again in the intended scene.');
       const project = saveCurrentSceneData(loadProjectScenes(projectId), captured);
       // A checkpoint is independent of the active save. Failure must not alter
@@ -1342,8 +1381,11 @@ export const createSceneSlice: StateCreator<
       // A valid restore supersedes earlier template imports and pending setup.
       sceneOperationRevision += 1;
       set({ sceneOperationRevision });
-      // Preserve the live, possibly unsaved scene before sending any load.
-      prior = await captureCheckpointScene(requestSceneExport);
+      // Preserve the live, possibly unsaved scene before sending any load —
+      // with its completion mode (#9998), which the engine read-back lacks, so
+      // a recovery re-apply of `prior` restages that mode rather than the
+      // legacy default.
+      prior = withCompletionMode(await captureCheckpointScene(requestSceneExport), get().sceneGraph.completionMode);
       if (!isCurrent()) throw new Error('The project changed while restoring. Try again in the intended project.');
       const active = result.project.scenes.find((scene) => scene.id === result.project.activeSceneId)!;
       const activeData = active.data ?? emptySceneFile(active.name);
