@@ -115,12 +115,17 @@ function sprite(color: Vec3, size: [number, number], order: number) {
  * `perf-2d@1`: 256 dynamic sprites (a 16 x 16 grid of alternating boxes and
  * circles) falling under 2D physics onto one static ground sprite. Untextured,
  * so the fixture has no asset dependency.
+ *
+ * In pixels, because that is the unit of the engine's 2D camera at zoom 1
+ * (and of an untextured sprite's 64 px default size): the whole pile fits a
+ * 1280 x 720 viewport. The run must be switched to the 2D camera
+ * (`set_project_type`), which the export template does for a 2D project.
  */
 function buildPerf2d(): FixtureScene {
   const entities: FixtureEntity[] = [];
-  const groundSize: [number, number] = [16, 0.5];
+  const groundSize: [number, number] = [960, 24];
   entities.push({
-    ...baseEntity('perf2d-ground', 'sprite', 'Ground', [0, -4, 0], [1, 1, 1]),
+    ...baseEntity('perf2d-ground', 'sprite', 'Ground', [0, -300, 0], [1, 1, 1]),
     spriteData: sprite([0.3, 0.3, 0.35], groundSize, 0),
     physics2dData: physics2d('Static', 'Box', groundSize),
     physics2dEnabled: true,
@@ -131,10 +136,10 @@ function buildPerf2d(): FixtureScene {
     for (let col = 0; col < cols; col++) {
       const i = row * cols + col;
       const shape = i % 2 === 0 ? 'Box' : 'Circle';
-      const size: [number, number] = [0.4, 0.4];
+      const size: [number, number] = [20, 20];
       // Odd rows are offset half a cell so the pile does not stack in columns.
-      const x = -6 + col * 0.8 + (row % 2) * 0.4;
-      const y = -1 + row * 0.55;
+      const x = -300 + col * 40 + (row % 2) * 20;
+      const y = -150 + row * 28;
       entities.push({
         ...baseEntity(`perf2d-body-${String(i).padStart(3, '0')}`, 'sprite', `Body ${i}`, [x, y, 0], [1, 1, 1]),
         spriteData: sprite(paletteColor(i), size, 1),

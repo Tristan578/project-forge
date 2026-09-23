@@ -31,7 +31,7 @@ export const PERF_FIXTURES: readonly Readonly<PerfFixture>[] = Object.freeze([
     dimension: '2d',
     label: '2D sprites + 2D physics',
     description: '256 dynamic untextured sprites (boxes and circles) falling under 2D physics onto a static ground sprite.',
-    checksum: '9dd00afc',
+    checksum: 'b620e09f',
   }),
   Object.freeze({
     id: 'perf-3d@1',
