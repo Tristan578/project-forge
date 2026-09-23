@@ -269,6 +269,13 @@ export function handleTransformEvent(
         // default) until the persisted-mode write path (child of #9901) has
         // something to set.
         sceneGraph: { ...useEditorStore.getState().sceneGraph, completionMode: undefined },
+        // `gameComponentAdjustments` (PF-1148) is deliberately NOT reset here.
+        // This event lands a frame after the command, and by then a caller may
+        // already have marked the INCOMING scene's components
+        // (`create_scene_from_description` adds them in the same task as its
+        // `newScene()`). The outgoing scene's markers were dropped when the
+        // engine accepted the command — `forgetOutgoingSceneAdjustments` in
+        // editorStore.ts.
       });
       resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context

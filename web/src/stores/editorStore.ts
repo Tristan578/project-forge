@@ -14,7 +14,7 @@ import { showError } from '@/lib/toast';
 // the snapshot setter) don't throw at module load. We feature-detect the
 // export at runtime instead of relying on the named binding being present.
 import * as engineModule from '@/hooks/useEngine';
-import type { CommandResponse } from '@/hooks/useEngine';
+import type { BatchResult, CommandResponse } from '@/hooks/useEngine';
 
 // Import all slices
 import {
@@ -251,6 +251,37 @@ function reportCommandRejected(command: string, error: string | undefined): void
   }
 }
 
+/**
+ * The commands that replace the whole scene. The engine answers each one as
+ * soon as it has QUEUED it, applies it on its next frame, and only then emits
+ * SCENE_LOADED (`apply_scene_load` / `apply_new_scene` in
+ * `engine/src/bridge/scene_io.rs`). Nothing else queues a scene replacement.
+ */
+const SCENE_REPLACING_COMMANDS: ReadonlySet<string> = new Set(['load_scene', 'new_scene']);
+
+/**
+ * Drop every game-component adjustment marker (PF-1148) once the engine has
+ * agreed to replace the scene.
+ *
+ * A marker says "this field holds X because you asked for Y", keyed by entity
+ * id. The outgoing scene's markers describe requests made of entities that are
+ * about to be despawned, and nothing else removes them: `GAME_COMPONENT_CHANGED`
+ * prunes only a marker whose field now holds a DIFFERENT value. Reloading the
+ * same scene file, restoring a checkpoint or loading a template with fixed ids
+ * brings the same id back holding the applied value, and the marker would then
+ * report a request nobody made of the scene on screen.
+ *
+ * Here, when the engine accepts the command, and NOT in the SCENE_LOADED
+ * handler. The scene is applied a frame later, and a caller can already have
+ * written the INCOMING scene's components by then: `create_scene_from_description`
+ * calls `newScene()` and adds its components in the same task. Clearing on
+ * SCENE_LOADED would erase exactly those markers, and they are true.
+ */
+function forgetOutgoingSceneAdjustments(): void {
+  if (Object.keys(useEditorStore.getState().gameComponentAdjustments).length === 0) return;
+  useEditorStore.setState({ gameComponentAdjustments: {} });
+}
+
 // Command dispatcher type - will be set by useEngine hook.
 // The return value is what makes an engine rejection observable; callers that
 // do not care may still ignore it (a value-returning function is assignable to
@@ -278,7 +309,18 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
       reportCommandRejected(command, tooBig);
       return { success: false, error: tooBig };
     }
-    const response = dispatcher(command, payload);
+    let response: CommandResponse | void = undefined;
+    try {
+      response = dispatcher(command, payload);
+    } finally {
+      // Anything but an explicit refusal replaced the scene, a throw included:
+      // a thrown dispatch can have despawned the outgoing scene mid-apply (see
+      // `sceneSlice.loadScene`), and a marker on a scene that may be gone is
+      // the false report this must not leave behind.
+      if (SCENE_REPLACING_COMMANDS.has(command) && !(response && response.success === false)) {
+        forgetOutgoingSceneAdjustments();
+      }
+    }
     // Only an explicit `success: false` is a rejection. A dispatcher that
     // returns nothing (every test double, and any pre-PF-1098 caller) is not
     // reporting failure, and must not be treated as if it were.
@@ -348,7 +390,18 @@ export function setCommandBatchDispatcher(dispatcher: BatchCommandDispatcher | u
         results: commands.map(() => ({ success: false, error: tooBig })),
       };
     }
-    return dispatcher(commands);
+    let result: BatchResult | undefined;
+    try {
+      result = dispatcher(commands);
+      return result;
+    } finally {
+      // Item by item, on the item's own answer: `useEngineEvents` answers a
+      // batch it never ran with no results at all, and that replaced nothing.
+      // A throw is taken as the single path takes it.
+      const replaced = commands.some(({ command }, i) => SCENE_REPLACING_COMMANDS.has(command)
+        && (result === undefined || result.results[i]?.success === true));
+      if (replaced) forgetOutgoingSceneAdjustments();
+    }
   };
 }
 
