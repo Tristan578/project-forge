@@ -42,6 +42,7 @@
  * Kept free of any `@playwright/test` runtime import so vitest can drive it
  * (`e2e/lib/__tests__/journeyEvidence.test.ts`).
  */
+import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { zJourneyId } from '../../src/lib/observatory/schema';
@@ -403,6 +404,222 @@ export class JourneyRecorder {
       recordedAt: ctx.recordedAt.toISOString(),
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Evidence: every attempt of one test, folded into the artifact's one record
+// ---------------------------------------------------------------------------
+
+export const zEvidenceAttempt = z.object({
+  attempt: z.number().int().min(0),
+  /** Playwright's status for this attempt — ground truth for the outcome. */
+  status: zPlaywrightStatus,
+  /** The outcome this attempt's own record claimed, or null when it attached none. */
+  recordedOutcome: zJourneyOutcome.nullable(),
+  failedStep: z.string().nullable(),
+  /** Paths relative to the evidence directory, `/`-separated. */
+  trace: z.string().nullable(),
+  video: z.array(z.string()),
+});
+export type EvidenceAttempt = z.infer<typeof zEvidenceAttempt>;
+
+/**
+ * The final outcome of a test from Playwright's per-attempt statuses and the
+ * final attempt's own record. Playwright wins any disagreement: a record
+ * written before a later teardown failed must not turn a red test into a pass.
+ */
+export function deriveFinalOutcome(
+  statuses: readonly PlaywrightStatus[],
+  finalRecordOutcome: JourneyOutcome,
+): { outcome: JourneyOutcome; note: string | null } {
+  const last = statuses[statuses.length - 1];
+  const claimed = (expected: string) =>
+    `Playwright reported ${last} but the journey record claimed ${finalRecordOutcome}; expected ${expected}`;
+  if (last === 'passed') {
+    if (finalRecordOutcome === 'pass' || finalRecordOutcome === 'flaky') {
+      return { outcome: statuses.length > 1 ? 'flaky' : 'pass', note: null };
+    }
+    return { outcome: 'fail', note: claimed('pass or flaky') };
+  }
+  if (last === 'skipped') {
+    return finalRecordOutcome === 'not-run'
+      ? { outcome: 'not-run', note: null }
+      : { outcome: 'fail', note: claimed('not-run') };
+  }
+  return { outcome: 'fail', note: finalRecordOutcome === 'fail' ? null : claimed('fail') };
+}
+
+export const zJourneyEvidence = z
+  .object({
+    schemaVersion: z.literal(JOURNEY_EVIDENCE_SCHEMA_VERSION),
+    kind: z.literal('journey-evidence'),
+    journeyId: zJourneyId,
+    test: zJourneyTestIdentity,
+    outcome: zJourneyOutcome,
+    /** True only for a first-attempt pass — see {@link isProvenJourney}. */
+    proven: z.boolean(),
+    /** Why the outcome differs from the final record's own claim, else null. */
+    note: z.string().nullable(),
+    /** The final attempt's record, as the fixture attached it. */
+    record: zJourneyAttemptRecord,
+    attempts: z.array(zEvidenceAttempt).min(1),
+  })
+  .superRefine((e, ctx) => {
+    const issue = (message: string, path: (string | number)[] = ['outcome']) =>
+      ctx.addIssue({ code: 'custom', message, path });
+    e.attempts.forEach((a, i) => {
+      if (a.attempt !== i) issue(`attempts[${i}] is attempt ${a.attempt}`, ['attempts', i]);
+    });
+    if (e.attempts[e.attempts.length - 1]?.attempt !== e.record.attempt) {
+      issue('the record is not the final attempt\'s', ['record', 'attempt']);
+    }
+    if (e.record.test.id !== e.test.id) issue('the record belongs to another test', ['record', 'test', 'id']);
+    if (e.record.journeyId !== e.journeyId) issue('journeyId differs from the record\'s', ['journeyId']);
+    const derived = deriveFinalOutcome(
+      e.attempts.map((a) => a.status),
+      e.record.outcome,
+    );
+    if (derived.outcome !== e.outcome) issue(`outcome ${e.outcome} does not follow from the attempts (${derived.outcome})`);
+    if (e.proven !== isProvenJourney(e)) issue(`proven must be ${isProvenJourney(e)} for outcome ${e.outcome}`, ['proven']);
+  });
+export type JourneyEvidence = z.infer<typeof zJourneyEvidence>;
+
+/** One attempt as a reporter saw it: status, attached record text(s), artifacts. */
+export interface ReportedAttempt {
+  retry: number;
+  status: PlaywrightStatus;
+  /** Text of every `journey-evidence` attachment on this attempt. */
+  recordTexts: readonly string[];
+  trace: string | null;
+  video: readonly string[];
+}
+
+export type BuildJourneyEvidenceResult =
+  | { ok: true; evidence: JourneyEvidence }
+  | { ok: false; problem: string };
+
+function summarizeIssues(error: z.ZodError): string {
+  return error.issues
+    .slice(0, 5)
+    .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+    .join('; ');
+}
+
+type ParsedAttempt = { record: JourneyAttemptRecord } | { error: string } | null;
+
+/** The one record an attempt attached; null when it attached none. */
+function parseAttemptRecord(attempt: ReportedAttempt): ParsedAttempt {
+  const texts = attempt.recordTexts;
+  if (texts.length === 0) return null;
+  if (texts.length > 1) {
+    return { error: `${texts.length} "${JOURNEY_EVIDENCE_ATTACHMENT}" records on attempt ${attempt.retry}; expected one` };
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(texts[0]);
+  } catch {
+    return { error: `the record attached on attempt ${attempt.retry} is not JSON` };
+  }
+  const parsed = zJourneyAttemptRecord.safeParse(json);
+  return parsed.success
+    ? { record: parsed.data }
+    : { error: `the record attached on attempt ${attempt.retry} is invalid: ${summarizeIssues(parsed.error)}` };
+}
+
+/** Fold every reported attempt of `test` into one evidence record, or say why not. */
+export function buildJourneyEvidence(
+  test: JourneyTestIdentity,
+  reported: readonly ReportedAttempt[],
+): BuildJourneyEvidenceResult {
+  const fail = (problem: string): BuildJourneyEvidenceResult => ({ ok: false, problem });
+  if (reported.length === 0) return fail('the test ran no attempt (interrupted, or never scheduled)');
+  const attempts = [...reported].sort((a, b) => a.retry - b.retry);
+  if (attempts.some((a, i) => a.retry !== i)) {
+    return fail(`Playwright reported attempts ${attempts.map((a) => a.retry).join(',')}; expected 0..${attempts.length - 1}`);
+  }
+
+  const parsed = attempts.map(parseAttemptRecord);
+
+  const finalAttempt = attempts[attempts.length - 1];
+  const finalParsed = parsed[parsed.length - 1];
+  if (finalParsed === null) {
+    return fail(`no "${JOURNEY_EVIDENCE_ATTACHMENT}" record attached on attempt ${finalAttempt.retry} (the final attempt)`);
+  }
+  if ('error' in finalParsed) return fail(finalParsed.error);
+  const record = finalParsed.record;
+  if (record.test.id !== test.id) {
+    return fail(`the record on attempt ${finalAttempt.retry} belongs to test ${record.test.id}, not ${test.id}`);
+  }
+  if (record.attempt !== finalAttempt.retry) {
+    return fail(`the record on attempt ${finalAttempt.retry} says it is attempt ${record.attempt}`);
+  }
+
+  const { outcome, note } = deriveFinalOutcome(
+    attempts.map((a) => a.status),
+    record.outcome,
+  );
+  const evidence = {
+    schemaVersion: JOURNEY_EVIDENCE_SCHEMA_VERSION,
+    kind: 'journey-evidence' as const,
+    journeyId: record.journeyId,
+    test,
+    outcome,
+    proven: outcome === 'pass',
+    note,
+    record,
+    attempts: attempts.map((a, i) => {
+      const p = parsed[i];
+      const r = p !== null && 'record' in p ? p.record : null;
+      return {
+        attempt: a.retry,
+        status: a.status,
+        recordedOutcome: r?.outcome ?? null,
+        failedStep: r?.failedStep ?? null,
+        trace: a.trace,
+        video: [...a.video],
+      };
+    }),
+  };
+  const checked = zJourneyEvidence.safeParse(evidence);
+  return checked.success
+    ? { ok: true, evidence: checked.data }
+    : fail(`the folded evidence is invalid: ${summarizeIssues(checked.error)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Index: every journey-tagged test the run selected, and where its record is
+// ---------------------------------------------------------------------------
+
+export const zJourneyEvidenceIndex = z.object({
+  schemaVersion: z.literal(JOURNEY_EVIDENCE_SCHEMA_VERSION),
+  kind: z.literal('journey-evidence-index'),
+  tag: z.literal(JOURNEY_TAG),
+  generatedAt: z.iso.datetime({ offset: false }),
+  tests: z.array(
+    z
+      .object({
+        test: zJourneyTestIdentity,
+        /** Path of the test's evidence.json relative to the evidence directory. */
+        evidence: z.string().nullable(),
+        /** Why there is no evidence; null when there is. */
+        problem: z.string().nullable(),
+      })
+      .refine((t) => (t.evidence === null) !== (t.problem === null), {
+        message: 'exactly one of evidence and problem must be set',
+      }),
+  ),
+});
+export type JourneyEvidenceIndex = z.infer<typeof zJourneyEvidenceIndex>;
+
+/** Directory name for one test's evidence: readable id plus the unique test id. */
+export function evidenceSlug(journeyId: string | null, testId: string): string {
+  const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  return `${safe(journeyId ?? 'journey') || 'journey'}--${safe(testId)}`;
+}
+
+/** A spec path relative to the config directory, `/`-separated on every OS. */
+export function specPath(baseDir: string, file: string): string {
+  return path.relative(baseDir, file).split(path.sep).join('/');
 }
 
 // ---------------------------------------------------------------------------
