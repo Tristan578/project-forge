@@ -45,7 +45,7 @@ human's yes:
 
 | File | Why it is ask-first |
 |------|---------------------|
-| `.codex/config.toml` | It declares the MCP servers a Codex session LAUNCHES. Every `[mcp_servers.*]` table is a `command` + `args` run on the developer's machine with the credentials named in its `env_vars`, so an edit there is code execution the next time someone starts Codex. It is not hard-blocked because it is hand-maintained (its eight server tables mirror `.mcp.json`), and a hard block made that maintenance impossible for an agent even with a human watching. |
+| `.codex/config.toml` | It declares the MCP servers a Codex session LAUNCHES. Every `[mcp_servers.*]` table is a `command` + `args` run on the developer's machine with the credentials named in its `env_vars`, so an edit there is code execution the next time someone starts Codex. It is not hard-blocked because it is hand-maintained (its server tables mirror `.mcp.json`), and a hard block made that maintenance impossible for an agent even with a human watching. |
 
 It sat in `deny` beside `settings.json` until #10134 lifted that block for
 maintainability. Lifting it outright left nothing between an agent's

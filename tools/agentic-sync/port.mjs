@@ -778,9 +778,12 @@ function ownedByGenerator(m, rel) {
 // appear verbatim in the `[…env]` sub-table — and command/args are compared exactly.
 //
 // config.toml is hand-authored, so this is a check the generator cannot fix; it
-// reports and a person edits. (It used to be guarded by a `deny` rule in
-// .claude/settings.json as well. That rule is gone — it only ever restrained one
-// agent, and secret-shaped content is covered repo-wide by GitHub push protection.)
+// reports and a person edits. It runs in CI, AFTER an edit is on disk; the
+// edit-time control is the `permissions.ask` rule on the file in
+// .claude/settings.json (a hard `deny` until #10134), which makes a Claude Code
+// Edit/Write stop for a human in every permission mode. .claude/SANDBOX.md lists
+// what guards the file and what does not.
+//
 // `[mcp_servers.<name>]` blocks out of a config.toml, as { command, args, envVars,
 // env }. Deliberately NOT a TOML parser — it reads the four shapes this file is
 // allowed to use, and anything else it cannot read becomes a `parseError` that is

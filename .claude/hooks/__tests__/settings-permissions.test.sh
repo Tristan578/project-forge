@@ -178,7 +178,7 @@ docs_name_governed_paths() {
       echo "  - SANDBOX.md has no table row for \`$path\` (settings.json: $kind rule)"
       problems=$((problems + 1))
     elif ! grep -qF "$want" <<<"$section"; then
-      echo "  - SANDBOX.md lists \`$path\` under \"$section\", but settings.json makes it a $kind rule (expected a heading naming \"$want\")"
+      echo "  - SANDBOX.md lists \`$path\` under \"$section\", but its settings.json rule kind is $kind (expected a heading naming \"$want\")"
       problems=$((problems + 1))
     fi
     if ! grep -qF "\`$path\`" <<<"$rows"; then
@@ -205,7 +205,7 @@ docs_case() {
     pass=$((pass + 1)); printf '  ok   %s\n' "$desc"
   else
     fail=$((fail + 1)); printf '  FAIL %s\n' "$desc"
-    [ -n "$out" ] && printf '         %s\n' "$out"
+    [ -n "$out" ] && sed 's/^/       /' <<<"$out"
   fi
 }
 
@@ -267,7 +267,7 @@ if docs_out="$(docs_name_governed_paths "$SETTINGS" "$HERE/../../SANDBOX.md" "$H
   pass=$((pass + 1)); printf '  ok   %s\n' "docs: SANDBOX.md and CONTRIBUTING.md name every deny/ask-governed file, each under its kind"
 else
   fail=$((fail + 1)); printf '  FAIL %s\n' "docs: SANDBOX.md and CONTRIBUTING.md name every deny/ask-governed file, each under its kind"
-  printf '         %s\n' "$docs_out"
+  sed 's/^/       /' <<<"$docs_out"
 fi
 
 # --- Negative guards (dangerous): never auto-allowed by EITHER layer.
