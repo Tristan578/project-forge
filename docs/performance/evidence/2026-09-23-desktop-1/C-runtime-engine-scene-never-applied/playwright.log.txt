@@ -14,7 +14,7 @@ Running 1 test using 1 worker
       291 |           if (!result.ok) return;
       292 |           const report = result.report;
       293 |           const file = `${fixtureId.replace('@', '-v')}-${CACHE}${CPU_THROTTLE > 1 ? `-cpu${CPU_THROTTLE}x` : ''}-run${run}.json`;
-        at D:\repos\into-rust\worktrees\pf-9904\web\e2e\perf\fixtureCapture.spec.ts:290:105
+        at <repo>\web\e2e\perf\fixtureCapture.spec.ts:290:105
     Error Context: test-results\fixtureCapture-Exported-fi-9a987-gpu-perf-3d-1-run-1-1-cold-\error-context.md
     Error Context: test-results\fixtureCapture-Exported-fi-9a987-gpu-perf-3d-1-run-1-1-cold-\error-context.md
   1 failed

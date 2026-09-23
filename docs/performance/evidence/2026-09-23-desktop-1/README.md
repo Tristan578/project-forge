@@ -8,6 +8,11 @@ is in [`docs/guides/performance-fixture-capture.md`](../../../guides/performance
 Every `*-run*.json` is the complete downloadable report: manifest, raw
 frame-time samples, aggregates and budget verdicts.
 
+`C-runtime-engine-scene-never-applied/playwright.log.txt` is the raw Playwright
+output with one edit: the stack frame's absolute checkout prefix is replaced by
+`<repo>`, because `scripts/check-portable-paths.sh` rejects machine-local paths
+in tracked files.
+
 ## Machine and build
 
 | | |
