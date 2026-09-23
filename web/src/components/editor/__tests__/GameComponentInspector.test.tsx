@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { axe } from 'jest-axe';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { GameComponentInspector } from '../GameComponentInspector';
 import { useEditorStore } from '@/stores/editorStore';
@@ -62,6 +63,8 @@ function setupStore(overrides: {
    * it (PF-1228). Defaults to '3d', matching `spriteSlice`.
    */
   projectType?: '2d' | '3d';
+  /** PF-1148: entityId -> component type -> field -> correction. */
+  gameComponentAdjustments?: Record<string, unknown>;
 } = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => {
@@ -72,6 +75,7 @@ function setupStore(overrides: {
       updateGameComponent: mockUpdateGameComponent,
       removeGameComponent: mockRemoveGameComponent,
       projectType: overrides.projectType ?? '3d',
+      gameComponentAdjustments: overrides.gameComponentAdjustments ?? {},
     };
     return selector(state);
   });
@@ -686,6 +690,121 @@ describe('GameComponentInspector', () => {
     // Click again to expand
     fireEvent.click(toggleBtn);
     expect(screen.getByText('Auto-Save').textContent).toBe('Auto-Save');
+  });
+
+  // ── Adjusted values (PF-1148) ─────────────────────────────────────────
+  //
+  // A field that holds a different value than the one asked for is marked,
+  // with the requested value readable — and nothing is marked when nothing
+  // was adjusted, because a false "we adjusted this" is worse than silence.
+
+  describe('adjusted values', () => {
+    const platform = (speed: number): GameComponentData => ({
+      type: 'movingPlatform',
+      movingPlatform: { speed, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration: 0.5, loopMode: 'pingPong' },
+    });
+    const speedClamp = {
+      component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
+    };
+    const sentence = 'Moving Platform speed: you asked for 99999, it was capped at 1000.';
+
+    it('lists the adjustment with the requested value, and marks the field it landed on', () => {
+      setupStore({
+        primaryGameComponents: [platform(1000)],
+        gameComponentAdjustments: { 'ent-1': { movingPlatform: { speed: speedClamp } } },
+      });
+      render(<GameComponentInspector />);
+
+      const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+      expect(Array.from(note.querySelectorAll('li')).map((li) => li.textContent)).toEqual([sentence]);
+
+      // The Speed slider is described by exactly that sentence, so a screen
+      // reader on the field hears what was asked for.
+      const speed = screen.getByLabelText('Speed');
+      const describedBy = speed.getAttribute('aria-describedby');
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy!)?.textContent).toBe(sentence);
+
+      // And the row itself carries the visible mark; the Pause row does not.
+      expect(speed.closest('div')?.textContent).toContain('Adjusted');
+      expect(screen.getByLabelText('Pause').closest('div')?.textContent).not.toContain('Adjusted');
+      expect(screen.getByLabelText('Pause').getAttribute('aria-describedby')).toBeNull();
+    });
+
+    it('keeps the count visible on the header when the section is collapsed', () => {
+      setupStore({
+        primaryGameComponents: [platform(1000)],
+        gameComponentAdjustments: { 'ent-1': { movingPlatform: { speed: speedClamp } } },
+      });
+      render(<GameComponentInspector />);
+      fireEvent.click(screen.getByText('Moving Platform'));
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.getByText('1 adjusted')).toBeDefined();
+    });
+
+    it('shows nothing for a marker the field no longer bears out', () => {
+      // The speed is back to 2 (an undo the store has not heard about yet): the
+      // marker describes a value the field does not hold, so it must not show.
+      setupStore({
+        primaryGameComponents: [platform(2)],
+        gameComponentAdjustments: { 'ent-1': { movingPlatform: { speed: speedClamp } } },
+      });
+      render(<GameComponentInspector />);
+      expect(screen.getByText('Moving Platform')).toBeDefined();
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.queryByText(/adjusted/i)).toBeNull();
+      expect(screen.getByLabelText('Speed').getAttribute('aria-describedby')).toBeNull();
+    });
+
+    it('shows nothing when nothing was adjusted', () => {
+      setupStore({ primaryGameComponents: [platform(1000)] });
+      render(<GameComponentInspector />);
+      expect(screen.getByText('Moving Platform')).toBeDefined();
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.queryByText(/adjusted/i)).toBeNull();
+    });
+
+    it('shows another entity’s markers nowhere', () => {
+      setupStore({
+        primaryGameComponents: [platform(1000)],
+        gameComponentAdjustments: { 'ent-2': { movingPlatform: { speed: speedClamp } } },
+      });
+      render(<GameComponentInspector />);
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+
+    it('lists an adjusted field that has no control of its own', () => {
+      // Current HP has no row in the Health section; the note is still the
+      // place the author can read what they asked for.
+      setupStore({
+        primaryGameComponents: [{
+          type: 'health',
+          health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true },
+        }],
+        gameComponentAdjustments: {
+          'ent-1': {
+            health: {
+              currentHp: { component: 'health', field: 'currentHp', requested: 5000, applied: 100, reason: 'clamped' },
+            },
+          },
+        },
+      });
+      render(<GameComponentInspector />);
+      const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+      expect(note.textContent).toContain('Health current HP: you asked for 5000, it was capped at 100.');
+    });
+
+    it('has no axe violations with an adjusted field showing', async () => {
+      setupStore({
+        primaryGameComponents: [platform(1000)],
+        gameComponentAdjustments: { 'ent-1': { movingPlatform: { speed: speedClamp } } },
+      });
+      const { container } = render(<GameComponentInspector />);
+      // Non-vacuous: the note being audited is really there.
+      expect(screen.getByRole('status')).toBeDefined();
+      const results = await axe(container);
+      expect(results.violations.map((v) => v.id)).toEqual([]);
+    });
   });
 
   // ── Multiple components ───────────────────────────────────────────────
