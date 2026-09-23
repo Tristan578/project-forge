@@ -67,6 +67,39 @@ export type WasmModule = {
 
 let wasmModule: WasmModule | null = null;
 let initPromise: Promise<WasmModule> | null = null;
+
+/**
+ * The engine's WebAssembly linear memory, from the wasm-bindgen init output.
+ * Read by the performance capture to report WASM memory (#10013); null until an
+ * engine module has initialised, and again after a reset or crash.
+ */
+let engineWasmMemory: { buffer: { byteLength: number } } | null = null;
+
+/**
+ * Performance-timeline mark set the first time the engine reports ready. Its
+ * `startTime` is milliseconds since navigation start: the editor capture's
+ * first-interactive time (`lib/perf/editorCapture.ts`, #10013).
+ */
+export const ENGINE_READY_MARK = 'forge:engine-ready';
+
+/**
+ * Milliseconds from navigation start to the engine first reporting ready.
+ * @returns The mark's start time, or `'unknown'` when the engine has not become
+ *   ready in this page (or the browser has no performance timeline).
+ */
+export function getEngineReadyMs(): number | 'unknown' {
+  try {
+    const mark = performance.getEntriesByName(ENGINE_READY_MARK, 'mark')[0];
+    return mark && Number.isFinite(mark.startTime) ? Math.round(mark.startTime * 10) / 10 : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** The running engine's WebAssembly memory, or null when none is loaded. */
+export function getEngineWasmMemory(): { buffer: { byteLength: number } } | null {
+  return engineWasmMemory;
+}
 let panicInterceptorInstalled = false;
 
 // --- Engine snapshot provider (registered by editorStore for crash diagnostics) ---
@@ -120,6 +153,7 @@ function setEngineCrashed(message: string): void {
   _engineCrashed = true;
   _engineCrashMessage = message;
   wasmModule = null;
+  engineWasmMemory = null;
   for (const listener of _crashListeners) {
     try { listener(message); } catch { /* prevent listener errors from breaking the loop */ }
   }
@@ -374,11 +408,16 @@ async function loadWasmFromPath(
     ? wrapResponseWithProgress(rawResponse, onProgress)
     : rawResponse;
 
-  await withTimeout(
+  const initOutput = (await withTimeout(
     wasm.default(wasmInput),
     WASM_FETCH_TIMEOUT_MS,
     'WASM fetch',
-  );
+  )) as { memory?: { buffer?: { byteLength?: unknown } } } | undefined;
+  const memory = initOutput?.memory;
+  engineWasmMemory =
+    memory && memory.buffer && typeof memory.buffer.byteLength === 'number'
+      ? (memory as { buffer: { byteLength: number } })
+      : null;
 
   const mod = wasm as unknown as WasmModule;
   if (mod.set_init_callback) {
@@ -545,6 +584,7 @@ export function resetEngine(): void {
   }
   wasmModule = null;
   initPromise = null;
+  engineWasmMemory = null;
   setLoadingState({ phase: 'idle' });
   clearEngineCrash();
 }
@@ -741,6 +781,15 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           // Expose readiness flag for E2E tests (Playwright)
           if (typeof window !== 'undefined') {
             (window as unknown as Record<string, unknown>).__FORGE_ENGINE_READY = true;
+          }
+          // First-interactive mark for the performance capture: only the first
+          // ready in this page, so a later recovery cannot move it.
+          try {
+            if (performance.getEntriesByName(ENGINE_READY_MARK, 'mark').length === 0) {
+              performance.mark(ENGINE_READY_MARK);
+            }
+          } catch {
+            // No performance timeline: first interactive stays unknown.
           }
           // Track editor session start (non-critical analytics)
           import('@/lib/analytics/posthog').then(({ trackEvent, AnalyticsEvent }) => {

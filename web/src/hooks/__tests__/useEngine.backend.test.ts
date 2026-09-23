@@ -103,3 +103,35 @@ describe('actual engine backend reporting', () => {
     expect(engine.getActiveEngineBackend()).toBe('unknown');
   });
 });
+
+describe('performance-capture readiness and memory (#10013)', () => {
+  beforeEach(() => {
+    performance.clearMarks(engine.ENGINE_READY_MARK);
+  });
+
+  it('marks the first engine ready on the performance timeline', async () => {
+    expect(engine.getEngineReadyMs()).toBe('unknown');
+    const { result } = renderHook(() => engine.useEngine('forge-canvas'));
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+    const readyMs = engine.getEngineReadyMs();
+    expect(typeof readyMs).toBe('number');
+    expect(readyMs as number).toBeGreaterThanOrEqual(0);
+    expect(performance.getEntriesByName(engine.ENGINE_READY_MARK, 'mark')).toHaveLength(1);
+  });
+
+  it('keeps the wasm-bindgen memory from the init output, and forgets it on reset', async () => {
+    const memory = { buffer: { byteLength: 64 * 1024 * 1024 } };
+    gpuDownload.mockResolvedValue({ memory } as never);
+    const { result } = renderHook(() => engine.useEngine('forge-canvas'));
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+    expect(engine.getEngineWasmMemory()).toBe(memory);
+    act(() => engine.resetEngine());
+    expect(engine.getEngineWasmMemory()).toBeNull();
+  });
+
+  it('reports no memory when the init output carries none', async () => {
+    const { result } = renderHook(() => engine.useEngine('forge-canvas'));
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+    expect(engine.getEngineWasmMemory()).toBeNull();
+  });
+});
