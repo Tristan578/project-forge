@@ -16,6 +16,7 @@
 
 import { useCallback, useId, useState } from 'react';
 import { Redo2, Undo2 } from 'lucide-react';
+import { Button } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import {
   COMPLETION_MODES,
@@ -23,6 +24,13 @@ import {
   DEFAULT_COMPLETION_MODE,
   type CompletionMode,
 } from '@/lib/playMode/completionMode';
+
+/**
+ * The library Button's `sm` size already holds a 44px minimum HEIGHT below the
+ * `sm` breakpoint; an icon-only button also needs the WIDTH, which the library
+ * leaves to the caller. Same shape as SceneBrowser's checkpoint icon buttons.
+ */
+const ICON_BUTTON_TARGET = 'min-w-[44px] px-2 sm:min-w-8';
 
 /**
  * Scene-level completion-mode radio group with undo/redo and a status line.
@@ -72,26 +80,30 @@ export function CompletionModeSection() {
           Completion mode
         </h3>
         <div className="flex items-center gap-1">
-          <button
+          <Button
             type="button"
             onClick={handleUndo}
             disabled={!canUndo}
             aria-label="Undo completion mode change"
             title="Undo completion mode change"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
+            size="sm"
+            variant="ghost"
+            className={ICON_BUTTON_TARGET}
           >
             <Undo2 size={12} aria-hidden="true" />
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={handleRedo}
             disabled={!canRedo}
             aria-label="Redo completion mode change"
             title="Redo completion mode change"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
+            size="sm"
+            variant="ghost"
+            className={ICON_BUTTON_TARGET}
           >
             <Redo2 size={12} aria-hidden="true" />
-          </button>
+          </Button>
         </div>
       </div>
 

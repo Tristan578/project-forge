@@ -142,6 +142,22 @@ describe('CompletionModeSection', () => {
     expect(screen.getByRole('radio', { name: 'Endless' })).toBeChecked();
   });
 
+  it.each(['Undo completion mode change', 'Redo completion mode change'])(
+    '%s keeps a 44px touch target in both dimensions on a narrow screen',
+    (name) => {
+      render(<CompletionModeSection />);
+
+      // jsdom does no layout, so read the target from the classes that set it.
+      // Split into whole tokens: a substring match would also accept a
+      // breakpoint-prefixed `sm:min-h-[44px]`, which applies only on WIDE
+      // screens — the opposite of what a phone needs. The height comes from
+      // the library Button's `sm` size; the width has no library default for
+      // an icon-only button, so this component has to set it.
+      const classes = screen.getByRole('button', { name }).className.split(/\s+/);
+      expect(classes).toEqual(expect.arrayContaining(['min-h-[44px]', 'min-w-[44px]']));
+    },
+  );
+
   it('reflects a change made elsewhere — the AI tool writes the same store field', () => {
     render(<CompletionModeSection />);
 
