@@ -2,10 +2,13 @@
 # See: https://developers.openai.com/codex/config-reference/
 #
 # HAND-EDITED, not generated. tools/agentic-sync/port.mjs only READS this file, to
-# check that the [mcp_servers.*] names below match .mcp.json — Codex never reads
-# .mcp.json, so without these blocks a Codex session has none of the 8 servers a
-# Claude Code session has (#8767). Parity is enforced from the first declaration,
-# so adding or removing a server here means doing the same in .mcp.json.
+# check that the [mcp_servers.*] tables below match .mcp.json (name, command, args
+# and secret names) — Codex never reads .mcp.json, so without these blocks a Codex
+# session has none of the 8 servers a Claude Code session has (#8767). Parity is
+# enforced from the first declaration, so adding or removing a server here means
+# doing the same in .mcp.json. The same check requires
+# default_tools_approval_mode = "prompt" on every server, which .mcp.json has no
+# counterpart for.
 
 # Model & approval
 model = "gpt-5.3-codex"
@@ -69,6 +72,7 @@ default_tools_approval_mode = "prompt"
 [mcp_servers.taskboard]
 command = "node"
 args = [".claude/hooks/taskboard-launch.mjs", "mcp"]
+default_tools_approval_mode = "prompt"
 
 [mcp_servers.upstash]
 command = "npx"

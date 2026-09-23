@@ -408,7 +408,9 @@ session in this repository would have none of them. The gate compares every
 server declared on both sides: the **names** must match, and each server's
 `command` and `args` must equal its `.mcp.json` entry exactly, with every `${VAR}`
 secret forwarded by name in `env_vars` and every literal `env` value restated
-verbatim. It does not compare any other key in a server table. Like
+verbatim. It also requires `default_tools_approval_mode = "prompt"` in every
+server's own table (see the list below), which `.mcp.json` has no counterpart
+for. It does not compare any other key in a server table. Like
 `scripts/check-codex-config-safety.sh` it reads the **committed**
 `HEAD:.codex/config.toml`, so an uncommitted edit to that file does not turn a
 local check red. That is a tolerance, not a recommendation: personal servers
@@ -434,9 +436,13 @@ whoever edits a server:
   Code feature; Codex would pass the literal text.
 - The committed profile runs with `approval_policy = "never"`. Per the contract
   table that does not auto-approve MCP calls under the workspace-write sandbox,
-  but set `default_tools_approval_mode = "prompt"` on every server that holds a
-  credential or reaches the network anyway, so a Stripe refund or a Neon branch
-  delete stays human-gated if that default moves.
+  but set `default_tools_approval_mode = "prompt"` on **every** server anyway, so
+  a Stripe refund, a Neon branch delete or a taskboard `delete_ticket` stays
+  human-gated if that default moves. Every server here holds a credential or
+  reaches the network (taskboard's launcher calls the board's local HTTP API,
+  `.claude/hooks/taskboard_runtime.py` `api()`), so there is no
+  exception to carve out, and `port.mjs --check` fails a server that omits it or
+  sets any other value.
 - A relative `command`/`args` path resolves against the directory Codex started
   in, not the repository root.
 
