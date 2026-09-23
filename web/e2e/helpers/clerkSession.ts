@@ -113,6 +113,14 @@ export async function signInThroughForm(page: Page, credentials: SeededUserCrede
     await expect(password).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
   }
   await password.fill(credentials.password);
+  // The code field can be editable before Clerk has prepared the verification.
+  // Subscribe before submitting the password so a fast preparation is not missed.
+  // No-code flows close the page without this response; handle that rejection.
+  const emailCodePrepared = page.waitForResponse(
+    (response) => response.request().method() === 'POST' &&
+      /\/v1\/client\/sign_ins\/[^/]+\/prepare_second_factor$/.test(new URL(response.url()).pathname),
+    { timeout: E2E_TIMEOUT_AUTH_MS },
+  ).then((response) => response.ok(), () => false);
   await continueButton.click();
 
   // Either the sign-in completes and the browser leaves /sign-in, or Device
@@ -143,6 +151,12 @@ export async function signInThroughForm(page: Page, credentials: SeededUserCrede
         'Clerk asked for an email verification code (Device Trust) and E2E_CLERK_TEST_EMAIL is not a ' +
           '+clerk_test address, so no code can be entered. Reseed the test user with a +clerk_test address ' +
           '(docs/guides/e2e-clerk-test-user.md).',
+      );
+    }
+    if (!(await emailCodePrepared)) {
+      throw new Error(
+        'Clerk did not successfully prepare the email verification code before entry. ' +
+        'Check the test instance Device Trust email-code settings.',
       );
     }
     await code.pressSequentially(CLERK_TEST_EMAIL_CODE);

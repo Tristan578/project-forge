@@ -71,7 +71,9 @@ needs:
    checks the seeded user before the journey; the public report suppresses its raw output.
 4. **Device Trust set to email code, if it is on.** Clerk picks "an email code, SMS code, or email link based
    on your settings". The spec types a code into the field named **Enter verification code**, so it can
-   finish only the email-code method.
+   finish only the email-code method. The helper waits for successful verification
+   preparation before typing: Clerk can show an editable code field earlier. The
+   journey deliberately delays that response to keep this race covered.
 
 ### Creating the user
 

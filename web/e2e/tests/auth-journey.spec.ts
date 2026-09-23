@@ -41,10 +41,17 @@ test.describe('Auth journey @auth', () => {
     await expect(page.locator('input[name="identifier"]')).toBeVisible({ timeout: E2E_TIMEOUT_AUTH_MS });
   });
 
-  test('seeded test user signs in and reaches the signed-in dashboard', async ({ page }) => {
+  test('seeded test user signs in and reaches the signed-in dashboard', async ({ page, context }) => {
     const email = process.env.E2E_CLERK_TEST_EMAIL ?? '';
     const password = process.env.E2E_CLERK_TEST_PASSWORD ?? '';
     test.skip(!email || !password, 'E2E_CLERK_TEST_EMAIL / E2E_CLERK_TEST_PASSWORD are not configured');
+
+    // Reproduce the race where Clerk shows the code field before preparation
+    // finishes. This is deliberate network latency, not a wait for UI readiness.
+    await context.route((url) => url.pathname.endsWith('/prepare_second_factor'), async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      await route.fallback();
+    });
 
     const { verificationCodeRequested } = await signInThroughForm(page, { email, password });
     test.info().annotations.push({
