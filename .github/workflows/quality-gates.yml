@@ -414,7 +414,7 @@ jobs:
       # scripts/__tests__/resolve-ci-wasm-artifact.test.sh pins.
       #
       # pull_request only: the resolver reads nothing else, so on a push or
-      # dispatch run this would be ~100 MB of storage for nobody.
+      # dispatch run this upload would be storage nobody reads.
       - name: Verify the pre-optimisation WASM variants for CD reuse
         if: github.event_name == 'pull_request'
         run: node scripts/verify-engine-wasm.mjs engine
