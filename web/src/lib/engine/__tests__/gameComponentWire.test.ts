@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
+  mergeStoreComponentProps,
   toWireComponent,
   parseGameComponentWire,
   parseEmittedGameComponent,
@@ -1310,5 +1311,47 @@ describe('parseGameComponentWire properties handling', () => {
       type: 'dialogueTrigger',
       dialogueTrigger: { treeId: '', triggerRadius: 3, requireInteract: true, interactKey: 'use', oneShot: true },
     });
+  });
+});
+
+describe('mergeStoreComponentProps (#10144)', () => {
+  const platform: GameComponentData = {
+    type: 'movingPlatform',
+    movingPlatform: { waypoints: [[0, 0, 0], [2, 0, 0], [4, 1, 0], [6, 1, 0], [8, 2, 0], [10, 2, 0]], speed: 2, loopMode: 'once', pauseDuration: 3 },
+  };
+
+  it('keeps every unnamed field and changes the named one', () => {
+    expect(mergeStoreComponentProps(platform, { speed: 5 })).toEqual({
+      type: 'movingPlatform',
+      movingPlatform: { ...platform.movingPlatform, speed: 5 },
+    });
+  });
+
+  it('runs the named value through the same clamp a fresh build gets', () => {
+    const merged = mergeStoreComponentProps(platform, { speed: 1e9 });
+    expect(merged?.type).toBe('movingPlatform');
+    // Whatever the engine's ceiling is, a merge cannot exceed it — pinned by
+    // comparing with a fresh build of the same value, not a hand-copied bound.
+    const fresh = buildStoreComponent('movingPlatform', { speed: 1e9 });
+    expect(merged).toEqual({
+      type: 'movingPlatform',
+      movingPlatform: { ...platform.movingPlatform, speed: (fresh as { movingPlatform: { speed: number } }).movingPlatform.speed },
+    });
+  });
+
+  it('ignores an explicit undefined rather than resetting the field', () => {
+    expect(mergeStoreComponentProps(platform, { loopMode: undefined, speed: 4 })).toEqual({
+      type: 'movingPlatform',
+      movingPlatform: { ...platform.movingPlatform, speed: 4 },
+    });
+  });
+
+  it('reads only own enumerable keys of the patch', () => {
+    const patch = Object.create({ speed: 9 }) as Record<string, unknown>;
+    expect(mergeStoreComponentProps(platform, patch)).toEqual(platform);
+  });
+
+  it('is the identity for an empty patch', () => {
+    expect(mergeStoreComponentProps(platform, {})).toEqual(platform);
   });
 });

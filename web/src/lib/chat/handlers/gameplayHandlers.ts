@@ -8,7 +8,13 @@ import type { ToolHandler } from './types';
 import { ownEntry, zEntityId, zVec3, parseArgs } from './types';
 import type { GameCameraData, EntityType } from '@/stores/editorStore';
 import { MATERIAL_PRESETS, getPresetsByCategory, saveCustomMaterial, deleteCustomMaterial, loadCustomMaterials } from '@/lib/materialPresets';
-import { buildStoreComponent, ENGINE_COMPONENT_TYPES, ENGINE_COMPONENT_CATALOG } from '@/lib/engine/gameComponentWire';
+import {
+  buildStoreComponent,
+  mergeStoreComponentProps,
+  toStoreComponentType,
+  ENGINE_COMPONENT_TYPES,
+  ENGINE_COMPONENT_CATALOG,
+} from '@/lib/engine/gameComponentWire';
 import { NUMERIC_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
 import { LINKED_PREFAB_UNAVAILABLE_REASON } from '@/lib/prefabs/prefabAvailability';
 
@@ -50,13 +56,27 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     }), args);
     if (p.error) return p.error;
 
-    const props = p.data.properties ?? {};
-    const component = buildStoreComponent(p.data.componentType, props);
+    const storeType = toStoreComponentType(p.data.componentType);
+    if (storeType === null) {
+      return { success: false, error: `Unknown component type: ${p.data.componentType}. Valid types: ${VALID_COMPONENT_TYPES}` };
+    }
+    // A PARTIAL update: fields the caller does not name keep their current
+    // values. Building from the properties alone filled every unnamed field
+    // with its default and replaced the stored component with that, so "make
+    // the platform faster" also threw away its route (#10144).
+    const existing = (ownEntry(ctx.store.allGameComponents, p.data.entityId) ?? []).find((c) => c.type === storeType);
+    if (!existing) {
+      return {
+        success: false,
+        error: `Entity ${p.data.entityId} has no ${p.data.componentType} component to update. Use add_game_component to add one.`,
+      };
+    }
+    const component = mergeStoreComponentProps(existing, p.data.properties ?? {});
     if (!component) {
       return { success: false, error: `Unknown component type: ${p.data.componentType}. Valid types: ${VALID_COMPONENT_TYPES}` };
     }
     ctx.store.updateGameComponent(p.data.entityId, component);
-    return { success: true };
+    return { success: true, result: { message: `Updated ${p.data.componentType}` } };
   },
 
   remove_game_component: async (args, ctx) => {
