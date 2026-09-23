@@ -234,7 +234,8 @@ function engineGameState(
   }
 
   const holding = (type: string) => scene.entities.filter((e) => componentsOf(e).some((c) => c.type === type));
-  const component = (e: ExportedEntity, type: string) => componentsOf(e).find((c) => c.type === type) ?? {};
+  const component = (e: ExportedEntity, type: string): Record<string, unknown> =>
+    componentsOf(e).find((c) => c.type === type) ?? {};
   const sortedIds = (list: ExportedEntity[]) => list.map((e) => idOf(e.entityId)).sort();
 
   const winners = holding('winCondition');
