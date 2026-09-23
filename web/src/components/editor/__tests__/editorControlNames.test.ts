@@ -19,7 +19,13 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { scanControls, type ControlFinding } from './controlNameScan';
+import {
+  scanControls,
+  scanLabels,
+  type ControlFinding,
+  type LabelFinding,
+  type LabelProblem,
+} from './controlNameScan';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const EDITOR_DIR = path.resolve(HERE, '..');
@@ -30,7 +36,7 @@ function component(jsx: string, preamble = ''): string {
   return `import { useId } from 'react';\nexport function Panel() {\n${preamble}\n  return (<div>${jsx}</div>);\n}\n`;
 }
 
-function only(findings: ControlFinding[]): ControlFinding {
+function only<T>(findings: T[]): T {
   expect(findings).toHaveLength(1);
   return findings[0];
 }
@@ -167,6 +173,120 @@ describe('scanControls — synthetic sources', () => {
     const expectedLine = src.split('\n').findIndex((l) => l.includes('type="color"')) + 1;
     expect(f.line).toBe(expectedLine);
   });
+
+  it('does not count a label that points at the control only some of the time', () => {
+    // When `on` is false the label has no `for`, and the slider renders unnamed.
+    const f = only(
+      scanControls(
+        'x.tsx',
+        component('<label htmlFor={on ? id : undefined}>Dist</label><input id={id} type="range" />', 'const id = useId(); const on = true;'),
+      ),
+    );
+    expect(f.namedBy).toBeNull();
+  });
+
+  it('does not count a label rendered under a guard the control is not under', () => {
+    const f = only(
+      scanControls(
+        'x.tsx',
+        component('{on && <label htmlFor={id}>Dist</label>}<input id={id} type="range" />', 'const id = useId(); const on = true;'),
+      ),
+    );
+    expect(f.namedBy).toBeNull();
+  });
+
+  it('counts a conditional for= whose condition also guards the control', () => {
+    const f = only(
+      scanControls(
+        'x.tsx',
+        component(
+          '<label htmlFor={on ? id : undefined}>Dist</label>{on && <input id={id} type="range" />}',
+          'const id = useId(); const on = true;',
+        ),
+      ),
+    );
+    expect(f.namedBy).toBe('label[for]');
+  });
+});
+
+describe('scanLabels — synthetic sources', () => {
+  const PRE = 'const id = useId(); const on = true; const rows = [1, 2];';
+
+  function labelProblem(jsx: string, preamble = PRE): LabelProblem | null {
+    return only(scanLabels('x.tsx', component(jsx, preamble))).problem;
+  }
+
+  it('flags a label whose target renders only behind &&', () => {
+    expect(labelProblem('<label htmlFor={id}>Dist</label>{on && <input id={id} type="range" />}')).toBe(
+      'conditional-target',
+    );
+  });
+
+  it('flags a label whose target is one arm of a ternary', () => {
+    expect(
+      labelProblem('<label htmlFor={id}>Tex</label>{on ? (<select id={id}><option>a</option></select>) : (<button>Upload</button>)}'),
+    ).toBe('conditional-target');
+  });
+
+  it('flags a label whose target is assigned inside an if', () => {
+    expect(
+      labelProblem(
+        '<label htmlFor={id}>Dist</label>{slider}',
+        `${PRE} let slider = null; if (on) { slider = <input id={id} type="range" />; }`,
+      ),
+    ).toBe('conditional-target');
+  });
+
+  it('flags a label outside a .map whose target renders once per row', () => {
+    expect(labelProblem('<label htmlFor={id}>Row</label>{rows.map((r) => <input key={r} id={id} type="range" />)}')).toBe(
+      'conditional-target',
+    );
+  });
+
+  it('flags a label whose id nothing carries', () => {
+    expect(labelProblem('<label htmlFor={id}>Ghost</label>')).toBe('no-target');
+  });
+
+  it('flags a label whose id only a non-labelable element carries', () => {
+    expect(labelProblem('<label htmlFor={id}>Box</label><div id={id} />')).toBe('not-labelable');
+    expect(labelProblem('<label htmlFor={id}>Box</label><input type="hidden" id={id} />')).toBe('not-labelable');
+  });
+
+  it('accepts a for= set under the same condition as its target', () => {
+    expect(labelProblem('<label htmlFor={on ? id : undefined}>Dist</label>{on && <input id={id} type="range" />}')).toBeNull();
+    expect(
+      labelProblem(
+        '<label htmlFor={on ? id : undefined}>Tex</label>{on ? (<select id={id}><option>a</option></select>) : (<button>Upload</button>)}',
+      ),
+    ).toBeNull();
+  });
+
+  it('accepts a label that sits under the same guard as its target', () => {
+    expect(labelProblem('{on && (<><label htmlFor={id}>Dist</label><input id={id} type="range" /></>)}')).toBeNull();
+    expect(
+      labelProblem('{rows.map((r) => (<div key={r}><label htmlFor={`${id}-${r}`}>Row</label><input id={`${id}-${r}`} type="range" /></div>))}'),
+    ).toBeNull();
+  });
+
+  it('accepts an unconditional target, a component that takes the id, and a string for=', () => {
+    expect(labelProblem('<label htmlFor={id}>Dist</label><input id={id} type="range" />')).toBeNull();
+    expect(labelProblem('<label htmlFor={id}>Dist</label><Slider id={id} />')).toBeNull();
+    expect(labelProblem('<label htmlFor="fog">Fog</label><input id="fog" type="color" />')).toBeNull();
+  });
+
+  it('matches guards by source text, so a differently spelled condition is reported', () => {
+    // Conservative on purpose: the scan cannot prove `!!on` and `on` agree.
+    expect(labelProblem('<label htmlFor={on ? id : undefined}>Dist</label>{!!on && <input id={id} type="range" />}')).toBe(
+      'conditional-target',
+    );
+  });
+
+  it('records the htmlFor source text and a 1-based line', () => {
+    const src = component('\n<label htmlFor={on ? id : undefined}>Dist</label>{on && <input id={id} type="range" />}', PRE);
+    const [f] = scanLabels('x.tsx', src);
+    expect(f.htmlFor).toBe('on ? id : undefined');
+    expect(f.line).toBe(src.split('\n').findIndex((l) => l.includes('<label')) + 1);
+  });
 });
 
 /** Every non-test TSX source under src/components/editor/. */
@@ -184,9 +304,12 @@ function editorSources(dir: string, out: string[] = []): string[] {
 }
 
 const files = editorSources(EDITOR_DIR);
-const findings: ControlFinding[] = files.flatMap((file) =>
-  scanControls(path.relative(WEB_ROOT, file).split(path.sep).join('/'), readFileSync(file, 'utf8')),
-);
+const sources = files.map((file) => ({
+  file: path.relative(WEB_ROOT, file).split(path.sep).join('/'),
+  text: readFileSync(file, 'utf8'),
+}));
+const findings: ControlFinding[] = sources.flatMap(({ file, text }) => scanControls(file, text));
+const labelFindings: LabelFinding[] = sources.flatMap(({ file, text }) => scanLabels(file, text));
 
 function listing(items: ControlFinding[]): string {
   return items.map((f) => `  ${f.file}:${f.line} ${f.kind}`).join('\n');
@@ -218,5 +341,24 @@ describe('editor colour/range/select controls (#9677)', () => {
     // is unique per mount.
     const literal = findings.filter((f) => f.literalId);
     expect(literal, `Controls labelled through a string-literal id — use useId():\n${listing(literal)}`).toEqual([]);
+  });
+});
+
+describe('editor <label htmlFor> targets (#9677)', () => {
+  it('walks the labels it checks', () => {
+    // Zero labels inspected would read as zero problems found (lessons-learned
+    // #9). The #9677 fix paired well over a hundred controls through htmlFor.
+    expect(labelFindings.length).toBeGreaterThanOrEqual(150);
+    const material = labelFindings.filter((f) => f.file === 'src/components/editor/MaterialInspector.tsx');
+    expect(material.length).toBeGreaterThanOrEqual(15);
+  });
+
+  it('points every label for= at a labelable control that renders whenever the label does', () => {
+    // HTML requires `for` to name a labelable element in the same tree. A
+    // label beside `{cond && <input id={id} />}` names nothing when cond is
+    // false; set the `for` under the same condition: htmlFor={cond ? id : undefined}.
+    const bad = labelFindings.filter((f) => f.problem !== null);
+    const lines = bad.map((f) => `  ${f.file}:${f.line} ${f.problem} htmlFor={${f.htmlFor}}`);
+    expect(bad, `Labels whose for= can name nothing:\n${lines.join('\n')}`).toEqual([]);
   });
 });
