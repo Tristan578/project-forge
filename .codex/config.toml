@@ -5,7 +5,7 @@
 # check that the [mcp_servers.*] tables below match .mcp.json (name, command, args
 # and secret names) — Codex never reads .mcp.json, so without these blocks a Codex
 # session has none of the 8 servers a Claude Code session has (#8767). Parity is
-# enforced from the first declaration, so adding or removing a server here means
+# enforced even when every table is removed; adding or removing a server here means
 # doing the same in .mcp.json. The same check requires
 # default_tools_approval_mode = "prompt" on every server, which .mcp.json has no
 # counterpart for, and fails a command, arg or cwd that is a relative path: Codex
@@ -13,11 +13,12 @@
 
 # Model & approval
 model = "gpt-5.3-codex"
-approval_policy = "never"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
 
-# Sandbox: allow writes only within the project
-[sandbox_workspace_write]
-allow = ["**/*"]
+# Interactive tool calls request approval. Headless runs must explicitly approve
+# only their required tools; starting an MCP server does not approve its calls.
+# Codex protects .codex from sandboxed writes; no custom allow glob is supported.
 
 # Disable features that could bypass workflow
 [features]

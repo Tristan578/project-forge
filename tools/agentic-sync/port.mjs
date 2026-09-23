@@ -827,9 +827,10 @@ function codexServerBlocks(text) {
   // unclosed string as closed, and read the body of a multi-line string as keys.
   const readLine = (s) => {
     const values = [];
+    let tokens = '';
     let depth = 0;
     let i = 0;
-    const error = (msg) => ({ values, depth, error: msg });
+    const error = (msg) => ({ values, tokens, depth, error: msg });
     while (i < s.length) {
       const c = s[i];
       if (c === '"' || c === "'") {
@@ -850,15 +851,17 @@ function codexServerBlocks(text) {
         }
         if (j >= s.length) return error('a string is not closed');
         values.push(v);
+        tokens += 's';
         i = j + 1;
         continue;
       }
       if (c === '#') break; // unquoted: the rest of the line is a comment
+      if (!/\s/.test(c)) tokens += '[],'.includes(c) ? c : '?';
       if (c === '[') depth += 1;
       if (c === ']') depth -= 1;
       i += 1;
     }
-    return { values, depth, error: '' };
+    return { values, tokens, depth, error: '' };
   };
   // Decode dotted key components once for both tables and properties.
   const readKey = (s) => {
@@ -923,6 +926,7 @@ function codexServerBlocks(text) {
     // Consume arrays even for options parity does not compare (enabled_tools,
     // for example). Their continuation lines are values, never new properties.
     let v = first.values;
+    let tokens = first.tokens;
     let depth = first.depth;
     let contError = '';
     let guard = 0;
@@ -931,11 +935,18 @@ function codexServerBlocks(text) {
       const cont = readLine(lines[i]);
       if (cont.error) { contError = cont.error; break; }
       v = v.concat(cont.values);
+      tokens += cont.tokens;
       depth += cont.depth;
       if ((guard += 1) > 500) break;
     }
     if (contError) { fail(block, key + ': ' + contError); continue; }
     if (depth > 0) { fail(block, key + ' array is not closed'); continue; }
+    const arrayProperty = !isEnv && (key === 'args' || key === 'env_vars');
+    const scalarProperty = isEnv || ['command', 'cwd', 'default_tools_approval_mode'].includes(key);
+    if ((arrayProperty && !/^\[(?:s(?:,s)*,?)?\]$/.test(tokens)) || (scalarProperty && tokens !== 's')) {
+      fail(block, key + ': expected ' + (arrayProperty ? 'an array of strings' : 'a string'));
+      continue;
+    }
     if (isEnv) {
       if (v.length) block.env[key] = v[0];
     } else if (key === 'command') {
@@ -952,8 +963,14 @@ function codexServerBlocks(text) {
 
 function mcpParity() {
   const out = { problems: [], note: '' };
-  if (!existsExact('.mcp.json') || !existsExact('.codex/config.toml')) {
-    out.note = 'MCP parity skipped — .mcp.json or .codex/config.toml is absent.';
+  const hasManifest = existsExact('.mcp.json');
+  const hasConfig = existsExact('.codex/config.toml');
+  if (!hasManifest && !hasConfig) {
+    out.note = 'MCP parity skipped — neither MCP configuration file is present.';
+    return out;
+  }
+  if (!hasManifest || !hasConfig) {
+    out.problems.push('mcp:      both .mcp.json and .codex/config.toml must be present to check parity');
     return out;
   }
   let wantServers;
@@ -991,13 +1008,6 @@ function mcpParity() {
     return out;
   }
   const have = [...blocks.keys()];
-  if (have.length === 0) {
-    // Not an error: a profile with no MCP block is a legitimate state, and
-    // failing here would make this gate red on the tree it was introduced in.
-    // It is said out loud so "nothing declared" never reads as "in parity".
-    out.note = `::warning::.codex/config.toml declares no [mcp_servers.*] — Codex users have none of the ${want.length} servers in .mcp.json. Parity is enforced from the first declaration (#8767).`;
-    return out;
-  }
   for (const n of want) if (!have.includes(n)) out.problems.push(`mcp:      ${n} is in .mcp.json but not in .codex/config.toml`);
   for (const n of have) if (!want.includes(n)) out.problems.push(`mcp:      ${n} is in .codex/config.toml but not in .mcp.json`);
 

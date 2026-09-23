@@ -335,12 +335,45 @@ gen "$F" --check; expect_rc 2 "a handAuthored agent that is missing is an error"
 OUT="$(CODEX_PORT_ROOT="$F" node "$GEN" 2>&1)"; RC=$?
 expect_rc 2 "no mode argument is a usage error"
 
+
+echo "== generator: MCP value types must match the Codex schema =="
+F="$(mkfix)"; gen "$F" --write
+printf '%s\n' '{"mcpServers":{"alpha":{"command":"npx","args":["mcp"],"env":{"TOKEN":"${TOKEN}","ORG":"acme"}}}}' > "$F/.mcp.json"
+TYPE_OK='[mcp_servers.alpha]
+command = "npx"
+args = ["mcp"]
+env_vars = ["TOKEN"]
+default_tools_approval_mode = "prompt"
+[mcp_servers.alpha.env]
+ORG = "acme"'
+for mutation in scalar_args scalar_env array_command array_cwd array_approval array_env numeric_args nested_args missing_comma trailing_value; do
+  printf '%s\n' "$TYPE_OK" > "$F/.codex/config.toml"
+  node -e '
+    const fs=require("fs"),p=process.argv[1],kind=process.argv[2];
+    const changes={"scalar_args":["args = [\"mcp\"]","args = \"mcp\""],"scalar_env":["env_vars = [\"TOKEN\"]","env_vars = \"TOKEN\""],"array_command":["command = \"npx\"","command = [\"npx\"]"],"array_cwd":["command = \"npx\"","command = \"npx\"\ncwd = [\"/tmp\"]"],"array_approval":["default_tools_approval_mode = \"prompt\"","default_tools_approval_mode = [\"prompt\"]"],"array_env":["ORG = \"acme\"","ORG = [\"acme\"]"],"numeric_args":["args = [\"mcp\"]","args = [\"mcp\", 1]"],"nested_args":["args = [\"mcp\"]","args = [[\"mcp\"]]"],"missing_comma":["args = [\"mcp\"]","args = [\"mcp\" \"extra\"]"],"trailing_value":["command = \"npx\"","command = \"npx\" true"]};
+    const [from,to]=changes[kind];fs.writeFileSync(p,fs.readFileSync(p,"utf8").replace(from,()=>to));
+  ' "$F/.codex/config.toml" "$mutation"
+  gen "$F" --check; expect_rc 1 "invalid MCP property type/syntax rejected: $mutation"
+  expect_out 'expected ' "…reports the required property type: $mutation"
+done
+printf '%s\n' "$TYPE_OK" > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "string scalars and string arrays remain valid"
+rm "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 1 "deleting the entire Codex config cannot bypass parity"
+printf '%s\n' "$TYPE_OK" > "$F/.codex/config.toml"
+rm "$F/.mcp.json"
+gen "$F" --check; expect_rc 1 "deleting the MCP manifest cannot bypass parity"
+printf '%s\n' '{"mcpServers":{}}' > "$F/.mcp.json"
+printf '%s\n' 'model = "x"' > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "two explicitly empty server sets are in parity"
+
 echo "== generator: MCP server parity =="
 F="$(mkfix)"; gen "$F" --write
 printf '{"mcpServers":{"alpha":{"command":"npx"},"beta":{"command":"npx"}}}\n' > "$F/.mcp.json"
 printf 'model = "x"\n' > "$F/.codex/config.toml"
-gen "$F" --check; expect_rc 0 "a config.toml with no MCP block passes…"
-expect_out "declares no [mcp_servers.*]" "…but says so out loud instead of reading as parity"
+gen "$F" --check; expect_rc 1 "removing all MCP tables fails parity"
+expect_out "alpha is in .mcp.json but not in .codex/config.toml" "…reports the first missing server"
+expect_out "beta is in .mcp.json but not in .codex/config.toml" "…reports every missing server"
 printf '[mcp_servers.alpha]\ncommand = "npx"\n\n[mcp_servers.alpha.env]\nA = "1"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 1 "a server in .mcp.json that Codex lacks is a failure"
 expect_out "beta is in .mcp.json but not in .codex/config.toml" "…naming the missing server"
@@ -357,9 +390,8 @@ gen "$F" --check; expect_rc 1 "a server Codex declares that .mcp.json lacks is a
 expect_out "gamma is in .codex/config.toml but not in .mcp.json" "…naming the extra server"
 printf '[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n[mcp_servers.beta]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "matching server names pass"
-# Quoted table names. If that branch of the header regex regresses, a config whose
-# servers are ALL written quoted yields zero declared servers — the warning-only
-# path — and parity silently stops being enforced.
+# Quoted table names must be decoded and counted just like bare table names.
+# Removing all declarations is now an error rather than a migration exception.
 printf '[mcp_servers."alpha"]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n[mcp_servers."beta"]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "QUOTED server table names are read as servers"
 expect_out "2 MCP servers declared for Codex, matching .mcp.json" "…counted, not mistaken for 'declares no servers'"
