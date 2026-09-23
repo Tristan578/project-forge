@@ -517,10 +517,13 @@ jobs:
   # `.claude/hooks/` inherited 62 failing assertions that had nothing to do with
   # its change.
   #
-  # So the trade is explicit: cheap PRs, and whoever next edits a hook pays the
-  # accumulated debt. If that becomes the common case, the fix is a scheduled
-  # run (5 min/week) rather than moving to every-PR — see #9606 for the
-  # discussion.
+  # So the gate stays, but it is no longer the only thing running these suites:
+  # `.github/workflows/hook-tests-scheduled.yml` runs them every Monday, and
+  # opens a tracking issue if they fail. That is roughly 5 minutes a week to
+  # bound the blast radius — rot is found by the schedule rather than by
+  # whoever happens to edit a hook months later. Do not remove one without
+  # reconsidering the other; together they are the reason a skipped run here is
+  # safe to ignore.
   hook-tests:
     name: Hook Tests
     needs: [ci-gate]
@@ -1177,6 +1180,9 @@ jobs:
         run: |
           bash scripts/__tests__/install-vercel-cli.test.sh
           node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs
+
+      - name: Verify scheduled hook-test contracts
+        run: node --test scripts/__tests__/hook-tests-scheduled.test.mjs
 
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh

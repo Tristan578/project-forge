@@ -1,0 +1,132 @@
+name: Hook Tests (scheduled)
+
+# Why this exists (#9606)
+#
+# `ci.yml`'s `hook-tests` job is path-gated on `.claude/hooks/**`, which is the
+# right call for PR cost: the hooks are development-workflow enforcement, not
+# product code, so re-proving them on every PR is poor value.
+#
+# The cost of that gate, measured rather than imagined: the job did not execute
+# in 25+ consecutive CI runs, and during that stretch two real defects
+# accumulated in `block-main-commits.sh` — `git \<newline> commit` was not
+# blocked on main, and the F4 size-cap case could not build its own payload.
+# The first PR to touch `.claude/hooks/` inherited 62 failing assertions
+# unrelated to its change.
+#
+# So the suites run here on a schedule as well. Roughly 5 minutes a week buys a
+# bounded blast radius: rot is found by the schedule, not by whoever happens to
+# edit a hook months later.
+#
+# A scheduled job that fails quietly would recreate the exact problem it is
+# meant to solve, so failure opens (or comments on) a tracking issue rather than
+# relying on anyone noticing a red run in the Actions tab.
+
+on:
+  schedule:
+    # 09:00 UTC every Monday.
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: hook-tests-scheduled
+  cancel-in-progress: false
+
+jobs:
+  hook-tests:
+    name: Hook Tests (scheduled)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run hook test suites
+        run: |
+          # jq + shellcheck are preinstalled on ubuntu-latest runners.
+          shopt -s nullglob
+          suites=(.claude/hooks/__tests__/*.test.sh)
+          # An empty glob must fail, not pass. A scheduled gate that silently
+          # scans nothing reads as "healthy" forever, which is the failure mode
+          # this workflow exists to remove.
+          if [ ${#suites[@]} -eq 0 ]; then
+            echo "::error::No hook test suites found under .claude/hooks/__tests__/"
+            exit 1
+          fi
+          echo "Running ${#suites[@]} hook test suite(s)."
+          rc=0
+          for suite in "${suites[@]}"; do
+            echo "::group::$suite"
+            bash "$suite" || rc=1
+            echo "::endgroup::"
+          done
+          exit "$rc"
+
+      - name: Shellcheck the hooks this gate owns
+        run: |
+          # Scope shellcheck to the hooks this gate owns + their tests: the
+          # hardened review-loop hooks and the auto-approve permission gate.
+          # The wider .claude/hooks/ tree carries pre-existing findings tracked
+          # separately (see .claude/rules/agent-operations.md §12) — linting all
+          # of it here would fail this gate on unrelated, untouched debt. Newly
+          # added or edited hooks MUST be shellcheck-clean, so they go here.
+          # -x follows `.`-sourced files (scripts/__tests__/lib/platform.sh);
+          # without it every sourcing suite reports SC1091 and the library's own
+          # definitions stay invisible to the analysis.
+          shellcheck -x \
+            .claude/hooks/reject-incomplete-review.sh \
+            .claude/hooks/review-quality-gate.sh \
+            .claude/hooks/auto-approve-safe-commands.sh \
+            .claude/hooks/block-main-commits.sh \
+            .claude/hooks/inject-lessons-learned.sh \
+            .claude/hooks/check-panel-registry.sh \
+            .claude/hooks/inject-post-compact.sh \
+            .claude/hooks/__tests__/inject-post-compact.test.sh \
+            .claude/hooks/__tests__/check-panel-registry.test.sh \
+            .claude/hooks/__tests__/reject-incomplete-review.test.sh \
+            .claude/hooks/__tests__/review-quality-gate.test.sh \
+            .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
+            .claude/hooks/__tests__/block-main-commits.test.sh \
+            .claude/hooks/__tests__/inject-lessons-learned.test.sh \
+            .claude/hooks/__tests__/settings-permissions.test.sh
+
+      - name: Report failure
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title='Scheduled hook tests are failing'
+
+          # printf with one argument per line, rather than a multi-line string
+          # or a heredoc. A multi-line assignment would keep this block's
+          # indentation inside the value, and Markdown renders indented lines as
+          # a code block; a heredoc at column 0 would terminate the YAML block
+          # scalar. This keeps the file valid and the issue readable.
+          body="$(printf '%s\n' \
+            'The scheduled hook test run failed.' \
+            '' \
+            "Run: ${RUN_URL}" \
+            '' \
+            'These suites are path-gated in `ci.yml`, so a PR only runs them when' \
+            'it touches `.claude/hooks/**`. This schedule is what catches rot in' \
+            'between - see #9606 for why that gap mattered.' \
+            '' \
+            'Fix the failure, or if the suites themselves are wrong, fix them.' \
+            'Do not silence the schedule.')"
+
+          # Comment on the existing issue rather than opening a new one every
+          # Monday: a pile of duplicates is noise, and noise is how a real
+          # failure gets ignored.
+          existing="$(gh issue list --state open --search "\"$title\" in:title" \
+                        --json number --jq '.[0].number // empty')"
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "Commented on existing issue #${existing}."
+          else
+            gh issue create --title "$title" --label bug --body "$body"
+          fi
