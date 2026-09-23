@@ -89,7 +89,7 @@ export interface ValueCorrection extends CorrectionCommon {
  *
  * A count cannot tell one route from another of the same length, so the record
  * also carries `appliedPoints`, the route it applied. That is what lets a marker
- * notice an undo or a scene load that put back a different route with as many
+ * notice an undo or a collab sync that put back a different route with as many
  * points — see {@link correctionMatchesValue}. It is bounded by the engine's
  * 64-point cap, the same cap the record reports, and the author never reads it:
  * {@link describeCorrection} speaks in counts.
@@ -343,9 +343,12 @@ function sameNumbersAtF32(expected: readonly number[], actual: unknown): boolean
  * Whether `current` is still the value the correction applied.
  *
  * A marker is only true while the field holds the value it describes. Undo, a
- * scene load and a play session can all move a field without going through the
+ * play session and a collab sync can all move a field without going through the
  * store actions that clear markers, and a marker left on a value it no longer
  * describes is exactly the false report this whole mechanism must not make.
+ * (A scene replacement drops every marker outright when the engine accepts it —
+ * a reload can bring the same entity back holding the same value, which this
+ * check would pass.)
  *
  * Numbers compare at f32 precision because the inspector reads the engine's
  * echo, which has been through an `f32` and back.
@@ -519,7 +522,9 @@ export type ComponentAdjustments = Readonly<Record<string, GameComponentFieldCor
  *
  * Ephemeral editor state. It is never written into a component, a wire payload,
  * a scene file or an export: it records how a value came to be, which is a fact
- * about this session's edits and not part of the game.
+ * about this session's edits and not part of the game. For the same reason it
+ * does not outlive the scene it describes: the tracked dispatchers in
+ * editorStore.ts empty it when the engine accepts `load_scene` or `new_scene`.
  */
 export type GameComponentAdjustments = Readonly<
   Record<string, Readonly<Partial<Record<GameComponentType, ComponentAdjustments>>>>

@@ -901,7 +901,7 @@ export function GameComponentInspector() {
       <div className="space-y-2">
         {(primaryGameComponents ?? []).map((comp) => (
           // Only the corrections the displayed value still bears out: the
-          // inspector shows the engine's echo, which undo or a scene load
+          // inspector shows the engine's echo, which undo or a play session
           // can have moved without the store action that clears a marker.
           <SectionAdjustments.Provider
             key={comp.type}

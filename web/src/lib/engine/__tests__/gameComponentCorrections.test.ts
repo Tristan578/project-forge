@@ -536,7 +536,7 @@ describe('correctionMatchesValue', () => {
 
   it('matches a route correction by the points it kept, not by how many there are', () => {
     // The route is reported in counts, and a count-only match let a "truncated"
-    // marker survive an undo, a scene load or a collab sync that put back a
+    // marker survive an undo or a collab sync that put back a
     // DIFFERENT 64-point route: the marker kept saying "these are the first 64
     // of the 300 you gave" about points nobody gave.
     const [cut] = report('moving_platform', { waypoints: route(300) }).corrections;

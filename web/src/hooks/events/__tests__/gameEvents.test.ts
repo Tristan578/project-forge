@@ -293,9 +293,11 @@ describe('handleGameEvent', () => {
     });
 
     // PF-1148: an adjustment marker is only true while the field still holds the
-    // value it says was applied. Undo, a scene load and a play session all move
+    // value it says was applied. Undo, a play session and a collab sync all move
     // values through the engine without the store action that clears markers, so
-    // the engine's own report is where a stale one is dropped.
+    // the engine's own report is where a stale one is dropped. (A scene
+    // replacement drops them all when the engine accepts it; that is pinned in
+    // stores/__tests__/sceneReplacementAdjustments.test.ts.)
     describe('adjustment markers', () => {
       const speedClamp = {
         component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
@@ -368,7 +370,7 @@ describe('handleGameEvent', () => {
 
         it('is dropped when the engine reports a different route with the same number of points', () => {
           withRouteMarker();
-          // An undo, a scene load or a collab sync put back another 64-point
+          // An undo or a collab sync put back another 64-point
           // route. The count alone cannot tell the two apart; the points can.
           const other = kept.map(([x]) => [x, 9, 0]);
           handleGameEvent('GAME_COMPONENT_CHANGED', emittedRoute(other), mockSetGet.set, mockSetGet.get);
