@@ -776,6 +776,8 @@ function ownedByGenerator(m, rel) {
 // credential name and this check would still call it parity. So the env is compared
 // STRUCTURALLY — a `${VAR}` value must appear in `env_vars`, a literal value must
 // appear verbatim in the `[…env]` sub-table — and command/args are compared exactly.
+// One key with no `.mcp.json` counterpart is checked too: every server must set
+// `default_tools_approval_mode = "prompt"` (see the loop at the end of mcpParity).
 //
 // config.toml is hand-authored, so this is a check the generator cannot fix; it
 // reports and a person edits. It runs in CI, AFTER an edit is on disk; the
@@ -785,7 +787,7 @@ function ownedByGenerator(m, rel) {
 // what guards the file and what does not.
 //
 // `[mcp_servers.<name>]` blocks out of a config.toml, as { command, args, envVars,
-// env }. Deliberately NOT a TOML parser — it reads the four shapes this file is
+// env, approvalMode }. Deliberately NOT a TOML parser — it reads the shapes this file is
 // allowed to use, and anything else it cannot read becomes a `parseError` that is
 // REPORTED rather than silently treated as parity (the failure mode that matters
 // here is a wrong comparison reading as a right one).
@@ -795,7 +797,7 @@ function codexServerBlocks(text) {
   let name = null;
   let isEnv = false;
   const ensure = (n) => {
-    if (!blocks.has(n)) blocks.set(n, { command: undefined, args: [], envVars: [], env: {}, parseError: '' });
+    if (!blocks.has(n)) blocks.set(n, { command: undefined, args: [], envVars: [], env: {}, approvalMode: undefined, parseError: '' });
     return blocks.get(n);
   };
   // ONE PASS PER LINE, string-aware. Counting brackets over the raw text let a
@@ -852,6 +854,11 @@ function codexServerBlocks(text) {
     if (key === 'command') {
       const v = scalars(rest);
       if (v.length) block.command = v[0];
+      continue;
+    }
+    if (key === 'default_tools_approval_mode') {
+      const v = scalars(rest);
+      if (v.length) block.approvalMode = v[0];
       continue;
     }
     if (key === 'args' || key === 'env_vars') {
@@ -957,7 +964,24 @@ function mcpParity() {
       }
     }
   }
-  if (out.problems.length === 0) out.note = `${have.length} MCP servers declared for Codex, matching .mcp.json (name, command, args and secret names).`;
+  // APPROVAL MODE, on every server Codex would run. `.mcp.json` has no counterpart,
+  // so parity alone never looks at it — and board round 1 on #10135 found the one
+  // server of eight without it (taskboard, whose tools include delete_ticket and
+  // move_ticket) with nothing noticing. docs/guides/codex-cli-support-matrix.md
+  // ("MCP servers") says why it is pinned rather than left to Codex's default.
+  // A `default_tools_approval_mode` written in the `[…env]` sub-table is an
+  // environment variable, not this setting, and codexServerBlocks keeps the two apart.
+  for (const n of have) {
+    const got = blocks.get(n);
+    if (!got || got.parseError) continue; // a parse error is reported above, or the server is already an extra
+    if (got.approvalMode !== 'prompt') {
+      const what = got.approvalMode === undefined
+        ? 'does not set default_tools_approval_mode = "prompt"'
+        : `sets default_tools_approval_mode = ${JSON.stringify(got.approvalMode)}, not "prompt",`;
+      out.problems.push(`mcp:      ${n} ${what} in .codex/config.toml — every server needs "prompt" so its tools stay human-gated if Codex's default approval changes`);
+    }
+  }
+  if (out.problems.length === 0) out.note = `${have.length} MCP servers declared for Codex, matching .mcp.json (name, command, args, secret names and approval mode).`;
   return out;
 }
 
@@ -1178,7 +1202,7 @@ function main() {
       console.error('Fix `extra`/`modified`: --write never deletes a file it cannot prove it wrote; each line above says what to do with that file.');
     }
     if (has(/^ref:/)) console.error('Fix `ref`: correct the path in the SOURCE under .claude/ (or the hand-authored .codex/ file) — the generator copies text, it does not invent paths.');
-    if (has(/^mcp:/)) console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files. If the COMMITTED .codex/config.toml carries a personal server block that was swept into a commit by accident (a `git add -A`, a safety commit), take it back out of the commit — personal servers belong in ~/.codex/config.toml.');
+    if (has(/^mcp:/)) console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files; an approval-mode line is fixed by adding default_tools_approval_mode = "prompt" to that server\'s own table. If the COMMITTED .codex/config.toml carries a personal server block that was swept into a commit by accident (a `git add -A`, a safety commit), take it back out of the commit — personal servers belong in ~/.codex/config.toml.');
     process.exit(1);
   }
   console.log('codex-port: generated Codex surface is in sync with .claude/.');

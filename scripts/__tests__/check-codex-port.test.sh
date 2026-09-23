@@ -355,18 +355,18 @@ fi
 printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n[mcp_servers.gamma]\ncommand = "npx"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 1 "a server Codex declares that .mcp.json lacks is a failure too"
 expect_out "gamma is in .codex/config.toml but not in .mcp.json" "…naming the extra server"
-printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+printf '[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n[mcp_servers.beta]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "matching server names pass"
 # Quoted table names. If that branch of the header regex regresses, a config whose
 # servers are ALL written quoted yields zero declared servers — the warning-only
 # path — and parity silently stops being enforced.
-printf '[mcp_servers."alpha"]\ncommand = "npx"\n[mcp_servers."beta"]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+printf '[mcp_servers."alpha"]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n[mcp_servers."beta"]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "QUOTED server table names are read as servers"
 expect_out "2 MCP servers declared for Codex, matching .mcp.json" "…counted, not mistaken for 'declares no servers'"
-printf '[mcp_servers."alpha"]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+printf '[mcp_servers."alpha"]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 1 "…and a quoted config missing a server is still a failure"
 expect_out "beta is in .mcp.json but not in .codex/config.toml" "…naming it"
-printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+printf '[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n[mcp_servers.beta]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
 
 # SHAPE, not just names. Comparing names alone let a server be restated with the
 # wrong package, the wrong command or a dropped credential NAME and still read as
@@ -375,11 +375,11 @@ printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx
 # config that is otherwise in parity.
 # shellcheck disable=SC2016  # ${ALPHA_TOKEN} is Claude's interpolation syntax, the literal text under test — it must NOT expand
 printf '{"mcpServers":{"alpha":{"command":"npx","args":["-y","@scope/pkg@latest"],"env":{"ALPHA_TOKEN":"${ALPHA_TOKEN}","ALPHA_ORG":"acme"}}}}\n' > "$F/.mcp.json"
-MCP_OK='[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n'
+MCP_OK='[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n'
 # shellcheck disable=SC2059  # the fixtures carry \n escapes that printf must expand
 printf "$MCP_OK" > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "a server matching on command, args and env is parity"
-expect_out 'name, command, args and secret names' "…and the note says what was compared, so a name-only check cannot masquerade as this one"
+expect_out 'name, command, args, secret names and approval mode' "…and the note says what was compared, so a name-only check cannot masquerade as this one"
 SHAPE_ROWS=0
 while IFS='|' read -r LABEL FIXTURE NEEDLE; do
   [ -n "$LABEL" ] || continue
@@ -393,26 +393,69 @@ while IFS='|' read -r LABEL FIXTURE NEEDLE; do
     bad "MCP shape drift went unreported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-200)"
   fi
 done <<'MCP_SHAPE_TABLE'
-the wrong package in args|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@0.0.1"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha args are
-the wrong command|[mcp_servers.alpha]\ncommand = "node"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha command is
-a dropped credential NAME, so the secret never reaches the server|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha forwards ALPHA_TOKEN
-a changed non-secret literal|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "someone-else"\n|alpha sets ALPHA_ORG
-an args array that is never closed is REPORTED, not read as empty|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"\nenv_vars = ["ALPHA_TOKEN"]\n|could not be read
-an EXTRA arg after a continuation line whose COMMENT holds a stray bracket|[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y", "@scope/pkg@latest", # ] note\n    "--allow-shell-exec",\n]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha args are
+the wrong package in args|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@0.0.1"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha args are
+the wrong command|[mcp_servers.alpha]\ncommand = "node"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha command is
+a dropped credential NAME, so the secret never reaches the server|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha forwards ALPHA_TOKEN
+a changed non-secret literal|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "someone-else"\n|alpha sets ALPHA_ORG
+an args array that is never closed is REPORTED, not read as empty|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n|could not be read
+an EXTRA arg after a continuation line whose COMMENT holds a stray bracket|[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y", "@scope/pkg@latest", # ] note\n    "--allow-shell-exec",\n]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha args are
 MCP_SHAPE_TABLE
 if [ "$SHAPE_ROWS" -eq 6 ]; then ok "all 6 MCP shape-drift rows were driven"; else bad "the MCP shape table was not walked: $SHAPE_ROWS of 6"; fi
 # …and the SAME shape with no extra argument is parity, so the bracket-in-a-comment
 # fix did not simply make every commented array unreadable. A `#` or a bracket
 # INSIDE a quoted value is data, not a delimiter, on the same reasoning.
 # shellcheck disable=SC2059  # the fixtures carry \n escapes that printf must expand
-printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y", "@scope/pkg@latest", # ] note\n]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
+printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y", "@scope/pkg@latest", # ] note\n]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "a comment containing a bracket does not close the array early"
 # The Codex app rewrites this file with MULTI-LINE arrays. That is the same TOML,
 # so it must read as parity — a check that called it drift would go red every time
 # the app touched the file.
 # shellcheck disable=SC2059  # as above
-printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y",\n    "@scope/pkg@latest",\n]\nenv_vars = [\n    "ALPHA_TOKEN",\n]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
+printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y",\n    "@scope/pkg@latest",\n]\nenv_vars = [\n    "ALPHA_TOKEN",\n]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "the multi-line array form the Codex app writes is parity, not drift"
+
+# APPROVAL MODE, which has no .mcp.json counterpart, so parity alone never saw it.
+# docs/guides/codex-cli-support-matrix.md ("MCP servers") has every server set
+# default_tools_approval_mode = "prompt", so its tools stay human-gated if Codex's
+# own default moves. Nothing checked that: board round 1 on #10135 found taskboard
+# (delete_ticket, move_ticket among its tools) as the one server of eight without
+# it. Each row starts from MCP_OK, which is parity, and changes ONLY that setting.
+APPROVAL_ROWS=0
+while IFS='|' read -r LABEL FIXTURE NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  APPROVAL_ROWS=$((APPROVAL_ROWS + 1))
+  # shellcheck disable=SC2059  # as above
+  printf "$FIXTURE" > "$F/.codex/config.toml"
+  gen "$F" --check
+  if [ "$RC" -eq 1 ] && grep -qF "$NEEDLE" <<<"$OUT"; then
+    ok "an unpinned MCP approval mode is caught: $LABEL"
+  else
+    bad "an unpinned MCP approval mode went unreported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-200)"
+  fi
+done <<'MCP_APPROVAL_TABLE'
+the setting is absent, so the server runs on Codex's unpinned default|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha does not set default_tools_approval_mode = "prompt"
+the setting is commented out|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n# default_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha does not set default_tools_approval_mode = "prompt"
+the setting sits in the env sub-table, where it is an environment variable, not the setting|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\ndefault_tools_approval_mode = "prompt"\n|alpha does not set default_tools_approval_mode = "prompt"
+the setting approves every tool|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "approve"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha sets default_tools_approval_mode = "approve"
+the setting is auto|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "auto"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha sets default_tools_approval_mode = "auto"
+MCP_APPROVAL_TABLE
+if [ "$APPROVAL_ROWS" -eq 5 ]; then ok "all 5 MCP approval-mode rows were driven"; else bad "the MCP approval table was not walked: $APPROVAL_ROWS of 5"; fi
+# The message says what to write and why, not merely that something differs.
+# shellcheck disable=SC2059  # as above
+printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
+gen "$F" --check
+expect_out 'stay human-gated' "…and the approval report says why the setting matters"
+expect_out "adding default_tools_approval_mode = \"prompt\" to that server's own table" "footer: …and the recipe says where the setting goes"
+# The check is per server: with two declared, only the one that lacks it is named.
+printf '{"mcpServers":{"alpha":{"command":"npx"},"beta":{"command":"node"}}}\n' > "$F/.mcp.json"
+printf '[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.beta]\ncommand = "node"\n' > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 1 "one server of two without the setting fails the check"
+expect_out 'beta does not set default_tools_approval_mode = "prompt"' "…naming the server that lacks it"
+expect_no_out 'alpha does not set' "…and not the server that has it"
+# A literal-string value with a trailing comment is the same TOML as "prompt", so it
+# must pass — a check that false-reds on valid spelling gets switched off.
+printf "[mcp_servers.alpha]\ncommand = \"npx\"\ndefault_tools_approval_mode = 'prompt' # ask first\n\n[mcp_servers.beta]\ncommand = \"node\"\ndefault_tools_approval_mode = \"prompt\"\n" > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "a literal-string 'prompt' with a trailing comment is read as prompt"
 
 echo "== generator: --write may delete ONLY what it generated =="
 # The lock is a committed text file. A bad merge resolution, or an edit, can put
@@ -1178,10 +1221,10 @@ else
   # MCP parity reads the COMMITTED config, like check-codex-config-safety.sh.
   F="$(gitfix)"; gen "$F" --write
   printf '{"mcpServers":{"alpha":{"command":"npx"},"beta":{"command":"npx"}}}\n' > "$F/.mcp.json"
-  printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+  printf '[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n[mcp_servers.beta]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
   git -C "$F" add -A; git -C "$F" commit -q -m fixture
   gen "$F" --check; expect_rc 0 "committed config in parity passes"
-  printf 'model = "x"\n[mcp_servers.alpha]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+  printf 'model = "x"\n[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
   gen "$F" --check; expect_rc 0 "an UNCOMMITTED local edit to config.toml (the taskboard guide suggests one) does not turn a local check red"
   git -C "$F" add -A; git -C "$F" commit -q -m "commit the partial block"
   gen "$F" --check; expect_rc 1 "…but once COMMITTED, a partial server list is a failure"
