@@ -108,8 +108,9 @@ session token whose `azp` claim is not in that list. Under `next start`, the lis
 origins plus `STAGING_URL`. Without it, a session created on `http://localhost:3000` looks signed out to the
 server, and `/dashboard` redirects back to sign-in.
 
-If the keys are not set, the global setup prints `skipping Clerk setup` and both tests skip. Set
-`E2E_CLERK_TEST_REQUIRED=true` to make that a failure instead.
+If the keys are not set on an optional run, both tests skip and the summary records
+`required: false` with skipped counts. Global setup is silent. Set
+`E2E_CLERK_TEST_REQUIRED=true` to make missing keys a failure instead.
 
 ## Published test evidence
 
@@ -120,6 +121,7 @@ whether the run is required, and passed/failed/skipped/total counts. It contains
 errors, stdout/stderr, attachments, or credential values. Missing or unwritable summaries fail
 the job. Expected failures do not count as successful authentication.
 
+Global setup emits no console output because its logs bypass reporter callbacks.
 The reporter emits a static diagnostic for setup errors and aggregate counts for test failures.
 Use the configuration checks below to diagnose a failure; raw authentication recordings must
 not be attached to a public issue or PR.

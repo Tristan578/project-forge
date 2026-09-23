@@ -38,7 +38,9 @@ export interface ClerkSetupDeps {
 const defaultDeps: ClerkSetupDeps = {
   createTestingToken: (secretKey) => createTestingToken(secretKey),
   findSeededUser: (secretKey, email) => findSeededUser(secretKey, email),
-  log: (message) => console.log(message),
+  // Global setup console output bypasses Playwright reporter callbacks. Keep
+  // production setup silent; injected logs remain available to unit tests.
+  log: () => {},
 };
 
 /**

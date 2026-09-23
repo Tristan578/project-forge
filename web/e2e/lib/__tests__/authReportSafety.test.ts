@@ -1,4 +1,3 @@
-
 /** Exercise the real Playwright reporter pipeline with credential-shaped failures. */
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -77,4 +76,61 @@ describe('auth report privacy boundary', () => {
       await rm(dir, { recursive: true, force: true });
     }
   }, 40_000);
+  it('keeps actual global setup output private before worker reporters attach', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'auth-setup-cli-'));
+    const secret = 'AUTH_SETUP_SENTINEL_739';
+    const summaryPath = join(dir, 'summary.json');
+    const markerPath = join(dir, 'setup-completed.json');
+    const configPath = join(dir, 'playwright.config.cjs');
+    try {
+      await writeFile(configPath, 'module.exports = ' + JSON.stringify({
+        testDir: dir, testMatch: '**/*.spec.cjs', workers: 1, retries: 0,
+        globalSetup: join(dir, 'setup.cjs'), outputDir: join(dir, 'raw-results'),
+        reporter: [[resolve('e2e/lib/requiredRunReporter.ts'), { enabled: true, minPassed: 1, summaryPath }]],
+      }) + ';');
+      await writeFile(join(dir, 'noop.spec.cjs'),
+        'const {test}=require(' + JSON.stringify(require.resolve('@playwright/test')) + ');test("ordinary",async()=>{});');
+      await writeFile(join(dir, 'setup.cjs'), [
+        'const setup = require(' + JSON.stringify(resolve('e2e/lib/clerkGlobalSetup.ts')) + ').default;',
+        'module.exports = async () => {',
+        '  const secret = ' + JSON.stringify(secret) + ';',
+        '  Object.assign(process.env, ' + JSON.stringify({
+          E2E_CLERK_TEST_REQUIRED: 'true',
+          CLERK_SECRET_KEY: 'sk_test_FAKE_FOR_REPORTER_TEST',
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_' + Buffer.from('fixture.clerk.accounts.dev$').toString('base64'),
+          E2E_CLERK_TEST_EMAIL: 'fixture+clerk_test@example.com',
+          E2E_CLERK_TEST_PASSWORD: secret,
+        }) + ');',
+        '  let requests = 0;',
+        '  global.fetch = async (url) => { requests++; return { ok: true, json: async () =>',
+        '    url.endsWith("/testing_tokens") ? { token: secret } : [{ id: secret, password_enabled: true, two_factor_enabled: false }] }; };',
+        '  await setup();',
+        '  require("node:fs").writeFileSync(' + JSON.stringify(markerPath) + ', JSON.stringify({requests, tokenForwarded: process.env.CLERK_TESTING_TOKEN === secret}));',
+        '  throw new Error(secret);',
+        '};',
+      ].join('\n'));
+      let exitCode: number | string | undefined = 0;
+      let output = '';
+      try {
+        const result = await run(process.execPath, [require.resolve('@playwright/test/cli'), 'test', '--config', configPath],
+          { cwd: dir, timeout: 30_000, maxBuffer: 1_000_000 });
+        output = result.stdout + result.stderr;
+      } catch (error) {
+        const failure = error as Error & { code?: number | string; stdout?: string; stderr?: string };
+        exitCode = failure.code;
+        output = (failure.stdout ?? '') + (failure.stderr ?? '');
+      }
+      expect(JSON.parse(await readFile(markerPath, 'utf8'))).toEqual({ requests: 2, tokenForwarded: true });
+      expect(exitCode).toBe(1);
+      expect(output).toContain('Playwright reported a run error');
+      expect(output).not.toContain(secret);
+      expect(output).not.toContain('fixture.clerk.accounts.dev');
+      const summary = await readFile(summaryPath, 'utf8');
+      expect(JSON.parse(summary)).toMatchObject({ status: 'failed', required: true, passed: 0 });
+      expect(summary).not.toContain(secret);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 40_000);
+
 });

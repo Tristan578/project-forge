@@ -11,7 +11,8 @@
  * mean the journey ran — lessons-learned #9: a check that scans zero items, or
  * skips its key assertion, must fail rather than report success.
  *
- * On a run that is not required it only prints the counts.
+ * Optional runs also emit aggregate counts and the configured safe summary;
+ * summary-write failures still fail the run.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -139,7 +140,7 @@ export default class RequiredRunReporter implements Reporter {
   }
 
   onStdOut(_chunk: string | Buffer): void {
-    // Suppress worker/setup output: only the aggregate summary is publishable.
+    // Suppress worker output: only the aggregate summary is publishable.
   }
 
   onStdErr(_chunk: string | Buffer): void {
