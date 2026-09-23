@@ -1799,6 +1799,18 @@ jobs:
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
+      # #10158: a spec that stands store injection or a mock in for the
+      # component it names must say so, in a `substitution` annotation AND a
+      # `[substituted: <component>]` title marker, and capabilityMatrix.test.ts
+      # keeps such specs out of `proven` cells. This lists every spec with
+      # Playwright's --list mode (no browser, no server) and fails on an
+      # unpaired annotation or marker, a listing that misses a spec file, or
+      # zero specs. Its summary line names the counts it listed. Pinned by
+      # scripts/__tests__/production-ci-contract.test.mjs.
+      - name: Check substitution naming
+        working-directory: web
+        run: npx tsx scripts/check-substitution-naming.ts
+
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
