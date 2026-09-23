@@ -225,6 +225,21 @@ export function describeCorrection(c: GameComponentFieldCorrection): string {
   }
 }
 
+/**
+ * A tool's result message with its corrections said out loud.
+ *
+ * `message` alone when nothing was adjusted — the absence of the sentence is a
+ * claim too, and it has to be a true one.
+ */
+export function withCorrectionSummary(
+  message: string,
+  corrections: readonly GameComponentFieldCorrection[],
+): string {
+  if (corrections.length === 0) return message;
+  const count = corrections.length === 1 ? '1 value was' : `${corrections.length} values were`;
+  return `${message}. ${count} adjusted to fit the engine’s limits: ${corrections.map(describeCorrection).join(' ')}`;
+}
+
 // ---------------------------------------------------------------------------
 // Matching a correction against the value a component holds now
 // ---------------------------------------------------------------------------
