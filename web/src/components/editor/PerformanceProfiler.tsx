@@ -262,18 +262,19 @@ export function PerformanceProfiler() {
             </div>
             <div className="h-8 bg-[var(--sf-bg-elevated)] rounded-[var(--sf-radius-sm)] relative overflow-hidden">
               {/* Sparkline */}
-              <svg className="absolute inset-0 w-full h-full" role="img" aria-label="FPS history sparkline">
+              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="FPS history sparkline">
                 <polyline
                   points={history
                     .map((s, i) => {
                       const x = (i / 59) * 100;
                       const y = 100 - (s.fps / budget.targetFps) * 100;
-                      return `${x}%,${Math.max(0, Math.min(100, y))}%`;
+                      return `${x},${Math.max(0, Math.min(100, y))}`;
                     })
                     .join(' ')}
                   fill="none"
                   className={STATUS_STROKE[fpsStatus]}
                   strokeWidth="2"
+                  vectorEffect="non-scaling-stroke"
                 />
               </svg>
             </div>

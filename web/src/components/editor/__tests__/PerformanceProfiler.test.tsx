@@ -481,4 +481,15 @@ describe('PerformanceProfiler', () => {
       expect(findRawControls(SOURCE)).toEqual([]);
     });
   });
+  it('renders FPS history with numeric SVG coordinates and a scalable viewBox', () => {
+    setupStore({ isProfilerOpen: true, history: [{ fps: 60 }, { fps: 30 }] });
+    const { container } = render(<PerformanceProfiler />);
+    const svg = screen.getByRole('img', { name: 'FPS history sparkline' });
+    const line = container.querySelector('polyline')!;
+    expect(svg).toHaveAttribute('viewBox', '0 0 100 100');
+    expect(svg).toHaveAttribute('preserveAspectRatio', 'none');
+    expect(line.getAttribute('points')).toBe('0,0 1.694915254237288,50');
+    expect(line).toHaveAttribute('vector-effect', 'non-scaling-stroke');
+  });
+
 });
