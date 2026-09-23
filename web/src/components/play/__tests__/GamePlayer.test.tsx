@@ -13,6 +13,7 @@ import {
   ENGINE_GLOBAL_TIMEOUT_MS,
   PLAY_GAME_FETCH_TIMEOUT_MS,
   PLAY_ENGINE_SETTLE_MS,
+  PLAY_SCENE_LOAD_RETRY_MS,
 } from '@/lib/config/timeouts';
 
 vi.mock('next/link', () => ({
@@ -343,9 +344,102 @@ describe('GamePlayer', () => {
       fireEvent.click(screen.getByText('Click to play'));
       await advance(PLAY_ENGINE_SETTLE_MS);
 
-      expect(runtime.handle_command).toHaveBeenCalledWith('play', '{}');
+      expect(runtime.handle_command).toHaveBeenCalledWith('play', {});
       expect(captureException).not.toHaveBeenCalled();
       expect(screen.queryByText('Starting engine...')).toBeNull();
+    });
+
+    // The engine deserialises the JS value it is handed. A JSON STRING arrives
+    // as one string with no fields, so `load_scene` was refused ("Missing
+    // 'json' field") on every published game and nothing reported it (#10196).
+    it('sends load_scene as { json } and every other command as an object, never a JSON string (#10196)', async () => {
+      global.fetch = okFetch();
+      const runtime = stubRuntime();
+      runtime.handle_command.mockReturnValue({ success: true });
+      vi.mocked(loadPlayEngine).mockResolvedValue(runtime);
+
+      render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+      await advance();
+      fireEvent.click(screen.getByText('Click to play'));
+      await advance(PLAY_ENGINE_SETTLE_MS);
+
+      expect(runtime.handle_command).toHaveBeenCalledWith('load_scene', {
+        json: JSON.stringify(mockGame.sceneData),
+      });
+      for (const [, payload] of runtime.handle_command.mock.calls) {
+        expect(typeof payload).toBe('object');
+      }
+      // Scene first, then play — never play before the scene is in.
+      const order = runtime.handle_command.mock.calls.map((call) => call[0] as string);
+      expect(order.indexOf('load_scene')).toBeLessThan(order.indexOf('play'));
+      expect(screen.queryByText('Starting engine...')).toBeNull();
+    });
+
+    it('waits for the engine to accept commands before giving up on the scene (#10196)', async () => {
+      global.fetch = okFetch();
+      const runtime = stubRuntime();
+      let attempts = 0;
+      runtime.handle_command.mockImplementation((command: string) => {
+        if (command !== 'load_scene') return { success: true };
+        attempts += 1;
+        return attempts < 3
+          ? { success: false, error: 'PendingCommands resource not initialized' }
+          : { success: true };
+      });
+      vi.mocked(loadPlayEngine).mockResolvedValue(runtime);
+
+      render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+      await advance();
+      fireEvent.click(screen.getByText('Click to play'));
+      await advance(PLAY_SCENE_LOAD_RETRY_MS * 3 + PLAY_ENGINE_SETTLE_MS);
+
+      expect(attempts).toBe(3);
+      expect(runtime.handle_command).toHaveBeenCalledWith('play', {});
+      expect(captureException).not.toHaveBeenCalled();
+      expect(screen.queryByText('Starting engine...')).toBeNull();
+    });
+
+    it('surfaces a refused scene instead of playing the default scene (#10196)', async () => {
+      global.fetch = okFetch();
+      const runtime = stubRuntime();
+      runtime.handle_command.mockImplementation((command: string) =>
+        command === 'load_scene'
+          ? { success: false, error: 'Scene has 0 entities' }
+          : { success: true },
+      );
+      vi.mocked(loadPlayEngine).mockResolvedValue(runtime);
+
+      render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+      await advance();
+      fireEvent.click(screen.getByText('Click to play'));
+      await advance(PLAY_ENGINE_SETTLE_MS);
+
+      expect(screen.getByText('Scene failed to load: Scene has 0 entities')).toBeDefined();
+      expect(runtime.handle_command).not.toHaveBeenCalledWith('play', expect.anything());
+      expect(captureException).toHaveBeenCalledTimes(1);
+      // The engine owns the canvas by now, so no restart is offered.
+      expect(screen.queryByText('Try again')).toBeNull();
+    });
+
+    it('reports a refused play command to monitoring without an error screen (#10196)', async () => {
+      global.fetch = okFetch();
+      const runtime = stubRuntime();
+      runtime.handle_command.mockImplementation((command: string) =>
+        command === 'play' ? { success: false, error: 'Cannot play: scene has no camera' } : { success: true },
+      );
+      vi.mocked(loadPlayEngine).mockResolvedValue(runtime);
+
+      render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+      await advance();
+      fireEvent.click(screen.getByText('Click to play'));
+      await advance(PLAY_ENGINE_SETTLE_MS);
+
+      expect(captureException).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(captureException).mock.calls[0][0]).toEqual(
+        new Error('Engine refused play: Cannot play: scene has no camera'),
+      );
+      expect(vi.mocked(captureException).mock.calls[0][1]).toMatchObject({ surface: 'play', phase: 'command', command: 'play' });
+      expect(screen.queryByText('Something Went Wrong')).toBeNull();
     });
 
     it('does not offer a retry once the engine has taken the canvas', async () => {

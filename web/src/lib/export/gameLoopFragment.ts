@@ -16,6 +16,8 @@
  * `handle_command`, while the ZIP build holds the WASM module in a `wasm` local
  * and calls `wasm.handle_command`. That reference is the lone parameter.
  */
+import { MAX_COMMAND_PAYLOAD_DEPTH } from '@/lib/engine/commandPayloadGuard';
+
 export interface GameLoopFragmentOptions {
   /**
    * How to reference the engine command sink inside the generated loop, e.g.
@@ -43,6 +45,22 @@ export interface GameLoopFragmentOptions {
  */
 export function generateGameLoopFragment({ handleCommand, indent = '' }: GameLoopFragmentOptions): string {
   const body = `var lastTime = performance.now();
+// Script commands the engine has already refused once, by name. A script that
+// keeps sending a bad command would otherwise warn on every frame.
+var __forgeRefusedCommands = {};
+// Depth bound on a script-built payload, mirroring the editor's command payload
+// guard: the engine walks the JS value recursively before any engine code runs,
+// and on wasm32 a stack overflow is an unrecoverable trap that kills the engine.
+// Depth is 1-based: a scalar is 1, { a: 1 } is 2.
+var __forgeMaxCommandDepth = ${MAX_COMMAND_PAYLOAD_DEPTH};
+function __forgeDepthWithin(value, remaining) {
+  if (value === null || typeof value !== 'object') return true;
+  if (remaining <= 1) return false;
+  for (var k in value) {
+    if (!__forgeDepthWithin(value[k], remaining - 1)) return false;
+  }
+  return true;
+}
 function gameLoop() {
   var now = performance.now();
   var dt = (now - lastTime) / 1000;
@@ -68,11 +86,31 @@ function gameLoop() {
 
   if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt);
 
-  // Flush script commands to the engine
+  // Flush script commands to the engine. The engine deserialises its payload
+  // from the JS value it is handed, so it must be the command OBJECT: a JSON
+  // string arrives as one string value with no fields and every handler that
+  // reads fields refuses it (#10196). The name travels separately, as the
+  // editor's script runner sends it, so it is split off the payload here.
   if (window.__forgeFlushCommands) {
     var cmds = window.__forgeFlushCommands();
     for (var ci = 0; ci < cmds.length; ci++) {
-      ${handleCommand}(cmds[ci].cmd, JSON.stringify(cmds[ci]));
+      var cmdName = cmds[ci].cmd;
+      var cmdPayload = {};
+      for (var cmdKey in cmds[ci]) {
+        if (cmdKey !== 'cmd') cmdPayload[cmdKey] = cmds[ci][cmdKey];
+      }
+      if (!__forgeDepthWithin(cmdPayload, __forgeMaxCommandDepth)) {
+        if (!__forgeRefusedCommands[cmdName]) {
+          __forgeRefusedCommands[cmdName] = true;
+          console.warn('[SpawnForge] Dropped script command "' + cmdName + '": payload nested deeper than ' + __forgeMaxCommandDepth + ' levels');
+        }
+        continue;
+      }
+      var cmdResult = ${handleCommand}(cmdName, cmdPayload);
+      if (cmdResult && cmdResult.success === false && !__forgeRefusedCommands[cmdName]) {
+        __forgeRefusedCommands[cmdName] = true;
+        console.warn('[SpawnForge] The engine refused script command "' + cmdName + '": ' + cmdResult.error);
+      }
     }
   }
 

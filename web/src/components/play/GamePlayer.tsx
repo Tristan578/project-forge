@@ -8,6 +8,7 @@ import { RemixButton } from './RemixButton';
 import { ReportGameDialog } from './ReportGameDialog';
 import { withTimeout } from '@/lib/async/withTimeout';
 import { loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
+import { loadSceneWhenReady, refusalOf } from '@/lib/engine/playSceneLoad';
 import { captureException } from '@/lib/monitoring/sentry-client';
 import {
   ENGINE_GLOBAL_TIMEOUT_MS,
@@ -186,9 +187,30 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       engineOwnsCanvasRef.current = true;
       runtime.init_engine(CANVAS_ID);
 
-      // Load scene data
-      const sceneJson = JSON.stringify(gameData.sceneData);
-      runtime.handle_command('load_scene', sceneJson);
+      // A refused command used to be silent here: the response was never
+      // read, so a game that failed to load played the engine's default scene
+      // with nothing reporting it (#10196). Anything the engine refuses after
+      // the scene is in is reported — the game is still playable, so it is
+      // not an error screen — and the scene load itself throws below.
+      const sendReported = (command: string, payload: unknown) => {
+        const refusal = refusalOf(runtime.handle_command(command, payload));
+        if (refusal === null) return;
+        const refused = new Error(`Engine refused ${command}: ${refusal}`);
+        console.error('[SpawnForge Play]', refused.message);
+        captureException(refused, { surface: 'play', phase: 'command', command, userId, slug });
+      };
+
+      // Load scene data. The payload is an OBJECT carrying the scene JSON —
+      // the engine deserialises whatever JS value it is handed, so a JSON
+      // string has no `json` field and is refused — and the engine only
+      // accepts commands once its first frame has run, so this waits for that
+      // within a bound (#10196).
+      await loadSceneWhenReady(
+        (command, payload) => runtime.handle_command(command, payload),
+        gameData.sceneData,
+      );
+
+      if (cancelledRef.current) return;
 
       // Auto-reduce quality on mobile
       const isMobile =
@@ -196,17 +218,14 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         'ontouchstart' in window ||
         navigator.maxTouchPoints > 0;
       if (isMobile) {
-        runtime.handle_command(
-          'set_quality',
-          JSON.stringify({ preset: 'low' })
-        );
+        sendReported('set_quality', { preset: 'low' });
       }
 
       // Start play mode after a short delay for the engine to settle
       settleTimerRef.current = setTimeout(() => {
         settleTimerRef.current = null;
         if (cancelledRef.current) return;
-        runtime.handle_command('play', '{}');
+        sendReported('play', {});
         setEngineState('ready');
       }, PLAY_ENGINE_SETTLE_MS);
     } catch (err) {

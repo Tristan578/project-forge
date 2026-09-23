@@ -66,8 +66,14 @@ const ACCOUNTED_FOR: Record<string, { calls: number; reason: string }> = {
   },
   'hooks/usePointerLock.ts': { calls: 1, reason: 'fixed { dx, dy } literal' },
   'components/play/GamePlayer.tsx': {
-    calls: 3,
-    reason: 'passes JSON *strings*; serde_json::from_str caps its own recursion at 128 levels',
+    calls: 2,
+    reason:
+      'fixed object literals built in the file ({ preset }, {}); the scene goes through lib/engine/playSceneLoad.ts (#10196)',
+  },
+  'lib/engine/playSceneLoad.ts': {
+    calls: 0,
+    reason:
+      'reaches the engine only through the sink GamePlayer passes in, with a two-level { json: string } literal: the scene itself stays a JSON string that serde_json::from_str parses inside the engine, capping its own recursion at 128 levels',
   },
 
   // --- Not a call at all --------------------------------------------------
