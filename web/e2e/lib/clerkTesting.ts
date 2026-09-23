@@ -24,6 +24,7 @@
  * `__tests__/clerkTesting.test.ts`; the Playwright wiring is in
  * `../helpers/clerkSession.ts` and the global setup in `./clerkGlobalSetup.ts`.
  */
+import { clerkFrontendApiFromPublishableKey } from '../../src/lib/security/csp';
 
 /** Clerk Backend API base (@clerk/backend `API_URL` + `API_VERSION`). */
 export const CLERK_BACKEND_API_URL = 'https://api.clerk.com/v1';
@@ -66,21 +67,17 @@ export type ClerkTestingPlan =
     };
 
 /**
- * Decode the Frontend API host from a publishable key, with the same checks as
- * @clerk/shared `isValidDecodedPublishableKey`: the decoded text ends in `$`,
- * has no other `$`, and the host contains a dot.
+ * Decode the Frontend API host from a publishable key — the app's own decoder
+ * (`clerkFrontendApiFromPublishableKey`, which builds the CSP from the same
+ * key), so the host this suite routes is the host the app allowlists. Throws
+ * instead of returning null: a configured key that cannot be decoded is a
+ * configuration error here, not a reason to skip.
  * @param publishableKey A `pk_test_…` or `pk_live_…` key.
  * @returns The Frontend API host, without scheme.
  */
 export function frontendApiFromPublishableKey(publishableKey: string): string {
-  const parts = publishableKey.split('_');
-  const encoded = parts.length === 3 ? parts[2] : '';
-  let decoded = '';
-  if (encoded && /^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
-    decoded = Buffer.from(encoded, 'base64').toString('utf8');
-  }
-  const host = decoded.endsWith('$') ? decoded.slice(0, -1) : '';
-  if (!host || host.includes('$') || !host.includes('.') || !/^[A-Za-z0-9.-]+$/.test(host)) {
+  const host = clerkFrontendApiFromPublishableKey(publishableKey);
+  if (!host) {
     throw new Error(
       'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is not a valid Clerk publishable key ' +
         '(expected pk_test_ followed by base64 of "<frontend-api-host>$").',
