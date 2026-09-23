@@ -118,11 +118,11 @@ export async function buildExportedRunReport(
   }
   if (!h.sceneApplied) {
     // load_scene succeeds when the command is QUEUED. A build that never drains
-    // the queue (the webgpu,runtime build at the time of #10013) measures its
-    // default scene; reporting that under the fixture's name is a false result.
+    // the queue (the runtime engine build, #10195) measures its default scene;
+    // reporting that under the fixture's name is a false result.
     return {
       ok: false,
-      error: 'The engine accepted load_scene but never applied the fixture scene (no SCENE_LOADED event); this engine build does not load scenes, so the run measured its default scene.',
+      error: 'The engine accepted load_scene but never applied the fixture scene (no SCENE_LOADED event); this engine build does not load scenes (the runtime build, #10195), so the run measured its default scene.',
     };
   }
 

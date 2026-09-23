@@ -17,11 +17,17 @@ import { UNKNOWN } from '@/lib/config/measurementManifest';
 
 /**
  * #9904 / #10013 (operation performance.FR-3.OP-01) — the pinned 2D and 3D
- * fixtures, exported through the REAL single-HTML export template and run on
- * the REAL runtime engine in a GPU-backed browser, captured by the exported
- * runtime's own harness (10 s warm-up, 60 s capture), and reported with the
- * same code as the editor capture. This is the real-hardware evidence the
- * mocked unit suites cannot provide.
+ * fixtures, exported through the REAL single-HTML export template and run on a
+ * REAL engine build in a GPU-backed browser, captured by the exported page's
+ * own harness (10 s warm-up, 60 s capture), and reported with the same code as
+ * the editor capture. This is the real-hardware evidence the mocked unit
+ * suites cannot provide.
+ *
+ * Engine package: the runtime build by default, as an export ships it. That
+ * build does not apply scene loads (#10195), so every run on it is refused by
+ * buildExportedRunReport ("never applied the fixture scene"); until that is
+ * fixed, capture with PERF_ENGINE=editor, which serves only the editor build so
+ * the template takes its own fallback to it (the build /play loads).
  *
  * LOCAL ONLY, and only under `playwright.perf.config.ts` (tag `@perf-gpu`):
  * it needs the runtime engine packages in `web/public/engine-pkg-*-runtime/`

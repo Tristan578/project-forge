@@ -17,6 +17,10 @@
  * This helper sends `{ json }` and retries only the not-initialised refusal,
  * within a bounded wait. Any other refusal is the scene's own fault and is
  * surfaced at once.
+ *
+ * Accepted is not applied: the runtime engine build queues `load_scene` but
+ * never drains it (#10195). The engine's `SCENE_LOADED` event is the proof a
+ * scene was applied; the performance harness waits for it.
  */
 
 import { EXPORTED_SCENE_LOAD_RETRY_MS, EXPORTED_SCENE_LOAD_TIMEOUT_MS } from '@/lib/config/timeouts';
