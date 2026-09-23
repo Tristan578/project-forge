@@ -108,8 +108,9 @@ If the keys are not set, the global setup prints `skipping Clerk setup` and both
 
 ## Failure messages
 
-| Message (global setup or spec) | Cause |
+| Message (build step, global setup or spec) | Cause |
 |---|---|
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set but unusable: its prefix is right but the payload does not decode…` (the **Build for auth E2E** step) | `CLERK_TEST_PUBLISHABLE_KEY` has a publishable-key prefix but is not a real Clerk publishable key: it is truncated, a placeholder, or has extra characters. Whitespace is not the cause, because the check trims first. Copy the key again from the test instance's **API keys** page and re-set the secret. |
 | `E2E_CLERK_TEST_REQUIRED=true but CLERK_SECRET_KEY … is empty` | A test-instance key secret was deleted or renamed. |
 | `Refusing to run the Clerk auth journey against a non-development instance` | A key that is not `sk_test_` / `pk_test_` was supplied. |
 | `Clerk testing-token request (POST /v1/testing_tokens) failed: HTTP 401` | The secret key is wrong or was rotated. |
