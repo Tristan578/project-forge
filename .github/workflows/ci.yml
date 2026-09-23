@@ -1857,7 +1857,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: e2e-auth-report
-          path: web/playwright-report/
+          path: web/auth-results/summary.json
+          if-no-files-found: error
           retention-days: 14
 
   # Strict interactive-journey gate (#8601 F09 + #8604 F12). Proves the core

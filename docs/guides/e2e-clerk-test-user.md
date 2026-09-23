@@ -68,7 +68,7 @@ needs:
    development instance, a `+clerk_test` address receives no email and accepts the fixed code `424242`
    ([docs](https://clerk.com/docs/guides/development/testing/test-emails-and-phones)), which the spec enters
    when Clerk asks. Any other address cannot finish the journey once Device Trust applies. The global setup
-   logs `+clerk_test address: yes|no` so the log shows which kind of address is configured.
+   checks the seeded user before the journey; the public report suppresses its raw output.
 4. **Device Trust set to email code, if it is on.** Clerk picks "an email code, SMS code, or email link based
    on your settings". The spec types a code into the field named **Enter verification code**, so it can
    finish only the email-code method.
@@ -111,7 +111,24 @@ server, and `/dashboard` redirects back to sign-in.
 If the keys are not set, the global setup prints `skipping Clerk setup` and both tests skip. Set
 `E2E_CLERK_TEST_REQUIRED=true` to make that a failure instead.
 
-## Failure messages
+## Published test evidence
+
+Authentication enters a reusable password and exchanges session tokens. This config disables
+traces, screenshots, videos, raw HTML reports, standard Playwright reporters, and server output.
+The only uploaded artifact is `web/auth-results/summary.json`: schema version, final status,
+whether the run is required, and passed/failed/skipped/total counts. It contains no test titles,
+errors, stdout/stderr, attachments, or credential values. Missing or unwritable summaries fail
+the job. Expected failures do not count as successful authentication.
+
+The reporter emits a static diagnostic for setup errors and aggregate counts for test failures.
+Use the configuration checks below to diagnose a failure; raw authentication recordings must
+not be attached to a public issue or PR.
+
+## Diagnosing configuration failures
+
+The setup helpers use the messages below internally; the public reporter suppresses raw errors.
+Check these conditions when the safe summary reports a failed run. Build-time diagnostics remain
+visible in the CI build step.
 
 | Message (build step, global setup or spec) | Cause |
 |---|---|

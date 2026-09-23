@@ -13,7 +13,9 @@
  *
  * On a run that is not required it only prints the counts.
  */
-import type { FullConfig, FullResult, Reporter, Suite, TestCase } from '@playwright/test/reporter';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestError } from '@playwright/test/reporter';
 import { CLERK_REQUIRED_ENV } from './clerkTesting';
 
 export interface RunCounts {
@@ -28,10 +30,10 @@ export interface RequiredRunOptions {
   minPassed: number;
 }
 
-type OutcomeCarrier = Pick<TestCase, 'outcome'>;
+type OutcomeCarrier = Pick<TestCase, 'outcome' | 'expectedStatus' | 'results'>;
 
 /**
- * Tally final outcomes (after retries): `flaky` counts as passed.
+ * Tally actual final results: a successful retry passes; an expected failure does not.
  * @param tests Every test in the run.
  * @returns Counts by outcome.
  */
@@ -39,8 +41,10 @@ export function countOutcomes(tests: readonly OutcomeCarrier[]): RunCounts {
   const counts: RunCounts = { passed: 0, failed: 0, skipped: 0, total: tests.length };
   for (const test of tests) {
     const outcome = test.outcome();
-    if (outcome === 'expected' || outcome === 'flaky') counts.passed++;
-    else if (outcome === 'skipped') counts.skipped++;
+    const finalStatus = test.results.at(-1)?.status;
+    if (test.expectedStatus === 'passed' && finalStatus === 'passed' &&
+        (outcome === 'expected' || outcome === 'flaky')) counts.passed++;
+    else if (outcome === 'skipped' || finalStatus === 'skipped') counts.skipped++;
     else counts.failed++;
   }
   return counts;
@@ -62,6 +66,7 @@ export function requiredRunProblems(counts: RunCounts, options: RequiredRunOptio
       `${counts.skipped} test(s) skipped on a run that requires Clerk — a skip here means the journey did not run`,
     );
   }
+  if (counts.failed > 0) problems.push(`${counts.failed} test(s) did not actually pass`);
   if (counts.passed < options.minPassed) {
     problems.push(`${counts.passed} passed, expected at least ${options.minPassed}`);
   }
@@ -71,6 +76,8 @@ export function requiredRunProblems(counts: RunCounts, options: RequiredRunOptio
 export interface RequiredRunReporterConfig extends Partial<RequiredRunOptions> {
   /** Force on/off; otherwise enabled iff `E2E_CLERK_TEST_REQUIRED === 'true'`. */
   enabled?: boolean;
+  /** Optional credential-safe artifact; contains only aggregate counts and status. */
+  summaryPath?: string;
 }
 
 /** Default floor: the Sign In navigation test and the sign-in journey. */
@@ -94,15 +101,31 @@ export default class RequiredRunReporter implements Reporter {
   }
 
   // Playwright only honours a status override returned through a Promise.
-  async onEnd(_result: FullResult): Promise<{ status: FullResult['status'] } | undefined> {
+  async onEnd(result: FullResult): Promise<{ status: FullResult['status'] } | undefined> {
     const counts = countOutcomes(this.suite?.allTests() ?? []);
     const required = this.isRequired();
     console.log(
       `[requiredRunReporter] ${counts.passed} passed, ${counts.skipped} skipped, ${counts.failed} failed ` +
         `of ${counts.total} (${CLERK_REQUIRED_ENV}=${required ? 'true' : 'false'}).`,
     );
-    if (!required) return undefined;
-    const problems = requiredRunProblems(counts, { minPassed: this.options.minPassed ?? DEFAULT_MIN_PASSED });
+    const problems = required
+      ? requiredRunProblems(counts, { minPassed: this.options.minPassed ?? DEFAULT_MIN_PASSED })
+      : [];
+    if (this.options.summaryPath) {
+      const status = problems.length > 0 ? 'failed' : result.status;
+      // Never serialize Playwright objects: errors, titles, stdout and attachments
+      // can contain reusable credentials even when browser tracing is disabled.
+      const summary = { schemaVersion: 1, status, required, ...counts };
+      try {
+        await mkdir(dirname(this.options.summaryPath), { recursive: true });
+        await writeFile(this.options.summaryPath, JSON.stringify(summary, null, 2) + '\n', 'utf8');
+      } catch {
+        // Playwright swallows reporter exceptions. Return failure explicitly so
+        // an I/O error cannot bypass required-run enforcement or artifact proof.
+        console.error('[requiredRunReporter] FAIL: could not write the credential-safe summary.');
+        return { status: 'failed' };
+      }
+    }
     if (problems.length === 0) return undefined;
     for (const problem of problems) {
       console.error(`[requiredRunReporter] FAIL: ${problem}`);
@@ -111,7 +134,20 @@ export default class RequiredRunReporter implements Reporter {
     return { status: 'failed' };
   }
 
+  onError(_error: TestError): void {
+    console.error('[requiredRunReporter] Playwright reported a run error; check the test-instance setup.');
+  }
+
+  onStdOut(_chunk: string | Buffer): void {
+    // Suppress worker/setup output: only the aggregate summary is publishable.
+  }
+
+  onStdErr(_chunk: string | Buffer): void {
+    // Do not forward raw authentication errors or network payloads.
+  }
+
   printsToStdio(): boolean {
-    return false;
+    // Otherwise Playwright adds its default reporter, which prints raw failures.
+    return true;
   }
 }

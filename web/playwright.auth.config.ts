@@ -42,10 +42,7 @@ export default defineConfig({
   // One seeded user: serial runs keep its sessions from racing each other.
   workers: 1,
   reporter: [
-    ['./e2e/lib/requiredRunReporter.ts', { minPassed: 2 }],
-    ['list'],
-    ['github'],
-    ['html', { open: 'never' }],
+    ['./e2e/lib/requiredRunReporter.ts', { minPassed: 2, summaryPath: 'auth-results/summary.json' }],
   ],
   timeout: AUTH_TEST_TIMEOUT_MS,
   expect: { timeout: AUTH_EXPECT_TIMEOUT_MS },
@@ -54,9 +51,11 @@ export default defineConfig({
     baseURL: 'http://localhost:3000',
     actionTimeout: 10_000,
     navigationTimeout: E2E_NAVIGATION_TIMEOUT_MS,
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    // This journey enters a reusable password and exchanges session tokens.
+    // Raw recordings/reports must never be uploaded from this public repository.
+    trace: 'off',
+    screenshot: 'off',
+    video: 'off',
     launchOptions: { args: ['--disable-gpu', '--no-sandbox'] },
   },
 
@@ -69,6 +68,8 @@ export default defineConfig({
 
   webServer: {
     command: 'npx next start',
+    stdout: 'ignore',
+    stderr: 'ignore',
     url: 'http://localhost:3000/api/health',
     reuseExistingServer: false,
     timeout: 30_000, // next start boots in <5s after build

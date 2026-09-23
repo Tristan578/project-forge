@@ -130,7 +130,7 @@ export async function signInThroughForm(page: Page, credentials: SeededUserCrede
       {
         message:
           'After the password step, <SignIn> neither left /sign-in nor asked for a verification code. ' +
-          'The failure screenshot shows the form; a wrong E2E_CLERK_TEST_PASSWORD shows as a form error.',
+          'Check the seeded user password and email-code verification settings in the test instance.',
         timeout: E2E_TIMEOUT_AUTH_MS,
       },
     )
