@@ -412,7 +412,14 @@ verbatim. It also requires `default_tools_approval_mode = "prompt"` in every
 server's own table (see the list below), which `.mcp.json` has no counterpart
 for, and fails a `command`, arg or `cwd` that Codex would resolve against the
 directory the session started in (the last item below). It does not compare any
-other key in a server table. Like
+other key in a server table. Strings are compared decoded, as TOML 1.0 defines
+them: `"C:\\x"` is `C:\x`, and a `'literal string'` is taken as written. A string
+the check cannot read is reported rather than compared: an escape TOML 1.0 does
+not define (a Windows path written `"C:\Users"`), an unclosed string, or any
+multi-line `"""…"""`/`'''…'''` string, whose body the line-based reader would
+take for keys. Inside a server table it fails that server, whichever key holds
+it; outside every server table it stops the check, since there it could pose as
+a whole `[mcp_servers.…]` table. Like
 `scripts/check-codex-config-safety.sh` it reads the **committed**
 `HEAD:.codex/config.toml`, so an uncommitted edit to that file does not turn a
 local check red. That is a tolerance, not a recommendation: personal servers
@@ -453,7 +460,9 @@ whoever edits a server:
   `git -c "alias.spawnforge-taskboard=!node .claude/hooks/taskboard-launch.mjs" spawnforge-taskboard mcp`.
   `port.mjs --check` fails a `command` or arg that is explicitly relative (`./…`,
   `../…`) or names a path that exists relative to the repository root, and any
-  relative `cwd`; `scripts/__tests__/check-codex-port.test.sh` runs the
+  relative `cwd`. A path absolute on either convention is not relative: POSIX
+  `/…`, or Windows `C:\…`, `C:/…`, `\\host\share` and `\…` (the root of the
+  current drive). `scripts/__tests__/check-codex-port.test.sh` runs the
   committed taskboard command from `tools/agentic-sync/`. Observed with
   codex-cli 0.144.1 on Windows 11 on 2026-09-23, through `codex app-server`
   (`thread/start` with `ephemeral: true`, then `mcpServerStatus/list`; no turn,
@@ -466,6 +475,13 @@ whoever edits a server:
     `cwd = ".."` reported the directory one level above the START directory.
     Resolved against the config file, it would have been the repository root.
     The same probe behind a git alias reported the repository root.
+
+MCP parity decodes bare, basic-quoted, and literal-quoted table/key names,
+including whitespace around dotted table paths. Inline or dotted MCP server
+declarations, inline environment tables, and unsupported MCP sub-tables fail
+with a diagnostic; use explicit server tables and their optional env sub-table.
+Secret forwarding requires matching source and destination variable names;
+Codex env_vars cannot implement a Claude variable alias.
 
 ## First-run checklist
 

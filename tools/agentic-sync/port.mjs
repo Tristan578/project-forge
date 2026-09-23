@@ -804,7 +804,7 @@ function codexServerBlocks(text) {
   let name = null;
   let isEnv = false;
   const ensure = (n) => {
-    if (!blocks.has(n)) blocks.set(n, { command: undefined, args: [], envVars: [], env: {}, approvalMode: undefined, cwd: undefined, parseError: '' });
+    if (!blocks.has(n)) blocks.set(n, { command: undefined, args: [], envVars: [], env: Object.create(null), approvalMode: undefined, cwd: undefined, parseError: '' });
     return blocks.get(n);
   };
   const fail = (block, msg) => { if (!block.parseError) block.parseError = msg; };
@@ -860,68 +860,92 @@ function codexServerBlocks(text) {
     }
     return { values, depth, error: '' };
   };
+  // Decode dotted key components once for both tables and properties.
+  const readKey = (s) => {
+    const parts = [];
+    let rest = s.trimStart();
+    while (true) {
+      const token = /^(?:[A-Za-z0-9_-]+|"(?:\\.|[^"\\])*"|'[^']*')/.exec(rest);
+      if (!token) return { parts, rest, error: 'unsupported or malformed TOML key' };
+      const decoded = readLine(token[0]);
+      if (decoded.error) return { parts, rest, error: decoded.error };
+      parts.push(decoded.values.length ? decoded.values[0] : token[0]);
+      rest = rest.slice(token[0].length).trimStart();
+      if (!rest.startsWith('.')) return { parts, rest, error: '' };
+      rest = rest.slice(1).trimStart();
+    }
+  };
+  let table = [];
   for (let i = 0; i < lines.length; i += 1) {
-    const raw = lines[i];
-    const line = raw.replace(/^\s+/, '');
-    if (line.startsWith('#')) continue;
-    const header = /^\[mcp_servers\.("[^"]+"|[A-Za-z0-9_-]+)(\.env)?\]\s*(#.*)?$/.exec(line);
-    if (header) {
-      name = header[1].replace(/^"|"$/g, '');
-      isEnv = header[2] === '.env';
+    const line = lines[i].trimStart();
+    if (!line.trim() || line.startsWith('#')) continue;
+    const unread = (msg) => { if (!unreadable) unreadable = 'line ' + (i + 1) + ': ' + msg; };
+    if (line.startsWith('[')) {
+      const arrayTable = line.startsWith('[[');
+      const header = readKey(line.slice(arrayTable ? 2 : 1));
+      const ending = arrayTable ? /^\]\]\s*(#.*)?$/ : /^\]\s*(#.*)?$/;
+      name = null;
+      isEnv = false;
+      table = header.parts;
+      if (header.error || !ending.test(header.rest)) {
+        unread(header.error || 'unsupported or malformed TOML table');
+        continue;
+      }
+      if (table[0] !== 'mcp_servers') continue;
+      if (arrayTable || table.length > 3 || (table.length === 3 && table[2] !== 'env')) {
+        unread('unsupported MCP table; use [mcp_servers.<name>] and its .env sub-table');
+        continue;
+      }
+      if (table.length === 1) continue;
+      name = table[1];
+      isEnv = table.length === 3;
       ensure(name);
       continue;
     }
-    if (/^\[/.test(line)) { name = null; isEnv = false; continue; } // some other table
-    // EVERY other line is read, not only the keys compared below: a string that
-    // cannot be decoded anywhere is reported, and a multi-line string in a key
-    // nothing compares could otherwise hide a decoy `command = …` in its body.
-    const kv = /^([A-Za-z_][A-Za-z0-9_-]*|"[^"]+")\s*=\s*(.*)$/.exec(line);
-    const first = readLine(kv ? kv[2] : line);
-    if (!name) {
-      if (first.error && !unreadable) unreadable = `line ${i + 1}: ${first.error}`;
+    const parsed = readKey(line);
+    const kv = !parsed.error && parsed.rest.startsWith('=') ? parsed : null;
+    const first = readLine(kv ? kv.rest.slice(1).trimStart() : line);
+    if (name === null) {
+      if (first.error) unread(first.error);
+      // Inline/dotted declarations can create servers without a server header.
+      if (table[0] === 'mcp_servers' || (table.length === 0 && parsed.parts[0] === 'mcp_servers')) {
+        unread('unsupported MCP declaration; use [mcp_servers.<name>] tables');
+      }
       continue;
     }
     const block = ensure(name);
-    const key = kv ? kv[1].replace(/^"|"$/g, '') : `line ${i + 1}`;
-    if (first.error) { fail(block, `${key}: ${first.error}`); continue; }
-    if (!kv) continue;
-    const v = first.values;
+    const key = kv ? kv.parts.join('.') : 'line ' + (i + 1);
+    if (first.error) { fail(block, key + ': ' + first.error); continue; }
+    if (!kv || kv.parts.length !== 1 || (!isEnv && key === 'env')) {
+      fail(block, key + ': unsupported MCP property; use simple keys and an .env sub-table');
+      continue;
+    }
+    // Consume arrays even for options parity does not compare (enabled_tools,
+    // for example). Their continuation lines are values, never new properties.
+    let v = first.values;
+    let depth = first.depth;
+    let contError = '';
+    let guard = 0;
+    while (depth > 0 && i + 1 < lines.length) {
+      i += 1;
+      const cont = readLine(lines[i]);
+      if (cont.error) { contError = cont.error; break; }
+      v = v.concat(cont.values);
+      depth += cont.depth;
+      if ((guard += 1) > 500) break;
+    }
+    if (contError) { fail(block, key + ': ' + contError); continue; }
+    if (depth > 0) { fail(block, key + ' array is not closed'); continue; }
     if (isEnv) {
       if (v.length) block.env[key] = v[0];
-      continue;
-    }
-    if (key === 'command') {
+    } else if (key === 'command') {
       if (v.length) block.command = v[0];
-      continue;
-    }
-    if (key === 'default_tools_approval_mode') {
+    } else if (key === 'default_tools_approval_mode') {
       if (v.length) block.approvalMode = v[0];
-      continue;
-    }
-    if (key === 'cwd') {
+    } else if (key === 'cwd') {
       if (v.length) block.cwd = v[0];
-      continue;
-    }
-    if (key === 'args' || key === 'env_vars') {
-      // Consume until the array closes, so the multi-line form reads the same as
-      // the inline one. An unterminated array is a parseError, never an empty list.
-      let depth = first.depth;
-      let collected = v;
-      let contError = '';
-      let guard = 0;
-      while (depth > 0 && i + 1 < lines.length) {
-        i += 1;
-        const cont = readLine(lines[i]);
-        if (cont.error) { contError = cont.error; break; }
-        collected = collected.concat(cont.values);
-        depth += cont.depth;
-        if ((guard += 1) > 500) break;
-      }
-      if (contError) fail(block, `${key}: ${contError}`);
-      else if (depth > 0) fail(block, `${key} array is not closed`);
-      else if (key === 'args') block.args = collected;
-      else block.envVars = collected;
-    }
+    } else if (key === 'args') block.args = v;
+    else if (key === 'env_vars') block.envVars = v;
   }
   return { blocks, unreadable };
 }
@@ -966,12 +990,7 @@ function mcpParity() {
     out.problems.push(`mcp:      .codex/config.toml cannot be read at ${unreadable} — no server was compared; fix that line, then re-run`);
     return out;
   }
-  const have = [];
-  for (const line of config.split(/\r?\n/)) {
-    // The table header of a server itself, not of a sub-table (`…sentry.env`).
-    const hit = /^\s*\[mcp_servers\.("[^"]+"|[A-Za-z0-9_-]+)\]\s*(#.*)?$/.exec(line);
-    if (hit) have.push(hit[1].replace(/^"|"$/g, ''));
-  }
+  const have = [...blocks.keys()];
   if (have.length === 0) {
     // Not an error: a profile with no MCP block is a legitimate state, and
     // failing here would make this gate red on the tree it was introduced in.
@@ -1001,13 +1020,17 @@ function mcpParity() {
       out.problems.push(`mcp:      ${n} command is ${JSON.stringify(got.command)} in .codex/config.toml but ${JSON.stringify(wanted.command)} in .mcp.json`);
     }
     const wantArgs = Array.isArray(wanted.args) ? wanted.args : [];
-    if (wantArgs.join('\0') !== got.args.join('\0')) {
+    if (JSON.stringify(wantArgs) !== JSON.stringify(got.args)) {
       out.problems.push(`mcp:      ${n} args are ${JSON.stringify(got.args)} in .codex/config.toml but ${JSON.stringify(wantArgs)} in .mcp.json`);
     }
     // The env is compared by MEANING, since the two files express it differently.
     for (const [k, v] of Object.entries(wanted.env || {})) {
-      const interpolated = /^\$\{[A-Za-z0-9_]+\}$/.test(String(v));
+      const interpolated = /^\$\{([A-Za-z0-9_]+)\}$/.exec(String(v));
       if (interpolated) {
+        if (Object.keys(got.env).some((key) => key.toLowerCase() === k.toLowerCase())) {
+          out.problems.push(`mcp:      ${n} overrides forwarded secret ${k} with a literal env value in .codex/config.toml`);
+        }
+        if (interpolated[1] !== k) out.problems.push(`mcp:      ${n} aliases ${interpolated[1]} to ${k} in .mcp.json — Codex env_vars cannot rename a secret; use matching variable names`);
         if (!got.envVars.includes(k)) {
           out.problems.push(`mcp:      ${n} forwards ${k} in .mcp.json but it is not in env_vars in .codex/config.toml — Codex has no \${VAR} interpolation, so that secret never reaches the server`);
         }

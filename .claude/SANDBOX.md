@@ -90,9 +90,10 @@ Behind every writer, at CI and at push time:
   entry and every `${VAR}` secret forwarded by name in `env_vars`. It also fails a
   server whose own table does not set `default_tools_approval_mode = "prompt"`,
   and a `command`, arg or `cwd` that is a relative path, because Codex resolves
-  those against the directory the session started in. It does not compare any
-  other key in a server table, nor an `env` entry `.mcp.json` does not have; the
-  prompt above and PR review are what see those.
+  those against the directory the session started in. Secret aliases and literal
+  overrides of forwarded secrets are rejected; override keys are compared
+  case-insensitively to cover Windows. It does not compare other server options
+  or unrelated extra `env` entries; the prompt above and PR review see those.
 - **Secret-shaped CONTENT** — GitHub secret-scanning push protection, enabled
   repo-wide, rejects a recognised credential at push time for every file and every
   actor. Verify with

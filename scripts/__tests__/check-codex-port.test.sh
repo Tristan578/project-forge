@@ -498,6 +498,78 @@ printf '%s\n[mcp_servers.alpha]\ncommand = "node"\nargs = ["x"]\ndefault_tools_a
 gen "$FS" --check; expect_rc 1 "an invalid escape outside every server table fails the check"
 expect_out '.codex/config.toml cannot be read at line 1: invalid escape \q in a basic string' "…naming the line and the escape"
 
+
+# Alternate TOML key spellings must not hide servers or launch arguments.
+FK="$(mkfix)"; gen "$FK" --write
+printf '{"mcpServers":{"alpha":{"command":"node"}}}\n' > "$FK/.mcp.json"
+KEY_ROWS=0
+while IFS='|' read -r LABEL HEADER KEY VALUE EXPECT NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  KEY_ROWS=$((KEY_ROWS + 1))
+  printf '%s\ncommand = "node"\ndefault_tools_approval_mode = "prompt"\n%s = %s\n' "$HEADER" "$KEY" "$VALUE" > "$FK/.codex/config.toml"
+  gen "$FK" --check
+  if [ "$RC" -eq "$EXPECT" ] && grep -qF "$NEEDLE" <<<"$OUT"; then
+    ok "alternate TOML syntax is checked: $LABEL"
+  else
+    bad "alternate TOML syntax escaped checking ($LABEL): exit $RC, output: $OUT"
+  fi
+done <<'MCP_KEY_TABLE'
+literal server name|[mcp_servers.'alpha']|args|[]|0|1 MCP servers declared for Codex
+spaced table path|[ mcp_servers . alpha ]|args|[]|0|1 MCP servers declared for Codex
+escaped namespace and name|["mcp_\u0073ervers"."al\u0070ha"]|args|[]|0|1 MCP servers declared for Codex
+literal args key|[mcp_servers.alpha]|'args'|["-e","0"]|1|alpha args are
+escaped args key|[mcp_servers.alpha]|"ar\u0067s"|["-e","0"]|1|alpha args are
+inline env|[mcp_servers.alpha]|env|{TOKEN="literal"}|1|unsupported MCP property
+dotted env|[mcp_servers.alpha]|env.TOKEN|"literal"|1|unsupported MCP property
+MCP_KEY_TABLE
+if [ "$KEY_ROWS" -eq 7 ]; then ok "all 7 alternate key rows were driven"; else bad "alternate key rows: $KEY_ROWS of 7"; fi
+
+DECL_ROWS=0
+while IFS='|' read -r LABEL DECL NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  DECL_ROWS=$((DECL_ROWS + 1))
+  printf '%b\n[mcp_servers.alpha]\ncommand = "node"\ndefault_tools_approval_mode = "prompt"\n' "$DECL" > "$FK/.codex/config.toml"
+  gen "$FK" --check
+  if [ "$RC" -eq 1 ] && grep -qF "$NEEDLE" <<<"$OUT"; then
+    ok "hidden MCP declaration is caught: $LABEL"
+  else
+    bad "hidden MCP declaration passed ($LABEL): exit $RC, output: $OUT"
+  fi
+done <<'MCP_DECL_TABLE'
+literal extra server|[mcp_servers.'hidden']\ncommand="node"|hidden is in .codex/config.toml but not in .mcp.json
+spaced extra server|[mcp_servers . hidden]\ncommand="node"|hidden is in .codex/config.toml but not in .mcp.json
+inline server under parent|[mcp_servers]\nhidden={command="node"}|unsupported MCP declaration
+root inline namespace|mcp_servers={hidden={command="node"}}|unsupported MCP declaration
+root dotted server|mcp_servers.hidden.command="node"|unsupported MCP declaration
+literal root namespace|'mcp_servers'.hidden.command="node"|unsupported MCP declaration
+array server table|[[mcp_servers.hidden]]\ncommand="node"|unsupported MCP table
+implicit server in env sub-table|[mcp_servers.hidden.env]\nTOKEN="literal"|hidden is in .codex/config.toml but not in .mcp.json
+MCP_DECL_TABLE
+if [ "$DECL_ROWS" -eq 8 ]; then ok "all 8 hidden declaration rows were driven"; else bad "hidden declaration rows: $DECL_ROWS of 8"; fi
+
+printf '[mcp_servers.alpha]\ncommand="node"\nargs=[""]\ndefault_tools_approval_mode="prompt"\n' > "$FK/.codex/config.toml"
+gen "$FK" --check; expect_rc 1 "an empty argument differs from no arguments"
+expect_out 'alpha args are [""]' "empty argument mismatch preserves array boundaries"
+printf '[mcp_servers.alpha]\ncommand="node"\nenabled_tools=[\n "read",\n]\ndefault_tools_approval_mode="prompt"\n' > "$FK/.codex/config.toml"
+gen "$FK" --check; expect_rc 0 "uncompared simple-key arrays may span lines"
+expect_out '1 MCP servers declared for Codex, matching .mcp.json' "multiline options preserve server discovery"
+# shellcheck disable=SC2016  # credential references are fixture data
+printf '%s\n' '{"mcpServers":{"alpha":{"command":"node","env":{"API_KEY":"${API_KEY}"}}}}' > "$FK/.mcp.json"
+printf '[mcp_servers.alpha]\ncommand="node"\nenv_vars=["API_KEY"]\ndefault_tools_approval_mode="prompt"\n' > "$FK/.codex/config.toml"
+gen "$FK" --check; expect_rc 0 "same-name secret forwarding is parity"
+expect_out '1 MCP servers declared for Codex, matching .mcp.json' "same-name forwarding is actually compared"
+for ENV_KEY in API_KEY api_key; do
+  printf '[mcp_servers.alpha]\ncommand="node"\nenv_vars=["API_KEY"]\ndefault_tools_approval_mode="prompt"\n[mcp_servers.alpha.env]\n%s="WRONG"\n' "$ENV_KEY" > "$FK/.codex/config.toml"
+  gen "$FK" --check; expect_rc 1 "literal override of forwarded secret is rejected ($ENV_KEY)"
+  expect_out 'alpha overrides forwarded secret API_KEY' "override diagnostic names the secret without its value"
+done
+
+# shellcheck disable=SC2016  # credential references are fixture data
+printf '%s\n' '{"mcpServers":{"alpha":{"command":"node","env":{"API_KEY":"${OTHER_TOKEN}"}}}}' > "$FK/.mcp.json"
+printf '[mcp_servers.alpha]\ncommand="node"\nenv_vars=["API_KEY","OTHER_TOKEN"]\ndefault_tools_approval_mode="prompt"\n' > "$FK/.codex/config.toml"
+gen "$FK" --check; expect_rc 1 "a secret alias cannot masquerade as same-name forwarding"
+expect_out 'alpha aliases OTHER_TOKEN to API_KEY' "the alias diagnostic names source and destination"
+
 # APPROVAL MODE, which has no .mcp.json counterpart, so parity alone never saw it.
 # docs/guides/codex-cli-support-matrix.md ("MCP servers") has every server set
 # default_tools_approval_mode = "prompt", so its tools stay human-gated if Codex's
