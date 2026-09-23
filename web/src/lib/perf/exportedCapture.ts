@@ -10,9 +10,10 @@
  * from resource timing, fixture checksum of the scene the driver injected) and
  * produces the report with the same code as an editor capture.
  *
- * A run is refused rather than reported when it did not complete, or when the
- * engine refused the fixture scene: a measurement of an empty world must never
- * be filed under a fixture's name.
+ * A run is refused rather than reported when it did not complete, when the
+ * engine refused the fixture scene, or when it accepted the scene but never
+ * applied it: a measurement of an empty or default world must never be filed
+ * under a fixture's name.
  */
 import { z } from 'zod';
 import {
@@ -39,6 +40,9 @@ export const zHarnessState = z.object({
   hiddenDuringCapture: z.boolean(),
   backend: z.enum(['webgpu', 'webgl2', 'unknown']),
   sceneLoad: z.object({ success: z.boolean(), error: z.string().nullable() }).nullable(),
+  /** The engine emitted SCENE_LOADED: the scene was applied, not merely queued. */
+  sceneApplied: z.boolean(),
+  sceneName: z.string().nullable(),
   error: z.string().nullable(),
   startedAt: z.string().nullable(),
   completedAt: z.string().nullable(),
@@ -111,6 +115,15 @@ export async function buildExportedRunReport(
   }
   if (!h.sceneLoad?.success) {
     return { ok: false, error: `The fixture scene was not loaded by the engine: ${h.sceneLoad?.error ?? 'no load result recorded'}` };
+  }
+  if (!h.sceneApplied) {
+    // load_scene succeeds when the command is QUEUED. A build that never drains
+    // the queue (the webgpu,runtime build at the time of #10013) measures its
+    // default scene; reporting that under the fixture's name is a false result.
+    return {
+      ok: false,
+      error: 'The engine accepted load_scene but never applied the fixture scene (no SCENE_LOADED event); this engine build does not load scenes, so the run measured its default scene.',
+    };
   }
 
   const env = h.env;

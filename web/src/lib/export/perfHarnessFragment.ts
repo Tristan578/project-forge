@@ -6,12 +6,14 @@
  * the page URL carries `?forgePerf=1` (optionally `forgePerfWarmupMs` /
  * `forgePerfCaptureMs`, bounded integers), or when `window.__forgePerfConfig`
  * is set before the script runs. Armed, it defines `window.__forgePerfHooks`,
- * which the export templates call at five points:
+ * which the export templates call at these points:
  *
  *   initStart()   first line of init — the player's click
  *   backend(v)    the WASM variant actually loaded
  *   wasm(exports) the module exports, for its linear memory
- *   sceneLoad(r)  the engine's answer to load_scene
+ *   sceneLoad(r)  the engine's answer to load_scene (accepted = queued)
+ *   sceneApplied  the engine's SCENE_LOADED event (the scene was applied),
+ *                 forwarded by the export's event callback
  *   frame(now)    top of every game-loop frame
  *   fail(err)     init threw
  *
@@ -66,6 +68,8 @@ export function generatePerfHarnessBootstrap(): string {
     hiddenDuringCapture: false,
     backend: 'unknown',
     sceneLoad: null,
+    sceneApplied: false,
+    sceneName: null,
     error: null,
     startedAt: null,
     completedAt: null,
@@ -150,6 +154,10 @@ export function generatePerfHarnessBootstrap(): string {
     wasm: function (exp) { try { if (exp && exp.memory) wasmMemory = exp.memory; } catch (e) {} },
     sceneLoad: function (res) {
       try { h.sceneLoad = { success: !!(res && res.success), error: res && res.error ? String(res.error) : null }; } catch (e) {}
+    },
+    sceneApplied: function (name) {
+      h.sceneApplied = true;
+      h.sceneName = typeof name === 'string' ? name : null;
     },
     fail: function (err) {
       if (h.status === 'complete') return;

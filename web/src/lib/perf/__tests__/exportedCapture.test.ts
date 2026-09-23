@@ -26,6 +26,8 @@ function harness(overrides: Record<string, unknown> = {}, envOverrides: Record<s
     hiddenDuringCapture: false,
     backend: 'webgpu',
     sceneLoad: { success: true, error: null },
+    sceneApplied: true,
+    sceneName: 'Perf fixture 3D v1',
     error: null,
     startedAt: '2026-09-22T10:00:00.000Z',
     completedAt: '2026-09-22T10:01:12.000Z',
@@ -134,5 +136,17 @@ describe('buildExportedRunReport', () => {
   it('reads the WebGL renderer string for a WebGL2 run', async () => {
     const result = await build(harness({ backend: 'webgl2' }, { gpu: { renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 2080 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)' } }));
     expect(result.ok && result.report.manifest.gpuDriver).toBe('ANGLE (NVIDIA, NVIDIA GeForce RTX 2080 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)');
+  });
+});
+
+describe('buildExportedRunReport scene application (#10013)', () => {
+  it('refuses a run where load_scene was accepted but the engine never applied the scene', async () => {
+    // Measured on the webgpu,runtime build: load_scene returns success (the
+    // command is queued) but nothing drains the queue, so the default scene is
+    // what gets measured. Without this check that run reported a PASS for
+    // perf-3d@1 while a flat default scene was on screen.
+    const result = await build(harness({ sceneApplied: false, sceneName: null }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/never applied the fixture scene/);
   });
 });

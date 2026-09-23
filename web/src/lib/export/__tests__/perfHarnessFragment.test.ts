@@ -184,3 +184,15 @@ describe('generatePerfHarnessBootstrap', () => {
     expect(env.window.__forgePerf?.frameTimestampsMs).toEqual([]);
   });
 });
+
+describe('generatePerfHarnessBootstrap scene application (#10013)', () => {
+  it('records that the engine applied the scene, separately from load_scene being accepted', () => {
+    const env = run('?forgePerf=1');
+    const hooks = env.window.__forgePerfHooks!;
+    hooks.sceneLoad({ success: true });
+    expect(env.window.__forgePerf?.sceneApplied).toBe(false);
+    hooks.sceneApplied('Perf fixture 3D v1');
+    expect(env.window.__forgePerf?.sceneApplied).toBe(true);
+    expect(env.window.__forgePerf?.sceneName).toBe('Perf fixture 3D v1');
+  });
+});
