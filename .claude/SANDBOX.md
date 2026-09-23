@@ -88,9 +88,11 @@ Behind every writer, at CI and at push time:
 - **Drift from `.mcp.json`** — `tools/agentic-sync/port.mjs --check` requires the
   same server names, each with the exact `command` and `args` of its `.mcp.json`
   entry and every `${VAR}` secret forwarded by name in `env_vars`. It also fails a
-  server whose own table does not set `default_tools_approval_mode = "prompt"`.
-  It does not compare any other key in a server table, nor an `env` entry
-  `.mcp.json` does not have; the prompt above and PR review are what see those.
+  server whose own table does not set `default_tools_approval_mode = "prompt"`,
+  and a `command`, arg or `cwd` that is a relative path, because Codex resolves
+  those against the directory the session started in. It does not compare any
+  other key in a server table, nor an `env` entry `.mcp.json` does not have; the
+  prompt above and PR review are what see those.
 - **Secret-shaped CONTENT** — GitHub secret-scanning push protection, enabled
   repo-wide, rejects a recognised credential at push time for every file and every
   actor. Verify with

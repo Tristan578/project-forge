@@ -54,7 +54,7 @@ supported version moves. Nothing is claimed about any other version.
 | Project instructions are `AGENTS.md` files collected from the project root (nearest `.git`) down to the cwd. **`<repo>/.codex/AGENTS.md` is not on that path and is not loaded** | `core/src/agents_md.rs` |
 | Subagents are `*.toml` under `.codex/agents/`; `name`, `description`, `developer_instructions` are required | `core/src/config/agent_roles.rs` |
 | Skills are discovered from `.agents/skills/` (and the project layer's `.codex/skills/`); there is no configurable extra directory | `core-skills/src/loader.rs` |
-| `[mcp_servers.<name>]` accepts `command`, `args`, `env`, `env_vars`, `default_tools_approval_mode` (`auto` \| `prompt` \| `writes` \| `approve`), `enabled_tools`, `disabled_tools` | `config/src/mcp_types.rs` |
+| `[mcp_servers.<name>]` accepts `command`, `args`, `env`, `env_vars`, `cwd`, `default_tools_approval_mode` (`auto` \| `prompt` \| `writes` \| `approve`), `enabled_tools`, `disabled_tools`. `cwd` is kept as written (`codex mcp get --json` prints `".."` for `cwd = ".."`), not resolved against the config file | `config/src/mcp_types.rs`; `cwd` from `codex mcp get --json`, 0.144.1 |
 | Under `approval_policy = "never"` an MCP call is auto-approved only when the tool is `approve` or the sandbox has full disk write access | `codex-mcp/src/mcp/mod.rs` |
 | Codex does not read a project `.mcp.json` | source search; it appears only as a plugin default |
 
@@ -410,12 +410,13 @@ server declared on both sides: the **names** must match, and each server's
 secret forwarded by name in `env_vars` and every literal `env` value restated
 verbatim. It also requires `default_tools_approval_mode = "prompt"` in every
 server's own table (see the list below), which `.mcp.json` has no counterpart
-for. It does not compare any other key in a server table. Like
+for, and fails a `command`, arg or `cwd` that Codex would resolve against the
+directory the session started in (the last item below). It does not compare any
+other key in a server table. Like
 `scripts/check-codex-config-safety.sh` it reads the **committed**
 `HEAD:.codex/config.toml`, so an uncommitted edit to that file does not turn a
 local check red. That is a tolerance, not a recommendation: personal servers
-belong in the user-level `~/.codex/config.toml`, as
-`docs/guides/taskboard-sync.md` says, because in a linked worktree
+belong in the user-level `~/.codex/config.toml`, because in a linked worktree
 `worktree-safety-commit.sh` commits whatever is in the tree when a session
 stops — and a committed personal block does turn the check red. Commit all of
 the servers or none.
@@ -444,7 +445,27 @@ whoever edits a server:
   exception to carve out, and `port.mjs --check` fails a server that omits it or
   sets any other value.
 - A relative `command`/`args` path resolves against the directory Codex started
-  in, not the repository root.
+  in, not the repository root, and so does a relative `cwd`: Codex does not
+  resolve it against `.codex/`. A server whose launcher is a file in this
+  repository therefore goes through a git alias, which git runs from the
+  repository's top-level directory (git-config(1), `alias.*`). taskboard is
+  launched that way, in `.mcp.json` and here alike:
+  `git -c "alias.spawnforge-taskboard=!node .claude/hooks/taskboard-launch.mjs" spawnforge-taskboard mcp`.
+  `port.mjs --check` fails a `command` or arg that is explicitly relative (`./…`,
+  `../…`) or names a path that exists relative to the repository root, and any
+  relative `cwd`; `scripts/__tests__/check-codex-port.test.sh` runs the
+  committed taskboard command from `tools/agentic-sync/`. Observed with
+  codex-cli 0.144.1 on Windows 11 on 2026-09-23, through `codex app-server`
+  (`thread/start` with `ephemeral: true`, then `mcpServerStatus/list`; no turn,
+  so no model request):
+  - Started in `web/src`, the committed taskboard entry reached `ready` with the
+    board's 21 tools. The previous `node .claude/hooks/taskboard-launch.mjs mcp`
+    failed from the same directory with "handshaking with MCP server failed:
+    connection closed: initialize response".
+  - In a scratch repository started two levels down, a probe server with
+    `cwd = ".."` reported the directory one level above the START directory.
+    Resolved against the config file, it would have been the repository root.
+    The same probe behind a git alias reported the repository root.
 
 ## First-run checklist
 
