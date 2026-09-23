@@ -8,8 +8,8 @@ import { setLastExportedScene } from '@/lib/storage/autoSave';
 import { invalidateSceneCache } from '@/lib/ai/cachedContext';
 import { releaseEntityAudio, resetEntityAudioGraphForScene } from '@/lib/audio/entityAudioGraph';
 import { takeStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
-import { foldCompletionModeIntoSceneJson, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
-import { emptyCompletionModeHistory } from '@/stores/slices/sceneGraphSlice';
+import { foldCompletionModeIntoSceneJson } from '@/lib/scenes/sceneCompletionMode';
+import { completionModeAtSceneBoundary } from '@/stores/slices/sceneGraphSlice';
 import type { SceneNode } from '@/stores/slices/types';
 import { castPayload, type SetFn, type GetFn } from './types';
 import { applyWhenPrimary } from './primaryGate';
@@ -284,11 +284,9 @@ export function handleTransformEvent(
         // same take-once handoff as the audio above. Nothing staged means a
         // legacy scene, i.e. `undefined`, which the validator treats as `win`.
         // The SCENE_GRAPH_UPDATE that follows carries no mode and so keeps
-        // this one.
-        sceneGraph: { ...useEditorStore.getState().sceneGraph, completionMode: takeStagedSceneCompletionMode() },
-        // The outgoing scene's mode edits are not steps anyone can undo back
-        // to in this one.
-        completionModeHistory: emptyCompletionModeHistory(),
+        // this one. The outgoing scene's mode edits are not steps anyone can
+        // undo back to in this one, so the history resets with it.
+        ...completionModeAtSceneBoundary(useEditorStore.getState().sceneGraph),
       });
       resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context

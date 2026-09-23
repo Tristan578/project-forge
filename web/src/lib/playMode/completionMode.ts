@@ -65,6 +65,23 @@ export const COMPLETION_MODE_INFO: Readonly<Record<CompletionMode, { label: stri
   },
 };
 
+/**
+ * Whether a completion mode demands at least one satisfiable win condition.
+ *
+ * Only `endless`, `sandbox` and `narrative` are exempt. EVERYTHING else returns
+ * true — that deliberately includes `undefined` (a legacy scene written before
+ * the field existed) and any unexpected value that a hand-edited or older
+ * `.forge` file might carry. Both the pre-play gate (`validateWinnability`)
+ * and the plan builder's default-goal guarantee read this one predicate, so the
+ * game the pipeline plans and the game Play accepts cannot disagree. Fail-CLOSED:
+ * absence, or a value we do not recognise, is `win`, never "no goal needed".
+ * @param mode The scene's or brief's mode, possibly absent or untrusted.
+ * @returns False only for the three modes that intentionally have no goal.
+ */
+export function requiresWinCondition(mode: unknown): boolean {
+  return mode !== 'endless' && mode !== 'sandbox' && mode !== 'narrative';
+}
+
 /** Outcome of validating a candidate mode. `error` is shown to people AND to the model. */
 export type CompletionModeValidation =
   | { ok: true; mode: CompletionMode }

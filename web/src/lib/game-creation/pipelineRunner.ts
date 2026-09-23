@@ -318,9 +318,13 @@ export async function runPipeline(
     return out;
   };
 
-  // Compose the effective context with the live resolvers
+  // Compose the effective context with the live resolvers — and the plan's own
+  // brief (#9998), for the same reason: the steps were built from `plan.gdd`,
+  // so an executor reading a fact off the brief (`scene_create` reads
+  // `completionMode`) must read THAT one, never whatever the caller passed.
   const effectiveContext: ExecutorContext = {
     ...context,
+    gdd: plan.gdd,
     resolveStepOutput: liveResolve,
     resolveStepOutputs: liveResolveAll,
   };

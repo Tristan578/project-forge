@@ -9,6 +9,7 @@
 import { StateCreator } from 'zustand';
 import type { SceneGraph, SceneNode, EntityType, TerrainDataState, CompletionMode } from './types';
 import { validateCompletionMode } from '@/lib/playMode/completionMode';
+import { takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
 import { invalidateSceneCache } from '@/lib/ai/cachedContext';
 
 /**
@@ -35,6 +36,26 @@ export type SetCompletionModeResult =
 /** A history with no steps in either direction; also what a scene boundary resets to. */
 export function emptyCompletionModeHistory(): CompletionModeHistory {
   return { past: [], future: [] };
+}
+
+/**
+ * The completion-mode half of the `SCENE_LOADED` boundary (#9998): the
+ * incoming scene's mode, taken from the staging `dispatchSceneLoad`/`newScene`
+ * wrote, and a fresh history. Nothing staged means a legacy scene, i.e.
+ * `undefined` (`win`). Take-once: calling this consumes the staging.
+ *
+ * One function so that the event handler and anything standing in for the
+ * engine in a test apply the SAME rule, instead of a test restating it.
+ * @param sceneGraph The graph as it stands when the boundary is crossed.
+ * @returns The two store fields the boundary sets.
+ */
+export function completionModeAtSceneBoundary(
+  sceneGraph: SceneGraph,
+): { sceneGraph: SceneGraph; completionModeHistory: CompletionModeHistory } {
+  return {
+    sceneGraph: { ...sceneGraph, completionMode: takeStagedSceneCompletionMode() },
+    completionModeHistory: emptyCompletionModeHistory(),
+  };
 }
 
 /** Partial node properties that may be changed in-place. */

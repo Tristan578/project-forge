@@ -666,6 +666,37 @@ describe('runPipeline', () => {
     expect(resolvedAll).toEqual([]);
   });
 
+  // #9998: `scene_create` reads the brief's completion mode off the context.
+  // The brief must be the PLAN's — the one the steps were built from — even
+  // when the caller hands in a context that already carries some other brief.
+  it('hands every executor the plan\'s own brief as ctx.gdd, replacing any the caller supplied', async () => {
+    const seen: Array<Readonly<OrchestratorGDD> | undefined> = [];
+    const probeRegistry = new Map<ExecutorName, ExecutorDefinition>([
+      ['scene_create', {
+        name: 'scene_create',
+        inputSchema: z.object({}),
+        execute: async (_input, ctx): Promise<ExecutorResult> => {
+          seen.push(ctx.gdd);
+          return { success: true, output: {} };
+        },
+        userFacingErrorMessage: '',
+      }],
+    ]);
+    const plan = makePlan({ steps: [makeStep('step_0'), makeStep('step_1')] });
+    plan.gdd = { ...plan.gdd, completionMode: 'sandbox' };
+    const callerCtx: ExecutorContext = {
+      ...makeContext(controller.signal),
+      gdd: { ...plan.gdd, completionMode: 'narrative' },
+    };
+
+    await runPipeline(plan, probeRegistry, callerCtx);
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBe(plan.gdd);
+    expect(seen[1]).toBe(plan.gdd);
+    expect(seen[0]?.completionMode).toBe('sandbox');
+  });
+
   it('resolveStepOutputs returns an empty list when no step matches', async () => {
     let resolvedAll: Record<string, unknown>[] | undefined;
 

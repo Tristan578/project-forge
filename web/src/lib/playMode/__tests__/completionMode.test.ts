@@ -13,6 +13,7 @@ import {
   COMPLETION_MODE_INFO,
   DEFAULT_COMPLETION_MODE,
   isCompletionMode,
+  requiresWinCondition,
   validateCompletionMode,
 } from '../completionMode';
 import * as sliceTypes from '@/stores/slices/types';
@@ -44,6 +45,20 @@ describe('completion mode vocabulary (idea.FR-1.OP-04)', () => {
     // A second hand-written copy is how a picker and a validator stop agreeing.
     expect(sliceTypes.COMPLETION_MODES).toBe(COMPLETION_MODES);
     expect(sliceTypes.DEFAULT_COMPLETION_MODE).toBe(DEFAULT_COMPLETION_MODE);
+  });
+});
+
+describe('requiresWinCondition', () => {
+  it('exempts exactly the three goal-free modes', () => {
+    expect(requiresWinCondition('endless')).toBe(false);
+    expect(requiresWinCondition('sandbox')).toBe(false);
+    expect(requiresWinCondition('narrative')).toBe(false);
+    expect(requiresWinCondition('win')).toBe(true);
+  });
+
+  it.each([undefined, null, 'Sandbox', 'puzzle', 0])('fails closed for %p', (value) => {
+    // Absence is the legacy win rule; anything unrecognised must not open the gate.
+    expect(requiresWinCondition(value)).toBe(true);
   });
 });
 

@@ -46,6 +46,9 @@ import { validateWinnability } from '@/lib/playMode/winnabilityValidator';
 import { setWinnabilityStateReader } from '@/stores/slices';
 import { isSceneFileEnvelope } from '@/lib/scenes/sceneValidation';
 
+import { completionModeAtSceneBoundary } from '@/stores/slices/sceneGraphSlice';
+import { takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
+
 import { createTestHarness, type TestHarness } from '../harness';
 
 // ---------------------------------------------------------------------------
@@ -242,6 +245,18 @@ const EMPTY_CAVERNS: OrchestratorGDD = {
   scenes: [{ ...UNWINNABLE_CAVERNS.scenes[0], entities: [] }],
 };
 
+/**
+ * The goal-free design of UNWINNABLE_CAVERNS, but the brief SAYS so (#9998):
+ * an explicit sandbox. Without the mode the plan invents a score goal (above);
+ * with it, the creator's choice is kept and both gates accept the game as is.
+ */
+const SANDBOX_CAVERNS: OrchestratorGDD = {
+  ...UNWINNABLE_CAVERNS,
+  id: 'gdd_sandbox',
+  title: 'Crystal Caverns (sandbox)',
+  completionMode: 'sandbox',
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -348,6 +363,14 @@ async function runGame(h: TestHarness, gdd: OrchestratorGDD): Promise<RunResult>
       } catch {
         return { success: false };
       }
+    }
+    // `new_scene` answers with SCENE_LOADED, the boundary where the incoming
+    // scene's completion mode lands (#9998). The harness store is not the one
+    // the event handler writes to, so apply the handler's own boundary rule —
+    // the same function, not a restatement of it.
+    if (command === 'new_scene') {
+      h.store.setState(completionModeAtSceneBoundary(h.getState().sceneGraph));
+      return;
     }
     if (command === 'spawn_entity') {
       if (typeof p.id !== 'string' || typeof p.name !== 'string') return;
@@ -677,6 +700,52 @@ describe('game creation: idea -> plan -> playable game', () => {
     h.dispatch.mockClear();
     h.getState().play();
     expect(commandsOf(h, 'play')).toEqual([{}]);
+  });
+
+  /**
+   * #9998, the AI half of the completion-mode operation: a brief that states
+   * `sandbox` becomes the scene's own editable `completionMode`, the plan does
+   * not invent a goal over the creator's choice, and the two gates that read
+   * the mode — verify and Play — both accept the goal-free game.
+   */
+  it('keeps a sandbox brief goal-free end to end: the mode reaches the scene, verify and Play pass', async () => {
+    const { plan } = await runGame(h, SANDBOX_CAVERNS);
+
+    expect(plan.status).toBe('completed');
+    expect(componentsOfType(commandsOf(h, 'add_game_component'), 'win_condition')).toEqual([]);
+
+    // Native, editable data: the same field the Scene Settings picker edits.
+    expect(h.getState().sceneGraph.completionMode).toBe('sandbox');
+
+    const verify = stepByExecutor(plan, 'verify_all_scenes');
+    expect(verify.status).toBe('completed');
+    expect(verify.output?.winnable).toBe(true);
+    expect(verify.output?.winnabilityIssues).toEqual([]);
+
+    h.dispatch.mockClear();
+    h.getState().play();
+    expect(commandsOf(h, 'play')).toEqual([{}]);
+
+    // The creator corrects the mode to win by hand after generation: now the
+    // goal-free game is refused by both gates, for the same reason.
+    expect(h.getState().setCompletionMode('win')).toMatchObject({ ok: true, changed: true });
+    h.dispatch.mockClear();
+    h.getState().play();
+    expect(wasDispatched(h, 'play')).toBe(false);
+    const store = h.getState();
+    expect(validateWinnability(store.sceneGraph, store.allGameComponents, store.sceneGraph.completionMode).issues.map(i => i.code))
+      .toEqual(['NO_WIN_CONDITION']);
+  });
+
+  it('opens a generated game with no stated mode as legacy win, not the mode of the previous scene', async () => {
+    // A sandbox left over from whatever was open before must not leak in.
+    h.getState().hydrateCompletionMode('sandbox');
+
+    const { plan } = await runGame(h, UNWINNABLE_CAVERNS);
+
+    expect(plan.status).toBe('completed');
+    expect(h.getState().sceneGraph.completionMode).toBeUndefined();
+    expect(takeStagedSceneCompletionMode()).toBeUndefined();
   });
 
   it('refuses to call a game with nothing in the world playable', async () => {

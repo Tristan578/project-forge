@@ -102,7 +102,13 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // then stacks the generated game on top of Ground/Player/Sun. Fail the step
     // instead — the same false-success class this campaign's acceptance
     // criterion 3 targets (#10056).
-    if (ctx.getStore().newScene() === false) {
+    //
+    // The brief's completion mode (#9998) rides on this call: `new_scene`
+    // emits the SCENE_LOADED that sets the incoming scene's mode, so the mode
+    // is staged for it here rather than written to the store before it (where
+    // that same event would wipe it). No brief, or a brief with no mode, opens
+    // a legacy `win` scene — never whatever the previous scene had.
+    if (ctx.getStore().newScene({ completionMode: ctx.gdd?.completionMode }) === false) {
       return failResult(
         makeStepError(
           'COMMAND_FAILED',

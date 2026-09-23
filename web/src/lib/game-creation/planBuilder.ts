@@ -26,6 +26,7 @@ import { physicsProfileForRole } from './physicsRoles';
 import { planBehaviorSteps } from './behaviorSteps';
 import { resolveEntityShape } from './entityShape';
 import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
+import { requiresWinCondition } from '@/lib/playMode/completionMode';
 
 // --- Topological sort for system dependency ordering ---
 // Ensures systems are processed after their dependsOn categories.
@@ -536,7 +537,16 @@ export function buildPlan(
   //
   // This DEFERS to a real progression system: two win conditions on one scene
   // is a second rule the player was never told about.
-  if (!plansAWinCondition(steps)) {
+  //
+  // It also defers to the brief's completion mode (#9998). The guarantee exists
+  // because a `win` game with no goal cannot start; an endless, sandbox or
+  // narrative brief chose "no goal" on purpose, and the Play gate and verify
+  // both accept it. Inventing a goal there would silently override the mode the
+  // brief states. `requiresWinCondition` is the predicate the gate itself uses,
+  // so what is planned here and what Play accepts cannot drift apart. A goal
+  // the brief DOES declare (a progression system) is still planned above and
+  // still validated in every mode.
+  if (requiresWinCondition(gdd.completionMode) && !plansAWinCondition(steps)) {
     // The condition is a rule about the game rather than about a particular
     // prop, so it rides on the player where there is one — that is where a user
     // opening the Inspector will look for it.
