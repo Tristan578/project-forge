@@ -64,8 +64,9 @@ latest report with it.
 Keep the editor workload unchanged from scene reading through report completion.
 Authoring commands, scene/project changes, native edits and engine restarts
 invalidate the capture, even if Undo restores the original scene. No report is
-published for that run; retry after the scene is stable. Selection or scene-graph
-refreshes in edit mode can conservatively invalidate a run too. Normal gameplay
+published for that run; retry after the scene is stable. Selection events in
+edit mode can conservatively invalidate a run too. Repeated scene-graph snapshots
+with unchanged engine-owned contents do not invalidate a capture. Normal gameplay
 physics and script history events continue without invalidating the capture.
 
 The in-app AI has the same five operations, with the same argument checks and

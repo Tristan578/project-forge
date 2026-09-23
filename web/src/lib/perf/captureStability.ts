@@ -1,3 +1,5 @@
+import type { SceneGraph } from '@/stores/slices/types';
+
 /**
  * Capture invalidation signals, independent of the editor store and recorder.
  * A listener latches the first change: editing and then undoing must not make
@@ -27,4 +29,25 @@ const READ_ONLY_COMMANDS = new Set([
 export function observeCaptureCommand(command: string): void {
   if (/^(get_|query_)/.test(command) || READ_ONLY_COMMANDS.has(command)) return;
   notifyCaptureWorkloadChange();
+}
+
+/**
+ * Full graph events can repeat without an edit. Compare the engine-owned
+ * fields only: completionMode is frontend-only and absent from engine replies.
+ * Avoid graph traversal entirely when there is no active capture listener.
+ */
+export function observeCaptureGraph(previous: SceneGraph, next: SceneGraph): void {
+  if (listeners.size === 0) return;
+  const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((value, index) => value === b[index]);
+  const ids = Object.keys(next.nodes);
+  const unchanged = sameList(previous.rootIds, next.rootIds)
+    && Object.keys(previous.nodes).length === ids.length
+    && ids.every((id) => {
+      const a = previous.nodes[id];
+      const b = next.nodes[id];
+      return a && a.entityId === b.entityId && a.name === b.name
+        && a.parentId === b.parentId && a.visible === b.visible
+        && sameList(a.children, b.children) && sameList(a.components, b.components);
+    });
+  if (!unchanged) notifyCaptureWorkloadChange();
 }

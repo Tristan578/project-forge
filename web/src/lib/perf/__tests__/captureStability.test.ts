@@ -96,6 +96,39 @@ describe('capture workload publishers', () => {
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
+  it('allows repeated identical engine graph snapshots, including reordered object keys', () => {
+    const node = { entityId: 'a', name: 'Cube', parentId: null, children: [], components: ['Transform'], visible: true };
+    useEditorStore.setState({ sceneGraph: { nodes: { a: node }, rootIds: ['a'], completionMode: 'sandbox' } });
+    changed.mockClear();
+    for (let i = 0; i < 3; i++) {
+      handleTransformEvent('SCENE_GRAPH_UPDATE', {
+        rootIds: ['a'], nodes: { a: { visible: true, components: ['Transform'], children: [], parentId: null, name: 'Cube', entityId: 'a' } },
+      }, useEditorStore.setState, useEditorStore.getState);
+    }
+    expect(changed).not.toHaveBeenCalled();
+    expect(useEditorStore.getState().sceneGraph.completionMode).toBe('sandbox');
+  });
+
+  it.each([
+    { name: 'Renamed' }, { visible: false }, { parentId: 'parent' },
+    { children: ['child'] }, { components: ['Transform', 'Mesh'] },
+  ])('invalidates a changed graph node %j', (patch) => {
+    const node = { entityId: 'a', name: 'Cube', parentId: null, children: [], components: ['Transform'], visible: true };
+    useEditorStore.setState({ sceneGraph: { nodes: { a: node }, rootIds: ['a'] } });
+    changed.mockClear();
+    handleTransformEvent('SCENE_GRAPH_UPDATE', { nodes: { a: { ...node, ...patch } }, rootIds: ['a'] }, useEditorStore.setState, useEditorStore.getState);
+    expect(changed).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates graph removal and root order changes', () => {
+    const nodes = Object.fromEntries(['a', 'b'].map((entityId) => [entityId, { entityId, name: entityId, parentId: null, children: [], components: [], visible: true }]));
+    useEditorStore.setState({ sceneGraph: { nodes, rootIds: ['a', 'b'] } });
+    changed.mockClear();
+    handleTransformEvent('SCENE_GRAPH_UPDATE', { nodes, rootIds: ['b', 'a'] }, useEditorStore.setState, useEditorStore.getState);
+    handleTransformEvent('SCENE_GRAPH_UPDATE', { nodes: { a: nodes.a }, rootIds: ['a'] }, useEditorStore.setState, useEditorStore.getState);
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
   it('stops observing after unsubscribe', () => {
     unsubscribe();
     getCommandDispatcher()!('delete_entity', {});
