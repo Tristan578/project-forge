@@ -2,7 +2,7 @@
 
 This document provides an honest accounting of features that are partially implemented or have genuine technical constraints. For unbuilt roadmap features, see the taskboard and the GitHub milestones. Note: Editor Collaboration (Phase 24) and Multiplayer Networking (Phase 25) stubs were removed in PF-141/PF-142 — these will be rebuilt from scratch when prioritized.
 
-> **Last updated:** 2026-09-16
+> **Last updated:** 2026-09-22
 
 ## Launch-readiness gaps (verified 2026-09-05)
 
