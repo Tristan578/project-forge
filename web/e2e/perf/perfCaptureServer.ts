@@ -48,7 +48,14 @@ export async function startPerfCaptureServer(publicDir: string, packages: readon
   let page = '<!doctype html><title>no page</title>';
   const server = http.createServer((req, res) => {
     void (async () => {
-      const url = decodeURIComponent((req.url ?? '/').split('?')[0]);
+      let url: string;
+      try {
+        url = decodeURIComponent((req.url ?? '/').split('?')[0]);
+      } catch {
+        res.writeHead(400);
+        res.end();
+        return;
+      }
       if (url === '/' || url === '/index.html') {
         const body = Buffer.from(page, 'utf8');
         res.writeHead(200, { 'Content-Type': CONTENT_TYPES['.html'], 'Content-Length': body.length, 'Cache-Control': 'no-store' });
