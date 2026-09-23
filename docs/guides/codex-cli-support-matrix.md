@@ -54,7 +54,7 @@ supported version moves. Nothing is claimed about any other version.
 | Project instructions are `AGENTS.md` files collected from the project root (nearest `.git`) down to the cwd. **`<repo>/.codex/AGENTS.md` is not on that path and is not loaded** | `core/src/agents_md.rs` |
 | Subagents are `*.toml` under `.codex/agents/`; `name`, `description`, `developer_instructions` are required | `core/src/config/agent_roles.rs` |
 | Skills are discovered from `.agents/skills/` (and the project layer's `.codex/skills/`); there is no configurable extra directory | `core-skills/src/loader.rs` |
-| `[mcp_servers.<name>]` accepts `command`, `args`, `env`, `env_vars`, `default_tools_approval_mode` (`auto` \| `prompt` \| `writes` \| `approve`), `enabled_tools`, `disabled_tools` | `config/src/mcp_types.rs` |
+| `[mcp_servers.<name>]` accepts `command`, `args`, `env`, `env_vars`, `cwd`, `default_tools_approval_mode` (`auto` \| `prompt` \| `writes` \| `approve`), `enabled_tools`, `disabled_tools`. `cwd` is kept as written (`codex mcp get --json` prints `".."` for `cwd = ".."`), not resolved against the config file | `config/src/mcp_types.rs`; `cwd` from `codex mcp get --json`, 0.144.1 |
 | Under `approval_policy = "never"` an MCP call is auto-approved only when the tool is `approve` or the sandbox has full disk write access | `codex-mcp/src/mcp/mod.rs` |
 | Codex does not read a project `.mcp.json` | source search; it appears only as a plugin default |
 
@@ -214,7 +214,7 @@ the field, not because this port uses it.
 |---|---|---|
 | `PostCompact` → `restore-context-hints.sh`, `inject-post-compact.sh` | Both exist only to put context back in front of the model. Codex's `PostCompact` output accepts no context field and drops plain text, so they would run and change nothing | **Instruction only:** the root `AGENTS.md` (which Codex loads; `.codex/AGENTS.md` it does not) tells the agent to re-read `.claude/rules/lessons-learned.md` after a compaction |
 | `auto-approve-safe-commands.sh` (`PreToolUse` `Bash`) | Its entire output is `permissionDecision: "allow"`, which marks the run Failed. Codex has no hook-driven approval | Approvals come from `approval_policy` and the sandbox in `.codex/config.toml` |
-| `permissions.deny` (Edit/Write on `.claude/settings.json` and `.codex/config.toml`) | A Claude Code permission rule, not a hook; Codex has no equivalent this repository configures | **None.** Under the committed profile (`approval_policy = "never"`, workspace writes allowed) nothing in this repository stops a Codex session editing either file. Whether Codex's sandbox protects `.codex/` was not checked. Review any change to those two files |
+| `permissions.deny` (Edit/Write on `.claude/settings.json`) and `permissions.ask` (Edit/Write on `.codex/config.toml`) | Claude Code permission rules, not hooks; Codex has no equivalent this repository configures. The ask rule makes a *Claude Code* edit to `.codex/config.toml` stop for a human in every Claude Code permission mode (#10134); a Codex session never reads it | The committed profile explicitly selects `on-request` and `workspace-write`. Codex applies its own sandbox protections independently of Claude rules; see `.claude/SANDBOX.md` for the scope and external-writer limitations. Review changes to both files |
 | `TaskCreated` → `validate-task-metadata.sh` | No such event | The taskboard validates tickets; `on-stop.sh` (ported) re-checks on `Stop` |
 | `TaskCompleted` → `validate-task-completion.sh` | No such event | `on-stop.sh` on `Stop` |
 | `WorktreeCreate` → `worktree-setup.sh` | No such event | By hand after `git worktree add`, **with its payload**: the script reads `{"worktree_path": …}` from stdin and does nothing when run bare. `.codex/AGENTS.md` has the exact command |
@@ -403,32 +403,95 @@ file, so "the lock names it" is not on its own a reason to delete anything.
 
 ## MCP servers
 
-**`.codex/config.toml` declares no MCP servers today**, so a Codex session in
-this repository has none of the servers in `.mcp.json` — Codex does not read that
-file. The gate says so on every run and starts enforcing parity of server
-**names** from the first `[mcp_servers.*]` table that is **committed**: like
-`scripts/check-codex-config-safety.sh` it reads `HEAD:.codex/config.toml`, so an
-uncommitted edit to that file does not turn a local check red. That is a
-tolerance, not a recommendation: personal servers belong in the user-level
-`~/.codex/config.toml`, as `docs/guides/taskboard-sync.md` says, because in a
-linked worktree `worktree-safety-commit.sh` commits whatever is in the tree when
-a session stops — and a committed personal block does turn the check red.
-Commit all of the servers or none.
+Approval behavior was exercised on Windows with codex-cli 0.153.4 on
+2026-09-23 using an isolated stdio `ping` server and loopback mock Responses
+API (no external model request or credentials). Actual model-produced tool
+calls used `workspace-write`: `on-request` prompted, acceptance invoked ping
+once, and declining invoked it zero additional times. With `never`, no prompt
+was emitted and the tool was rejected with “MCP tool call requires approval,
+but approval policy is never.” This proves the approval path, not authenticated
+third-party service access.
 
-`.codex/config.toml` is covered by a `deny` rule in `.claude/settings.json`,
-which stops *Claude Code* editing it; that rule does nothing under Codex (see
-the `permissions.deny` row above). Adding the servers is therefore a hand edit,
-tracked by #8767. What the contract rows above imply for whoever makes it:
+**`.codex/config.toml` declares the same MCP servers as `.mcp.json`** (#10134). Codex does not read `.mcp.json`, so without those tables a Codex
+session in this repository would have none of them. The gate compares every
+server declared on both sides: the **names** must match, and each server's
+`command` and `args` must equal its `.mcp.json` entry exactly, with every `${VAR}`
+secret forwarded by name in `env_vars` and every literal `env` value restated
+verbatim. It also requires `default_tools_approval_mode = "prompt"` in every
+server's own table (see the list below), which `.mcp.json` has no counterpart
+for, and fails a `command`, arg or `cwd` that Codex would resolve against the
+directory the session started in (the last item below). It does not compare any
+other key in a server table. Compared scalar properties must be strings; `args`
+and `env_vars` must be arrays containing only strings. Scalar/array substitutions,
+nested arrays and mixed value types fail. Strings are compared decoded, as TOML 1.0 defines
+them: `"C:\\x"` is `C:\x`, and a `'literal string'` is taken as written. A string
+the check cannot read is reported rather than compared: an escape TOML 1.0 does
+not define (a Windows path written `"C:\Users"`), an unclosed string, or any
+multi-line `"""…"""`/`'''…'''` string, whose body the line-based reader would
+take for keys. Inside a server table it fails that server, whichever key holds
+it; outside every server table it stops the check, since there it could pose as
+a whole `[mcp_servers.…]` table. Like
+`scripts/check-codex-config-safety.sh` it reads the **committed**
+`HEAD:.codex/config.toml`, so an uncommitted edit to that file does not turn a
+local check red. That is a tolerance, not a recommendation: personal servers
+belong in the user-level `~/.codex/config.toml`, because in a linked worktree
+`worktree-safety-commit.sh` commits whatever is in the tree when a session
+stops — and a committed personal block does turn the check red. Every server
+in `.mcp.json` must be declared, including when all Codex tables are removed.
+Deleting either configuration file also fails; only two absent files or two
+explicitly empty server sets have no MCP parity requirements.
+
+`.codex/config.toml` is hand-maintained. A *Claude Code* `Edit` or `Write` to it
+is an `ask` rule in `.claude/settings.json`: a human approves each edit, in every
+Claude Code permission mode, because each server table is a command the next
+Codex session runs. It used to be a hard `deny`, lifted in #10134 because it
+made the file unmaintainable by an agent even with a human watching. Neither
+rule does anything under Codex (see the permission-rules row above), and shell writes have different enforcement — `.claude/SANDBOX.md` has the full list of what does and
+does not guard this file. Secret-shaped content is covered repo-wide by GitHub
+secret-scanning push protection, which rejects a recognised credential at push
+time for every file and every actor. What the contract rows above imply for
+whoever edits a server:
 
 - Forward secrets by **name** with `env_vars`. `${VAR}` interpolation is a Claude
   Code feature; Codex would pass the literal text.
-- The committed profile runs with `approval_policy = "never"`. Per the contract
-  table that does not auto-approve MCP calls under the workspace-write sandbox,
-  but set `default_tools_approval_mode = "prompt"` on every server that holds a
-  credential or reaches the network anyway, so a Stripe refund or a Neon branch
-  delete stays human-gated if that default moves.
+- The committed profile uses `approval_policy = "on-request"` and explicit
+  `sandbox_mode = "workspace-write"`. Every server retains
+  `default_tools_approval_mode = "prompt"` so interactive sessions can request
+  permission for tool calls. A headless `codex exec` cannot answer that prompt;
+  unattended jobs need narrow, explicit per-tool approvals in their own profile.
+  Server startup alone does not prove tool execution. The parity gate rejects
+  missing or non-prompt server defaults.
 - A relative `command`/`args` path resolves against the directory Codex started
-  in, not the repository root.
+  in, not the repository root, and so does a relative `cwd`: Codex does not
+  resolve it against `.codex/`. A server whose launcher is a file in this
+  repository therefore goes through a git alias, which git runs from the
+  repository's top-level directory (git-config(1), `alias.*`). taskboard is
+  launched that way, in `.mcp.json` and here alike:
+  `git -c "alias.spawnforge-taskboard=!node .claude/hooks/taskboard-launch.mjs" spawnforge-taskboard mcp`.
+  `port.mjs --check` fails a `command` or arg that is explicitly relative (`./…`,
+  `../…`) or names a path that exists relative to the repository root, and any
+  relative `cwd`. A path absolute on either convention is not relative: POSIX
+  `/…`, or Windows `C:\…`, `C:/…`, `\\host\share` and `\…` (the root of the
+  current drive). `scripts/__tests__/check-codex-port.test.sh` runs the
+  committed taskboard command from `tools/agentic-sync/`. Observed with
+  codex-cli 0.144.1 on Windows 11 on 2026-09-23, through `codex app-server`
+  (`thread/start` with `ephemeral: true`, then `mcpServerStatus/list`; no turn,
+  so no model request):
+  - Started in `web/src`, the committed taskboard entry reached `ready` with the
+    board's 21 tools. The previous `node .claude/hooks/taskboard-launch.mjs mcp`
+    failed from the same directory with "handshaking with MCP server failed:
+    connection closed: initialize response".
+  - In a scratch repository started two levels down, a probe server with
+    `cwd = ".."` reported the directory one level above the START directory.
+    Resolved against the config file, it would have been the repository root.
+    The same probe behind a git alias reported the repository root.
+
+MCP parity decodes bare, basic-quoted, and literal-quoted table/key names,
+including whitespace around dotted table paths. Inline or dotted MCP server
+declarations, inline environment tables, and unsupported MCP sub-tables fail
+with a diagnostic; use explicit server tables and their optional env sub-table.
+Secret forwarding requires matching source and destination variable names;
+Codex env_vars cannot implement a Claude variable alias.
 
 ## First-run checklist
 

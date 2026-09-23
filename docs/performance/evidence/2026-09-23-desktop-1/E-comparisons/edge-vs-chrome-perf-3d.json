@@ -1,0 +1,16 @@
+{
+  "currentReportId": "perf-eb3cb96d-5614-4689-9226-6e9279559fdd",
+  "baselineReportId": "perf-ade17f2c-ea00-440f-9c79-7889f3ab3d4b",
+  "compatible": false,
+  "claim": "incompatible-baseline",
+  "incompatibilities": [
+    {
+      "field": "browserVersion",
+      "current": "Edge 153.0.4234.48",
+      "baseline": "Chrome 153.0.8010.53",
+      "reason": "browserVersion differs"
+    }
+  ],
+  "advisories": [],
+  "metrics": null
+}

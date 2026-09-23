@@ -7,9 +7,23 @@ They provide the fallback when the primary engine CDN cannot be reached.
 The CD WASM job runs for web changes as well as engine changes. It restores the
 exact four-variant cache keyed by engine sources, the transform-gizmo dependency,
 wasm-bindgen version, and CD recipe. A hit skips Rust setup and compilation.
-A miss builds and verifies all four packages before saving or publishing them.
-The separate WebGL2 cache warmer runs only when this job does not, preventing
-duplicate builds on a cold key.
+
+The first CD run after an engine merge cannot hit that cache, because the
+engine tree is new to main. On that miss the job looks for the merged pull
+request's CI run instead. Quality Gates uploads that run's four packages as
+`wasm-binaries-cd-reuse`, captured before `wasm-opt` because CD ships
+unoptimised bytes. It also records a `ci-reuse` key covering the engine inputs,
+both workflow recipes and the wasm-bindgen installer.
+`scripts/resolve-ci-wasm-artifact.sh` looks only at a pull request that merged
+as the commit being deployed. It adopts the packages only when that key equals
+the one recomputed on main and every package validates. A fork, a pull request
+that did not merge as this commit, a failed or skipped WASM build, an expired
+artifact, a lookup error or a key mismatch each produce a `::notice::` naming
+the reason, and the job builds.
+
+Any other miss builds and verifies all four packages before saving or
+publishing them. The separate WebGL2 cache warmer runs only when this job does
+not, preventing duplicate builds on a cold key.
 
 Staging and production require the current run's wasm-binaries artifact.
 scripts/populate-engine-fallback.mjs validates every exact JS glue and WASM
@@ -27,6 +41,7 @@ Local validation:
 
 ~~~bash
 bash scripts/__tests__/engine-wasm-cache-key.test.sh
+bash scripts/__tests__/resolve-ci-wasm-artifact.test.sh
 bash scripts/__tests__/assert-vercel-engine-manifest.test.sh
 bash scripts/__tests__/generate-wasm-manifests.test.sh
 ~~~

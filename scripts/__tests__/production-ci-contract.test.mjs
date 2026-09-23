@@ -1,7 +1,7 @@
 import './visual-ci-contract.test.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 const read = path => YAML.parse(readFileSync(fileURLToPath(new URL('../../' + path, import.meta.url)), 'utf8'));
@@ -128,4 +128,68 @@ for (const [lineEnding, fixture] of [
       assert.throws(() => assertStandaloneAudit(mutated));
     });
   }
+}
+
+// #10158: the substitution-naming check (web/scripts/check-substitution-naming.ts)
+// runs, unskippable, in a job ci-success requires. Parsed as YAML with unique
+// keys, so a commented-out step, a duplicate `run:` or a quote-spelled key is
+// the same thing to this pin as it is to GitHub.
+const ciWorkflowText = readFileSync(fileURLToPath(new URL('../../.github/workflows/ci.yml', import.meta.url)), 'utf8');
+const substitutionStep = {
+  name: 'Check substitution naming',
+  'working-directory': 'web',
+  run: 'npx tsx scripts/check-substitution-naming.ts',
+};
+function assertSubstitutionCheckWired(text) {
+  const ci = YAML.parse(text, { uniqueKeys: true });
+  assert.ok(ci.jobs['ci-success'].needs.includes('test-e2e-journey'), 'test-e2e-journey must be a ci-success need');
+  const job = ci.jobs['test-e2e-journey'];
+  assert.match(job.if, /needs-web == 'true'/);
+  assert.equal(job['continue-on-error'], undefined);
+  const invocations = Object.values(ci.jobs).flatMap(j => (j.steps ?? []).filter(s => (s.run ?? '').includes('check-substitution-naming')));
+  assert.equal(invocations.length, 1, 'exactly one step runs the check');
+  const step = job.steps.find(s => s.name === substitutionStep.name);
+  // Exact key set: no step-level if:, continue-on-error, env or shell override.
+  assert.deepEqual(step, substitutionStep);
+  const install = job.steps.findIndex(s => s.run === 'npm ci');
+  assert.ok(install >= 0 && install < job.steps.indexOf(step), 'the check must run after npm ci');
+}
+test('substitution-naming check is wired into the required journey job (#10158)', () => {
+  assertSubstitutionCheckWired(ciWorkflowText);
+  assert.ok(existsSync(fileURLToPath(new URL('../../web/scripts/check-substitution-naming.ts', import.meta.url))));
+  // check-ci-success.sh turns a skipped test-e2e-journey red when needs-web fired.
+  const ciSuccess = readFileSync(fileURLToPath(new URL('../check-ci-success.sh', import.meta.url)), 'utf8');
+  assert.match(ciSuccess, /^check_triggered "test-e2e-journey"\s+"needs-web"\s*$/m);
+});
+const substitutionBlock = Object.entries(substitutionStep)
+  .map(([key, value], i) => (i === 0 ? '      - ' : '        ') + key + ': ' + value + '\n')
+  .join('');
+const journeyHeader = "  test-e2e-journey:\n    name: E2E Journey Gate\n    needs: [ci-gate]\n    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}\n";
+const substitutionMutations = {
+  removed: text => text.replace(substitutionBlock, ''),
+  commented: text => text.replace(substitutionBlock, substitutionBlock.split('\n').filter(Boolean).map(line => '#' + line).join('\n') + '\n'),
+  disabledStep: text => text.replace(substitutionBlock, substitutionBlock + '        if: false\n'),
+  ignoredError: text => text.replace(substitutionBlock, substitutionBlock + '        continue-on-error: true\n'),
+  disabledJob: text => text.replace(journeyHeader, journeyHeader.replace(/if: .*\n/, 'if: false\n')),
+  jobIgnoresErrors: text => text.replace(journeyHeader, journeyHeader + '    continue-on-error: true\n'),
+  notRequired: text => text.replace('      - test-e2e-journey\n', ''),
+  neutered: text => text.replace(substitutionBlock, substitutionBlock.replace('.ts\n', '.ts || true\n')),
+  duplicateRun: text => text.replace(substitutionBlock, substitutionBlock + '        run: echo skipped\n'),
+  movedBeforeInstall: text => {
+    const without = text.replace(substitutionBlock, '');
+    const install = without.indexOf('      - run: npm ci\n', without.indexOf(journeyHeader));
+    return without.slice(0, install) + substitutionBlock + '\n' + without.slice(install);
+  },
+};
+const ciWorkflowLF = ciWorkflowText.replace(/\r\n/g, '\n');
+for (const [name, mutate] of Object.entries(substitutionMutations)) {
+  test('substitution-naming wiring rejects ' + name, () => {
+    const mutated = mutate(ciWorkflowLF);
+    assert.notEqual(mutated, ciWorkflowLF, 'negative control must actually mutate the workflow');
+    // A duplicate key is rejected by the parser; every other mutation must still
+    // parse and be refused by an assertion, so a mutation that merely broke the
+    // YAML cannot pass for a caught regression.
+    const expected = name === 'duplicateRun' ? /unique/i : err => err instanceof assert.AssertionError;
+    assert.throws(() => assertSubstitutionCheckWired(mutated), expected);
+  });
 }

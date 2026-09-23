@@ -1,3 +1,4 @@
+import { notifyCaptureWorkloadChange, observeCaptureCommand } from '@/lib/perf/captureStability';
 /**
  * Zustand store for editor state management.
  *
@@ -126,6 +127,20 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createLocalizationSlice(...args),
   ...createOrchestratorSlice(...args),
 }));
+
+
+
+// Scene/project transitions can begin before the engine publishes its new graph.
+// Subscribe once, synchronously, so captures need no lazy-store-import window.
+useEditorStore.subscribe((state, previous) => {
+  if (state.projectId !== previous.projectId ||
+      state.projectRevision !== previous.projectRevision ||
+      state.sceneOperationRevision !== previous.sceneOperationRevision ||
+      state.activeSceneId !== previous.activeSceneId ||
+      state.engineMode !== previous.engineMode) {
+    notifyCaptureWorkloadChange();
+  }
+});
 
 // E2E store exposure (__EDITOR_STORE, __CHAT_STORE, __FORGE_DISPATCH) is done
 // in a SINGLE place — EditorLayout's post-hydration useEffect — so all three
@@ -343,6 +358,8 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
     // reporting failure, and must not be treated as if it were.
     if (response && response.success === false) {
       reportCommandRejected(command, response.error);
+    } else {
+      observeCaptureCommand(command);
     }
     return response;
   };
@@ -410,6 +427,10 @@ export function setCommandBatchDispatcher(dispatcher: BatchCommandDispatcher | u
     let result: BatchResult | undefined;
     try {
       result = dispatcher(commands);
+      commands.forEach(({ command }, index) => {
+        // Successful items still invalidate a capture when another batch item fails.
+        if (result?.results[index]?.success !== false) observeCaptureCommand(command);
+      });
       return result;
     } finally {
       // Item by item, on the item's own answer, EXCEPT when there is no answer

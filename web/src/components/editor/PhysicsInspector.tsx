@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useId } from 'react';
 import { HelpCircle } from 'lucide-react';
 import { useEditorStore, type PhysicsData } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -43,6 +43,10 @@ const COLLIDER_SHAPE_OPTIONS = [
 ];
 
 export function PhysicsInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryPhysics = useEditorStore((s) => s.primaryPhysics);
   const physicsEnabled = useEditorStore((s) => s.physicsEnabled);
@@ -92,8 +96,9 @@ export function PhysicsInspector() {
           <>
             {/* Body Type */}
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400">Body Type<InfoTooltip term="bodyType" /></label>
+              <label htmlFor={fieldId('body-type')} className="w-20 shrink-0 text-xs text-zinc-400">Body Type<InfoTooltip term="bodyType" /></label>
               <select
+                id={fieldId('body-type')}
                 value={primaryPhysics.bodyType}
                 onChange={(e) => handleUpdate({ bodyType: e.target.value as PhysicsData['bodyType'] })}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -107,8 +112,9 @@ export function PhysicsInspector() {
 
             {/* Collider Shape */}
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400">Collider<InfoTooltip term="colliderShape" /></label>
+              <label htmlFor={fieldId('collider')} className="w-20 shrink-0 text-xs text-zinc-400">Collider<InfoTooltip term="colliderShape" /></label>
               <select
+                id={fieldId('collider')}
                 value={primaryPhysics.colliderShape}
                 onChange={(e) => handleUpdate({ colliderShape: e.target.value as PhysicsData['colliderShape'] })}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -122,8 +128,9 @@ export function PhysicsInspector() {
 
             {/* Restitution (bounciness) */}
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400">Restitution<InfoTooltip term="restitution" /></label>
+              <label htmlFor={fieldId('restitution')} className="w-20 shrink-0 text-xs text-zinc-400">Restitution<InfoTooltip term="restitution" /></label>
               <input
+                id={fieldId('restitution')}
                 type="range"
                 min={0}
                 max={1}
@@ -142,8 +149,9 @@ export function PhysicsInspector() {
 
             {/* Friction */}
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400">Friction<InfoTooltip term="friction" /></label>
+              <label htmlFor={fieldId('friction')} className="w-20 shrink-0 text-xs text-zinc-400">Friction<InfoTooltip term="friction" /></label>
               <input
+                id={fieldId('friction')}
                 type="range"
                 min={0}
                 max={1}
@@ -162,8 +170,9 @@ export function PhysicsInspector() {
 
             {/* Density */}
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400">Density<InfoTooltip term="density" /></label>
+              <label htmlFor={fieldId('density')} className="w-20 shrink-0 text-xs text-zinc-400">Density<InfoTooltip term="density" /></label>
               <input
+                id={fieldId('density')}
                 type="range"
                 min={0.01}
                 max={100}
@@ -182,8 +191,9 @@ export function PhysicsInspector() {
 
             {/* Gravity Scale */}
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400">Gravity<InfoTooltip term="gravityScale" /></label>
+              <label htmlFor={fieldId('gravity')} className="w-20 shrink-0 text-xs text-zinc-400">Gravity<InfoTooltip term="gravityScale" /></label>
               <input
+                id={fieldId('gravity')}
                 type="range"
                 min={-10}
                 max={10}
