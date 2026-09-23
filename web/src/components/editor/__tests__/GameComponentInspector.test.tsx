@@ -936,6 +936,56 @@ describe('GameComponentInspector', () => {
       expect(screen.getByRole('status')).toBeDefined();
       const results = await axe(container);
       expect(results.violations.map((v) => v.id)).toEqual([]);
+      // axe files an id reference it cannot resolve (`aria-valid-attr-value`)
+      // or one that resolves to a duplicated id (`duplicate-id-aria`) under
+      // "needs review", never as a violation — and every mark here IS an id
+      // reference. So the audit reads that list too; it is empty on this DOM.
+      expect(results.incomplete.map((v) => v.id)).toEqual([]);
+    });
+
+    it('has no axe violations with a route row and a vector row marked', async () => {
+      // The two group-shaped rows: the mark sits on a `role="group"`, not on
+      // an input, and the route row's badge sits inside its group. Two marked
+      // sections, so a note id shared between sections is a duplicate here.
+      // Which line a row points at is pinned by the content assertions in the
+      // row tests above; this audit catches a reference that resolves to no
+      // element, or to more than one.
+      setupStore({
+        primaryGameComponents: [
+          {
+            type: 'movingPlatform',
+            movingPlatform: { speed: 2, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration: 0.5, loopMode: 'pingPong' },
+          },
+          {
+            type: 'health',
+            health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true },
+          },
+        ],
+        gameComponentAdjustments: {
+          'ent-1': {
+            movingPlatform: {
+              waypoints: {
+                component: 'movingPlatform', field: 'waypoints', requested: 1, applied: 2, reason: 'invalid-replaced',
+                unit: 'points', appliedPoints: [[0, 0, 0], [0, 3, 0]],
+              },
+            },
+            health: {
+              respawnPoint: {
+                component: 'health', field: 'respawnPoint', requested: { description: '[1, 2]' }, applied: [0, 1, 0], reason: 'invalid-replaced',
+              },
+            },
+          },
+        },
+      });
+      const { container } = render(<GameComponentInspector />);
+      // Non-vacuous: both rows really are marked in what is being audited.
+      expect(screen.getByRole('group', { name: 'Waypoints' }).getAttribute('aria-describedby')).not.toBeNull();
+      expect(screen.getByRole('group', { name: 'Respawn Pt' }).getAttribute('aria-describedby')).not.toBeNull();
+      expect(screen.getAllByText('Adjusted')).toHaveLength(2);
+      const results = await axe(container);
+      expect(results.violations.map((v) => v.id)).toEqual([]);
+      // "Needs review" too: see the audit above for why.
+      expect(results.incomplete.map((v) => v.id)).toEqual([]);
     });
   });
 
