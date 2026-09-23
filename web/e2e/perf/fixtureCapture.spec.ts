@@ -48,6 +48,7 @@ import { UNKNOWN } from '@/lib/config/measurementManifest';
  *   PERF_ENGINE=editor     serve only the editor engine packages, so the export
  *                          template falls back to them (the binary /play loads)
  *   PERF_VSYNC=1           pace frames to the display (config flag; default uncapped)
+ *   PERF_CHANNEL=msedge    capture in installed Edge instead of Chrome (config flag)
  *   PERF_WARMUP_MS / PERF_CAPTURE_MS  shortened smoke runs (budgets then read unknown)
  *   PERF_OUT_DIR           where reports go (default test-results/perf-evidence/<stamp>)
  *   PERF_ALLOW_DIRTY=1     run from an uncommitted tree (build SHA recorded as unknown)

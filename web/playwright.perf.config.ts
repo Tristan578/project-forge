@@ -53,7 +53,9 @@ export default defineConfig({
   forbidOnly: true,
   reporter: [['list']],
   use: {
-    channel: 'chrome',
+    // PERF_CHANNEL=msedge captures in Edge: a second exact browser version on
+    // the same machine, for the incompatible-baseline check.
+    channel: process.env.PERF_CHANNEL || 'chrome',
     headless: process.env.PERF_HEADED !== '1',
     launchOptions: { args: gpuArgs },
     trace: 'off',
