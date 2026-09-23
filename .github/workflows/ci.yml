@@ -1152,6 +1152,7 @@ jobs:
             scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
+            scripts/resolve-ci-wasm-artifact.sh scripts/__tests__/resolve-ci-wasm-artifact.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
@@ -1297,6 +1298,8 @@ jobs:
         run: bash scripts/__tests__/ci-tree-already-validated.test.sh
       - name: Run engine WASM cache-key test suite
         run: bash scripts/__tests__/engine-wasm-cache-key.test.sh
+      - name: Run CD WASM artifact-reuse resolver test suite
+        run: bash scripts/__tests__/resolve-ci-wasm-artifact.test.sh
 
       - name: Run source-encoding gate test suite
         run: bash scripts/__tests__/check-source-encoding.test.sh
@@ -1755,6 +1758,112 @@ jobs:
           path: web/blob-report/
           retention-days: 7
 
+  # Signup/auth journey against a real Clerk TEST instance (#8632, F40). The
+  # ONLY job that builds and serves the app with Clerk keys.
+  #
+  # Why not put the keys on test-e2e-ui: with valid keys the proxy switches to
+  # clerkMiddleware for every request, and under `next start`
+  # (NODE_ENV=production) buildPublicRoutes() drops /dev from the public routes
+  # (web/src/proxy.ts). The editor fixture opens /dev for every editor spec, so
+  # keys there would send hundreds of @ui specs to /sign-in. This job runs only
+  # the @auth specs (web/playwright.auth.config.ts), and the keys are mapped
+  # onto the build and test steps alone, never the job env, so `npm ci`'s
+  # install scripts never see them.
+  #
+  # Secrets are the CI-only TEST instance's (CLERK_TEST_*), never production's;
+  # clerkGlobalSetup refuses anything but sk_test_/pk_test_.
+  # E2E_CLERK_TEST_REQUIRED follows the E2E_UPSTASH_TEST_REQUIRED pattern:
+  # fork and Dependabot PRs receive no repository secrets, so the specs skip
+  # there; everywhere else a missing secret FAILS the run (the global setup
+  # throws) and requiredRunReporter fails any run that skipped a test.
+  # Setup and rotation: docs/guides/e2e-clerk-test-user.md.
+  test-e2e-auth:
+    name: E2E Auth Journey
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      E2E_CLERK_TEST_REQUIRED: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      # Same silent-drop guard as test-e2e-ui (npm/cli#4828 class, PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          # Same single-root-lockfile key as test-e2e-ui (#8589).
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh browsers
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh deps
+
+      # No Next.js build cache here, deliberately: the publishable key is
+      # inlined into this build, so a cache shared with the keyless jobs would
+      # cross-contaminate, and a per-key cache would have to be keyed on a
+      # secret.
+      - name: Build for auth E2E (Clerk test instance)
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          # Inlined into the client bundle at build time, so it MUST be here.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+        run: npx next build
+
+      - name: Run auth-journey E2E tests
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+          E2E_CLERK_TEST_EMAIL: ${{ secrets.E2E_CLERK_TEST_EMAIL }}
+          E2E_CLERK_TEST_PASSWORD: ${{ secrets.E2E_CLERK_TEST_PASSWORD }}
+          # The proxy passes buildAuthorizedParties() to clerkMiddleware, which
+          # rejects a session token whose azp claim is not listed. Under
+          # NODE_ENV=production that list is the production origins plus
+          # STAGING_URL, and this browser signs in on http://localhost:3000 --
+          # without this line every session the journey creates is treated as
+          # signed out on the server.
+          STAGING_URL: 'http://localhost:3000'
+        run: npx playwright test --config playwright.auth.config.ts
+
+      - name: Upload auth-journey report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-auth-report
+          path: web/auth-results/summary.json
+          if-no-files-found: error
+          retention-days: 14
+
   # Strict interactive-journey gate (#8601 F09 + #8604 F12). Proves the core
   # new-user journey — idea -> generated scene -> entities spawn -> Play ->
   # winnable -> export — survives on the SAME production server users hit
@@ -1798,6 +1907,18 @@ jobs:
 
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
+
+      # #10158: a spec that stands store injection or a mock in for the
+      # component it names must say so, in a `substitution` annotation AND a
+      # `[substituted: <component>]` title marker, and capabilityMatrix.test.ts
+      # keeps such specs out of `proven` cells. This lists every spec with
+      # Playwright's --list mode (no browser, no server) and fails on an
+      # unpaired annotation or marker, a listing that misses a spec file, or
+      # zero specs. Its summary line names the counts it listed. Pinned by
+      # scripts/__tests__/production-ci-contract.test.mjs.
+      - name: Check substitution naming
+        working-directory: web
+        run: npx tsx scripts/check-substitution-naming.ts
 
       - name: Cache Playwright browsers
         id: playwright-cache
@@ -2321,6 +2442,12 @@ jobs:
 
       - run: npm ci
 
+      # apps/docs builds with the hoisted root `next`, so the npm/cli#4828 drop
+      # of @next/swc kills its `next build` exactly as it does web's — with an
+      # opaque "Failed to load SWC binary" three steps from the cause (PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Verify production workflow contracts
         run: node --test scripts/__tests__/production-ci-contract.test.mjs
 
@@ -2407,6 +2534,7 @@ jobs:
       - portable-paths
       - test-e2e-ui
       - test-e2e-api
+      - test-e2e-auth
       - test-e2e-journey
       - test-e2e-engine-smoke
     runs-on: ubuntu-latest

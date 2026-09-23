@@ -101,6 +101,19 @@ export const PLAY_GAME_FETCH_TIMEOUT_MS = 15_000;
  */
 export const PLAY_ENGINE_SETTLE_MS = 500;
 
+/**
+ * Longest an exported game waits for the engine to accept `load_scene`.
+ *
+ * The engine's command queue only exists after the Bevy app's first update
+ * (about 1.3 s after `init_engine` on the #10013 reference machine), so the
+ * exported loader retries the "not initialized" refusal until this deadline
+ * (`lib/export/sceneLoadFragment.ts`).
+ */
+export const EXPORTED_SCENE_LOAD_TIMEOUT_MS = 30_000;
+
+/** Poll interval of that wait. */
+export const EXPORTED_SCENE_LOAD_RETRY_MS = 50;
+
 // ---------------------------------------------------------------------------
 // API / Server timeouts
 // ---------------------------------------------------------------------------

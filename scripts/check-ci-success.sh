@@ -191,6 +191,10 @@ check_triggered "test-e2e-journey"          "needs-web"
 # The request-only API gate is the only pre-merge execution of billing and
 # token-guard endpoint coverage. It must run on every web-touching PR.
 check_triggered "test-e2e-api"              "needs-web"
+# The Clerk-keyed auth journey (#8632) is the ONLY per-PR sign-in against a
+# real Clerk instance -- test-e2e-ui deliberately runs keyless. needs-web is the
+# single trigger in its own `if:` (ci.yml test-e2e-auth).
+check_triggered "test-e2e-auth"             "needs-web"
 # The engine-smoke gate is the ONLY per-PR job that boots the real WASM engine
 # (load -> spawn -> play -> export under SwiftShader software WebGL2), closing the
 # F10 gap where rendering/ECS journeys ran only post-merge. It fires on

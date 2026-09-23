@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import {
   Plus, Trash2, ChevronDown, ChevronRight, MessageSquare,
   GitBranch, Zap, CircleStop, ArrowRight, Copy, AlertTriangle,
@@ -43,6 +43,7 @@ function TreeSelector() {
   return (
     <div className="mb-3 flex items-center gap-2">
       <select
+        aria-label="Dialogue tree"
         value={selectedTreeId ?? ''}
         onChange={(e) => selectTree(e.target.value || null)}
         className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-300 border border-zinc-700"
@@ -115,6 +116,10 @@ interface NodeItemProps {
 }
 
 function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: NodeItemProps) {
+  // useId, not literal ids: one NodeItem renders per dialogue node, so a
+  // literal id would repeat and every <label for> would hit the first node.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [expanded, setExpanded] = useState(false);
   const updateNode = useDialogueStore((s) => s.updateNode);
   const removeNode = useDialogueStore((s) => s.removeNode);
@@ -208,8 +213,9 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                 />
               </div>
               <div>
-                <label className="block text-[10px] text-zinc-400">Next Node</label>
+                <label htmlFor={fieldId('next-node')} className="block text-[10px] text-zinc-400">Next Node</label>
                 <select
+                  id={fieldId('next-node')}
                   value={(node as TextNode).next ?? ''}
                   onChange={(e) => updateNode(treeId, node.id, { next: e.target.value || null })}
                   className="w-full rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-300 border border-zinc-700"
@@ -257,6 +263,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                     <span className="text-[10px] text-zinc-400 w-4">{idx + 1}.</span>
                     <input
                       type="text"
+                      aria-label={`Choice ${idx + 1} text`}
                       value={ch.text}
                       onChange={(e) => {
                         const choices = [...choicesOf(node)];
@@ -266,6 +273,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                       className="flex-1 rounded bg-zinc-900 px-1.5 py-0.5 text-xs text-zinc-300 border border-zinc-700"
                     />
                     <select
+                      aria-label={`Choice ${idx + 1} next node`}
                       value={ch.nextNodeId ?? ''}
                       onChange={(e) => {
                         const choices = [...choicesOf(node)];
@@ -329,8 +337,9 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
               )}
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="block text-[10px] text-zinc-400">If True → Node</label>
+                  <label htmlFor={fieldId('if-true-node')} className="block text-[10px] text-zinc-400">If True → Node</label>
                   <select
+                    id={fieldId('if-true-node')}
                     value={(node as ConditionNode).onTrue ?? ''}
                     onChange={(e) => updateNode(treeId, node.id, { onTrue: e.target.value || null })}
                     className="w-full rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-300 border border-zinc-700"
@@ -340,8 +349,9 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="block text-[10px] text-zinc-400">If False → Node</label>
+                  <label htmlFor={fieldId('if-false-node')} className="block text-[10px] text-zinc-400">If False → Node</label>
                   <select
+                    id={fieldId('if-false-node')}
                     value={(node as ConditionNode).onFalse ?? ''}
                     onChange={(e) => updateNode(treeId, node.id, { onFalse: e.target.value || null })}
                     className="w-full rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-300 border border-zinc-700"
@@ -358,8 +368,9 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
           {node.type === 'action' && (
             <>
               <div>
-                <label className="block text-[10px] text-zinc-400">Next Node</label>
+                <label htmlFor={fieldId('action-next-node')} className="block text-[10px] text-zinc-400">Next Node</label>
                 <select
+                  id={fieldId('action-next-node')}
                   value={(node as ActionNode).next ?? ''}
                   onChange={(e) => updateNode(treeId, node.id, { next: e.target.value || null })}
                   className="w-full rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-300 border border-zinc-700"

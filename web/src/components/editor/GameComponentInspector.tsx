@@ -32,13 +32,15 @@ interface SliderRowProps {
 }
 
 function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, tooltipTerm, unit }: SliderRowProps) {
+  const inputId = useId();
   return (
     <div className="flex items-center gap-2">
       <div className="flex w-20 shrink-0 items-center gap-1">
-        <label className="text-xs text-zinc-400">{label}</label>
+        <label htmlFor={inputId} className="text-xs text-zinc-400">{label}</label>
         {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
       </div>
       <input
+        id={inputId}
         type="range"
         min={min}
         max={max}
@@ -155,13 +157,15 @@ interface SelectRowProps {
 }
 
 function SelectRow({ label, value, options, onChange, tooltipTerm }: SelectRowProps) {
+  const selectId = useId();
   return (
     <div className="flex items-center gap-2">
       <div className="flex w-20 shrink-0 items-center gap-1">
-        <label className="text-xs text-zinc-400">{label}</label>
+        <label htmlFor={selectId} className="text-xs text-zinc-400">{label}</label>
         {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
       </div>
       <select
+        id={selectId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none

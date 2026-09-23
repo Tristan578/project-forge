@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, memo } from 'react';
+import { useState, useCallback, memo, useId } from 'react';
 import { Plus, Trash2, ChevronDown, ChevronRight, Play, Square } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
@@ -47,6 +47,10 @@ const PLAY_MODE_OPTIONS = [
 ];
 
 export const AnimationClipInspector = memo(function AnimationClipInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryAnimationClip = useEditorStore((s) => s.primaryAnimationClip);
   const createAnimationClip = useEditorStore((s) => s.createAnimationClip);
@@ -194,10 +198,11 @@ export const AnimationClipInspector = memo(function AnimationClipInspector() {
 
             <div>
               <div className="mb-1 flex items-center gap-1.5">
-                <label className="text-xs text-zinc-400">Play Mode</label>
+                <label htmlFor={fieldId('play-mode')} className="text-xs text-zinc-400">Play Mode</label>
                 <InfoTooltip term="clipPlayMode" />
               </div>
               <select
+                id={fieldId('play-mode')}
                 value={primaryAnimationClip.playMode}
                 onChange={(e) => handlePlayModeChange(e.target.value)}
                 className="w-full rounded bg-zinc-900 px-2 py-1 text-sm text-zinc-200 outline-none focus:ring-1 focus:ring-blue-500"
@@ -210,10 +215,11 @@ export const AnimationClipInspector = memo(function AnimationClipInspector() {
 
             <div>
               <div className="mb-1 flex items-center gap-1.5">
-                <label className="text-xs text-zinc-400">Speed</label>
+                <label htmlFor={fieldId('speed')} className="text-xs text-zinc-400">Speed</label>
                 <InfoTooltip term="animationSpeed" />
               </div>
               <input
+                id={fieldId('speed')}
                 type="range"
                 value={primaryAnimationClip.speed}
                 onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
@@ -311,6 +317,7 @@ export const AnimationClipInspector = memo(function AnimationClipInspector() {
                             placeholder="Value"
                           />
                           <select
+                            aria-label={`Keyframe ${idx + 1} interpolation`}
                             value={kf.interpolation}
                             onChange={(e) => handleUpdateKeyframeInterpolation(track.target, kf.time, e.target.value)}
                             className="rounded bg-zinc-900 px-2 py-1 text-zinc-200 text-xs outline-none focus:ring-1 focus:ring-blue-500"
@@ -321,6 +328,7 @@ export const AnimationClipInspector = memo(function AnimationClipInspector() {
                           </select>
                           <button
                             onClick={() => handleRemoveKeyframe(track.target, kf.time)}
+                            aria-label={`Remove keyframe ${idx + 1}`}
                             className="p-1 rounded text-red-400 hover:bg-red-900/30 transition-colors"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -380,10 +388,11 @@ export const AnimationClipInspector = memo(function AnimationClipInspector() {
           {addingTrack ? (
             <div className="space-y-2 rounded bg-zinc-800 p-3">
               <div className="flex items-center gap-1.5">
-                <label className="text-xs text-zinc-400">Property</label>
+                <label htmlFor={fieldId('new-track-property')} className="text-xs text-zinc-400">Property</label>
                 <InfoTooltip text="Which aspect of the object to animate (position, rotation, etc.)" />
               </div>
               <select
+                id={fieldId('new-track-property')}
                 value={newTrackTarget}
                 onChange={(e) => setNewTrackTarget(e.target.value)}
                 className="w-full rounded bg-zinc-900 px-2 py-1 text-sm text-zinc-200 outline-none focus:ring-1 focus:ring-blue-500"

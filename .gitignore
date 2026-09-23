@@ -79,6 +79,7 @@ yarn-error.log*
 web/.next/
 web/out/
 web/test-results/
+web/auth-results/
 web/playwright-report/
 web/playwright-report-crossbrowser/
 web/blob-report/

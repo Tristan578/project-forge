@@ -1,9 +1,13 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useId } from 'react';
 import { useEditorStore, type Camera2dData } from '@/stores/editorStore';
 
 export function Camera2dInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const camera2dData = useEditorStore((s) => s.camera2dData);
 
   const setCamera2dData = useEditorStore((s) => s.setCamera2dData);
@@ -28,8 +32,9 @@ export function Camera2dInspector() {
       <div className="space-y-3">
         {/* Zoom Slider */}
         <div className="flex items-center gap-2">
-          <label className="w-20 shrink-0 text-xs text-zinc-400">Zoom</label>
+          <label htmlFor={fieldId('zoom')} className="w-20 shrink-0 text-xs text-zinc-400">Zoom</label>
           <input
+            id={fieldId('zoom')}
             type="range"
             min={0.1}
             max={10}

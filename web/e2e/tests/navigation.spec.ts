@@ -2,15 +2,17 @@
 // `editor.load()`, which navigates to /dev and waits for the engine. It
 // re-exports `test`/`expect`, so every other case here is unaffected.
 import { test, expect } from '../fixtures/editor.fixture';
-import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_NAV_MS } from '../constants';
+import { E2E_TIMEOUT_NAV_MS } from '../constants';
 
 /**
  * Navigation and routing E2E tests.
  * Verifies page routing, redirects, link navigation, and URL behavior
  * across the application.
  *
- * CI runs without Clerk keys by default. Sign-in navigation tests are
- * skipped unless valid Clerk keys (sk_/pk_ prefixes) are configured.
+ * The @ui shard runs without Clerk keys, so the cases below that branch on
+ * isClerkConfigured() take their passthrough arm there. The Sign In journey
+ * that NEEDS keys lives in auth-journey.spec.ts (@auth), which CI runs in the
+ * Clerk-keyed test-e2e-auth job (#8632).
  * URL assertions use waitForURL (not waitForLoadState, which resolves
  * immediately on the current page and does not wait for Next.js
  * client-side navigation to complete).
@@ -110,25 +112,9 @@ test.describe('Navigation & Routing @ui', () => {
       await expect(page).toHaveURL(/\/terms/, { timeout: E2E_TIMEOUT_NAV_MS });
     });
 
-    test('pricing page Sign In button navigates to sign-in', async ({ page }) => {
-      test.skip(!isClerkConfigured(), 'Clerk not configured — requires both sk_ and pk_ keys');
-
-      await page.goto('/pricing');
-      await page.waitForLoadState('domcontentloaded');
-
-      const signInBtn = page.getByRole('button', { name: /sign in/i });
-
-      // When signed out, the Sign In button should be visible
-      await expect(signInBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
-
-      await signInBtn.click();
-
-      // The button calls router.push('/sign-in'). Use waitForURL instead
-      // of waitForLoadState — the latter resolves immediately on the
-      // current page and doesn't wait for Next.js client-side navigation.
-      await page.waitForURL('**/sign-in**', { timeout: E2E_TIMEOUT_LOAD_MS });
-      expect(page.url()).toMatch(/sign-in/);
-    });
+    // 'pricing page Sign In button navigates to sign-in' moved to
+    // auth-journey.spec.ts (@auth, #8632). It needs Clerk keys, which this @ui
+    // shard never has, so here it could only ever report `skipped`.
   });
 
   test.describe('404 Handling', () => {

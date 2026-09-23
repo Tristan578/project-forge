@@ -86,11 +86,20 @@ const ACCOUNTED_FOR: Record<string, { calls: number; reason: string }> = {
   'lib/ai/smartCamera.ts': { calls: 0, reason: 'comment' },
   'lib/monitoring/sentryConfig.ts': { calls: 0, reason: 'regex matched against error message text' },
   'lib/perf/baselines.ts': { calls: 1, reason: 'benchmark description string' },
+  'lib/perf/fixtures/fixtureScenes.ts': {
+    calls: 1,
+    reason: 'doc comment naming the load_scene command the fixture JSON is fed to; the builders only return data',
+  },
   'app/blog/content/spawnforge-browser-ai-game-engine.tsx': { calls: 1, reason: 'prose code sample' },
 
   // --- Emitted into an exported game, which runs its own engine instance ---
   'lib/export/gameLoopFragment.ts': { calls: 0, reason: 'emits player JS; not a call in this app' },
   'lib/export/gameTemplate.ts': { calls: 3, reason: 'emits player JS; not a call in this app' },
+  'lib/export/sceneLoadFragment.ts': {
+    calls: 1,
+    reason:
+      "emits player JS (__forgeLoadScene) that dispatches load_scene through the export's own handle_command, passed in as `send`; the one call-shaped match is the doc comment quoting the pre-#10013 exporter call",
+  },
   'lib/export/zipExporter.ts': { calls: 2, reason: 'emits player JS; not a call in this app' },
 };
 

@@ -1,6 +1,6 @@
 # Command Reference
 
-Reference for all 374 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
+Reference for all 379 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -15,7 +15,7 @@ Reference for all 374 registered MCP commands. Registration does not imply that 
 - [Editor](#editor) (7 commands)
 - [Camera](#camera) (4 commands)
 - [History](#history) (2 commands)
-- [Query](#query) (16 commands)
+- [Query](#query) (18 commands)
 - [Runtime](#runtime) (12 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
@@ -43,7 +43,7 @@ Reference for all 374 registered MCP commands. Registration does not imply that 
 - [Skeleton2d](#skeleton2d) (13 commands)
 - [Modeling](#modeling) (6 commands)
 - [Security](#security) (2 commands)
-- [Performance](#performance) (7 commands)
+- [Performance](#performance) (10 commands)
 - [World_building](#world_building) (3 commands)
 - [Localization](#localization) (4 commands)
 - [Economy](#economy) (1 commands)
@@ -1789,6 +1789,48 @@ List saved recovery checkpoints for the current project, newest first
 ```
 
 Scope: `scene:read` | Token cost: 0
+
+---
+
+### `get_performance_report`
+
+Read the latest (or a named) performance report and the capture status. While a capture runs the status carries its phase and progress (0-1); once finished the report carries the measurement manifest (build SHA, fixture checksum and id, OS, exact browser version, GPU, backend, viewport, device memory, cache state, sample count), p50/p95/p99 frame time, first-interactive time, memory availability, every budget's observed value, limit and pass/fail/unknown status, and the overall verdict. Values the browser could not measure are 'unknown'. Raw frame samples are omitted unless includeSamples is true.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reportId` | string | No | A report id from this session or the pinned baseline. Defaults to the latest report. |
+| `includeSamples` | boolean | No | Include the raw frame-time samples (thousands of numbers). Default false: only their count. |
+
+**Example:**
+```json
+{
+  "command": "get_performance_report",
+  "params": {}
+}
+```
+
+Scope: `performance:read` | Token cost: 0
+
+---
+
+### `compare_performance_reports`
+
+Compare a performance report (default: latest) with a baseline (default: pinned). Fixture checksum, exact browser version and backend must be known and equal; source, first-interactive timing basis, device profile and capture protocol must match. Hidden-tab captures and known warm-versus-cold cache states are incompatible: no deltas or directional claim. Unknown cache state on either side is an advisory and retains deltas; equal cache conditions are not established. Compatible reports return p50/p95/p99 and first-interactive deltas with improved, regressed, unchanged (within 5% on p95), or inconclusive.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reportId` | string | No | Report to compare. Defaults to the latest report. |
+| `baselineReportId` | string | No | Report to compare against. Defaults to the pinned baseline. |
+
+**Example:**
+```json
+{
+  "command": "compare_performance_reports",
+  "params": {}
+}
+```
+
+Scope: `performance:read` | Token cost: 0
 
 ---
 
@@ -8617,6 +8659,66 @@ Select the mesh simplification algorithm used for LOD generation. 'qem' preserve
   "params": {
     "backend": "qem"
   }
+}
+```
+
+Scope: `performance:write` | Token cost: 0
+
+---
+
+### `capture_performance_report`
+
+Start a timed, manifest-pinned performance capture of the running scene: a warm-up, then a capture window of animation-frame times (default 10 s + 60 s). Returns immediately with status 'pending' and a captureId; poll get_performance_report for progress and the finished report (p50/p95/p99 frame time, first-interactive time, memory availability, fixture checksum, build SHA, exact browser version, GPU, backend, viewport, cache state, sample count, and a pass/fail/unknown verdict per budget of the device profile). A metric the browser cannot measure is reported as 'unknown', never 0, and never passes a budget. Authoring changes, scene/project changes and engine restarts invalidate an active capture without publishing a report, even if Undo restores the scene. Keep the editor workload unchanged until completion. Refused while another capture runs or when the engine is not loaded. Same controls as the profiler's Run capture button.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `warmupSeconds` | integer | No | Warm-up before measuring, whole seconds 0-60 (default 10). The frame-time budget is only judged on the profile protocol (10 s warm-up, 60 s capture). |
+| `captureSeconds` | integer | No | Capture window, whole seconds 5-300 (default 60). |
+| `profileId` | string | No | Device profile whose budgets judge the run, as id@version (default 'desktop@1': p95 frame time <= 16.7 ms, cold first interactive <= 5 s). |
+| `cacheState` | `"warm"` \| `"cold"` \| `"unknown"` | No | Declare the asset-cache state of the run. Omit to detect it from the engine binary's resource timing (unknown when it cannot be told). |
+
+**Example:**
+```json
+{
+  "command": "capture_performance_report",
+  "params": {}
+}
+```
+
+Scope: `performance:write` | Token cost: 0
+
+---
+
+### `set_performance_baseline`
+
+Pin a captured performance report as the baseline that compare_performance_reports uses by default (persisted in this browser), or clear the pin. Defaults to the latest report. Capturing never changes the pin, so a baseline pinned manually in the profiler survives later captures. Same as the profiler's Pin as baseline / Unpin baseline button.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reportId` | string | No | Report to pin (from get_performance_report). Defaults to the latest report of this session. |
+| `clear` | boolean | No | Clear the pinned baseline instead of setting one. |
+
+**Example:**
+```json
+{
+  "command": "set_performance_baseline",
+  "params": {}
+}
+```
+
+Scope: `performance:write` | Token cost: 0
+
+---
+
+### `cancel_performance_capture`
+
+Cancel the running performance capture. No report is kept. Errors when no capture is running. Same as the profiler's Cancel capture button.
+
+**Example:**
+```json
+{
+  "command": "cancel_performance_capture",
+  "params": {}
 }
 ```
 
