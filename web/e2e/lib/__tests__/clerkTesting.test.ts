@@ -38,6 +38,7 @@ import {
   frontendApiFromPublishableKey,
   isClerkTestEmail,
   planClerkTesting,
+  signInProgress,
   withTestingToken,
 } from '../clerkTesting';
 
@@ -340,5 +341,35 @@ describe('isClerkTestEmail', () => {
 
   it('exposes the documented fixed verification code', () => {
     expect(CLERK_TEST_EMAIL_CODE).toBe('424242');
+  });
+});
+
+// After the password step, <SignIn> either finishes (the browser leaves
+// /sign-in) or, under Device Trust, asks for an email code. Which sub-route it
+// shows that code on is clerk-js internals, loaded from Clerk's CDN at run
+// time, so the journey keys on the code FIELD instead of a route name.
+describe('signInProgress', () => {
+  it('reports left-sign-in once the browser is off /sign-in, whatever else is visible', () => {
+    expect(signInProgress('/', false)).toBe('left-sign-in');
+    expect(signInProgress('/dashboard', false)).toBe('left-sign-in');
+    expect(signInProgress('/dashboard', true)).toBe('left-sign-in');
+  });
+
+  it('treats a path that only starts with the letters /sign-in as off the sign-in page', () => {
+    expect(signInProgress('/sign-in-help', false)).toBe('left-sign-in');
+    expect(signInProgress('/sign-up', false)).toBe('left-sign-in');
+  });
+
+  it('reports verification-code on any /sign-in route that shows the code field', () => {
+    expect(signInProgress('/sign-in/client-trust', true)).toBe('verification-code');
+    expect(signInProgress('/sign-in/factor-two', true)).toBe('verification-code');
+    expect(signInProgress('/sign-in/some-future-step', true)).toBe('verification-code');
+  });
+
+  it('reports pending on /sign-in while no code field is showing', () => {
+    expect(signInProgress('/sign-in', false)).toBe('pending');
+    expect(signInProgress('/sign-in/', false)).toBe('pending');
+    expect(signInProgress('/sign-in/factor-one', false)).toBe('pending');
+    expect(signInProgress('/sign-in/client-trust', false)).toBe('pending');
   });
 });

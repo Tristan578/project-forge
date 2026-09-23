@@ -62,13 +62,16 @@ needs:
 3. **A `+clerk_test` email address**, such as `spawnforge-e2e+clerk_test@<your-domain>`. A suffix after
    `+clerk_test` also counts (Clerk's own Playwright example uses `testuser+clerk_test_123@example.com`,
    [docs](https://clerk.com/docs/guides/development/testing/playwright/test-sign-up-flows)). Clerk's Device
-   Trust asks for a second factor "when a user enters a valid password, hasn't enabled MFA, and is signing
-   in from a new device". It is on by default for applications created after November 14, 2025
-   ([docs](https://clerk.com/docs/guides/secure/client-trust)). Every CI browser is a new device. On a
+   Trust asks for a second factor when a user enters a valid password, has not enabled MFA, and signs in
+   from a new device. It is on by default for applications created after November 14, 2025
+   ([docs](https://clerk.com/docs/guides/secure/device-trust)). Every CI browser is a new device. On a
    development instance, a `+clerk_test` address receives no email and accepts the fixed code `424242`
    ([docs](https://clerk.com/docs/guides/development/testing/test-emails-and-phones)), which the spec enters
    when Clerk asks. Any other address cannot finish the journey once Device Trust applies. The global setup
    logs `+clerk_test address: yes|no` so the log shows which kind of address is configured.
+4. **Device Trust set to email code, if it is on.** Clerk picks "an email code, SMS code, or email link based
+   on your settings". The spec types a code into the field named **Enter verification code**, so it can
+   finish only the email-code method.
 
 ### Creating the user
 

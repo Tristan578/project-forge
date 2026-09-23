@@ -11,7 +11,7 @@
  * `signInThroughForm` drives the real `<SignIn>` form a person uses: email,
  * Continue, password, Continue. Clerk's Device Trust ("automatically enabled
  * for Clerk applications created after November 14, 2025",
- * https://clerk.com/docs/guides/secure/client-trust) asks a password sign-in
+ * https://clerk.com/docs/guides/secure/device-trust) asks a password sign-in
  * from a new device — which every CI browser is — for an email code. On a
  * development instance a `+clerk_test` address takes the fixed code 424242, so
  * the journey completes; any other address cannot, and the helper says so.
@@ -23,8 +23,10 @@ import {
   CLERK_TEST_EMAIL_CODE,
   bypassCaptcha,
   isClerkTestEmail,
+  signInProgress,
   withTestingToken,
   type SeededUserCredentials,
+  type SignInProgress,
 } from '../lib/clerkTesting';
 import { E2E_TIMEOUT_AUTH_MS, E2E_TIMEOUT_NAV_MS } from '../constants';
 
@@ -113,12 +115,28 @@ export async function signInThroughForm(page: Page, credentials: SeededUserCrede
   await password.fill(credentials.password);
   await continueButton.click();
 
-  const verificationStep = /^\/sign-in\/(client-trust|factor-two)(\/|$)/;
-  await page.waitForURL((url) => !url.pathname.startsWith('/sign-in') || verificationStep.test(url.pathname), {
-    timeout: E2E_TIMEOUT_AUTH_MS,
-  });
+  // Either the sign-in completes and the browser leaves /sign-in, or Device
+  // Trust asks for an email code. Poll for whichever happens, keyed on the code
+  // field rather than a guessed sub-route (signInProgress explains why). The
+  // field's accessible name is the one Clerk's own Playwright guide targets.
+  const code = page.getByRole('textbox', { name: 'Enter verification code' });
+  let progress = 'pending' as SignInProgress;
+  await expect
+    .poll(
+      async () => {
+        progress = signInProgress(new URL(page.url()).pathname, await code.isVisible());
+        return progress;
+      },
+      {
+        message:
+          'After the password step, <SignIn> neither left /sign-in nor asked for a verification code. ' +
+          'The failure screenshot shows the form; a wrong E2E_CLERK_TEST_PASSWORD shows as a form error.',
+        timeout: E2E_TIMEOUT_AUTH_MS,
+      },
+    )
+    .not.toBe('pending');
 
-  const verificationCodeRequested = verificationStep.test(new URL(page.url()).pathname);
+  const verificationCodeRequested = progress === 'verification-code';
   if (verificationCodeRequested) {
     if (!isClerkTestEmail(credentials.email)) {
       throw new Error(
@@ -127,10 +145,10 @@ export async function signInThroughForm(page: Page, credentials: SeededUserCrede
           '(docs/guides/e2e-clerk-test-user.md).',
       );
     }
-    const code = page.getByRole('textbox', { name: 'Enter verification code' });
-    await expect(code).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
     await code.pressSequentially(CLERK_TEST_EMAIL_CODE);
-    await page.waitForURL((url) => !url.pathname.startsWith('/sign-in'), { timeout: E2E_TIMEOUT_AUTH_MS });
+    await page.waitForURL((url) => signInProgress(url.pathname, false) === 'left-sign-in', {
+      timeout: E2E_TIMEOUT_AUTH_MS,
+    });
   }
 
   return { verificationCodeRequested };

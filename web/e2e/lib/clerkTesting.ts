@@ -322,6 +322,25 @@ export function bypassCaptcha(json: unknown): boolean {
   return changed;
 }
 
+export type SignInProgress = 'left-sign-in' | 'verification-code' | 'pending';
+
+/**
+ * Where a form sign-in stands after the password step, from what the browser
+ * shows. Keyed on the verification-code FIELD, not on a sub-route name: which
+ * `/sign-in/<step>` path `<SignIn>` uses for the Device Trust code is clerk-js
+ * internals, fetched from Clerk's CDN at run time, and a guessed route name
+ * that stopped matching would turn a working sign-in into a 30-second timeout.
+ * @param pathname The page's current `location.pathname`.
+ * @param verificationCodeVisible Whether the "Enter verification code" field is visible.
+ * @returns `left-sign-in` once off `/sign-in`, `verification-code` when Clerk
+ *   is asking for a code, otherwise `pending`.
+ */
+export function signInProgress(pathname: string, verificationCodeVisible: boolean): SignInProgress {
+  const onSignIn = pathname === '/sign-in' || pathname.startsWith('/sign-in/');
+  if (!onSignIn) return 'left-sign-in';
+  return verificationCodeVisible ? 'verification-code' : 'pending';
+}
+
 /**
  * True for a Clerk test email, which a development instance verifies with
  * {@link CLERK_TEST_EMAIL_CODE}. Clerk documents it two ways: "Any email with
