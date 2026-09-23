@@ -79,6 +79,7 @@ export interface ValueCorrection extends CorrectionCommon {
   readonly applied: CorrectionValue;
   readonly unit?: undefined;
   readonly appliedPoints?: undefined;
+  readonly usable?: undefined;
 }
 
 /**
@@ -100,6 +101,22 @@ export interface PointsCorrection extends CorrectionCommon {
   readonly applied: number;
   readonly unit: 'points';
   readonly appliedPoints: readonly CorrectionPoint[];
+  /**
+   * How many of the entries given were usable points — set only on a list
+   * refused for having fewer than two of them (`invalid-replaced` with a count
+   * in `requested`), so it is always 0 or 1.
+   *
+   * Neither count says it: `requested` counts every entry, usable or not, and
+   * `applied` counts the DEFAULT route that replaced them. Without it the only
+   * sentence available was "you gave 3 points, but a route needs at least 2
+   * usable points", which contradicts itself. A truncated or dropped route
+   * needs no such field — what it kept is `applied`.
+   *
+   * Optional because the sentence is still true without it (see
+   * {@link describeCorrection}); only a record that states a count the build
+   * could not have written is refused, by {@link isGameComponentFieldCorrection}.
+   */
+  readonly usable?: number;
 }
 
 export type GameComponentFieldCorrection = ValueCorrection | PointsCorrection;
@@ -212,6 +229,23 @@ function fieldLabel(component: GameComponentType, field: string): string {
   return Object.hasOwn(labels, field) ? labels[field] : field;
 }
 
+/**
+ * Why a refused route's entries were not enough, in words — or `null` when
+ * every entry was usable and the list was simply shorter than two.
+ *
+ * `given` counts every entry, usable or not, so a list of two or more that was
+ * still refused has to say the entries were the problem; "you gave 3 points,
+ * but a route needs at least 2" would contradict itself. Without a `usable`
+ * count, a refused list of two or more supports only "fewer than 2", and that
+ * is all it says.
+ */
+function unusableEntries(given: number, usable: number | undefined): string | null {
+  if (usable === undefined) return given < 2 ? null : 'fewer than 2 of them could be used';
+  if (usable >= given) return null;
+  if (usable === 0) return given === 1 ? 'it could not be used' : 'none of them could be used';
+  return `only ${usable} could be used`;
+}
+
 function formatValue(value: CorrectionValue, unit: 'points' | undefined): string {
   if (value === null) return 'an empty value';
   if (typeof value === 'number') {
@@ -255,9 +289,13 @@ export function describeCorrection(c: GameComponentFieldCorrection, entityName?:
     }
     case 'invalid-replaced':
       if (c.unit === 'points') {
-        return typeof c.requested === 'number'
+        if (typeof c.requested !== 'number') {
+          return `${where}: ${requested} is not a list of points, so the default route (${applied}) was used instead.`;
+        }
+        const unusable = unusableEntries(c.requested, c.usable);
+        return unusable === null
           ? `${where}: you gave ${requested}, but a route needs at least 2 usable points, so the default route (${applied}) was used instead.`
-          : `${where}: ${requested} is not a list of points, so the default route (${applied}) was used instead.`;
+          : `${where}: you gave ${requested}, but ${unusable}, and a route needs at least 2, so the default route (${applied}) was used instead.`;
       }
       return `${where}: ${requested} is not a value this field accepts, so ${applied} was used instead.`;
   }
@@ -385,6 +423,20 @@ function isRoute(value: unknown): value is readonly CorrectionPoint[] {
   return true;
 }
 
+/**
+ * Whether a route record's `usable` count is one the wire layer could have
+ * written: only on a list refused for having fewer than two usable entries
+ * (so 0 or 1), and never more than the entries given. Any other count would
+ * render a sentence the build never produces.
+ */
+function isRefusedRouteCount(c: Record<string, unknown>): boolean {
+  const { usable, requested } = c;
+  return c.reason === 'invalid-replaced'
+    && typeof requested === 'number'
+    && (usable === 0 || usable === 1)
+    && usable <= requested;
+}
+
 /** Whether `value` is a well-formed correction record. */
 export function isGameComponentFieldCorrection(value: unknown): value is GameComponentFieldCorrection {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -397,11 +449,14 @@ export function isGameComponentFieldCorrection(value: unknown): value is GameCom
     && isCorrectionValue(c.requested)
     && (c.entityId === undefined || typeof c.entityId === 'string');
   if (!common) return false;
-  if (c.unit === undefined) return c.appliedPoints === undefined && isCorrectionValue(c.applied);
+  if (c.unit === undefined) {
+    return c.appliedPoints === undefined && c.usable === undefined && isCorrectionValue(c.applied);
+  }
   // A route record is only well formed with the route its count describes.
   return c.unit === 'points'
     && isRoute(c.appliedPoints)
-    && c.applied === c.appliedPoints.length;
+    && c.applied === c.appliedPoints.length
+    && (c.usable === undefined || isRefusedRouteCount(c));
 }
 
 /**

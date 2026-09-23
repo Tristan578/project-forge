@@ -159,14 +159,18 @@ describe('buildStoreComponentWithReport — what IS a correction', () => {
       {
         component: 'movingPlatform',
         field: 'waypoints',
+        // Every entry given, usable or not…
         requested: 2,
         applied: 2,
         reason: 'invalid-replaced',
         unit: 'points',
         appliedPoints: defaultRoute,
+        // …and how many of them were usable, which neither count above says.
+        usable: 1,
       },
     ]);
-    expect(report('moving_platform', { waypoints: 'not a list' }).corrections).toEqual([
+    const notAList = report('moving_platform', { waypoints: 'not a list' }).corrections;
+    expect(notAList).toEqual([
       {
         component: 'movingPlatform',
         field: 'waypoints',
@@ -177,6 +181,30 @@ describe('buildStoreComponentWithReport — what IS a correction', () => {
         appliedPoints: defaultRoute,
       },
     ]);
+    // Not a list, so there are no entries to count — the key is absent, not
+    // `undefined` (which `toEqual` would read as absent too).
+    expect(Object.hasOwn(notAList[0], 'usable')).toBe(false);
+  });
+
+  it.each([
+    ['an empty list', [], 0, 0],
+    ['one usable point', [[1, 2, 3]], 1, 1],
+    ['one entry that is not a point', ['junk'], 1, 0],
+    ['two entries, one usable', [[1, 2, 3], 'junk'], 2, 1],
+    ['three entries, none usable', ['a', [1, 2], [0, Number.NaN, 0]], 3, 0],
+  ] as const)('counts the usable entries of a refused route: %s', (_label, waypoints, given, usable) => {
+    const [refused] = report('moving_platform', { waypoints }).corrections;
+    expect(refused).toMatchObject({ reason: 'invalid-replaced', requested: given, applied: 2, unit: 'points', usable });
+  });
+
+  it('carries no usable count on a route it kept', () => {
+    // Truncated and dropped routes already say what they kept: `applied`.
+    const records = [
+      ...report('moving_platform', { waypoints: route(300) }).corrections,
+      ...report('moving_platform', { waypoints: [[0, 0, 0], 'nope', [4, 5, 6]] }).corrections,
+    ];
+    expect(records.map((r) => r.reason)).toEqual(['truncated', 'dropped']);
+    for (const record of records) expect(Object.hasOwn(record, 'usable'), record.reason).toBe(false);
   });
 
   it('reports a non-number, an f32 overflow and a null as replaced by the default', () => {
@@ -398,6 +426,52 @@ describe('describeCorrection', () => {
     expect(describeCorrection(points(300, 64, 'truncated'))).not.toMatch(/\[/);
   });
 
+  // Board round 3: `requested` counts every entry given, usable or not, so a
+  // refused list of two or more entries read "you gave 2 points, but a route
+  // needs at least 2 usable points" — a sentence that contradicts itself. The
+  // cases are built by the real wire layer, not by hand, so the sentence is
+  // pinned to the record the build actually writes.
+  it.each([
+    [
+      [],
+      'you gave 0 points, but a route needs at least 2 usable points, so the default route (2 points) was used instead.',
+    ],
+    [
+      [[1, 2, 3]],
+      'you gave 1 point, but a route needs at least 2 usable points, so the default route (2 points) was used instead.',
+    ],
+    [
+      ['junk'],
+      'you gave 1 point, but it could not be used, and a route needs at least 2, so the default route (2 points) was used instead.',
+    ],
+    [
+      [[1, 2, 3], 'junk'],
+      'you gave 2 points, but only 1 could be used, and a route needs at least 2, so the default route (2 points) was used instead.',
+    ],
+    [
+      [[1, 2, 3], [1, 2], 'junk', [4, 5, Number.NaN]],
+      'you gave 4 points, but only 1 could be used, and a route needs at least 2, so the default route (2 points) was used instead.',
+    ],
+    [
+      ['a', [1, 2], [0, Number.NaN, 0]],
+      'you gave 3 points, but none of them could be used, and a route needs at least 2, so the default route (2 points) was used instead.',
+    ],
+  ] as const)('says why the route %j was refused without contradicting its own count', (waypoints, sentence) => {
+    const [refused] = report('moving_platform', { waypoints }).corrections;
+    expect(describeCorrection(refused)).toBe(`Moving Platform waypoints: ${sentence}`);
+  });
+
+  it('says only what a refused-route record without a usable count supports', () => {
+    // A record can arrive without the count (a hand-written MCP reply). Two or
+    // more entries and still refused means fewer than two were usable — true
+    // whatever the count was — and nothing more specific is claimed.
+    expect(describeCorrection(points(5, 2, 'invalid-replaced')))
+      .toBe('Moving Platform waypoints: you gave 5 points, but fewer than 2 of them could be used, and a route needs at least 2, so the default route (2 points) was used instead.');
+    // Fewer than two entries: the short list is the reason on its own.
+    expect(describeCorrection(points(1, 2, 'invalid-replaced')))
+      .toBe('Moving Platform waypoints: you gave 1 point, but a route needs at least 2 usable points, so the default route (2 points) was used instead.');
+  });
+
   it('quotes text, and describes what it did not echo', () => {
     expect(describeCorrection(c({ field: 'loopMode', requested: 'bounce', applied: 'pingPong', reason: 'invalid-replaced' })))
       .toBe('Moving Platform loop mode: "bounce" is not a value this field accepts, so "pingPong" was used instead.');
@@ -562,6 +636,41 @@ describe('readCorrections', () => {
         { ...cut, unit: 'metres' },
       ],
     })).toEqual([cut]);
+  });
+
+  it('keeps a usable count only where the wire layer could have written it', () => {
+    const refused = {
+      component: 'movingPlatform', field: 'waypoints', requested: 2, applied: 2, reason: 'invalid-replaced', unit: 'points',
+      appliedPoints: [[0, 0, 0], [0, 3, 0]], usable: 1,
+    };
+    const cut = {
+      component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 2, reason: 'truncated', unit: 'points',
+      appliedPoints: [[0, 0, 0], [1, 0, 0]],
+    };
+    // Each of these would render a sentence the build never produces.
+    const forged = [
+      // A refused route has fewer than two usable entries, by definition.
+      { ...refused, usable: 2 },
+      // More usable entries than were given.
+      { ...refused, requested: 0, usable: 1 },
+      { ...refused, usable: -1 },
+      { ...refused, usable: 0.5 },
+      { ...refused, usable: '1' },
+      { ...refused, usable: null },
+      // Not a list, so there were no entries to count.
+      { ...refused, requested: 'not a list', usable: 0 },
+      // A kept route already says what it kept.
+      { ...cut, usable: 1 },
+      { ...cut, reason: 'dropped', usable: 1 },
+      // Not a route at all.
+      { ...good, usable: 1 },
+    ];
+    expect(forged.filter((c) => isGameComponentFieldCorrection(c))).toEqual([]);
+    // Non-vacuous: the well-formed records beside them are kept, with and
+    // without the count (a hand-written reply may leave it out).
+    const { usable: _count, ...withoutCount } = refused;
+    expect(readCorrections({ corrections: [refused, withoutCount, { ...refused, usable: 0 }, ...forged] }))
+      .toEqual([refused, withoutCount, { ...refused, usable: 0 }]);
   });
 
   it('drops a vector with a hole in it', () => {

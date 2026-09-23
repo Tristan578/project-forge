@@ -518,9 +518,27 @@ const num = (v: unknown, fallback: number, range: EngineRange): number =>
 const MAX_WAYPOINTS = 64;
 
 /**
+ * The fewest points a route may have.
+ *
+ * `if !waypoints.is_empty()` in the engine: an all-malformed list leaves the
+ * Rust `Default` route standing rather than an empty one, which
+ * `system_moving_platform` would refuse to move at all.
+ *
+ * Two, not one. `system_moving_platform` early-returns below two waypoints and
+ * reports nothing, so a surviving single point is a platform the store shows a
+ * route for and the engine never moves — the same silent divergence an empty
+ * list produces, just harder to see in the inspector.
+ */
+const MIN_ROUTE_POINTS = 2;
+
+/**
  * Mirror the engine's waypoint parse: keep the first `MAX_WAYPOINTS` entries
- * that are 3-element arrays of engine-finite numbers, and answer `null` — the
- * caller keeps the default route — if that leaves fewer than two.
+ * that are 3-element arrays of engine-finite numbers. `null` for a value that
+ * is not a list at all.
+ *
+ * A list that leaves fewer than `MIN_ROUTE_POINTS` is still answered with what
+ * it left, so the report can say how many of its entries were usable; the
+ * caller keeps the default route for it.
  *
  * The store used to cast `props.waypoints` through untouched. The engine
  * `filter_map`s each entry, so an array carrying a 2-element point or a string
@@ -553,15 +571,7 @@ const parseWaypoints = (
     if (!isEngineFinite(x) || !isEngineFinite(y) || !isEngineFinite(z)) continue;
     points.push([x, y, z]);
   }
-  // `if !waypoints.is_empty()` in the engine: an all-malformed list leaves the
-  // Rust `Default` route standing rather than an empty one, which
-  // `system_moving_platform` would refuse to move at all.
-  //
-  // Two, not one. `system_moving_platform` early-returns below two waypoints and
-  // reports nothing, so a surviving single point is a platform the store shows a
-  // route for and the engine never moves — the same silent divergence an empty
-  // list produces, just harder to see in the inspector.
-  return points.length >= 2 ? { points, truncated, given: v.length } : null;
+  return { points, truncated, given: v.length };
 };
 
 /**
@@ -736,6 +746,7 @@ function fieldReader<T extends object>(
     requested: CorrectionValue,
     route: readonly (readonly [number, number, number])[],
     reason: CorrectionReason,
+    usable?: number,
   ): void => {
     sink?.corrections.push({
       component,
@@ -745,6 +756,9 @@ function fieldReader<T extends object>(
       reason,
       unit: 'points',
       appliedPoints: route.map(([x, y, z]) => [x, y, z] as const),
+      // Absent, not `undefined`, on every record that does not count its
+      // entries: the key's presence is itself part of the record.
+      ...(usable === undefined ? {} : { usable }),
     });
   };
   /** The shared shape of every scalar field: coerce, then compare. */
@@ -790,6 +804,12 @@ function fieldReader<T extends object>(
      * issue asks us not to show. The caller's list is never echoed; the route
      * that was APPLIED rides along as `appliedPoints`, which the author never
      * reads and a marker needs (see `recordRoute`).
+     *
+     * A list refused for leaving fewer than `MIN_ROUTE_POINTS` also carries
+     * `usable`, how many of its entries were points. `requested` counts every
+     * entry given and `applied` the default route, so without it a refused list
+     * of two or more could only be described as "you gave 2 points, but a route
+     * needs at least 2" — a sentence that contradicts itself.
      */
     waypoints: (
       field: Field,
@@ -798,17 +818,19 @@ function fieldReader<T extends object>(
     ): [number, number, number][] => {
       const supplied = named(field, v);
       const parsed = parseWaypoints(v);
+      const route = parsed !== null && parsed.points.length >= MIN_ROUTE_POINTS ? parsed.points : null;
       if (supplied) {
         if (parsed === null) {
-          const requested = Array.isArray(v) ? v.length : summarizeValue(v);
-          recordRoute(field, requested, fallback, 'invalid-replaced');
+          recordRoute(field, summarizeValue(v), fallback, 'invalid-replaced');
+        } else if (route === null) {
+          recordRoute(field, parsed.given, fallback, 'invalid-replaced', parsed.points.length);
         } else if (parsed.truncated) {
-          recordRoute(field, parsed.given, parsed.points, 'truncated');
-        } else if (parsed.points.length !== parsed.given) {
-          recordRoute(field, parsed.given, parsed.points, 'dropped');
+          recordRoute(field, parsed.given, route, 'truncated');
+        } else if (route.length !== parsed.given) {
+          recordRoute(field, parsed.given, route, 'dropped');
         }
       }
-      return parsed?.points ?? fallback;
+      return route ?? fallback;
     },
   };
 }

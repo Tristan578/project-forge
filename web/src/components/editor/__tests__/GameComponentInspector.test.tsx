@@ -758,10 +758,12 @@ describe('GameComponentInspector', () => {
 
     describe('a route marker', () => {
       // "You gave 1 point" left the default route standing: two points, the
-      // same count as plenty of routes the author could put there next.
+      // same count as plenty of routes the author could put there next. The
+      // one point was usable (`usable: 1`), as the wire layer records it for
+      // `waypoints: [[1, 2, 3]]`.
       const routeReplaced = {
         component: 'movingPlatform', field: 'waypoints', requested: 1, applied: 2, reason: 'invalid-replaced',
-        unit: 'points', appliedPoints: [[0, 0, 0], [0, 3, 0]],
+        unit: 'points', appliedPoints: [[0, 0, 0], [0, 3, 0]], usable: 1,
       };
       const routeSentence = 'Moving Platform waypoints: you gave 1 point, but a route needs at least 2 usable points, '
         + 'so the default route (2 points) was used instead.';
@@ -966,7 +968,7 @@ describe('GameComponentInspector', () => {
             movingPlatform: {
               waypoints: {
                 component: 'movingPlatform', field: 'waypoints', requested: 1, applied: 2, reason: 'invalid-replaced',
-                unit: 'points', appliedPoints: [[0, 0, 0], [0, 3, 0]],
+                unit: 'points', appliedPoints: [[0, 0, 0], [0, 3, 0]], usable: 1,
               },
             },
             health: {
