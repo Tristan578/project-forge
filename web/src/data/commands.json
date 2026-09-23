@@ -5534,6 +5534,33 @@
       "visibility": "public"
     },
     {
+      "name": "set_completion_mode",
+      "description": "Set how the open scene's game counts as complete. \"win\" (what a scene with no mode plays as) lets Play start only when at least one win condition the player can complete exists; \"endless\", \"sandbox\" and \"narrative\" let a game with no win condition play and pass verification. A win condition the scene does have is still validated in every mode. Saved with the scene file and undoable from Scene Settings. Set it when the creator asks for a sandbox, endless or story game; never infer it from entity names.",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "win",
+              "endless",
+              "sandbox",
+              "narrative"
+            ],
+            "description": "win: requires a completable win condition. endless: score or survival, no final win. sandbox: a toy with no goal. narrative: ends through authored story progression."
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
       "name": "add_game_component",
       "description": "Add a pre-built game component (e.g., CharacterController, Health, Collectible) to an entity",
       "category": "game_components",

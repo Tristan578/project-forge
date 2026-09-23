@@ -10,6 +10,7 @@ import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
 import { isValidSceneFile } from '@/lib/scenes/sceneValidation';
+import { COMPLETION_MODE_INFO } from '@/lib/playMode/completionMode';
 
 /**
  * Read the live scene back out of the engine before a mutation moves off it
@@ -421,6 +422,34 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     return {
       success: true,
       result: { message: `Loaded scene "${p.data.sceneName}" with ${p.data.transitionType || 'fade'} transition` },
+    };
+  },
+
+  /**
+   * The typed in-app AI operation for the scene's completion mode
+   * (idea.FR-1.OP-04, #9998).
+   *
+   * Deliberately NOT a `z.enum` here: the raw `mode` goes straight to
+   * `setCompletionMode`, the store action the manual picker calls, which owns
+   * validation. So the tool and the picker accept the same values and refuse
+   * the rest with the same words — parity by construction, not by two schemas
+   * agreeing. The change is recorded in the picker's undo history, so a mode
+   * the AI chose is one Undo away, and a later targeted AI edit to entities
+   * never touches it.
+   */
+  set_completion_mode: async (args, ctx): Promise<ExecutionResult> => {
+    const result = ctx.store.setCompletionMode(args.mode);
+    if (!result.ok) return { success: false, error: result.error };
+    const info = COMPLETION_MODE_INFO[result.mode];
+    return {
+      success: true,
+      result: {
+        mode: result.mode,
+        changed: result.changed,
+        message: result.changed
+          ? `Completion mode set to ${info.label}. ${info.description}`
+          : `Completion mode is already ${info.label}.`,
+      },
     };
   },
 
