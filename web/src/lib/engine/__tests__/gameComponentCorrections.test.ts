@@ -679,6 +679,99 @@ describe('readCorrections', () => {
     expect(readCorrections({ corrections: [{ ...good, applied: holed }] })).toEqual([]);
   });
 
+  // Board round 4 (PR #10187): the guard checked `component` against the known
+  // components but let `field` be any string, and let a route record sit on any
+  // field. `fieldLabel` falls back to the raw key, so a hand-written reply of
+  // `{ component: 'movingPlatform', field: 'maxHp', … }` rendered "Moving
+  // Platform maxHp", a note the wire layer never wrote. The wire layer's
+  // `fieldReader` types its field names as `keyof` the component's data, so a
+  // real record never names anything else.
+  describe('holds a record to what the wire layer can write', () => {
+    const cut = {
+      component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 2, reason: 'truncated', unit: 'points',
+      appliedPoints: [[0, 0, 0], [1, 0, 0]],
+    };
+
+    it('keeps a record only on a field its own component has', () => {
+      const forged = [
+        // Another component's field.
+        { ...good, field: 'maxHp' },
+        { ...good, component: 'health', field: 'loopMode' },
+        // No component's field.
+        { ...good, field: 'speeed' },
+        { ...good, field: '' },
+        // Inherited, not own: `in` would let these through.
+        { ...good, field: 'toString' },
+        { ...good, field: 'constructor' },
+        { ...good, field: '__proto__' },
+        { ...good, field: 7 },
+      ];
+      expect(forged.filter((c) => isGameComponentFieldCorrection(c))).toEqual([]);
+      // Non-vacuous: the same record on the field it belongs to is kept.
+      expect(readCorrections({ corrections: [good, ...forged] })).toEqual([good]);
+    });
+
+    it('keeps a route record only on the route field, and the route field only as a route', () => {
+      const forged = [
+        // A route on a scalar field of the component that has a route.
+        { ...cut, field: 'speed' },
+        { ...cut, field: 'pauseDuration' },
+        // A route on another component's field.
+        { ...cut, component: 'health', field: 'maxHp' },
+        { ...cut, component: 'spawner', field: 'spawnOffset' },
+        // The route field reported as a plain value. `recordRoute` is the only
+        // writer for it, and every record it writes carries the unit.
+        { component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated' },
+        { component: 'movingPlatform', field: 'waypoints', requested: 'x', applied: [0, 0, 0], reason: 'invalid-replaced' },
+      ];
+      expect(forged.filter((c) => isGameComponentFieldCorrection(c))).toEqual([]);
+      expect(readCorrections({ corrections: [cut, ...forged] })).toEqual([cut]);
+    });
+
+    it('keeps a reason only on the kind of record the wire layer gives it', () => {
+      // `truncated` and `dropped` describe entries of a list; `clamped` and
+      // `rounded` describe one number. Crossed over, each renders a sentence
+      // the build never produces ("you gave 99999; only the first 1000 were
+      // kept" about a speed).
+      const forged = [
+        { ...good, reason: 'truncated' },
+        { ...good, reason: 'dropped' },
+        { ...cut, reason: 'clamped' },
+        { ...cut, reason: 'rounded' },
+      ];
+      expect(forged.filter((c) => isGameComponentFieldCorrection(c))).toEqual([]);
+      expect(readCorrections({ corrections: [good, cut, ...forged] })).toEqual([good, cut]);
+    });
+
+    it('keeps every record the wire layer actually writes, directly and after a JSON round trip', () => {
+      // The other side of the three cases above: a tighter guard must not
+      // refuse a real record. Every field of every component, given a value no
+      // field accepts, plus each reason the wire layer can give.
+      const written: GameComponentFieldCorrection[] = [];
+      for (const name of ENGINE_COMPONENT_TYPES) {
+        const fields = Object.keys(gameComponentFields(buildStoreComponent(name)!));
+        written.push(...report(name, Object.fromEntries(fields.map((f) => [f, Symbol('junk')]))).corrections);
+      }
+      written.push(
+        ...report('moving_platform', { speed: 99999, waypoints: route(300) }).corrections,
+        ...report('moving_platform', { waypoints: [[0, 0, 0], 'junk', [1, 0, 0]] }).corrections,
+        ...report('moving_platform', { waypoints: [[1, 2, 3], 'junk'] }).corrections,
+        ...report('collectible', { value: 10.4 }).corrections,
+      );
+      // The sweep reached every reason on the kind of record that carries it.
+      const kinds = new Set(written.map((c) => `${c.unit ?? 'value'}:${c.reason}`));
+      expect([...kinds].sort()).toEqual([
+        'points:dropped', 'points:invalid-replaced', 'points:truncated',
+        'value:clamped', 'value:invalid-replaced', 'value:rounded',
+      ]);
+      expect(written.filter((c) => c.usable !== undefined)).toHaveLength(1);
+
+      expect(readCorrections({ corrections: written })).toEqual(written);
+      const relayed = JSON.parse(JSON.stringify({ corrections: written })) as { corrections: unknown[] };
+      expect(readCorrections(relayed)).toEqual(relayed.corrections);
+    });
+  });
+
   it('reads nothing from a result without its own corrections key', () => {
     expect(readCorrections(undefined)).toEqual([]);
     expect(readCorrections('Added')).toEqual([]);

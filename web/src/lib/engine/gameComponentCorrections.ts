@@ -383,9 +383,28 @@ export function correctionMatchesValue(c: GameComponentFieldCorrection, current:
 // Reading corrections back out of an untrusted result
 // ---------------------------------------------------------------------------
 
-const REASONS: ReadonlySet<string> = new Set<CorrectionReason>([
-  'clamped', 'rounded', 'truncated', 'dropped', 'invalid-replaced',
-]);
+/**
+ * The reasons each kind of record can carry, as the wire layer gives them:
+ * `record` (every scalar and vector field) clamps, rounds or replaces a value,
+ * and `recordRoute` (the one route field) cuts, thins or replaces a list.
+ * Crossed over, a reason renders a sentence the build never produces.
+ */
+const VALUE_REASONS: ReadonlySet<string> = new Set<CorrectionReason>(['clamped', 'rounded', 'invalid-replaced']);
+const ROUTE_REASONS: ReadonlySet<string> = new Set<CorrectionReason>(['truncated', 'dropped', 'invalid-replaced']);
+
+/**
+ * Whether `field` is one of `component`'s own store fields — the only names the
+ * wire layer can write, since `fieldReader` types them as `keyof` the
+ * component's data. An own-key check, so `toString` or `__proto__` is not one.
+ */
+function isComponentField(component: GameComponentType, field: string): boolean {
+  return Object.hasOwn(FIELD_LABELS[component], field);
+}
+
+/** The one field the wire layer reports as a route, in counts (`recordRoute`). */
+function isRouteField(component: GameComponentType, field: string): boolean {
+  return component === 'movingPlatform' && field === 'waypoints';
+}
 
 /**
  * Whether `value` is an array of `length` numbers with no holes. Indexed rather
@@ -437,23 +456,38 @@ function isRefusedRouteCount(c: Record<string, unknown>): boolean {
     && usable <= requested;
 }
 
-/** Whether `value` is a well-formed correction record. */
+/**
+ * Whether `value` is a correction record the wire layer could have written.
+ *
+ * Well formed is not enough: a record naming a field its component does not
+ * have, a route on a field that is not a route, or a reason on the wrong kind
+ * of record all render as sentences the build never produces — and the
+ * sentence falls back to the raw key for an unknown field.
+ */
 export function isGameComponentFieldCorrection(value: unknown): value is GameComponentFieldCorrection {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
-  const common = typeof c.component === 'string'
-    && Object.hasOwn(COMPONENT_LABELS, c.component)
-    && typeof c.field === 'string'
+  if (typeof c.component !== 'string' || !Object.hasOwn(COMPONENT_LABELS, c.component)) return false;
+  const component = c.component as GameComponentType;
+  const common = typeof c.field === 'string'
+    && isComponentField(component, c.field)
     && typeof c.reason === 'string'
-    && REASONS.has(c.reason)
     && isCorrectionValue(c.requested)
     && (c.entityId === undefined || typeof c.entityId === 'string');
   if (!common) return false;
+  const route = isRouteField(component, c.field as string);
   if (c.unit === undefined) {
-    return c.appliedPoints === undefined && c.usable === undefined && isCorrectionValue(c.applied);
+    return !route
+      && VALUE_REASONS.has(c.reason as string)
+      && c.appliedPoints === undefined
+      && c.usable === undefined
+      && isCorrectionValue(c.applied);
   }
-  // A route record is only well formed with the route its count describes.
-  return c.unit === 'points'
+  // A route record is only well formed on the route field, with the route its
+  // count describes.
+  return route
+    && c.unit === 'points'
+    && ROUTE_REASONS.has(c.reason as string)
     && isRoute(c.appliedPoints)
     && c.applied === c.appliedPoints.length
     && (c.usable === undefined || isRefusedRouteCount(c));
