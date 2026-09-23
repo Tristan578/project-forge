@@ -72,8 +72,9 @@ function EditorPageContent() {
         useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(project.sceneData));
         // Same guarantee for the completion mode (#9998). When `loadScene`
         // does reach the engine it stages this very value for SCENE_LOADED, so
-        // the two agree; when it defers (the cold open), this is the only
-        // thing that stops a sandbox project reopening as a win game.
+        // the two agree; when it defers (the cold open — nothing re-issues that
+        // load yet, #10192), this is the only thing that stops a sandbox
+        // project reopening as a win game.
         useEditorStore.getState().hydrateCompletionMode(readCompletionModeFromSceneData(project.sceneData));
         setLoading(false);
       } catch (err) {
