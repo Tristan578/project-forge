@@ -25,11 +25,12 @@
  * health observes it.
  *
  * On entering Play, `manage_character_controller_lifecycle`
- * (`engine/src/core/character_controller.rs`) swaps the player's dynamic body
- * for a kinematic character controller and opts it into kinematic-vs-static
- * contacts, which is how the fixed sensors above produce collision pairs at
- * all. Proving those outcomes in the running game is #10163; #10159 asserts
- * only that the game loads and enters Play.
+ * (`engine/src/core/character_controller.rs`) gives a character that has a
+ * collider a kinematic controller and opts it into kinematic-vs-static
+ * contacts; a character without one keeps the legacy raw-translation path and
+ * the engine logs that it was skipped. Observing which path this player takes,
+ * and the win and lose outcomes, is #10163. #10159 asserts only that the game
+ * loads and enters Play.
  */
 import type { PhysicsData } from '@/stores/slices/types';
 import {
