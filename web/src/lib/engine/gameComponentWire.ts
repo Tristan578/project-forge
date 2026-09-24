@@ -151,6 +151,56 @@ function propertiesOf(component: GameComponentData): Record<string, unknown> {
 }
 
 /**
+ * Rebuild `existing` with `props` layered over its CURRENT fields — the partial
+ * update `update_game_component` promises ("property values to update").
+ *
+ * `buildStoreComponent` fills every field the caller did not name with the
+ * component's DEFAULT, and `updateGameComponent` replaces the stored component
+ * with the result, so `{ speed: 5 }` on a platform with a six-point route used
+ * to leave it with the default two-point route, `loopMode: 'pingPong'` and the
+ * default pause (#10144). Merging the current values first makes an unnamed
+ * field keep its value; the merged component then goes through the same
+ * coercions and clamps as any other, and the engine receives all of it.
+ *
+ * `props` is read in the store vocabulary, as `buildStoreComponent` reads it.
+ * An explicit `undefined` in `props` is ignored rather than resetting a field —
+ * a tool call cannot express "back to default" through it.
+ * @param existing The component as the store currently holds it.
+ * @param props The fields to change.
+ * @returns The rebuilt component, or `null` if `existing.type` is unknown.
+ */
+export function mergeStoreComponentProps(
+  existing: GameComponentData,
+  props: Record<string, unknown>,
+): GameComponentData | null {
+  return mergeStoreComponentPropsWithReport(existing, props)?.component ?? null;
+}
+
+/**
+ * `mergeStoreComponentProps` with the write report: the corrections the
+ * engine's limits applied to the NAMED fields, and `supplied` restricted to
+ * those names. The carried fields are read back from the stored component,
+ * not written by the caller, so a stale adjustment marker on one of them has
+ * to survive this write — reporting them as supplied would clear it.
+ */
+export function mergeStoreComponentPropsWithReport(
+  existing: GameComponentData,
+  props: Record<string, unknown>,
+): BuiltGameComponent | null {
+  const named = Object.fromEntries(
+    Object.entries(ownEnumerableSnapshot(props)).filter(([, value]) => value !== undefined),
+  );
+  const built = buildStoreComponentWithReport(existing.type, { ...gameComponentFields(existing), ...named });
+  if (built === null) return null;
+  // `supplied` is read off a build over the named props alone, so a carried
+  // field — read back from the store, never written — cannot count as
+  // supplied. The corrections still come from the merged build, where a clamp
+  // can depend on a carried field (currentHp against the stored maxHp).
+  const namedOnly = buildStoreComponentWithReport(existing.type, named);
+  return { ...built, supplied: namedOnly?.supplied ?? [] };
+}
+
+/**
  * Re-run a complete component through the same coercions a freshly-built one gets.
  *
  * The inspector edits a component field-by-field and hands the whole object back,

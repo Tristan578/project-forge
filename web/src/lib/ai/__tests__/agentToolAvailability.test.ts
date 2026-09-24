@@ -15,7 +15,7 @@ vi.mock('ai', async () => {
     stepCountIs: vi.fn(),
   };
 });
-vi.mock('@ai-sdk/anthropic', () => ({ anthropic: vi.fn() }));
+vi.mock('@ai-sdk/anthropic', () => ({ createAnthropic: vi.fn(() => ({ languageModel: vi.fn() })) }));
 vi.mock('@ai-sdk/gateway', () => ({ gateway: vi.fn() }));
 vi.mock('@/lib/ai/toolAdapter', () => ({
   convertManifestToolsToSdkTools: vi.fn((tools: Array<{ name: string }>) => tools),

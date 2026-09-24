@@ -6,10 +6,11 @@ use crate::core::{
     shader_effects::{ShaderEffectData, ForgeMaterial},
 };
 
-// Editor-only imports. Only three systems in this file survive a `runtime`
-// build — `sync_extended_material_data`, `sync_custom_wgsl_uniforms` and
-// `sync_forge_shader_time` — and they need just `MaterialData`,
-// `ShaderEffectData` and `ForgeMaterial`. Everything below feeds the
+// Editor-only imports. Four systems in this file survive a `runtime` build —
+// `sync_extended_material_data`, `sync_custom_wgsl_uniforms`,
+// `sync_forge_shader_time` and `apply_custom_wgsl_source_updates` — and they
+// need just `MaterialData`, `ShaderEffectData` and `ForgeMaterial` (the WGSL
+// drain names its own types by full path). Everything below feeds the
 // selection-emit, environment, skybox, post-processing and shader appliers, all
 // of which already carry `#[cfg(not(feature = "runtime"))]`.
 #[cfg(not(feature = "runtime"))]
@@ -525,9 +526,14 @@ pub(super) fn emit_shader_on_selection(
 ///
 /// Hot-swapping the Shader asset at CUSTOM_WGSL_SHADER_HANDLE triggers Bevy's
 /// pipeline recompilation for all `CustomWgslMaterial` instances automatically.
-#[cfg(not(feature = "runtime"))]
+///
+/// Compiled in EVERY build, including `runtime`: `apply_scene_load` runs there
+/// too (#10195) and queues a hot-swap for a scene that carries custom WGSL, so
+/// without this drain an exported game rendered its custom-shader materials
+/// with the passthrough shader. Types are named by full path because this
+/// file's `PendingCommands` and `events` imports are editor-only.
 pub(super) fn apply_custom_wgsl_source_updates(
-    mut pending: ResMut<PendingCommands>,
+    mut pending: ResMut<crate::core::pending_commands::PendingCommands>,
     mut source: ResMut<crate::core::custom_wgsl::CustomWgslSource>,
     mut shaders: ResMut<Assets<bevy::shader::Shader>>,
 ) {
@@ -544,7 +550,7 @@ pub(super) fn apply_custom_wgsl_source_updates(
             source.compile_error = validation.error;
             source.user_code = update.user_code;
             source.name = update.name;
-            events::emit_custom_wgsl_source_changed(&source);
+            crate::bridge::events::emit_custom_wgsl_source_changed(&source);
             continue;
         }
 
@@ -567,7 +573,7 @@ pub(super) fn apply_custom_wgsl_source_updates(
             source.user_code = update.user_code;
             source.name = update.name;
             tracing::error!("WGSL template missing FORGE_USER_CODE_INJECTION_POINT placeholder");
-            events::emit_custom_wgsl_source_changed(&source);
+            crate::bridge::events::emit_custom_wgsl_source_changed(&source);
             continue;
         }
 
@@ -590,7 +596,7 @@ pub(super) fn apply_custom_wgsl_source_updates(
 
         source.user_code = update.user_code;
         source.name = update.name;
-        events::emit_custom_wgsl_source_changed(&source);
+        crate::bridge::events::emit_custom_wgsl_source_changed(&source);
     }
 }
 

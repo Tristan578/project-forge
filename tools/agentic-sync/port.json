@@ -3,11 +3,7 @@
   "skills": {
     "source": ".claude/skills",
     "target": ".agents/skills",
-    "independent": {
-      "game-engine": "exists on both sides as a real directory and the two have drifted; which side is canonical is undecided, so neither is overwritten. Tracked by #10131 — empty this list there",
-      "kanban": "exists on both sides as a real directory and the two have drifted; which side is canonical is undecided, so neither is overwritten. Tracked by #10131 — empty this list there",
-      "web-accessibility": "exists on both sides as a real directory and the two have drifted; which side is canonical is undecided, so neither is overwritten. Tracked by #10131 — empty this list there"
-    }
+    "independent": {}
   },
   "agents": {
     "source": ".claude/agents",

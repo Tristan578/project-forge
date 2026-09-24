@@ -25,8 +25,13 @@ vi.mock('ai', async () => {
   };
 });
 
+// The direct branch builds its client with `createAnthropic(auth)` (#8858) so
+// the auth it was given is observable per call.
+const mockCreateAnthropic = vi.fn((auth: Record<string, unknown>) => ({
+  languageModel: (id: string) => ({ _provider: 'anthropic', id, _auth: auth }),
+}));
 vi.mock('@ai-sdk/anthropic', () => ({
-  anthropic: vi.fn((id: string) => ({ _provider: 'anthropic', id })),
+  createAnthropic: (auth: Record<string, unknown>) => mockCreateAnthropic(auth),
 }));
 
 vi.mock('@ai-sdk/gateway', () => ({
@@ -370,3 +375,45 @@ describe('createSpawnforgeAgent — providerOptions.gateway (PF-969 / #8954)', (
   });
 });
 
+// ---------------------------------------------------------------------------
+// Direct Anthropic client auth (#8858)
+// ---------------------------------------------------------------------------
+
+describe('createSpawnforgeAgent — direct Anthropic client auth (#8858)', () => {
+  beforeEach(() => {
+    mockToolLoopAgent.mockClear();
+    mockCreateAnthropic.mockClear();
+    vi.unstubAllEnvs();
+  });
+
+  function modelArg(): { _provider: string; id: string; _auth: Record<string, unknown> } {
+    return (mockToolLoopAgent.mock.calls[0][0] as { model: { _provider: string; id: string; _auth: Record<string, unknown> } }).model;
+  }
+
+  it('with no override, builds the client from ANTHROPIC_API_KEY exactly as the default singleton read it', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-api03-static-key');
+    createSpawnforgeAgent(baseOptions);
+    expect(mockCreateAnthropic).toHaveBeenCalledTimes(1);
+    expect(mockCreateAnthropic).toHaveBeenCalledWith({ apiKey: 'sk-ant-api03-static-key' });
+    expect(modelArg()).toEqual({ _provider: 'anthropic', id: AI_MODEL_PRIMARY, _auth: { apiKey: 'sk-ant-api03-static-key' } });
+  });
+
+  it('uses the federated authToken override INSTEAD of the static key', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-api03-static-key');
+    createSpawnforgeAgent({ ...baseOptions, anthropicAuthOverride: { authToken: 'sk-ant-oat01-federated' } });
+    // Exactly the override — no apiKey alongside it (the SDK throws when both are set).
+    expect(mockCreateAnthropic).toHaveBeenCalledWith({ authToken: 'sk-ant-oat01-federated' });
+    expect(modelArg()._auth).toEqual({ authToken: 'sk-ant-oat01-federated' });
+  });
+
+  it('never builds an Anthropic client on the gateway backend, even with an override present', () => {
+    createSpawnforgeAgent({
+      ...baseOptions,
+      isDirectBackend: false,
+      model: 'anthropic/claude-sonnet-5',
+      anthropicAuthOverride: { authToken: 'sk-ant-oat01-federated' },
+    });
+    expect(mockCreateAnthropic).not.toHaveBeenCalled();
+    expect(modelArg()._provider).toBe('gateway');
+  });
+});
