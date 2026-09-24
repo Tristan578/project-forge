@@ -13,6 +13,17 @@ vi.mock('lucide-react', () => ({
   CreditCard: (props: Record<string, unknown>) => <span data-testid="card-icon" {...props} />,
 }));
 
+// Marks every next/link render, so a link that regresses to a plain <a> --
+// a full page load that drops the editor's in-memory state, including a plan
+// waiting to be built -- fails here even though its href is unchanged.
+vi.mock('next/link', () => ({
+  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode } & Record<string, unknown>) => (
+    <a href={href} data-next-link="" {...rest}>
+      {children}
+    </a>
+  ),
+}));
+
 const mockState = {
   tokenBalance: null as null | { monthlyRemaining: number; monthlyTotal: number; addon: number; total: number; nextRefillDate: string | null },
   billingStatus: null as null | { tier: string; stripeCustomerId: string | null; billingCycleStart: string | null; subscriptionStatus: string | null },
@@ -68,6 +79,7 @@ describe('TokenWarningBanner', () => {
     // Was '/settings/billing', a route that has never existed (#9046), then the
     // Billing tab, which sells no token packs (#6831).
     expect(link.getAttribute('href')).toBe('/settings?tab=tokens');
+    expect(link.hasAttribute('data-next-link')).toBe(true);
   });
 
   it('dismisses token warning when X is clicked', () => {
@@ -100,6 +112,22 @@ describe('TokenWarningBanner', () => {
     render(<TokenWarningBanner />);
     const link = screen.getByText('Update Payment');
     expect(link.getAttribute('href')).toBe('/settings?tab=billing');
+    expect(link.hasAttribute('data-next-link')).toBe(true);
+  });
+
+  // 44px on mobile (the library Button's own minimum), 24px from sm up.
+  it.each([
+    ['Buy Tokens', 'Dismiss token warning'],
+    ['Update Payment', 'Dismiss payment warning'],
+  ])('gives %s and its dismiss control 44px mobile targets', (linkText, dismissLabel) => {
+    mockState.tokenBalance = { monthlyRemaining: 100, monthlyTotal: 10000, addon: 0, total: 100, nextRefillDate: null };
+    mockState.billingStatus = { tier: 'creator', stripeCustomerId: 'cus_123', billingCycleStart: null, subscriptionStatus: 'past_due' };
+    render(<TokenWarningBanner />);
+
+    const link = screen.getByText(linkText).className.split(/\s+/);
+    expect(link).toEqual(expect.arrayContaining(['min-h-11', 'sm:min-h-6']));
+    const dismiss = screen.getByLabelText(dismissLabel).className.split(/\s+/);
+    expect(dismiss).toEqual(expect.arrayContaining(['min-h-11', 'min-w-11', 'sm:min-h-6', 'sm:min-w-6']));
   });
 
   it('dismisses payment warning when X is clicked', () => {

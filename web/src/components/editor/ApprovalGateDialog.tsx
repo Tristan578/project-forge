@@ -28,6 +28,7 @@ export function ApprovalGateDialog({
   autoFocus = false,
   approveLabel = 'Approve',
   cancelLabel = 'Cancel',
+  cancelVariant = 'ghost',
   approveDisabled = false,
   children,
 }: {
@@ -53,6 +54,11 @@ export function ApprovalGateDialog({
    * consequences must not share a vague name.
    */
   cancelLabel?: string;
+  /**
+   * The cancel button's variant. The plan review arms Discard on the first
+   * press and shows the armed button as destructive.
+   */
+  cancelVariant?: 'ghost' | 'destructive';
   /** Disables approve, e.g. while the confirmed action is already starting. */
   approveDisabled?: boolean;
   /**
@@ -165,7 +171,7 @@ export function ApprovalGateDialog({
         >
           {approveLabel}
         </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onCancel} className="flex-1">
+        <Button type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
           {cancelLabel}
         </Button>
       </div>

@@ -7,6 +7,17 @@ import { useUserStore } from '@/stores/userStore';
 import { SETTINGS_BILLING_HREF, SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
 
 const DISMISSED_KEY = 'forge-token-warning-dismissed';
+
+/**
+ * Both banners' action link and dismiss control. Links are client-side
+ * `next/link`, never `<a>`: a full page load would throw away the editor's
+ * in-memory state, including a plan waiting to be built. Targets are 44px on
+ * mobile (the library Button's own minimum) and 24px from `sm` up (WCAG 2.5.8).
+ */
+const ACTION_CLASSES =
+  'inline-flex min-h-11 shrink-0 items-center rounded bg-[var(--sf-bg-elevated)] px-2 text-xs font-medium text-[var(--sf-text)] hover:bg-[var(--sf-bg-overlay)] sm:min-h-6';
+const DISMISS_CLASSES =
+  'inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-[var(--sf-text)] hover:bg-[var(--sf-bg-overlay)] sm:min-h-6 sm:min-w-6';
 const PAYMENT_DISMISSED_KEY = 'forge-payment-warning-dismissed';
 
 /**
@@ -66,24 +77,22 @@ export function TokenWarningBanner() {
         <div
           role="alert"
           data-testid="payment-warning-banner"
-          className="flex items-center gap-2 border-b border-red-700/50 bg-red-900/80 px-3 py-1.5 text-xs text-red-200"
+          className="flex items-center gap-2 border-b border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_12%,var(--sf-bg-surface))] px-3 py-1.5 text-xs text-[var(--sf-text)]"
         >
-          <CreditCard size={14} className="shrink-0 text-red-400" />
+          <CreditCard size={14} className="shrink-0 text-[var(--sf-destructive)]" aria-hidden="true" />
           <span className="flex-1">
             Your payment method has failed. Please update it to avoid service interruption.
           </span>
-          <a
-            href={SETTINGS_BILLING_HREF}
-            className="shrink-0 rounded bg-red-700 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-red-600"
-          >
+          <Link href={SETTINGS_BILLING_HREF} className={ACTION_CLASSES}>
             Update Payment
-          </a>
+          </Link>
           <button
+            type="button"
             onClick={handleDismissPayment}
-            className="shrink-0 rounded p-0.5 hover:bg-red-800"
+            className={DISMISS_CLASSES}
             aria-label="Dismiss payment warning"
           >
-            <X size={14} />
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
       )}
@@ -92,9 +101,9 @@ export function TokenWarningBanner() {
         <div
           role="alert"
           data-testid="token-warning-banner"
-          className="flex items-center gap-2 border-b border-amber-700/50 bg-amber-900/80 px-3 py-1.5 text-xs text-amber-200"
+          className="flex items-center gap-2 border-b border-[var(--sf-warning)] bg-[color-mix(in_srgb,var(--sf-warning)_12%,var(--sf-bg-surface))] px-3 py-1.5 text-xs text-[var(--sf-text)]"
         >
-          <AlertTriangle size={14} className="shrink-0 text-amber-400" />
+          <AlertTriangle size={14} className="shrink-0 text-[var(--sf-warning)]" aria-hidden="true" />
           <span className="flex-1">
             Your AI token balance is below 20%.{' '}
             {tokenBalance && (
@@ -104,21 +113,16 @@ export function TokenWarningBanner() {
               </span>
             )}
           </span>
-          {/* A client-side Link, not <a>: a full page load would throw away
-              the editor's in-memory state, including a plan waiting to be
-              built. Theme tokens and a 24px target (WCAG 2.5.8). */}
-          <Link
-            href={SETTINGS_TOKENS_HREF}
-            className="inline-flex min-h-6 shrink-0 items-center rounded bg-[var(--sf-bg-elevated)] px-2 text-xs font-medium text-[var(--sf-text)] hover:bg-[var(--sf-bg-overlay)]"
-          >
+          <Link href={SETTINGS_TOKENS_HREF} className={ACTION_CLASSES}>
             Buy Tokens
           </Link>
           <button
+            type="button"
             onClick={handleDismissToken}
-            className="shrink-0 rounded p-0.5 hover:bg-amber-800"
+            className={DISMISS_CLASSES}
             aria-label="Dismiss token warning"
           >
-            <X size={14} />
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
       )}

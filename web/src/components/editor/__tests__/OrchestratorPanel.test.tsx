@@ -12,6 +12,7 @@ import {
   _resetQuickStartGateOwner,
 } from '../quickStartGateOwner';
 import { getLayoutConfig, useResponsiveLayout } from '@/hooks/useResponsiveLayout';
+import { RESERVATION_UNCONFIRMED_MESSAGE, SIGNED_OUT_MESSAGE } from '@/stores/slices/orchestratorSlice';
 import type { OrchestratorPlan } from '@/lib/game-creation/types';
 
 vi.mock('@/stores/editorStore', () => ({
@@ -315,6 +316,99 @@ describe('OrchestratorPanel', () => {
     expect(mockCancelPipeline).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Discard it' }));
     expect(mockCancelPipeline).toHaveBeenCalledTimes(1);
+  });
+
+  describe('armed Discard (#6831 review)', () => {
+    const WAITING = { orchestratorStatus: 'awaiting_approval', currentPlan: MOCK_PLAN, stepStatuses: {} };
+
+    it('says what discarding costs, keeps focus on the button, and backs out with Keep plan', () => {
+      mockStore(WAITING);
+      render(<OrchestratorPanel />);
+      const discard = screen.getByRole('button', { name: 'Discard plan' });
+      discard.focus();
+
+      fireEvent.click(discard);
+
+      expect(screen.getByText('Discard this plan? Planning it again costs tokens.')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Discard it' })).toBe(discard);
+      expect(document.activeElement).toBe(discard);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Keep plan' }));
+
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+      expect(mockCancelPipeline).not.toHaveBeenCalled();
+    });
+
+    // A refused build puts the SAME plan back on the review; an arm that
+    // survived the attempt would make the next click drop it.
+    it('disarms on Start Building', () => {
+      mockStore(WAITING);
+      render(<OrchestratorPanel />);
+      fireEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+
+      fireEvent.click(screen.getByRole('button', { name: /Start Building/ }));
+
+      expect(mockRunPipelineFromPlan).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Discard it' })).toBeNull();
+    });
+
+    // The panel stays mounted across runs (a Dockview panel), so the arm must
+    // not carry over to whatever plan waits here next.
+    it('disarms when the review is left, e.g. a build started from chat', () => {
+      mockStore(WAITING);
+      const { rerender } = render(<OrchestratorPanel />);
+      fireEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+
+      mockStore({ ...WAITING, orchestratorStatus: 'executing' });
+      rerender(<OrchestratorPanel />);
+      mockStore(WAITING);
+      rerender(<OrchestratorPanel />);
+
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+    });
+
+    it('does not show a new plan pre-armed', () => {
+      mockStore(WAITING);
+      const { rerender } = render(<OrchestratorPanel />);
+      fireEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+
+      mockStore({ ...WAITING, currentPlan: { ...MOCK_PLAN } });
+      rerender(<OrchestratorPanel />);
+
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+      expect(screen.queryByText(/Discard this plan\?/)).toBeNull();
+    });
+  });
+
+  // Same message-to-action mapping as the quick-start dialog (one module):
+  // the panel's Start Building reaches the same unconfirmed outcome.
+  it('offers Check balance beside an unconfirmed reservation', () => {
+    mockStore({
+      orchestratorStatus: 'failed',
+      currentPlan: MOCK_PLAN,
+      stepStatuses: {},
+      orchestratorError: RESERVATION_UNCONFIRMED_MESSAGE,
+    });
+    render(<OrchestratorPanel />);
+
+    expect(screen.getByRole('alert').textContent).toContain(RESERVATION_UNCONFIRMED_MESSAGE);
+    expect(screen.getByRole('link', { name: 'Check balance' }).getAttribute('href')).toBe('/settings?tab=tokens');
+  });
+
+  it('keeps the cost bar\'s balance warning for a refusal that is not about the balance', () => {
+    mockStore({
+      orchestratorStatus: 'awaiting_approval',
+      currentPlan: MOCK_PLAN,
+      tokenEstimate: { ...MOCK_PLAN.tokenEstimate, sufficientBalance: false },
+      stepStatuses: {},
+      orchestratorError: SIGNED_OUT_MESSAGE,
+    });
+    render(<OrchestratorPanel />);
+
+    expect(screen.getByRole('alert').textContent).toContain(SIGNED_OUT_MESSAGE);
+    expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: /buy tokens/i })).toHaveLength(1);
   });
 
   it('announces a refused build and offers one Buy tokens link for a short balance', () => {

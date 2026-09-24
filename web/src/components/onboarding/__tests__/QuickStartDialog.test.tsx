@@ -16,6 +16,7 @@ import { QuickStartDialog } from '../QuickStartDialog';
 import {
   INSUFFICIENT_TOKENS_MESSAGE,
   RESERVATION_UNCONFIRMED_MESSAGE,
+  SIGNED_OUT_MESSAGE,
 } from '@/stores/slices/orchestratorSlice';
 import {
   QUICK_START_GAME_TYPES,
@@ -595,15 +596,57 @@ describe('QuickStartDialog', () => {
       finish();
     });
 
-    it('drops the plan and closes on "Discard plan"', async () => {
+    // The plan cost tokens to design, so Discard asks once -- the same rule
+    // as OrchestratorPanel, through the same useDiscardConfirm.
+    it('asks once, then drops the plan and closes on "Discard it"', async () => {
       const onClose = vi.fn();
       await reachPlanReview({}, onClose);
 
-      await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+      const discard = screen.getByRole('button', { name: 'Discard plan' });
+      await userEvent.click(discard);
+
+      expect(cancelPipeline).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByText('Discard this plan? Planning it again costs tokens.')).toBeTruthy();
+      // One button whose label changes, so focus stays where the user pressed.
+      expect(screen.getByRole('button', { name: 'Discard it' })).toBe(discard);
+      expect(document.activeElement).toBe(discard);
+
+      await userEvent.click(discard);
 
       expect(cancelPipeline).toHaveBeenCalledTimes(1);
       expect(onClose).toHaveBeenCalledTimes(1);
       expect(runPipelineFromPlan).not.toHaveBeenCalled();
+    });
+
+    it('backs out of Discard with "Keep plan"', async () => {
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Keep plan' }));
+
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+      expect(screen.queryByText(/Discard this plan\?/)).toBeNull();
+      expect(cancelPipeline).not.toHaveBeenCalled();
+    });
+
+    // An armed Discard must not survive a build attempt: a refused build puts
+    // the same plan back on the review, where one click would then drop it.
+    it('disarms Discard when Build it is pressed, so a refused build returns unarmed', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'awaiting_approval';
+        hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
+      });
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+      expect(screen.getByRole('button', { name: 'Discard it' })).toBeTruthy();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      await screen.findByText(/The build did not start/);
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Discard it' })).toBeNull();
+      expect(cancelPipeline).not.toHaveBeenCalled();
     });
 
     it('surfaces a build that fails after confirmation, with Try again', async () => {
@@ -644,7 +687,9 @@ describe('QuickStartDialog', () => {
       expect(toast.error).not.toHaveBeenCalled();
       // Says what happened, not "building" or "stopped early".
       expect(screen.getByRole('status').textContent).toContain('The build did not start');
-      expect(screen.getByText(/Nothing was spent/)).toBeTruthy();
+      // Scoped to the build: designing the plan was metered.
+      expect(screen.getByText(/No build tokens were taken/)).toBeTruthy();
+      expect(screen.queryByText(/Nothing was spent/)).toBeNull();
       // The way on is the plan it already has, not a paid re-design.
       expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
@@ -684,6 +729,23 @@ describe('QuickStartDialog', () => {
       expect(screen.queryByText(/may cost more than your token balance/)).toBeNull();
     });
 
+    // Any refusal but a short balance leaves the cost bar's balance warning
+    // (and its Buy tokens link) as the only one on screen, so it stays.
+    it('keeps the cost bar\'s balance warning for a refusal that is not about the balance', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'awaiting_approval';
+        hoisted.state.orchestratorError = SIGNED_OUT_MESSAGE;
+      });
+      await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
+
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      expect((await screen.findByRole('alert')).textContent).toContain(SIGNED_OUT_MESSAGE);
+      expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
+      // The alert names no link of its own; the bar's is the one.
+      expect(screen.getAllByRole('link', { name: /buy tokens/i })).toHaveLength(1);
+    });
+
     // No reply, or a 2xx the client could not read: the hold may already have
     // been taken. The dialog must not say nothing was spent.
     it('does not claim nothing was spent when the reservation outcome is unknown', async () => {
@@ -695,7 +757,7 @@ describe('QuickStartDialog', () => {
       await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
 
       expect((await screen.findByRole('alert')).textContent).toContain(RESERVATION_UNCONFIRMED_MESSAGE);
-      expect(screen.queryByText(/Nothing was spent/)).toBeNull();
+      expect(screen.queryByText(/No build tokens were taken/)).toBeNull();
       // The message says to check the balance; the way to is right there.
       expect(screen.getByRole('link', { name: 'Check balance' }).getAttribute('href')).toBe(
         '/settings?tab=tokens',

@@ -31,17 +31,19 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Compass, Crosshair, Gamepad2, Loader2, Puzzle, type LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button, Dialog, Label, Textarea } from '@spawnforge/ui';
+import { Button, Dialog, Label, Textarea, cn } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import Link from 'next/link';
 import {
-  INSUFFICIENT_TOKENS_MESSAGE,
-  RESERVATION_UNCONFIRMED_MESSAGE,
   isOrchestratorRunLive,
   type OrchestratorStatus,
 } from '@/stores/slices/orchestratorSlice';
-import { SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
+import {
+  DiscardConfirmPrompt,
+  OrchestratorErrorNotice,
+  errorReportsShortBalance,
+} from '@/components/editor/OrchestratorNotices';
+import { useDiscardConfirm } from '@/hooks/useDiscardConfirm';
 import {
   QUICK_START_GAME_TYPES,
   buildQuickStartPrompt,
@@ -87,6 +89,10 @@ const STARTING_BUILD = 'Starting the build…';
 
 /** Status line for a plan whose build was refused before any step ran. */
 const BUILD_NOT_STARTED = 'The build did not start.';
+
+/** The dialog's error surface, shared by the review's refusal and a failed run. */
+const ALERT_CLASSES =
+  'rounded-[var(--sf-radius-md)] border border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_12%,transparent)] px-3 py-2 text-xs text-[var(--sf-text)]';
 
 /**
  * Stand-in for a plan with no `gate_plan`. `planBuilder` always adds one, but
@@ -327,7 +333,14 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // The plan review's "Build it": the first point at which build tokens are
   // spent. Failures land on the store, not as throws (same contract as
   // `handleSubmit` above), so read the status the run left behind.
+  // Same two-step Discard as OrchestratorPanel: the plan cost tokens to design.
+  const { armed: discardArmed, arm: armDiscard, disarm: disarmDiscard } = useDiscardConfirm(
+    currentPlan,
+    planGate !== null,
+  );
+
   const handleConfirmBuild = useCallback(async () => {
+    disarmDiscard();
     setError(null);
     setConfirming(true);
     try {
@@ -348,7 +361,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     } finally {
       setConfirming(false);
     }
-  }, [runPipelineFromPlan]);
+  }, [runPipelineFromPlan, disarmDiscard]);
 
   const handleRetry = useCallback(() => {
     setError(null);
@@ -431,7 +444,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             ? 'Describe it in your own words, or leave it blank for our take.'
             : planGate && !startingBuild
               ? reviewError
-                ? 'Nothing was spent. Build it again when you are ready, or discard the plan. Close keeps it for later.'
+                ? 'No build tokens were taken. Close keeps this plan for later.'
                 : 'The build starts, and its tokens are taken, only when you press Build it. Close keeps this plan for later.'
               : status === 'completed'
                 ? 'Your game is built.'
@@ -539,31 +552,26 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               approveLabel="Build it"
               approveDisabled={confirming}
               onApprove={() => void handleConfirmBuild()}
-              onCancel={handleCancelRun}
-              cancelLabel="Discard plan"
+              onCancel={discardArmed ? handleCancelRun : armDiscard}
+              cancelLabel={discardArmed ? 'Discard it' : 'Discard plan'}
+              cancelVariant={discardArmed ? 'destructive' : 'ghost'}
               autoFocus
             >
               {reviewError && (
-                <div
-                  role="alert"
-                  className="mb-3 rounded-[var(--sf-radius-md)] border border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_12%,transparent)] px-3 py-2 text-xs text-[var(--sf-text)]"
-                >
-                  {reviewError}
-                  {reviewError === INSUFFICIENT_TOKENS_MESSAGE && (
-                    <>
-                      {' '}
-                      <Link href={SETTINGS_TOKENS_HREF} className="underline underline-offset-2">
-                        Buy tokens
-                      </Link>
-                    </>
-                  )}
-                </div>
+                <OrchestratorErrorNotice error={reviewError} className={cn('mb-3', ALERT_CLASSES)} />
               )}
               {tokenEstimate && (
-                // The refusal above already says the balance was short, with
-                // its own Buy tokens link; the bar's "this MAY cost more"
-                // warning would contradict it with a second link.
-                <TokenCostBar estimate={tokenEstimate} hideBalanceWarning={reviewError !== null} />
+                // Only a short-balance refusal already carries its own Buy
+                // tokens link; for any other, the bar's warning is the only one.
+                <TokenCostBar
+                  estimate={tokenEstimate}
+                  hideBalanceWarning={errorReportsShortBalance(reviewError)}
+                />
+              )}
+              {discardArmed && (
+                <div className="mt-3">
+                  <DiscardConfirmPrompt onKeep={disarmDiscard} />
+                </div>
               )}
             </ApprovalGateDialog>
           )}
@@ -588,24 +596,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         </div>
       )}
 
-      {error && (
-        <div
-          role="alert"
-          className="mt-3 rounded-[var(--sf-radius-md)] border border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_12%,transparent)] px-3 py-2 text-xs text-[var(--sf-text)]"
-        >
-          {error}
-          {/* The message tells the user to check their balance; give them the
-              way to, since the hold may or may not have been taken. */}
-          {error === RESERVATION_UNCONFIRMED_MESSAGE && (
-            <>
-              {' '}
-              <Link href={SETTINGS_TOKENS_HREF} className="underline underline-offset-2">
-                Check balance
-              </Link>
-            </>
-          )}
-        </div>
-      )}
+      {error && <OrchestratorErrorNotice error={error} className={cn('mt-3', ALERT_CLASSES)} />}
     </Dialog>
   );
 }

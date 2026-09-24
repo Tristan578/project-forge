@@ -13,8 +13,7 @@
  * Spec: specs/2026-04-12-e1-pipeline-integration.md (Deliverable 4)
  */
 
-import { useCallback, useState } from 'react';
-import Link from 'next/link';
+import { useCallback } from 'react';
 import { Button, cn } from '@spawnforge/ui';
 import {
   Loader2,
@@ -28,11 +27,13 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
+import type { OrchestratorStatus } from '@/stores/slices/orchestratorSlice';
+import { useDiscardConfirm } from '@/hooks/useDiscardConfirm';
 import {
-  INSUFFICIENT_TOKENS_MESSAGE,
-  type OrchestratorStatus,
-} from '@/stores/slices/orchestratorSlice';
-import { SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
+  DiscardConfirmPrompt,
+  OrchestratorErrorNotice,
+  errorReportsShortBalance,
+} from './OrchestratorNotices';
 import type { PlanStep, ExecutorName } from '@/lib/game-creation/types';
 import { ApprovalGateDialog } from './ApprovalGateDialog';
 import { TokenCostBar } from './TokenCostBar';
@@ -370,9 +371,17 @@ export function OrchestratorPanel() {
     resolveGate('rejected');
   }, [resolveGate]);
 
+  // Two-step discard for a waiting plan (see the footer), shared with the
+  // quick-start plan review.
+  const { armed: discardArmed, arm: armDiscard, disarm: disarmDiscard } = useDiscardConfirm(
+    plan,
+    status === 'awaiting_approval',
+  );
+
   const handleStartPipeline = useCallback(() => {
+    disarmDiscard();
     void runPipelineFromPlan();
-  }, [runPipelineFromPlan]);
+  }, [runPipelineFromPlan, disarmDiscard]);
 
   const handleCancel = useCallback(() => {
     cancelPipeline();
@@ -382,12 +391,10 @@ export function OrchestratorPanel() {
     resetOrchestrator();
   }, [resetOrchestrator]);
 
-  // Two-step discard for a waiting plan (see the footer).
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const handleDiscard = useCallback(() => {
-    setConfirmDiscard(false);
+    disarmDiscard();
     cancelPipeline();
-  }, [cancelPipeline]);
+  }, [cancelPipeline, disarmDiscard]);
 
   // Idle state — nothing to show
   if (status === 'idle' && !plan) {
@@ -428,19 +435,10 @@ export function OrchestratorPanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {/* Error display */}
         {error && (
-          // role="alert": a refused Start Building changes nothing else on
-          // screen, so this is the only way a screen reader learns of it.
-          <div role="alert" className={cn('rounded-md px-3 py-2 text-sm', ERROR_SURFACE_CLASSES)}>
-            {error}
-            {error === INSUFFICIENT_TOKENS_MESSAGE && (
-              <>
-                {' '}
-                <Link href={SETTINGS_TOKENS_HREF} className="underline underline-offset-2">
-                  Buy tokens
-                </Link>
-              </>
-            )}
-          </div>
+          <OrchestratorErrorNotice
+            error={error}
+            className={cn('rounded-md px-3 py-2 text-sm', ERROR_SURFACE_CLASSES)}
+          />
         )}
 
         {/* Partially-applied steps. Amber, not red, and never replaces a step's
@@ -480,11 +478,12 @@ export function OrchestratorPanel() {
 
         {/* Token estimate */}
         {tokenEstimate && (
-          // While the server's actual refusal is shown above, the bar's "this
-          // MAY cost more" row (with a second Buy tokens link) contradicts it.
+          // A short-balance refusal above already carries its own Buy tokens
+          // link, and the bar's "this MAY cost more" row would contradict it.
+          // For any other refusal that row is the only balance warning left.
           <TokenCostBar
             estimate={tokenEstimate}
-            hideBalanceWarning={status === 'awaiting_approval' && error !== null}
+            hideBalanceWarning={status === 'awaiting_approval' && errorReportsShortBalance(error)}
           />
         )}
 
@@ -523,26 +522,25 @@ export function OrchestratorPanel() {
       {/* Footer actions */}
       <div className="border-t border-[var(--sf-border)] px-3 py-2">
         {status === 'awaiting_approval' && !pendingGate && (
-          <div className="flex gap-2">
-            <button
-              onClick={handleStartPipeline}
-              className="flex flex-1 items-center justify-center gap-2 rounded bg-[var(--sf-accent-hover)] px-3 py-2 text-sm font-medium text-[var(--sf-on-accent)] transition-colors hover:bg-[var(--sf-accent-active)]"
-            >
-              <Play className="h-3.5 w-3.5" aria-hidden="true" />
-              Start Building
-            </button>
-            {/* A plan waiting here (including one whose build was refused) is a
-                live run, so without this the panel had no way to drop it. The
-                design cost tokens, so dropping it asks once. */}
-            {confirmDiscard ? (
-              <Button variant="destructive" size="sm" onClick={handleDiscard}>
-                Discard it
+          <div className="space-y-2">
+            {discardArmed && <DiscardConfirmPrompt onKeep={disarmDiscard} />}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleStartPipeline} className="flex-1 gap-2">
+                <Play className="h-3.5 w-3.5" aria-hidden="true" />
+                Start Building
               </Button>
-            ) : (
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDiscard(true)}>
-                Discard plan
+              {/* A plan waiting here (including one whose build was refused) is
+                  a live run, so without this the panel had no way to drop it.
+                  The design cost tokens, so dropping it asks once. One button
+                  whose label changes, so focus stays on it when it arms. */}
+              <Button
+                variant={discardArmed ? 'destructive' : 'ghost'}
+                size="sm"
+                onClick={discardArmed ? handleDiscard : armDiscard}
+              >
+                {discardArmed ? 'Discard it' : 'Discard plan'}
               </Button>
-            )}
+            </div>
           </div>
         )}
 
