@@ -76,10 +76,15 @@ this repository:
   `docs/operations/deploy-migration-rollback.md`.
 - **Data loss suspected:** `docs/operations/backup-recovery.md` (Neon
   point-in-time recovery).
-- **A credential or key leaked, or an auth bypass found:**
-  `docs/production-support.md` § 8 (Security Incident Playbook) — rotation
-  steps for the Clerk, database and provider keys. Rotate first; do not wait
-  for the rest of this process.
+- **A credential or key leaked:** `docs/production-support.md` § 8
+  (Security Incident Playbook) — rotation steps for the Clerk (§ 8.1),
+  database (§ 8.2) and provider and Stripe (§ 8.3) keys. Rotate first; do not
+  wait for the rest of this process.
+- **An auth bypass or other access-control bug found (no credential
+  involved):** rotation will not fix it. Patch and deploy, or roll back to a
+  build without the bug (Rollback, above), then follow
+  `docs/production-support.md` § 8.5 (Data Leak) to scope and audit what was
+  reachable. Rotate a key only if one was also exposed.
 
 ## Resolution
 

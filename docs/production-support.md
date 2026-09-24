@@ -35,7 +35,7 @@ Only **Database (Neon)** and **Clerk** trigger HTTP 503 on the health endpoint. 
 
 | Metric | Target | Measurement | Alert Threshold |
 |--------|--------|-------------|-----------------|
-| Availability | 99.9% (8.7h downtime/year) | External synthetic monitor (1-min interval, 3 regions) | 2 consecutive failures = page |
+| Availability | 99.9% (8.7h downtime/year) | External synthetic monitor (1-min interval, 3 regions) | 2 consecutive failures = notify the owner (no paging; see `docs/operations/incident-response.md`) |
 | Health endpoint latency (p99) | < 3s | Sentry transaction traces | > 5s for 5 min |
 | Homepage TTFB (p95) | < 1.5s | Web Vitals reporting | > 3s for 10% of sessions |
 | LCP (p75) | < 2.5s | Web Vitals reporting | > 4s warning, > 6s critical |

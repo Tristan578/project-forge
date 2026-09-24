@@ -86,8 +86,12 @@ Configure Sentry Browser SDK to track:
 ## Infrastructure Monitoring
 
 ### Vercel
-- **Deployment notifications:** Slack #deployments
-- **Build failure alerts:** `#engineering-alerts`, if configured in Vercel's Slack integration (build events never reach Sentry)
+- **Deployment and build failures:** not a Sentry alert (build events never
+  reach Sentry). A failed CD run surfaces as a GitHub Actions notification and
+  a `label:ci-failure` issue — see `docs/production-support.md` § 5.8 and
+  § 11 ("Where automated failures land"). Nothing in this repository shows a
+  Slack channel wired to Vercel deployments; check the Vercel dashboard if you
+  need to know.
 - **Usage alerts:** Set spending limit in Vercel dashboard
 
 ### Cloudflare (R2 + Workers)
@@ -108,7 +112,9 @@ Configure Sentry Browser SDK to track:
    whole "action" for every tier; see `docs/operations/incident-response.md`):
    - `#incidents` -- P0 and P1 alerts
    - `#engineering-alerts` -- P2 alerts and daily digests
-   - `#deployments` -- Vercel deployment notifications
+
+This covers the Sentry rules in this document only. Deployment and build
+failures do not come through the Sentry app; see the Vercel entry above.
 
 ## Uptime Monitoring (Recommended)
 
