@@ -33,8 +33,27 @@ keeps every subsequent step at the cache-read price (~10% of full ingest).
 |---|---|
 | `web/src/lib/ai/cachedContext.ts` | Export `CacheTier = 'short' \| 'long'` and `buildAnthropicCacheControl(tier)` returning `{ anthropic: { cacheControl: { type: 'ephemeral', ttl?: '1h' } } }`. |
 | `web/src/lib/ai/spawnforgeAgent.ts` | `SpawnforgeAgentOptions.instructions` widened to `string \| InstructionBlock[]`. `buildAgentInstructions` emits `SystemModelMessage[]` with per-block `providerOptions` on the direct backend; collapses to a string on the gateway. |
-| `web/src/app/api/chat/route.ts` | Constructs `instructionBlocks`: base prompt (long), scene context (long), doc context (short). `onStepFinish` reads `usage.inputTokenDetails.cacheReadTokens`/`cacheWriteTokens` and emits `ai_cache_hit_rate` to Vercel Analytics. |
+| `web/src/app/api/chat/route.ts` | Constructs `instructionBlocks`. On the gateway backend and on non-premium models: base prompt (long), scene context (long), doc context (short). On the direct backend with the premium model (#8859): base prompt (long), doc context (short) only — see the scene-context note below. `onStepFinish` reads `usage.inputTokenDetails.cacheReadTokens`/`cacheWriteTokens` and emits `ai_cache_hit_rate` to Vercel Analytics. |
 | `web/src/lib/analytics/events.server.ts` | New `trackAiCacheHitRate(tier, usage)`. |
+
+**Scene-context placement (#8859).** Anthropic's cache is a prefix cache, and
+the scene context changes on every entity edit, so leaving it in the leading
+prefix re-pays the whole conversation history as a cache write after each
+edit. On the direct backend with the premium model the route therefore moves
+it out of `instructionBlocks` and inserts it as a mid-conversation
+`role: "system"` message (long tier, same per-user nonce) immediately
+**before** the latest user turn, built by `buildTrailingSceneContextMessage` /
+`insertSceneContextMessage` in `cachedContext.ts`. The system prompt and all
+prior history stay a stable cached prefix, and the user's own message stays
+last. Because a system message in that slot carries more weight than
+background prefix text, and the scene is user-authored (entity names, script
+text, anything a `.forge` file or modified client sends), the message is framed
+as data — a one-line preamble saying so, then the body inside
+`<scene_context>` delimiters that the body cannot close — and screened by
+`sanitizeSceneContext` (control characters stripped, injection patterns
+redacted rather than rejected). Every other path keeps the leading embed and
+runs it through the same `sanitizeSceneContext`, so both placements screen
+identically.
 
 The AI SDK auto-attaches the `extended-cache-ttl-2025-04-11` beta header when
 any block carries `ttl: '1h'` — no manual header wiring needed.

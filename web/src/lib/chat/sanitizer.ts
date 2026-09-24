@@ -9,6 +9,17 @@ const MAX_JSON_STRING_LENGTH = 1_000_000;
 const MAX_ARRAY_ELEMENTS = 100;
 
 /**
+ * Remove ASCII control characters, keeping tab, newline and carriage return.
+ *
+ * The ONE copy of this rule. Every sanitizer in this file and the chat route's
+ * scene-context paths call it, so the leading scene embed and the trailing
+ * scene message cannot drift apart (#8859).
+ */
+export function stripControlChars(input: string): string {
+  return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
+/**
  * Sanitize user chat input to prevent prompt injection.
  *
  * @param input - Raw user message
@@ -20,7 +31,7 @@ export function sanitizeChatInput(input: string): string {
   }
 
   // Remove control characters (except tab, newline, carriage return)
-  let sanitized = input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  let sanitized = stripControlChars(input);
 
   // Limit length
   sanitized = sanitized.slice(0, MAX_MESSAGE_LENGTH);
@@ -48,7 +59,7 @@ export function sanitizeSystemPrompt(input: string): string {
   }
 
   // Remove control characters (except tab, newline, carriage return)
-  let sanitized = input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  let sanitized = stripControlChars(input);
 
   // Limit to the system-prompt maximum (not the shorter user-message maximum)
   sanitized = sanitized.slice(0, MAX_SYSTEM_PROMPT_LENGTH);
@@ -120,7 +131,7 @@ function sanitizeString(value: string, maxLength = 1000): string {
   }
 
   // Remove control characters
-  let sanitized = value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  let sanitized = stripControlChars(value);
 
   // Limit length
   sanitized = sanitized.slice(0, maxLength);
@@ -288,12 +299,19 @@ export function sanitizeToolText(input: string): string {
     return '';
   }
 
-  let text = input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  return redactInjectionPatterns(stripControlChars(input)).slice(0, MAX_TOOL_TEXT_LENGTH);
+}
 
-  // Redact in place first, so text with no homoglyph tricks keeps its exact
-  // bytes. If a pattern is only visible after NFKD folding, the normalized
-  // form is what gets returned — losing the original spelling of an evasion
-  // attempt is the correct trade.
+/**
+ * Replace every injection-pattern match with `INJECTION_REDACTION`.
+ *
+ * Redacts in place first, so text with no homoglyph tricks keeps its exact
+ * bytes. If a pattern is only visible after NFKD folding, the normalized form
+ * is what gets returned — losing the original spelling of an evasion attempt
+ * is the correct trade.
+ */
+function redactInjectionPatterns(input: string): string {
+  let text = input;
   for (const pattern of INJECTION_PATTERNS) {
     text = text.replace(new RegExp(pattern.source, `${pattern.flags}g`), INJECTION_REDACTION);
   }
@@ -303,6 +321,33 @@ export function sanitizeToolText(input: string): string {
       text = text.replace(new RegExp(pattern.source, `${pattern.flags}g`), INJECTION_REDACTION);
     }
   }
+  return text;
+}
 
-  return text.slice(0, MAX_TOOL_TEXT_LENGTH);
+/**
+ * Screen the client-supplied engine scene context before it reaches the model.
+ *
+ * THREAT MODEL. The scene context is built in the browser from the scene graph,
+ * so it carries user-authored text — entity names, scene names, script
+ * snippets — and a `.forge` file or remixed project can put a stranger's text
+ * there. A modified client can send anything at all. It is therefore as
+ * forgeable as a tool result, and gets the same treatment as the tool channel:
+ * control characters stripped and injection patterns REDACTED, never rejected.
+ * A 400 would lock the user out of chat for as long as the offending entity
+ * exists, and the `system:` pattern false-positives on ordinary text.
+ *
+ * NO length cap, unlike `sanitizeToolText`: a complex scene is legitimately
+ * 50k+ chars, and the request-wide MAX_INPUT_CHARS budget in the chat route is
+ * the real size guard. No trim either, so the cached bytes are exactly what the
+ * client sent minus what was screened out.
+ *
+ * Used by BOTH scene-context placements in the chat route (the leading
+ * instruction-block embed and the trailing system message, #8859), so the two
+ * cannot screen differently.
+ */
+export function sanitizeSceneContext(input: string): string {
+  if (typeof input !== 'string') {
+    return '';
+  }
+  return redactInjectionPatterns(stripControlChars(input));
 }
