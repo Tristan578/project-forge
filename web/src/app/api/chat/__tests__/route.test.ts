@@ -140,6 +140,12 @@ const mockStreamResult = {
 const mockStream = vi.fn().mockResolvedValue(mockStreamResult);
 const mockAgent = { stream: mockStream };
 
+// Direct-backend Anthropic auth (#8858). Its own behaviour is covered by
+// wifCredential.test.ts; here only the route's wiring is under test.
+vi.mock('@/lib/ai/wifCredential', () => ({
+  resolveAnthropicClientAuth: vi.fn(),
+}));
+
 vi.mock('@/lib/ai/spawnforgeAgent', () => ({
   createSpawnforgeAgent: vi.fn(() => mockAgent),
   resolveToolApprovalSecret: vi.fn(() => undefined),
@@ -163,6 +169,8 @@ import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { DEEP_GEN_SURFACES } from '@/lib/ai/surfaces';
 import { AI_MODEL_PRIMARY, AI_MODEL_PREMIUM, GATEWAY_MODEL_PREMIUM } from '@/lib/ai/models';
+import { resolveAnthropicClientAuth } from '@/lib/ai/wifCredential';
+import { resolveChatRoute } from '@/lib/providers/resolveChat';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -233,6 +241,9 @@ describe('POST /api/chat', () => {
 
     // Default: deep tier off — surface requests derive AI_MODEL_PRIMARY
     isDeepTierEnabledMock.mockReturnValue(false);
+
+    // Default: no federation — the static key, as in production today (#8858).
+    vi.mocked(resolveAnthropicClientAuth).mockResolvedValue({ apiKey: 'sk-ant-static-key' });
 
     // Re-import to get fresh module
     const mod = await import('../route');
@@ -529,6 +540,51 @@ describe('POST /api/chat', () => {
         'chat_message',
         expect.anything(),
       );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Direct Anthropic client auth (#8858)
+  // -------------------------------------------------------------------------
+  describe('direct Anthropic client auth (#8858)', () => {
+    it('resolves the auth once and hands it to the agent on the direct backend', async () => {
+      vi.mocked(resolveAnthropicClientAuth).mockResolvedValue({ authToken: 'sk-ant-oat01-federated' });
+
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+
+      expect(resolveAnthropicClientAuth).toHaveBeenCalledTimes(1);
+      expect(createSpawnforgeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          isDirectBackend: true,
+          anthropicAuthOverride: { authToken: 'sk-ant-oat01-federated' },
+        }),
+      );
+    });
+
+    it('passes the static-key fallback through unchanged when federation is off', async () => {
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+      expect(createSpawnforgeAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ anthropicAuthOverride: { apiKey: 'sk-ant-static-key' } }),
+      );
+    });
+
+    it('never resolves Anthropic auth on the gateway backend', async () => {
+      vi.mocked(resolveChatRoute).mockReturnValueOnce({
+        backendId: 'vercel-gateway',
+        modelId: 'anthropic/claude-sonnet-4.6',
+        apiKey: '',
+        metered: false,
+      } as never);
+
+      const res = await POST(makeRequest(validBody()));
+      await res.text();
+
+      expect(resolveAnthropicClientAuth).not.toHaveBeenCalled();
+      const args = vi.mocked(createSpawnforgeAgent).mock.calls[0][0];
+      expect(args.isDirectBackend).toBe(false);
+      expect(args).not.toHaveProperty('anthropicAuthOverride');
     });
   });
 

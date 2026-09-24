@@ -17,9 +17,16 @@ import { TIER_DISPLAY_NAMES } from '../billing/tierPlans';
 import { effectiveTier, spendableTokensOf } from '../ai/tierAccess';
 import type { Tier } from '@/lib/db/schema';
 import { STATUS_CHECK_OPERATION } from './statusCheckOperation';
+import { resolveAnthropicClientAuth } from '../ai/wifCredential';
 
 export interface ResolvedKey {
   type: 'byok' | 'platform';
+  /**
+   * For `anthropic` on the platform path this can be a short-lived federated
+   * Bearer token (#8858), not an API key. Build an Anthropic client from it with
+   * `anthropicClientAuthForKey()` from `@/lib/ai/wifCredential`, never
+   * `{ apiKey: key }`, which sends it as `x-api-key` and is rejected.
+   */
   key: string;
   metered: boolean;
   usageId?: string;
@@ -50,7 +57,7 @@ const _PLATFORM_KEY_ENV_COMPLETE = PLATFORM_KEY_ENV satisfies Record<
 >;
 void _PLATFORM_KEY_ENV_COMPLETE;
 
-function getPlatformKey(provider: Provider, capability?: ProviderCapability): string {
+async function getPlatformKey(provider: Provider, capability?: ProviderCapability): Promise<string> {
   // A resolver-gateway capability (image/embedding, #9523) resolves the single
   // AI_GATEWAY_API_KEY instead of the provider's PLATFORM_* var, and never
   // falls back to it: those capabilities have no direct platform path anymore,
@@ -74,6 +81,19 @@ function getPlatformKey(provider: Provider, capability?: ProviderCapability): st
     // OIDC-only deployment the gateway backend would have served (#10074).
     if (isVercelRuntime()) return '';
     throw new Error(`Platform key not configured: ${GATEWAY_KEY_ENV.vercelGateway}`);
+  }
+
+  // Anthropic ONLY (#8858): the federated short-lived token when Workload
+  // Identity Federation is configured, else the static ANTHROPIC_API_KEY. The
+  // guard is on the provider, not on WIF being configured, so no other
+  // provider can ever receive the Anthropic credential or have its own
+  // missing-key throw suppressed by it. The throw below keeps the exact message
+  // the generic path produced for Anthropic.
+  if (provider === 'anthropic') {
+    const auth = await resolveAnthropicClientAuth();
+    const key = auth.authToken ?? auth.apiKey;
+    if (key) return key;
+    throw new Error(`Platform key not configured: ${getPlatformKeyEnvVar(provider) ?? provider}`);
   }
 
   // getPlatformKeyEnvVar returns null for a retired/keyless provider (Suno):
@@ -172,7 +192,7 @@ export async function resolveApiKey(
   // BOTH halves are required: a charged call named `status_check`, or a free
   // call named anything else, still goes through every check.
   if (tokenCost === 0 && operation === STATUS_CHECK_OPERATION) {
-    return { type: 'platform', key: getPlatformKey(provider, capability), metered: true };
+    return { type: 'platform', key: await getPlatformKey(provider, capability), metered: true };
   }
 
   // Pro tier always has platform key access. Other paid tiers can use
@@ -204,7 +224,7 @@ export async function resolveApiKey(
   // happened after deductTokens, the user would be charged for a call that can
   // never run and never gets refunded — silent token loss (#8597). Validate the
   // key is present first so a missing key fails before any balance changes.
-  const platformKey = getPlatformKey(provider, capability);
+  const platformKey = await getPlatformKey(provider, capability);
 
   const deduction = await deductTokens(userId, operation, tokenCost, provider, metadata);
   if (!deduction.success) {
