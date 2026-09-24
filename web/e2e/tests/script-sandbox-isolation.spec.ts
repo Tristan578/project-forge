@@ -42,10 +42,13 @@
  *   `Script sandbox worker-error: Error: Script error.`, and the other two
  *   timed out at 30 s. The honest expectation there is FAIL CLOSED, so in
  *   WebKit every test asserts exactly that ({@link expectFailedClosed}): one
- *   `boot` failure, nothing relayed, the frame gone, nothing on the network.
- *   That run did not record the failure's PHASE or whether anything was
- *   relayed first; this branch is the first measurement of both, and it
- *   prints the whole account on failure. If WebKit starts running the worker,
+ *   `boot` failure with reason `worker-error` (the reason that selects the
+ *   "can't run in this browser" creator message), nothing relayed, the frame
+ *   gone, nothing on the network. Job 107639940511 (head 4f862259) measured
+ *   the phase — `boot`, nothing relayed, frame gone, in all four — and showed
+ *   WebKit routing the frame's own `blob:null/<uuid>` worker load, which
+ *   `expectFailedClosed` now partitions out. The REASON is first measured by
+ *   this revision; the whole account is printed on failure. If WebKit starts running the worker,
  *   these assertions go red — the signal to move WebKit to the functional
  *   branch and to update the docs that say Safari fails closed.
  *
@@ -148,6 +151,12 @@ async function openHarness(context: BrowserContext): Promise<{ page: Page; net: 
     const request = route.request();
     const key = `${request.method()} ${request.url()}`;
     net.routed.push(key);
+    // A `blob:` URL is a local object URL, never network egress. WebKit hands
+    // the sandbox frame's own worker load to this handler (job 107639940511);
+    // answering it with the fake body below would replace the worker's source
+    // and turn the test into a measurement of the harness. Recorded above,
+    // then passed through to the browser untouched.
+    if (request.url().startsWith('blob:')) return route.fallback();
     if (key === HARNESS_ASSETS[0]) {
       return route.fulfill({
         status: 200,
@@ -176,8 +185,8 @@ async function openHarness(context: BrowserContext): Promise<{ page: Page; net: 
 
 interface RunResult {
   messages: Array<{ type: string; [key: string]: unknown }>;
-  /** Everything the host passed to its (required) `onError`, in order. */
-  failures: Array<{ detail: string; phase: string }>;
+  /** Everything the host passed to its (required) `onError`, in order. `reason` is set for `boot` only. */
+  failures: Array<{ detail: string; phase: string; reason?: string }>;
 }
 
 /**
@@ -209,8 +218,8 @@ async function runInSandbox(
         const host = api.createSandboxedScriptHost({
           // undefined => the module's own default loader, i.e. the bundled string.
           loadWorkerSource: source === undefined ? undefined : () => Promise.resolve(source),
-          onError: (detail: string, phase: string) => {
-            failures.push({ detail, phase });
+          onError: (detail: string, phase: string, reason?: string) => {
+            failures.push(reason === undefined ? { detail, phase } : { detail, phase, reason });
             if (phase === 'boot') finish();
           },
         });
@@ -241,24 +250,49 @@ async function runInSandbox(
  * contained rather than silent (see the header). Every clause is the property a
  * creator or an attacker depends on:
  *
- * - exactly one failure, phase `boot` — which is what makes `useScriptRunner`
- *   stop Play and show the creator message instead of letting ticks run into
- *   the watchdog, and it never falls back to the same-origin transport
- *   (pinned in useScriptRunner.test.ts);
+ * - exactly one failure, phase `boot`, reason `worker-error` — which is what
+ *   makes `useScriptRunner` stop Play and show the creator the
+ *   "can't run in this browser" message (not the retry one, which would be a
+ *   dead end here) instead of letting ticks run into the watchdog, and it
+ *   never falls back to the same-origin transport (both pinned in
+ *   useScriptRunner.test.ts);
  * - no protocol message relayed — no script output of any kind came back;
  * - the frame is gone — the host tore itself down, so nothing can start later;
- * - nothing on the network but the harness's own two files.
+ * - nothing on the network but the harness's own two files (see the blob
+ *   note below).
  *
  * The whole result goes in the failure message, so a WebKit that behaves
  * differently says exactly how in the CI log.
  */
 async function expectFailedClosed(page: Page, net: NetworkLog, result: RunResult): Promise<void> {
-  const account = JSON.stringify({ failures: result.failures, messageTypes: result.messages.map((m) => m.type) });
+  const account = JSON.stringify({
+    failures: result.failures,
+    messageTypes: result.messages.map((m) => m.type),
+    routed: net.routed,
+  });
   test.info().annotations.push({ type: 'webkit-fail-closed', description: account });
-  expect(result.failures.map((f) => f.phase), account).toEqual(['boot']);
+  expect(result.failures.map((f) => [f.phase, f.reason]), account).toEqual([['boot', 'worker-error']]);
   expect(result.messages, account).toEqual([]);
   expect(await page.locator('iframe').count(), account).toBe(0);
-  expect(net.routed).toEqual(HARNESS_ASSETS);
+  // WebKit hands the frame's own `blob:` worker load to the route handler
+  // (job 107639940511: every WebKit test saw exactly one extra
+  // `GET blob:null/<uuid>`, a fresh UUID each run). A blob: URL is a local
+  // object URL, not network egress, and `null` is the frame's opaque origin —
+  // the bootstrap's `URL.createObjectURL` of the worker source. So it is
+  // partitioned out HERE ONLY, and as narrowly as it can be: the exact
+  // `blob:null/<uuid>` shape, at most one per test. A `blob:https://…` entry
+  // (an object URL minted by the app origin) or any other URL stays in the
+  // strict comparison and fails it. Chromium and Firefox keep the strict
+  // `toEqual(HARNESS_ASSETS)` in their own branches.
+  // `openHarness` passes `blob:` loads through (route.fallback), so the worker
+  // WebKit starts runs the real bootstrap source and a worker-error here is
+  // WebKit's own, not the harness's fake response body.
+  const FRAME_BLOB = /^GET blob:null\/[0-9a-f-]{36}$/;
+  const frameBlobs = net.routed.filter((entry) => FRAME_BLOB.test(entry));
+  const rest = net.routed.filter((entry) => !FRAME_BLOB.test(entry));
+  expect(rest, account).toEqual(HARNESS_ASSETS);
+  expect(frameBlobs.length, account).toBeLessThanOrEqual(1);
+  expect(net.routed.filter((entry) => entry.startsWith('GET blob:') && !FRAME_BLOB.test(entry)), account).toEqual([]);
   expect(net.websockets).toEqual([]);
 }
 

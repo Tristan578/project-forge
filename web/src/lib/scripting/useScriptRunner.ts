@@ -28,6 +28,7 @@ import {
   loadSandboxWorkerSource,
   SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE,
   SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+  SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
   type ScriptWorkerLike,
 } from '@/lib/scripting/sandboxOrigin';
 
@@ -227,12 +228,20 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           ? createSandboxedScriptHost({
               // The script console is read by game creators: it gets plain
               // words, and the raw error / bundling hint goes to the devtools.
-              onError: (detail, phase) => {
+              onError: (...report) => {
+                // Destructured from the rest tuple so `phase` narrows `reason`:
+                // past the runtime branch it is a SandboxBootFailureReason.
+                const [detail, phase, reason] = report;
                 if (phase === 'runtime') {
                   reportSandboxRuntimeFailure(detail);
                   return;
                 }
-                console.error(`[ScriptRunner] Script sandbox ${phase} failure: ${detail}`);
+                console.error(`[ScriptRunner] Script sandbox ${phase} failure (${reason}): ${detail}`);
+                // A worker the browser refused will be refused again, so the
+                // retry advice would be a dead end: say what is true instead.
+                // A timeout or a failed source load may be transient.
+                const creatorMessage =
+                  reason === 'worker-error' ? SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE : SCRIPT_SANDBOX_START_FAILED_MESSAGE;
                 // The scripts never started and never will this session. Say so
                 // ONCE and stop Play now: left running, the ticks keep arming
                 // the watchdog, and 5 s later it would tell the creator their
@@ -244,8 +253,8 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
                   watchdogRef.current = null;
                 }
                 setPlayTickCallback(null);
-                addScriptLog({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_START_FAILED_MESSAGE, timestamp: Date.now() });
-                showError(SCRIPT_SANDBOX_START_FAILED_MESSAGE);
+                addScriptLog({ entityId: '*', level: 'error', message: creatorMessage, timestamp: Date.now() });
+                showError(creatorMessage);
                 useEditorStore.getState().setEngineMode('edit');
               },
             })

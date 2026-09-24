@@ -60,12 +60,21 @@
  *   host reported `Script sandbox worker-error: Error: Script error.` (the
  *   sanitised text a browser gives a cross-origin error) and the tests waiting
  *   on the worker never got an answer. A `worker-error` that arrives before
- *   the worker's first message is a `boot` failure below, so the host FAILS
- *   CLOSED: it reports once, removes the frame and relays nothing, and the
- *   runner stops Play with {@link SCRIPT_SANDBOX_START_FAILED_MESSAGE} and
- *   never falls back to the same-origin transport. The spec's WebKit branch
- *   asserts that — one `boot` failure, nothing relayed, nothing on the
+ *   the worker's first message is a `boot` failure below, reason
+ *   `worker-error`, so the host FAILS CLOSED: it reports once, removes the
+ *   frame and relays nothing, and the runner stops Play and never falls back
+ *   to the same-origin transport. The spec's WebKit branch asserts that — one
+ *   `boot` failure with reason `worker-error`, nothing relayed, nothing on the
  *   network. Why WebKit refuses the worker has not been diagnosed.
+ *
+ * The runner shows the creator one of two boot messages, chosen by
+ * {@link SandboxBootFailureReason}:
+ *
+ * - `worker-error` (the browser refused the worker; retrying cannot help):
+ *   {@link SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE} — scripts can't run in this
+ *   browser with the current editor settings. It offers no retry.
+ * - `timeout` or `source-load` (possibly transient):
+ *   {@link SCRIPT_SANDBOX_START_FAILED_MESSAGE} — press Play again or reload.
  *
  * So a creator on Safari cannot run their game's scripts at all with the flag
  * on. It must stay off for production users until WebKit support exists.
@@ -215,12 +224,53 @@ export function loadSandboxWorkerSource(): Promise<string> {
 export type SandboxFailurePhase = 'boot' | 'runtime';
 
 /**
- * What the script console shows the game creator for a `boot` failure. The
- * technical detail goes to the devtools: a creator cannot act on a bundling
- * hint or a raw worker error, but can press Play again or reload.
+ * WHY a `boot` failure happened, in the terms that decide what the creator can
+ * do about it. Behaviour-based: it names what the host observed, never a
+ * browser.
+ *
+ * - `worker-error`: the frame came up and then reported that the worker could
+ *   not be constructed (`boot-error`) or failed before its first message
+ *   (`worker-error`). The browser refused to run the sandboxed worker, and it
+ *   will refuse again: pressing Play again or reloading re-runs the same
+ *   frame, the same policy and the same bytes. This is what WebKit does today.
+ * - `timeout`: nothing was heard within the boot timeout. Possibly transient
+ *   (a busy tab, a slow machine), so retrying is honest advice.
+ * - `source-load`: the bundled worker text could not be loaded. A failed load
+ *   is not cached ({@link loadSandboxWorkerSource}), so the next Play retries
+ *   it; retrying is honest advice here too.
+ */
+export type SandboxBootFailureReason = 'worker-error' | 'timeout' | 'source-load';
+
+/**
+ * The arguments of {@link SandboxedScriptHostOptions.onError}. A `boot` report
+ * always carries a reason; a `runtime` report never does. A tuple union rather
+ * than an optional third parameter, so a handler written as
+ * `(...report) => { const [detail, phase, reason] = report; ... }` gets a
+ * non-optional `reason` once it has narrowed `phase` to `boot`.
+ */
+export type SandboxFailureReport =
+  | [detail: string, phase: 'boot', reason: SandboxBootFailureReason]
+  | [detail: string, phase: 'runtime'];
+
+/**
+ * What the script console shows the game creator for a `boot` failure whose
+ * reason is `timeout` or `source-load`. The technical detail goes to the
+ * devtools: a creator cannot act on a bundling hint or a raw worker error, but
+ * can press Play again or reload, and for these two reasons that may help.
  */
 export const SCRIPT_SANDBOX_START_FAILED_MESSAGE =
   "Your game's scripts couldn't start. Press Play again, or reload the editor if this keeps happening.";
+
+/**
+ * What the script console shows the game creator for a `boot` failure whose
+ * reason is `worker-error`: this browser refused to run the sandboxed worker.
+ * Retrying and reloading are dead ends there, so this message does not offer
+ * them. It names the settings as the cause (the isolation flag is what puts
+ * scripts in the sandbox) and suggests, without promising, another browser.
+ */
+export const SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE =
+  "Your game's scripts can't run in this browser with the editor's current settings. " +
+  'You could try opening the editor in a different browser.';
 
 /** What the script console shows the game creator for a `runtime` failure. */
 export const SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE =
@@ -232,8 +282,10 @@ export interface SandboxedScriptHostOptions {
   /**
    * Boot and uncaught worker errors. Never protocol messages. `detail` is the
    * DEVELOPER account (raw error text, bundling hints): log it to the devtools
-   * and show the creator {@link SCRIPT_SANDBOX_START_FAILED_MESSAGE} or
-   * {@link SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE} instead.
+   * and show the creator plain words instead — for `boot`, chosen by `reason`
+   * ({@link SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE} for `worker-error`,
+   * {@link SCRIPT_SANDBOX_START_FAILED_MESSAGE} otherwise); for `runtime`,
+   * {@link SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE}.
    *
    * REQUIRED, deliberately. A `runtime` report fires once per uncaught worker
    * error for as long as the worker runs (a script can throw from a
@@ -241,7 +293,7 @@ export interface SandboxedScriptHostOptions {
    * `useScriptRunner` does. A built-in fallback could only log 1:1, which is
    * an unbounded console; there is none, so a new caller has to decide.
    */
-  onError: (detail: string, phase: SandboxFailurePhase) => void;
+  onError: (...report: SandboxFailureReport) => void;
   /** Where the hidden frame is attached. Defaults to `document.body`. */
   container?: HTMLElement;
   /** How long to wait for the frame to report `ready` before calling `onError`. */
@@ -284,9 +336,9 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
   /** The worker has sent at least one protocol message, i.e. its code is running. */
   let started = false;
 
-  const report = (detail: string, phase: SandboxFailurePhase) => {
+  const report = (...args: SandboxFailureReport) => {
     if (terminated) return;
-    onError(detail, phase);
+    onError(...args);
   };
 
   const host: SandboxedScriptHost = {
@@ -322,9 +374,9 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
   // terminate. terminate() clears the boot timer and silences every later
   // report, so a load failure is never followed by a timeout for the same
   // frame, and a frame that turns up late is never built.
-  const failBoot = (detail: string) => {
+  const failBoot = (detail: string, reason: SandboxBootFailureReason) => {
     if (terminated) return;
-    report(detail, 'boot');
+    report(detail, 'boot', reason);
     host.terminate();
   };
 
@@ -344,15 +396,18 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
     if (msg.type === 'boot-error' || msg.type === 'worker-error') {
       const detail = `Script sandbox ${msg.type}: ${typeof msg.message === 'string' ? msg.message : 'unknown error'}`;
       // A worker error before the worker has said anything (a bundle that does
-      // not parse, a throw at module init) means the scripts never started.
+      // not parse, a throw at module init, a browser that will not run it)
+      // means the scripts never started — and, unlike a timeout, will not
+      // start on a retry, so it carries the `worker-error` reason. So does a
+      // worker the frame could not construct at all.
       if (msg.type === 'worker-error' && started) report(detail, 'runtime');
-      else failBoot(detail);
+      else failBoot(detail, 'worker-error');
     }
   };
 
   bootTimer = setTimeout(() => {
     bootTimer = null;
-    failBoot(`Script sandbox did not start within ${bootTimeoutMs} ms.`);
+    failBoot(`Script sandbox did not start within ${bootTimeoutMs} ms.`, 'timeout');
   }, bootTimeoutMs);
 
   loadWorkerSource().then(
@@ -374,7 +429,7 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
       (container ?? document.body).appendChild(el);
     },
     (err: unknown) => {
-      failBoot(err instanceof Error ? err.message : String(err));
+      failBoot(err instanceof Error ? err.message : String(err), 'source-load');
     },
   );
 

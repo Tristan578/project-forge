@@ -183,6 +183,13 @@ vi.mock('@/lib/playtest/playTickBus', () => ({
   resetPlayTickBus: mockResetPlayTickBus,
 }));
 
+// A CALL-THROUGH spy on the toast: the real `showError` still runs, and the
+// sandbox boot-reason tests can read which creator message it was given.
+vi.mock('@/lib/toast', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/toast')>();
+  return { ...actual, showError: vi.fn(actual.showError) };
+});
+
 // A CALL-THROUGH wrapper, not a stub: every test runs the real
 // `createSandboxedScriptHost` unless it swaps the implementation, which only
 // the sandbox runtime-failure suite at the bottom does (and restores after).
@@ -203,9 +210,11 @@ import {
   SANDBOX_BOOT_TIMEOUT_MS,
   SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE,
   SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+  SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
   type SandboxedScriptHost,
   type SandboxedScriptHostOptions,
 } from '../sandboxOrigin';
+import { showError } from '@/lib/toast';
 import { AST_FALLBACK_NOTICE } from '../sandboxConfig';
 import { audioManager } from '@/lib/audio/audioManager';
 // Deliberately NOT mocked: the module singleton IS the thing under test here,
@@ -1431,9 +1440,11 @@ describe('useScriptRunner — script isolation transport', () => {
       expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
       expect(mockPlayTickCallback).toBeNull();
       // Fail CLOSED: a sandbox that cannot start is never replaced by the
-      // weaker same-origin transport. This is the path WebKit takes today
-      // (CI run 35997735154), so "no Worker" is what keeps its scripts off
-      // the network rather than merely off the sandbox.
+      // weaker same-origin transport. The same teardown serves WebKit's
+      // boot failure (CI run 35997735154; reason 'worker-error', pinned with
+      // the fake host below), so "no Worker" is what keeps its scripts off
+      // the network rather than merely off the sandbox. This test reaches it
+      // through a 'source-load' failure (the unbundled placeholder).
       expect(latestWorker).toBeNull();
       expect(vi.mocked(createSandboxedScriptHost)).toHaveBeenCalledTimes(1);
       unmount();
@@ -1457,6 +1468,7 @@ describe('useScriptRunner — script isolation transport', () => {
 describe('useScriptRunner — sandbox runtime failures (fake sandboxed host)', () => {
   const mockWasmModule = { handle_command: vi.fn() };
   type OnError = SandboxedScriptHostOptions['onError'];
+  const mockShowError = vi.mocked(showError);
   let fakeHosts: { host: SandboxedScriptHost; onError: OnError }[] = [];
   let actualCreate: typeof createSandboxedScriptHost;
   let errorSpy: MockInstance<typeof console.error>;
@@ -1569,6 +1581,60 @@ describe('useScriptRunner — sandbox runtime failures (fake sandboxed host)', (
     // Guard the premise: the loop really did outrun the bound.
     expect(failures).toBeGreaterThan(SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT + 1);
     unmount();
+  });
+
+  // BOOT reasons. The real host's mapping (WebKit's shape => 'worker-error', a
+  // silent frame => 'timeout') is pinned in sandboxOrigin.test.ts; these pin
+  // the runner's choice of creator message for each, and that everything else
+  // about the fail-closed path is identical for both.
+  it.each([
+    {
+      reason: 'worker-error' as const,
+      shown: SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
+      notShown: SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+      detail: 'Script sandbox worker-error: Error: Script error.',
+    },
+    {
+      reason: 'timeout' as const,
+      shown: SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+      notShown: SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
+      detail: 'Script sandbox did not start within 4000 ms.',
+    },
+  ])("boot failure, reason '$reason': shows the matching creator message and fails closed", ({ reason, shown, notShown, detail }) => {
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    expect(fakeHosts).toHaveLength(1);
+    const [{ onError }] = fakeHosts;
+    // A tick arms the watchdog before the boot failure arrives.
+    tick();
+    mockAddScriptLog.mockClear();
+
+    act(() => onError(detail, 'boot', reason));
+
+    expect(scriptLogMessages()).toEqual([shown]);
+    expect(scriptLogMessages()).not.toContain(notShown);
+    expect(mockShowError).toHaveBeenCalledTimes(1);
+    expect(mockShowError).toHaveBeenCalledWith(shown);
+    // The raw detail and the reason are for the devtools.
+    expect(errorSpy).toHaveBeenCalledWith(`[ScriptRunner] Script sandbox boot failure (${reason}): ${detail}`);
+    // Fail closed, identically for both reasons: Play stops, the tick callback
+    // is gone, the watchdog never fires, and no same-origin Worker is built.
+    expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
+    expect(mockPlayTickCallback).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(WATCHDOG_TIMEOUT_MS + 1000);
+    });
+    expect(scriptLogMessages()).toEqual([shown]);
+    expect(latestWorker).toBeNull();
+    expect(vi.mocked(createSandboxedScriptHost)).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('the two boot messages are distinct, and only the start-failed one offers a retry', () => {
+    // Guard the premise of the test above: were the constants equal, it could
+    // not tell the two choices apart.
+    expect(SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE).not.toBe(SCRIPT_SANDBOX_START_FAILED_MESSAGE);
+    expect(SCRIPT_SANDBOX_START_FAILED_MESSAGE).toMatch(/Play again|reload/i);
+    expect(SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE).not.toMatch(/Play again|reload|retry/i);
   });
 
   it('a new Play session reports again', () => {

@@ -124,8 +124,9 @@ function bootFakeFrame(): FakeFrame {
  * afterEach instead of vanishing into a no-op spy.
  */
 let unexpectedReports: string[] = [];
-const unexpectedReport: SandboxedScriptHostOptions['onError'] = (detail, phase) => {
-  unexpectedReports.push(`${phase}: ${detail}`);
+const unexpectedReport: SandboxedScriptHostOptions['onError'] = (...report) => {
+  const [detail, phase, reason] = report;
+  unexpectedReports.push(`${phase}${reason ? ` (${reason})` : ''}: ${detail}`);
 };
 
 /** Start a host whose frame is the fake realm above. */
@@ -324,7 +325,7 @@ describe('failure reporting', () => {
   it('reports a worker source that fails to load', async () => {
     const onError = vi.fn();
     hosts.push(createSandboxedScriptHost({ loadWorkerSource: () => Promise.reject(new Error('chunk 404')), onError }));
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith('chunk 404', 'boot'));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith('chunk 404', 'boot', 'source-load'));
   });
 
   it('refuses the unbundled placeholder loudly instead of starting an empty worker', async () => {
@@ -332,7 +333,7 @@ describe('failure reporting', () => {
     await expect(loadSandboxWorkerSource()).rejects.toThrow(/was not bundled/);
     const onError = vi.fn();
     hosts.push(createSandboxedScriptHost({ onError }));
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringMatching(/was not bundled/), 'boot'));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringMatching(/was not bundled/), 'boot', 'source-load'));
   });
 
   it('reports a worker the frame could not construct, and an uncaught worker error', async () => {
@@ -351,7 +352,7 @@ describe('failure reporting', () => {
     hosts.push(first);
     await vi.waitFor(() => {
       first.frame?.dispatchEvent(new Event('load'));
-      expect(onError).toHaveBeenCalledWith(expect.stringMatching(/boot-error: Worker blocked by policy/), 'boot');
+      expect(onError).toHaveBeenCalledWith(expect.stringMatching(/boot-error: Worker blocked by policy/), 'boot', 'worker-error');
     });
     expect(frame1.contentWindow.postMessage).toHaveBeenCalledTimes(1);
     // A host that could not start is finished: its frame is gone.
@@ -367,10 +368,10 @@ describe('failure reporting', () => {
     FakeWorker.created[0].onerror?.({ message: 'SyntaxError: bad bundle' });
     // Before the worker has said anything: its code never ran, so this is a
     // failure to START, not an error in a running game.
-    await vi.waitFor(() => expect(onError2).toHaveBeenCalledWith(expect.stringMatching(/worker-error: SyntaxError: bad bundle/), 'boot'));
+    await vi.waitFor(() => expect(onError2).toHaveBeenCalledWith(expect.stringMatching(/worker-error: SyntaxError: bad bundle/), 'boot', 'worker-error'));
   });
 
-  it("WebKit's shape — 'ready', then an uncaught error before the first message — fails CLOSED as a boot failure", async () => {
+  it("WebKit's shape — 'ready', then an uncaught error before the first message — fails CLOSED as a boot failure, reason 'worker-error'", async () => {
     // What CI run 35997735154 recorded in WebKit: the frame constructed the
     // worker (so the bootstrap said 'ready' and the boot timer was cleared),
     // then the worker reported the sanitised "Script error." without ever
@@ -389,7 +390,7 @@ describe('failure reporting', () => {
     worker.onerror?.({ message: 'Error: Script error.' });
 
     await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
-    expect(onError).toHaveBeenCalledWith('Script sandbox worker-error: Error: Script error.', 'boot');
+    expect(onError).toHaveBeenCalledWith('Script sandbox worker-error: Error: Script error.', 'boot', 'worker-error');
     expect(host.frame).toBeNull();
     expect(container.querySelector('iframe')).toBeNull();
     // Finished: nothing further is relayed or reported, however long we wait.
@@ -427,7 +428,7 @@ describe('failure reporting', () => {
     // The boot timer is the other reporter a load failure could be followed by.
     vi.advanceTimersByTime(5000);
     expect(onError).toHaveBeenCalledTimes(1);
-    expect(onError).toHaveBeenCalledWith('chunk 404', 'boot');
+    expect(onError).toHaveBeenCalledWith('chunk 404', 'boot', 'source-load');
   });
 
   it('reports a frame that never comes up, and stays quiet once it has', async () => {
@@ -437,7 +438,7 @@ describe('failure reporting', () => {
     vi.advanceTimersByTime(999);
     expect(stuck).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(stuck).toHaveBeenCalledWith('Script sandbox did not start within 1000 ms.', 'boot');
+    expect(stuck).toHaveBeenCalledWith('Script sandbox did not start within 1000 ms.', 'boot', 'timeout');
 
     const healthy = vi.fn();
     const { host } = await startHost({ onError: healthy, bootTimeoutMs: 1000 });
@@ -446,5 +447,40 @@ describe('failure reporting', () => {
     await vi.waitFor(() => expect(vi.getTimerCount()).toBe(0));
     vi.advanceTimersByTime(5000);
     expect(healthy).not.toHaveBeenCalled();
+  });
+
+  it("a frame that is attached and booted but never says 'ready' is a TIMEOUT, not a worker error", async () => {
+    // The other boot shape the runner must tell apart from WebKit's: here
+    // nothing was ever heard, which may be transient (a busy tab), so the
+    // reason is 'timeout' and the creator is told to retry. The frame is real
+    // and the boot message is delivered; its window simply never answers.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const silentWindow = { postMessage: vi.fn() };
+    vi.spyOn(HTMLIFrameElement.prototype, 'contentWindow', 'get').mockReturnValue(silentWindow as unknown as Window);
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const onError = vi.fn();
+    const host = createSandboxedScriptHost({
+      loadWorkerSource: async () => 'WORKER_SOURCE_TEXT',
+      container,
+      onError,
+      bootTimeoutMs: 1000,
+    });
+    hosts.push(host);
+    // Not vi.waitFor: under fake timers it advances them, which would spend the
+    // boot timeout this test is measuring. Flush microtasks only.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.frame).not.toBeNull();
+    host.frame?.dispatchEvent(new Event('load'));
+    // Premise: the frame really was booted, so this is not the source-load path.
+    expect(silentWindow.postMessage).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(999);
+    expect(onError).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith('Script sandbox did not start within 1000 ms.', 'boot', 'timeout');
+    // Fail closed exactly as for every boot failure: the frame is gone.
+    expect(host.frame).toBeNull();
+    expect(container.querySelector('iframe')).toBeNull();
   });
 });
