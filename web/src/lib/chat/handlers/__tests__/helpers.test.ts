@@ -60,6 +60,24 @@ describe('buildCompoundResult', () => {
     expect(result.summary).toContain('Failed');
     expect(result.summary).toContain('2 errors');
   });
+
+  it('carries an empty corrections list, and says nothing about adjusting, by default', () => {
+    const result = buildCompoundResult([{ action: 'spawn', success: true, entityId: 'a' }], { Cube: 'a' });
+    expect(result.corrections).toEqual([]);
+    expect(result.summary).toBe('Created 1 entities. Entity IDs: Cube=a');
+  });
+
+  it('carries the corrections and says each one under its entity’s name (PF-1148)', () => {
+    const correction = {
+      component: 'collectible', field: 'value', requested: 2.6, applied: 3, reason: 'rounded', entityId: 'a',
+    } as const;
+    const result = buildCompoundResult([{ action: 'spawn', success: true, entityId: 'a' }], { Coin: 'a' }, [correction]);
+    expect(result.corrections).toEqual([correction]);
+    expect(result.summary).toBe(
+      'Created 1 entities. Entity IDs: Coin=a. 1 value was adjusted to fit the engine’s limits: '
+      + '"Coin" Collectible value: you asked for 2.6, it was rounded to the whole number 3.',
+    );
+  });
 });
 
 describe('buildMaterialFromPartial', () => {

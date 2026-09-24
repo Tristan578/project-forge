@@ -58,6 +58,27 @@ export function mockSSEResponse(events: unknown[], status = 200): Response {
 export function makeChatSSEEvents(opts: {
   text?: string;
   toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
+  /**
+   * Tool calls that FAIL on the wire (PF-950 / #8931). Shapes verified against
+   * `ai@7.x`'s `UIMessageChunk` union (`node_modules/ai/dist/index.d.ts`):
+   *   - `phase: 'input'`  → `tool-input-start`, then
+   *     `{ type:'tool-input-error', toolCallId, toolName, input, errorText }`
+   *     (the model produced input the SDK could not parse or validate; no
+   *     `tool-input-available` is ever emitted for it)
+   *   - `phase: 'output'` → `tool-input-start`, then
+   *     `{ type:'tool-output-error', toolCallId, errorText }`
+   *     (a provider-executed tool failed; the SDK reports the failure with
+   *     this chunk and no output)
+   * Either way the client's card must land on `'error'` carrying `errorText`,
+   * never stay `'pending'` or vanish.
+   */
+  toolErrors?: Array<{
+    id: string;
+    name: string;
+    phase: 'input' | 'output';
+    errorText: string;
+    input?: Record<string, unknown>;
+  }>;
   thinking?: string;
   inputTokens?: number;
   outputTokens?: number;
@@ -102,13 +123,32 @@ export function makeChatSSEEvents(opts: {
     }
   }
 
+  // Failed tool calls — the pending card from `tool-input-start` is resolved
+  // by an error chunk instead of `tool-input-available`.
+  if (opts.toolErrors) {
+    for (const te of opts.toolErrors) {
+      events.push({ type: 'tool-input-start', toolCallId: te.id, toolName: te.name });
+      if (te.phase === 'input') {
+        events.push({
+          type: 'tool-input-error',
+          toolCallId: te.id,
+          toolName: te.name,
+          input: te.input ?? {},
+          errorText: te.errorText,
+        });
+      } else {
+        events.push({ type: 'tool-output-error', toolCallId: te.id, errorText: te.errorText });
+      }
+    }
+  }
+
   events.push({ type: 'finish-step' });
 
   // Finish — `finishReason` is 'tool-calls' when tools were called, else 'stop'.
   // Usage rides on `messageMetadata`, matching toUIMessageStreamResponse({ messageMetadata }).
   const finishChunk: Record<string, unknown> = {
     type: 'finish',
-    finishReason: opts.toolCalls?.length ? 'tool-calls' : 'stop',
+    finishReason: opts.toolCalls?.length || opts.toolErrors?.length ? 'tool-calls' : 'stop',
   };
   if (opts.inputTokens !== undefined || opts.outputTokens !== undefined) {
     finishChunk.messageMetadata = {

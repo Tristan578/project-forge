@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
-import { injectStore, readStore, isStrictMode } from '../helpers/store-injection';
+import { injectStore, readStore } from '../helpers/store-injection';
 import {
   E2E_TIMEOUT_SHORT_MS,
   E2E_TIMEOUT_ELEMENT_MS,
@@ -13,8 +13,10 @@ import {
  * messages and tool call states directly into the Zustand store via
  * the store-injection helper.
  *
- * In CI (strict mode): tests throw if stores are unavailable.
- * Locally: tests skip assertions gracefully when stores aren't exposed.
+ * Every assertion is unconditional (#10160). The @ui job builds with
+ * NEXT_PUBLIC_E2E_HOOKS, so the stores are on `window`; a test whose subject is
+ * missing — injection refused, a card or button that did not render — FAILS on
+ * that assertion instead of passing around it.
  *
  * Every test that injects store state in place of the component it exercises
  * declares that substitution (#10158, e2e/lib/substitution.ts): an annotation
@@ -51,10 +53,10 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
     await editor.waitForEditorStore();
 
     const injected = await injectStore(page, '__CHAT_STORE', `
-      const store = window.__CHAT_STORE ?? window.__EDITOR_STORE;
-      const addMessage = store.getState?.()?.addMessage;
-      if (typeof addMessage === 'function') {
-        addMessage({
+      // The chat store has no append action; a message is added
+      // exactly the way streamOneTurn appends one.
+      window.__CHAT_STORE.setState((s) => ({
+        messages: [...s.messages, {
           id: 'test-msg-1',
           role: 'assistant',
           content: 'I spawned a cube for your game.',
@@ -64,21 +66,16 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
             status: 'success', undoable: true,
           }],
           timestamp: Date.now(),
-        });
-      }
+        }],
+      }));
     `);
 
     await page.keyboard.press('Control+k');
     await expect(page.locator('span').filter({ hasText: /AI Chat/i }).first())
       .toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
-    if (injected || isStrictMode) {
-      const toolLabel = page.getByText('Spawn Entity', { exact: false });
-      const count = await toolLabel.count();
-      if (count > 0) {
-        await expect(toolLabel.first()).toBeVisible();
-      }
-    }
+    expect(injected, 'store injection requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
+    await expect(page.getByText('Spawn Entity', { exact: false }).first()).toBeVisible();
   });
 
   // -------------------------------------------------------------------------
@@ -91,22 +88,14 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
 
     const injected = await injectStore(page, '__EDITOR_STORE', `
       const store = window.__EDITOR_STORE;
-      const addNode = store.getState?.()?.addNode;
-      if (typeof addNode === 'function') {
-        addNode({
-          id: 'ai-created-cube-99', name: 'GamePlayer', type: 'Cube',
-          parentId: null, visible: true, locked: false, childIds: [],
-        });
-      }
+      store.getState().addNode({
+        entityId: 'ai-created-cube-99', name: 'GamePlayer', parentId: null,
+        children: [], components: ['Mesh3d'], visible: true,
+      });
     `);
 
-    if (injected || isStrictMode) {
-      const hierarchyNode = page.getByText(/GamePlayer/i, { exact: false });
-      const count = await hierarchyNode.count();
-      if (count > 0) {
-        await expect(hierarchyNode.first()).toBeVisible();
-      }
-    }
+    expect(injected, 'store injection requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
+    await expect(page.getByText(/GamePlayer/i, { exact: false }).first()).toBeVisible();
   });
 
   // -------------------------------------------------------------------------
@@ -117,11 +106,9 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
   }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
-    await injectStore(page, '__CHAT_STORE', `
-      const chatStore = window.__CHAT_STORE;
-      const addMessage = chatStore?.getState?.()?.addMessage;
-      if (typeof addMessage === 'function') {
-        addMessage({
+    const injected = await injectStore(page, '__CHAT_STORE', `
+      window.__CHAT_STORE.setState((s) => ({
+        messages: [...s.messages, {
           id: 'test-msg-multi', role: 'assistant',
           content: 'Setting up your platformer scene.',
           toolCalls: [
@@ -130,18 +117,21 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
             { id: 'tc-multi-3', name: 'update_material', input: { entityId: 'ai-ground', baseColor: [0.2, 0.8, 0.2, 1.0] }, status: 'success', undoable: false },
           ],
           timestamp: Date.now(),
-        });
-      }
+        }],
+      }));
     `);
 
     await page.keyboard.press('Control+k');
     await expect(page.locator('span').filter({ hasText: /AI Chat/i }).first())
       .toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
+    expect(injected, 'store injection requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
+    // One card per tool call, each carrying its TOOL_LABELS name.
     const chatOverlay = page.locator('.fixed.z-50').first();
     await expect(chatOverlay).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
-    const divCount = await chatOverlay.locator('div').count();
-    expect(divCount).toBeGreaterThan(2);
+    await expect(chatOverlay.getByText('Spawn Entity', { exact: true })).toBeVisible();
+    await expect(chatOverlay.getByText('Transform', { exact: true })).toBeVisible();
+    await expect(chatOverlay.getByText('Material', { exact: true })).toBeVisible();
   });
 
   // -------------------------------------------------------------------------
@@ -154,10 +144,9 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
 
     const injected = await injectStore(page, '__CHAT_STORE', `
       const chatStore = window.__CHAT_STORE;
-      const state = chatStore?.getState?.();
-      if (state?.setApprovalMode) state.setApprovalMode(true);
-      if (state?.addMessage) {
-        state.addMessage({
+      chatStore.getState().setApprovalMode(true);
+      chatStore.setState((s) => ({
+        messages: [...s.messages, {
           id: 'test-msg-approval', role: 'assistant',
           content: 'Ready to spawn entities. Please review.',
           toolCalls: [{
@@ -166,22 +155,17 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
             status: 'preview', undoable: false,
           }],
           timestamp: Date.now(),
-        });
-      }
+        }],
+      }));
     `);
 
     await page.keyboard.press('Control+k');
     await expect(page.locator('span').filter({ hasText: /AI Chat/i }).first())
       .toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
-    if (injected || isStrictMode) {
-      const approveBtn = page.getByRole('button', { name: /Approve/i });
-      const approveCount = await approveBtn.count();
-      if (approveCount > 0) {
-        await expect(approveBtn.first()).toBeVisible();
-        await expect(page.getByRole('button', { name: /Reject/i }).first()).toBeVisible();
-      }
-    }
+    expect(injected, 'store injection requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
+    await expect(page.getByRole('button', { name: /Approve/i }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /Reject/i }).first()).toBeVisible();
   });
 
   // -------------------------------------------------------------------------
@@ -193,10 +177,8 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
     await editor.waitForEditorStore();
 
     const injected = await injectStore(page, '__CHAT_STORE', `
-      const chatStore = window.__CHAT_STORE;
-      const addMessage = chatStore?.getState?.()?.addMessage;
-      if (typeof addMessage === 'function') {
-        addMessage({
+      window.__CHAT_STORE.setState((s) => ({
+        messages: [...s.messages, {
           id: 'test-msg-error', role: 'assistant',
           content: 'An error occurred while processing your request.',
           toolCalls: [{
@@ -205,21 +187,16 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
             status: 'error', error: 'Unknown entity type: invalid_type', undoable: false,
           }],
           timestamp: Date.now(),
-        });
-      }
+        }],
+      }));
     `);
 
     await page.keyboard.press('Control+k');
     const chatOverlay = page.locator('.fixed.z-50').first();
     await expect(chatOverlay).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
-    if (injected || isStrictMode) {
-      const errorText = page.getByText(/error occurred/i, { exact: false });
-      const errorCount = await errorText.count();
-      if (errorCount > 0) {
-        await expect(errorText.first()).toBeVisible();
-      }
-    }
+    expect(injected, 'store injection requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
+    await expect(page.getByText(/error occurred/i, { exact: false }).first()).toBeVisible();
   });
 
   // -------------------------------------------------------------------------
@@ -253,26 +230,27 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
   }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
-    await injectStore(page, '__CHAT_STORE', `
-      window.__CHAT_STORE?.getState?.()?.setApprovalMode?.(true);
+    // Direct calls, no optional chaining: a renamed or removed action must
+    // throw at the injection, not leave the store untouched and the read
+    // below explaining it away.
+    const enabled = await injectStore(page, '__CHAT_STORE', `
+      window.__CHAT_STORE.getState().setApprovalMode(true);
     `);
+    expect(enabled, 'store injection requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
 
     const approvalEnabled = await readStore<boolean>(page, '__CHAT_STORE',
-      `window.__CHAT_STORE?.getState?.()?.approvalMode ?? null`);
+      `window.__CHAT_STORE.getState().approvalMode`);
 
-    if (approvalEnabled !== null) {
-      expect(approvalEnabled).toBe(true);
-    }
+    expect(approvalEnabled, 'store read requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
 
-    await injectStore(page, '__CHAT_STORE', `
-      window.__CHAT_STORE?.getState?.()?.setApprovalMode?.(false);
+    const disabled = await injectStore(page, '__CHAT_STORE', `
+      window.__CHAT_STORE.getState().setApprovalMode(false);
     `);
+    expect(disabled, 'store injection requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
 
     const approvalDisabled = await readStore<boolean>(page, '__CHAT_STORE',
-      `window.__CHAT_STORE?.getState?.()?.approvalMode ?? null`);
+      `window.__CHAT_STORE.getState().approvalMode`);
 
-    if (approvalDisabled !== null) {
-      expect(approvalDisabled).toBe(false);
-    }
+    expect(approvalDisabled, 'store read requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(false);
   });
 });
