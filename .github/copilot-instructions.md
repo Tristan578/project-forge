@@ -104,6 +104,10 @@ Do not combine `--plan` with `--mode autopilot` here. That combination approves 
 plan automatically and implements it, which skips the review step this section exists
 for.
 
+To trust this checkout so Copilot CLI stops asking on every start, follow
+`docs/guides/copilot-cli-trusted-folders.md`. The trust list is local state and is never
+committed.
+
 ### Sync Architecture (Non-Negotiable)
 - `github_issue_number` (SQLite column) is the SOLE link between local tickets and GitHub Issues. NEVER match by title.
 - `sync_repo` (SQLite column) controls which repo a ticket syncs to. Only `sync_repo = 'project-forge'` tickets are synced.
