@@ -114,7 +114,7 @@ cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 cd web && npx eslint --max-warnings 0 .
 cd web && npx tsc --noEmit
 cd web && npx vitest run
-cd ../mcp-server && npx vitest run
+cd ../mcp-server && npx tsc --noEmit && npx vitest run
 python .claude/skills/arch-validator/check_arch.py
 ```
 
@@ -141,7 +141,7 @@ Include a summary of what changed, how to test it, and screenshots for visual ch
 | Test type | Command | Count |
 |-----------|---------|-------|
 | Unit (web) | `cd web && npx vitest run` | 4700+ |
-| Unit (MCP) | `cd mcp-server && npx vitest run` | 25+ |
+| Unit (MCP) | `cd mcp-server && npx tsc --noEmit && npx vitest run` | 25+ |
 | E2E | `cd web && npx playwright test` | 81 |
 | E2E (cross-browser) | `cd web && npm run e2e:crossbrowser` | @ui specs x 4 engines |
 | Manual | See [TESTING.md](TESTING.md) | checklist |

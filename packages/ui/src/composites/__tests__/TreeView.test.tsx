@@ -33,6 +33,22 @@ describe('TreeView', () => {
     expect(screen.getByText('Child 2')).not.toBeNull();
   });
 
+  it('marks the selected top-level node aria-selected and no other', () => {
+    render(<TreeView nodes={NODES} selectedId="sibling" />);
+    const items = screen.getAllByRole('treeitem');
+    const selected = items.filter((el) => el.getAttribute('aria-selected') === 'true');
+    expect(selected).toHaveLength(1);
+    expect(selected[0]).toHaveTextContent('Sibling');
+    expect(screen.getByText('Root').closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('threads selectedId down to nested items (the recursive TreeItem render)', () => {
+    render(<TreeView nodes={NODES} expandedIds={['root']} selectedId="child-1" />);
+    expect(screen.getByText('Child 1').closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Child 2').closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByText('Root').closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'false');
+  });
+
   it('calls onSelect when a node is clicked', () => {
     const onSelect = vi.fn();
     render(<TreeView nodes={NODES} onSelect={onSelect} />);
