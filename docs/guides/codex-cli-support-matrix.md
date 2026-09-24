@@ -393,7 +393,7 @@ file, so "the lock names it" is not on its own a reason to delete anything.
   `.agents/` copies were the generic upstream imports. Everything the `.agents/`
   side had that the `.claude/` side lacked was merged into `.claude/` first — the
   five game-engine starter templates under `assets/` (the skill body already
-  referred to them) and eight generic references, plus the filtered-list and
+  referred to them) and nine generic references, plus the filtered-list and
   delete rows of the kanban REST table — and the three are now mirrored like
   the rest. `skills.independent` is empty; a skill that must diverge again is
   declared there deliberately, never by editing `.agents/` in place.

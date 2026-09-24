@@ -218,7 +218,6 @@ curl -s -X POST "http://taskboard.localhost:1355/api/subtasks/<SUBTASK_ID>/toggl
 
 | Endpoint | Method | Body Fields | Notes |
 |----------|--------|-------------|-------|
-| `/api/board` | GET | (none) | Full board: todo / in_progress / done columns |
 | `/api/tickets?project=...&status=...` | GET | (query) | List tickets with filters |
 | `/api/tickets/:id` | GET | (none) | Ticket details including subtasks |
 | `/api/tickets` | POST | `title`, `description`, `priority`, `projectId`, `teamId`, `labels` | `projectId` not `project` |
