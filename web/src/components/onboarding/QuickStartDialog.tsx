@@ -37,6 +37,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import Link from 'next/link';
 import {
   INSUFFICIENT_TOKENS_MESSAGE,
+  RESERVATION_UNCONFIRMED_MESSAGE,
   isOrchestratorRunLive,
   type OrchestratorStatus,
 } from '@/stores/slices/orchestratorSlice';
@@ -593,6 +594,16 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
           className="mt-3 rounded-[var(--sf-radius-md)] border border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_12%,transparent)] px-3 py-2 text-xs text-[var(--sf-text)]"
         >
           {error}
+          {/* The message tells the user to check their balance; give them the
+              way to, since the hold may or may not have been taken. */}
+          {error === RESERVATION_UNCONFIRMED_MESSAGE && (
+            <>
+              {' '}
+              <Link href={SETTINGS_TOKENS_HREF} className="underline underline-offset-2">
+                Check balance
+              </Link>
+            </>
+          )}
         </div>
       )}
     </Dialog>

@@ -310,8 +310,27 @@ describe('OrchestratorPanel', () => {
     render(<OrchestratorPanel />);
 
     expect(screen.getByRole('button', { name: /Start Building/ })).toBeTruthy();
+    // The design cost tokens, so dropping it asks once.
     fireEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+    expect(mockCancelPipeline).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard it' }));
     expect(mockCancelPipeline).toHaveBeenCalledTimes(1);
+  });
+
+  it('announces a refused build and offers one Buy tokens link for a short balance', () => {
+    mockStore({
+      orchestratorStatus: 'awaiting_approval',
+      currentPlan: MOCK_PLAN,
+      tokenEstimate: { ...MOCK_PLAN.tokenEstimate, sufficientBalance: false },
+      stepStatuses: {},
+      orchestratorError: 'Insufficient tokens — add tokens or upgrade your plan',
+    });
+    render(<OrchestratorPanel />);
+
+    expect(screen.getByRole('alert').textContent).toContain('Insufficient tokens');
+    expect(screen.getAllByRole('link', { name: 'Buy tokens' })).toHaveLength(1);
+    // The cost bar's speculative "may cost more" row gives way to the refusal.
+    expect(screen.queryByText(/may cost more than your token balance/)).toBeNull();
   });
 
   it('renders approval gate dialog', () => {

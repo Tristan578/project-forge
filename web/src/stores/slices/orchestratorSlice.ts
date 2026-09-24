@@ -213,9 +213,16 @@ export const RESERVATION_UNCONFIRMED_MESSAGE =
   'We could not confirm the build started. Check your token balance before trying again.';
 
 /**
- * The route answered the reserve request with a non-2xx status. Only this
- * proves nothing was deducted: the route refuses before `deductTokens` runs.
+ * The statuses `POST /api/game/pipeline` refuses a reserve with BEFORE
+ * `deductTokens` runs: 400 (validation), 402 (insufficient_tokens), and the
+ * middleware's 401/403 (auth) and 429 (rate limit). Only these prove nothing
+ * was taken. A 5xx proves nothing: `deductTokens` commits and then reads the
+ * balance, so a failure there, the egress guard, or a gateway timeout can all
+ * answer 5xx after the hold exists.
  */
+const RESERVE_REFUSAL_STATUSES = new Set([400, 401, 402, 403, 429]);
+
+/** The route refused the reserve with one of `RESERVE_REFUSAL_STATUSES`. */
 class ReservationRefusedError extends Error {}
 
 /**
@@ -246,9 +253,12 @@ async function reserveBuildBudget(estimatedTotal: number): Promise<string | null
 
   if (!reserveRes.ok) {
     const reserveBody = await reserveRes.json().catch(() => ({ error: 'Token reservation failed' }));
-    throw new ReservationRefusedError(reserveBody.error === 'insufficient_tokens'
+    const message = reserveBody.error === 'insufficient_tokens'
       ? INSUFFICIENT_TOKENS_MESSAGE
-      : reserveBody.error ?? 'Token reservation failed');
+      : reserveBody.error ?? 'Token reservation failed';
+    // Anything but a documented refusal leaves the hold's fate unknown.
+    if (!RESERVE_REFUSAL_STATUSES.has(reserveRes.status)) throw new Error(message);
+    throw new ReservationRefusedError(message);
   }
 
   const reserveData = await reserveRes.json();
@@ -576,15 +586,16 @@ export const createOrchestratorSlice: StateCreator<
       if (signal.aborted) return;
       if (get().currentPlan === currentPlan) {
         if (err instanceof ReservationRefusedError) {
-          // The route said no: nothing was spent and the plan is intact, so it
+          // The route refused with a documented status: nothing was taken and
+          // the plan is intact, so it
           // goes back to the review with the reason. As store state it outlives
           // the dialog and in-app navigation; a full page load (Stripe checkout
           // returns to the site root) still drops it, like all editor state.
           set({ orchestratorStatus: 'awaiting_approval', orchestratorError: err.message });
         } else {
-          // No reply, or a 2xx we could not read: the hold may already have
-          // been taken, with no id to release it by. Say so, and do not offer
-          // a one-click retry that could take a second hold.
+          // No reply, a 5xx, or a 2xx we could not read: the hold may already
+          // have been taken, with no id to release it by. Say so, and do not
+          // offer a one-click retry that could take a second hold.
           set({ orchestratorStatus: 'failed', orchestratorError: RESERVATION_UNCONFIRMED_MESSAGE });
         }
       }

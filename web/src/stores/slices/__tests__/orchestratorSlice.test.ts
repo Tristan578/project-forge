@@ -1450,7 +1450,7 @@ describe('orchestratorSlice', () => {
     });
 
     it('returns the plan to the review with the server\'s reason, touching nothing, when the reservation is refused', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'insufficient_tokens' }) });
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 402, json: async () => ({ error: 'insufficient_tokens' }) });
       store.getState().setPlan(makeMockPlan());
 
       await store.getState().runPipelineFromPlan();
@@ -1465,13 +1465,13 @@ describe('orchestratorSlice', () => {
     });
 
     it('returns the plan to the review with the route\'s own reason when it refuses for something else', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Pipeline budget unavailable' }) });
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: 'Invalid estimatedTotal' }) });
       store.getState().setPlan(makeMockPlan());
 
       await store.getState().runPipelineFromPlan();
 
       expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
-      expect(store.getState().orchestratorError).toBe('Pipeline budget unavailable');
+      expect(store.getState().orchestratorError).toBe('Invalid estimatedTotal');
       expect(Object.values(store.getState().stepStatuses).every((st) => st === 'pending')).toBe(true);
       expect(runPipeline).not.toHaveBeenCalled();
     });
@@ -1485,6 +1485,12 @@ describe('orchestratorSlice', () => {
       ['a 2xx reply that is not JSON', () =>
         mockFetch.mockResolvedValueOnce({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } })],
       ['no reply (network)', () => mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'))],
+      // A 5xx can follow a committed deduction: deductTokens commits and then
+      // reads the balance, and the egress guard or a gateway can fail after.
+      ['a 500 with a JSON body', () =>
+        mockFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: 'Internal server error' }) })],
+      ['a 504 with an HTML body', () =>
+        mockFetch.mockResolvedValueOnce({ ok: false, status: 504, json: async () => { throw new SyntaxError('Unexpected token <'); } })],
     ])('reports an unconfirmed outcome, not a clean refusal, for %s', async (_case, arrange) => {
       arrange();
       store.getState().setPlan(makeMockPlan());
@@ -1500,7 +1506,7 @@ describe('orchestratorSlice', () => {
     // The in-flight guard must let go on every exit, or the plan can never
     // be built again after a refusal.
     it('builds the same plan on retry after a refused reservation', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'insufficient_tokens' }) });
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 402, json: async () => ({ error: 'insufficient_tokens' }) });
       const plan = makeMockPlan();
       store.getState().setPlan(plan);
       await store.getState().runPipelineFromPlan();
@@ -1515,7 +1521,7 @@ describe('orchestratorSlice', () => {
     });
 
     it('does not report an earlier refusal as the reason a later run failed', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'insufficient_tokens' }) });
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 402, json: async () => ({ error: 'insufficient_tokens' }) });
       const plan = makeMockPlan();
       store.getState().setPlan(plan);
       await store.getState().runPipelineFromPlan();

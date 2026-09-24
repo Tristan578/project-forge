@@ -696,6 +696,10 @@ describe('QuickStartDialog', () => {
 
       expect((await screen.findByRole('alert')).textContent).toContain(RESERVATION_UNCONFIRMED_MESSAGE);
       expect(screen.queryByText(/Nothing was spent/)).toBeNull();
+      // The message says to check the balance; the way to is right there.
+      expect(screen.getByRole('link', { name: 'Check balance' }).getAttribute('href')).toBe(
+        '/settings?tab=tokens',
+      );
       expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
     });
 

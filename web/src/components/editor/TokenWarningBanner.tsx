@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { X, AlertTriangle, CreditCard } from 'lucide-react';
 import { useUserStore } from '@/stores/userStore';
 import { SETTINGS_BILLING_HREF, SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
@@ -103,12 +104,15 @@ export function TokenWarningBanner() {
               </span>
             )}
           </span>
-          <a
+          {/* A client-side Link, not <a>: a full page load would throw away
+              the editor's in-memory state, including a plan waiting to be
+              built. Theme tokens and a 24px target (WCAG 2.5.8). */}
+          <Link
             href={SETTINGS_TOKENS_HREF}
-            className="shrink-0 rounded bg-amber-700 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-amber-600"
+            className="inline-flex min-h-6 shrink-0 items-center rounded bg-[var(--sf-bg-elevated)] px-2 text-xs font-medium text-[var(--sf-text)] hover:bg-[var(--sf-bg-overlay)]"
           >
             Buy Tokens
-          </a>
+          </Link>
           <button
             onClick={handleDismissToken}
             className="shrink-0 rounded p-0.5 hover:bg-amber-800"

@@ -30,10 +30,10 @@ export function TokenDepletedModal() {
     router.push('/pricing');
   }, [setShowModal, router]);
 
-  // `/settings?tab=billing`, not `/settings/billing`: there is no nested billing
-  // route and never was (#9046) — billing is a TAB on /settings, selected by the
-  // `?tab=` query param SettingsPage reads at mount. This modal is deliberately
-  // non-dismissible, so a dead link here strands a paying user with no exit.
+  // `/settings?tab=tokens`: the Tokens tab is where the packs are sold (the
+  // Billing tab only upgrades plans). Settings sections are TABS on /settings,
+  // selected by `?tab=`; there are no nested routes (#9046). This modal is
+  // deliberately non-dismissible, so a dead link here strands a paying user.
   const handleBuyTokens = useCallback(() => {
     setShowModal(false);
     router.push(SETTINGS_TOKENS_HREF);

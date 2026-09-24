@@ -13,8 +13,9 @@
  * Spec: specs/2026-04-12-e1-pipeline-integration.md (Deliverable 4)
  */
 
-import { useCallback } from 'react';
-import { cn } from '@spawnforge/ui';
+import { useCallback, useState } from 'react';
+import Link from 'next/link';
+import { Button, cn } from '@spawnforge/ui';
 import {
   Loader2,
   CheckCircle2,
@@ -27,7 +28,11 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
-import type { OrchestratorStatus } from '@/stores/slices/orchestratorSlice';
+import {
+  INSUFFICIENT_TOKENS_MESSAGE,
+  type OrchestratorStatus,
+} from '@/stores/slices/orchestratorSlice';
+import { SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
 import type { PlanStep, ExecutorName } from '@/lib/game-creation/types';
 import { ApprovalGateDialog } from './ApprovalGateDialog';
 import { TokenCostBar } from './TokenCostBar';
@@ -377,6 +382,13 @@ export function OrchestratorPanel() {
     resetOrchestrator();
   }, [resetOrchestrator]);
 
+  // Two-step discard for a waiting plan (see the footer).
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const handleDiscard = useCallback(() => {
+    setConfirmDiscard(false);
+    cancelPipeline();
+  }, [cancelPipeline]);
+
   // Idle state — nothing to show
   if (status === 'idle' && !plan) {
     return (
@@ -416,8 +428,18 @@ export function OrchestratorPanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {/* Error display */}
         {error && (
-          <div className={cn('rounded-md px-3 py-2 text-sm', ERROR_SURFACE_CLASSES)}>
+          // role="alert": a refused Start Building changes nothing else on
+          // screen, so this is the only way a screen reader learns of it.
+          <div role="alert" className={cn('rounded-md px-3 py-2 text-sm', ERROR_SURFACE_CLASSES)}>
             {error}
+            {error === INSUFFICIENT_TOKENS_MESSAGE && (
+              <>
+                {' '}
+                <Link href={SETTINGS_TOKENS_HREF} className="underline underline-offset-2">
+                  Buy tokens
+                </Link>
+              </>
+            )}
           </div>
         )}
 
@@ -457,7 +479,14 @@ export function OrchestratorPanel() {
         )}
 
         {/* Token estimate */}
-        {tokenEstimate && <TokenCostBar estimate={tokenEstimate} />}
+        {tokenEstimate && (
+          // While the server's actual refusal is shown above, the bar's "this
+          // MAY cost more" row (with a second Buy tokens link) contradicts it.
+          <TokenCostBar
+            estimate={tokenEstimate}
+            hideBalanceWarning={status === 'awaiting_approval' && error !== null}
+          />
+        )}
 
         {/* Approval gate */}
         {pendingGate && !quickStartOwnsGate && (
@@ -503,13 +532,17 @@ export function OrchestratorPanel() {
               Start Building
             </button>
             {/* A plan waiting here (including one whose build was refused) is a
-                live run, so without this the panel had no way to drop it. */}
-            <button
-              onClick={handleCancel}
-              className="rounded bg-[var(--sf-bg-elevated)] px-3 py-2 text-sm font-medium text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-overlay)]"
-            >
-              Discard plan
-            </button>
+                live run, so without this the panel had no way to drop it. The
+                design cost tokens, so dropping it asks once. */}
+            {confirmDiscard ? (
+              <Button variant="destructive" size="sm" onClick={handleDiscard}>
+                Discard it
+              </Button>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDiscard(true)}>
+                Discard plan
+              </Button>
+            )}
           </div>
         )}
 
