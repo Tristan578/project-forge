@@ -1295,17 +1295,23 @@ describe('gameplayHandlers', () => {
       expect(result.error).toContain('Unknown component type');
     });
 
-    it('updates health component', async () => {
+    it('updates the named health fields and keeps the rest (#10144)', async () => {
+      const health = {
+        type: 'health' as const,
+        health: { maxHp: 100, currentHp: 100, invincibilitySecs: 2, respawnOnDeath: false, respawnPoint: [4, 5, 6] as [number, number, number], despawnOnDeath: false },
+      };
       const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
         entityId: 'player',
         componentType: 'health',
         properties: { maxHp: 50, currentHp: 25 },
-      });
+      }, { allGameComponents: { player: [health] } });
       expect(result.success).toBe(true);
-      expect(store.updateGameComponent).toHaveBeenCalledWith('player', expect.objectContaining({
+      // The full component: `objectContaining` would hide the unnamed fields
+      // being reset to defaults, which is the defect this pins.
+      expect(store.updateGameComponent).toHaveBeenCalledWith('player', {
         type: 'health',
-        health: expect.objectContaining({ maxHp: 50, currentHp: 25 }),
-      }), NO_CORRECTIONS);
+        health: { ...health.health, maxHp: 50, currentHp: 25 },
+      }, NO_CORRECTIONS);
     });
   });
 

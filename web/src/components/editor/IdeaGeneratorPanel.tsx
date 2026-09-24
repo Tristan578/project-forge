@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Lightbulb, RefreshCw, Sparkles, ChevronDown, ChevronUp, TrendingUp, Filter } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import { revealChat } from '@/lib/chat/revealChat';
 import {
   GENRE_CATALOG,
   MECHANIC_CATALOG,
@@ -311,7 +312,6 @@ export function IdeaGeneratorPanel() {
   const [isGenerating, setIsGenerating] = useState(false);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const isStreaming = useChatStore((s) => s.isStreaming);
-  const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
 
   const handleGenerate = useCallback(() => {
     setIsGenerating(true);
@@ -328,9 +328,11 @@ export function IdeaGeneratorPanel() {
       if (isStreaming) return;
       const prompt = buildGddPrompt(idea);
       void sendMessage(prompt);
-      setRightPanelTab('chat');
+      // Selecting the chat tab alone is a no-op on desktop, where the reply
+      // would stream off-screen; revealChat() also opens the overlay (#10166).
+      revealChat();
     },
-    [sendMessage, setRightPanelTab, isStreaming],
+    [sendMessage, isStreaming],
   );
 
   const hasIdeas = ideas.length > 0;

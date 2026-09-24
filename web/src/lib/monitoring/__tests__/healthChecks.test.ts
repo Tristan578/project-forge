@@ -1094,6 +1094,39 @@ describe('healthChecks', () => {
       expect(mockFetch).toHaveBeenCalledWith('https://api.anthropic.com', { method: 'HEAD' });
     });
 
+    it('reports wifConfigured (#8858) only when all three ANTHROPIC_WIF_* vars are set, and never their values', async () => {
+      const { ANTHROPIC_WIF_REQUIRED_ENV_NAMES } = await import('@/lib/config/anthropicWif');
+      expect(ANTHROPIC_WIF_REQUIRED_ENV_NAMES).toHaveLength(3);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+      vi.stubEnv('VERCEL', '');
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
+
+      const run = async () => {
+        vi.resetModules();
+        const { checkChatBackend } = await import('@/lib/monitoring/healthChecks');
+        return checkChatBackend();
+      };
+
+      for (const name of ANTHROPIC_WIF_REQUIRED_ENV_NAMES) vi.stubEnv(name, '');
+      expect((await run()).details?.wifConfigured).toBe(false);
+
+      ANTHROPIC_WIF_REQUIRED_ENV_NAMES.forEach((name, i) => vi.stubEnv(name, `wif-secret-value-${i}`));
+      const configured = await run();
+      expect(configured.details?.wifConfigured).toBe(true);
+      expect(configured.details?.configured).toBe(true);
+      expect(JSON.stringify(configured)).not.toContain('wif-secret-value');
+
+      vi.stubEnv(ANTHROPIC_WIF_REQUIRED_ENV_NAMES[1], '');
+      expect((await run()).details?.wifConfigured).toBe(false);
+
+      // Also surfaced when no chat backend resolves at all.
+      vi.stubEnv('ANTHROPIC_API_KEY', '');
+      ANTHROPIC_WIF_REQUIRED_ENV_NAMES.forEach((name, i) => vi.stubEnv(name, `wif-secret-value-${i}`));
+      const noBackend = await run();
+      expect(noBackend.details?.configured).toBe(false);
+      expect(noBackend.details?.wifConfigured).toBe(true);
+    });
+
     it('accepts 4xx responses as healthy (host is reachable)', async () => {
       vi.resetModules();
       vi.stubEnv('VERCEL', '');

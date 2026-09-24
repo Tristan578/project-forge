@@ -28,8 +28,14 @@ So the board's result goes onto the PR, where it becomes the `review-board`
 commit status next to CI:
 
 ```bash
-bash scripts/post-board-verdict.sh <pr> <PASS|FAIL> <the sha the board reviewed> "<one-line summary>"
+bash scripts/post-board-verdict.sh <pr> <PASS|FAIL> <the sha the board reviewed> <reported>/<total seats> "<one-line summary>"
 ```
+
+The seat count is part of the verdict (#10141). The board is five seats and a
+PASS means all five looked, so the script refuses a PASS unless `5/5` seats
+reported, and `scripts/board-verdict.sh` renders a PASS that carries a partial
+count, or no count at all, as `pending` — never `success`. A reduced board can
+post `FAIL 3/5`; it cannot post a pass.
 
 `.claude/workflows/review-board.js` runs this itself in its Publish phase; run
 it by hand when the board was run by hand. Pass the sha the board **actually
