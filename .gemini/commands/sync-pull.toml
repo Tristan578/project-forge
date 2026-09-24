@@ -1,0 +1,12 @@
+# /sync-pull — thin wrapper over the sync-pull skill; it adds no logic of its own.
+# Format: docs/cli/custom-commands.md in google-gemini/gemini-cli (v0.61.0).
+description = "Pull GitHub Project board changes into the local taskboard (wraps the sync-pull skill)."
+prompt = """
+Follow the `sync-pull` skill in `.agents/skills/sync-pull/SKILL.md`. It is the source of truth for this workflow; this command only starts it.
+
+From the repository root (`git rev-parse --show-toplevel`), run:
+
+    python3 .claude/hooks/github_project_sync.py pull
+
+Report the script's output as it printed it, errors included. Do not retry a failed pull, and do not run any other sync mode.
+"""

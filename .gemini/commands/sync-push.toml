@@ -1,0 +1,16 @@
+# /sync-push — thin wrapper over the sync-push skill; it adds no logic of its own.
+# Format: docs/cli/custom-commands.md in google-gemini/gemini-cli (v0.61.0).
+description = "Push local taskboard ticket changes to the GitHub Project board (wraps the sync-push skill)."
+prompt = """
+Follow the `sync-push` skill in `.agents/skills/sync-push/SKILL.md`. It is the source of truth for this workflow; this command only starts it.
+
+From the repository root (`git rev-parse --show-toplevel`), run:
+
+    python3 .claude/hooks/github_project_sync.py push
+
+If the arguments below ask for everything including done tickets (for example `--all`), run the skill's `push-all` form instead.
+
+Report the script's output as it printed it, errors included. Do not retry a failed push, and do not run any other sync mode.
+
+Arguments: {{args}}
+"""
