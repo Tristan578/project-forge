@@ -389,7 +389,7 @@
                           },
                           "configurationOnly": {
                             "type": "boolean",
-                            "description": "Present and true when this service is degraded by a deliberate configuration state (e.g. a generation capability with no platform key) rather than by a fault. Such a service does not raise the top-level `overall`, and does not page the synthetic monitor."
+                            "description": "Present and true when this service is degraded by a deliberate configuration state (e.g. a generation capability with no platform key) rather than by a fault. Such a service does not raise the top-level `overall`, and the synthetic health monitor logs it at warn instead of reporting it to Sentry."
                           },
                           "error": {
                             "type": "string",

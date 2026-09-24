@@ -35,7 +35,7 @@ Only **Database (Neon)** and **Clerk** trigger HTTP 503 on the health endpoint. 
 
 | Metric | Target | Measurement | Alert Threshold |
 |--------|--------|-------------|-----------------|
-| Availability | 99.9% (8.7h downtime/year) | External synthetic monitor (1-min interval, 3 regions) | 2 consecutive failures = notify the owner (no paging; see `docs/operations/incident-response.md`) |
+| Availability | 99.9% (8.7h downtime/year) | Synthetic health monitor (`/api/cron/health-monitor`, every ~15 min, when activated — see `docs/guides/health-monitor-cron.md`). No external multi-region monitor exists yet (PF-607, § 11) | A non-healthy result is reported to Sentry and notifies the owner (no paging; see `docs/operations/incident-response.md`) |
 | Health endpoint latency (p99) | < 3s | Sentry transaction traces | > 5s for 5 min |
 | Homepage TTFB (p95) | < 1.5s | Web Vitals reporting | > 3s for 10% of sessions |
 | LCP (p75) | < 2.5s | Web Vitals reporting | > 4s warning, > 6s critical |
@@ -131,7 +131,7 @@ Vercel Edge (CDN, routing, headers)
 
 ### 5.1 Complete Outage (Site Unreachable)
 
-**Detection:** External synthetic monitor fires after 2 consecutive failures (~3 min).
+**Detection:** The synthetic health monitor (`/api/cron/health-monitor`, every ~15 min when activated — see `docs/guides/health-monitor-cron.md` before trusting its silence) reports a non-healthy result to Sentry, or a user reports it. No external synthetic monitor exists yet (PF-607).
 
 **Verification:**
 ```bash
@@ -740,7 +740,7 @@ entirely green.
 
 ### Gaps (Addressed by PF-607 through PF-617)
 - No external synthetic monitoring (PF-607)
-- No on-call rotation or paging, by decision — see `docs/decisions/2026-09-24-no-paging-or-on-call.md` and `docs/operations/incident-response.md` (PF-608, GH #7710)
+- No on-call rotation or paging, by decision — see `docs/decisions/2026-09-24-no-paging-or-on-call.md` and `docs/operations/incident-response.md` (PF-168, GH #7710)
 - Health endpoint not rate-limited (PF-609)
 - Rate limiting is per-instance, not distributed (PF-610)
 - No client Web Vitals reporting (PF-611)

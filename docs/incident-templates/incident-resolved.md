@@ -48,7 +48,7 @@ All affected services are now operating normally.
 2. {prevention action — e.g., "Add circuit breaker to Y service"}
 3. {prevention action — e.g., "Improve runbook for Z scenario"}
 
-A full postmortem will be published within **5 business days**.
+A short write-up of what happened will be linked from the tracking issue.
 
 ---
 

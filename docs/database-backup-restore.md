@@ -429,5 +429,5 @@ For the Right to Erasure (`DELETE /api/user/delete`), confirm the cascading dele
 |-----------|---------|
 | Neon platform issue (not user error) | [Neon Support](https://support.neon.tech) — include project ID and branch name |
 | Data loss suspected | Project owner — see `docs/operations/incident-response.md` (no on-call rotation or paging; see `docs/decisions/2026-09-24-no-paging-or-on-call.md`) |
-| GDPR data request | Engineering + Legal |
-| Billing data discrepancy | Engineering + Finance |
+| GDPR data request | Project owner (no separate legal contact is documented in this repository) |
+| Billing data discrepancy | Project owner (no separate finance contact is documented in this repository) |
