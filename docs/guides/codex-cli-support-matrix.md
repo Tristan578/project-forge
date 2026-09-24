@@ -360,7 +360,7 @@ Thirteen generated from `.claude/agents/*.md`, one hand-authored.
 
 ## Skills
 
-The 35 project skills under `.claude/skills/` are mirrored byte-for-byte into
+The 38 project skills under `.claude/skills/` are mirrored byte-for-byte into
 `.agents/skills/`. The check is two-directional: a stale file, a missing file and
 a hand-added file inside a mirrored directory all fail it.
 
@@ -374,7 +374,7 @@ third-party skills this tool does not own, and the lock is an editable text
 file, so "the lock names it" is not on its own a reason to delete anything.
 
 - **`.agents/skills/` is not Codex's alone.** Gemini CLI and Copilot read it too
-  (`GEMINI.md`, the README tool table), so the mirror puts these 35 skills in
+  (`GEMINI.md`, the README tool table), so the mirror puts these 38 skills in
   front of them as well. They were written for Claude Code and name its tools;
   the generated *agents* carry a preface mapping those names to Codex's, the
   mirrored *skills* carry none, because they are byte-exact copies by design.
@@ -384,11 +384,19 @@ file, so "the lock names it" is not on its own a reason to delete anything.
   (`.claude/skills/tdd` → `.agents/skills/tdd`). But with `core.symlinks=false`
   — the Git for Windows default — a link checks out as a text file, so the
   skills would not exist on the platform Codex is used on here.
-- **Not mirrored, and not yet resolved (#10131):** `game-engine`, `kanban` and
-  `web-accessibility` exist as real directories on both sides and have drifted.
-  Which side is canonical is undecided, so the generator leaves both alone
-  (`skills.independent`). For these three, what a Codex user loads is **not** the
-  Claude Code copy.
+- **`.claude/skills/` is the canonical side for every project skill (#10131).**
+  `game-engine`, `kanban` and `web-accessibility` used to exist as real,
+  drifted directories on both sides and were listed under `skills.independent`
+  so the generator overwrote neither. The `.claude/` copies were the newer,
+  SpawnForge-specific ones (the MCP-tool kanban protocol, the `paths:`-scoped
+  accessibility skill, the ECS and command-dispatch references), and the
+  `.agents/` copies were the generic upstream imports. Everything the `.agents/`
+  side had that the `.claude/` side lacked was merged into `.claude/` first — the
+  five game-engine starter templates under `assets/` (the skill body already
+  referred to them) and eight generic references, plus the filtered-list and
+  delete rows of the kanban REST table — and the three are now mirrored like
+  the rest. `skills.independent` is empty; a skill that must diverge again is
+  declared there deliberately, never by editing `.agents/` in place.
 - **Only files git tracks are mirrored** — a stray `.env` or a `__pycache__`
   beside a skill script does not ride into a tracked directory. `--write` and
   `--check` both list what was left out; a file git *ignores* is only listed,

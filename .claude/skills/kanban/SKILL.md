@@ -177,7 +177,7 @@ Use MCP tool: batch_create_subtasks
 ## REST API (primary access method)
 
 The taskboard is accessed via REST API. Use the Portless URL when available, direct port as fallback.
-**Base URL:** `http://taskboard.localhost:1355/api` (fallback: `http://taskboard.localhost:1355/api`)
+**Base URL:** `http://taskboard.localhost:1355/api` (fallback: `http://localhost:3010/api`)
 
 ### CRITICAL: Field name is `status`, NOT `column`
 
@@ -218,9 +218,13 @@ curl -s -X POST "http://taskboard.localhost:1355/api/subtasks/<SUBTASK_ID>/toggl
 
 | Endpoint | Method | Body Fields | Notes |
 |----------|--------|-------------|-------|
+| `/api/board` | GET | (none) | Full board: todo / in_progress / done columns |
+| `/api/tickets?project=...&status=...` | GET | (query) | List tickets with filters |
+| `/api/tickets/:id` | GET | (none) | Ticket details including subtasks |
 | `/api/tickets` | POST | `title`, `description`, `priority`, `projectId`, `teamId`, `labels` | `projectId` not `project` |
 | `/api/tickets/:id/move` | POST | `status` ("todo", "in_progress", "done") | **NOT `column`** |
 | `/api/tickets/:id` | PUT | `title`, `description`, `priority`, `labels`, `dueDate` | Partial update |
+| `/api/tickets/:id` | DELETE | (none) | Remove a ticket |
 | `/api/tickets/:id/subtasks` | POST | `title` | Single subtask |
 | `/api/subtasks/:id/toggle` | POST | (none) | Toggles complete/incomplete |
 | `/api/board` | GET | (none) | Returns `{ columns: [{ name, tickets }] }` |

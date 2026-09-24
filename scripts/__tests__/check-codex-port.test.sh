@@ -72,6 +72,10 @@ mkfix() {
   mkdir -p "$d/tools/agentic-sync" "$d/.claude/skills/alpha/scripts" "$d/.claude/skills/kanban" \
            "$d/.claude/agents" "$d/.claude/hooks" "$d/.codex/hooks" "$d/.codex/agents"
   cp "$MANIFEST" "$d/tools/agentic-sync/port.json"
+  # The fixture declares its own independent skill (kanban, created below on
+  # both sides) rather than borrowing one from the real manifest, whose
+  # `skills.independent` is empty by design since #10131.
+  json_set "$d/tools/agentic-sync/port.json" skills.independent.kanban '"fixture: exists on both sides on purpose"'
   cp "$ADAPTER" "$d/.codex/hooks/run-claude-hook.mjs"
   # The real adapter's messages send readers to this file, and the reference
   # validator resolves every path a .codex/ file names — so the fixture has one.
