@@ -1498,14 +1498,18 @@ expect_rc "30j. every expansion that can be empty, in every guarded position, is
 # any whitespace before the number (a space on lines 7, 8 and 11, then line
 # 16 a vertical tab, 17 a newline, 18 a tab, 19 a form feed and 20 a
 # carriage return: round twenty-four found tab, form feed and carriage
-# return unexercised, so dropping any of them from the gate passed) but only
-# a space or tab after it (lines 12 to 15). Lines 21 and 22 (signal 10, and
-# signal 1 spelled 01) are real signals; line 23, a bare sign, is not a
-# number; line 24 ends in a newline, line 25 has a blank inside it and line
-# 26 is a name with a blank before it, and bash rejects all three (the gate
-# joins signal words with blanks, so a blank inside a word must not split
-# it). None of lines 21 to 26 is reported, and 30n-c runs every line in bash
-# to check the split against bash itself.
+# return unexercised, so dropping any of them from the gate passed) and a
+# space or tab after it (lines 12 to 15). After the digits, Linux bash 5.2
+# stops there, but the Git for Windows bash on the Windows runner also takes
+# a newline (line 21 exited 0 there, job 107713633065), so the gate reads
+# every whitespace class as a trailing blank and reports lines 21 to 24 (a
+# newline, vertical tab, form feed and carriage return after the zero) on
+# every platform. Lines 25 and 26 (signal 10, and signal 1 spelled 01) are
+# real signals; line 27, a bare sign, is not a number; line 28 has a blank
+# inside it and line 29 is a name with a blank before it, and bash rejects
+# both (the gate joins signal words with blanks, so a blank inside a word
+# must not split it). None of lines 25 to 29 is reported, and 30n-c runs
+# every line in the bash running the suite to check the split against it.
 d_numsig="$(mkfixture numeric-signals <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -1527,45 +1531,61 @@ trap 'exit 0' $'\n0'
 trap 'exit 0' $'\t0'
 trap 'exit 0' $'\f0'
 trap 'exit 0' $'\r0'
+trap 'exit 0' $'0\n'
+trap 'exit 0' $'0\v'
+trap 'exit 0' $'0\f'
+trap 'exit 0' $'0\r'
 trap 'exit 0' 10
 trap 'exit 0' 01
 trap 'exit 0' +
-trap 'exit 0' $'0\n'
 trap 'exit 0' '0 0'
 trap 'exit 0' ' EXIT'
 FIX
 )"
 out_numsig="$(run_gate "$d_numsig")"
-expect_rc "30n. every signed, zero-padded or blank-surrounded spelling of 0 bash accepts is signal 0" 1 "$out_numsig" "18 violation(s)" \
+expect_rc "30n. every signed, zero-padded or blank-surrounded spelling of 0 bash accepts is signal 0" 1 "$out_numsig" "22 violation(s)" \
   "fixture.test.sh:3: 'trap exit 0 ..." "fixture.test.sh:4: 'trap exit 0 ..." "fixture.test.sh:5: 'trap exit 0 ..." \
   "fixture.test.sh:6: 'trap exit 0 ..." "fixture.test.sh:7: 'trap exit 0 ..." "fixture.test.sh:8: 'trap exit 0 ..." \
   "fixture.test.sh:9: 'trap exit 0 ..." "fixture.test.sh:10: 'trap exit 0 ..." "fixture.test.sh:11: 'trap exit 0 ..." \
   "fixture.test.sh:12: 'trap exit 0 ..." "fixture.test.sh:13: 'trap exit 0 ..." "fixture.test.sh:14: 'trap exit 0 ..." \
   "fixture.test.sh:15: 'trap exit 0 ..." "fixture.test.sh:16: 'trap exit 0 ..." "fixture.test.sh:17: 'trap exit 0 ..." \
-  "fixture.test.sh:18: 'trap exit 0 ..." "fixture.test.sh:19: 'trap exit 0 ..." "fixture.test.sh:20: 'trap exit 0 ..."
-if grep -Eq 'fixture.test.sh:(21|22|23|24|25|26):' <<<"$out_numsig"; then
+  "fixture.test.sh:18: 'trap exit 0 ..." "fixture.test.sh:19: 'trap exit 0 ..." "fixture.test.sh:20: 'trap exit 0 ..." \
+  "fixture.test.sh:21: 'trap exit 0 ..." "fixture.test.sh:22: 'trap exit 0 ..." "fixture.test.sh:23: 'trap exit 0 ..." \
+  "fixture.test.sh:24: 'trap exit 0 ..."
+if grep -Eq 'fixture.test.sh:(25|26|27|28|29):' <<<"$out_numsig"; then
   fail "30n-b. real signals and spellings bash rejects are not signal 0" "$out_numsig"
 else
   pass "30n-b. real signals and spellings bash rejects are not signal 0"
 fi
 # The fixture's own lines are the subject: each runs in this bash before an
-# exit 3, and a line must be reported exactly when its trap replaces that
-# status, so a spelling added above is checked against bash, not a comment.
-numsig_checked=0; numsig_mismatch=""
+# exit 3, and a line whose trap replaces that status must be reported. A
+# reported line bash rejects is a mismatch too, unless its signal is a zero
+# followed by a whitespace escape: those are the gate's deliberate superset
+# (the bashes differ there), derived from the line itself, so a spelling
+# added above is checked against bash, not a comment.
+numsig_checked=0; numsig_mismatch=""; numsig_wide=0
 for n in $(seq 3 "$(wc -l < "$d_numsig/fixture.test.sh")"); do
   line="$(sed -n "${n}p" "$d_numsig/fixture.test.sh")"
   bash -c "$line"$'\n''exit 3' >/dev/null 2>&1; rc=$?
   reported=0; grep -q "fixture.test.sh:$n: " <<<"$out_numsig" && reported=1
   overrides=0; [ "$rc" -eq 0 ] && overrides=1
-  [ "$reported" = "$overrides" ] || numsig_mismatch="$numsig_mismatch line $n ($line: bash exit $rc, reported $reported);"
+  wide=0; [[ "$line" =~ \$\'[-+]?0+\\[nvfr]\'$ ]] && wide=1
+  numsig_wide=$((numsig_wide + wide))
+  if [ "$overrides" = 1 ] && [ "$reported" = 0 ]; then
+    numsig_mismatch="$numsig_mismatch line $n ($line: bash exit $rc, not reported);"
+  elif [ "$overrides" = 0 ] && [ "$reported" = 1 ] && [ "$wide" = 0 ]; then
+    numsig_mismatch="$numsig_mismatch line $n ($line: bash exit $rc, reported);"
+  fi
   numsig_checked=$((numsig_checked + 1))
 done
-if [ "$numsig_checked" -ne 24 ]; then
-  fail "30n-c. expected to check 24 fixture lines against bash, checked $numsig_checked" "$out_numsig"
+if [ "$numsig_checked" -ne 27 ]; then
+  fail "30n-c. expected to check 27 fixture lines against bash, checked $numsig_checked" "$out_numsig"
+elif [ "$numsig_wide" -ne 4 ]; then
+  fail "30n-c. expected 4 trailing-whitespace lines in the fixture, found $numsig_wide" "$out_numsig"
 elif [ -n "$numsig_mismatch" ]; then
   fail "30n-c. the gate and bash disagree on which traps replace the exit status:$numsig_mismatch" "$out_numsig"
 else
-  pass "30n-c. every fixture line is reported exactly when its trap replaces the exit status in this bash"
+  pass "30n-c. every fixture line whose trap replaces the exit status in this bash is reported, and no other outside the trailing-whitespace superset"
 fi
 
 # ---- 30o. text a parameter expansion carries is judged ------------------------
@@ -1588,13 +1608,26 @@ fi
 # line 29, where the array is named. Lines 32 to 35 put a quoted or escaped
 # closing brace in the operand (the lexer counted it and closed the group
 # early, and the stray quote swallowed the real alias); the decoy quote in
-# each comment is what let the file still parse. Line 36 uses a brace and a
-# comma in the operand, which must stay literal so the default after it is
-# still judged. Lines 37 and 38 escape a quote outside quotes and inside an
+# each comment is what let the file still parse. Line 36 puts a quoted brace
+# in one operand, which must stay literal so the default after it is still
+# judged. Lines 37 and 38 escape a quote outside quotes and inside an
 # ANSI-C string, where miscounting would open a string that swallows the
 # alias; line 39 is replacement text that is only the word after its
 # quotes are removed. Line 40 escapes the dollar, so its braces are text,
 # and bash runs a command literally named ${y:-alias}: not reported (30o-e).
+# Line 41 has a comma in the operand, which bash keeps (it runs a command
+# named a,alias): a comma read as alternation would invent the word alias,
+# so it too is not reported (30o-e), nor is line 44, the same comma escaped
+# with a backslash. Lines 42 and 43 put a bracket inside a
+# nested expansion in an array subscript (round twenty-eight), which cut the
+# subscript short and dropped the whole operand. Lines 45 to 50 open an
+# array whose element, after a substitution that opens its own array on
+# line 46, names the posix-mode variable: the report names line 45, the
+# outer array, so the line survives the substitution. Lines 51 to 54 hold a
+# closing brace inside a command substitution (lines 55 and 56 add a
+# single-quoted and an escaped paren, line 54 an escaped backtick), which
+# ends nothing to bash: each operand holds a blank, so each
+# is a split violation named by the whole word, not cut at the inner brace.
 d_pexp="$(mkfixture param-expansion <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -1636,10 +1669,26 @@ ${x:-"}"}${y:-alias} fail=:
 : ${x:-$'\''}; alias fail=: # decoy: '
 ${x/a/"alias"} fail=:
 ${x:-\${y:-alias}} fail=:
+${x:-a,alias} fail=:
+${arr1[${y:-0]0}]:-shopt -s expand_aliases}
+${arr2[${y:-0]0}]:-alias fail=:}
+${x:-a\,alias} fail=:
+x=(
+$(y=(
+1
+))
+${POSIXLY_CORRECT:=1}
+)
+${x:-$(echo }) alias}
+${x:-`echo }` alias}
+${x:-$(echo ")}") alias}
+${x:-`echo a\`b}` alias}
+${x:-$(echo ')}') alias}
+${x:-$(echo \)}) alias}
 FIX
 )"
 out_pexp="$(run_gate "$d_pexp")"
-expect_rc "30o. a default, alternate or replacement that can spell a guarded word is judged as that word" 1 "$out_pexp" "29 violation(s)" \
+expect_rc "30o. a default, alternate or replacement that can spell a guarded word is judged as that word" 1 "$out_pexp" "38 violation(s)" \
   "fixture.test.sh:3: 'shopt -s \${n:-expand_aliases}'" "fixture.test.sh:4: 'alias fail=:'" \
   "fixture.test.sh:5: 'shopt -s \${HOME:+expand_aliases}'" "fixture.test.sh:6: 'alias fail=:'" \
   "fixture.test.sh:7: 'trap exit 0 ... EXIT'" "fixture.test.sh:8: 'trap exit 0 ... EXIT'" \
@@ -1652,16 +1701,19 @@ expect_rc "30o. a default, alternate or replacement that can spell a guarded wor
   "fixture.test.sh:29: 'y=(...)'" "fixture.test.sh:32: 'shopt -s expand_aliases'" \
   "fixture.test.sh:33: 'alias fail=:'" "fixture.test.sh:34: 'alias fail=:'" "fixture.test.sh:35: 'alias fail=:'" \
   "fixture.test.sh:36: 'alias fail=:'" "fixture.test.sh:37: 'alias fail=:'" "fixture.test.sh:38: 'alias fail=:'" \
-  "fixture.test.sh:39: 'alias fail=:'"
+  "fixture.test.sh:39: 'alias fail=:'" "fixture.test.sh:42: '\${arr1[" "fixture.test.sh:43: '\${arr2[" "fixture.test.sh:45: 'x=(...)'" \
+  "fixture.test.sh:51: '\${x:-\$(echo }) alias}'" "fixture.test.sh:52: '\${x:-\`echo }\` alias}'" \
+  "fixture.test.sh:53: '\${x:-\$(echo \")}\") alias}'" "fixture.test.sh:54: '\${x:-\`echo a\\\`b}\` alias}'" \
+  "fixture.test.sh:55: '\${x:-\$(echo ')}') alias}'" "fixture.test.sh:56: '\${x:-\$(echo \\)}) alias}'"
 if grep -Eq 'fixture.test.sh:(18|19|20|21):' <<<"$out_pexp"; then
   fail "30o-c. an argument, an assignment, a trap action and a quoted argument with expansion text are not reported" "$out_pexp"
 else
   pass "30o-c. an argument, an assignment, a trap action and a quoted argument with expansion text are not reported"
 fi
-if grep -q 'fixture.test.sh:40: ' <<<"$out_pexp"; then
-  fail "30o-e. an escaped dollar in an operand is text, not a nested expansion" "$out_pexp"
+if grep -Eq 'fixture.test.sh:(40|41|44): ' <<<"$out_pexp"; then
+  fail "30o-e. an escaped dollar and a comma in an operand are text, not a nested expansion or alternation" "$out_pexp"
 else
-  pass "30o-e. an escaped dollar in an operand is text, not a nested expansion"
+  pass "30o-e. an escaped dollar and a comma in an operand are text, not a nested expansion or alternation"
 fi
 if [ "$(grep -c 'fixture.test.sh:24: ' <<<"$out_pexp")" -eq 1 ]; then
   pass "30o-d. a trap whose action candidates repeat a call reports that call once"

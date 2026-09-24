@@ -283,6 +283,33 @@ derive_file() {
     # after a backslash, are text to bash (twenty-seventh board round:
     # ${x:-"}"} closed one brace early, and the stray quote then swallowed a
     # real statement), so they are not counted.
+    # The index just past the paren closing a command substitution whose
+    # body starts at j, skipping quoted text, escapes and nested ones.
+    function paren_close(s, j, n,   pd, qs, cj) {
+      pd = 1; qs = ""
+      while (j <= n && pd > 0) {
+        cj = substr(s, j, 1)
+        if (qs == "s") { if (cj == "\047") qs = ""; j++; continue }
+        if (cj == "\\") { j += 2; continue }
+        if (qs == "d") { if (cj == "\"") qs = ""; j++; continue }
+        if (cj == "\047") qs = "s"
+        else if (cj == "\"") qs = "d"
+        else if (cj == "(") pd++
+        else if (cj == ")") pd--
+        j++
+      }
+      return j
+    }
+    # The index just past the backtick closing one opened before j.
+    function tick_close(s, j, n,   cj) {
+      while (j <= n) {
+        cj = substr(s, j, 1)
+        if (cj == "\\") { j += 2; continue }
+        if (cj == "`") return j + 1
+        j++
+      }
+      return j
+    }
     function brace_close(s, j, n,   bd, qs, cj) {
       bd = 1; qs = ""
       while (j <= n && bd > 0) {
@@ -290,6 +317,11 @@ derive_file() {
         if (qs == "s") { if (cj == "\047") qs = ""; j++; continue }
         if (cj == "\\") { j += 2; continue }
         if (qs == "a") { if (cj == "\047") qs = ""; j++; continue }
+        # A command substitution is its own balanced unit, quoted or not, as
+        # bash reads it: a brace inside $( ) or backticks ends nothing here
+        # (twenty-eighth board round).
+        if (cj == "$" && substr(s, j + 1, 1) == "(") { j = paren_close(s, j + 2, n); continue }
+        if (cj == "`") { j = tick_close(s, j + 1, n); continue }
         if (qs == "d") { if (cj == "\"") qs = ""; j++; continue }
         if (cj == "$" && substr(s, j + 1, 1) == "\047") { qs = "a"; j += 2; continue }
         if (cj == "\047") qs = "s"
@@ -300,21 +332,25 @@ derive_file() {
       }
       return j
     }
-    function pexp_group(b,   t, c) {
-      sub(/^[!#]?([A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])/, "", b)
-      if (b ~ /^\[/) sub(/^\[[^]]*\]/, "", b)
-      t = ""
-      if (b ~ /^:?[-=+]/) { sub(/^:?[-=+]/, "", b); t = pexp_text(b) }
-      else if (b ~ /^\//) {
-        # The pattern ends at the first slash bash does not treat as quoted or
-        # escaped (${x/a\/b/alias} and ${x/"a/b"/alias} both bind), so every
-        # text after a slash is a candidate rather than the text after the
-        # first one: a superset no spelling of the pattern can dodge. Each is
-        # normalised alone, so the commas joining them stay alternation.
-        sub(/^\/[\/#%]?/, "", b)
-        while (match(b, /\//)) { b = substr(b, RSTART + 1); c = pexp_text(b); t = (t == "" ? c : t "," c) }
+    # The TEXT of a default, alternate or replacement starts right after the
+    # last character of its operator: - = or + for a default or alternate,
+    # a slash for a replacement. Rather than parse the name, a subscript and
+    # the operator (a nested ${...} in a subscript may hold a bracket, the
+    # twenty-eighth board round; a pattern may hold an escaped or quoted
+    # slash, the twenty-seventh), every suffix of the group after one of
+    # those characters is a candidate: a superset that holds the true TEXT
+    # whatever precedes it. Each is normalised alone, so the commas joining
+    # them stay alternation.
+    function pexp_group(b,   t, c, k, n, ch) {
+      t = ""; n = length(b)
+      for (k = 1; k <= n; k++) {
+        ch = substr(b, k, 1)
+        if (ch == "-" || ch == "=" || ch == "+" || ch == "/") {
+          c = pexp_text(substr(b, k + 1))
+          if (c != "") t = (t == "" ? c : t "," c)
+        }
       }
-      if (t == "" || t ~ /^,*$/) return ""
+      if (t == "") return ""
       return "{," t "}"
     }
     # One operand TEXT as the words it can yield: blanks noted for the split
@@ -385,8 +421,14 @@ derive_file() {
     }
     # bash parses a trap signal number with its legal_number(): any whitespace
     # before it (space, tab, newline, vertical tab, form feed, carriage
-    # return), an optional sign, decimal digits, then only spaces or tabs.
-    # Checked in bash 5.2 for every class (twenty-third board round). A name
+    # return), an optional sign, decimal digits, then trailing blanks. Linux
+    # bash 5.2 takes only a space or tab after the digits (checked for every
+    # class, twenty-third board round), but the Git for Windows bash on the
+    # Windows CI runner also takes a newline there: an exit trap on a zero
+    # followed by a newline (spelled with ANSI-C quoting) replaced the exit
+    # status in job 107713633065. The gate has to hold on
+    # every bash the suites run under, so it reads any whitespace after the
+    # digits as a blank too, a superset of both. A name
     # is matched as written, case aside, so only a number is normalised,
     # and the regex alone decides which blanks and signs a number may carry
     # (the digit run is then taken whole, so no second strip can widen it); a
@@ -394,7 +436,7 @@ derive_file() {
     # replaced and can never read as a separate signal in trap_sigs.
     function sig_word(s) {
       s = toupper(s)
-      if (s ~ /^[ \t\n\v\f\r]*[-+]?[0-9]+[ \t]*$/) {
+      if (s ~ /^[ \t\n\v\f\r]*[-+]?[0-9]+[ \t\n\v\f\r]*$/) {
         match(s, /[0-9]+/); s = substr(s, RSTART, RLENGTH)
         sub(/^0+/, "", s); if (s == "") s = "0"
       } else gsub(/[ \t\n\v\f\r]/, "_", s)

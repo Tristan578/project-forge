@@ -613,11 +613,14 @@ jobs:
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
     runs-on: windows-latest
-    # Raised from 30 after review measured 26:52 on this branch — ~3 minutes
-    # of headroom on a job that is in ci-success's needs:, so a tip-over blocks
-    # every PR rather than one. The delta against main's ~22 minutes is mostly
-    # runner variance rather than any single suite, which is the argument for
-    # headroom rather than for hunting a culprit.
+    # Raised from 30 after review measured 26:52 on a branch — ~3 minutes of
+    # headroom on a job that is in ci-success's needs:, so a tip-over blocks
+    # every PR rather than one. Remeasured 2026-09-24: main took 36:53, 36:54
+    # and 39:04, so the headroom is about 6 minutes, not the ~23 that main's
+    # earlier ~22 minutes implied. The slowest suite is check-ci-success
+    # (about 6 minutes); check-fn-freeze adds 37 s (job 107713633065). The
+    # spread between runs of the same tree is mostly runner variance, which
+    # is the argument for headroom rather than for hunting a culprit.
     timeout-minutes: 45
     permissions:
       contents: read

@@ -940,6 +940,27 @@ by construction rather than by measurement.
   replacement pattern can hide its boundary (`${x/a\/b/alias}`,
   `${x/"a/b"/alias}`), so every text after a slash is now a candidate; and
   an array report now names the line where the array opens.
+  The twenty-eighth found two more boundaries drawn by parsing: a bracket
+  inside a nested expansion in an array subscript
+  (`${a[${y:-0]0}]:-alias fail=:}`) cut the subscript short and dropped the
+  operand, and a brace inside a command substitution in an operand ended
+  the group early. The operand is no longer parsed at all: every suffix of
+  the group after a `-`, `=`, `+` or `/` is a candidate, a superset that
+  holds the true text whatever the name, subscript or operator looks like,
+  and the brace matcher skips `$( )` and backtick spans as bash does. A
+  comma in an operand stays text (bash keeps it), which is what stops it
+  inventing a candidate. The same round's Windows run (job 107713633065)
+  found the one place the two bashes CI runs under disagree: after a
+  numeric trap signal, Linux bash 5.2 takes only a space or tab, but the
+  Git Bash on the Windows runner also takes a newline, so
+  `trap 'exit 0' $'0\n'` fired as an EXIT trap there and the gate, modelled
+  on Linux, let it through. The gate now reads any whitespace after the
+  digits as a blank, a superset of both. The suite's cross-check still runs
+  every fixture line in the bash running it: a trap that fires must be
+  reported on every platform, and the only lines it lets the gate report
+  while this bash rejects them are a zero followed by an escaped newline,
+  vertical tab, form feed or carriage return, picked out from the line text
+  and counted so the exemption cannot quietly widen or vanish.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

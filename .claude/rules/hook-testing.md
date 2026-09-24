@@ -189,7 +189,10 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   inside a parameter expansion (`${n:-alias}`, `${HOME:+alias}`,
   `${x/*/alias}`) is judged both with and without it, and such text holding
   a blank, which bash splits into words, is a `split` violation in a guarded
-  position. Only a variable value or a command output that must contribute
+  position. A quoted or escaped brace inside the group does not end it
+  (`${x:-"}"}`), and a replacement is judged after every slash, so an
+  escaped or quoted slash in the pattern (`${x/a\/b/alias}`) cannot hide
+  the boundary. Only a variable value or a command output that must contribute
   text to spell the word (`al$(echo i)as`), `eval`, a `source` of a file the
   suite wrote, and `declare -n` stay out of reach. The word
   as an argument (`echo alias fail=:`), inside a quoted string
@@ -215,8 +218,10 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   RETURN or 0 whose action exits or execs is one too — `trap 'exit 0' EXIT`
   overrides the `exit 1` the suite reached; a numeric signal is judged by its
   value, since bash reads it as a signed decimal between blanks (any
-  whitespace before, a space or tab after), so `00`, `+0`, `-0`, `' 00'` and
-  `'0 '` are all 0 — and so is one whose action calls
+  whitespace before; after it, a space or tab in Linux bash, and a newline
+  too in the Git Bash on the Windows runner, so the gate takes any whitespace
+  there), so `00`, `+0`, `-0`, `' 00'`, `'0 '` and `$'0\n'` are all 0 — and
+  so is one whose action calls
   a function of the same file that exits or execs, directly or through another
   function (`cleanup() { exit 0; }` + `trap cleanup EXIT`), while a cleanup
   EXIT trap whose functions never exit, a
