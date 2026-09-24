@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMockDispatch } from './sliceTestTemplate';
 import { createSceneTestStore } from './sceneSliceTestStore';
-import { setSceneDispatcher } from '../sceneSlice';
+import { setSceneDispatcher, hasDeferredSceneLoad, cancelDeferredSceneLoad } from '../sceneSlice';
 import { loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
 import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
-import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage, savePrefab, getPrefab } from '@/lib/prefabs/prefabStore';
 import * as prefabStoreModule from '@/lib/prefabs/prefabStore';
 import * as toastModule from '@/lib/toast';
@@ -526,6 +526,158 @@ describe('sceneSlice', () => {
       expect(store.getState().loadScene(healthyScene)).toBe(false);
 
       expect(store.getState().sceneLoadError).toBeNull();
+    });
+
+    // ---- Deferred cold-open load (#10192) ----------------------------------
+    //
+    // The editor page calls `loadScene` before `EditorLayout` mounts the
+    // engine. Returning `false` there is correct (it is a deferral, not a
+    // rejection) — but nothing ever re-issued that load, so a project opened
+    // in a fresh tab showed the engine's starter scene, and the next autosave
+    // could write that starter scene over the stored one.
+
+    it('replays the load deferred before the engine attached, exactly once', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const scene = JSON.stringify({ entities: [{ entityId: 'e1', name: 'Cube', parentId: null, visible: true }] });
+      expect(store.getState().loadScene(scene, { deferUntilEngineAttaches: true })).toBe(false);
+      expect(store.getState().sceneLoadError).toBeNull();
+      const revisionBefore = store.getState().sceneOperationRevision;
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+
+      const loads = engine.mock.calls.filter(([command]) => command === 'load_scene');
+      expect(loads).toEqual([['load_scene', { json: scene }]]);
+      // The replay went through `loadScene`'s accepted path, not a raw dispatch.
+      expect(store.getState().sceneOperationRevision).toBe(revisionBefore + 1);
+      expect(store.getState().sceneLoadError).toBeNull();
+
+      // Consumed: a later attach (a second engine, a test re-install) must not
+      // load the scene again over whatever the user has done since.
+      const later = createMockDispatch();
+      setSceneDispatcher(later);
+      expect(later.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('keeps only the latest deferred load', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const first = JSON.stringify({ entities: [], metadata: { name: 'first' } });
+      const second = JSON.stringify({ entities: [], metadata: { name: 'second' } });
+      store.getState().loadScene(first, { deferUntilEngineAttaches: true });
+      store.getState().loadScene(second, { deferUntilEngineAttaches: true });
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([
+        ['load_scene', { json: second }],
+      ]);
+    });
+
+    it('strands the editor when the engine rejects the replayed load, so nothing saves over the stored scene', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
+
+      const engine = vi.fn((command: string) =>
+        command === 'load_scene' ? { success: false, error: 'Scene JSON too large' } : undefined,
+      );
+      setSceneDispatcher(engine);
+
+      expect(store.getState().sceneLoadError?.reason).toContain('the engine refused');
+      // Every save path asks the engine to export first; a stranded editor
+      // never asks (#10056), so the starter scene cannot reach the project.
+      store.getState().saveScene();
+      expect(engine.mock.calls.filter(([command]) => command === 'export_scene')).toEqual([]);
+    });
+
+    it('locks saving and does not throw out of the attach when the replayed load throws', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        // `setSceneDispatcher` runs inside the effect that installs the
+        // engine; a throw escaping it would unmount the editor.
+        expect(() => setSceneDispatcher(vi.fn(() => { throw new Error('engine unreachable'); }))).not.toThrow();
+        expect(store.getState().sceneLoadError?.reason).toContain('the engine failed while loading it');
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('discards the deferred load when the engine detaches before attaching', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('does not hold a load its caller did not ask to defer: an interactive import before the engine attaches is refused, not queued', () => {
+      // SceneToolbar, AutoSaveRecovery and the AI/MCP load_scene handler all
+      // report a `false` return as a failed load. Queueing that scene anyway
+      // would make the toolbar say "not loaded" and then load it over the
+      // project scene once the engine attached.
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      expect(store.getState().loadScene(healthyScene, { rejectionStrandsEditor: false })).toBe(false);
+      expect(store.getState().loadScene(healthyScene)).toBe(false);
+      expect(hasDeferredSceneLoad()).toBe(false);
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('cancelDeferredSceneLoad drops the held load, so an abandoned cold open cannot replay into the next editor', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
+      expect(hasDeferredSceneLoad()).toBe(true);
+
+      cancelDeferredSceneLoad();
+      expect(hasDeferredSceneLoad()).toBe(false);
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('leaves the music arrangement alone on replay, so edits made while the engine loaded survive', () => {
+      // The editor page hydrates the arrangement from the project data the
+      // moment it defers the load; the arrangement store is JS-only, so the
+      // user can edit it before WASM attaches. The replay must not reset it.
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const scene = {
+        entities: [],
+        musicArrangement: {
+          version: 1,
+          tracks: [{ id: 'track_saved', name: 'From the project', muted: false }],
+          clips: [],
+          tempoBpm: 120,
+        },
+      };
+      store.getState().loadScene(JSON.stringify(scene), { deferUntilEngineAttaches: true });
+      useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(scene));
+      useMusicArrangementStore.getState().addTrack('Added while loading');
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(2);
+
+      setSceneDispatcher(createMockDispatch());
+
+      const tracks = useMusicArrangementStore.getState().arrangement.tracks;
+      expect(tracks.map((t) => t.name)).toEqual(['From the project', 'Added while loading']);
+
+      // A LIVE load of the same scene still resets the arrangement to the scene's own (#10058).
+      expect(store.getState().loadScene(JSON.stringify(scene))).toBe(true);
+      expect(useMusicArrangementStore.getState().arrangement.tracks.map((t) => t.name)).toEqual(['From the project']);
+    });
+
+    it('holds nothing when the load was dispatched live', () => {
+      expect(store.getState().loadScene(healthyScene)).toBe(true);
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
     });
 
     it('clears sceneLoadError once a scene loads successfully', () => {
