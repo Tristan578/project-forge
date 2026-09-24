@@ -316,7 +316,12 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
           ) : (
             <TemplateSelector
               onSelect={handleTemplateChosen}
-              onBack={() => setShowTemplates(false)}
+              onBack={() => {
+                setShowTemplates(false);
+                // A stale error must not greet the user when the selector is
+                // reopened; it described a load that is no longer on screen.
+                setTemplateError(null);
+              }}
               loadingId={loadingTemplate}
               error={templateError}
             />

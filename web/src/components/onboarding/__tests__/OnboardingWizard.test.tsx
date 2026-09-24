@@ -404,6 +404,18 @@ describe('OnboardingWizard', () => {
     expect(onComplete).not.toHaveBeenCalled();
   });
 
+  it('clears a load error when the user goes Back, so reopening the selector starts clean', async () => {
+    loadTemplate.mockResolvedValueOnce({ success: false, error: 'first failure' });
+    render(<OnboardingWizard onComplete={onComplete} />);
+    fireEvent.click(screen.getByTestId('path-card-template'));
+    fireEvent.click(screen.getByTestId('template-card-puzzle'));
+    await screen.findByRole('alert');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to path selection' }));
+    fireEvent.click(screen.getByTestId('path-card-template'));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('clears the previous error when a new load starts', async () => {
     loadTemplate.mockResolvedValueOnce({ success: false, error: 'first failure' });
     let settle!: (result: TemplateLoadResult) => void;
