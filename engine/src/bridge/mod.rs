@@ -625,6 +625,13 @@ impl Plugin for SelectionPlugin {
         #[cfg(feature = "webgpu")]
         app.add_systems(Update, particles::sync_hanabi_effects);
 
+        // The custom-WGSL hot-swap that `apply_scene_load` queues for a scene
+        // carrying custom shader code. The editor build registers the same
+        // system inside `EditorApplySet` below; a `runtime` build has no such
+        // set, so it is registered here, once, for that build only (#10195).
+        #[cfg(feature = "runtime")]
+        app.add_systems(Update, material::apply_custom_wgsl_source_updates);
+
         app
             // glTF scene spawn system (always-active): spawns loaded glTF scenes as children
             .add_systems(Update, scene_io::apply_gltf_scene_spawn)

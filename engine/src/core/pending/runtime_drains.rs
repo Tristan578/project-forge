@@ -417,6 +417,31 @@ pub(super) mod scan {
         out
     }
 
+    /// The `PendingCommands` queue fields `body` pushes onto through a
+    /// `pending` binding (`pending.<field>.push(`). Command dispatch fills
+    /// queues through `self.<field>.push(` helpers instead; those are
+    /// feature-blind by design and are what `RUNTIME_UNDRAINED` accounts for.
+    pub fn pushed_fields(body: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for (idx, _) in body.match_indices("pending.") {
+            if idx > 0 && is_ident_byte(body.as_bytes()[idx - 1]) {
+                continue;
+            }
+            let rest = &body[idx + "pending.".len()..];
+            let field: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if field.is_empty() {
+                continue;
+            }
+            if rest[field.len()..].starts_with(".push(") && !out.contains(&field) {
+                out.push(field);
+            }
+        }
+        out
+    }
+
     /// Every field of `PendingCommands`, in declaration order.
     pub fn pending_fields() -> Vec<String> {
         let start = PENDING_MOD
@@ -477,7 +502,6 @@ mod tests {
         ("remove_skybox_requests", "editor-authoring: remove_skybox"),
         ("update_skybox_requests", "editor-authoring: update_skybox"),
         ("custom_skybox_requests", "editor-authoring: set_custom_skybox"),
-        ("custom_wgsl_source_updates", "editor-authoring: set_custom_wgsl_source"),
         ("register_custom_shader_requests", "editor-authoring: register_custom_shader"),
         ("apply_custom_shader_requests", "editor-authoring: apply_custom_shader"),
         ("remove_custom_shader_requests", "editor-authoring: remove_custom_shader_slot"),
@@ -527,7 +551,13 @@ mod tests {
     /// game hands its scene to the runtime engine, and the old waiver claimed
     /// a boot path ("embedded scene data") that never existed. Pinned like
     /// `FIXED_BY_9550` so the waiver list cannot re-absorb it.
-    const FIXED_BY_10195: &[&str] = &["scene_load_requests"];
+    ///
+    /// `custom_wgsl_source_updates` joined it when `apply_scene_load` became
+    /// runtime-reachable: the loader queues a hot-swap for a scene that carries
+    /// custom WGSL, and while the drain stayed editor-only an exported game
+    /// rendered those materials with the passthrough shader (Sentry review on
+    /// #10213).
+    const FIXED_BY_10195: &[&str] = &["scene_load_requests", "custom_wgsl_source_updates"];
 
     /// The queues #9550 un-gated. Named explicitly so the waiver list above
     /// cannot re-absorb them: these MUST be drained in a runtime build.
@@ -808,7 +838,7 @@ app.add_systems(Update, runtime_call);
         for field in FIXED_BY_10195 {
             assert!(
                 runtime_drained.iter().any(|f| f == field),
-                "`{field}` is the only boot path of an exported game but its drain is not reachable in a runtime build (#10195 regression)"
+                "`{field}` is part of an exported game's scene boot but its drain is not reachable in a runtime build (#10195 regression)"
             );
             assert!(
                 !RUNTIME_UNDRAINED.iter().any(|(f, _)| f == field),
@@ -833,5 +863,42 @@ app.add_systems(Update, runtime_call);
                 "waiver for `{field}` needs a real reason, got {reason:?}"
             );
         }
+    }
+
+    /// A system a `runtime` build runs must never fill a queue that only the
+    /// editor drains. `RUNTIME_UNDRAINED` waives queues that COMMAND DISPATCH
+    /// fills, on the ground that an exported game does not author; it says
+    /// nothing about a runtime system pushing work for a drain that is not
+    /// there. That is how `apply_scene_load`, made runtime-reachable by #10195,
+    /// queued a custom-WGSL hot-swap no runtime system would ever apply.
+    #[test]
+    fn no_runtime_system_fills_a_queue_only_the_editor_drains() {
+        let gated_modules = gated_modules();
+        let fns = all_functions();
+        let runtime_fns: Vec<&Func> = fns.iter().filter(|f| runtime_reachable(f, &gated_modules)).collect();
+        let runtime_drained: Vec<String> = runtime_fns
+            .iter()
+            .flat_map(|f| drained_fields(&f.runtime_body))
+            .collect();
+        let mut pushes: Vec<(String, String)> = Vec::new();
+        for f in &runtime_fns {
+            for field in pushed_fields(&f.runtime_body) {
+                pushes.push((f.name.clone(), field));
+            }
+        }
+        // Vacuity floor: the scene loader's WGSL push is a known runtime
+        // producer. If the scan stops seeing it, it is seeing nothing.
+        assert!(
+            pushes.iter().any(|(f, q)| f == "apply_scene_load" && q == "custom_wgsl_source_updates"),
+            "the scan no longer sees apply_scene_load push custom_wgsl_source_updates — the producer model is broken: {pushes:?}"
+        );
+        let orphaned: Vec<&(String, String)> = pushes
+            .iter()
+            .filter(|(_, q)| !runtime_drained.iter().any(|d| d == q))
+            .collect();
+        assert!(
+            orphaned.is_empty(),
+            "runtime-reachable systems push onto queues no runtime system drains (the work is queued and never applied in an exported game): {orphaned:?}"
+        );
     }
 }
