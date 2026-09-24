@@ -21,7 +21,7 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 **Review:** `/review-protocol`, `/component-checklist`
 **Vercel:** `/vercel-cli-with-tokens`
 
-## MCP Servers (`.mcp.json` — 7 servers)
+## MCP Servers (`.mcp.json` — 8 servers)
 - `context7` — live library documentation for all 30+ dependencies
 - `neon` — direct Neon Postgres queries (needs `NEON_API_KEY`)
 - `playwright` — browser automation for E2E verification
@@ -29,6 +29,16 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 - `sentry` — error tracking, issue search, event analysis
 - `stripe` — payment processing, webhook debugging, test cards
 - `upstash` — Redis cache operations and rate limiting
+- `taskboard` — the local ticket board (launched through a git alias; see `docs/guides/taskboard-sync.md`)
+
+Claude Code defers MCP tools behind Tool Search by default. `github` and `context7`
+set `"alwaysLoad": true`, so their tools are in context from session start: nearly
+every session uses them. The others stay deferred on purpose. Four carry credentials,
+and none is needed in most sessions. `alwaysLoad` also makes startup wait for those two
+servers, for up to the 5-second connect timeout. Add it to another server only if that
+server is needed in nearly every session. The key and its behavior are documented at
+https://code.claude.com/docs/en/mcp#exempt-a-server-from-deferral. The key affects
+Claude Code only: Codex does not read `.mcp.json`.
 
 ## Hooks (`.claude/hooks/` — 52 scripts, 20 event types)
 

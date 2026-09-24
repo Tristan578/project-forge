@@ -82,6 +82,28 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 
 See `AGENTS.md` for full taskboard setup, workflow, and GitHub Project sync details.
 
+### Plan mode (Copilot CLI)
+
+This repository is spec-first. `.claude/CLAUDE.md` says "Spec-First: Never implement
+without an approved spec in `specs/`". In Copilot CLI, enter plan mode before you
+implement a subtask. Have Copilot write the implementation plan, check it against the
+ticket's acceptance criteria, and only then leave plan mode. The plan is not a spec. If
+the work needs a spec, it still goes in `specs/`.
+
+Ways to enter it, checked against `copilot --help` and `copilot help commands` for
+Copilot CLI 1.0.88:
+
+- `/plan` creates an implementation plan before coding.
+- `copilot --plan` (or `--mode plan`) starts a session in plan mode.
+- To start every new interactive session in plan mode, set the `defaultMode` setting to
+  `plan` with `/settings` at user scope. Do not use `/settings --repo`. That writes
+  `.github/copilot/settings.json` inside the repository, and a personal preference
+  must not be committed there.
+
+Do not combine `--plan` with `--mode autopilot` here. That combination approves the
+plan automatically and implements it, which skips the review step this section exists
+for.
+
 ### Sync Architecture (Non-Negotiable)
 - `github_issue_number` (SQLite column) is the SOLE link between local tickets and GitHub Issues. NEVER match by title.
 - `sync_repo` (SQLite column) controls which repo a ticket syncs to. Only `sync_repo = 'project-forge'` tickets are synced.
