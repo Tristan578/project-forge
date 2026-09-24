@@ -67,7 +67,13 @@ const ACCOUNTED_FOR: Record<string, { calls: number; reason: string }> = {
   'hooks/usePointerLock.ts': { calls: 1, reason: 'fixed { dx, dy } literal' },
   'components/play/GamePlayer.tsx': {
     calls: 3,
-    reason: 'passes JSON *strings*; serde_json::from_str caps its own recursion at 128 levels',
+    reason:
+      'fixed object literals built in the file: { preset } through sendReported, {} for set_quality, and {} for the explicit play whose refusal is a failed start; the scene goes through lib/engine/playSceneLoad.ts (#10196)',
+  },
+  'lib/engine/playSceneLoad.ts': {
+    calls: 0,
+    reason:
+      'reaches the engine only through the sink GamePlayer passes in, with a two-level { json: string } literal: the scene itself stays a JSON string that serde_json::from_str parses inside the engine, capping its own recursion at 128 levels',
   },
 
   // --- Not a call at all --------------------------------------------------
@@ -84,6 +90,11 @@ const ACCOUNTED_FOR: Record<string, { calls: number; reason: string }> = {
       'prose in a doc comment explaining why the batch dispatcher can be unset; it reaches the engine only through ctx.dispatchCommand / ctx.dispatchCommandBatch, which orchestratorSlice fills from the store dispatchers this list already guards',
   },
   'lib/ai/smartCamera.ts': { calls: 0, reason: 'comment' },
+  'stores/editorStore.ts': {
+    calls: 0,
+    reason:
+      'prose: the scene-replacement comments cite that the engine entry points dispatch before they serialize their answer, which is why a caught throw is not a refusal. The store is the guard for both paths and reaches the engine only through the dispatchers useEngineEvents registers',
+  },
   'lib/monitoring/sentryConfig.ts': { calls: 0, reason: 'regex matched against error message text' },
   'lib/perf/baselines.ts': { calls: 1, reason: 'benchmark description string' },
   'lib/perf/fixtures/fixtureScenes.ts': {

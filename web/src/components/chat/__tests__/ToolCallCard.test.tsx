@@ -94,6 +94,129 @@ describe('ToolCallCard', () => {
     expect(mockApprove).toHaveBeenCalledWith('tc-3');
   });
 
+  // ---------------------------------------------------------------------------
+  // PF-1148: the chat turn that caused an adjustment says so, without expanding.
+  // ---------------------------------------------------------------------------
+  describe('adjusted values', () => {
+    const clamp = {
+      component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
+    };
+    const cut = {
+      component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+      appliedPoints: Array.from({ length: 64 }, (_, i) => [i, 0, 0]),
+    };
+    const card = (result: unknown, status: ToolCallStatus['status'] = 'success') => render(
+      <ToolCallCard
+        toolCall={{
+          id: 'tc-adj',
+          name: 'add_game_component',
+          input: { entityId: 'e-1', componentType: 'moving_platform' },
+          status,
+          undoable: false,
+          result,
+        }}
+      />,
+    );
+
+    it('lists each adjustment in the author’s terms, visible without expanding', () => {
+      card({ message: 'Added moving_platform', corrections: [clamp, cut] });
+      const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+      const items = Array.from(note.querySelectorAll('li')).map((li) => li.textContent);
+      expect(items).toEqual([
+        'Moving Platform speed: you asked for 99999, it was capped at 1000.',
+        'Moving Platform waypoints: you gave 300 points; only the first 64 points were kept, the most the engine supports.',
+      ]);
+    });
+
+    it('names the entity for a record a multi-entity tool tagged', () => {
+      card({ summary: 'Created 1 entities.', corrections: [{ ...clamp, entityId: 'e-1' }, { ...cut, entityId: 'e-9' }] });
+      const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+      expect(Array.from(note.querySelectorAll('li')).map((li) => li.textContent)).toEqual([
+        // `e-1` is "Player" in the scene graph; `e-9` is unknown, so its id stands in.
+        '"Player" Moving Platform speed: you asked for 99999, it was capped at 1000.',
+        '"e-9" Moving Platform waypoints: you gave 300 points; only the first 64 points were kept, the most the engine supports.',
+      ]);
+    });
+
+    it('shows no note when nothing was adjusted', () => {
+      card({ message: 'Added moving_platform', corrections: [] });
+      expect(screen.queryByRole('status')).toBeNull();
+      // The card itself did render, so the absence above is not a blank render.
+      expect(screen.getByText('Add Game Component')).toBeDefined();
+    });
+
+    it('shows no note for a result that carries no corrections at all', () => {
+      card('Added moving_platform');
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+
+    it('renders only well-formed records, never a note built from junk', () => {
+      card({ corrections: [{ component: 'movingPlatform', field: 'speed', reason: 'guessed' }, 'x', null] });
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+
+    it('drops the note once the call is undone — the adjusted value is gone', () => {
+      card({ message: 'Added moving_platform', corrections: [clamp] }, 'undone');
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+
+    // Board round 3: only `success` shows the note. Every other status either
+    // applied nothing (`error`, and a call still pending, previewed, rejected,
+    // blocked or denied) or no longer stands (`undone`), so a note on it would
+    // claim an adjustment the scene does not hold. Each status is rendered with
+    // a result that DOES carry a well-formed correction, so only the status can
+    // be what keeps the note away — a condition loosened to `!== 'undone'` or
+    // `!== 'error'` fails here by name.
+    const NOT_APPLIED = [
+      'error', 'pending', 'preview', 'rejected', 'undone', 'approval-required', 'denied',
+    ] as const satisfies readonly Exclude<ToolCallStatus['status'], 'success'>[];
+
+    it('covers every status except success', () => {
+      // `satisfies` above rejects a status the union does not have; it cannot
+      // notice one the union gains and this list misses. The `Record` can: a
+      // missing key does not compile, so its keys are the whole union.
+      const every: Record<ToolCallStatus['status'], true> = {
+        pending: true, success: true, error: true, preview: true, rejected: true,
+        undone: true, 'approval-required': true, denied: true,
+      };
+      expect([...NOT_APPLIED].sort()).toEqual(Object.keys(every).filter((s) => s !== 'success').sort());
+    });
+
+    it.each(NOT_APPLIED)('shows no note when the status is %s, even though the result carries corrections', (status) => {
+      card({ message: 'Added moving_platform', corrections: [clamp] }, status);
+      expect(screen.queryByRole('status', { name: 'Adjusted to fit the engine’s limits' })).toBeNull();
+      expect(screen.queryByText('Moving Platform speed: you asked for 99999, it was capped at 1000.')).toBeNull();
+      // Non-vacuous: the card itself rendered, for this status.
+      expect(screen.getByText('Add Game Component')).toBeDefined();
+    });
+
+    it('shows the same result’s note on a success call', () => {
+      // The control for the case above: the identical result, only the status
+      // differs, and here the note is there.
+      card({ message: 'Added moving_platform', corrections: [clamp] }, 'success');
+      const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+      expect(Array.from(note.querySelectorAll('li')).map((li) => li.textContent))
+        .toEqual(['Moving Platform speed: you asked for 99999, it was capped at 1000.']);
+    });
+
+    it('says how many entries of a refused route could be used', () => {
+      // Read back from an untrusted result, so this also proves the `usable`
+      // count survives `readCorrections`.
+      card({
+        message: 'Added moving_platform',
+        corrections: [{
+          component: 'movingPlatform', field: 'waypoints', requested: 2, applied: 2, reason: 'invalid-replaced',
+          unit: 'points', appliedPoints: [[0, 0, 0], [0, 3, 0]], usable: 1,
+        }],
+      });
+      const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+      expect(Array.from(note.querySelectorAll('li')).map((li) => li.textContent)).toEqual([
+        'Moving Platform waypoints: you gave 2 points, but only 1 could be used, and a route needs at least 2, '
+          + 'so the default route (2 points) was used instead.',
+      ]);
+    });
+  });
+
   it('expands to show input JSON when header button is clicked', () => {
     render(
       <ToolCallCard

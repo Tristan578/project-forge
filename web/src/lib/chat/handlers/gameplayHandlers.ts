@@ -8,7 +8,8 @@ import type { ToolHandler } from './types';
 import { ownEntry, zEntityId, zVec3, parseArgs } from './types';
 import type { GameCameraData, EntityType } from '@/stores/editorStore';
 import { MATERIAL_PRESETS, getPresetsByCategory, saveCustomMaterial, deleteCustomMaterial, loadCustomMaterials } from '@/lib/materialPresets';
-import { buildStoreComponent, ENGINE_COMPONENT_TYPES, ENGINE_COMPONENT_CATALOG } from '@/lib/engine/gameComponentWire';
+import { buildStoreComponentWithReport, ENGINE_COMPONENT_TYPES, ENGINE_COMPONENT_CATALOG } from '@/lib/engine/gameComponentWire';
+import { withCorrectionSummary, type GameComponentFieldCorrection } from '@/lib/engine/gameComponentCorrections';
 import { NUMERIC_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
 import { LINKED_PREFAB_UNAVAILABLE_REASON } from '@/lib/prefabs/prefabAvailability';
 
@@ -24,6 +25,22 @@ const zPropertiesBag = z.record(z.string(), z.unknown()).optional();
 // Game camera mode enum
 const zGameCameraMode = z.enum(['thirdPersonFollow', 'firstPerson', 'sideScroller', 'topDown', 'fixed', 'orbital']);
 
+/**
+ * A component tool's result: what it did, and every value it did not apply as
+ * asked (PF-1148).
+ *
+ * `corrections` is always present, empty when nothing was adjusted, so an MCP
+ * client can read it without probing for the key. The chat card renders it
+ * from the structured list; `message` says the same thing in sentences for any
+ * reader that only has text.
+ */
+function correctionResult(
+  action: string,
+  corrections: readonly GameComponentFieldCorrection[],
+): { message: string; corrections: readonly GameComponentFieldCorrection[] } {
+  return { message: withCorrectionSummary(action, corrections), corrections };
+}
+
 export const gameplayHandlers: Record<string, ToolHandler> = {
   add_game_component: async (args, ctx) => {
     const p = parseArgs(z.object({
@@ -34,12 +51,15 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const props = p.data.properties ?? {};
-    const component = buildStoreComponent(p.data.componentType, props);
-    if (!component) {
+    // The report is taken HERE, at the first coercion: the store normalizes
+    // again, but by then it is handed a valid component and has nothing left
+    // to report (PF-1148).
+    const built = buildStoreComponentWithReport(p.data.componentType, props);
+    if (!built) {
       return { success: false, error: `Unknown component type: ${p.data.componentType}. Valid types: ${VALID_COMPONENT_TYPES}` };
     }
-    ctx.store.addGameComponent(p.data.entityId, component);
-    return { success: true, result: { message: `Added ${p.data.componentType}` } };
+    ctx.store.addGameComponent(p.data.entityId, built.component, built);
+    return { success: true, result: correctionResult(`Added ${p.data.componentType}`, built.corrections) };
   },
 
   update_game_component: async (args, ctx) => {
@@ -51,12 +71,12 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     const props = p.data.properties ?? {};
-    const component = buildStoreComponent(p.data.componentType, props);
-    if (!component) {
+    const built = buildStoreComponentWithReport(p.data.componentType, props);
+    if (!built) {
       return { success: false, error: `Unknown component type: ${p.data.componentType}. Valid types: ${VALID_COMPONENT_TYPES}` };
     }
-    ctx.store.updateGameComponent(p.data.entityId, component);
-    return { success: true };
+    ctx.store.updateGameComponent(p.data.entityId, built.component, built);
+    return { success: true, result: correctionResult(`Updated ${p.data.componentType}`, built.corrections) };
   },
 
   remove_game_component: async (args, ctx) => {
