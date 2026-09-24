@@ -53,7 +53,8 @@
 # `alias NAME=` and `shopt -s expand_aliases` wherever they occur in
 # executable text, after the quote removal and backslash unescaping bash
 # itself performs before it looks a command up: `\alias`, `"alias"`,
-# `al"ias"`, `\a\l\i\a\s`, `$'alias'`, a backslash line continuation in the
+# `al"ias"`, `\a\l\i\a\s`, `$'alias'` and its escaped forms (octal, hex,
+# `\u`, `\U`, a NUL ending the value), a backslash line continuation in the
 # middle of the statement, and anything in front of the word (`builtin`,
 # `command`, `time -p`, `X="1"`, `!`, `if`) are all the same word, and so
 # is a word spelled around an expansion that can be empty (`ali$()as`,
@@ -61,7 +62,8 @@
 # with its expansions removed (see end_word). A word whose spelling needs an
 # expansion to CONTRIBUTE text (`al$(echo i)as`), `eval`, a `source` of a
 # file written by the suite, and `declare -n` (a variable, not a function)
-# remain outside this gate (round 39 of the guide).
+# remain outside this gate (the Honest bound of the Sweep section in
+# docs/guides/npm-audit-gate-hardening.md).
 #
 # A DEBUG trap under `shopt -s extdebug` is the other binding-independent
 # neuter: bash skips the NEXT command whenever a command run by the DEBUG
@@ -425,7 +427,53 @@ derive_file() {
         d--
       }
     }
-    function lex_line(line,   n, i, c, c2, c3, rest, tok, carry, j, bd, cj) {
+    # Decodes the ANSI-C escape at line[i] (a backslash) as bash does inside
+    # an ANSI-C quoted string: named letters, octal (up to three digits), `\xHH`, `\uHHHH`,
+    # `\UHHHHHHHH` and `\cX`. It returns the decoded text, sets ac_len to the
+    # characters consumed and ac_nul when the value is NUL. A code point past
+    # ASCII becomes `?`: no guarded word contains one. An escape bash does
+    # not know keeps its backslash, as bash keeps it. Portable awk only (no
+    # strtonum): CI may run mawk.
+    function hexv(ch) { return index("0123456789abcdef", tolower(ch)) - 1 }
+    function ansi_c(line, i,   nx, k, v, lim, ch) {
+      nx = substr(line, i + 1, 1); ac_nul = 0; ac_len = 2
+      if (nx == "") { ac_len = 1; return "\\" }
+      k = index("abeEfnrtv", nx)
+      if (k) return ansi_named(nx)
+      if (nx == "\\" || nx == "\047" || nx == "\"" || nx == "?") return nx
+      if (nx ~ /[0-7]/) {
+        v = 0; k = 1
+        while (k <= 3 && substr(line, i + k, 1) ~ /[0-7]/) { v = v * 8 + substr(line, i + k, 1); k++ }
+        ac_len = k; return ansi_code(v % 256)
+      }
+      if (nx == "x" || nx == "u" || nx == "U") {
+        lim = (nx == "x") ? 2 : (nx == "u") ? 4 : 8
+        v = 0; k = 2
+        while (k <= lim + 1 && hexv(substr(line, i + k, 1)) >= 0 && substr(line, i + k, 1) != "") { v = v * 16 + hexv(substr(line, i + k, 1)); k++ }
+        if (k == 2) return "\\" nx
+        ac_len = k; return ansi_code(v)
+      }
+      if (nx == "c") {
+        ch = substr(line, i + 2, 1); ac_len = 3
+        if (ch == "?") return ansi_code(127)
+        v = index("@abcdefghijklmnopqrstuvwxyz[\\]^_", tolower(ch)) - 1
+        if (v < 0) return "?"
+        return ansi_code(v)
+      }
+      return "\\" nx
+    }
+    function ansi_named(nx) {
+      if (nx == "a") return ansi_code(7); if (nx == "b") return ansi_code(8)
+      if (nx == "e" || nx == "E") return ansi_code(27); if (nx == "f") return ansi_code(12)
+      if (nx == "n") return ansi_code(10); if (nx == "r") return ansi_code(13)
+      if (nx == "t") return ansi_code(9); return ansi_code(11)
+    }
+    function ansi_code(v) {
+      if (v == 0) { ac_nul = 1; return "" }
+      if (v >= 128) return "?"
+      return sprintf("%c", v)
+    }
+    function lex_line(line,   n, i, c, c2, c3, rest, tok, carry, j, bd, cj, dc) {
       n = length(line); i = 1
       # A trailing unquoted backslash joins this line to the next one, so the
       # word and the two words before it carry over (`alias \` + `fail=:`,
@@ -442,9 +490,14 @@ derive_file() {
       while (i <= n) {
         c = substr(line, i, 1); c2 = substr(line, i, 2); c3 = substr(line, i, 3)
         if (q == "s") { if (c == "\047") q = ""; else w = w c; i++; continue }
+        # Inside an ANSI-C quoted string bash decodes each escape before the
+        # word is looked up, so the octal escape 141 followed by lias IS the
+        # word alias; ansi_c decodes the same forms (seventeenth board round).
+        # A NUL ends the value of the string: bash drops everything after it
+        # up to the closing quote, so a_nul discards those characters.
         if (q == "a") {
-          if (c == "\\") { w = w substr(line, i + 1, 1); i += 2; continue }
-          if (c == "\047") q = ""; else w = w c
+          if (c == "\\") { dc = ansi_c(line, i); if (!a_nul) { if (ac_nul) a_nul = 1; else w = w dc }; i += ac_len; continue }
+          if (c == "\047") { q = ""; a_nul = 0 } else if (!a_nul) w = w c
           i++; continue
         }
         if (q == "d") {

@@ -885,7 +885,11 @@ by construction rather than by measurement.
   can be empty (`${x:+Q}`, an unset `$1`, a `$( )` holding only a comment in
   a trap action), in every guarded position (the `-s` flag, a trap's signal
   words and action, the body of a function a trap calls), with `$NAME` kept
-  as `${NAME}` so quote removal cannot move its end (`ali$x"as"`). No files,
+  as `${NAME}` so quote removal cannot move its end (`ali$x"as"`). The
+  seventeenth found that an ANSI-C quoted string was copied escape by escape
+  instead of decoded, so `$'\141lias'` read as `141lias`; its octal, hex,
+  `\u`, `\U`, named and control escapes are now decoded as bash does, and a
+  NUL ends its value. No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state

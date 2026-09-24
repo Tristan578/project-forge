@@ -1389,6 +1389,41 @@ expect_rc "30j. every expansion that can be empty, in every guarded position, is
   "fixture.test.sh:16: 'alias fail=:'" "fixture.test.sh:17: 'shopt -s expand\${x}_aliases'" "fixture.test.sh:18: 'trap exit 0 ... EXIT'" \
   "fixture.test.sh:23: 'trap wrap ... EXIT (wrap() exits)'" "fixture.test.sh:24: 'trap exit 0 ... EXIT'"
 
+# ---- 30k. an ANSI-C quoted string is decoded before the word is judged -------
+# Seventeenth board round (security): bash decodes octal, hex, \u, \U and
+# named escapes inside an ANSI-C quoted string, and a NUL ends its value, so
+# each line below is the guarded word to bash (the round reproduced a live
+# alias shadow and a trap exit override). `\ca` is control-A, not `a`, so
+# line 10 is NOT a guarded word and must not be reported. Line 11 pins the
+# single-quote removal in a trap action (test round seventeen); line 12
+# pins that the control escape for @ is NUL, which also ends the value.
+d_ansic="$(mkfixture ansi-c <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+$'\141lias' fail=:
+$'\x61lias' fail=:
+$'\u0061lias' fail=:
+$'\U00000061lias' fail=:
+$'\163hopt' -s $'\145xpand_aliases'
+trap $'\145xit 0' EXIT
+$'alias\0zz' fail=:
+$'\ca'lias fail=:
+trap "e'x'it 0" EXIT
+$'alias\c@zz' fail=:
+FIX
+)"
+out_ansic="$(run_gate "$d_ansic")"
+expect_rc "30k. octal, hex, \\u, \\U and NUL-terminated ANSI-C spellings are the guarded word" 1 \
+  "$out_ansic" "9 violation(s)" "fixture.test.sh:3: 'alias fail=:'" "fixture.test.sh:4: 'alias fail=:'" \
+  "fixture.test.sh:5: 'alias fail=:'" "fixture.test.sh:6: 'alias fail=:'" "fixture.test.sh:7: 'shopt -s expand_aliases'" \
+  "fixture.test.sh:8: 'trap exit 0 ... EXIT'" "fixture.test.sh:9: 'alias fail=:'" "fixture.test.sh:11: 'trap exit 0 ... EXIT'" \
+  "fixture.test.sh:12: 'alias fail=:'"
+if grep -q 'fixture.test.sh:10:' <<<"$out_ansic"; then
+  fail "30k-b. a control-A escape is not the letter a" "line 10 was reported: $out_ansic"
+else
+  pass "30k-b. a control-A escape is not the letter a"
+fi
+
 # ---- 12c. a file whose only definition is malformed gets that report --------------
 # Fourteenth board round (ux): the vacuity guard counted only frozen and
 # unfrozen rows, so a file holding just ` fail() { :; }` (the eleventh round's
