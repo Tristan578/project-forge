@@ -85,6 +85,16 @@ export const WASM_FETCH_TIMEOUT_MS = 60_000;
 export const ENGINE_GLOBAL_TIMEOUT_MS = 30_000;
 
 /**
+ * Per-origin deadline for the `/play` engine loader (#7580).
+ *
+ * `/play` tries the engine CDN and then same-origin. Each origin needs its own
+ * budget so a CDN that stalls (rather than fails) still leaves time for the
+ * same-origin fallback inside ENGINE_GLOBAL_TIMEOUT_MS: two origins at this
+ * budget fit under the global deadline with room for the GPU probe.
+ */
+export const PLAY_ENGINE_ORIGIN_TIMEOUT_MS = 12_000;
+
+/**
  * Deadline for the published-game metadata fetch on `/play`.
  *
  * Bounds the "Loading game..." spinner. Deliberately much shorter than the

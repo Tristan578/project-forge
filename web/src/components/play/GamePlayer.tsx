@@ -7,8 +7,8 @@ import { ShareButtons } from './ShareButtons';
 import { RemixButton } from './RemixButton';
 import { ReportGameDialog } from './ReportGameDialog';
 import { withTimeout } from '@/lib/async/withTimeout';
-import { loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
-import { captureException } from '@/lib/monitoring/sentry-client';
+import { isCdnOrigin, loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
+import { addBreadcrumb, captureException, captureMessage, setTag } from '@/lib/monitoring/sentry-client';
 import {
   ENGINE_GLOBAL_TIMEOUT_MS,
   PLAY_GAME_FETCH_TIMEOUT_MS,
@@ -16,6 +16,15 @@ import {
 } from '@/lib/config/timeouts';
 
 const CANVAS_ID = 'play-canvas';
+
+/** Host only — never the path, which carries the build SHA. */
+function originHost(basePath: string): string {
+  try {
+    return new URL(basePath, window.location.origin).host;
+  } catch {
+    return 'unknown';
+  }
+}
 
 // The document URL never changes for the lifetime of this component (a play
 // page is a full navigation), so there is nothing to subscribe to.
@@ -157,7 +166,25 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       // would let a slow-but-not-hung load spend the full budget twice over and
       // leave "Starting engine..." on screen for double the intended time.
       const runtime: PlayEngineRuntime = await withTimeout(
-        loadPlayEngine(),
+        loadPlayEngine({
+          // A CDN that fails or stalls falls back to same-origin and the player
+          // never notices — which is the point, and also why it must be
+          // reported: a broken CDN prefix would otherwise route every player
+          // through the slower origin with nothing in Sentry to show for it.
+          // Same signals the editor emits (`wasm.source`, breadcrumb, #8250).
+          onOriginSkipped: (basePath, err) => {
+            const reason = err instanceof Error ? err.message : String(err);
+            addBreadcrumb({
+              category: 'wasm',
+              message: `Play engine load skipped ${originHost(basePath)}: ${reason}`,
+              level: 'warning',
+            });
+            captureMessage('Play engine origin skipped, falling back', 'warning');
+          },
+          onOriginUsed: (basePath) => {
+            setTag('wasm.source', isCdnOrigin(basePath) ? 'cdn' : 'same-origin');
+          },
+        }),
         ENGINE_GLOBAL_TIMEOUT_MS,
         'Game engine load',
       );

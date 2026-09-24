@@ -3,17 +3,20 @@
  *
  * This exists as its own module purely to be a **test seam**. The import
  * specifier is a computed template literal (`${basePath}forge_engine.js`),
- * which Vitest cannot intercept — `useEngine.test.ts` documents why mocking
- * the dynamic import directly is intractable. A named module CAN be mocked, so
- * `GamePlayer` calls this and tests replace it wholesale.
+ * which Vitest can only intercept with a `vi.doMock` of the exact resolved
+ * path (`useEngine.backend.test.ts` does that with a fixture tree). A named
+ * module CAN be mocked, so `GamePlayer` calls this and tests replace it
+ * wholesale; the loader itself takes an injectable importer for the same
+ * reason.
  *
  * Keep this a leaf: `/play` is the public, unauthenticated bundle and must not
  * pull in the editor's engine graph. That is why the CDN resolution below is a
- * copy of `useEngine.getWasmBasePaths`, not an import of it.
+ * copy of `useEngine.getWasmBasePaths`, not an import of it — a parity test in
+ * `loadPlayEngine.test.ts` pins the two copies to the same output.
  */
 
 import { withTimeout } from '@/lib/async/withTimeout';
-import { GPU_INIT_TIMEOUT_MS } from '@/lib/config/timeouts';
+import { GPU_INIT_TIMEOUT_MS, PLAY_ENGINE_ORIGIN_TIMEOUT_MS } from '@/lib/config/timeouts';
 
 /** The subset of the wasm-bindgen surface `/play` actually calls. */
 export interface PlayEngineRuntime {
@@ -54,6 +57,11 @@ export function getPlayEngineBasePaths(backend: 'webgpu' | 'webgl2'): string[] {
   return paths;
 }
 
+/** True for an absolute http(s) origin (the CDN); false for a same-origin path. */
+export function isCdnOrigin(basePath: string): boolean {
+  return /^https?:\/\//.test(basePath);
+}
+
 /**
  * Pick the engine build, load its JS glue, and instantiate the WASM binary.
  *
@@ -90,34 +98,81 @@ export type GlueImporter = (specifier: string) => Promise<GlueModule>;
 const importGlue: GlueImporter = (specifier) =>
   import(/* webpackIgnore: true */ specifier) as Promise<GlueModule>;
 
+export interface PlayEngineLoadOptions {
+  /**
+   * Called each time an origin is given up on (it failed or exceeded the
+   * per-origin deadline) and the next one is about to be tried. This is the
+   * ONLY signal that the CDN was skipped: a fallback that succeeds looks like a
+   * success from the outside, and a broken CDN prefix would otherwise route
+   * every player through the same-origin path with nothing to show for it.
+   */
+  onOriginSkipped?: (basePath: string, error: unknown) => void;
+  /** Called once, with the origin that produced the runtime. */
+  onOriginUsed?: (basePath: string) => void;
+  /** Test seam: replaces the dynamic `import()`. */
+  load?: GlueImporter;
+  /** Per-origin deadline; defaults to PLAY_ENGINE_ORIGIN_TIMEOUT_MS. */
+  originTimeoutMs?: number;
+}
+
 /**
  * Try each base path in order and return the first runtime that instantiates.
  *
- * A failure on one origin (CDN unreachable, blocked, or a stale alias) falls
- * through to the next; only the LAST origin's failure is what the caller sees.
- * Exported with an injectable importer so the ordering and the fallback can be
- * tested without a resolvable engine bundle.
+ * Every origin gets its OWN deadline. Without one, a CDN that stalls (a
+ * blackholed connection, a hung edge) would never reject, the loop would never
+ * reach the same-origin path, and the caller's single global deadline would
+ * expire on a page that had a working fallback the whole time — and because
+ * `loadPlayEngine`'s latch only clears on rejection, Retry would join the
+ * same hung attempt. The per-origin budget is sized so that CDN + same-origin
+ * both fit inside `ENGINE_GLOBAL_TIMEOUT_MS`.
+ *
+ * `withTimeout` bounds the wait, not the work: an abandoned attempt keeps
+ * running. The `abandoned` flag stops a late-arriving glue module from
+ * instantiating a rival WASM instance after the loop has moved on; a binary
+ * that was already mid-instantiation when the deadline fired cannot be
+ * stopped, which is the same trade the editor's per-origin timeout makes.
  */
 export async function instantiateFromPaths(
   paths: readonly string[],
-  load: GlueImporter = importGlue,
+  options: PlayEngineLoadOptions = {},
 ): Promise<PlayEngineRuntime> {
+  const load = options.load ?? importGlue;
+  const originTimeoutMs = options.originTimeoutMs ?? PLAY_ENGINE_ORIGIN_TIMEOUT_MS;
   let lastErr: unknown = new Error('No engine base path to load from');
-  for (const basePath of paths) {
-    try {
-      const wasm = await load(`${basePath}forge_engine.js`);
+
+  for (let i = 0; i < paths.length; i++) {
+    const basePath = paths[i];
+    let abandoned = false;
+    const attempt = load(`${basePath}forge_engine.js`).then(async (wasm) => {
+      if (abandoned) throw new Error(`Engine load from ${basePath} abandoned after its deadline`);
       await wasm.default(`${basePath}forge_engine_bg.wasm`);
+      return wasm;
+    });
+    try {
+      const wasm = await withTimeout(attempt, originTimeoutMs, `Engine load from ${basePath}`);
+      options.onOriginUsed?.(basePath);
       return wasm as unknown as PlayEngineRuntime;
     } catch (err) {
+      abandoned = true;
+      // The abandoned attempt may still reject later; that rejection is ours.
+      attempt.catch(() => {});
       lastErr = err;
+      if (i < paths.length - 1) options.onOriginSkipped?.(basePath, err);
     }
   }
   throw lastErr;
 }
 
-async function instantiate(): Promise<PlayEngineRuntime> {
+/**
+ * Resolve the backend and the ordered origins, then instantiate. Exported so
+ * the composition — env → base paths → loader — can be tested end to end with
+ * an injected importer; `loadPlayEngine` is this plus the latch.
+ */
+export async function resolveAndInstantiate(
+  options: PlayEngineLoadOptions = {},
+): Promise<PlayEngineRuntime> {
   const backend = await selectPlayEngineBackend();
-  return instantiateFromPaths(getPlayEngineBasePaths(backend));
+  return instantiateFromPaths(getPlayEngineBasePaths(backend), options);
 }
 
 /**
@@ -143,14 +198,17 @@ let loadLatch: Promise<PlayEngineRuntime> | null = null;
  * call must genuinely retry. Fulfilment is cached forever: wasm-bindgen's init
  * is not idempotent, so there must never be a second one.
  *
+ * `options` apply to the attempt that is started; a caller that joins an
+ * in-flight attempt gets that attempt's callbacks, not its own.
+ *
  * `useEngine.loadWasm()` carries the same latch for the editor (PF-585); this
  * is deliberately a separate copy rather than a shared import, because `/play`
  * is the public bundle and must not pull in the editor's engine graph.
  */
-export function loadPlayEngine(): Promise<PlayEngineRuntime> {
+export function loadPlayEngine(options: PlayEngineLoadOptions = {}): Promise<PlayEngineRuntime> {
   if (loadLatch) return loadLatch;
 
-  const attempt = instantiate();
+  const attempt = resolveAndInstantiate(options);
   loadLatch = attempt;
 
   attempt.catch(() => {

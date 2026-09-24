@@ -97,17 +97,22 @@ sweep and orphan-key script — for a payload that is one JSON document per play
 What makes a play slow to start is the engine: several megabytes of WASM plus
 its JS glue per backend, which the `engine-cdn` Worker at
 `engine.spawnforge.ai` serves from the `spawnforge-engine` bucket under a
-per-build prefix with immutable cache headers. The editor has loaded from
-there since #8247 (`useEngine.getWasmBasePaths`, CDN first, same-origin
-fallback). **The `/play` loader never did**: `loadPlayEngine.ts` hardcoded the
+per-build prefix with immutable cache headers. The editor has loaded CDN
+first with a same-origin fallback since #8247 (`useEngine.getWasmBasePaths`).
+**The `/play` loader never did**: `loadPlayEngine.ts` hardcoded the
 same-origin `/engine-pkg-*` path, so every player pulled the engine through
 the Vercel origin even though the play CSP already allowed the CDN
 (`playCspOptionsFromEnv` → `engineCdn`). This decision's PR fixes that:
 `getPlayEngineBasePaths` mirrors the editor's resolution (versioned CDN prefix
 when `NEXT_PUBLIC_ENGINE_VERSION` is set, `/latest/` otherwise, then
 same-origin), and `instantiateFromPaths` falls through to the next origin when
-one fails. That is the CDN win the issue was after, and it is delivered on the
-artifact that is actually large. The scene snapshot is one JSON document per
+one fails or exceeds its own deadline (`PLAY_ENGINE_ORIGIN_TIMEOUT_MS`), so a
+stalled CDN still leaves time for same-origin inside the page's global budget.
+A skipped origin is reported from the play page (a Sentry breadcrumb, a
+warning-level message, and the `wasm.source` tag the editor also sets), so a
+broken CDN prefix cannot silently route every player through the origin. That
+is the CDN win the issue was after, and it is delivered on the artifact that is
+actually large. The scene snapshot is one JSON document per
 session; moving it to a CDN would not change what a player waits for, only
 where the moderation check can no longer run.
 
