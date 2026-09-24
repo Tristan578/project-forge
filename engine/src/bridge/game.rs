@@ -15,7 +15,7 @@ use crate::core::{
 #[cfg(not(feature = "runtime"))]
 use crate::core::{
     history::{HistoryStack, UndoableAction},
-    game_components::build_game_component,
+    game_components::{build_game_component, StagedGameComponents},
 };
 #[cfg(not(feature = "runtime"))]
 use crate::bridge::{log, Selection, SelectionChangedEvent};
@@ -34,6 +34,13 @@ pub(super) fn apply_game_component_adds(
     mut history: ResMut<HistoryStack>,
 ) {
     let requests: Vec<_> = pending.game_component_adds.drain(..).collect();
+    // Inserts for entities that have no `GameComponents` yet are STAGED and
+    // applied once per entity after the loop. The insert below is deferred,
+    // so a second add for the same entity in this drain still sees `None`
+    // here; building it a fresh `GameComponents` made the second insert
+    // replace the first, and a player given a Character Controller and Health
+    // in one frame kept only Health (#10193).
+    let mut staged = StagedGameComponents::default();
     for request in requests {
         let Some((entity, _eid, existing)) = entity_query.iter_mut().find(|(_, eid, _)| eid.0 == request.entity_id) else {
             continue;
@@ -59,17 +66,17 @@ pub(super) fn apply_game_component_adds(
                 new_components,
             });
         } else {
-            let mut gc = GameComponents::default();
-            gc.add(component_data);
-            let new_components = Some(gc.clone());
+            let (old_components, gc) = staged.add(entity, component_data);
             events::emit_game_component_changed(&request.entity_id, &gc.components);
-            commands.entity(entity).insert(gc);
             history.push(UndoableAction::GameComponentChange {
                 entity_id: request.entity_id,
-                old_components: None,
-                new_components,
+                old_components,
+                new_components: Some(gc),
             });
         }
+    }
+    for (entity, gc) in staged.into_inserts() {
+        commands.entity(entity).insert(gc);
     }
 }
 

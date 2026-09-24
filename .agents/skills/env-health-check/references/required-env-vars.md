@@ -17,7 +17,7 @@ tables sit in the way:
 
 | Table | File | Read as |
 |---|---|---|
-| `PLATFORM_KEY_ENV` | `web/src/lib/config/providers.ts:173-182` | `process.env[PLATFORM_KEY_ENV[provider]]` |
+| `PLATFORM_KEY_ENV` | `web/src/lib/config/providers.ts` (search the name; line numbers drift) | `process.env[PLATFORM_KEY_ENV[provider]]` |
 | `ASSET_STORAGE_ENV` | `web/src/lib/config/assetStorage.ts:12-17` | `process.env[ASSET_STORAGE_ENV.accountId]` |
 
 Three consequences, all of which have bitten this project:
@@ -32,7 +32,7 @@ Three consequences, all of which have bitten this project:
 3. **Drift between the table and the deployed environment is silent.** `healthChecks.ts`
    once read `MESHY_API_KEY` / `ELEVENLABS_API_KEY` / `SUNO_API_KEY` — names nothing sets
    — and the public status page reported a permanent "AI Assistant: outage" against a
-   working install (PF-1054, recorded in the comment at `providers.ts:169`).
+   working install (PF-1054, recorded in the docblock above `PLATFORM_KEY_ENV`).
 
 The live consequence today is **#9117**: zero `PLATFORM_*` keys are set in Vercel
 production, so every platform-path generation fails before charging (500 for a missing key; `music` is declared unavailable in code and refused 503 at every entry point, see `docs/guides/platform-keys.md`). That state was easy to reach and hard to
@@ -64,32 +64,41 @@ To check the platform keys as the app sees them rather than as you hope they are
 
 ## Platform generation keys — the `PLATFORM_KEY_ENV` set
 
-All eight values from `web/src/lib/config/providers.ts:173-182`, complete. These are the
+All seven values of `PLATFORM_KEY_ENV` in `web/src/lib/config/providers.ts`, complete
+(`PLATFORM_SUNO_KEY` was dropped by #9522 when `music` moved to ElevenLabs). These are the
 keys used for users who do not bring their own (BYOK). **Each is read through the dynamic
 indirection described above** — an unset key degrades that provider rather than failing
-the app.
+the app. Two capabilities are served by NONE of them: `image` and `embedding` are
+gateway-only on the platform path (#9523 / #10074), so `AI_GATEWAY_API_KEY` (or Vercel
+OIDC) is their only credential — see the row below the table.
 
 | Variable | Provider | What degrades when unset |
 |----------|----------|--------------------------|
 | `ANTHROPIC_API_KEY` | Anthropic | AI chat and every text-generation route for non-BYOK users — but only as the LAST chat backend tried. `resolveConfiguredChatBackend()` prefers the Vercel AI Gateway (`AI_GATEWAY_API_KEY`, or Vercel OIDC with no key at all), then OpenRouter, then GitHub Models, then this. So the status page's **"AI Providers"** check (renamed from "AI Assistant" in #9727) reports `down` only when NONE of those resolves; an unset `ANTHROPIC_API_KEY` alone does not degrade it. |
-| `PLATFORM_OPENAI_KEY` | OpenAI | Image and texture generation for non-BYOK users. |
+| `PLATFORM_OPENAI_KEY` | OpenAI | The DALL·E path of `/api/generate/sprite` (non-pixel single-sprite styles; the `sprite` capability needs this AND the Replicate key). **Not image or embedding**: the resolver forces `AI_GATEWAY_API_KEY` for those with no fallback to this key (`RESOLVER_GATEWAY_CAPABILITIES`), and `isCapabilityConfigured` grades them by the gateway key alone (pinned by `capabilityEnvVars.test.ts`). Texture generation is Meshy. |
 | `PLATFORM_MESHY_KEY` | Meshy | 3D model and texture generation (`model3d`, `texture` capabilities). |
 | `PLATFORM_HYPER3D_KEY` | Hyper3D | Alternative 3D model generation backend. |
-| `PLATFORM_ELEVENLABS_KEY` | ElevenLabs | SFX and voice generation (`sfx`, `voice` capabilities). |
-| `PLATFORM_SUNO_KEY` | Suno | Unobtainable — Suno has no public API. `music` is declared unavailable in `UNAVAILABLE_CAPABILITIES` regardless of this key and refused before any charge (#9117 / #9522); see `docs/guides/platform-keys.md`. |
+| `PLATFORM_ELEVENLABS_KEY` | ElevenLabs | SFX, voice and music generation (`sfx`, `voice`, `music` capabilities; `music` moved here from Suno in #9522). |
 | `PLATFORM_REPLICATE_KEY` | Replicate | Sprite generation (`sprite` capability). |
 | `PLATFORM_REMOVEBG_KEY` | remove.bg | Background removal (`bg_removal` capability). |
 
+Not in `PLATFORM_KEY_ENV`, but the only platform credential for two capabilities:
+
+| Variable | Provider | What degrades when unset |
+|----------|----------|--------------------------|
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway | `image` and `embedding` for non-BYOK users off Vercel (on Vercel, OIDC stands in for it). The resolver forces this key for both with no fallback to `PLATFORM_OPENAI_KEY`, and `/api/capabilities` grades them by it alone, so an environment with only the OpenAI key shows them unavailable. It is also the FIRST chat backend `resolveConfiguredChatBackend()` tries. Transport for the image/embedding consumers is tracked in #9818; see `docs/guides/platform-keys.md`. |
+
 There are no `MESHY_API_KEY`, `ELEVENLABS_API_KEY` or `SUNO_API_KEY` variables in `web/`.
 Those three names are read only by `autoforge/autoforge.config.ts`, a sibling workspace.
-Setting them does nothing for the app; the comment at `providers.ts:169` exists to stop
+Setting them does nothing for the app; the `PLATFORM_KEY_ENV` docblock exists to stop
 that mistake recurring.
 
 ## Optional (features degrade gracefully)
 
 | Variable | Source | Description |
 |----------|--------|-------------|
-| `AI_GATEWAY_API_KEY`, `OPENROUTER_API_KEY`, `GITHUB_MODELS_PAT`, `GOOGLE_AI_API_KEY` | Respective dashboards | Fallback routing for alternative AI providers. |
+| `OPENROUTER_API_KEY`, `GITHUB_MODELS_PAT` | Respective dashboards | The two alternative chat backends in `CHAT_BACKENDS`, tried after the Vercel AI Gateway and before `ANTHROPIC_API_KEY`. (`AI_GATEWAY_API_KEY` is not optional for `image`/`embedding` — see the platform generation keys section.) |
+| `GOOGLE_AI_API_KEY` | — | Reserved: present in `web/.env.example` but read by nothing in `web/src`. Setting it changes nothing; it is not a chat backend. |
 | `NEXT_PUBLIC_ENGINE_CDN_URL` | Set manually | Base URL for the WASM engine CDN. Production: `https://engine.spawnforge.ai`. Without this, the engine loads from `/engine-pkg-*` in `web/public/`. |
 | `NEXT_PUBLIC_ENGINE_VERSION` | Set by CI to the engine build SHA | Cache-busting suffix on engine asset URLs and the preload hint. Unset means no suffix. |
 | `CDN_URL` | Set manually | Public base URL marketplace asset keys are served from. **Distinct from `NEXT_PUBLIC_ENGINE_CDN_URL`** — that one is the WASM engine. Signed download URLs and the download route's host check both derive from this. |
@@ -215,5 +224,5 @@ These are set in GitHub → Settings → Secrets and variables → Actions:
 | Stripe webhooks failing | `STRIPE_WEBHOOK_SECRET` missing | Get from Stripe dashboard → Webhooks |
 | Engine CDN 404 | `NEXT_PUBLIC_ENGINE_CDN_URL` wrong | Should be `https://engine.spawnforge.ai` |
 | Generation 500s for non-BYOK users, app otherwise healthy | The relevant `PLATFORM_*` key is unset — no startup error is produced | Check `/api/capabilities`, then set the key from the table above. This is #9117. |
-| Status page reports a provider outage that is not real | A `PLATFORM_KEY_ENV` value drifted from the deployed variable name | Compare `providers.ts:173-182` against `web/.env.example` and Vercel. This is PF-1054. |
+| Status page reports a provider outage that is not real | A `PLATFORM_KEY_ENV` value drifted from the deployed variable name | Compare `PLATFORM_KEY_ENV` in `providers.ts` against `web/.env.example` and Vercel. This is PF-1054. |
 | Asset upload returns 501 | One of the four `ASSET_R2_*` / `ASSET_BUCKET_NAME` names is unset | Set all four; there is no `ASSET_STORAGE_TYPE` to set |
