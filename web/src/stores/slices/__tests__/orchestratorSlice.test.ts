@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createSliceStore } from './sliceTestTemplate';
 import {
   createOrchestratorSlice,
+  INSUFFICIENT_TOKENS_MESSAGE,
   isOrchestratorRunLive,
   _setAbortController,
   _getGateResolver,
@@ -508,17 +509,27 @@ describe('orchestratorSlice', () => {
       expect(store.getState().orchestratorError).toBe('No plan to execute');
     });
 
-    it('fails with error when engine is not loaded', async () => {
-      store.getState().setPlan(makeMockPlan());
-
-      // Mock dispatcher to return null (engine not loaded)
+    // Nothing ran and nothing was reserved, so the plan goes back to waiting
+    // for "build" with the reason, not to 'failed' (whose way on is a paid
+    // re-design). The same plan builds once the engine is there.
+    it('returns the plan to the review when the engine is not loaded, and builds it on retry', async () => {
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
       const { getCommandDispatcher } = await import('@/stores/editorStore');
       (getCommandDispatcher as ReturnType<typeof vi.fn>).mockReturnValueOnce(null);
 
       await store.getState().runPipelineFromPlan();
 
-      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
       expect(store.getState().orchestratorError).toBe('Engine not loaded');
+      expect(store.getState().currentPlan).toBe(plan);
+      expect(Object.values(store.getState().stepStatuses).every((st) => st === 'pending')).toBe(true);
+      expect(runPipeline).not.toHaveBeenCalled();
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(runPipeline).toHaveBeenCalledOnce();
+      expect(store.getState().orchestratorError).toBeNull();
     });
 
     it('calls runPipeline when plan and engine are available', async () => {
@@ -1421,14 +1432,16 @@ describe('orchestratorSlice', () => {
       expect(store.getState().reservationId).toBe('res-default');
     });
 
-    it('fails with the server\'s reason and touches nothing when the reservation is refused', async () => {
+    it('returns the plan to the review with the server\'s reason, touching nothing, when the reservation is refused', async () => {
       mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'insufficient_tokens' }) });
       store.getState().setPlan(makeMockPlan());
 
       await store.getState().runPipelineFromPlan();
 
-      expect(store.getState().orchestratorStatus).toBe('failed');
-      expect(store.getState().orchestratorError).toContain('Insufficient tokens');
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
+      expect(store.getState().orchestratorError).toBe(INSUFFICIENT_TOKENS_MESSAGE);
+      expect(Object.values(store.getState().stepStatuses).every((st) => st === 'pending')).toBe(true);
+
       expect(store.getState().reservationId).toBeNull();
       expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
       expect(runPipeline).not.toHaveBeenCalled();
@@ -1440,8 +1453,9 @@ describe('orchestratorSlice', () => {
 
       await store.getState().runPipelineFromPlan();
 
-      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
       expect(store.getState().orchestratorError).toBe('Pipeline budget unavailable');
+      expect(Object.values(store.getState().stepStatuses).every((st) => st === 'pending')).toBe(true);
       expect(runPipeline).not.toHaveBeenCalled();
     });
 
@@ -1452,8 +1466,9 @@ describe('orchestratorSlice', () => {
 
       await store.getState().runPipelineFromPlan();
 
-      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
       expect(store.getState().orchestratorError).toContain('invalid ID');
+      expect(Object.values(store.getState().stepStatuses).every((st) => st === 'pending')).toBe(true);
       expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
       expect(runPipeline).not.toHaveBeenCalled();
     });
@@ -1465,12 +1480,33 @@ describe('orchestratorSlice', () => {
       const plan = makeMockPlan();
       store.getState().setPlan(plan);
       await store.getState().runPipelineFromPlan();
-      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
 
       await store.getState().runPipelineFromPlan();
 
       expect(budgetCalls().filter((c) => c.action === 'reserve')).toHaveLength(2);
       expect(runPipeline).toHaveBeenCalledOnce();
+      // The refusal's reason must not outlive the attempt it belonged to.
+      expect(store.getState().orchestratorError).toBeNull();
+    });
+
+    it('does not report an earlier refusal as the reason a later run failed', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'insufficient_tokens' }) });
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
+      await store.getState().runPipelineFromPlan();
+      expect(store.getState().orchestratorError).toBe(INSUFFICIENT_TOKENS_MESSAGE);
+
+      // The retry reserves, runs, and a step fails the way the runner reports
+      // it: status only, no error message.
+      vi.mocked(runPipeline).mockImplementationOnce(async (_plan, _registry, _ctx, callbacks) => {
+        callbacks?.onPlanStatusChange?.('failed');
+        return plan;
+      });
+      await store.getState().runPipelineFromPlan();
+
+      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorError).toBeNull();
     });
 
     // Everything between the reservation and the run is inside the try whose
@@ -1532,6 +1568,10 @@ describe('orchestratorSlice', () => {
       expect(budgetCalls()).toContainEqual({ action: 'release', reservationId: 'res-inflight', actualUsed: 0 });
       expect(runPipeline).not.toHaveBeenCalled();
       expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
+
+      // That exit let go of the in-flight guard: the same plan can be built.
+      await store.getState().runPipelineFromPlan();
+      expect(runPipeline).toHaveBeenCalledOnce();
     });
 
     it('releases a reservation that lands after the user cancelled', async () => {

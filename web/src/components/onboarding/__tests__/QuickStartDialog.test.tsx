@@ -70,9 +70,6 @@ const cancelPipeline = vi.fn();
 const play = vi.fn().mockReturnValue(true);
 const setEngineMode = vi.fn();
 const runPipelineFromPlan = vi.fn().mockResolvedValue(undefined);
-const setOrchestratorStatus = vi.fn((status: string) => {
-  hoisted.state.orchestratorStatus = status;
-});
 
 function setState(overrides: Record<string, unknown> = {}) {
   Object.keys(hoisted.state).forEach((k) => delete hoisted.state[k]);
@@ -87,7 +84,6 @@ function setState(overrides: Record<string, unknown> = {}) {
     play,
     setEngineMode,
     runPipelineFromPlan,
-    setOrchestratorStatus,
     currentPlan: null,
     tokenEstimate: null,
     ...overrides,
@@ -611,7 +607,6 @@ describe('QuickStartDialog', () => {
       runPipelineFromPlan.mockImplementationOnce(async () => {
         // A step ran and failed: the plan is spent, so the way on is a new one.
         hoisted.state.orchestratorStatus = 'failed';
-        hoisted.state.stepStatuses = { step_0: 'completed', step_1: 'failed' };
       });
       await reachPlanReview();
       await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
@@ -622,19 +617,18 @@ describe('QuickStartDialog', () => {
         'Could not start building your game. Please try again.',
       );
       expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Back to the plan' })).toBeNull();
     });
 
-    // #6831 review: a refused reservation left the user with only "Try again",
-    // which re-runs the metered design for a plan they already have, and it
-    // would be refused again at "Build it".
-    it('offers "Back to the plan" and "Buy tokens" when the reservation is refused', async () => {
+    // #6831 review: a refused build returns the plan to the review with the
+    // reason on the STORE (status 'awaiting_approval', `orchestratorError`), so
+    // "Build it" is right there again and nothing is re-designed. Because it is
+    // store state, it also survives the dialog closing and a trip to billing.
+    it('keeps the review up with the reason and a Buy tokens link when the reservation is refused', async () => {
       runPipelineFromPlan.mockImplementationOnce(async () => {
-        hoisted.state.orchestratorStatus = 'failed';
+        hoisted.state.orchestratorStatus = 'awaiting_approval';
         hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
-        hoisted.state.stepStatuses = { step_0: 'pending', step_1: 'pending' };
       });
-      const { rerender } = await reachPlanReview();
+      await reachPlanReview();
       await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
 
       const alert = await screen.findByRole('alert');
@@ -642,26 +636,55 @@ describe('QuickStartDialog', () => {
       expect(screen.getByRole('link', { name: 'Buy tokens' }).getAttribute('href')).toBe(
         '/settings?tab=billing',
       );
-      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
-
-      await userEvent.click(screen.getByRole('button', { name: 'Back to the plan' }));
-      rerender(<QuickStartDialog open onClose={vi.fn()} />);
-
-      expect(setOrchestratorStatus).toHaveBeenCalledWith('awaiting_approval');
-      expect(screen.queryByRole('alert')).toBeNull();
+      expect(toast.error).toHaveBeenCalledWith(INSUFFICIENT_TOKENS_MESSAGE);
+      // Says what happened, not "building" or "stopped early".
+      expect(screen.getByRole('status').textContent).toContain('The build did not start');
+      expect(screen.getByText(/Nothing was spent/)).toBeTruthy();
+      // The way on is the plan it already has, not a paid re-design.
       expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
-      // Back to the review, not to the describe step: no second design.
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
       expect(startQuickStart).toHaveBeenCalledTimes(1);
     });
 
-    it('surfaces the failure message the store recorded', async () => {
+    it('shows the refusal again when the dialog is reopened, e.g. after buying tokens', () => {
+      setState({
+        orchestratorStatus: 'awaiting_approval',
+        orchestratorError: INSUFFICIENT_TOKENS_MESSAGE,
+        currentPlan: PLAN,
+        tokenEstimate: ESTIMATE,
+      });
+
+      render(<QuickStartDialog open onClose={vi.fn()} />);
+
+      expect(screen.getByRole('heading', { name: 'Review your game plan' })).toBeTruthy();
+      expect(screen.getByRole('alert').textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
+    });
+
+    it('keeps the review up when the engine is not ready, with no billing link', async () => {
       runPipelineFromPlan.mockImplementationOnce(async () => {
-        hoisted.state.orchestratorStatus = 'failed';
+        hoisted.state.orchestratorStatus = 'awaiting_approval';
         hoisted.state.orchestratorError = 'Engine not loaded';
       });
       await reachPlanReview();
       await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
       expect((await screen.findByRole('alert')).textContent).toContain('Engine not loaded');
+      expect(screen.queryByRole('link', { name: 'Buy tokens' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    });
+
+    it('surfaces a step failure the store recorded, with Try again', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'failed';
+        hoisted.state.orchestratorError = 'The level could not be generated.';
+      });
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      expect((await screen.findByRole('alert')).textContent).toContain('The level could not be generated.');
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+      expect(screen.getByText('Nothing is running now.')).toBeTruthy();
     });
 
     it('surfaces a thrown failure', async () => {

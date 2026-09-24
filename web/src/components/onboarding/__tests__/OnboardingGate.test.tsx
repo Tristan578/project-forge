@@ -331,6 +331,44 @@ describe('OnboardingGate', () => {
       await waitFor(() => expect(completeOnboarding).toHaveBeenCalledTimes(1));
     });
 
+    // The real "Buy tokens" round trip leaves the editor entirely: the whole
+    // tree unmounts, the dialog's open state with it, and the user comes back
+    // to a closed dialog. A refused build leaves the plan at 'awaiting_approval'
+    // (live), so the attempt must still be pending and the wizard hidden.
+    it('keeps the attempt across leaving the editor and coming back with the dialog closed', async () => {
+      const first = await startAiPath();
+      setStatus('awaiting_approval');
+      first.update();
+      first.unmount();
+
+      const back = render(<Harness />);
+
+      expect(wizardShown()).toBe(false);
+      expect(completeOnboarding).not.toHaveBeenCalled();
+
+      setStatus('executing');
+      back.rerender(<Harness />);
+      setStatus('completed');
+      back.rerender(<Harness />);
+
+      await waitFor(() => expect(completeOnboarding).toHaveBeenCalledTimes(1));
+    });
+
+    it('brings the wizard back if that plan is then discarded', async () => {
+      const first = await startAiPath();
+      setStatus('awaiting_approval');
+      first.update();
+      first.unmount();
+      const back = render(<Harness />);
+      expect(wizardShown()).toBe(false);
+
+      setStatus('cancelled');
+      back.rerender(<Harness />);
+
+      expect(await screen.findByRole('dialog', { name: 'Welcome wizard' })).toBeTruthy();
+      expect(completeOnboarding).not.toHaveBeenCalled();
+    });
+
     it('completes after a failed attempt is retried from the same dialog', async () => {
       const { update } = await startAiPath();
       setStatus('decomposing');

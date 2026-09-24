@@ -68,9 +68,11 @@ export type OrchestratorStatus =
  * Statuses in which NO pipeline run holds the slice, so a new run may start.
  *
  * The complement is what `isOrchestratorRunLive` reports. Kept as data (not an
- * inline disjunction) because three call sites have to agree: the slice guard
- * below, the quick-start dialog's reopen behaviour, and `EditorLayout`'s
- * trigger.
+ * inline disjunction) because its consumers have to agree: the slice guard in
+ * `startQuickStart`, the quick-start dialog's reopen behaviour (a live status
+ * resumes the running view, including a plan waiting at 'awaiting_approval'),
+ * and `OnboardingGate`, which keeps a first-run AI attempt pending, and the
+ * welcome wizard hidden, for exactly as long as the run is live (#6831).
  */
 const RESTARTABLE_STATUSES: readonly OrchestratorStatus[] = [
   'idle',
@@ -529,7 +531,10 @@ export const createOrchestratorSlice: StateCreator<
 
     const dispatcher = getCommandDispatcher();
     if (!dispatcher) {
-      set({ orchestratorStatus: 'failed', orchestratorError: 'Engine not loaded' });
+      // Nothing ran and nothing was reserved: the plan is intact, so it goes
+      // back to waiting for "build" with the reason attached, rather than to
+      // 'failed', whose only way on is designing (and paying for) it again.
+      set({ orchestratorStatus: 'awaiting_approval', orchestratorError: 'Engine not loaded' });
       settle();
       return;
     }
@@ -538,7 +543,9 @@ export const createOrchestratorSlice: StateCreator<
     const signal = _abortController.signal;
     // Cleared per RUN, not per plan: re-running the same plan after a fix must
     // not show the notes the previous attempt produced.
-    set({ orchestratorStatus: 'executing', orchestratorWarnings: [] });
+    // A new attempt starts with no error: a reason left by a refused earlier
+    // attempt must not be read as this run's failure (#6831 review).
+    set({ orchestratorStatus: 'executing', orchestratorWarnings: [], orchestratorError: null });
 
     // Reserve BEFORE the first engine command, so a refused reservation leaves
     // the scene exactly as it was.
@@ -549,9 +556,12 @@ export const createOrchestratorSlice: StateCreator<
       settle();
       // A cancel while reserving already set 'cancelled'; do not repaint it.
       if (signal.aborted) return;
+      // Refused before any step ran: nothing was spent and the plan is intact,
+      // so it goes back to the review with the reason, and survives the user
+      // leaving the editor to buy tokens (a store status, not dialog state).
       if (get().currentPlan === currentPlan) {
         set({
-          orchestratorStatus: 'failed',
+          orchestratorStatus: 'awaiting_approval',
           orchestratorError: err instanceof Error ? err.message : String(err),
         });
       }

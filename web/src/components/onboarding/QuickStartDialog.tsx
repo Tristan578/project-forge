@@ -84,6 +84,9 @@ const PLAN_READY = 'Your game plan is ready. Review it, then build.';
 /** Status line between "Build it" and the run reporting 'executing'. */
 const STARTING_BUILD = 'Starting the build…';
 
+/** Status line for a plan whose build was refused before any step ran. */
+const BUILD_NOT_STARTED = 'The build did not start.';
+
 /**
  * Stand-in for a plan with no `gate_plan`. `planBuilder` always adds one, but
  * the plan is caller-supplied data (`setPlan` is public), and a missing gate
@@ -125,15 +128,12 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  // "Build it" on the plan review was pressed and `runPipelineFromPlan` has not
-  // yet moved the status on. It awaits dynamic imports before setting
-  // 'executing', so without this a second click in that window starts a second
-  // run of the same plan.
+  // True from the plan review's "Build it" until that run settles: it disables
+  // the button for the whole run. The slice refuses a second start of the same
+  // plan on its own (`_inFlightPlan`), so this is the visible half of that
+  // guard, not the only one. It must not drive the status line; see
+  // `startingBuild`.
   const [confirming, setConfirming] = useState(false);
-  // The build was refused before any step ran (its reservation was declined),
-  // so the plan is intact. "Back to the plan" returns to the review rather
-  // than making the user pay to design the same game again (#6831 review).
-  const [refusedBeforeStart, setRefusedBeforeStart] = useState(false);
 
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const statusRef = useRef<HTMLDivElement>(null);
@@ -149,7 +149,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const currentPlan = useEditorStore((s) => s.currentPlan);
   const tokenEstimate = useEditorStore((s) => s.tokenEstimate);
   const runPipelineFromPlan = useEditorStore((s) => s.runPipelineFromPlan);
-  const setOrchestratorStatus = useEditorStore((s) => s.setOrchestratorStatus);
+  const orchestratorError = useEditorStore((s) => s.orchestratorError);
   const play = useEditorStore((s) => s.play);
 
   const runIsLive = isOrchestratorRunLive(status);
@@ -165,6 +165,11 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // "Building your game…" and the mid-run gates' "Waiting on your approval…"
   // have to show, and be announced, while the build goes on.
   const startingBuild = confirming && planGate !== null;
+  // A build refused before any step ran (its reservation was declined, or the
+  // engine was not ready) returns the plan to the review with the reason on
+  // the store. It is shown ON the review, so it survives the dialog closing,
+  // a reload of this component, and a trip to billing and back (#6831).
+  const reviewError = planGate ? orchestratorError : null;
 
   // While this dialog is open it is the only place the user can reach a gate
   // (it is modal and covers the orchestrator panel), so it owns the gate UI.
@@ -193,7 +198,6 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       setError(null);
       setStarting(false);
       setConfirming(false);
-      setRefusedBeforeStart(false);
       if (isOrchestratorRunLive(useEditorStore.getState().orchestratorStatus)) {
         setPhase('running');
       } else {
@@ -322,7 +326,6 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // `handleSubmit` above), so read the status the run left behind.
   const handleConfirmBuild = useCallback(async () => {
     setError(null);
-    setRefusedBeforeStart(false);
     setConfirming(true);
     try {
       await runPipelineFromPlan();
@@ -331,12 +334,9 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         const message = state.orchestratorError ?? GENERIC_FAILURE;
         setError(message);
         toast.error(message);
-        // No step ran: the reservation (or the engine check before it) was
-        // refused, and the plan the user already paid to design is intact.
-        setRefusedBeforeStart(
-          state.currentPlan !== null &&
-            Object.values(state.stepStatuses ?? {}).every((st) => st === 'pending'),
-        );
+      } else if (state.orchestratorStatus === 'awaiting_approval' && state.orchestratorError) {
+        // Refused before it started: the review shows the reason itself.
+        toast.error(state.orchestratorError);
       }
     } catch (err) {
       const message = err instanceof Error && err.message ? err.message : GENERIC_FAILURE;
@@ -351,13 +351,6 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     setError(null);
     setPhase('describe');
   }, []);
-
-  // Back to the review for a build that was refused before it started.
-  const handleBackToPlan = useCallback(() => {
-    setError(null);
-    setRefusedBeforeStart(false);
-    setOrchestratorStatus('awaiting_approval');
-  }, [setOrchestratorStatus]);
 
   const handleCancelRun = useCallback(() => {
     cancelPipeline();
@@ -388,12 +381,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       </>
     ) : phase === 'running' ? (
       <>
-        {error && refusedBeforeStart && (
-          <Button variant="outline" size="sm" onClick={handleBackToPlan}>
-            Back to the plan
-          </Button>
-        )}
-        {error && !refusedBeforeStart && (
+        {error && (
           <Button variant="outline" size="sm" onClick={handleRetry}>
             Try again
           </Button>
@@ -439,8 +427,14 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
           : phase === 'describe'
             ? 'Describe it in your own words, or leave it blank for our take.'
             : planGate && !startingBuild
-              ? 'The build starts, and its tokens are taken, only when you press Build it. Close keeps this plan for later.'
-              : 'Building. You can keep working while this runs.'
+              ? reviewError
+                ? 'Nothing was spent. Build it again when you are ready, or discard the plan. Close keeps it for later.'
+                : 'The build starts, and its tokens are taken, only when you press Build it. Close keeps this plan for later.'
+              : status === 'completed'
+                ? 'Your game is built.'
+                : status === 'failed' || status === 'cancelled'
+                  ? 'Nothing is running now.'
+                  : 'Building. You can keep working while this runs.'
       }
       className="max-w-lg"
       actions={actions}
@@ -519,7 +513,15 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             {(starting || startingBuild || status === 'decomposing' || status === 'planning' || status === 'executing') && (
               <Loader2 className="h-4 w-4 animate-spin text-[var(--sf-accent)]" aria-hidden="true" />
             )}
-            <span>{startingBuild ? STARTING_BUILD : planGate ? PLAN_READY : STATUS_MESSAGES[status]}</span>
+            <span>
+              {startingBuild
+                ? STARTING_BUILD
+                : planGate
+                  ? reviewError
+                    ? BUILD_NOT_STARTED
+                    : PLAN_READY
+                  : STATUS_MESSAGES[status]}
+            </span>
           </div>
 
           {/* Plan review. "Build it" is where the build's tokens are reserved,
@@ -538,6 +540,22 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               cancelLabel="Discard plan"
               autoFocus
             >
+              {reviewError && (
+                <div
+                  role="alert"
+                  className="mb-3 rounded-[var(--sf-radius-md)] border border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_12%,transparent)] px-3 py-2 text-xs text-[var(--sf-text)]"
+                >
+                  {reviewError}
+                  {reviewError === INSUFFICIENT_TOKENS_MESSAGE && (
+                    <>
+                      {' '}
+                      <Link href={SETTINGS_BILLING_HREF} className="underline underline-offset-2">
+                        Buy tokens
+                      </Link>
+                    </>
+                  )}
+                </div>
+              )}
               {tokenEstimate && <TokenCostBar estimate={tokenEstimate} />}
             </ApprovalGateDialog>
           )}
@@ -568,14 +586,6 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
           className="mt-3 rounded-[var(--sf-radius-md)] border border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_12%,transparent)] px-3 py-2 text-xs text-[var(--sf-text)]"
         >
           {error}
-          {error === INSUFFICIENT_TOKENS_MESSAGE && (
-            <>
-              {' '}
-              <Link href={SETTINGS_BILLING_HREF} className="underline underline-offset-2">
-                Buy tokens
-              </Link>
-            </>
-          )}
         </div>
       )}
     </Dialog>
