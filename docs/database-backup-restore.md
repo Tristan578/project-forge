@@ -1,7 +1,7 @@
 # Database Backup & Restore Procedures
 
 > **Last updated:** 2026-03-17
-> **Owner:** Engineering
+> **Owner:** Project owner
 > **Review cadence:** Quarterly
 
 This document covers the full lifecycle of SpawnForge's Neon PostgreSQL backup strategy: how backups work, how to restore them, how to verify they are working, and how to export user data for GDPR compliance.
@@ -339,7 +339,7 @@ pg_dump "$DATABASE_URL" \
   --file="spawnforge-pre-$(date +%Y%m%d-%H%M%S).sql"
 ```
 
-Store it somewhere that survives the loss of the machine that made it (not only on a developer laptop).
+The dump is a plaintext copy of user data (see § 7). Store it in a durable, access-controlled location that is not a developer laptop, and delete it once the migration is confirmed.
 
 ---
 

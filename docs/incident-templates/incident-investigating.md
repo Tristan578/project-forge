@@ -24,7 +24,7 @@
 
 ### What we have ruled out
 
-<!-- List any hypotheses that have been eliminated. Helps users and responders understand your progress. -->
+<!-- List any hypotheses that have been eliminated. Helps users understand your progress. -->
 
 - {ruled out item}
 - {ruled out item}
@@ -78,4 +78,4 @@ Live service status (updates automatically from the health checks): https://spaw
 
 ### Resources needed
 
-- [ ] {additional engineer / tool / access}
+- [ ] {additional tool / access}

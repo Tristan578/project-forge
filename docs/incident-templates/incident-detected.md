@@ -52,16 +52,15 @@ Live service status (updates automatically from the health checks): https://spaw
 ## Internal Notes (not for publication)
 
 **Incident ID:** INC-{YYYYMMDD}-{N}
-**Alert triggered by:** {monitoring alert / user report / engineer observation}
-**First responder:** {NAME}
-**Escalated to:** {NAME or N/A}
+**Alert triggered by:** {monitoring alert / user report / owner observation}
+**Responder:** {NAME} (the project owner; there is no one to escalate to)
 
 ### Timeline
 
 | Time (UTC) | Event |
 |------------|-------|
 | {HH:MM} | Incident detected |
-| {HH:MM} | {first responder} begins investigation |
+| {HH:MM} | {NAME} begins investigation |
 
 ### Current hypotheses
 

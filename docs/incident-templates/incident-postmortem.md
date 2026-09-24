@@ -44,13 +44,13 @@
 
 ## Timeline
 
-> All times in UTC. Include key events: first symptom, detection, escalation, root cause identified, fix deployed, recovery confirmed.
+> All times in UTC. Include key events: first symptom, detection, root cause identified, fix deployed, recovery confirmed.
 
 | Time (UTC) | Event | Who |
 |------------|-------|-----|
 | {HH:MM} | {event} | {name} |
 | {HH:MM} | {event} | {name} |
-| {HH:MM} | Incident detected | {monitoring / user / engineer} |
+| {HH:MM} | Incident detected | {monitoring / user / owner} |
 | {HH:MM} | Incident commander assigned | {name} |
 | {HH:MM} | First update posted | {name} |
 | {HH:MM} | Root cause identified | {name} |
@@ -90,7 +90,7 @@
 ## Detection
 
 **How was the incident detected?**
-{monitoring alert / user report / engineer observation}
+{monitoring alert / user report / owner observation}
 
 **Time to detection:** {N minutes from first symptom to incident declared}
 
