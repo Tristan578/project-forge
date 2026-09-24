@@ -740,7 +740,15 @@ export function dispatchGuardedBatch(
 export function useEngine(canvasId: string, options?: UseEngineOptions) {
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const initializedRef = useRef(false);
+  // Ownership of the initialization in flight (#10208). One object per
+  // effect run: `cancelled` retires an attempt that never reached
+  // `init_engine` (StrictMode replay, unmount, canvas change while loading),
+  // `started` marks one that did — Bevy owns that canvas from then on and no
+  // later effect run may start a second. A plain boolean could not tell the
+  // two apart: it stayed set through the replay's cleanup, so the second run
+  // returned early while the first continuation had been cancelled, and the
+  // engine never initialized in development.
+  const attemptRef = useRef<{ cancelled: boolean; started: boolean } | null>(null);
   const onReadyRef = useRef(options?.onReady);
   const onErrorRef = useRef(options?.onError);
 
@@ -751,7 +759,9 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
   }, [options?.onReady, options?.onError]);
 
   useEffect(() => {
-    if (initializedRef.current) return;
+    // An attempt that reached `init_engine` owns the canvas for the life of
+    // this hook; re-entering init_engine on a live Bevy app is not supported.
+    if (attemptRef.current?.started) return;
 
     // SSR guard
     if (typeof document === 'undefined') return;
@@ -762,13 +772,15 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
       return;
     }
 
-    initializedRef.current = true;
-
-    let cancelled = false;
+    const attempt = { cancelled: false, started: false };
+    attemptRef.current = attempt;
 
     loadWasm()
       .then((wasm) => {
-        if (cancelled) return;
+        // Retired before the module arrived: a replayed, unmounted or
+        // re-targeted effect run. Its successor (if any) owns the canvas.
+        if (attempt.cancelled) return;
+        attempt.started = true;
         emitEvent('engine_starting', `Calling init_engine("${canvasId}")`);
 
         // Set Sentry context for all subsequent errors in this session
@@ -812,16 +824,19 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           });
           setError(engineError);
           onErrorRef.current?.(engineError);
-          initializedRef.current = false;
+          // init_engine threw before Bevy took the canvas: a later effect
+          // run may try again.
+          attempt.started = false;
+          if (attemptRef.current === attempt) attemptRef.current = null;
         }
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (attempt.cancelled) return;
+        if (attemptRef.current === attempt) attemptRef.current = null;
         const loadError = err instanceof Error ? err : new Error(String(err));
         // AbortError is raised when the user navigates away mid-load. It is not
         // a real failure — suppress the error toast and Sentry capture. (#7689)
         if (loadError.name === 'AbortError') {
-          initializedRef.current = false;
           return;
         }
         captureException(loadError, {
@@ -835,11 +850,17 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         }
         setError(loadError);
         onErrorRef.current?.(loadError);
-        initializedRef.current = false;
       });
 
     return () => {
-      cancelled = true;
+      // Before init_engine: this run is obsolete. Retire it and release
+      // ownership so the next run (StrictMode's replay, or a new canvas)
+      // starts its own attempt; the shared load promise is reused, so
+      // nothing is downloaded twice. After init_engine: Bevy owns the
+      // canvas, so the attempt stays and the next run returns early.
+      if (attempt.started) return;
+      attempt.cancelled = true;
+      if (attemptRef.current === attempt) attemptRef.current = null;
     };
   }, [canvasId]);
 
