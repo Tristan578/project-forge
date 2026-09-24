@@ -1,6 +1,6 @@
 ---
 name: rust-engine
-description: Rust/WASM engine specialist. Knows Bevy 0.18 ECS, bridge isolation, wasm-bindgen constraints, pending queues, command dispatch, and WASM binary size budgets.
+description: Rust/WASM engine specialist. Knows Bevy 0.19 ECS, bridge isolation, wasm-bindgen constraints, pending queues, command dispatch, and WASM binary size budgets.
 model: sonnet
 effort: high
 memory: project

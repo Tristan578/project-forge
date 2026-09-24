@@ -34,10 +34,10 @@ SpawnForge is "Canva for games" — an AI-native 2D/3D game engine in the browse
 
 | Layer | Tool | Version |
 |-------|------|---------|
-| Engine | Bevy | 0.18 (wgpu 27) |
+| Engine | Bevy | 0.19 (wgpu 29) |
 | Engine | bevy_rapier3d/2d | 0.33 |
-| Engine | bevy_hanabi | 0.18 |
-| Engine | bevy_panorbit_camera | 0.34 |
+| Engine | bevy_hanabi | 0.19 |
+| Engine | bevy_panorbit_camera | 0.35 |
 | Engine | csgrs | 0.20 |
 | Engine | wasm-bindgen | 0.2.127 |
 | Web | Next.js | 16.x |

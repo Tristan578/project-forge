@@ -1,7 +1,7 @@
 use bevy_app::{App, Plugin};
 use bevy_asset::{Asset, AssetId, Handle, RenderAssetUsages, load_internal_asset, uuid_handle};
 use bevy_camera::visibility::RenderLayers;
-use bevy_core_pipeline::core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d};
+use bevy_core_pipeline::core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d, TransparentSortingInfo3d};
 use bevy_core_pipeline::prepass::{
     DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass,
 };
@@ -10,9 +10,8 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::query::ROQueryItem;
 use bevy_ecs::system::SystemParamItem;
 use bevy_ecs::system::lifetimeless::{Read, SRes};
-use bevy_image::BevyDefault as _;
 use bevy_mesh::{PrimitiveTopology, VertexBufferLayout};
-use bevy_pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup};
+use bevy_pbr::{MeshPipeline, MeshPipelineKey, MeshPipelineSystems, SetMeshViewBindGroup};
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_reflect::{Reflect, TypePath};
 use bevy_render::extract_component::ExtractComponent;
@@ -28,13 +27,15 @@ use bevy_render::render_resource::{
     BlendState, Buffer, BufferInitDescriptor, BufferUsages, ColorTargetState, ColorWrites,
     CompareFunction, DepthBiasState, DepthStencilState, FragmentState, IndexFormat,
     MultisampleState, PipelineCache, PrimitiveState, RenderPipelineDescriptor,
-    SpecializedRenderPipeline, SpecializedRenderPipelines, StencilState, TextureFormat,
+    SpecializedRenderPipeline, SpecializedRenderPipelines, StencilState,
     VertexAttribute, VertexFormat, VertexState, VertexStepMode,
 };
 use bevy_render::renderer::RenderDevice;
 use bevy_render::sync_world::TemporaryRenderEntity;
-use bevy_render::view::{ExtractedView, ViewTarget};
-use bevy_render::{Extract, Render, RenderApp, RenderSystems};
+use bevy_render::view::ExtractedView;
+use bevy_render::{
+    Extract, GpuResourceAppExt, Render, RenderApp, RenderStartup, RenderSystems,
+};
 use bevy_shader::Shader;
 use bytemuck::cast_slice;
 use uuid::Uuid;
@@ -59,7 +60,17 @@ impl Plugin for TransformGizmoRenderPlugin {
 
         render_app
             .add_render_command::<Transparent3d, DrawGizmo>()
-            .init_resource::<SpecializedRenderPipelines<TransformGizmoPipeline>>()
+            .init_gpu_resource::<SpecializedRenderPipelines<TransformGizmoPipeline>>()
+            // Bevy 0.19: `MeshPipeline` is created by a `RenderStartup` system
+            // (bevy#22443), which runs on the first render-world update, i.e.
+            // AFTER every plugin's `finish`. Reading it from `finish` (as the
+            // 0.18 fork did via `init_resource::<TransformGizmoPipeline>()`)
+            // would panic at startup, so build the pipeline in `RenderStartup`
+            // ordered after `MeshPipelineSystems`, the way bevy_gizmos_render does.
+            .add_systems(
+                RenderStartup,
+                init_transform_gizmo_pipeline.after(MeshPipelineSystems),
+            )
             .add_systems(
                 Render,
                 queue_transform_gizmos
@@ -73,9 +84,7 @@ impl Plugin for TransformGizmoRenderPlugin {
             return;
         };
 
-        render_app
-            .add_systems(ExtractSchedule, extract_gizmo_data)
-            .init_resource::<TransformGizmoPipeline>();
+        render_app.add_systems(ExtractSchedule, extract_gizmo_data);
     }
 }
 
@@ -221,12 +230,10 @@ struct TransformGizmoPipeline {
     mesh_pipeline: MeshPipeline,
 }
 
-impl FromWorld for TransformGizmoPipeline {
-    fn from_world(render_world: &mut World) -> Self {
-        Self {
-            mesh_pipeline: render_world.resource::<MeshPipeline>().clone(),
-        }
-    }
+fn init_transform_gizmo_pipeline(mut commands: Commands, mesh_pipeline: Res<MeshPipeline>) {
+    commands.insert_resource(TransformGizmoPipeline {
+        mesh_pipeline: mesh_pipeline.clone(),
+    });
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
@@ -249,11 +256,11 @@ impl SpecializedRenderPipeline for TransformGizmoPipeline {
             shader_defs.push("PERSPECTIVE".into());
         }
 
-        let format = if key.view_key.contains(MeshPipelineKey::HDR) {
-            ViewTarget::TEXTURE_FORMAT_HDR
-        } else {
-            TextureFormat::bevy_default()
-        };
+        // Bevy 0.19 (bevy#23734): the colour target format is carried in the
+        // mesh pipeline key (sourced from `ExtractedView::target_format`); the
+        // HDR bit, `TextureFormat::bevy_default()` and
+        // `ViewTarget::TEXTURE_FORMAT_HDR` are gone or deprecated.
+        let format = key.view_key.target_format();
 
         let view_layout = self
             .mesh_pipeline
@@ -307,8 +314,8 @@ impl SpecializedRenderPipeline for TransformGizmoPipeline {
             },
             depth_stencil: Some(DepthStencilState {
                 format: CORE_3D_DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::Always,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(CompareFunction::Always),
                 stencil: StencilState::default(),
                 bias: DepthBiasState::default(),
             }),
@@ -317,7 +324,7 @@ impl SpecializedRenderPipeline for TransformGizmoPipeline {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            push_constant_ranges: vec![],
+            immediate_size: 0,
         }
     }
 }
@@ -369,7 +376,7 @@ fn queue_transform_gizmos(
         );
 
         let mut view_key = MeshPipelineKey::from_msaa_samples(msaa_sample_count)
-            | MeshPipelineKey::from_hdr(view.hdr);
+            | MeshPipelineKey::from_target_format(view.target_format);
 
         if normal_prepass {
             view_key |= MeshPipelineKey::NORMAL_PREPASS;
@@ -401,7 +408,18 @@ fn queue_transform_gizmos(
                 },
             );
 
-            transparent_phase.add(Transparent3d {
+            // Bevy 0.19 recomputes `distance` from `sorting_info` every frame
+            // (`recalculate_sort_keys`). The 0.18 fork hard-coded `distance: 0.`,
+            // i.e. the camera plane, so the gizmo sorted AFTER every transparent
+            // item in front of the camera and drew on top of them. Anchoring the
+            // sort point at the camera's own position reproduces exactly that
+            // (view-space z == 0). `AlwaysOnTop` is NOT equivalent: it sorts to
+            // NEG_INFINITY, which the ascending transparent sort draws FIRST.
+            transparent_phase.add_transient(Transparent3d {
+                sorting_info: TransparentSortingInfo3d::Sorted {
+                    mesh_center: view.world_from_view.translation(),
+                    depth_bias: 0.0,
+                },
                 entity: (entity, view_entity.into()),
                 draw_function,
                 pipeline,

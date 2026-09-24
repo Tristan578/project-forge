@@ -24,7 +24,7 @@ serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 
 [dependencies.bevy]
-version = "0.18.1"
+version = "0.19.1"
 default-features = false
 features = [
     "bevy_winit",
@@ -43,7 +43,7 @@ features = [
     "mesh_picking",
     "gltf_animation",
     "bevy_gltf",
-    "bevy_scene",
+    "bevy_world_serialization",
     "ktx2",
     "zstd_rust",
     "debug",
@@ -80,21 +80,21 @@ features = ["v4", "js"]
 path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"
 
 [dependencies.bevy_panorbit_camera]
-version = "0.34"
+version = "0.35"
 default-features = false
 
 [dependencies.bevy_rapier3d]
-version = "0.34"
+version = "0.35"
 default-features = false
 features = ["dim3", "async-collider", "debug-render-3d"]
 
 [dependencies.bevy_rapier2d]
-version = "0.34"
+version = "0.35"
 default-features = false
 features = ["dim2", "debug-render-2d"]
 
 [dependencies.bevy_hanabi]
-version = "0.18"
+version = "0.19"
 optional = true
 default-features = false
 features = ["3d"]

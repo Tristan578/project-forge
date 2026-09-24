@@ -8,6 +8,10 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use transform_gizmo_bevy::prelude::*;
+// Bevy 0.19's prelude now exports its own `TransformGizmoPlugin` (bevy_gizmos),
+// which makes the glob-imported name ambiguous (E0659). The explicit import
+// shadows both globs and keeps the local transform-gizmo fork's plugin.
+use transform_gizmo_bevy::prelude::TransformGizmoPlugin;
 
 use super::entity_id::EntityId;
 use super::history::{HistoryStack, TransformSnapshot, UndoableAction};

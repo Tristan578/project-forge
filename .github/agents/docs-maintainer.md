@@ -37,7 +37,7 @@ You maintain and create documentation across:
 - `.github/copilot-instructions.md` is the root file read by Copilot Chat and coding agent
 - `.github/instructions/review.instructions.md` guides PR reviews
 - Keep version numbers, command counts, and paths accurate
-- Cross-reference: engine uses Bevy 0.18, MCP server exposes 322 commands, wasm-bindgen pinned to 0.2.127
+- Cross-reference: engine uses Bevy 0.19, MCP server exposes 322 commands, wasm-bindgen pinned to 0.2.127
 
 ### User-Facing Docs
 - Markdown files in `docs/content/` are served by `web/src/app/api/docs/route.ts`

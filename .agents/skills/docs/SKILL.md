@@ -22,7 +22,7 @@ Every document should be scannable in 30 seconds, complete in 5 minutes, and pre
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Bevy | 0.18 | wgpu 27, WebGPU primary, WebGL2 fallback |
+| Bevy | 0.19 | wgpu 29, WebGPU primary, WebGL2 fallback |
 | Next.js | 16.x | Turbopack build, Webpack dev |
 | React | 19.x | Via Next.js |
 | Zustand | 5.x | Slice-based store composition |

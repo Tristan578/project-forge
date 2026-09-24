@@ -321,3 +321,178 @@ mod validation_tests {
         assert!(parse_entities(entities).is_ok());
     }
 }
+
+/// Save/load round trip for a keyframe animation clip (PF-935 / #8887).
+///
+/// The Bevy 0.19 readiness audit flagged animation as the one save/load path
+/// with no coverage, because 0.19 changed how `AnimationTargetId` is computed
+/// and "serialized data containing `AnimationTargetId` values" must be
+/// recalculated. A `.forge` scene carries none: `AnimationClipData` addresses
+/// its channels by our own `PropertyTarget` enum, and glTF skeletal clips are
+/// rebuilt from the re-imported asset on every load. What CAN silently lose a
+/// clip is this module's serde shape plus `spawn_from_snapshot`, so the test
+/// drives the real load path (the call `bridge::scene_io` makes, with the same
+/// `ResyncReport::Silent`) and then plays the restored clip.
+#[cfg(test)]
+mod animation_round_trip_tests {
+    use super::*;
+    use crate::core::animation_clip::{
+        AnimationClipData, Interpolation, PlayMode, PropertyTarget,
+    };
+    use crate::core::component_resync::ResyncReport;
+    use crate::core::entity_factory::spawn_from_snapshot;
+    use crate::core::entity_id::EntityId;
+    use crate::core::history::TransformSnapshot;
+    use crate::core::material::MaterialData;
+    use crate::core::pending_commands::EntityType;
+
+    /// Every field is set OFF its `Default` so a restore that inserted a blank
+    /// `AnimationClipData::default()` cannot satisfy the equality below.
+    fn authored_clip() -> AnimationClipData {
+        let mut clip = AnimationClipData::default();
+        clip.add_keyframe(PropertyTarget::PositionY, 0.0, 0.0, Interpolation::Linear)
+            .unwrap();
+        clip.add_keyframe(PropertyTarget::PositionY, 1.0, 10.0, Interpolation::Linear)
+            .unwrap();
+        clip.add_keyframe(PropertyTarget::MaterialMetallic, 0.0, 0.2, Interpolation::EaseIn)
+            .unwrap();
+        clip.add_keyframe(PropertyTarget::MaterialMetallic, 2.0, 0.8, Interpolation::Step)
+            .unwrap();
+        clip.duration = 3.0;
+        clip.play_mode = PlayMode::PingPong;
+        clip.speed = 1.5;
+        clip.autoplay = false;
+        clip
+    }
+
+    fn save_and_load(clip: &AnimationClipData) -> AnimationClipData {
+        let mut snapshot = EntitySnapshot::new(
+            "animated".into(),
+            EntityType::Cube,
+            "Animated".into(),
+            TransformSnapshot {
+                position: [0.0; 3],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0; 3],
+            },
+        );
+        // No `material_data`: a default `MaterialData` carries
+        // `attenuation_distance: f32::INFINITY`, which serde_json writes as `null`
+        // and then refuses to read back — a separate, pre-existing save/load
+        // defect reported alongside #8887, not something this test is about.
+        snapshot.animation_clip_data = Some(clip.clone());
+
+        // Save: the same builder and serializer the export path uses.
+        let json = serde_json::to_string(&build_scene_file(
+            "Animated",
+            &EnvironmentSettings::default(),
+            &GlobalAmbientLight::default(),
+            &InputMap::default(),
+            HashMap::new(),
+            &PostProcessingSettings::default(),
+            &AudioBusConfig::default(),
+            vec![snapshot],
+            None,
+            None,
+        ))
+        .unwrap();
+
+        // Load: parse, then rebuild the entity exactly as `bridge::scene_io` does.
+        let scene = parse_scene_file(&json).unwrap();
+        assert_eq!(scene.entities.len(), 1);
+        let loaded = scene.entities[0].clone();
+        let mut world = World::new();
+        world.insert_resource(Assets::<Mesh>::default());
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        let mut schedule = Schedule::default();
+        schedule.add_systems(
+            move |mut commands: Commands,
+                  mut meshes: ResMut<Assets<Mesh>>,
+                  mut materials: ResMut<Assets<StandardMaterial>>| {
+                spawn_from_snapshot(
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &loaded,
+                    ResyncReport::Silent,
+                );
+            },
+        );
+        schedule.run(&mut world);
+
+        let mut restored = world.query::<(&EntityId, &AnimationClipData)>();
+        let hits: Vec<_> = restored
+            .iter(&world)
+            .map(|(id, clip)| (id.0.clone(), clip.clone()))
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "exactly one entity must come back carrying the clip, got {}",
+            hits.len()
+        );
+        assert_eq!(hits[0].0, "animated");
+        hits[0].1.clone()
+    }
+
+    #[test]
+    fn a_saved_clip_is_restored_field_for_field() {
+        let authored = authored_clip();
+        let restored = save_and_load(&authored);
+
+        // Full-shape comparison through the DERIVED `Debug`: `AnimationClipData`
+        // has no `PartialEq`, a hand-written field list would stop covering the
+        // next field added, and comparing two serde encodings would be blind to
+        // exactly the defect under test — a field serde drops is dropped from
+        // both sides of that comparison alike (verified by mutation).
+        assert_eq!(format!("{restored:?}"), format!("{authored:?}"));
+        // Non-vacuity: the fixture must actually carry tracks and keyframes, or
+        // the equality above would hold for two empty clips.
+        assert_eq!(restored.tracks.len(), 2);
+        assert_eq!(
+            restored.tracks.iter().map(|t| t.keyframes.len()).sum::<usize>(),
+            4
+        );
+        assert_eq!(restored.play_mode, PlayMode::PingPong);
+    }
+
+    #[test]
+    fn a_restored_clip_plays_back_identically_to_the_authored_one() {
+        let mut authored = authored_clip();
+        let mut restored = save_and_load(&authored);
+
+        for clip in [&mut authored, &mut restored] {
+            clip.preview("play", None).unwrap();
+            assert!(clip.playing, "preview(\"play\") must start playback");
+        }
+
+        // Step both clips through the same frames, including a PingPong bounce
+        // off the 3s end, and compare what each writes into the entity.
+        let mut sampled_any_motion = false;
+        for frame in 0..40 {
+            authored.advance(0.1);
+            restored.advance(0.1);
+            assert_eq!(restored.current_time, authored.current_time, "frame {frame}");
+
+            let (mut t_a, mut t_r) = (Transform::default(), Transform::default());
+            let (mut m_a, mut m_r) = (MaterialData::default(), MaterialData::default());
+            authored.sample(&mut t_a, Some(&mut m_a), None);
+            restored.sample(&mut t_r, Some(&mut m_r), None);
+            assert_eq!(t_r.translation, t_a.translation, "frame {frame}");
+            assert_eq!(m_r.metallic, m_a.metallic, "frame {frame}");
+            sampled_any_motion |= t_r.translation.y > 0.0;
+        }
+        // Non-vacuity: the channel must actually have moved, or two frozen
+        // clips would compare equal on every frame.
+        assert!(sampled_any_motion, "the restored clip never animated position.y");
+
+        // One absolute value, so "both halves agree" cannot mean "both are
+        // wrong the same way": 0.5s at speed 1.5 is 0.75s, i.e. y = 7.5.
+        let mut probe = save_and_load(&authored_clip());
+        probe.preview("play", None).unwrap();
+        probe.advance(0.5);
+        let mut transform = Transform::default();
+        probe.sample(&mut transform, None, None);
+        assert!((transform.translation.y - 7.5).abs() < 1e-5, "{}", transform.translation.y);
+    }
+}

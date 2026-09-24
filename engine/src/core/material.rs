@@ -274,8 +274,8 @@ fn sync_material_data(
     texture_handles: Res<TextureHandleMap>,
 ) {
     for (data, handle) in query.iter() {
-        if let Some(material) = materials.get_mut(handle) {
-            apply_material_data_to_standard(material, data, &texture_handles);
+        if let Some(mut material) = materials.get_mut(handle) {
+            apply_material_data_to_standard(&mut material, data, &texture_handles);
         }
     }
 }

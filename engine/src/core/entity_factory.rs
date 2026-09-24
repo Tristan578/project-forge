@@ -993,7 +993,7 @@ fn spawn_point_light_with_id(
         PointLight {
             intensity: 100_000.0,
             color: Color::WHITE,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_translation(pos),
@@ -1023,7 +1023,7 @@ fn spawn_directional_light_with_id(
         light_data,
         DirectionalLight {
             illuminance: 10_000.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_translation(pos)
@@ -1052,7 +1052,7 @@ fn spawn_spot_light_with_id(
         SpotLight {
             intensity: 100_000.0,
             color: Color::WHITE,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             range: 20.0,
             inner_angle: 0.0,
             outer_angle: std::f32::consts::FRAC_PI_4,
@@ -1353,7 +1353,7 @@ pub fn spawn_from_snapshot(
                 PointLight {
                     intensity: ld.intensity,
                     color: Color::linear_rgb(ld.color[0], ld.color[1], ld.color[2]),
-                    shadows_enabled: ld.shadows_enabled,
+                    shadow_maps_enabled: ld.shadows_enabled,
                     shadow_depth_bias: ld.shadow_depth_bias,
                     shadow_normal_bias: ld.shadow_normal_bias,
                     range: ld.range,
@@ -1374,7 +1374,7 @@ pub fn spawn_from_snapshot(
                 DirectionalLight {
                     illuminance: ld.intensity,
                     color: Color::linear_rgb(ld.color[0], ld.color[1], ld.color[2]),
-                    shadows_enabled: ld.shadows_enabled,
+                    shadow_maps_enabled: ld.shadows_enabled,
                     shadow_depth_bias: ld.shadow_depth_bias,
                     shadow_normal_bias: ld.shadow_normal_bias,
                     ..default()
@@ -1393,7 +1393,7 @@ pub fn spawn_from_snapshot(
                 SpotLight {
                     intensity: ld.intensity,
                     color: Color::linear_rgb(ld.color[0], ld.color[1], ld.color[2]),
-                    shadows_enabled: ld.shadows_enabled,
+                    shadow_maps_enabled: ld.shadows_enabled,
                     shadow_depth_bias: ld.shadow_depth_bias,
                     shadow_normal_bias: ld.shadow_normal_bias,
                     range: ld.range,
