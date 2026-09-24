@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { panelTierGateResponse } from '@/lib/api/panelTierGate';
+import { panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
@@ -17,10 +18,11 @@ async function GET_impl(request: NextRequest) {
   });
   if (mid.error) return mid.error;
 
-  // Per-panel tier gate (#7715): the same check `createGenerationHandler`
-  // runs for POST /api/generate/skybox (panel 'generate-skybox'), BEFORE any
-  // provider key is resolved — this route calls `resolveApiKey` directly.
-  const tierDenied = panelTierGateResponse('generate-skybox', mid.authContext!.user);
+  // Per-panel tier gate, POLL variant (#7715): the panel POST /api/generate/skybox declares
+  // ('generate-skybox'), checked BEFORE any provider key is resolved. A poll reads
+  // a job already paid for, so a starter is judged at the trial access tier
+  // whatever its live balance — see `src/lib/api/panelTierGate.ts`.
+  const tierDenied = panelTierGateResponseForPoll('generate-skybox', mid.authContext!.user);
   if (tierDenied) return tierDenied;
 
   // 2. Parse query params
@@ -39,7 +41,7 @@ async function GET_impl(request: NextRequest) {
       mid.userId!,
       DB_PROVIDER.texture,
       0,
-      'status_check'
+      STATUS_CHECK_OPERATION
     );
     apiKey = resolved.key;
   } catch (err) {

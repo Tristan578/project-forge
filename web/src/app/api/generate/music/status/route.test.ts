@@ -65,4 +65,25 @@ describe('GET /api/generate/music/status', () => {
     // No provider name leaks in the terminal message.
     expect(JSON.stringify(data)).not.toMatch(/suno/i);
   });
+
+  // Per-panel tier gate, POLL variant (#7715). 'generate-music' is
+  // hobbyist-gated. The terminal `failed` state is what makes the client
+  // refund, so a trial starter whose one music generation spent the grant must
+  // still get it, not a 403 that leaves the job hanging until timeout.
+  describe('panel tier gate (generate-music, hobbyist)', () => {
+    function authAs(user: Record<string, unknown>) {
+      vi.mocked(authenticateRequest).mockResolvedValue({
+        ok: true as const,
+        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', ...user } as unknown as User },
+      });
+    }
+
+    it('admits a starter whose trial balance is spent: it is reading the job it paid for', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(200);
+      expect((await res.json()).error).toBe(MUSIC_SYNC_TERMINAL_MESSAGE);
+    });
+  });
 });

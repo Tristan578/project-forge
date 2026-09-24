@@ -47,7 +47,10 @@ vi.mock('@/lib/api/middleware', () => ({
 }));
 // The per-panel tier gate (#7715) runs before the status mapping this suite
 // compares; it has its own route tests, so it is passed through here.
-vi.mock('@/lib/api/panelTierGate', () => ({ panelTierGateResponse: vi.fn(() => null) }));
+vi.mock('@/lib/api/panelTierGate', () => ({
+  panelTierGateResponse: vi.fn(() => null),
+  panelTierGateResponseForPoll: vi.fn(() => null),
+}));
 vi.mock('@/lib/keys/resolver', () => ({
   resolveApiKey: vi.fn(async () => ({ key: 'provider-key' })),
   ApiKeyError: class ApiKeyError extends Error {

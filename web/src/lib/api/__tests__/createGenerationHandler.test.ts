@@ -1193,5 +1193,20 @@ describe('createGenerationHandler', () => {
       expect(res.status).not.toBe(403);
       expect(mockResolve).toHaveBeenCalled();
     });
+
+    // A create spends tokens, so the factory runs the BALANCE-AWARE variant:
+    // a starter whose trial grant is spent is a plain starter again. (Status
+    // polls use `panelTierGateResponseForPoll`, which admits this same account
+    // to read a job it already paid for — the difference is deliberate.)
+    it('(5) refuses a starter whose trial balance is spent on a hobbyist-gated panel with 403, never reaching resolveApiKey', async () => {
+      mockUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+      // testHandler declares panel: 'generate-sound' (hobbyist).
+      const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
+      expect(res.status).toBe(403);
+      const body = await res.json();
+      expect(body.error).toBe('TIER_REQUIRED');
+      expect(body.requiredTier).toBe('hobbyist');
+      expect(mockResolve).not.toHaveBeenCalled();
+    });
   });
 });

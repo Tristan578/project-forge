@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
@@ -234,10 +235,12 @@ describe('GET /api/generate/sprite/status', () => {
     expect(mockGetReplicateStatus).not.toHaveBeenCalled();
   });
 
-  // Per-panel tier gate (#7715). This route resolves the platform key itself
-  // rather than going through `createGenerationHandler`, so without its own
-  // `panelTierGateResponse('generate-sprite', …)` call a free account with no
-  // trial balance left could poll Replicate with the platform key.
+  // Per-panel tier gate, POLL variant (#7715). This route resolves the
+  // platform key itself rather than going through `createGenerationHandler`,
+  // so it runs `panelTierGateResponseForPoll('generate-sprite', …)`. A poll reads
+  // a job already paid for, so the live balance does not decide it: a
+  // starter counts as the trial tier (hobbyist) whether or not it has tokens
+  // left. The creator-only status suites (model, skybox) pin the refusal.
   describe('panel tier gate (generate-sprite, hobbyist)', () => {
     function authAs(overrides: Partial<User>) {
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser(overrides) } });
@@ -248,19 +251,18 @@ describe('GET /api/generate/sprite/status', () => {
       mockGetReplicateStatus.mockResolvedValue({ status: 'processing', output: undefined });
     });
 
-    it('refuses a starter whose trial balance is spent with 403 TIER_REQUIRED and never resolves a key', async () => {
+    it('admits a starter whose trial balance is spent: it is reading the job it paid for', async () => {
+      // One generation can spend the whole grant, so the account is at 0 by
+      // its first poll. The create gate would refuse it; the poll gate must not.
       authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
 
       const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
-      expect(res.status).toBe(403);
-      expect(await res.json()).toEqual({
-        error: 'TIER_REQUIRED',
-        message: 'This feature requires the Starter plan',
-        currentTier: 'starter',
-        requiredTier: 'hobbyist',
-      });
-      expect(resolveApiKey).not.toHaveBeenCalled();
-      expect(mockGetReplicateStatus).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+      // Asked as a zero-cost status poll: the pair the resolver requires
+      // before it skips its own tier and balance checks.
+      expect(vi.mocked(resolveApiKey).mock.calls[0].slice(2)).toEqual([0, STATUS_CHECK_OPERATION]);
     });
 
     it('lets a starter holding spendable trial tokens through to resolveApiKey', async () => {

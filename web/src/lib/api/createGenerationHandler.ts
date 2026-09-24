@@ -436,9 +436,11 @@ export function createGenerationHandler<TParams, TResult>(
     // checks, the response cache, and any token deduction, so a locked caller
     // never spends rate-limit budget or a token on a request that was always
     // going to be refused.
-    // The check itself lives in `panelTierGateResponse` so the direct
-    // `resolveApiKey` callers (status pollers, `voice/batch`) apply the SAME
-    // rule and body instead of skipping it.
+    // The check itself lives in `panelTierGateResponse` (the balance-aware
+    // CREATE variant) so `voice/batch`, which resolves its key directly,
+    // applies the SAME rule and body. Status pollers run the POLL variant,
+    // `panelTierGateResponseForPoll`, which ignores the balance because the
+    // job they read was already paid for; see `./panelTierGate`.
     const tierDenied = panelTierGateResponse(panel, authResult.ctx.user);
     if (tierDenied) {
       mctx.outcome = 'tier_required';

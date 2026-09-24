@@ -483,11 +483,22 @@ as `hobbyist` by the four AI gates — `effectiveTier` in
 `/api/game/decompose`, by the platform-key resolver, by
 `createGenerationHandler`'s per-route `panel` check (every `/api/generate/*`
 route, checked right after auth and before any token deduction — #7715 review
-round 2; the routes that call `resolveApiKey` directly — every `*/status`
-poller and `voice/batch` — run the same check through `panelTierGateResponse`
-in `web/src/lib/api/panelTierGate.ts` before resolving a key), and by the
-editor's panel gate (the profile route ships
-`spendableTokens` so the editor knows on first paint). A user whose grant
+round 2; `voice/batch`, which calls `resolveApiKey` directly, runs the same
+check through `panelTierGateResponse` in `web/src/lib/api/panelTierGate.ts`
+before resolving a key), and by the editor's panel gate (the profile route ships
+`spendableTokens` so the editor knows on first paint).
+
+**Status polls are the exception, on purpose.** Every `*/status` poller runs
+`panelTierGateResponseForPoll` instead, which does not read the balance: a
+`starter` counts as `hobbyist` whatever it holds, so creator-tier status routes
+stay refused. The resolver, likewise, skips its tier and balance checks for a
+zero-cost `STATUS_CHECK_OPERATION` call (the pollers and the QStash
+`generation-complete` callback). The polled job was paid for when it was
+created, and one generation can spend the whole grant (a tileset costs 50), so
+the balance-aware rule would refuse every poll of it: the result would never
+arrive, and the durable callback would finalize it as failed and refund it. The
+same check had been locking out a paid hobbyist whose last generation took the
+balance to exactly 0. A user whose grant
 landed but who still sees every AI panel locked has a stale profile (reload) or
 a balance of zero; the SQL above distinguishes the two. The Token Dashboard
 labels a `starter` balance "Trial Remaining" with a one-time, does-not-renew

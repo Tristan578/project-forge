@@ -2,14 +2,30 @@
  * Server-side per-panel tier gate for generation routes (#7715).
  *
  * The single implementation of "may this caller use the editor panel that
- * fronts this route?". `createGenerationHandler` runs it as step 1a for every
- * create route, and every route under `src/app/api/generate/` that calls
- * `resolveApiKey()` DIRECTLY (the `status` pollers and `voice/batch`) must run
- * it too, after authentication and BEFORE the key is resolved. Those routes do
- * not go through the factory, so without this call a caller whose own panel
- * renders `LockedPanelOverlay` could still poll the provider with the platform
- * key — e.g. a trial `starter` (effective `hobbyist`) on the creator-gated
- * 3D model or skybox status route.
+ * fronts this route?". It comes in TWO variants, one per kind of request,
+ * and every route under `src/app/api/generate/` runs exactly one of them
+ * after authentication and BEFORE any provider key is resolved:
+ *
+ * - `panelTierGateResponse` — CREATE requests (work that spends tokens).
+ *   `createGenerationHandler` runs it as step 1a for every create route, and
+ *   `voice/batch` (which resolves its key directly but starts a charged batch)
+ *   runs it too. The access tier is BALANCE-AWARE:
+ *   `effectiveTier(user.tier, spendableTokensOf(user))`, the same rule the
+ *   editor's `canAccessPanel` applies, so a `starter` counts as the trial
+ *   tier only while it still has trial tokens to spend.
+ *
+ * - `panelTierGateResponseForPoll` — STATUS POLLS (`generate/<type>/status`),
+ *   which read a job the caller has ALREADY paid for. The access tier does
+ *   NOT read the balance: a `starter` counts as `TRIAL_ACCESS_TIER` whatever
+ *   it holds. The balance-aware rule would refuse exactly the polls the trial
+ *   exists to deliver — one generation can spend the whole grant (a tileset
+ *   costs `TRIAL_GRANT_TOKENS`), so the account is at 0 by its first poll and
+ *   every poll of the job it just paid for would be 403, with the result never
+ *   delivered. What gating the pollers is FOR is unchanged: a `$0` account
+ *   still cannot drive a CREATOR-or-above provider (3D model, skybox, …) with
+ *   the platform key, because the trial never reaches above
+ *   `TRIAL_ACCESS_TIER` — the same answer `canAccessPanelBeforeProfileLoad`
+ *   gives the editor. Paid tiers get the same answer from both variants.
  *
  * `panel` must be a key of `PANEL_TIER_REQUIREMENTS` in
  * `@/lib/ai/tierAccess`: `canAccessPanel` returns true for an unmapped id, so
@@ -19,22 +35,20 @@
 
 import { NextResponse } from 'next/server';
 import type { Tier, User } from '@/lib/db/schema';
-import { canAccessPanel, effectiveTier, getRequiredTier, spendableTokensOf, TIER_LABELS } from '@/lib/ai/tierAccess';
+import {
+  canAccessPanel,
+  effectiveTier,
+  getRequiredTier,
+  spendableTokensOf,
+  TIER_LABELS,
+  TRIAL_ACCESS_TIER,
+} from '@/lib/ai/tierAccess';
 
 /** The user fields the gate reads — the auth context's `user` satisfies it. */
 export type PanelTierGateUser = Pick<User, 'tier' | 'monthlyTokens' | 'monthlyTokensUsed' | 'addonTokens'>;
 
-/**
- * Returns the 403 `TIER_REQUIRED` response when `user` may not use `panel`,
- * or `null` when the caller is allowed through. The access decision uses
- * `effectiveTier(user.tier, spendableTokensOf(user))` — the same rule the
- * editor's `canAccessPanel` applies — so the server refuses exactly when the
- * caller's panel would render locked. `currentTier` in the body is the RAW
- * tier, not the effective one.
- */
-export function panelTierGateResponse(panel: string, user: PanelTierGateUser): NextResponse | null {
-  const accessTier = effectiveTier(user.tier as Tier, spendableTokensOf(user));
-  if (canAccessPanel(panel, accessTier)) return null;
+/** The 403 body both variants return. `currentTier` is the RAW tier, not the access tier. */
+function tierRequiredResponse(panel: string, user: PanelTierGateUser): NextResponse {
   const requiredTier = getRequiredTier(panel);
   return NextResponse.json(
     {
@@ -45,4 +59,28 @@ export function panelTierGateResponse(panel: string, user: PanelTierGateUser): N
     },
     { status: 403 },
   );
+}
+
+/**
+ * CREATE variant. Returns the 403 `TIER_REQUIRED` response when `user` may
+ * not start work on `panel`, or `null` when the caller is allowed through.
+ * Balance-aware: `effectiveTier(user.tier, spendableTokensOf(user))`, so the
+ * server refuses exactly when the caller's panel would render locked.
+ */
+export function panelTierGateResponse(panel: string, user: PanelTierGateUser): NextResponse | null {
+  const accessTier = effectiveTier(user.tier as Tier, spendableTokensOf(user));
+  if (canAccessPanel(panel, accessTier)) return null;
+  return tierRequiredResponse(panel, user);
+}
+
+/**
+ * STATUS-POLL variant. Same body and same `null`-when-allowed contract as
+ * `panelTierGateResponse`, but the access tier ignores the balance: a
+ * `starter` is `TRIAL_ACCESS_TIER`, every other account is its own tier. See
+ * the module docblock for why a poll must not depend on the live balance.
+ */
+export function panelTierGateResponseForPoll(panel: string, user: PanelTierGateUser): NextResponse | null {
+  const accessTier: Tier = user.tier === 'starter' ? TRIAL_ACCESS_TIER : (user.tier as Tier);
+  if (canAccessPanel(panel, accessTier)) return null;
+  return tierRequiredResponse(panel, user);
 }

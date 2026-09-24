@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { panelTierGateResponse } from '@/lib/api/panelTierGate';
+import { panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { MUSIC_SYNC_TERMINAL_MESSAGE } from '@/lib/generate/pollProviderStatus';
 
@@ -23,10 +23,11 @@ async function GET_impl(request: NextRequest) {
   });
   if (mid.error) return mid.error;
 
-  // Per-panel tier gate (#7715): the same check `createGenerationHandler`
-  // runs for POST /api/generate/music (panel 'generate-music'), kept here so
-  // every generate status route is gated exactly like its create route.
-  const tierDenied = panelTierGateResponse('generate-music', mid.authContext!.user);
+  // Per-panel tier gate, POLL variant (#7715): the panel POST /api/generate/music declares
+  // ('generate-music'), kept so every status route is gated alike. A poll reads
+  // a job already paid for, so a starter is judged at the trial access tier
+  // whatever its live balance — see `src/lib/api/panelTierGate.ts`.
+  const tierDenied = panelTierGateResponseForPoll('generate-music', mid.authContext!.user);
   if (tierDenied) return tierDenied;
 
   const { searchParams } = new URL(request.url);

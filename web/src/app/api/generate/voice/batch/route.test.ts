@@ -384,7 +384,9 @@ describe('POST /api/generate/voice/batch', () => {
   // Per-panel tier gate (#7715). This route resolves the platform key itself
   // rather than going through `createGenerationHandler`, so without its own
   // `panelTierGateResponse('generate-sound', …)` call a free account with no
-  // trial balance left could drive ElevenLabs with the platform key.
+  // trial balance left could drive ElevenLabs with the platform key. A batch
+  // creates new, charged work, so it runs the CREATE (balance-aware) variant,
+  // not the status-poll one: the spent starter below stays refused.
   describe('panel tier gate (generate-sound, hobbyist)', () => {
     function authAs(overrides: Partial<User>) {
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser(overrides) } });

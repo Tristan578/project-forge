@@ -65,10 +65,15 @@ export function spendableTokensOf(user: {
  * tier. This is the single rule behind `canAccessPanel` in the editor,
  * `assertAiAccess` on `/api/chat` and `/api/game/decompose`, the platform-key
  * resolver, and the per-route `panel` gate (`panelTierGateResponse`, run by
- * `createGenerationHandler` and by every generate route that resolves a key
+ * `createGenerationHandler` and by `voice/batch`, which resolves its key
  * directly — #7715 review rounds 2-3) — the gates that had kept a trial grant unusable, or left a
  * generation route reachable past its own panel's tier, when they each
  * checked the raw tier alone.
+ *
+ * Status polls do NOT use this rule: `panelTierGateResponseForPoll` judges a
+ * `starter` at `TRIAL_ACCESS_TIER` whatever its balance, and the resolver
+ * skips its checks for a zero-cost `STATUS_CHECK_OPERATION`. A poll reads a job
+ * that was already paid for, and one generation can spend the whole grant.
  */
 export function effectiveTier(tier: Tier, spendableTokens: number): Tier {
   return tier === 'starter' && spendableTokens > 0 ? TRIAL_ACCESS_TIER : tier;

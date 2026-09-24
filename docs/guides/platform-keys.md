@@ -21,7 +21,11 @@ procedure for that day, not a request to act now.
 Every generate route runs through `createGenerationHandler`, which resolves
 the key **before** deducting tokens (`web/src/lib/keys/resolver.ts`,
 `getPlatformKey`). A missing key throws server-side, the user gets a generic
-500, and nothing is charged. For a capability that can never be provisioned,
+500, and nothing is charged. The status pollers (`/api/generate/*/status`) and
+the QStash `generation-complete` callback call the resolver directly as a
+zero-cost `STATUS_CHECK_OPERATION`. That call skips the tier and balance checks
+(the job was paid for at creation, and the route's `panelTierGateResponseForPoll`
+is its tier control), but a missing platform key still throws there too. For a capability that can never be provisioned,
 three more layers keep it from reaching that point:
 
 | Layer | Where | Effect |

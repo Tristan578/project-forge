@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
@@ -199,7 +200,7 @@ describe('GET /api/generate/model/status', () => {
 
   // Per-panel tier gate (#7715). This route resolves the platform key itself
   // rather than going through `createGenerationHandler`, so without its own
-  // `panelTierGateResponse('generate-model', …)` call a trial starter (effective
+  // `panelTierGateResponseForPoll('generate-model', …)` call a trial starter (effective
   // hobbyist) could poll the creator-gated 3D model provider with the platform key.
   describe('panel tier gate (generate-model, creator)', () => {
     function authAs(user: Record<string, unknown>) {
@@ -225,6 +226,16 @@ describe('GET /api/generate/model/status', () => {
       expect(MeshyClient).not.toHaveBeenCalled();
     });
 
+    it('refuses a starter whose trial balance is spent: the poll rule ignores the balance but never reaches creator', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: 'TIER_REQUIRED', currentTier: 'starter', requiredTier: 'creator' });
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
     it('refuses a real hobbyist account the same way', async () => {
       authAs({ tier: 'hobbyist', monthlyTokens: 300, monthlyTokensUsed: 0, addonTokens: 0 });
 
@@ -246,6 +257,9 @@ describe('GET /api/generate/model/status', () => {
       expect(res.status).toBe(200);
       expect((await res.json()).status).toBe('processing');
       expect(resolveApiKey).toHaveBeenCalledTimes(1);
+      // A zero-cost status poll: the pair the resolver requires before it
+      // skips its own tier and balance checks (#7715).
+      expect(vi.mocked(resolveApiKey).mock.calls[0].slice(2)).toEqual([0, STATUS_CHECK_OPERATION]);
     });
   });
 });
