@@ -24,11 +24,14 @@ if [ -z "${BOARD_JSON}" ] || echo "${BOARD_JSON}" | grep -q '"error"'; then
   exit 0
 fi
 
-echo "${BOARD_JSON}" | python3 << 'PYEOF'
-import json, sys
+# The board JSON travels in the environment, not on stdin: the heredoc IS
+# python's stdin, so a pipe into it is discarded and json.load(sys.stdin)
+# would read an empty stream and fail silently (Seer, #10231).
+BOARD_JSON="${BOARD_JSON}" python3 - << 'PYEOF'
+import json, os, sys
 from datetime import datetime, timezone
 
-data = json.load(sys.stdin)
+data = json.loads(os.environ["BOARD_JSON"])
 
 # Handle both response shapes: { tickets: [...] } or { columns: [...] }
 tickets = []

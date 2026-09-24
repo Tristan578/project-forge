@@ -79,7 +79,7 @@
     ".agents/skills/infra-services/scripts/check-services.sh": "7c8ba4d5eb91feb586c5f3fbf35e4f82dbecf3678d70fce0716a1cf0f8dd89b4",
     ".agents/skills/infra-services/scripts/check-vercel-project.sh": "b8ef34cac4b7ccbc37e09895fa7917a6a35117fe628ad17c7af22a900f94009d",
     ".agents/skills/kanban/SKILL.md": "9f59c15d42e0a0602652a6304a39f05d51d2b4ee540a11fd4d0dc4f8cea1e863",
-    ".agents/skills/kanban/scripts/board-summary.sh": "c04ef1ab5f4a71511ef61d2f6a8beefc65007d4346ff157b282f5afeb0217c5f",
+    ".agents/skills/kanban/scripts/board-summary.sh": "b49310ecf172f558db0d7d3af040850bb65f64808517f88ca7f45c8f8a99ffca",
     ".agents/skills/kanban/scripts/validate-ticket.sh": "a0e7b1aaf45bb6cb8b1f6dd40bcc5be2eb44f8182628fe531ebc9d8c4d63ba4a",
     ".agents/skills/kanban/scripts/validate-ticket.test.sh": "0bffa42ef42055d8065d519b89a3cdc3b808ed6889e39896c224baa8141d7c76",
     ".agents/skills/mcp-commands/SKILL.md": "d88bf83d6b8c5ab61b4c3d8f2d112bc3f1fecbc24e29a0c04e765244ba943386",
