@@ -193,7 +193,9 @@ describe('sandbox frame element', () => {
   it('the bootstrap can be embedded verbatim: no closing script tag, no backtick', () => {
     expect(SANDBOX_BOOTSTRAP).not.toMatch(/<\/script/i);
     expect(SANDBOX_BOOTSTRAP).not.toContain('`');
-    expect(buildSandboxFrameSrcdoc().match(/<script>/g)).toHaveLength(1);
+    // Any casing and any attributes: HTML tag names are case-insensitive, so
+    // `<SCRIPT src=...>` would be a second script the hash does not cover.
+    expect(buildSandboxFrameSrcdoc().match(/<script\b/gi)).toHaveLength(1);
   });
 
   it('the CSP builder refuses a hash it cannot interpolate safely', () => {
