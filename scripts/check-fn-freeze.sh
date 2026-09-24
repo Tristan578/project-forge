@@ -71,8 +71,12 @@
 # or RETURN whose action exits or execs overrides the exit status the script
 # itself chose — `trap 'exit 0' EXIT` turns a suite that reached `exit 1`
 # with FAILED=1 into a green one (the ninth board round) — so such an
-# action is reported too; a trap on a real signal (`trap 'exit 143' TERM`)
-# and a cleanup trap (`trap 'rm -rf "$TMP"' EXIT`) are fine.
+# action is reported too, including an action that calls a function this
+# file defines whose body exits or execs, directly or through another
+# function of the file (`cleanup() { exit 0; }` + `trap cleanup EXIT`, the
+# tenth round). A trap on a real signal (`trap 'exit 143' TERM`) and a
+# cleanup trap whose functions never exit (`trap 'rm -rf "$TMP"' EXIT`)
+# are fine. A function defined in a sourced file is outside the scan.
 #
 # A function named after a bash BUILTIN shadows that builtin for the rest
 # of the script, at any nesting depth once the enclosing code runs: a
@@ -184,6 +188,13 @@ derive_file() {
         if (w ~ /^(builtin|command|time|-p|!|if|then|elif|else|do|while|until|coproc|\{|\})$/ ||
             w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { w = ""; return }
         cmd_seen = 1; cmd_word = w; nwords = 1
+        # Inside a definition, remember what the body runs: an exit or exec
+        # marks the function as one that ends the shell, anything else is a
+        # call the trap rule may have to follow (see resolve_traps).
+        if (def_name != "") {
+          if (w == "exit" || w == "exec") fexits[def_name] = 1
+          else fcalls[def_name] = fcalls[def_name] " " w
+        }
         if (w == "alias") in_alias = 1
         if (w == "shopt") in_shopt = 1
         if (w == "trap") in_trap = 1
@@ -221,7 +232,40 @@ derive_file() {
       a = trap_action; gsub(/\\/, "", a)
       if (a ~ /(^|[^A-Za-z0-9_])(exit|exec)([^A-Za-z0-9_]|$)/ && trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/)
         printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " a " ..." trap_sigs, NR, NR
+      else if (trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/) {
+        # The command word of every segment of the action is a function the
+        # trap may call; which of them this file defines is only known at
+        # END, since a trap is often set before its handler is written.
+        ns = split(a, segs, /[;&|]+/)
+        for (k = 1; k <= ns; k++) {
+          seg = segs[k]; sub(/^[[:space:]]+/, "", seg)
+          while (seg ~ /^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/)
+            sub(/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/, "", seg)
+          nw = split(seg, tw, /[[:space:]]+/)
+          cw = tw[1]
+          if ((cw == "command" || cw == "builtin") && nw > 1) cw = tw[2]
+          if (cw != "") { nt++; t_word[nt] = cw; t_line[nt] = NR; t_sigs[nt] = trap_sigs }
+        }
+      }
       trap_action = ""; trap_sigs = ""; trap_has_action = 0
+    }
+    # Whether function f, as defined in this file, can end the shell: its
+    # own body runs exit or exec, or it calls another function of this file
+    # that can. `seen` stops recursion on a cycle.
+    function fn_exits(f,   cs, nc, j) {
+      if (f in fexits) return 1
+      nc = split(fcalls[f], cs, " ")
+      for (j = 1; j <= nc; j++)
+        if ((cs[j] in defined) && !(cs[j] in seen)) { seen[cs[j]] = 1; if (fn_exits(cs[j])) return 1 }
+      return 0
+    }
+    function resolve_traps(   k) {
+      for (k = 1; k <= nt; k++) {
+        if (!(t_word[k] in defined)) continue
+        delete seen; seen[t_word[k]] = 1
+        if (fn_exits(t_word[k]))
+          printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " t_word[k] " ..." t_sigs[k] " (" t_word[k] "() exits)", t_line[k], t_line[k]
+      }
     }
     function end_command() { end_word(); if (in_trap) check_trap(); cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = "" }
     # Entering `$( ... )` or `( ... )` starts a new context: the enclosing
@@ -236,7 +280,13 @@ derive_file() {
     # swallowing the rest of the file as a heredoc body; the ninth found the
     # same through `$[1 << 2]`). A plain `(` nested inside one inherits the
     # context; a context opened by `((` closes on `))` (dbl = 1) and one
-    # opened by `$[` closes on `]` (dbl = 2).
+    # opened by `$[` closes on `]` (dbl = 2). Inside a double-quoted string
+    # or an array literal a `$((` must still open the context, because the
+    # `$(` rule would otherwise open a command context in which `<<` is a
+    # heredoc (cases 27 and 27c); a `$[` there needs no opener, because the
+    # string and array branches consume every character and never reach the
+    # heredoc rule (the tenth board round found two such openers that no
+    # fixture could tell apart from their absence, and removed them).
     function open_sub(saved_q, new_arith, dbl) {
       end_command(); d++
       st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_arith[d] = arith; st_dbl[d] = dbl
@@ -272,7 +322,6 @@ derive_file() {
           if (c == "\\") { w = w substr(line, i + 1, 1); i += 2; continue }
           if (c == "\"") { q = ""; i++; continue }
           if (c3 == "$((") { open_sub(q, 1, 1); i += 3; continue }
-          if (c2 == "$[") { open_sub(q, 1, 2); i += 2; continue }
           if (c2 == "$(") { open_sub(q, 0, 0); i += 2; continue }
           w = w c; i++; continue
         }
@@ -282,7 +331,6 @@ derive_file() {
           if (c == "\047") { q = "s"; i++; continue }
           if (c == "\"") { q = "d"; i++; continue }
           if (c3 == "$((") { open_sub("", 1, 1); i += 3; continue }
-          if (c2 == "$[") { open_sub("", 1, 2); i += 2; continue }
           if (c2 == "$(") { open_sub("", 0, 0); i += 2; continue }
           if (c == "(") arr_d++
           if (c == ")") { arr_d--; if (arr_d == 0) { arr = 0; w = "" } }
@@ -437,10 +485,12 @@ derive_file() {
       }
       if (name != "") {
         opener = length(line) - length(rest)
+        # The name is recorded before the line is lexed, so the commands of a
+        # one-line body are attributed to it (the trap rule reads them).
+        def_name = name; def_line = NR; defined[name] = 1
         lex_line(line)
         body = (code_end > opener + 1) ? substr(line, opener + 1, code_end - opener - 1) : ""
         sub(/^[[:space:]]+/, "", body); sub(/[[:space:]]+$/, "", body)
-        def_name = name; def_line = NR
         if (body == "") { brace_pending = 1; next }
         if (body ~ /^\{/) {
           if (body ~ /\}$/) flush_def()
@@ -461,6 +511,7 @@ derive_file() {
       lex_line(line)
     }
     END {
+      resolve_traps()
       if (pending_name != "")
         printf "%s\t%s\t%d\t%d\tunfrozen\n", file, pending_name, pending_def, pending_end
       if (def_name != "" && brace_pending)
@@ -543,7 +594,7 @@ if [ -n "$violations" ]; then
         unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
         stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, a freeze inside a quoted string or fixture is text, not a statement, and a freeze naming a function this file never defines is left over from a rename or a deletion: move this line to directly after the closing brace of $name(), or delete it" ;;
         alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion" ;;
-        trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and an EXIT, ERR or RETURN trap that exits or execs replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR or RETURN (a trap on a real signal such as INT or TERM may)" ;;
+        trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 that exits or execs, directly or through a function of this file, replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may)" ;;
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable" ;;
         unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as a one-liner '$name() { ...; }', or multi-line with the closing '}' at column 0, then freeze it on the next line" ;;
       esac

@@ -191,7 +191,10 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   tokeniser, same rule (the word `DEBUG` in any case after a `trap` command
   word; `extdebug` after `shopt` plus an `s` flag). A trap on EXIT, ERR,
   RETURN or 0 whose action exits or execs is one too — `trap 'exit 0' EXIT`
-  overrides the `exit 1` the suite reached — while a cleanup EXIT trap, a
+  overrides the `exit 1` the suite reached — and so is one whose action calls
+  a function of the same file that exits or execs, directly or through another
+  function (`cleanup() { exit 0; }` + `trap cleanup EXIT`), while a cleanup
+  EXIT trap whose functions never exit, a
   trap on a real signal (`trap 'exit 143' TERM`), `trap - ERR` and
   `shopt -u extdebug` are not violations.
 - No function named after a bash builtin, at any depth, and no `enable`: a

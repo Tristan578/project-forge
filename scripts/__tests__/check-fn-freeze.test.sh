@@ -707,6 +707,55 @@ FIX
 expect_rc "19k-b. exit in a trap on a real signal, a cleanup EXIT trap (even one whose text contains the letters exit), 'trap - ERR' and 'trap -p' are not violations" 0 \
   "$(run_gate "$d_signal_trap")" "1 function(s) across 1 file(s) are frozen"
 
+# ---- 19k-c. a trap action that is a function which exits ----------------------
+# `cleanup() { exit 0; }` + `trap cleanup EXIT` overrides the verdict exactly
+# like `trap 'exit 0' EXIT` (tenth board round, security seat), and so does a
+# chain of functions. Prove it in this bash, then that the gate follows the
+# action into the bodies this file defines, before or after the trap line.
+fn_trap_probe="$(bash -c 'inner() { exit 0; }; outer() { inner; }; trap outer EXIT; exit 1' >/dev/null 2>&1; echo "rc=$?")"
+if [ "$fn_trap_probe" = "rc=0" ]; then
+  pass "19k-c-probe. in this bash an EXIT trap calling a function that exits 0 overrides 'exit 1' (the gate must refuse it)"
+else
+  fail "19k-c-probe. the function-trap probe did not override the exit status (got '$fn_trap_probe')"
+fi
+d_fn_trap="$(mkfixture function-trap <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+cleanup() { exit 0; }
+readonly -f cleanup
+trap cleanup EXIT
+trap 'rm -f x; teardown' ERR
+teardown() {
+  finish
+}
+readonly -f teardown
+finish() {
+  exec true
+}
+readonly -f finish
+FIX
+)"
+expect_rc "19k-c. an EXIT or ERR trap whose action calls a function of this file that exits or execs, directly or through another function, is a violation" 1 \
+  "$(run_gate "$d_fn_trap")" "2 violation(s)" "fixture.test.sh:5: 'trap cleanup ... EXIT (cleanup() exits)'" "fixture.test.sh:6: 'trap teardown ... ERR (teardown() exits)'"
+d_fn_trap_ok="$(mkfixture function-trap-ok <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+cleanup() { rm -rf "$TMP"; loop_a; }
+readonly -f cleanup
+loop_a() { loop_b; }
+readonly -f loop_a
+loop_b() { loop_a; }
+readonly -f loop_b
+trap cleanup EXIT
+trap on_term TERM
+on_term() { exit 143; }
+readonly -f on_term
+trap external_helper EXIT
+FIX
+)"
+expect_rc "19k-d. a trap function that never exits (even through a call cycle), a TERM trap function that exits, and a function this file does not define are not violations" 0 \
+  "$(run_gate "$d_fn_trap_ok")" "5 function(s) across 1 file(s) are frozen"
+
 # ---- 19h. an array literal holds words, it does not run them ------------------
 # `arr=(alias fail=1)` stores two strings; nothing is aliased (the fifth board
 # round's architect seat measured the word rule flagging exactly this).
@@ -977,6 +1026,22 @@ FIX
 )"
 expect_rc "27b. a shift inside \$[ ] is not a heredoc, so the alias after it is reported" 1 \
   "$(run_gate "$d_arith_br")" "1 violation(s)" "fixture.test.sh:6: 'alias fail=:'"
+
+# ---- 27c. $(( )) inside an array literal is arithmetic too -----------------------
+# Without its own opener in the array branch, `$((` would be read as `$(`
+# followed by a plain `(` in a command context, where `<<` opens a heredoc.
+d_arith_arr="$(mkfixture arithmetic-array <<'FIX'
+fail() {
+  local -a sizes=($(( 1 << 2 )) 8)
+  echo "${sizes[@]} $1"
+}
+readonly -f fail
+decoy6() { echo bad; }
+fail "boom"
+FIX
+)"
+expect_rc "27c. a shift inside \$(( )) in an array literal is not a heredoc, so the decoy after it is reported" 1 \
+  "$(run_gate "$d_arith_arr")" "1 violation(s)" "fixture.test.sh:6: decoy6() is not frozen"
 
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
 # Same posture as check-suite-wiring.test.sh: comment-stripped scan of every

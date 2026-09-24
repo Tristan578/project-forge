@@ -854,9 +854,11 @@ by construction rather than by measurement.
   function named after a bash builtin (`compgen -b`, derived at run time) or an
   `enable` command: `readonly() { return 0; }` makes every later freeze a no-op
   and `exit() { return 0; }` makes the final verdict one (eighth board round),
-  and so is a trap on EXIT, ERR or RETURN whose action exits or execs —
-  `trap 'exit 0' EXIT` replaces the `exit 1` the suite reached (ninth round);
-  signal traps and cleanup traps are fine. No files, no definitions, or a file the
+  and so is a trap on EXIT, ERR, RETURN or 0 whose action exits or execs,
+  directly or through a function the same file defines — `trap 'exit 0' EXIT`
+  replaces the `exit 1` the suite reached (ninth round), and so does
+  `cleanup() { exit 0; }` + `trap cleanup EXIT` (tenth round); signal traps
+  and cleanup traps whose functions never exit are fine. No files, no definitions, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state
   from a fixture, runs the gate on the real tree behind a 300-function floor
