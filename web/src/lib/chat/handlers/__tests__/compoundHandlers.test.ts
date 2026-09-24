@@ -476,16 +476,16 @@ describe('create_scene_from_description', () => {
           interactKey: 'interact',
           oneShot: false,
         },
-      });
+      }, expect.objectContaining({ corrections: [] }));
     });
 
     it.each([
-      // [supplied value, what the engine's u32 coercion leaves]
-      [9_999_999, 1_000_000], // above U32_MAXES.collectible.value → clamped down
-      [-5, 0],                // below zero → clamped up; u32 has no negatives
-      [2.7, 3],               // fractional → rounded, as `prop_u32` rounds
-      ['not-a-number', 1],    // not a number at all → the field's default
-    ])('coerces an out-of-range collectible value %o to %o', async (supplied, expected) => {
+      // [supplied value, what the engine's u32 coercion leaves, the reported reason]
+      [9_999_999, 1_000_000, 'clamped'],        // above U32_MAXES.collectible.value → clamped down
+      [-5, 0, 'clamped'],                       // below zero → clamped up; u32 has no negatives
+      [2.7, 3, 'rounded'],                      // fractional → rounded, as `prop_u32` rounds
+      ['not-a-number', 1, 'invalid-replaced'],  // not a number at all → the field's default
+    ])('coerces an out-of-range collectible value %o to %o', async (supplied, expected, reason) => {
       // The private builder cast every field straight through (`props.x as number`),
       // so an LLM-supplied absurd value reached the engine verbatim. Assert the
       // EXACT resulting number: a `typeof === 'number'` check would still pass if
@@ -511,7 +511,10 @@ describe('create_scene_from_description', () => {
           pickupSoundAsset: null,
           rotateSpeed: 90,
         },
-      });
+      }, expect.objectContaining({
+        // PF-1148: and the store is told what the coercion did to the request.
+        corrections: [{ component: 'collectible', field: 'value', requested: supplied, applied: expected, reason }],
+      }));
     });
 
     it('collapses a win conditionType the engine cannot parse to its default', async () => {
@@ -541,7 +544,11 @@ describe('create_scene_from_description', () => {
           targetScore: 25,
           targetEntityId: null,
         },
-      });
+      }, expect.objectContaining({
+        corrections: [{
+          component: 'winCondition', field: 'conditionType', requested: 'collect_all', applied: 'score', reason: 'invalid-replaced',
+        }],
+      }));
     });
 
     it('reparents entities using the distinct ids returned by spawnEntity', async () => {
@@ -1500,6 +1507,87 @@ describe('create_scene_from_description', () => {
 
       const comp = lastCallArg(store.addGameComponent, 1) as { collectible: { value: number } };
       expect(comp.collectible.value).toBe(2);
+    });
+
+    // PF-1148: a compound call touches many entities, so each value it did not
+    // apply as asked is reported with the entity it landed on — and the store
+    // is handed the same report, so the inspector marks the field.
+    describe('reporting adjusted values', () => {
+      const speedClamp = {
+        component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
+      };
+
+      it('create_scene_from_description reports and names the entity', async () => {
+        const { result, store } = await spawnWith({
+          name: 'Lift',
+          gameComponent: 'moving_platform',
+          gameComponentProps: { speed: 99999 },
+        });
+        const data = result.result as { corrections: unknown[]; summary: string };
+        expect(data.corrections).toEqual([{ ...speedClamp, entityId: 'e1' }]);
+        expect(data.summary).toContain(
+          '1 value was adjusted to fit the engine’s limits: '
+          + '"Lift" Moving Platform speed: you asked for 99999, it was capped at 1000.',
+        );
+        const report = lastCallArg(store.addGameComponent, 2) as { corrections: unknown[] };
+        expect(report.corrections).toEqual([speedClamp]);
+      });
+
+      it('create_scene_from_description reports nothing for in-range props', async () => {
+        const { result } = await spawnWith({
+          name: 'Lift',
+          gameComponent: 'moving_platform',
+          gameComponentProps: { speed: 4 },
+        });
+        const data = result.result as { corrections: unknown[]; summary: string };
+        expect(data.corrections).toEqual([]);
+        expect(data.summary).not.toContain('adjusted');
+        expect(data.summary).toContain('Created 1 entities');
+      });
+
+      it('create_level_layout reports an obstacle’s adjusted value', async () => {
+        const { result } = await invoke('create_level_layout', {
+          theme: 'platformer',
+          obstacles: [{
+            type: 'cube', name: 'Lift', position: [0, 0, 0],
+            gameComponent: 'moving_platform', gameComponentProps: { speed: 99999 },
+          }],
+        }, {
+          spawnEntity: vi.fn(() => 'e1'),
+        });
+        expect((result.result as { corrections: unknown[] }).corrections).toEqual([{ ...speedClamp, entityId: 'e1' }]);
+      });
+
+      it('setup_character reports both controller corrections', async () => {
+        const { result } = await invoke('setup_character', {
+          name: 'Hero',
+          controller: { speed: 1e6, jumpHeight: -5 },
+        }, {
+          spawnEntity: vi.fn(() => 'char-1'),
+        });
+        expect((result.result as { corrections: unknown[] }).corrections).toEqual([
+          { component: 'characterController', field: 'speed', requested: 1e6, applied: 1000, reason: 'clamped', entityId: 'char-1' },
+          { component: 'characterController', field: 'jumpHeight', requested: -5, applied: 0, reason: 'clamped', entityId: 'char-1' },
+        ]);
+      });
+
+      it('configure_game_mechanics reports, and says so in its summary', async () => {
+        mockFindEntityByName.mockReturnValue('e1');
+        const { result } = await invoke('configure_game_mechanics', {
+          entityConfigs: [{
+            entityName: 'Coin',
+            gameComponents: [{ type: 'collectible', props: { value: 1.5 } }],
+          }],
+        });
+        const data = result.result as { corrections: unknown[]; summary: string };
+        expect(data.corrections).toEqual([
+          { component: 'collectible', field: 'value', requested: 1.5, applied: 2, reason: 'rounded', entityId: 'e1' },
+        ]);
+        expect(data.summary).toBe(
+          'Configured 1 settings/entities. 1 value was adjusted to fit the engine’s limits: '
+          + '"Coin" Collectible value: you asked for 1.5, it was rounded to the whole number 2.',
+        );
+      });
     });
   });
 });

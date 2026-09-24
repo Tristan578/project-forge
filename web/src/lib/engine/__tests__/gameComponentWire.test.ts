@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   mergeStoreComponentProps,
+  mergeStoreComponentPropsWithReport,
+  buildStoreComponentWithReport,
   toWireComponent,
   parseGameComponentWire,
   parseEmittedGameComponent,
@@ -1353,5 +1355,30 @@ describe('mergeStoreComponentProps (#10144)', () => {
 
   it('is the identity for an empty patch', () => {
     expect(mergeStoreComponentProps(platform, {})).toEqual(platform);
+  });
+
+  // The write report (#9237) over a merge: what the engine's limits did to the
+  // NAMED fields, and only those fields as supplied. The carried fields are read
+  // back from the stored component, not written, so reporting them as supplied
+  // would clear a stale adjustment marker the caller never touched.
+  describe('mergeStoreComponentPropsWithReport', () => {
+    it('reports the clamp on the named field, against a fresh build of the same value', () => {
+      const merged = mergeStoreComponentPropsWithReport(platform, { speed: 1e9 });
+      const fresh = buildStoreComponentWithReport('movingPlatform', { speed: 1e9 });
+      expect(merged?.corrections).toEqual(fresh?.corrections);
+      expect(merged?.corrections.map((c) => c.field)).toEqual(['speed']);
+      expect(merged?.component).toEqual(mergeStoreComponentProps(platform, { speed: 1e9 }));
+    });
+
+    it('lists only the fields the caller named as supplied, never the carried ones', () => {
+      expect(mergeStoreComponentPropsWithReport(platform, { speed: 5 })?.supplied).toEqual(['speed']);
+      expect([...(mergeStoreComponentPropsWithReport(platform, { speed: 5, loopMode: 'pingPong' })?.supplied ?? [])].sort()).toEqual(['loopMode', 'speed']);
+      expect(mergeStoreComponentPropsWithReport(platform, {})?.supplied).toEqual([]);
+      expect(mergeStoreComponentPropsWithReport(platform, { speed: undefined })?.supplied).toEqual([]);
+    });
+
+    it('reports nothing for a patch that is in range', () => {
+      expect(mergeStoreComponentPropsWithReport(platform, { speed: 5 })?.corrections).toEqual([]);
+    });
   });
 });
