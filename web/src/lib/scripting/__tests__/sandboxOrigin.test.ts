@@ -365,7 +365,7 @@ describe('failure reporting', () => {
     await expect(loadSandboxWorkerSource()).rejects.toThrow(/was not bundled/);
     const onError = vi.fn();
     hosts.push(createSandboxedScriptHost({ onError }));
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringMatching(/was not bundled/), 'boot', 'source-load'));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringMatching(/was not bundled/), 'boot', 'not-bundled'));
   });
 
   it('reports a worker the frame could not construct, and an uncaught worker error', async () => {

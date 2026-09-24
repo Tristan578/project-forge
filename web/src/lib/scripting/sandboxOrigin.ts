@@ -70,12 +70,15 @@
  *   `boot` failure with reason `worker-error`, nothing relayed, nothing on the
  *   network. Why WebKit refuses the worker has not been diagnosed.
  *
- * The runner shows the creator one of two boot messages, chosen by
+ * The runner shows the creator one of three boot messages, chosen by
  * {@link SandboxBootFailureReason}:
  *
  * - `worker-error` (the browser refused the worker; retrying cannot help):
  *   {@link SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE} — scripts can't run in this
  *   browser with the current editor settings. It offers no retry.
+ * - `not-bundled` (this build shipped without the worker; nothing the
+ *   creator does changes that): {@link SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE} —
+ *   the scripts can't run in this version of the editor. No retry either.
  * - `timeout` or `source-load` (possibly transient):
  *   {@link SCRIPT_SANDBOX_START_FAILED_MESSAGE} — press Play again or reload.
  *
@@ -193,6 +196,21 @@ export function createSandboxFrameElement(doc: Document = document): HTMLIFrameE
 let workerSourcePromise: Promise<string> | null = null;
 
 /**
+ * The build shipped without the bundled worker: the build-time loader never
+ * rewrote the placeholder. Unlike a failed chunk load, this is the same on
+ * every Play and every reload of that build, so it gets its own boot reason.
+ */
+export class SandboxWorkerNotBundledError extends Error {
+  constructor() {
+    super(
+      'The sandboxed script worker was not bundled: scriptWorkerSource.bundle.ts was not ' +
+        'rewritten by web/scripts/sandbox-worker-loader.cjs (check next.config.ts).',
+    );
+    this.name = 'SandboxWorkerNotBundledError';
+  }
+}
+
+/**
  * The bundled worker as text. Loaded once and cached; a failed load is not
  * cached, so the next Play retries. Call it early (the runner does, on mount)
  * so the chunk is in memory before the first tick starts the 5 s watchdog.
@@ -203,10 +221,7 @@ export function loadSandboxWorkerSource(): Promise<string> {
       .then((mod) => {
         const source = mod.default;
         if (typeof source !== 'string' || source.length === 0) {
-          throw new Error(
-            'The sandboxed script worker was not bundled: scriptWorkerSource.bundle.ts was not ' +
-              'rewritten by web/scripts/sandbox-worker-loader.cjs (check next.config.ts).',
-          );
+          throw new SandboxWorkerNotBundledError();
         }
         return source;
       })
@@ -237,13 +252,19 @@ export type SandboxFailurePhase = 'boot' | 'runtime';
  *   (`worker-error`). The browser refused to run the sandboxed worker, and it
  *   will refuse again: pressing Play again or reloading re-runs the same
  *   frame, the same policy and the same bytes. This is what WebKit does today.
- * - `timeout`: nothing was heard within the boot timeout. Possibly transient
- *   (a busy tab, a slow machine), so retrying is honest advice.
- * - `source-load`: the bundled worker text could not be loaded. A failed load
- *   is not cached ({@link loadSandboxWorkerSource}), so the next Play retries
- *   it; retrying is honest advice here too.
+ * - `timeout`: the worker source had loaded, but nothing was heard from the
+ *   frame within the boot timeout. Possibly transient (a busy tab, a slow
+ *   machine), so retrying is honest advice.
+ * - `source-load`: the bundled worker text failed to load, or was still
+ *   loading when the boot timeout ran out (the budget covers the load, so the
+ *   whole boot stays under the play watchdog). A failed load is not cached
+ *   ({@link loadSandboxWorkerSource}), so the next Play retries it; retrying
+ *   is honest advice here too.
+ * - `not-bundled`: this build has no bundled worker at all
+ *   ({@link SandboxWorkerNotBundledError}). Every Play and every reload of the
+ *   same build fails the same way, so retrying is not offered.
  */
-export type SandboxBootFailureReason = 'worker-error' | 'timeout' | 'source-load';
+export type SandboxBootFailureReason = 'worker-error' | 'timeout' | 'source-load' | 'not-bundled';
 
 /**
  * The arguments of {@link SandboxedScriptHostOptions.onError}. A `boot` report
@@ -276,6 +297,15 @@ export const SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE =
   "Your game's scripts can't run in this browser with the editor's current settings. " +
   'You could try opening the editor in a different browser.';
 
+/**
+ * What the script console shows the game creator for a `boot` failure whose
+ * reason is `not-bundled`: this build of the editor shipped without the
+ * sandboxed worker. Nothing the creator does changes that, so no retry is
+ * offered, and it says the fault is not in their game.
+ */
+export const SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE =
+  "Your game's scripts can't run in this version of the editor. This is a problem on our side, not with your game.";
+
 /** What the script console shows the game creator for a `runtime` failure. */
 export const SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE =
   "Your game's scripts ran into an unexpected problem. If your game stops responding, press Play again.";
@@ -288,6 +318,7 @@ export interface SandboxedScriptHostOptions {
    * DEVELOPER account (raw error text, bundling hints): log it to the devtools
    * and show the creator plain words instead — for `boot`, chosen by `reason`
    * ({@link SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE} for `worker-error`,
+   * {@link SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE} for `not-bundled`,
    * {@link SCRIPT_SANDBOX_START_FAILED_MESSAGE} otherwise); for `runtime`,
    * {@link SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE}.
    *
@@ -441,7 +472,10 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
       (container ?? document.body).appendChild(el);
     },
     (err: unknown) => {
-      failBoot(err instanceof Error ? err.message : String(err), 'source-load');
+      failBoot(
+        err instanceof Error ? err.message : String(err),
+        err instanceof SandboxWorkerNotBundledError ? 'not-bundled' : 'source-load',
+      );
     },
   );
 

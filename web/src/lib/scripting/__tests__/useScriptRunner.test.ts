@@ -210,6 +210,7 @@ import {
   SANDBOX_BOOT_TIMEOUT_MS,
   SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE,
   SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+  SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE,
   SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
   type SandboxedScriptHost,
   type SandboxedScriptHostOptions,
@@ -1369,10 +1370,12 @@ describe('useScriptRunner — script isolation transport', () => {
     vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', 'sandboxed-origin');
     const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
     expect(latestWorker).toBeNull();
-    // The creator sees plain words in the script console...
+    // The creator sees plain words in the script console: vitest never runs
+    // the build-time loader, so this is the not-bundled case, which offers
+    // no retry because every Play of this build fails the same way...
     await vi.waitFor(() =>
       expect(mockAddScriptLog).toHaveBeenCalledWith(
-        expect.objectContaining({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_START_FAILED_MESSAGE }),
+        expect.objectContaining({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE }),
       ),
     );
     // ...and the bundling hint goes to the devtools, never to the script console.
@@ -1424,7 +1427,7 @@ describe('useScriptRunner — script isolation transport', () => {
 
       await vi.waitFor(() =>
         expect(mockAddScriptLog).toHaveBeenCalledWith(
-          expect.objectContaining({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_START_FAILED_MESSAGE }),
+          expect.objectContaining({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE }),
         ),
       );
 
@@ -1434,7 +1437,7 @@ describe('useScriptRunner — script isolation transport', () => {
       });
 
       const logged = mockAddScriptLog.mock.calls.map(([entry]) => (entry as { message: string }).message);
-      expect(logged).toEqual([SCRIPT_SANDBOX_START_FAILED_MESSAGE]);
+      expect(logged).toEqual([SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE]);
       expect(errorSpy).not.toHaveBeenCalledWith(expect.stringMatching(/timeout|infinite loop/i));
       // Play is stopped, and no further tick can re-arm the watchdog.
       expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
@@ -1600,6 +1603,14 @@ describe('useScriptRunner — sandbox runtime failures (fake sandboxed host)', (
       notShown: SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
       detail: 'Script sandbox did not start within 4000 ms.',
     },
+    {
+      // A build that shipped without the bundled worker fails the same way on
+      // every Play and every reload, so neither is offered (round eight, ux).
+      reason: 'not-bundled' as const,
+      shown: SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE,
+      notShown: SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+      detail: 'The sandboxed script worker was not bundled: scriptWorkerSource.bundle.ts was not rewritten.',
+    },
   ])("boot failure, reason '$reason': shows the matching creator message and fails closed", ({ reason, shown, notShown, detail }) => {
     const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
     expect(fakeHosts).toHaveLength(1);
@@ -1629,12 +1640,14 @@ describe('useScriptRunner — sandbox runtime failures (fake sandboxed host)', (
     unmount();
   });
 
-  it('the two boot messages are distinct, and only the start-failed one offers a retry', () => {
-    // Guard the premise of the test above: were the constants equal, it could
-    // not tell the two choices apart.
-    expect(SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE).not.toBe(SCRIPT_SANDBOX_START_FAILED_MESSAGE);
+  it('the three boot messages are distinct, and only the start-failed one offers a retry', () => {
+    // Guard the premise of the test above: were two constants equal, it could
+    // not tell those choices apart.
+    const messages = [SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE, SCRIPT_SANDBOX_START_FAILED_MESSAGE, SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE];
+    expect(new Set(messages).size).toBe(3);
     expect(SCRIPT_SANDBOX_START_FAILED_MESSAGE).toMatch(/Play again|reload/i);
     expect(SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE).not.toMatch(/Play again|reload|retry/i);
+    expect(SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE).not.toMatch(/Play again|reload|retry/i);
   });
 
   it('a new Play session reports again', () => {

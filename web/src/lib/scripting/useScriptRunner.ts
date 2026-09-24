@@ -28,6 +28,7 @@ import {
   loadSandboxWorkerSource,
   SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE,
   SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+  SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE,
   SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
   type ScriptWorkerLike,
 } from '@/lib/scripting/sandboxOrigin';
@@ -237,11 +238,16 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
                   return;
                 }
                 console.error(`[ScriptRunner] Script sandbox ${phase} failure (${reason}): ${detail}`);
-                // A worker the browser refused will be refused again, so the
-                // retry advice would be a dead end: say what is true instead.
-                // A timeout or a failed source load may be transient.
+                // A worker the browser refused will be refused again, and a
+                // build without the bundled worker fails on every Play, so the
+                // retry advice would be a dead end for both: say what is true
+                // instead. A timeout or a failed source load may be transient.
                 const creatorMessage =
-                  reason === 'worker-error' ? SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE : SCRIPT_SANDBOX_START_FAILED_MESSAGE;
+                  reason === 'worker-error'
+                    ? SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE
+                    : reason === 'not-bundled'
+                      ? SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE
+                      : SCRIPT_SANDBOX_START_FAILED_MESSAGE;
                 // The scripts never started and never will this session. Say so
                 // ONCE and stop Play now: left running, the ticks keep arming
                 // the watchdog, and 5 s later it would tell the creator their
