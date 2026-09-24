@@ -51,7 +51,10 @@
  * ## Browser support — do NOT enable for production users yet
  *
  * Measured, not assumed (CI run 35997735154, head a17c010f,
- * `e2e/tests/script-sandbox-isolation.spec.ts`):
+ * `e2e/tests/script-sandbox-isolation.spec.ts`; the WebKit result re-measured
+ * in run 36007182328, job 107658645036, head 8b7869d8, after the spec stopped
+ * answering the frame's `blob:` worker load with a fake body: WebKit still
+ * reported a boot `worker-error`, so the harness was not the cause):
  *
  * - Chromium and Firefox: scripts RUN through this transport — a normal script
  *   runs end to end, `terminate()` ends a spinning worker, and an escaped
