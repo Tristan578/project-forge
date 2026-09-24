@@ -881,13 +881,17 @@ position of executable text as a violation; a self-defense suite has no use
 for aliases. The rule is on the WORD, not on text: the lexer tokenises
 executable text the way bash does before a command lookup — quotes removed
 and joined, each backslash escaping the next character, a trailing backslash
-joining the next line — and reports the word `alias` followed by a `NAME=`
-word, or `shopt`, an `s` flag cluster and `expand_aliases`, anywhere. That is
-one case for every spelling the board found across two rounds (`\alias`,
-`builtin alias`, `command alias`, then `X="1" alias`, then `\a\l\i\a\s`,
-`"alias"`, `al"ias"`, `$'alias'` and `alias \` + `fail=:`), where the two
-prefix lists that preceded it were each defeated by the next spelling (the
-same treadmill round 39 documents for assignment keywords). What stays open
+joining the next line — finds the COMMAND word of each statement (the first
+word that is not an assignment or one of the words bash lets stand in front of
+a command), and when it is `alias` reports every later `NAME=` word in the
+statement, and when it is `shopt` with an `s` flag reports a later
+`expand_aliases`. That is one case for every spelling the board found across
+three rounds (`\alias`, `builtin alias`, `command alias`, then `X="1" alias`,
+then `\a\l\i\a\s`, `"alias"`, `al"ias"`, `$'alias'` and `alias \` + `fail=:`,
+then `alias nothing fail=:` and `shopt -s nocasematch expand_aliases`), where
+the two prefix lists and the next-word rule that preceded it were each defeated
+by the next spelling (the same treadmill round 39 documents for assignment
+keywords) — while `echo alias fail=:`, the word as an argument, stays text. What stays open
 is a word assembled at run time — `$x`, `$(...)`, `eval`, a `source` of a
 file the suite wrote — and `declare -n`, which aliases a variable, not a
 function. Nested definitions are deliberately

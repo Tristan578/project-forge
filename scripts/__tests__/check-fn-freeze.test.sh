@@ -510,11 +510,13 @@ FIX
 )"
 expect_rc "19c. alias text inside quotes, a heredoc fixture or a comment is not a violation" 0 \
   "$(run_gate "$d_alias_text")" "1 function(s) across 1 file(s) are frozen"
-# Every spelling bash resolves to the same WORD is the same violation: the
-# review board measured `\alias`, `builtin alias`, `command alias`, then
-# `X="1" alias`, then `\a\l\i\a\s` and a backslash continuation, as silent
-# bypasses of two successive prefix lists. The rule is now on the tokenised
-# word, so this fixture is one line per spelling and every line must report.
+# Every spelling bash resolves to the same COMMAND WORD is the same violation:
+# the review board measured `\alias`, `builtin alias`, `command alias`, then
+# `X="1" alias`, then `\a\l\i\a\s` and a backslash continuation, then a decoy
+# argument (`alias nothing fail=:`) and a second shopt option, as silent
+# bypasses of the rules before this one. The rule is now on the tokenised
+# words of the whole statement, so this fixture is one line per spelling and
+# every line must report (line 24 reports twice, once per name bound).
 d_alias_prefix="$(mkfixture alias-prefix <<'FIX'
 fail() { echo "  FAIL: $1"; }
 readonly -f fail
@@ -538,10 +540,13 @@ shopt -sq expand_aliases
 'alias' fail=:
 alias \
   fail=:
+alias nothing fail=:
+alias pass=: fail=:
+shopt -s nocasematch expand_aliases
 FIX
 )"
 expect_rc "19e. every spelling of the alias word — prefixes, quoted assignments, quoted or escaped letters, a line continuation — is a violation" 1 \
-  "$(run_gate "$d_alias_prefix")" "19 violation(s)" \
+  "$(run_gate "$d_alias_prefix")" "23 violation(s)" \
   "fixture.test.sh:3: 'shopt -s expand_aliases'" "fixture.test.sh:4: 'alias fail=:'" \
   "fixture.test.sh:5: 'alias fail=:'" "fixture.test.sh:6: 'alias fail=:'" \
   "fixture.test.sh:7: 'alias fail=:'" "fixture.test.sh:8: 'alias fail=:'" \
@@ -551,7 +556,22 @@ expect_rc "19e. every spelling of the alias word — prefixes, quoted assignment
   "fixture.test.sh:15: 'alias fail=:'" "fixture.test.sh:16: 'alias fail=:'" \
   "fixture.test.sh:17: 'shopt -s expand_aliases'" "fixture.test.sh:18: 'alias fail=:'" \
   "fixture.test.sh:19: 'shopt -sq expand_aliases'" "fixture.test.sh:20: 'alias fail=:'" \
-  "fixture.test.sh:22: 'alias fail=:'"
+  "fixture.test.sh:22: 'alias fail=:'" "fixture.test.sh:23: 'alias fail=:'" \
+  "fixture.test.sh:24: 'alias pass=:'" "fixture.test.sh:24: 'alias fail=:'" \
+  "fixture.test.sh:25: 'shopt -s expand_aliases'"
+# The words as ARGUMENTS of another command define nothing: a diagnostic that
+# prints them unquoted is text, not a violation (the round-4 architect seat
+# measured the word-adjacency rule flagging exactly this).
+d_alias_arg="$(mkfixture alias-argument <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+echo alias fail=: is only printed here
+printf %s shopt -s expand_aliases
+nice alias fail=:
+FIX
+)"
+expect_rc "19g. alias and shopt as arguments of another command (echo, printf, nice) are not violations" 0 \
+  "$(run_gate "$d_alias_arg")" "1 function(s) across 1 file(s) are frozen"
 # The three spellings that defeated the previous rounds bind for real in this
 # bash, so the rule guards measured bypasses (lessons-learned #19 in reverse).
 alias_spellings_probe="$(bash -c 'fail() { echo REAL; }; readonly -f fail; \s\h\o\p\t -s expand_aliases; X="1" \a\l\i\a\s fail="echo ALIASED"; eval fail' 2>&1)"

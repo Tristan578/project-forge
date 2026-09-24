@@ -176,12 +176,14 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   `platform-contract.test.sh` does) is unaffected — the freeze lives in the
   parent shell only.
 - No `alias NAME=` and no `shopt -s expand_aliases` anywhere in a suite: an
-  alias is resolved before functions and `readonly -f` does not stop it, so the
-  gate reports either WORD wherever it occurs in executable text, after the
-  quote removal and unescaping bash performs (`\alias`, `"alias"`,
-  `\a\l\i\a\s`, a continuation line, anything in front of it). A word inside
-  a quoted string that contains more than the word, a heredoc fixture or a
-  comment is text and is ignored.
+  alias is resolved before functions and `readonly -f` does not stop it. The
+  gate tokenises executable text the way bash does (quotes removed, escapes
+  and continuations resolved), finds each statement's command word, and when
+  it is `alias` reports every later `NAME=` word, or `expand_aliases` after
+  `shopt` plus an `s` flag — so `\alias`, `"alias"`, `\a\l\i\a\s`,
+  `alias nothing fail=:` and anything in front of the word are all caught,
+  while the word as an argument (`echo alias fail=:`), inside a quoted string
+  that holds more than the word, in a heredoc fixture or in a comment is text.
 - Heredocs follow bash: only `<<-` strips leading tabs before the terminator;
   a plain `<<` body runs to the column-0 delimiter, tab-indented lookalikes
   included.

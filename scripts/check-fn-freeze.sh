@@ -121,32 +121,48 @@ derive_file() {
     # pieces joined (al"ias", the word in single or $ quotes), a backslash
     # escapes the next character
     # (`\a\l\i\a\s`), and whitespace or a control operator ends the word. The
-    # alias rule is then a check on WORDS, not on text position: the word
-    # `alias` followed by a word matching `NAME=`, or the words `shopt`,
-    # `-s` (any flag cluster containing s) and `expand_aliases`, anywhere in
-    # a line. That is what makes `\alias`, `builtin alias`, `time -p alias`,
-    # `X="1" alias`, `"alias" fail=:` and `\a\l\i\a\s fail=:` all one case —
-    # each spells the same word — instead of a list of prefixes that the
-    # review board extended twice and could always extend again. A word
-    # assembled at run time (`$x`, `$(...)`, `eval`, a sourced file) is not
-    # a word this scan can see; that is the documented bound.
+    # alias rule is then a check on the WORDS of a statement: the COMMAND
+    # word is the first word that is not an assignment (`X="1"`) and not one
+    # of the words bash lets stand in front of a command (`builtin`,
+    # `command`, `time`, `-p`, `!`, `if`/`then`/`else`/`do`/`while`/..., `{`).
+    # When that word is `alias`, every later `NAME=` word in the statement is
+    # a violation (`alias nothing fail=:` still binds fail); when it is
+    # `shopt` and an s flag cluster follows, a later `expand_aliases` is one
+    # (`shopt -s nocasematch expand_aliases` still turns it on). A statement
+    # ends at `;`, `&`, `|`, `(`, `)` or a line end that is not a
+    # continuation. That is what makes `\alias`, `builtin alias`, `time -p
+    # alias`, `X="1" alias`, `"alias" fail=:` and `\a\l\i\a\s fail=:` all one
+    # case — each spells the same command word — instead of a list of
+    # prefixes that the review board extended twice and could always extend
+    # again, while `echo alias fail=:` (the word as an ARGUMENT) is text. A
+    # word assembled at run time (`$x`, `$(...)`, `eval`, a sourced file) is
+    # not a word this scan can see; that is the documented bound.
     function end_word() {
-      if (w != "") {
-        if (p1 == "alias" && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/)
-          printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
-        else if (p2 == "shopt" && p1 ~ /^-[a-z]*s[a-z]*$/ && w == "expand_aliases")
-          printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " p1 " " w, NR, NR
-        p2 = p1; p1 = w; w = ""
+      if (w == "") return
+      if (!cmd_seen) {
+        # Still looking for the command word of this statement.
+        if (w ~ /^(builtin|command|time|-p|!|if|then|elif|else|do|while|until|coproc|\{|\})$/ ||
+            w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { w = ""; return }
+        cmd_seen = 1
+        if (w == "alias") in_alias = 1
+        if (w == "shopt") in_shopt = 1
+        w = ""; return
       }
+      if (in_alias && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/)
+        printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
+      if (in_shopt && sflag != "" && w == "expand_aliases")
+        printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " sflag " " w, NR, NR
+      if (in_shopt && w ~ /^-[a-z]*s[a-z]*$/) sflag = w
+      w = ""
     }
-    function end_command() { end_word(); p1 = ""; p2 = "" }
+    function end_command() { end_word(); cmd_seen = 0; in_alias = 0; in_shopt = 0; sflag = "" }
     function lex_line(line,   n, i, c, c2, c3, rest, tok, carry) {
       n = length(line); i = 1
       # A trailing unquoted backslash joins this line to the next one, so the
       # word and the two words before it carry over (`alias \` + `fail=:`,
       # or `al\` + `ias`, are one statement to bash).
       carry = cont; cont = 0
-      if (q == "" && !carry) { p1 = ""; p2 = ""; w = "" }
+      if (q == "" && !carry) { cmd_seen = 0; in_alias = 0; in_shopt = 0; sflag = ""; w = "" }
       while (i <= n) {
         c = substr(line, i, 1); c2 = substr(line, i, 2); c3 = substr(line, i, 3)
         if (q == "s") { if (c == "\047") q = ""; else w = w c; i++; continue }
