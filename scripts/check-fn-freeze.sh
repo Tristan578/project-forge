@@ -287,6 +287,11 @@ derive_file() {
       }
       bx[++nbx] = s
     }
+    function sig_word(s) {
+      s = toupper(s); sub(/^[ \t]+/, "", s)
+      if (s ~ /^\+?[0-9]+$/) { sub(/^\+/, "", s); sub(/^0+/, "", s); if (s == "") s = "0" }
+      return s
+    }
     function has(t,   k) { for (k = 1; k <= nbx; k++) if (bx[k] == t) return 1; return 0 }
     function anym(re,   k) { for (k = 1; k <= nbx; k++) if (bx[k] ~ re) return 1; return 0 }
     function end_word(   rq, wk, k) {
@@ -367,10 +372,13 @@ derive_file() {
       if (in_trap && anym("^[Dd][Ee][Bb][Uu][Gg]$"))
         printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap ... " w, NR, NR
       # The first non-flag argument of trap is its action; every later word
-      # is a signal. The pair is judged when the statement ends.
+      # is a signal. The pair is judged when the statement ends. bash reads
+      # a numeric signal as an optionally signed decimal after leading
+      # blanks, so 00, +0 and a quoted leading blank are all signal 0
+      # (twenty-first board round); sig_word stores each as its value.
       if (in_trap) {
         if (!trap_has_action) { if (w !~ /^-/) { trap_action = w; trap_has_action = 1 } }
-        else for (k = 1; k <= nbx; k++) trap_sigs = trap_sigs " " toupper(bx[k])
+        else for (k = 1; k <= nbx; k++) trap_sigs = trap_sigs " " sig_word(bx[k])
       }
       if (in_shopt && anym("^-[a-z]*s[a-z]*$")) sflag = w
       w = ""

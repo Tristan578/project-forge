@@ -900,6 +900,10 @@ by construction rather than by measurement.
   position 65; an expansion cut short by the cap or by the 8-level nesting
   bound, in a command name or an alias, shopt or trap statement, is now a
   `brace` violation, and a numeric range (`trap 'exit 0' {0..0}`) is pinned.
+  The twenty-first found that bash reads a numeric trap signal as an
+  optionally signed decimal after leading blanks, so `00`, `+0` and `' 00'`
+  are all signal 0 (EXIT); the gate now stores each numeric signal as its
+  value.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
