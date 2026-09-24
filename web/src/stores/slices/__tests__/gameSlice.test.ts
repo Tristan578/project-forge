@@ -2,15 +2,27 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createGameSlice, setGameDispatcher, setWinnabilityStateReader, type GameSlice } from '../gameSlice';
 import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, SceneGraph } from '../types';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { buildStoreComponentWithReport } from '@/lib/engine/gameComponentWire';
 import { componentAdjustmentsOf } from '@/lib/engine/gameComponentCorrections';
 
-const { chatSetState, chatGetState } = vi.hoisted(() => ({
-  chatSetState: vi.fn(),
-  chatGetState: vi.fn(() => ({ messages: [] as unknown[] })),
-}));
+const { chatSetState, chatGetState, chatSetRightPanelTab, trackPlayModeStarted } = vi.hoisted(() => {
+  const chatSetRightPanelTab = vi.fn();
+  return {
+    chatSetState: vi.fn(),
+    chatSetRightPanelTab,
+    chatGetState: vi.fn(() => ({ messages: [] as unknown[], setRightPanelTab: chatSetRightPanelTab })),
+    trackPlayModeStarted: vi.fn(),
+  };
+});
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: { getState: chatGetState, setState: chatSetState },
+}));
+// play() reports a Play only after a real dispatch (#10166); the mock lets the
+// tests observe that it stays silent on a refusal.
+vi.mock('@/lib/analytics/events', () => ({
+  trackPlayModeStarted,
+  trackEditorPanelOpened: vi.fn(),
 }));
 
 describe('gameSlice', () => {
@@ -23,11 +35,18 @@ describe('gameSlice', () => {
     store = createSliceStore(createGameSlice);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // play() reports analytics through a dynamic import. Let every pending one
+    // land HERE, before the mocks are cleared: otherwise a start counted by one
+    // test resolves inside the next and fails its "not called" assertion.
+    await vi.dynamicImportSettled();
     setGameDispatcher(null as unknown as (command: string, payload: unknown) => void);
     setWinnabilityStateReader(null);
     chatSetState.mockClear();
     chatGetState.mockClear();
+    chatSetRightPanelTab.mockClear();
+    trackPlayModeStarted.mockClear();
+    useWorkspaceStore.setState({ chatOverlayOpen: false });
   });
 
   describe('Initial State', () => {
@@ -735,12 +754,15 @@ describe('gameSlice', () => {
       },
     });
 
-    it('dispatches play when the scene is winnable', () => {
+    it('dispatches play when the scene is winnable, returns true and reports the start', async () => {
       setWinnabilityStateReader(winnableReader);
 
-      store.getState().play();
+      expect(store.getState().play()).toBe(true);
 
       expect(mockDispatch).toHaveBeenCalledWith('play', {});
+      // The winnable path reveals nothing: the overlay stays exactly as it was.
+      expect(useWorkspaceStore.getState().chatOverlayOpen).toBe(false);
+      await vi.waitFor(() => expect(trackPlayModeStarted).toHaveBeenCalledTimes(1));
     });
 
     it('dispatches play for a sandbox scene with no win condition (#9901)', () => {
@@ -803,7 +825,7 @@ describe('gameSlice', () => {
       // play() is synchronous, but surfaceWinnabilityMessage dynamically imports
       // chatStore (a floating promise), so the chat write lands on a later
       // microtask — vi.waitFor polls until that async surface completes.
-      store.getState().play();
+      expect(store.getState().play()).toBe(false);
 
       expect(mockDispatch).not.toHaveBeenCalledWith('play', {});
       await vi.waitFor(() => expect(chatSetState).toHaveBeenCalled());
@@ -824,6 +846,12 @@ describe('gameSlice', () => {
       // role:'system' — visible to the user, filtered out of the AI request.
       expect(payload.messages[0].role).toBe('system');
       expect(payload.messages[0].content).toContain("can't be won");
+      // Desktop renders nothing from rightPanelTab, so the gate also opens the
+      // chat overlay — the one chat surface both layouts share (#10166).
+      await vi.waitFor(() => expect(useWorkspaceStore.getState().chatOverlayOpen).toBe(true));
+      expect(chatSetRightPanelTab).toHaveBeenCalledWith('chat');
+      // A refused Play never happened, so it is not counted as one.
+      expect(trackPlayModeStarted).not.toHaveBeenCalled();
     });
 
     it('blocks play when a goal win condition targets a missing entity', async () => {
@@ -856,6 +884,19 @@ describe('gameSlice', () => {
       store.getState().play();
 
       expect(mockDispatch).toHaveBeenCalledWith('play', {});
+    });
+
+    it('returns false and reports nothing when no dispatcher is attached', async () => {
+      setWinnabilityStateReader(winnableReader);
+      setGameDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      expect(store.getState().play()).toBe(false);
+
+      expect(mockDispatch).not.toHaveBeenCalled();
+      // The analytics call rides a dynamic import: let every pending one
+      // settle so a wrongly-counted start has reported before this asserts.
+      await vi.dynamicImportSettled();
+      expect(trackPlayModeStarted).not.toHaveBeenCalled();
     });
   });
 
