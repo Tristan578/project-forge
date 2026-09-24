@@ -1,17 +1,15 @@
 use bevy_app::{App, Plugin};
 use bevy_asset::{Asset, AssetId, Handle, RenderAssetUsages, load_internal_asset, uuid_handle};
-use bevy_camera::visibility::RenderLayers;
 use bevy_core_pipeline::core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d, TransparentSortingInfo3d};
-use bevy_core_pipeline::prepass::{
-    DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass,
-};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::ROQueryItem;
 use bevy_ecs::system::SystemParamItem;
 use bevy_ecs::system::lifetimeless::{Read, SRes};
 use bevy_mesh::{PrimitiveTopology, VertexBufferLayout};
-use bevy_pbr::{MeshPipeline, MeshPipelineKey, MeshPipelineSystems, SetMeshViewBindGroup};
+use bevy_pbr::{
+    MeshPipeline, MeshPipelineKey, MeshPipelineSystems, SetMeshViewBindGroup, ViewKeyCache,
+};
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_reflect::{Reflect, TypePath};
 use bevy_render::extract_component::ExtractComponent;
@@ -39,8 +37,6 @@ use bevy_render::{
 use bevy_shader::Shader;
 use bytemuck::cast_slice;
 use uuid::Uuid;
-
-use crate::GizmoCamera;
 
 const GIZMO_SHADER_HANDLE: Handle<Shader> = uuid_handle!("e44be110-cb2b-4a8d-9c0c-965424e6a633");
 
@@ -331,68 +327,55 @@ impl SpecializedRenderPipeline for TransformGizmoPipeline {
 
 type DrawGizmo = (SetItemPipeline, SetMeshViewBindGroup<0>, DrawTransformGizmo);
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+/// The [`MeshPipelineKey`] the gizmo pipeline is specialized against for `view`.
+///
+/// `DrawGizmo` binds the view bind group with `SetMeshViewBindGroup<0>`, and
+/// Bevy's `prepare_mesh_view_bind_groups` builds that bind group against a
+/// layout chosen from the view's features. Since Bevy 0.19 the layout depends on
+/// far more than MSAA and prepasses: tonemapping in shader (the LUT at bindings
+/// 18/19), distance fog, SSR, contact shadows, OIT, atmosphere and SSAO. So the
+/// pipeline must use exactly the key Bevy's own mesh passes use, which Bevy
+/// caches per view in [`ViewKeyCache`] (`check_views_need_specialization`, in
+/// `RenderSystems::PrepareAssets`, which runs before `Queue`).
+///
+/// The 0.18 fork rebuilt the key from MSAA, the target format and the prepass
+/// markers. On a non-HDR camera that selected `mesh_view_layout:` while the
+/// bound group was `mesh_view_layout:tonemap_in_shader`; wgpu rejected the draw
+/// the first time an entity was selected, and Bevy 0.19's default
+/// `RenderErrorHandler` quits the app on a validation error, so the editor
+/// stopped processing commands.
+///
+/// `None` means Bevy has not cached a key for the view yet, and nothing is
+/// queued for it this frame, which is what `bevy_gizmos_render` does.
+pub fn gizmo_view_key(
+    view_key_cache: &ViewKeyCache,
+    view: &ExtractedView,
+) -> Option<MeshPipelineKey> {
+    view_key_cache.get(&view.retained_view_entity).copied()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn queue_transform_gizmos(
     draw_functions: Res<DrawFunctions<Transparent3d>>,
     pipeline: Res<TransformGizmoPipeline>,
     mut pipelines: ResMut<SpecializedRenderPipelines<TransformGizmoPipeline>>,
     pipeline_cache: Res<PipelineCache>,
-    msaa_q: Query<Option<&Msaa>, With<GizmoCamera>>,
+    view_key_cache: Res<ViewKeyCache>,
     transform_gizmos: Query<(Entity, &GizmoDrawDataHandle)>,
     transform_gizmo_assets: Res<RenderAssets<GizmoBuffers>>,
-    mut views: Query<(
-        Entity,
-        &ExtractedView,
-        Option<&Msaa>,
-        Option<&RenderLayers>,
-        (
-            Has<NormalPrepass>,
-            Has<DepthPrepass>,
-            Has<MotionVectorPrepass>,
-            Has<DeferredPrepass>,
-        ),
-    )>,
+    views: Query<(Entity, &ExtractedView)>,
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
 ) {
     let draw_function = draw_functions.read().get_id::<DrawGizmo>().unwrap();
-    let camera_msaa = msaa_q.single().ok().flatten();
-    for (
-        view_entity,
-        view,
-        entity_msaa,
-        _render_layers,
-        (normal_prepass, depth_prepass, motion_vector_prepass, deferred_prepass),
-    ) in &mut views
-    {
+    for (view_entity, view) in &views {
         let Some(transparent_phase) = transparent_render_phases.get_mut(&view.retained_view_entity)
         else {
             continue;
         };
 
-        // entity_msaa > camera_msaa > default
-        let msaa_sample_count = entity_msaa.map_or(
-            camera_msaa.unwrap_or(&Msaa::default()).samples(),
-            Msaa::samples,
-        );
-
-        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa_sample_count)
-            | MeshPipelineKey::from_target_format(view.target_format);
-
-        if normal_prepass {
-            view_key |= MeshPipelineKey::NORMAL_PREPASS;
-        }
-
-        if depth_prepass {
-            view_key |= MeshPipelineKey::DEPTH_PREPASS;
-        }
-
-        if motion_vector_prepass {
-            view_key |= MeshPipelineKey::MOTION_VECTOR_PREPASS;
-        }
-
-        if deferred_prepass {
-            view_key |= MeshPipelineKey::DEFERRED_PREPASS;
-        }
+        let Some(view_key) = gizmo_view_key(&view_key_cache, view) else {
+            continue;
+        };
 
         for (entity, handle) in &transform_gizmos {
             let Some(_) = transform_gizmo_assets.get(handle.0.id()) else {

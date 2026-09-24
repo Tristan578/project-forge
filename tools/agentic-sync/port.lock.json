@@ -105,7 +105,7 @@
     ".agents/skills/resolve-pr-comments/SKILL.md": "d2dfcefee525444ecb82a689a1d725be00a01aa30cc9892bb9a81789c253f1d1",
     ".agents/skills/review-protocol/SKILL.md": "228b9028e70996ce87eae3f08de2c588a04df6f1d0495a89cc5bc77362f8acdc",
     ".agents/skills/rust-engine/SKILL.md": "948717e13028fec32ec5d94a93e1733ee8b3cbddaea5dbd63e6f15e61492a01b",
-    ".agents/skills/rust-engine/references/bevy-api.md": "55837e48f3d51028989babb1e0dda22bdea707381aa64b9c051e9060c3a1b058",
+    ".agents/skills/rust-engine/references/bevy-api.md": "be81611ea25ecc7c0b1f75820f82a2b49a78a431a83d30ac8c332556541ec15f",
     ".agents/skills/rust-engine/references/bridge-isolation-rules.md": "eb605439063c17a42128e683c70d85ee6a872e05d76502fc5a5aeb95d956a56a",
     ".agents/skills/rust-engine/scripts/cargo-check-wasm.sh": "597aebd0c831f132debbda0da0f58649b3ae39f01906f63fddb35f5844c82c40",
     ".agents/skills/stripe-webhooks/SKILL.md": "c8b8ff5d599b30032d1ca911e12057c6e5a8acba5bbf415d5fe0af219e26d1c5",

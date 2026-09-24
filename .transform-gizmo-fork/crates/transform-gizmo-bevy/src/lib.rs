@@ -43,6 +43,7 @@ use picking::TransformGizmoPickingPlugin;
 use uuid::Uuid;
 
 use render::{DrawDataHandles, TransformGizmoRenderPlugin};
+pub use render::gizmo_view_key;
 use transform_gizmo::config::{
     DEFAULT_SNAP_ANGLE, DEFAULT_SNAP_DISTANCE, DEFAULT_SNAP_SCALE, GizmoModeKind,
     TransformPivotPoint,

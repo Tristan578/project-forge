@@ -380,3 +380,103 @@ pub fn set_coordinate_mode(mode: CoordinateMode, coordinate_mode: &mut ResMut<Co
     **coordinate_mode = mode;
     emit_coordinate_mode_changed(mode);
 }
+
+/// The transform gizmo's draw must be specialized against the SAME view
+/// bind-group layout that `SetMeshViewBindGroup<0>` binds for the view.
+///
+/// Bevy 0.19 made that layout depend on the view's features (tonemapping in
+/// shader, fog, SSR, contact shadows, OIT, atmosphere, SSAO), not just MSAA and
+/// prepasses. The fork kept 0.18's hand-built key, so on every non-HDR editor
+/// camera its pipeline expected `mesh_view_layout:` while the bound group was
+/// `mesh_view_layout:tonemap_in_shader` (the tonemapping LUT at bindings 18/19).
+/// wgpu rejected the first draw after an entity was selected, Bevy 0.19's
+/// render error handler quit the app, and the next command (Play) was never
+/// processed: the `@engine-smoke` journey's "Playing" indicator never appeared.
+///
+/// The producer side is Bevy's own `check_views_need_specialization`, run here
+/// unmodified, so these tests follow Bevy if it adds another layout feature.
+#[cfg(test)]
+mod gizmo_view_key_tests {
+    use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::pbr::{check_views_need_specialization, MeshPipelineViewLayoutKey, ViewKeyCache};
+    use bevy::prelude::*;
+    use bevy::render::camera::DirtySpecializations;
+    use bevy::render::render_resource::TextureFormat;
+    use bevy::render::sync_world::MainEntity;
+    use bevy::render::view::{ColorGrading, ExtractedView, Msaa, RetainedViewEntity};
+
+    fn extracted_view(main: Entity, target_format: TextureFormat) -> ExtractedView {
+        ExtractedView {
+            retained_view_entity: RetainedViewEntity::new(MainEntity::from(main), None, 0),
+            clip_from_view: Mat4::IDENTITY,
+            world_from_view: GlobalTransform::IDENTITY,
+            clip_from_world: None,
+            target_format,
+            viewport: UVec4::new(0, 0, 1280, 720),
+            color_grading: ColorGrading::default(),
+            invert_culling: false,
+        }
+    }
+
+    /// A render world holding one editor-style view (non-HDR, tonemapped,
+    /// dithered, 4x MSAA — what `Camera3d`'s required components give the
+    /// editor camera), after Bevy's own view-key producer has run on it.
+    fn world_after_bevy_view_keys() -> (World, Entity) {
+        let mut world = World::new();
+        world.init_resource::<ViewKeyCache>();
+        world.init_resource::<DirtySpecializations>();
+        let main = world.spawn_empty().id();
+        let view = world
+            .spawn((
+                extracted_view(main, TextureFormat::Rgba8UnormSrgb),
+                Msaa::Sample4,
+                Tonemapping::TonyMcMapface,
+                DebandDither::Enabled,
+            ))
+            .id();
+        world
+            .run_system_once(check_views_need_specialization)
+            .expect("Bevy's view-key producer must run on a hand-built render world");
+        (world, view)
+    }
+
+    #[test]
+    fn gizmo_view_layout_matches_the_bound_view_bind_group() {
+        let (world, view) = world_after_bevy_view_keys();
+        let extracted = world.get::<ExtractedView>(view).unwrap();
+        let cache = world.resource::<ViewKeyCache>();
+
+        let cached = *cache
+            .get(&extracted.retained_view_entity)
+            .expect("vacuity guard: Bevy's producer cached no key for the view");
+        let gizmo = transform_gizmo_bevy::gizmo_view_key(cache, extracted)
+            .expect("a view with a cached key must get a gizmo key");
+
+        let gizmo_layout = MeshPipelineViewLayoutKey::from(gizmo);
+        // `prepare_mesh_view_bind_groups` adds the tonemapping LUT bindings
+        // (18/19) for any non-HDR camera; this is the exact incompatibility wgpu
+        // reported ("Assigned entry with binding 18 not found").
+        assert!(
+            gizmo_layout.contains(MeshPipelineViewLayoutKey::TONEMAP_IN_SHADER),
+            "gizmo pipeline layout {gizmo_layout:?} lacks TONEMAP_IN_SHADER; the bound \
+             view bind group has it, so wgpu rejects the draw and Bevy quits the app"
+        );
+        assert!(gizmo_layout.contains(MeshPipelineViewLayoutKey::MULTISAMPLED));
+        // The whole layout, not the two bits above: Bevy's own mesh passes take
+        // their layout from this cached key, and so must the gizmo.
+        assert_eq!(gizmo_layout, MeshPipelineViewLayoutKey::from(cached));
+        // The colour target and sample count still come through the key.
+        assert_eq!(gizmo.target_format(), TextureFormat::Rgba8UnormSrgb);
+        assert_eq!(gizmo.msaa_samples(), 4);
+    }
+
+    #[test]
+    fn a_view_with_no_cached_key_queues_no_gizmo() {
+        let mut world = World::new();
+        let main = world.spawn_empty().id();
+        let cache = ViewKeyCache::default();
+        let view = extracted_view(main, TextureFormat::Rgba8UnormSrgb);
+        assert!(transform_gizmo_bevy::gizmo_view_key(&cache, &view).is_none());
+    }
+}
