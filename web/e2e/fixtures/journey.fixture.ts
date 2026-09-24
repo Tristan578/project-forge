@@ -165,10 +165,11 @@ export const test = editorTest.extend<{ journeyTier: JourneyTier; journey: Journ
       sha,
       recordedAt: new Date(),
     });
-    await testInfo.attach(JOURNEY_EVIDENCE_ATTACHMENT, {
-      body: JSON.stringify(record, null, 2),
-      contentType: 'application/json',
-    });
+    // AC5 MUTATION (throwaway, do not merge): attach removed.
+    // await testInfo.attach(JOURNEY_EVIDENCE_ATTACHMENT, {
+    //   body: JSON.stringify(record, null, 2),
+    //   contentType: 'application/json',
+    // });
     // A mismatch the test body swallowed (or a journey with no steps) must
     // still fail the test: the record says fail, so the run may not say pass.
     if (record.outcome === 'fail' && status === 'passed') {
