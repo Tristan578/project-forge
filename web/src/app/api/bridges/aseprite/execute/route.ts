@@ -9,6 +9,25 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { BRIDGE_CACHE_TTL_MS } from '@/lib/config/timeouts';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { randomUUID } from 'crypto';
+import { unlinkSync } from 'fs';
+
+/**
+ * Template params that name files on the server. The templates hand them to
+ * `saveAs` / `app.open`, so taking them from a client let a caller choose where
+ * the server writes and what it opens (#10271). Clients may not send them; the
+ * server generates an output path itself and deletes the file afterwards.
+ */
+const SERVER_PATH_PARAMS = new Set(['outputPath', 'inputPath', 'outputPng', 'outputJson']);
+
+/**
+ * Templates only server code may run. `drawFrames` needs server-generated
+ * output paths and is reached through `drawPixelArt`, which validates the pixel
+ * data and returns the sheet.
+ */
+const SERVER_ONLY_TEMPLATES = new Set(['drawFrames']);
 
 const asepriteExecuteSchema = z.object({
   operation: z.string().min(1).max(100),
@@ -48,6 +67,21 @@ async function POST_impl(req: NextRequest) {
       );
     }
 
+    if (SERVER_ONLY_TEMPLATES.has(operation)) {
+      return NextResponse.json(
+        { error: `Operation "${operation}" is not available through this route` },
+        { status: 400 }
+      );
+    }
+
+    const clientPaths = Object.keys(params ?? {}).filter((key) => SERVER_PATH_PARAMS.has(key));
+    if (clientPaths.length > 0) {
+      return NextResponse.json(
+        { error: `File paths are chosen by the server. Remove: ${clientPaths.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
     const tool = await getCachedTool();
     if (tool.status !== 'connected') {
       return NextResponse.json(
@@ -65,10 +99,22 @@ async function POST_impl(req: NextRequest) {
       );
     }
 
-    const result = await executeOperation(binaryPath, {
-      name: operation,
-      params: params ?? {},
-    });
+    // The templates that save need a destination; it is the server's, under
+    // its temp directory, and is removed once the operation has run.
+    const outputPath = join(tmpdir(), 'spawnforge-bridge', `${randomUUID()}.aseprite`).replace(/\\/g, '/');
+    let result;
+    try {
+      result = await executeOperation(binaryPath, {
+        name: operation,
+        params: { ...(params ?? {}), outputPath },
+      });
+    } finally {
+      try {
+        unlinkSync(outputPath);
+      } catch {
+        /* never written */
+      }
+    }
 
     // Forwarding `result` verbatim is a leak on the SUCCESS path (#9736): a
     // BridgeResult carries `stdout`, `stderr` and `error: stderr || ...`, which

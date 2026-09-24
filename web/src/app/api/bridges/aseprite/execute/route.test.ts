@@ -5,7 +5,7 @@ import type { BridgeToolConfig, BridgeResult } from '@/lib/bridges/types';
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/bridges/luaTemplates', () => ({
-  ALLOWED_TEMPLATES: new Set(['createSprite', 'createAnimation', 'editSprite', 'applyPalette', 'exportSheet']),
+  ALLOWED_TEMPLATES: new Set(['createSprite', 'createAnimation', 'editSprite', 'applyPalette', 'exportSheet', 'drawFrames']),
 }));
 
 // Each test gets a fresh route module to avoid the module-level cache
@@ -14,7 +14,7 @@ async function importRoute() {
   // Re-apply mocks after reset (vi.doMock is not hoisted, unlike vi.mock)
   vi.doMock('server-only', () => ({}));
   vi.doMock('@/lib/bridges/luaTemplates', () => ({
-    ALLOWED_TEMPLATES: new Set(['createSprite', 'createAnimation', 'editSprite', 'applyPalette', 'exportSheet']),
+    ALLOWED_TEMPLATES: new Set(['createSprite', 'createAnimation', 'editSprite', 'applyPalette', 'exportSheet', 'drawFrames']),
   }));
   const { POST } = await import('./route');
   return POST;
@@ -327,7 +327,11 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(res.status).toBe(200);
     expect(nullParamsMock).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ name: 'createSprite', params: {} })
+      expect.objectContaining({
+        name: 'createSprite',
+        // The only param is the server's own output path (#10271).
+        params: { outputPath: expect.stringMatching(/spawnforge-bridge\/[0-9a-f-]+\.aseprite$/) },
+      })
     );
   });
 
@@ -352,8 +356,59 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(res.status).toBe(200);
     expect(executeOperationMock).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ name: 'createSprite', params: {} })
+      expect.objectContaining({
+        name: 'createSprite',
+        // The only param is the server's own output path (#10271).
+        params: { outputPath: expect.stringMatching(/spawnforge-bridge\/[0-9a-f-]+\.aseprite$/) },
+      })
     );
+  });
+
+  // #10271: templates hand these to saveAs / app.open. A client choosing them
+  // chose where the server writes and what it opens.
+  it.each([['outputPath'], ['inputPath'], ['outputPng'], ['outputJson']])(
+    'rejects a client-supplied %s before touching Aseprite',
+    async (key) => {
+      const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
+      vi.doMock('@/lib/auth/api-auth', () => ({
+        authenticateRequest: vi.fn().mockResolvedValue({
+          ok: true as const,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+        }),
+      }));
+      const discoverToolMock = vi.fn().mockResolvedValue(connectedConfig);
+      vi.doMock('@/lib/bridges/bridgeManager', () => ({ discoverTool: discoverToolMock }));
+      vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: executeOperationMock }));
+
+      const POST = await importRoute();
+      const res = await POST(
+        makeRequest({ operation: 'createSprite', params: { width: 16, [key]: 'C:/Windows/evil.aseprite' } }),
+      );
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toContain(key);
+      expect(executeOperationMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not run the server-only drawFrames template for a client', async () => {
+    const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
+    vi.doMock('@/lib/auth/api-auth', () => ({
+      authenticateRequest: vi.fn().mockResolvedValue({
+        ok: true as const,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+      }),
+    }));
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({ discoverTool: vi.fn().mockResolvedValue(connectedConfig) }));
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: executeOperationMock }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({ operation: 'drawFrames', params: {} }));
+
+    expect(res.status).toBe(400);
+    expect(executeOperationMock).not.toHaveBeenCalled();
   });
 
   it('returns 500 when executeOperation throws', async () => {
