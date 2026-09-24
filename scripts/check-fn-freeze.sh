@@ -42,13 +42,17 @@
 # the same name is resolved before functions once `shopt -s expand_aliases`
 # is on, so `alias fail=:` after a frozen `fail()` takes every later call
 # without an error, and neither line is a definition or a freeze. A
-# self-defense suite has no use for aliases, so the gate reports any
-# `alias NAME=` or `shopt -s expand_aliases` in command position of
-# executable text as a violation — through a leading backslash, `builtin`,
-# `command`, `time`, `!`, a compound keyword or an assignment prefix, all of
-# which still define the alias. `declare -n`, `eval` on a runtime-assembled
-# name, and a `source` of a file written at runtime remain outside this gate
-# (round 39 of the guide).
+# self-defense suite has no use for aliases, so the gate reports the WORDS
+# `alias NAME=` and `shopt -s expand_aliases` wherever they occur in
+# executable text, after the quote removal and backslash unescaping bash
+# itself performs before it looks a command up: `\alias`, `"alias"`,
+# `al"ias"`, `\a\l\i\a\s`, `$'alias'`, a backslash line continuation in the
+# middle of the statement, and anything in front of the word (`builtin`,
+# `command`, `time -p`, `X="1"`, `!`, `if`) are all the same word. A word
+# assembled at run time — `$x`, `$(...)`, `eval`, a `source` of a file
+# written by the suite — is not a word this scan can see, and `declare -n`
+# is a variable, not a function: those remain outside this gate (round 39
+# of the guide).
 #
 # Indented definitions are deliberately out of scope: they are nested inside
 # another function, an `if` arm, or a subshell, and a function defined inside a
@@ -112,67 +116,68 @@ derive_file() {
     }
     # Advance the lexer over one line, updating the quote state (q), the
     # context stack (d, st_q[]) and the heredoc queue (hd_n, hd_term[]).
-    # An unquoted word is in COMMAND POSITION at line start and after `;`,
-    # `&`, `|`, `(`, `)`, `{`, `}`. The flag is carried through the scan
-    # (cmdpos) rather than re-derived from the prefix, and it survives the
-    # words that bash lets stand in front of a command without ending it:
-    # a backslash on the first character (`\alias`), `builtin`, `command`,
-    # `time [-p]`, `!`, the compound keywords (`if`, `then`, `elif`, `else`,
-    # `do`, `while`, `until`, `coproc`) and an unquoted `NAME=value`
-    # assignment prefix. Every one of those still defines the alias in the
-    # running shell; the review board measured `\alias`, `builtin alias` and
-    # `command alias` as silent bypasses of a check that anchored only on the
-    # separator characters.
-    function lex_line(line,   n, i, c, c2, c3, rest, tok, peeled, used) {
+    # The scan also TOKENISES executable text into words the way bash does
+    # before it looks a command up: quotes of every kind are removed and the
+    # pieces joined (al"ias", the word in single or $ quotes), a backslash
+    # escapes the next character
+    # (`\a\l\i\a\s`), and whitespace or a control operator ends the word. The
+    # alias rule is then a check on WORDS, not on text position: the word
+    # `alias` followed by a word matching `NAME=`, or the words `shopt`,
+    # `-s` (any flag cluster containing s) and `expand_aliases`, anywhere in
+    # a line. That is what makes `\alias`, `builtin alias`, `time -p alias`,
+    # `X="1" alias`, `"alias" fail=:` and `\a\l\i\a\s fail=:` all one case —
+    # each spells the same word — instead of a list of prefixes that the
+    # review board extended twice and could always extend again. A word
+    # assembled at run time (`$x`, `$(...)`, `eval`, a sourced file) is not
+    # a word this scan can see; that is the documented bound.
+    function end_word() {
+      if (w != "") {
+        if (p1 == "alias" && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/)
+          printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
+        else if (p2 == "shopt" && p1 ~ /^-[a-z]*s[a-z]*$/ && w == "expand_aliases")
+          printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " p1 " " w, NR, NR
+        p2 = p1; p1 = w; w = ""
+      }
+    }
+    function end_command() { end_word(); p1 = ""; p2 = "" }
+    function lex_line(line,   n, i, c, c2, c3, rest, tok, carry) {
       n = length(line); i = 1
-      cmdpos = (q == "")
+      # A trailing unquoted backslash joins this line to the next one, so the
+      # word and the two words before it carry over (`alias \` + `fail=:`,
+      # or `al\` + `ias`, are one statement to bash).
+      carry = cont; cont = 0
+      if (q == "" && !carry) { p1 = ""; p2 = ""; w = "" }
       while (i <= n) {
         c = substr(line, i, 1); c2 = substr(line, i, 2); c3 = substr(line, i, 3)
-        if (q == "s") { if (c == "\047") { q = ""; cmdpos = 0 } i++; continue }
-        if (q == "a") { if (c == "\\") { i += 2; continue } if (c == "\047") { q = ""; cmdpos = 0 } i++; continue }
-        if (q == "d") {
-          if (c == "\\") { i += 2; continue }
-          if (c == "\"") { q = ""; cmdpos = 0; i++; continue }
-          if (c2 == "$(") { d++; st_q[d] = q; q = ""; cmdpos = 1; i += 2; continue }
+        if (q == "s") { if (c == "\047") q = ""; else w = w c; i++; continue }
+        if (q == "a") {
+          if (c == "\\") { w = w substr(line, i + 1, 1); i += 2; continue }
+          if (c == "\047") q = ""; else w = w c
           i++; continue
         }
-        if (c ~ /[[:space:]]/) { i++; continue }
-        # `readonly -f` freezes the FUNCTION binding; it does not stop a bash
-        # alias of the same name from taking every later call once
-        # `expand_aliases` is on, and neither spelling is a definition or a
-        # freeze, so the gate would otherwise never see it. A self-defense
-        # suite has no use for aliases: either builtin in command position
-        # of UNQUOTED text is a violation, whatever stands in front of it.
-        # This sits inside the lexer so an alias spelled inside a string or
-        # a heredoc fixture is text.
-        if (cmdpos) {
-          rest = substr(line, i)
-          while (1) {
-            if (substr(rest, 1, 1) == "\\") { rest = substr(rest, 2); continue }
-            if (match(rest, /^(builtin|command|time|if|then|elif|else|do|while|until|coproc|!)[[:space:]]+/)) { rest = substr(rest, RLENGTH + 1); continue }
-            if (match(rest, /^-p[[:space:]]+/)) { rest = substr(rest, RLENGTH + 1); continue }
-            if (match(rest, /^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]\047"$`\\]*[[:space:]]+/)) { rest = substr(rest, RLENGTH + 1); continue }
-            break
-          }
-          if (match(rest, /^(shopt[[:space:]]+-s[[:space:]]+expand_aliases|alias[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=)/)) {
-            used = (n - i + 1) - length(rest) + RLENGTH
-            printf "%s\t%s\t%d\t%d\talias\n", file, substr(line, i, used), NR, NR
-            i += used; cmdpos = 0; continue
-          }
+        if (q == "d") {
+          if (c == "\\") { w = w substr(line, i + 1, 1); i += 2; continue }
+          if (c == "\"") { q = ""; i++; continue }
+          if (c2 == "$(") { end_command(); d++; st_q[d] = q; q = ""; i += 2; continue }
+          w = w c; i++; continue
         }
-        if (c == "\\") { i += 2; cmdpos = 0; continue }
-        if (c2 == "$\047") { q = "a"; cmdpos = 0; i += 2; continue }
-        if (c == "\047") { q = "s"; cmdpos = 0; i++; continue }
-        if (c == "\"") { q = "d"; cmdpos = 0; i++; continue }
+        if (c == "\\") {
+          if (i == n) { cont = 1; i++; continue }
+          w = w substr(line, i + 1, 1); i += 2; continue
+        }
+        if (c2 == "$\047") { q = "a"; i += 2; continue }
+        if (c == "\047") { q = "s"; i++; continue }
+        if (c == "\"") { q = "d"; i++; continue }
         if (c == "#") {
-          if (i == 1 || substr(line, i - 1, 1) ~ /[[:space:];(&|]/) break
-          i++; cmdpos = 0; continue
+          if (i == 1 || substr(line, i - 1, 1) ~ /[[:space:];(&|]/) { end_word(); break }
+          w = w c; i++; continue
         }
-        if (c2 == "$(") { d++; st_q[d] = ""; cmdpos = 1; i += 2; continue }
-        if (c == "(") { d++; st_q[d] = ""; cmdpos = 1; i++; continue }
-        if (c == ")") { if (d > 0) { q = st_q[d]; d-- } cmdpos = 1; i++; continue }
-        if (c3 == "<<<") { i += 3; cmdpos = 0; continue }
+        if (c2 == "$(") { end_command(); d++; st_q[d] = ""; i += 2; continue }
+        if (c == "(") { end_command(); d++; st_q[d] = ""; i++; continue }
+        if (c == ")") { end_command(); if (d > 0) { q = st_q[d]; d-- } i++; continue }
+        if (c3 == "<<<") { end_word(); i += 3; continue }
         if (c2 == "<<") {
+          end_word()
           rest = substr(line, i + 2)
           strip = (substr(rest, 1, 1) == "-")
           sub(/^-?[[:space:]]*/, "", rest)
@@ -181,14 +186,15 @@ derive_file() {
             gsub(/[\047"\\]/, "", tok)
             hd_n++; hd_term[hd_n] = tok; hd_strip[hd_n] = strip
             i += 2 + (length(line) - i - 1 - length(rest)) + RLENGTH
-            cmdpos = 0
             continue
           }
-          i += 2; cmdpos = 0; continue
+          i += 2; continue
         }
-        if (c ~ /[;&|{}]/) { i++; cmdpos = 1; continue }
-        i++; cmdpos = 0
+        if (c ~ /[;&|]/) { end_command(); i++; continue }
+        if (c ~ /[[:space:]<>]/) { end_word(); i++; continue }
+        w = w c; i++
       }
+      if (q == "" && !cont) end_word()
     }
     {
       line = $0

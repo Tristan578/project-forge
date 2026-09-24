@@ -484,7 +484,7 @@ alias fail=:
 FIX
 )"
 expect_rc "19. 'shopt -s expand_aliases' and 'alias NAME=' in executable text are violations" 1 \
-  "$(run_gate "$d_alias")" "fixture.test.sh:3: 'shopt -s expand_aliases'" "fixture.test.sh:4: 'alias fail='" "2 violation(s)"
+  "$(run_gate "$d_alias")" "fixture.test.sh:3: 'shopt -s expand_aliases'" "fixture.test.sh:4: 'alias fail=:'" "2 violation(s)"
 d_alias_body="$(mkfixture alias-body <<'FIX'
 fail() { echo "  FAIL: $1"; }
 readonly -f fail
@@ -495,7 +495,7 @@ readonly -f neuter
 FIX
 )"
 expect_rc "19b. an alias inside a function body is still a violation" 1 \
-  "$(run_gate "$d_alias_body")" "fixture.test.sh:4: 'alias fail='"
+  "$(run_gate "$d_alias_body")" "fixture.test.sh:4: 'alias fail=:'"
 d_alias_text="$(mkfixture alias-text <<'FIX'
 fail() { echo "  FAIL: $1"; }
 readonly -f fail
@@ -510,9 +510,11 @@ FIX
 )"
 expect_rc "19c. alias text inside quotes, a heredoc fixture or a comment is not a violation" 0 \
   "$(run_gate "$d_alias_text")" "1 function(s) across 1 file(s) are frozen"
-# Every word bash lets stand in front of a command still defines the alias:
-# the review board measured `\alias`, `builtin alias` and `command alias` as
-# silent bypasses of an anchor that only looked at separator characters.
+# Every spelling bash resolves to the same WORD is the same violation: the
+# review board measured `\alias`, `builtin alias`, `command alias`, then
+# `X="1" alias`, then `\a\l\i\a\s` and a backslash continuation, as silent
+# bypasses of two successive prefix lists. The rule is now on the tokenised
+# word, so this fixture is one line per spelling and every line must report.
 d_alias_prefix="$(mkfixture alias-prefix <<'FIX'
 fail() { echo "  FAIL: $1"; }
 readonly -f fail
@@ -524,21 +526,39 @@ if alias fail=:; then :; fi
 X=1 alias fail=:
 ! alias fail=:
 \builtin \alias fail=:
+X="1" alias fail=:
+X='has space' alias fail=:
+time -p alias fail=:
+"alias" fail=:
+al"ias" fail=:
+\a\l\i\a\s fail=:
+\s\h\o\p\t -s expand_aliases
+$'alias' fail=:
+shopt -sq expand_aliases
+'alias' fail=:
+alias \
+  fail=:
 FIX
 )"
-expect_rc "19e. a backslash, builtin, command, time, if, an assignment prefix, ! and their combinations do not hide an alias" 1 \
-  "$(run_gate "$d_alias_prefix")" "8 violation(s)" \
-  "fixture.test.sh:3: '\shopt -s expand_aliases'" "fixture.test.sh:4: 'builtin alias fail='" \
-  "fixture.test.sh:5: 'command alias fail='" "fixture.test.sh:6: 'time alias fail='" \
-  "fixture.test.sh:7: 'if alias fail='" "fixture.test.sh:8: 'X=1 alias fail='" \
-  "fixture.test.sh:9: '! alias fail='" "fixture.test.sh:10: '\builtin \alias fail='"
-# ...and each of those really binds in this bash, so the rule guards measured
-# bypasses, not a list someone imagined (lessons-learned #19 in reverse).
-alias_prefix_probe="$(bash -c 'fail() { echo REAL; }; readonly -f fail; \shopt -s expand_aliases; builtin alias fail="echo ALIASED"; eval fail' 2>&1)"
-if [ "$alias_prefix_probe" = "ALIASED" ]; then
-  pass "19f. '\\shopt' and 'builtin alias' define the alias for real in this bash"
+expect_rc "19e. every spelling of the alias word — prefixes, quoted assignments, quoted or escaped letters, a line continuation — is a violation" 1 \
+  "$(run_gate "$d_alias_prefix")" "19 violation(s)" \
+  "fixture.test.sh:3: 'shopt -s expand_aliases'" "fixture.test.sh:4: 'alias fail=:'" \
+  "fixture.test.sh:5: 'alias fail=:'" "fixture.test.sh:6: 'alias fail=:'" \
+  "fixture.test.sh:7: 'alias fail=:'" "fixture.test.sh:8: 'alias fail=:'" \
+  "fixture.test.sh:9: 'alias fail=:'" "fixture.test.sh:10: 'alias fail=:'" \
+  "fixture.test.sh:11: 'alias fail=:'" "fixture.test.sh:12: 'alias fail=:'" \
+  "fixture.test.sh:13: 'alias fail=:'" "fixture.test.sh:14: 'alias fail=:'" \
+  "fixture.test.sh:15: 'alias fail=:'" "fixture.test.sh:16: 'alias fail=:'" \
+  "fixture.test.sh:17: 'shopt -s expand_aliases'" "fixture.test.sh:18: 'alias fail=:'" \
+  "fixture.test.sh:19: 'shopt -sq expand_aliases'" "fixture.test.sh:20: 'alias fail=:'" \
+  "fixture.test.sh:22: 'alias fail=:'"
+# The three spellings that defeated the previous rounds bind for real in this
+# bash, so the rule guards measured bypasses (lessons-learned #19 in reverse).
+alias_spellings_probe="$(bash -c 'fail() { echo REAL; }; readonly -f fail; \s\h\o\p\t -s expand_aliases; X="1" \a\l\i\a\s fail="echo ALIASED"; eval fail' 2>&1)"
+if [ "$alias_spellings_probe" = "ALIASED" ]; then
+  pass "19f. '\\s\\h\\o\\p\\t', a quoted assignment prefix and '\\a\\l\\i\\a\\s' define the alias for real in this bash"
 else
-  fail "19f. prefix probe did not shadow the frozen function (got '$alias_prefix_probe')"
+  fail "19f. spelling probe did not shadow the frozen function (got '$alias_spellings_probe')"
 fi
 # The refusal is the whole point: prove the alias really does shadow a frozen
 # function in this bash, so the rule guards a real bypass and not a theory.

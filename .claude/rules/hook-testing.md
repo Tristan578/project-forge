@@ -177,10 +177,11 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   parent shell only.
 - No `alias NAME=` and no `shopt -s expand_aliases` anywhere in a suite: an
   alias is resolved before functions and `readonly -f` does not stop it, so the
-  gate reports either one in executable text as a violation, through a
-  leading backslash, `builtin`, `command`, `time`, `!`, a compound keyword or
-  an assignment prefix. Inside a quoted string, a heredoc fixture or a
-  comment it is text and is ignored.
+  gate reports either WORD wherever it occurs in executable text, after the
+  quote removal and unescaping bash performs (`\alias`, `"alias"`,
+  `\a\l\i\a\s`, a continuation line, anything in front of it). A word inside
+  a quoted string that contains more than the word, a heredoc fixture or a
+  comment is text and is ignored.
 - Heredocs follow bash: only `<<-` strips leading tabs before the terminator;
   a plain `<<` body runs to the column-0 delimiter, tab-indented lookalikes
   included.

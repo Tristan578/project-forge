@@ -878,15 +878,19 @@ a forced failure exits 0 — the same silent pass as the pre-sweep neuter, from
 two inserted lines the first cut of the gate could not see (the review board's
 security seat found it). The gate now reports either spelling in command
 position of executable text as a violation; a self-defense suite has no use
-for aliases. Command position is tracked through the scan and survives every
-word bash lets stand in front of a command — a leading backslash (`\alias`),
-`builtin`, `command`, `time`, `!`, the compound keywords and an unquoted
-`NAME=value` prefix — because the second board round measured `\alias`,
-`builtin alias` and `command alias` as silent bypasses of an anchor that
-looked only at separator characters. That closes the literal spellings —
-`declare -n` aliasing of a VARIABLE, `eval` on a runtime-assembled name and a
-`source` of a file written at runtime remain open (round 39), as does an
-`alias` assembled by `eval`. Nested definitions are deliberately
+for aliases. The rule is on the WORD, not on text: the lexer tokenises
+executable text the way bash does before a command lookup — quotes removed
+and joined, each backslash escaping the next character, a trailing backslash
+joining the next line — and reports the word `alias` followed by a `NAME=`
+word, or `shopt`, an `s` flag cluster and `expand_aliases`, anywhere. That is
+one case for every spelling the board found across two rounds (`\alias`,
+`builtin alias`, `command alias`, then `X="1" alias`, then `\a\l\i\a\s`,
+`"alias"`, `al"ias"`, `$'alias'` and `alias \` + `fail=:`), where the two
+prefix lists that preceded it were each defeated by the next spelling (the
+same treadmill round 39 documents for assignment keywords). What stays open
+is a word assembled at run time — `$x`, `$(...)`, `eval`, a `source` of a
+file the suite wrote — and `declare -n`, which aliases a variable, not a
+function. Nested definitions are deliberately
 unfrozen. And removing BOTH a definition and its freeze still satisfies the
 gate, as it did the round-40 drift check — the effect probe and the neuter
 reproduction are what prove a surviving freeze is in force.
