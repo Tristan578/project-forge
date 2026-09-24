@@ -45,9 +45,17 @@ echo "$AUDIT_OUTPUT"
 # ---------------------------------------------------------------------------
 # Parse and summarize results
 # ---------------------------------------------------------------------------
-FAIL_COUNT=$(echo "$AUDIT_OUTPUT" | grep -c "  FAIL:" 2>/dev/null || echo "0")
-WARN_COUNT=$(echo "$AUDIT_OUTPUT" | grep -c "  WARN:" 2>/dev/null || echo "0")
-PASS_COUNT=$(echo "$AUDIT_OUTPUT" | grep -c "  PASS:" 2>/dev/null || echo "0")
+# dx-audit.sh colours every label ("  <ESC>[0;32mPASS<ESC>[0m: ..."), so a
+# plain "  PASS:" never matched: every count read 0 and the summary said
+# "DX HEALTHY" over real failures. Strip the SGR codes first. The ESC byte comes
+# from $'\033' because BSD sed has no \x1b escape.
+ESC=$'\033'
+PLAIN_OUTPUT=$(printf '%s\n' "$AUDIT_OUTPUT" | sed "s/${ESC}\[[0-9;]*m//g")
+# grep -c prints 0 AND exits 1 on no match; `|| true` keeps that single 0
+# (an `|| echo 0` fallback appended a second one).
+FAIL_COUNT=$(printf '%s\n' "$PLAIN_OUTPUT" | grep -c "^  FAIL:" || true)
+WARN_COUNT=$(printf '%s\n' "$PLAIN_OUTPUT" | grep -c "^  WARN:" || true)
+PASS_COUNT=$(printf '%s\n' "$PLAIN_OUTPUT" | grep -c "^  PASS:" || true)
 
 echo ""
 echo "=============================================="
@@ -62,11 +70,13 @@ if [ "$FAIL_COUNT" -gt 0 ]; then
   echo -e "  ${RED}RESULT: DX ISSUES FOUND — ${FAIL_COUNT} failure(s)${NC}"
   echo ""
   echo "  Top issues to fix:"
-  echo "$AUDIT_OUTPUT" | sed -n '/  FAIL:/{s/^/    /;p;}' | sed -n '1,10p'
+  printf '%s\n' "$PLAIN_OUTPUT" | sed -n '/^  FAIL:/{s/^/    /;p;}' | sed -n '1,10p'
   echo ""
   echo "  References:"
   echo "  - .claude/skills/developer-experience/references/dx-standards.md"
   echo "  - .claude/tools/dx-audit.sh (full audit)"
+elif [ "$AUDIT_EXIT" -ne 0 ]; then
+  echo -e "  ${RED}RESULT: AUDIT EXITED ${AUDIT_EXIT} with no FAIL line parsed; read the output above${NC}"
 elif [ "$WARN_COUNT" -gt 0 ]; then
   echo -e "  ${YELLOW}RESULT: DX OK with ${WARN_COUNT} warning(s) — review above${NC}"
 else
