@@ -55,9 +55,15 @@ function now(): number {
 }
 
 /**
- * Computes the Nth percentile from a sorted array of numbers.
+ * Computes the Nth percentile from a sorted array of numbers, interpolating
+ * linearly between the two nearest ranks.
+ *
+ * Returns `0` for an empty array. That is fine for `benchmark()`, which always
+ * has `iterations` samples, but a caller whose sample set can be empty (the
+ * frame-capture harness in `frameCapture.ts`) must check for that first and
+ * report `'unknown'` — a 0 ms p95 reads as a real, passing measurement.
  */
-function percentile(sorted: number[], p: number): number {
+export function percentile(sorted: readonly number[], p: number): number {
   if (sorted.length === 0) return 0;
   const idx = (p / 100) * (sorted.length - 1);
   const lower = Math.floor(idx);

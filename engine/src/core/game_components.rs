@@ -803,6 +803,144 @@ pub struct GameEvent {
     pub target_entity_id: Option<String>,
 }
 
+// ---- Staged inserts for same-frame adds (#10193) ----
+
+/// Game components staged for entities that had no `GameComponents` when the
+/// current `add_game_component` drain began.
+///
+/// The bridge's `apply_game_component_adds` inserts a missing `GameComponents`
+/// through deferred `Commands`, which Bevy applies only after the system
+/// returns. A second add for the same entity in the same drain therefore
+/// still sees no component, and building a fresh `GameComponents` for it made
+/// the second insert REPLACE the first: an entity given a Character Controller
+/// and Health in one frame kept only Health. Staging the pending inserts here
+/// keeps every add for one entity in ONE `GameComponents`, inserted once at
+/// the end of the drain, and lets each add's event and history entry describe
+/// the accumulated set.
+///
+/// Lives in `core/` so it can be tested natively; the bridge is wasm32-only.
+#[derive(Debug, Default)]
+pub struct StagedGameComponents {
+    staged: Vec<(Entity, GameComponents)>,
+}
+
+impl StagedGameComponents {
+    /// The components already staged for `entity`, if any.
+    pub fn get(&self, entity: Entity) -> Option<&GameComponents> {
+        self.staged.iter().find(|(e, _)| *e == entity).map(|(_, gc)| gc)
+    }
+
+    /// Stage `component` for `entity`, merging into anything already staged
+    /// for it under `GameComponents::add`'s replace-by-type rule.
+    ///
+    /// Returns the staged set before the add (`None` for the entity's first
+    /// add this drain) and a clone of the set after it, the pair a history
+    /// entry records.
+    pub fn add(
+        &mut self,
+        entity: Entity,
+        component: GameComponentData,
+    ) -> (Option<GameComponents>, GameComponents) {
+        if let Some((_, gc)) = self.staged.iter_mut().find(|(e, _)| *e == entity) {
+            let before = gc.clone();
+            gc.add(component);
+            return (Some(before), gc.clone());
+        }
+        let mut gc = GameComponents::default();
+        gc.add(component);
+        self.staged.push((entity, gc.clone()));
+        (None, gc)
+    }
+
+    /// Every staged insert, one per entity, in first-seen order.
+    pub fn into_inserts(self) -> Vec<(Entity, GameComponents)> {
+        self.staged
+    }
+}
+
+#[cfg(test)]
+mod staged_game_components_tests {
+    use super::{
+        CharacterControllerData, GameComponentData, HealthData, StagedGameComponents,
+    };
+    use bevy::prelude::*;
+
+    fn controller() -> GameComponentData {
+        GameComponentData::CharacterController(CharacterControllerData::default())
+    }
+
+    fn health(max_hp: f32) -> GameComponentData {
+        GameComponentData::Health(HealthData { max_hp, current_hp: max_hp, ..HealthData::default() })
+    }
+
+    fn names(gc: &super::GameComponents) -> Vec<&'static str> {
+        gc.components.iter().map(|c| c.component_name()).collect()
+    }
+
+    /// The #10193 case: two different components for one entity in one drain
+    /// end up in ONE insert holding both, and the second add's history pair
+    /// records the first add as its `old` side.
+    #[test]
+    fn two_adds_for_one_entity_share_one_insert() {
+        let mut world = World::new();
+        let player = world.spawn_empty().id();
+        let mut staged = StagedGameComponents::default();
+
+        let (old_first, new_first) = staged.add(player, controller());
+        assert!(old_first.is_none());
+        assert_eq!(names(&new_first), vec!["character_controller"]);
+
+        let (old_second, new_second) = staged.add(player, health(100.0));
+        assert_eq!(names(old_second.as_ref().expect("first add is the old side")), vec!["character_controller"]);
+        assert_eq!(names(&new_second), vec!["character_controller", "health"]);
+
+        let inserts = staged.into_inserts();
+        assert_eq!(inserts.len(), 1, "one insert per entity, never one per add");
+        assert_eq!(inserts[0].0, player);
+        assert_eq!(names(&inserts[0].1), vec!["character_controller", "health"]);
+    }
+
+    /// Same type twice in one drain keeps ONE component of that type carrying
+    /// the second payload — the existing replace-by-type rule of `add`.
+    #[test]
+    fn same_type_twice_keeps_the_second_payload() {
+        let mut world = World::new();
+        let player = world.spawn_empty().id();
+        let mut staged = StagedGameComponents::default();
+
+        staged.add(player, health(50.0));
+        let (_, after) = staged.add(player, health(200.0));
+
+        assert_eq!(names(&after), vec!["health"]);
+        match &after.components[0] {
+            GameComponentData::Health(h) => assert_eq!(h.max_hp, 200.0),
+            other => panic!("expected health, got {other:?}"),
+        }
+        assert_eq!(staged.into_inserts().len(), 1);
+    }
+
+    #[test]
+    fn different_entities_stay_separate_in_first_seen_order() {
+        let mut world = World::new();
+        let a = world.spawn_empty().id();
+        let b = world.spawn_empty().id();
+        let mut staged = StagedGameComponents::default();
+
+        assert!(staged.get(a).is_none());
+        staged.add(a, controller());
+        staged.add(b, health(10.0));
+        staged.add(a, health(20.0));
+        assert!(staged.get(a).is_some());
+
+        let inserts = staged.into_inserts();
+        assert_eq!(inserts.len(), 2);
+        assert_eq!(inserts[0].0, a);
+        assert_eq!(names(&inserts[0].1), vec!["character_controller", "health"]);
+        assert_eq!(inserts[1].0, b);
+        assert_eq!(names(&inserts[1].1), vec!["health"]);
+    }
+}
+
 // ---- Plugin ----
 
 pub struct GameComponentsPlugin;
@@ -1260,44 +1398,166 @@ fn system_collectible(
 
 /// Collision tracking system: reads Rapier CollisionEvents and updates the runtime's
 /// active_collisions set. Must run before all game component systems that need overlap info.
+///
+/// Reads BOTH simulations. A 2D project's bodies are stepped by `bevy_rapier2d`
+/// (`physics_2d_sim.rs`), whose contacts arrive as `bevy_rapier2d`'s own
+/// `CollisionEvent` type; until #10194 only the 3D reader fed this set, so in a
+/// 2D game no Collectible, Damage Zone, Checkpoint, Teleporter, Trigger Zone or
+/// `reachGoal` win condition ever saw a contact. The two message streams are
+/// merged here rather than in a sibling system so `prev_collisions` rotates
+/// exactly once per frame.
 fn system_track_collisions(
     mut collision_events: MessageReader<CollisionEvent>,
+    mut collision_events_2d: MessageReader<bevy_rapier2d::prelude::CollisionEvent>,
     entity_id_query: Query<&EntityId>,
     runtime: Option<ResMut<GameComponentRuntime>>,
 ) {
     let Some(mut runtime) = runtime else {
         collision_events.clear();
+        collision_events_2d.clear();
         return;
     };
 
     // Rotate: current -> prev, then rebuild current from events
     runtime.prev_collisions = runtime.active_collisions.clone();
 
+    let transitions_3d = collision_events.read().map(|event| match event {
+        CollisionEvent::Started(a, b, _) => (*a, *b, true),
+        CollisionEvent::Stopped(a, b, _) => (*a, *b, false),
+    });
+    let transitions_2d = collision_events_2d.read().map(|event| match event {
+        bevy_rapier2d::prelude::CollisionEvent::Started(a, b, _) => (*a, *b, true),
+        bevy_rapier2d::prelude::CollisionEvent::Stopped(a, b, _) => (*a, *b, false),
+    });
+
     // Process collision events: Started adds pairs, Stopped removes them
-    for event in collision_events.read() {
-        match event {
-            CollisionEvent::Started(a, b, _) => {
-                if let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(*a), entity_id_query.get(*b)) {
-                    // Store in canonical order for consistent lookups
-                    let pair = if id_a.0 <= id_b.0 {
-                        (id_a.0.clone(), id_b.0.clone())
-                    } else {
-                        (id_b.0.clone(), id_a.0.clone())
-                    };
-                    runtime.active_collisions.insert(pair);
-                }
-            }
-            CollisionEvent::Stopped(a, b, _) => {
-                if let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(*a), entity_id_query.get(*b)) {
-                    let pair = if id_a.0 <= id_b.0 {
-                        (id_a.0.clone(), id_b.0.clone())
-                    } else {
-                        (id_b.0.clone(), id_a.0.clone())
-                    };
-                    runtime.active_collisions.remove(&pair);
-                }
-            }
+    for (a, b, started) in transitions_3d.chain(transitions_2d) {
+        let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(a), entity_id_query.get(b)) else {
+            continue;
+        };
+        // Store in canonical order for consistent lookups
+        let pair = if id_a.0 <= id_b.0 {
+            (id_a.0.clone(), id_b.0.clone())
+        } else {
+            (id_b.0.clone(), id_a.0.clone())
+        };
+        if started {
+            runtime.active_collisions.insert(pair);
+        } else {
+            runtime.active_collisions.remove(&pair);
         }
+    }
+}
+
+#[cfg(test)]
+mod track_collisions_tests {
+    use super::{system_track_collisions, GameComponentRuntime};
+    use crate::core::entity_id::EntityId;
+    use bevy::prelude::*;
+    use bevy_rapier2d::prelude::CollisionEvent as CollisionEvent2d;
+    use bevy_rapier2d::rapier::geometry::CollisionEventFlags as Flags2d;
+    use bevy_rapier3d::prelude::CollisionEvent as CollisionEvent3d;
+    use bevy_rapier3d::rapier::geometry::CollisionEventFlags as Flags3d;
+
+    /// A world with both Rapier message streams registered, the play-mode
+    /// runtime present, and a persistent schedule running the tracker — the
+    /// reader's cursor must survive across runs, which `run_system_once`'s
+    /// fresh system per call would not give.
+    fn play_world() -> (World, Schedule, Entity, Entity) {
+        let mut world = World::new();
+        world.init_resource::<Messages<CollisionEvent2d>>();
+        world.init_resource::<Messages<CollisionEvent3d>>();
+        world.insert_resource(GameComponentRuntime::default());
+        let player = world.spawn(EntityId::new("player")).id();
+        let coin = world.spawn(EntityId::new("coin")).id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(system_track_collisions);
+        (world, schedule, player, coin)
+    }
+
+    fn active(world: &World) -> Vec<(String, String)> {
+        let mut pairs: Vec<_> = world
+            .resource::<GameComponentRuntime>()
+            .active_collisions
+            .iter()
+            .cloned()
+            .collect();
+        pairs.sort();
+        pairs
+    }
+
+    /// The #10194 case: a contact reported by the 2D simulation reaches
+    /// `active_collisions`, in the same canonical order the 3D path uses, so
+    /// every contact-driven component works in a 2D project.
+    #[test]
+    fn a_2d_contact_reaches_active_collisions() {
+        let (mut world, mut schedule, player, coin) = play_world();
+
+        world.write_message(CollisionEvent2d::Started(coin, player, Flags2d::SENSOR));
+        schedule.run(&mut world);
+
+        assert_eq!(active(&world), vec![("coin".to_string(), "player".to_string())]);
+
+        world.write_message(CollisionEvent2d::Stopped(player, coin, Flags2d::SENSOR));
+        schedule.run(&mut world);
+
+        assert_eq!(active(&world), Vec::<(String, String)>::new());
+        // The frame before the stop is still visible as the previous set.
+        assert_eq!(
+            world.resource::<GameComponentRuntime>().prev_collisions.len(),
+            1,
+            "prev_collisions rotates once per frame"
+        );
+    }
+
+    /// 3D behaviour is unchanged by the merge.
+    #[test]
+    fn a_3d_contact_still_reaches_active_collisions() {
+        let (mut world, mut schedule, player, coin) = play_world();
+
+        world.write_message(CollisionEvent3d::Started(player, coin, Flags3d::empty()));
+        schedule.run(&mut world);
+
+        assert_eq!(active(&world), vec![("coin".to_string(), "player".to_string())]);
+    }
+
+    /// Both streams in one frame land in one set, and a contact against an
+    /// entity with no `EntityId` (a Rapier-internal body) is ignored rather
+    /// than panicking.
+    #[test]
+    fn both_streams_merge_and_unknown_entities_are_skipped() {
+        let (mut world, mut schedule, player, coin) = play_world();
+        let goal = world.spawn(EntityId::new("goal")).id();
+        let anonymous = world.spawn_empty().id();
+
+        world.write_message(CollisionEvent3d::Started(player, coin, Flags3d::empty()));
+        world.write_message(CollisionEvent2d::Started(player, goal, Flags2d::SENSOR));
+        world.write_message(CollisionEvent2d::Started(player, anonymous, Flags2d::empty()));
+        schedule.run(&mut world);
+
+        assert_eq!(
+            active(&world),
+            vec![
+                ("coin".to_string(), "player".to_string()),
+                ("goal".to_string(), "player".to_string()),
+            ]
+        );
+    }
+
+    /// Outside Play (no runtime) both readers are drained so a stale contact
+    /// from Edit mode cannot be counted on the first Play frame.
+    #[test]
+    fn without_a_runtime_both_streams_are_cleared() {
+        let (mut world, mut schedule, player, coin) = play_world();
+        world.remove_resource::<GameComponentRuntime>();
+        world.write_message(CollisionEvent2d::Started(player, coin, Flags2d::SENSOR));
+        world.write_message(CollisionEvent3d::Started(player, coin, Flags3d::empty()));
+        schedule.run(&mut world);
+
+        world.insert_resource(GameComponentRuntime::default());
+        schedule.run(&mut world);
+
+        assert_eq!(active(&world), Vec::<(String, String)>::new());
     }
 }
 

@@ -15,6 +15,9 @@
  *   - every status cell is exactly one of the five statuses, and every
  *     non-proven, non-excluded cell names the issue that tracks the gap;
  *   - every row with an `excluded` cell says why in its Notes column;
+ *   - no row with a `proven` cell cites, in Notes, a spec file that declares a
+ *     substitution (`web/e2e/lib/substitution.ts`, #10158) — a spec that
+ *     stands store injection or a mock in for a component cannot prove it;
  *   - the Legend TABLE (not just the prose) defines all five statuses;
  *   - the manifest counts the prose quotes (351 / 41 / 282 / 69) and the
  *     per-category `public/internal` count that opens every `commands:` row's
@@ -38,14 +41,16 @@
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { PROVIDER_CAPABILITIES } from '../providers';
 import { BRIDGE_DENIED_CATEGORIES, bridgeAllowedCommands } from '@/lib/mcp/bridgeAllowlist';
 import { getChatTools } from '@/lib/chat/tools';
+import { listSpecFiles, sourceDeclaresSubstitution } from '../../../../e2e/lib/substitution';
 
 // __dirname is web/src/lib/config/__tests__ — five levels below the repo root.
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..', '..');
 const MATRIX_PATH = join(REPO_ROOT, 'docs', 'capability-matrix.md');
+const E2E_DIR = join(REPO_ROOT, 'web', 'e2e');
 const README_PATH = join(REPO_ROOT, 'README.md');
 const DOCS_SITE_COPY_PATH = join(REPO_ROOT, 'apps', 'docs', 'data', 'capability-matrix.json');
 const MANIFEST_PATH = join(REPO_ROOT, 'mcp-server', 'manifest', 'commands.json');
@@ -241,6 +246,59 @@ export function checkMatrix(
   return report;
 }
 
+/** The entry-point columns of a row whose cell is `proven`, in document order. */
+export function provenColumns(row: MatrixRow): EntryPointColumn[] {
+  return ENTRY_POINT_COLUMNS.filter((column) => CELL_RE.exec(row.cells[column])?.[1] === 'proven');
+}
+
+/** Spec files a Notes cell cites, by basename: `engine-smoke.spec.ts`, `web/e2e/tests/journey.spec.ts`. */
+const SPEC_CITATION_RE = /(?:[\w.-]+\/)*([\w.-]+\.spec\.ts)\b/g;
+
+export function citedSpecs(notes: string): string[] {
+  return [...notes.matchAll(SPEC_CITATION_RE)].map((match) => match[1]);
+}
+
+/**
+ * Basenames of the spec files whose source declares a substitution — the
+ * literal `{ type: 'substitution', ... }` annotation of `web/e2e/lib/substitution.ts`.
+ */
+export function substitutedSpecBasenames(specFiles: readonly string[]): Set<string> {
+  return new Set(
+    specFiles.filter((file) => sourceDeclaresSubstitution(readFileSync(file, 'utf8'))).map((file) => basename(file)),
+  );
+}
+
+/**
+ * A `proven` cell's evidence has to exercise the component it proves (#10158,
+ * epic #9723 criterion 3). A spec that stands something in for that component
+ * — store injection for the AI, a store setter for the engine — declares it
+ * with a substitution annotation, and a row with a `proven` cell whose Notes
+ * cite such a spec is refused, whatever the spec's other tests do. Matched by
+ * basename, so an ambiguous name is treated as the substituted one.
+ */
+export function checkProvenCitations(
+  rows: readonly MatrixRow[],
+  substitutedSpecs: ReadonlySet<string>,
+): MatrixProblem[] {
+  const problems: MatrixProblem[] = [];
+  for (const row of rows) {
+    const proven = provenColumns(row);
+    if (proven.length === 0) continue;
+    for (const spec of new Set(citedSpecs(row.notes))) {
+      if (!substitutedSpecs.has(spec)) continue;
+      problems.push({
+        row: `${row.kind}:${row.key}`,
+        line: row.line,
+        column: proven.join(', '),
+        reason:
+          `Notes cite ${spec}, which contains a substitution-annotated test ([substituted: …]); ` +
+          'a proven cell cannot rest on a spec that stands in for the component it proves',
+      });
+    }
+  }
+  return problems;
+}
+
 export function formatProblems(problems: readonly MatrixProblem[]): string {
   return problems
     .map((p) => `  ${p.row} [${p.column}] (docs/capability-matrix.md:${p.line}): ${p.reason}`)
@@ -346,6 +404,35 @@ describe('docs/capability-matrix.md', () => {
 
   it('uses only the five statuses, with an issue on every non-proven, non-excluded cell', () => {
     expect(report.problems, `\n${formatProblems(report.problems)}\n`).toEqual([]);
+  });
+
+  it('never rests a proven cell on a spec that declares a substitution (#10158)', () => {
+    // The set comes from the literal `type: 'substitution'` declaration, the
+    // form scripts/check-substitution-naming.ts proves agrees with Playwright's
+    // own listing in CI — so a declaration this scan cannot see fails there.
+    const specFiles = listSpecFiles(E2E_DIR);
+    expect(specFiles.length, `no *.spec.ts files under ${E2E_DIR}`).toBeGreaterThan(0);
+    const substituted = substitutedSpecBasenames(specFiles);
+    // The journeys #10158 annotated. One leaving this list means it stopped
+    // substituting — remove it here in the change that proves that.
+    for (const spec of [
+      'journey.spec.ts',
+      'save-load-roundtrip.spec.ts',
+      'game-creation-flow.spec.ts',
+      'ai-game-creation.spec.ts',
+    ]) {
+      expect(substituted.has(spec), `${spec} no longer declares a substitution`).toBe(true);
+    }
+    // Fail closed: a walk over no proven row, or proven rows that cite no spec,
+    // would read as "no proven cell rests on a substitution".
+    const provenRows = rows.filter((row) => provenColumns(row).length > 0);
+    expect(provenRows.length, 'no row has a proven cell — this check would be vacuous').toBeGreaterThan(0);
+    expect(
+      provenRows.flatMap((row) => citedSpecs(row.notes)).length,
+      'no proven row cites a spec file in Notes — this check would be vacuous',
+    ).toBeGreaterThan(0);
+    const problems = checkProvenCitations(rows, substituted);
+    expect(problems, `\n${formatProblems(problems)}\n`).toEqual([]);
   });
 
   it('defines every status in the table under the Legend heading', () => {
@@ -624,6 +711,40 @@ describe('command counts quoted across the repo', () => {
       `\ncounts matching none of ${[...allowedCommands].join('/')} commands or ${categoryCount} categories:\n${offenders.join('\n')}\n`,
     ).toEqual([]);
   });
+
+  // The date is part of a dated count. `.claude/docs/engine-api-reference.md`
+  // said "379 commands across 41 categories, measured 2026-09-05" — a day the
+  // manifest held 374 — because the count pins above forced the digit to move
+  // and nothing moved the date beside it, while README.md's copy of the same
+  // measurement said 2026-09-22 (#9904). Every count in these files comes from
+  // one manifest, so every "measured <date>" in them must name one
+  // measurement, and no file's "Last updated" header may predate the counts it
+  // quotes — every one of them had to change when those counts did.
+  it('dates every quoted count to one measurement, and no counted file is "last updated" before it', () => {
+    const MEASURED = /\bmeasured\s+(\d{4}-\d{2}-\d{2})\b/g;
+    // "> Last updated: 2026-09-05" and "> **Last updated:** 2026-09-16" both occur.
+    const LAST_UPDATED = /Last updated:?\**:?\s*(\d{4}-\d{2}-\d{2})/;
+    const measurements: { path: string; date: string }[] = [];
+    const lastUpdated: { path: string; date: string }[] = [];
+    for (const doc of docs) {
+      const text = read(doc.path);
+      for (const match of text.matchAll(MEASURED)) measurements.push({ path: doc.path, date: match[1] });
+      const updated = LAST_UPDATED.exec(text);
+      if (updated) lastUpdated.push({ path: doc.path, date: updated[1] });
+    }
+    // Agreement needs at least two dated quotes; a header walk that finds none
+    // would pass the ordering check below vacuously (lesson #9).
+    expect(measurements.length, 'fewer than two counted docs date their measurement').toBeGreaterThanOrEqual(2);
+    expect(lastUpdated.length, 'no counted doc carries a "Last updated" header').toBeGreaterThanOrEqual(1);
+    const dates = [...new Set(measurements.map((m) => m.date))];
+    expect(
+      dates,
+      `counted docs cite different measurement dates:\n${measurements.map((m) => `${m.path}: ${m.date}`).join('\n')}\n`,
+    ).toHaveLength(1);
+    // ISO dates order correctly as strings.
+    const stale = lastUpdated.filter((u) => u.date < dates[0]).map((u) => `${u.path}: last updated ${u.date}`);
+    expect(stale, `\nlast updated before the ${dates[0]} measurement their counts come from:\n${stale.join('\n')}\n`).toEqual([]);
+  });
 });
 
 describe('tableUnderHeading on synthetic input', () => {
@@ -705,6 +826,51 @@ describe('checkMatrix on synthetic input (the checker can fail)', () => {
   it('ignores tables that carry no matrix rows, such as the legend', () => {
     const md = ['| Status | Meaning |', '|---|---|', '| `proven` | verified |'].join('\n');
     expect(parseMatrix(md)).toEqual([]);
+  });
+});
+
+describe('checkProvenCitations on synthetic input (#10158)', () => {
+  const header = '| Row | Human/UI | In-app AI | Scripting | External MCP | Notes |';
+  const separator = '|---|---|---|---|---|---|';
+  const substituted = new Set(['journey.spec.ts']);
+
+  it('extracts cited spec files from Notes by basename, whatever path prefixes them', () => {
+    expect(
+      citedSpecs('`engine-smoke.spec.ts` (CI `@engine-smoke`) and web/e2e/tests/journey.spec.ts; also chat-commands.spec.ts.'),
+    ).toEqual(['engine-smoke.spec.ts', 'journey.spec.ts', 'chat-commands.spec.ts']);
+    expect(citedSpecs('no spec here, only capabilityMatrix.test.ts')).toEqual([]);
+  });
+
+  it('FAILS a proven cell whose Notes cite a spec containing a substitution-annotated test, naming the row', () => {
+    const md = [
+      header,
+      separator,
+      '| `commands:scene` | proven | implemented-unverified (#1) | proven | unavailable (#2) | 1/0. `journey.spec.ts` drives it. |',
+    ].join('\n');
+    const problems = checkProvenCitations(parseMatrix(md), substituted);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatchObject({ row: 'commands:scene', line: 3, column: 'Human/UI, Scripting' });
+    expect(problems[0].reason).toContain('journey.spec.ts');
+    expect(formatProblems(problems)).toContain('commands:scene [Human/UI, Scripting] (docs/capability-matrix.md:3)');
+  });
+
+  it('matches a cited path by its basename', () => {
+    const md = [header, separator, '| `commands:scene` | proven | proven | proven | proven | see web/e2e/tests/journey.spec.ts |'].join('\n');
+    expect(checkProvenCitations(parseMatrix(md), substituted)).toHaveLength(1);
+  });
+
+  it('passes a proven row that cites only specs with no substitution', () => {
+    const md = [header, separator, '| `commands:scene` | proven | proven | proven | proven | `engine-smoke.spec.ts` |'].join('\n');
+    expect(checkProvenCitations(parseMatrix(md), substituted)).toEqual([]);
+  });
+
+  it('lets a row with no proven cell cite a substituted spec (it claims no proof)', () => {
+    const md = [
+      header,
+      separator,
+      '| `commands:scene` | implemented-unverified (#1) | partial (#2) | excluded | unavailable (#3) | `journey.spec.ts` is outside the gate. |',
+    ].join('\n');
+    expect(checkProvenCitations(parseMatrix(md), substituted)).toEqual([]);
   });
 });
 

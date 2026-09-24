@@ -140,7 +140,17 @@ const READ_WIN_INPUT = `JSON.stringify({
   nodeIds: Object.keys(window.__EDITOR_STORE.getState().sceneGraph?.nodes ?? {}),
 })`;
 
-test.describe('Interactive Journey Gate @journey', () => {
+// Substitutions, declared per #10158 (e2e/lib/substitution.ts): the generated
+// game is injected through store setters (no AI call), and entities and Play
+// mode come from store setters (no WASM engine). So this gate proves the editor
+// shell drives a generated game — not generation, not the engine — and the
+// capability matrix cannot cite it as evidence for a `proven` cell.
+test.describe('Interactive Journey Gate [substituted: AI generation] [substituted: WASM engine] @journey', {
+  annotation: [
+    { type: 'substitution', description: 'AI generation' },
+    { type: 'substitution', description: 'WASM engine' },
+  ],
+}, () => {
   test.beforeEach(async ({ page, editor }) => {
     await editor.loadPage();
     // Explicit no-redirect invariant for the journey gate: the /dev gate
