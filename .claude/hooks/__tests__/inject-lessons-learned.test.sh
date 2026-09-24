@@ -31,6 +31,7 @@ pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; FAILURES=$((FAILURES + 1)); }
 # Shared platform contract (#9611): a probe skip is loud, and a failure in CI.
 # shellcheck source=scripts/__tests__/lib/platform.sh
+# shellcheck disable=SC1091  # plain shellcheck (no -x) cannot follow the relative source; -x resolves the directive above
 . "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/__tests__/lib/platform.sh"
 skip() { probe_skip "$1"; }
 
