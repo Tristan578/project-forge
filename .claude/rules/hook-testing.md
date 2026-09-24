@@ -139,6 +139,43 @@ silent:
    prints for that guard (the helper greps `FAIL <substr>`; a substring
    that only appears on an `ok` line will never match).
 
+## Function freezes (#9125)
+
+Every top-level function a suite defines — `pass`, `fail`, `ok`, `bad`, every
+fixture builder — gets `readonly -f <name>` on the line DIRECTLY after its
+closing brace:
+
+```bash
+fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
+run_hook() {
+  ...
+}
+readonly -f run_hook
+```
+
+A bash function resolves by name at call time, so without the freeze one
+inserted `fail() { :; }` turns every FAIL into silence and the suite exits 0
+having checked nothing (measured on 45 of 46 suites before the sweep). With it,
+bash refuses the rebind and the real helper keeps running.
+
+`scripts/check-fn-freeze.sh` (run by `lockfile-sync-tests` in `ci.yml`, after
+its own suite) derives every column-0 definition and fails on one whose next
+line is not its freeze, on a stray freeze (before the definition, after a blank
+line, or inside a quoted program or heredoc fixture), and fail-closed on a file
+it cannot lex to EOF. Rules that follow from `readonly -f` itself:
+
+- It cannot pre-declare, so no freeze block at the end of the file — each freeze
+  follows its own definition, with no blank line between.
+- Nested (indented) definitions are not frozen: a function defined inside a body
+  that runs twice would be refused on the second run. Define helpers at the top
+  level.
+- Initialise counters (`FAILURES=0`) BEFORE the helpers, so a failure recorded
+  early cannot be reset by the counter's own assignment.
+- A `fail()` you redefine on purpose inside `bash -c '...'` (a child process, as
+  `platform-contract.test.sh` does) is unaffected — the freeze lives in the
+  parent shell only.
+
 ## Platform contract (#9611)
 
 Suites run on Linux AND on Windows (Git Bash, `hook-tests-windows` in `ci.yml`).

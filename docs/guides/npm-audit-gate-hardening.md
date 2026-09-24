@@ -758,7 +758,8 @@ Both bypasses now report the degate.
 
 This freezes the functions **this file** defines. It does not extend to the other
 ~17 bash suites under `scripts/__tests__/`, which remain rebindable by one
-inserted line — that sweep is tracked separately (#9123) rather than scope-crept here. It
+inserted line — that sweep was tracked separately (#9125, landed as the section
+below) rather than scope-crept here. It
 does not close `declare -n` aliasing or `eval` on a runtime-assembled name (round
 39's bound still stands). And a NEW function added later without a freeze is
 unprotected until the drift check notices it — which it will, because the check
@@ -787,3 +788,81 @@ success clause, and the exact complete `if:` line. Red mutations verified each
 new failure path: removing the job, removing the whole `needs:` or `if:` key,
 removing `security` from `needs:`, replacing the condition with `!= 'failure'`,
 and appending `|| true` all make the suite exit nonzero.
+
+## Sweep (PF-1076 / #9125): every suite, one derived gate
+
+Round 40 froze the 20 functions of this suite and named its honest bound: the
+other bash suites stayed rebindable by one inserted line. This section is that
+bound closed.
+
+### Measured before
+
+For every `scripts/__tests__/*.test.sh` and `.claude/hooks/__tests__/*.test.sh`
+that defines a `fail`/`bad` helper, the helper was neutered with `fail() { :; }`
+directly after its definition and a forced `fail "..."` was called on the next
+line — the generic stand-in for "a real failure after the rebind", which is what
+a degated gate produces. 46 suites define such a helper:
+
+| state | exit 0 (green while neutered) | exit non-zero |
+|---|---|---|
+| before the sweep | **45** | 1 (`check-npm-audit.test.sh`, round 40) |
+| after the sweep | 0 | **46** |
+
+The 19 suites without a `fail`/`bad` helper (`check`, `assert_*`, `ok`/`bad`
+in `.claude/tools/`, or no functions at all) were frozen by the same sweep;
+they were not individually neutered, because the derivation below covers them
+by construction rather than by measurement.
+
+### What changed
+
+- `readonly -f <name>` directly after every top-level definition: 349 new
+  freezes, 369 in total across 68 files (the 20 from round 40 included).
+- `scripts/check-fn-freeze.sh`, a DERIVED gate. The round-40 drift check
+  compared two lists of file text inside one suite; a per-suite copy of that
+  would be 60 restated subjects (lesson #18). Instead one awk lexer walks each
+  file — single, double and `$'` quotes, backslashes, `$( )` contexts (a `$(`
+  inside double quotes opens a fresh quoting context, as bash does), comments,
+  heredoc bodies — and emits every column-0 definition with its closing line.
+  The rule is shape, not text: the very next line must be `readonly -f <name>`.
+  A freeze anywhere else is a stray (before its definition it cannot bind; after
+  a blank line it leaves a window; inside a quoted program or a heredoc fixture
+  it is text, not a statement). No files, no definitions, or a file the lexer
+  cannot carry to EOF → exit 2, never a pass over the visible prefix.
+- `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state
+  from a fixture, runs the gate on the real tree behind a 300-function floor
+  with per-directory contribution asserted, carries the round-40 effect probe,
+  and reproduces the neuter on an unfrozen copy (exit 0) and its refusal on a
+  frozen one (exit non-zero) so the measurement above is re-run on every PR.
+
+### What the first cut got wrong, and why the gate lexes
+
+The first sweep matched `^name() {` and `^function name() {` at column 0 with
+heredoc bodies skipped. It froze `function flush() {` inside
+`NEXT_BUILD_JOBS_AWK='...'` in `check-native-bindings.test.sh` — an awk function,
+column 0, inside a single-quoted string — and the suite's derivation went to
+zero jobs. It also placed three freezes inside heredoc fixtures written from
+within helpers, because the scan stopped tracking heredoc openers once inside a
+function body. Both were found by running every suite, not by the gate, which
+at that point could not see them. The lexer is the fix: line-level
+classification applies only to a line that STARTS outside a quoted region, and
+a freeze found inside one is reported as a stray instead of being invisible.
+
+### Honest bound
+
+The freeze protects the binding, not the counter the helper writes.
+`check-skills.test.sh` assigned `FAILED=0` after defining `fail()`, so a failure
+recorded between the two was reset; the counter now initialises first, and the
+rule is stated in `.claude/rules/hook-testing.md`. `declare -n` aliasing and
+`eval` on a runtime-assembled name remain open (round 39). Nested definitions
+are deliberately unfrozen. And removing BOTH a definition and its freeze still
+satisfies the gate, as it did the round-40 drift check — the effect probe and
+the neuter reproduction are what prove a surviving freeze is in force.
+
+### What else moved
+
+`lockfile-sync-tests` gained a shellcheck entry and two steps (suite, then
+gate), mirrored in this suite's step-block and shellcheck pins;
+`SELF_EXEC_EXPECTED_DROP` moved 658 → 663 with the heredoc payload. Shellcheck
+clean on every touched file. All 66 suites exit 0 on the frozen tree. No
+workflow was degated for the measurement; the neuter-plus-forced-failure stand-in
+replaced per-gate degating.
