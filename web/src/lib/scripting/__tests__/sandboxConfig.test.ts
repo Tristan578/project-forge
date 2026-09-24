@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  AST_FALLBACK_NOTICE,
   DEFAULT_SCRIPT_ISOLATION_MODE,
   getScriptIsolationMode,
   parseScriptIsolationMode,
@@ -93,8 +94,24 @@ describe('resolveScriptTransport', () => {
     expect(AST_INTERPRETER_IMPLEMENTED).toBe(false);
     const resolved = resolveScriptTransport('ast');
     expect(resolved.transport).toBe('sandboxed-origin');
-    expect(resolved.notice).toMatch(/not implemented/);
-    expect(resolved.notice).toMatch(/sandboxed-origin/);
+    expect(resolved.notice).toBe(AST_FALLBACK_NOTICE);
+    // The technical account still exists — for the devtools, not the creator.
+    expect(resolved.noticeDetail).toMatch(/not implemented/);
+    expect(resolved.noticeDetail).toMatch(/sandboxed-origin/);
+    expect(resolved.noticeDetail).toMatch(/#8700/);
+  });
+
+  it('the ast notice shown to the creator is plain language: no flag, mode, issue number or "transport"', () => {
+    // Read off the RESOLVED value the runner logs, not the constant, so a
+    // resolver that went back to returning the developer text fails here.
+    const { notice } = resolveScriptTransport('ast');
+    expect(notice).toBeTruthy();
+    expect(notice).not.toMatch(/NEXT_PUBLIC|SCRIPT_ISOLATION|process\.env/);
+    expect(notice).not.toMatch(/#\s*\d+/);
+    expect(notice).not.toMatch(/transport/i);
+    expect(notice).not.toMatch(/\bast\b|sandboxed-origin|Option B/i);
+    // And it says what the creator needs: their game still runs.
+    expect(notice).toMatch(/your game is not affected/i);
   });
 
   it('the ast host stub refuses rather than running anything', () => {

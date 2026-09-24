@@ -11,8 +11,12 @@
  *                     <── MessagePort ──                                  <──
  *
  * - `sandbox="allow-scripts"` and NOTHING else. Without `allow-same-origin` the
- *   frame gets an opaque origin: no cookies, no storage, no Clerk session, even
- *   for code that escapes every in-realm control. Adding `allow-same-origin`
+ *   frame gets an opaque origin, so code in it cannot read the app's cookies or
+ *   storage (`document.cookie` and `localStorage` are unavailable to it), even
+ *   code that escapes every in-realm control. Whether a cookie would ride on a
+ *   request FROM the frame is not something this module decides; the CSP below
+ *   refuses every request, so no request leaves the frame for any credential
+ *   to ride on. Adding `allow-same-origin`
  *   (the usual "make postMessage work" fix) would hand the editor's origin
  *   back and silently reopen #8607. The channel is a pair of `MessagePort`s,
  *   which work across an opaque origin, so there is never a reason to add it.
@@ -179,18 +183,51 @@ export function loadSandboxWorkerSource(): Promise<string> {
   return workerSourcePromise;
 }
 
+/**
+ * `boot`: the scripts never started — the worker source did not load, the frame
+ * could not construct the worker, the worker failed before its first message,
+ * or the frame did not come up in time. Reported AT MOST ONCE per host, which
+ * then terminates itself.
+ * `runtime`: an uncaught error in a worker that had already started.
+ */
+export type SandboxFailurePhase = 'boot' | 'runtime';
+
+/**
+ * What the script console shows the game creator for a `boot` failure. The
+ * technical detail goes to the devtools: a creator cannot act on a bundling
+ * hint or a raw worker error, but can press Play again or reload.
+ */
+export const SCRIPT_SANDBOX_START_FAILED_MESSAGE =
+  "Your game's scripts couldn't start. Press Play again, or reload the editor if this keeps happening.";
+
+/** What the script console shows the game creator for a `runtime` failure. */
+export const SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE =
+  "Your game's scripts ran into an unexpected problem. If your game stops responding, press Play again.";
+
 export interface SandboxedScriptHostOptions {
   /** Defaults to {@link loadSandboxWorkerSource}. */
   loadWorkerSource?: () => Promise<string>;
-  /** Boot and uncaught worker errors. Never protocol messages. */
-  onError?: (message: string) => void;
+  /**
+   * Boot and uncaught worker errors. Never protocol messages. `detail` is the
+   * DEVELOPER account (raw error text, bundling hints): log it to the devtools
+   * and show the creator {@link SCRIPT_SANDBOX_START_FAILED_MESSAGE} or
+   * {@link SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE} instead.
+   */
+  onError?: (detail: string, phase: SandboxFailurePhase) => void;
   /** Where the hidden frame is attached. Defaults to `document.body`. */
   container?: HTMLElement;
   /** How long to wait for the frame to report `ready` before calling `onError`. */
   bootTimeoutMs?: number;
 }
 
-export const SANDBOX_BOOT_TIMEOUT_MS = 10_000;
+/**
+ * Deliberately SHORTER than `useScriptRunner`'s `WATCHDOG_TIMEOUT_MS`, which is
+ * armed on the first play tick (so no earlier than this timer). A frame that
+ * never comes up must be reported as what it is — scripts that could not start
+ * — before the watchdog can call it a possible infinite loop.
+ * `useScriptRunner.test.ts` asserts the ordering by value.
+ */
+export const SANDBOX_BOOT_TIMEOUT_MS = 4_000;
 
 export interface SandboxedScriptHost extends ScriptWorkerLike {
   /** The frame, once attached; `null` before the source has loaded and after terminate. */
@@ -216,11 +253,13 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions = 
   let frame: HTMLIFrameElement | null = null;
   let terminated = false;
   let bootTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The worker has sent at least one protocol message, i.e. its code is running. */
+  let started = false;
 
-  const report = (message: string) => {
+  const report = (detail: string, phase: SandboxFailurePhase) => {
     if (terminated) return;
-    if (onError) onError(message);
-    else console.error(`[ScriptSandbox] ${message}`);
+    if (onError) onError(detail, phase);
+    else console.error(`[ScriptSandbox] ${phase} failure: ${detail}`);
   };
 
   const host: SandboxedScriptHost = {
@@ -252,8 +291,19 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions = 
     },
   };
 
+  // A host whose scripts could not start is finished: report once, then
+  // terminate. terminate() clears the boot timer and silences every later
+  // report, so a load failure is never followed by a timeout for the same
+  // frame, and a frame that turns up late is never built.
+  const failBoot = (detail: string) => {
+    if (terminated) return;
+    report(detail, 'boot');
+    host.terminate();
+  };
+
   data.port1.onmessage = (event: MessageEvent) => {
     if (terminated) return;
+    started = true;
     host.onmessage?.(event);
   };
   control.port1.onmessage = (event: MessageEvent) => {
@@ -265,13 +315,17 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions = 
       return;
     }
     if (msg.type === 'boot-error' || msg.type === 'worker-error') {
-      report(`Script sandbox ${msg.type}: ${typeof msg.message === 'string' ? msg.message : 'unknown error'}`);
+      const detail = `Script sandbox ${msg.type}: ${typeof msg.message === 'string' ? msg.message : 'unknown error'}`;
+      // A worker error before the worker has said anything (a bundle that does
+      // not parse, a throw at module init) means the scripts never started.
+      if (msg.type === 'worker-error' && started) report(detail, 'runtime');
+      else failBoot(detail);
     }
   };
 
   bootTimer = setTimeout(() => {
     bootTimer = null;
-    report(`Script sandbox did not start within ${bootTimeoutMs} ms.`);
+    failBoot(`Script sandbox did not start within ${bootTimeoutMs} ms.`);
   }, bootTimeoutMs);
 
   loadWorkerSource().then(
@@ -293,7 +347,7 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions = 
       (container ?? document.body).appendChild(el);
     },
     (err: unknown) => {
-      report(err instanceof Error ? err.message : String(err));
+      failBoot(err instanceof Error ? err.message : String(err));
     },
   );
 

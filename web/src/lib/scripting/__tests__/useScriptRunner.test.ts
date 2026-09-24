@@ -182,7 +182,17 @@ vi.mock('@/lib/playtest/playTickBus', () => ({
   resetPlayTickBus: mockResetPlayTickBus,
 }));
 
-import { useScriptRunner, getScriptCollisionCallback, getScriptGameEventCallback } from '../useScriptRunner';
+import {
+  useScriptRunner,
+  getScriptCollisionCallback,
+  getScriptGameEventCallback,
+  WATCHDOG_TIMEOUT_MS,
+} from '../useScriptRunner';
+import {
+  SANDBOX_BOOT_TIMEOUT_MS,
+  SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+} from '../sandboxOrigin';
+import { AST_FALLBACK_NOTICE } from '../sandboxConfig';
 import { audioManager } from '@/lib/audio/audioManager';
 // Deliberately NOT mocked: the module singleton IS the thing under test here,
 // and a stub would pin the test's own idea of the wire instead of the hook's.
@@ -1331,24 +1341,84 @@ describe('useScriptRunner — script isolation transport', () => {
   });
 
   it("'sandboxed-origin': no same-origin Worker is constructed, and an unbundled worker is reported, not run", async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', 'sandboxed-origin');
     const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
     expect(latestWorker).toBeNull();
+    // The creator sees plain words in the script console...
     await vi.waitFor(() =>
       expect(mockAddScriptLog).toHaveBeenCalledWith(
-        expect.objectContaining({ entityId: '*', level: 'error', message: expect.stringMatching(/was not bundled/) }),
+        expect.objectContaining({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_START_FAILED_MESSAGE }),
       ),
     );
+    // ...and the bundling hint goes to the devtools, never to the script console.
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/was not bundled/));
+    const logged = mockAddScriptLog.mock.calls.map(([entry]) => (entry as { message: string }).message);
+    expect(logged.some((m) => /bundled|next\.config|boot-error|worker-error/.test(m))).toBe(false);
     unmount();
+    errorSpy.mockRestore();
   });
 
-  it("'ast': says it is not implemented and runs the sandboxed transport — never the weaker one", () => {
+  it("'ast': tells the creator in plain words and runs the sandboxed transport — never the weaker one", () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', 'ast');
     const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
     expect(latestWorker).toBeNull();
     expect(mockAddScriptLog).toHaveBeenCalledWith(
-      expect.objectContaining({ entityId: '*', level: 'warn', message: expect.stringMatching(/not implemented/) }),
+      expect.objectContaining({ entityId: '*', level: 'warn', message: AST_FALLBACK_NOTICE }),
     );
+    // The mode and issue number are for developers, in the devtools.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/'ast' is not implemented yet \(#8700/));
     unmount();
+    warnSpy.mockRestore();
+  });
+
+  it('the sandbox boot timeout is shorter than the watchdog, so a boot failure is reported before the watchdog can fire', () => {
+    // By value, not by source text: both are the constants the code runs with.
+    expect(SANDBOX_BOOT_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(SANDBOX_BOOT_TIMEOUT_MS).toBeLessThan(WATCHDOG_TIMEOUT_MS);
+  });
+
+  it('a sandbox boot failure is logged to the creator once, stops Play, and is NOT followed by the infinite-loop message', async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', 'sandboxed-origin');
+      const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+      // A tick lands BEFORE the (asynchronous) boot failure, arming the
+      // watchdog — the ordering in which the misleading message used to follow.
+      expect(mockPlayTickCallback).not.toBeNull();
+      act(() => {
+        mockPlayTickCallback!({
+          entities: {},
+          entityInfos: {},
+          inputState: { pressed: {}, justPressed: {}, justReleased: {}, axes: {} },
+        });
+      });
+      expect(mockAddScriptLog).not.toHaveBeenCalled();
+
+      await vi.waitFor(() =>
+        expect(mockAddScriptLog).toHaveBeenCalledWith(
+          expect.objectContaining({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_START_FAILED_MESSAGE }),
+        ),
+      );
+
+      // Well past the watchdog AND the host's own boot timer.
+      act(() => {
+        vi.advanceTimersByTime(WATCHDOG_TIMEOUT_MS + SANDBOX_BOOT_TIMEOUT_MS + 1000);
+      });
+
+      const logged = mockAddScriptLog.mock.calls.map(([entry]) => (entry as { message: string }).message);
+      expect(logged).toEqual([SCRIPT_SANDBOX_START_FAILED_MESSAGE]);
+      expect(errorSpy).not.toHaveBeenCalledWith(expect.stringMatching(/timeout|infinite loop/i));
+      // Play is stopped, and no further tick can re-arm the watchdog.
+      expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
+      expect(mockPlayTickCallback).toBeNull();
+      unmount();
+    } finally {
+      errorSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

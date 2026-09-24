@@ -300,7 +300,7 @@ test.describe(
       // The enumeration is OFF: the constructor chain hands back a live fetch.
       // Whatever blocks the requests below, it is not revokeNetworkGlobals().
       expect(logs(result, 'probe:fetch-type:')).toEqual(['function']);
-      // The frame is an opaque origin: no cookies or storage of the editor's.
+      // The frame is an opaque origin, so it cannot read the editor's cookies or storage.
       expect(logs(result, 'probe:origin:')).toEqual(['null']);
 
       const outcomes = logs(result, 'probe:result:');

@@ -26,6 +26,8 @@ import { getScriptIsolationMode, resolveScriptTransport } from '@/lib/scripting/
 import {
   createSandboxedScriptHost,
   loadSandboxWorkerSource,
+  SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE,
+  SCRIPT_SANDBOX_START_FAILED_MESSAGE,
   type ScriptWorkerLike,
 } from '@/lib/scripting/sandboxOrigin';
 
@@ -48,7 +50,12 @@ function tickScaleY(entities: unknown, entityId: string): number {
   return scale[1];
 }
 
-const WATCHDOG_TIMEOUT_MS = 5000;
+/**
+ * How long a play session waits for the worker to answer a tick before calling
+ * it a possible infinite loop. Exported so the sandbox's own boot timeout
+ * (`SANDBOX_BOOT_TIMEOUT_MS`, which must be shorter) is tested against it.
+ */
+export const WATCHDOG_TIMEOUT_MS = 5000;
 const OCCLUSION_RAYCAST_INTERVAL_MS = 250; // Check occlusion 4x per second
 
 // Module-level collision callback (replaces window.__scriptCollisionCallback)
@@ -176,13 +183,32 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       // receive/emit the same messages; everything below this line is shared.
       // NEXT_PUBLIC_SCRIPT_ISOLATION is read inside getScriptIsolationMode() as a
       // literal member expression — see sandboxConfig.ts.
-      const { transport, notice } = resolveScriptTransport(getScriptIsolationMode());
+      const { transport, notice, noticeDetail } = resolveScriptTransport(getScriptIsolationMode());
       const worker: ScriptWorkerLike =
         transport === 'sandboxed-origin'
           ? createSandboxedScriptHost({
-              onError: (message) => {
-                console.error(`[ScriptRunner] ${message}`);
-                addScriptLog({ entityId: '*', level: 'error', message, timestamp: Date.now() });
+              // The script console is read by game creators: it gets plain
+              // words, and the raw error / bundling hint goes to the devtools.
+              onError: (detail, phase) => {
+                console.error(`[ScriptRunner] Script sandbox ${phase} failure: ${detail}`);
+                if (phase === 'runtime') {
+                  addScriptLog({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE, timestamp: Date.now() });
+                  return;
+                }
+                // The scripts never started and never will this session. Say so
+                // ONCE and stop Play now: left running, the ticks keep arming
+                // the watchdog, and 5 s later it would tell the creator their
+                // script is a possible infinite loop — which it is not. The host
+                // reports nothing after terminate(), so this is always the live
+                // session; the edit-mode branch below does the full teardown.
+                if (watchdogRef.current) {
+                  clearTimeout(watchdogRef.current);
+                  watchdogRef.current = null;
+                }
+                setPlayTickCallback(null);
+                addScriptLog({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_START_FAILED_MESSAGE, timestamp: Date.now() });
+                showError(SCRIPT_SANDBOX_START_FAILED_MESSAGE);
+                useEditorStore.getState().setEngineMode('edit');
               },
             })
           : new Worker(
@@ -190,6 +216,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
               { type: 'module' }
             );
       if (notice) {
+        if (noticeDetail) console.warn(`[ScriptRunner] ${noticeDetail}`);
         addScriptLog({ entityId: '*', level: 'warn', message: notice, timestamp: Date.now() });
       }
 

@@ -308,7 +308,7 @@ describe('failure reporting', () => {
   it('reports a worker source that fails to load', async () => {
     const onError = vi.fn();
     hosts.push(createSandboxedScriptHost({ loadWorkerSource: () => Promise.reject(new Error('chunk 404')), onError }));
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith('chunk 404'));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith('chunk 404', 'boot'));
   });
 
   it('refuses the unbundled placeholder loudly instead of starting an empty worker', async () => {
@@ -316,15 +316,31 @@ describe('failure reporting', () => {
     await expect(loadSandboxWorkerSource()).rejects.toThrow(/was not bundled/);
     const onError = vi.fn();
     hosts.push(createSandboxedScriptHost({ onError }));
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringMatching(/was not bundled/)));
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringMatching(/was not bundled/), 'boot'));
   });
 
   it('reports a worker the frame could not construct, and an uncaught worker error', async () => {
     FakeWorker.throwOnConstruct = true;
     const onError = vi.fn();
-    const first = await startHost({ onError });
-    hosts.push(first.host);
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringMatching(/boot-error: Worker blocked by policy/)));
+    // Not startHost(): a host that fails to boot removes its frame, and jsdom
+    // fires the frame's load event by itself, so the frame can come and go
+    // before startHost's wait for it. Dispatch load (once-only) while waiting.
+    const frame1 = bootFakeFrame();
+    vi.spyOn(HTMLIFrameElement.prototype, 'contentWindow', 'get').mockReturnValue(
+      frame1.contentWindow as unknown as Window,
+    );
+    const container1 = document.createElement('div');
+    document.body.appendChild(container1);
+    const first = createSandboxedScriptHost({ loadWorkerSource: async () => 'WORKER_SOURCE_TEXT', container: container1, onError });
+    hosts.push(first);
+    await vi.waitFor(() => {
+      first.frame?.dispatchEvent(new Event('load'));
+      expect(onError).toHaveBeenCalledWith(expect.stringMatching(/boot-error: Worker blocked by policy/), 'boot');
+    });
+    expect(frame1.contentWindow.postMessage).toHaveBeenCalledTimes(1);
+    // A host that could not start is finished: its frame is gone.
+    expect(first.frame).toBeNull();
+    expect(container1.querySelector('iframe')).toBeNull();
 
     FakeWorker.throwOnConstruct = false;
     vi.restoreAllMocks();
@@ -333,7 +349,36 @@ describe('failure reporting', () => {
     hosts.push(second.host);
     await vi.waitFor(() => expect(FakeWorker.created).toHaveLength(1));
     FakeWorker.created[0].onerror?.({ message: 'SyntaxError: bad bundle' });
-    await vi.waitFor(() => expect(onError2).toHaveBeenCalledWith(expect.stringMatching(/worker-error: SyntaxError: bad bundle/)));
+    // Before the worker has said anything: its code never ran, so this is a
+    // failure to START, not an error in a running game.
+    await vi.waitFor(() => expect(onError2).toHaveBeenCalledWith(expect.stringMatching(/worker-error: SyntaxError: bad bundle/), 'boot'));
+  });
+
+  it('an uncaught error in a worker that has STARTED is a runtime failure, not a boot failure', async () => {
+    const onError = vi.fn();
+    const { host } = await startHost({ onError });
+    hosts.push(host);
+    const received: unknown[] = [];
+    host.onmessage = (event) => received.push(event.data);
+    await vi.waitFor(() => expect(FakeWorker.created).toHaveLength(1));
+    FakeWorker.created[0].emit({ type: 'commands', commands: [] });
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    FakeWorker.created[0].onerror?.({ message: 'TypeError: late' });
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(onError).toHaveBeenCalledWith(expect.stringMatching(/worker-error: TypeError: late/), 'runtime');
+  });
+
+  it('reports a boot failure ONCE: the boot timer does not report the same frame again', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const onError = vi.fn();
+    hosts.push(
+      createSandboxedScriptHost({ loadWorkerSource: () => Promise.reject(new Error('chunk 404')), onError, bootTimeoutMs: 1000 }),
+    );
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    // The boot timer is the other reporter a load failure could be followed by.
+    vi.advanceTimersByTime(5000);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith('chunk 404', 'boot');
   });
 
   it('reports a frame that never comes up, and stays quiet once it has', async () => {
@@ -343,7 +388,7 @@ describe('failure reporting', () => {
     vi.advanceTimersByTime(999);
     expect(stuck).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(stuck).toHaveBeenCalledWith('Script sandbox did not start within 1000 ms.');
+    expect(stuck).toHaveBeenCalledWith('Script sandbox did not start within 1000 ms.', 'boot');
 
     const healthy = vi.fn();
     const { host } = await startHost({ onError: healthy, bootTimeoutMs: 1000 });

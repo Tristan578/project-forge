@@ -54,16 +54,28 @@ export function getScriptIsolationMode(): ScriptIsolationMode {
 
 export interface ResolvedScriptTransport {
   transport: ScriptTransport;
-  /** Set when the requested mode could not be honoured as asked. Shown to the author. */
+  /**
+   * Set when the requested mode could not be honoured as asked. Shown to the
+   * game creator in the script console, so it is plain language: no flag name,
+   * no mode name, no issue number. The technical account is {@link noticeDetail}.
+   */
   notice?: string;
+  /** The developer-facing account of {@link notice}, for the browser devtools only. Set whenever `notice` is. */
+  noticeDetail?: string;
 }
+
+/** The script-console text for `ast`. Exported so the creator-facing wording is tested, not restated. */
+export const AST_FALLBACK_NOTICE =
+  "Advanced script isolation isn't available yet, so your scripts are running in the standard sandbox. " +
+  'Your game is not affected.';
 
 /**
  * Map a mode onto a transport that exists.
  *
  * `ast` resolves UP to `sandboxed-origin`, never down to `revoke`: an operator
  * who opted into a stronger boundary must not silently get the weaker one. The
- * notice says so, so the fallback is visible rather than implied.
+ * notice says so, so the fallback is visible rather than implied — in plain
+ * words to the creator, and with the mode and issue in the devtools detail.
  */
 export function resolveScriptTransport(mode: ScriptIsolationMode): ResolvedScriptTransport {
   switch (mode) {
@@ -72,9 +84,10 @@ export function resolveScriptTransport(mode: ScriptIsolationMode): ResolvedScrip
     case 'ast':
       return {
         transport: 'sandboxed-origin',
-        notice:
+        notice: AST_FALLBACK_NOTICE,
+        noticeDetail:
           "NEXT_PUBLIC_SCRIPT_ISOLATION='ast' is not implemented yet (#8700 Option B); " +
-          "running scripts in the sandboxed-origin transport instead.",
+          'running scripts in the sandboxed-origin transport instead.',
       };
     case 'revoke':
     default:
