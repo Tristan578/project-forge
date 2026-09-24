@@ -5,7 +5,7 @@ import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Sparkles, C
 import { Tabs } from '@spawnforge/ui';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
-import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { canAccessPanel, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { showError } from '@/lib/toast';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -87,7 +87,10 @@ export const AssetPanel = memo(function AssetPanel() {
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const dragCounterRef = useRef(0);
 
-  const tier = useUserStore((s) => s.tier);
+  const rawTier = useUserStore((s) => s.tier);
+  const spendableTokens = useUserStore((s) => s.spendableTokens);
+  // A starter account with trial tokens reads as hobbyist here (#7715).
+  const tier = effectiveTier(rawTier, spendableTokens);
   // #9117: every AI-menu item is gated by its own capability (a fixed set, so
   // one hook call each), never just music — the next UNAVAILABLE_CAPABILITIES
   // entry must disable its item here, not drop the user into a dead dialog.

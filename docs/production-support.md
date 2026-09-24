@@ -477,6 +477,16 @@ cd web && npx tsx -e "import('./src/lib/billing/trial-grant').then(m => m.grantT
 #    signups recover before granting by hand.
 ```
 
+**What the tokens open:** a `starter` account with spendable tokens is treated
+as `hobbyist` by the three AI gates — `effectiveTier` in
+`web/src/lib/ai/tierAccess.ts`, applied by `assertAiAccess` on `/api/chat`, by
+the platform-key resolver and by the editor's panel gate (the profile route
+ships `spendableTokens` so the editor knows on first paint). A user whose grant
+landed but who still sees every AI panel locked has a stale profile (reload) or
+a balance of zero; the SQL above distinguishes the two. `billing_cycle_start`
+is not set by the grant, so the Token Dashboard shows no "Next refill" for a
+trial account — nothing refills it.
+
 **Abuse boundary (known, accepted):** the grant is exactly-once **per
 account**. `users.email` is `NOT NULL UNIQUE` and `users.clerk_id` is unique
 (`web/src/lib/db/schema.ts`), so one email address receives at most one trial

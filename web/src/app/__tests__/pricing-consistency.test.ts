@@ -34,6 +34,7 @@ import {
   formatPrice,
   isExclusionFeature,
 } from '@/lib/billing/tierPlans';
+import { TRIAL_GRANT_TOKENS } from '@/lib/tokens/pricing';
 
 const SRC_DIR = resolve(__dirname, '../..');
 
@@ -264,13 +265,18 @@ describe('TIER_PLANS quotes the limits the server enforces', () => {
     expect(plan.features).toContain(`${formatLimit(TIER_MONTHLY_TOKENS[tier])} AI tokens/month`);
   });
 
-  it('does not promise the free tier any AI capability', () => {
-    // `/api/chat` calls `assertTier(['hobbyist', 'creator', 'pro'])`, and every
-    // AI panel is gated the same way. "AI chat (limited)" was sold on three
-    // surfaces against a hard 403.
+  it('promises the free tier exactly the trial the code grants, and no other AI capability', () => {
+    // `/api/chat` calls `assertAiAccess`, the key resolver and every AI panel
+    // apply the same `effectiveTier` rule: a starter account may use hobbyist
+    // AI while it holds spendable tokens, and signup grants TRIAL_GRANT_TOKENS
+    // once (#7715). "AI chat (limited)" was once sold on three surfaces
+    // against a hard 403; the only AI inclusion allowed here is the trial
+    // bullet, and its number is the constant the grant writes.
     const free = TIER_PLANS.find((p) => p.key === 'starter')!;
+    const trialBullet = `${TRIAL_GRANT_TOKENS} trial AI tokens at signup`;
+    expect(free.features).toContain(trialBullet);
     for (const feature of free.features) {
-      if (/\bAI\b/.test(feature)) {
+      if (/\bAI\b/.test(feature) && feature !== trialBullet) {
         expect(isExclusionFeature(feature), `free tier sells "${feature}"`).toBe(true);
       }
     }

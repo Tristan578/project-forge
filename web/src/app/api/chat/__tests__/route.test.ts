@@ -20,6 +20,7 @@ import { z } from 'zod';
 vi.mock('@/lib/auth/api-auth', () => ({
   authenticateRequest: vi.fn(),
   assertTier: vi.fn(() => null),
+  assertAiAccess: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/api/middleware', () => ({
@@ -147,7 +148,7 @@ vi.mock('@/lib/ai/spawnforgeAgent', () => ({
 // ---------------------------------------------------------------------------
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
-import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
+import { authenticateRequest, assertAiAccess } from '@/lib/auth/api-auth';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { rateLimit } from '@/lib/rateLimit';
 import { resolveApiKey } from '@/lib/keys/resolver';
@@ -258,12 +259,12 @@ describe('POST /api/chat', () => {
   // Tier gate
   // -------------------------------------------------------------------------
   describe('tier gate', () => {
-    it('returns 403 when assertTier rejects', async () => {
+    it('returns 403 when assertAiAccess rejects (a starter account with nothing to spend)', async () => {
       const tierResponse = Response.json(
         { error: 'TIER_REQUIRED', message: 'This feature requires one of: hobbyist, creator, pro', currentTier: 'starter' },
         { status: 403 },
       );
-      vi.mocked(assertTier).mockReturnValueOnce(tierResponse as never);
+      vi.mocked(assertAiAccess).mockReturnValueOnce(tierResponse as never);
 
       const res = await POST(makeRequest(validBody()));
       expect(res.status).toBe(403);

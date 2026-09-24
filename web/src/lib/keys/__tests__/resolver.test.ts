@@ -198,13 +198,13 @@ describe('resolveApiKey - platform key', () => {
     delete process.env['PLATFORM_MESHY_KEY'];
   });
 
-  it('throws TIER_NOT_ALLOWED for starter tier', async () => {
-    wireDb([], [makeUser({ tier: 'starter' })]);
+  it('throws TIER_NOT_ALLOWED for a starter account with nothing to spend', async () => {
+    wireDb([], [makeUser({ tier: 'starter', monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 })]);
     await expect(resolveApiKey('user-1', 'meshy', 50, 'texture_generation')).rejects.toThrow(ApiKeyError);
   });
 
-  it('TIER_NOT_ALLOWED code is set on starter tier error', async () => {
-    wireDb([], [makeUser({ tier: 'starter' })]);
+  it('TIER_NOT_ALLOWED code is set on the starter tier error, including a spent trial', async () => {
+    wireDb([], [makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 })]);
     let caught: ApiKeyError | null = null;
     try {
       await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
@@ -212,6 +212,15 @@ describe('resolveApiKey - platform key', () => {
       caught = e as ApiKeyError;
     }
     expect(caught?.code).toBe('TIER_NOT_ALLOWED');
+  });
+
+  it('resolves the platform key and deducts for a starter account holding trial tokens (#7715)', async () => {
+    wireDb([], [makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 0, monthlyTotal: 50, addon: 0, total: 0, nextRefillDate: null }, usageId: 'u-trial' });
+    const result = await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
+    expect(result.type).toBe('platform');
+    expect(result.usageId).toBe('u-trial');
+    expect(mockDeductTokens).toHaveBeenCalledWith('user-1', 'texture_generation', 50, 'meshy', undefined);
   });
 
   it('throws NO_KEY_CONFIGURED for non-pro with zero balance', async () => {

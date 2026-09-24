@@ -16,7 +16,7 @@
  */
 
 import { PROJECT_LIMITS, ENTITY_LIMITS, PUBLISH_LIMITS } from '@/lib/projects/limits';
-import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
+import { TIER_MONTHLY_TOKENS, TRIAL_GRANT_TOKENS } from '@/lib/tokens/pricing';
 
 export { PROJECT_LIMITS, ENTITY_LIMITS, PUBLISH_LIMITS, TIER_MONTHLY_TOKENS };
 
@@ -80,9 +80,11 @@ export function countLabel(limit: number, singular: string, plural: string): str
  * ("Unlimited AI chat", "Remove branding", "Team collaboration", "Custom
  * domain") that no gate implemented and no feature existed for.
  *
- * - `starter` has no AI at all. `/api/chat` rejects it (`assertTier`), the key
- *   resolver rejects it, and `PANEL_TIER_REQUIREMENTS` gates every AI panel at
- *   `hobbyist` or above — a free user can open none of them.
+ * - `starter` has no monthly AI allocation. Signup grants `TRIAL_GRANT_TOKENS`
+ *   once (#7715), and while a starter account holds spendable tokens
+ *   `effectiveTier` treats it as `hobbyist` on the three AI gates (`/api/chat`
+ *   via `assertAiAccess`, the key resolver, `PANEL_TIER_REQUIREMENTS` through
+ *   `canAccessPanel`). With the tokens spent it can open none of them.
  * - `hobbyist` unlocks AI chat, the generation panels, and BYOK (`/api/keys`).
  *   Chat is rate limited to 10 requests/minute, so it is never "unlimited".
  * - `creator` adds the platform MCP key (`/api/keys/api-key`) and the
@@ -91,7 +93,11 @@ export function countLabel(limit: number, singular: string, plural: string): str
  *   it from the balance check) and the four pro-only panels.
  */
 const TIER_CAPABILITIES: Record<TierKey, readonly string[]> = {
-  starter: ['Full editor and local export', 'No AI features'],
+  starter: [
+    'Full editor and local export',
+    `${TRIAL_GRANT_TOKENS} trial AI tokens at signup`,
+    'No monthly AI tokens',
+  ],
   hobbyist: ['AI chat and asset generation', 'Bring your own AI keys (BYOK)'],
   creator: ['MCP access for external AI tools', 'Advanced AI panels'],
   pro: ['Platform AI keys, no balance required', 'Pro AI panels'],
@@ -134,10 +140,10 @@ export const TIER_PLANS: readonly TierPlan[] = TIER_KEYS.map((key) => ({
 }));
 
 /**
- * True when a feature bullet states an absence ("No AI features") rather than an
- * inclusion. Every surface that lists these bullets must mark them as a
- * constraint — a green check beside "No AI features" reads as the opposite of
- * what it says.
+ * True when a feature bullet states an absence ("No monthly AI tokens") rather
+ * than an inclusion. Every surface that lists these bullets must mark them as
+ * a constraint — a green check beside "No monthly AI tokens" reads as the
+ * opposite of what it says.
  */
 export function isExclusionFeature(feature: string): boolean {
   return feature.startsWith('No ');

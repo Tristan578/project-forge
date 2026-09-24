@@ -23,7 +23,7 @@ import {
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { assertTier } from '@/lib/auth/api-auth';
+import { assertAiAccess } from '@/lib/auth/api-auth';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { logCost } from '@/lib/costs/costLogger';
 import { trackAiCacheHitRate } from '@/lib/analytics/events.server';
@@ -474,8 +474,10 @@ async function POST_impl(request: NextRequest) {
   if (mid.error) return mid.error;
   const auth = { ctx: mid.authContext! };
 
-  // 1b. Tier gate — starter tier has no AI access
-  const tierError = assertTier(auth.ctx.user, ['hobbyist', 'creator', 'pro']);
+  // 1b. Tier gate — starter tier has no AI access unless it holds trial
+  //     tokens to spend (#7715); the platform-key resolver applies the same
+  //     rule before it deducts.
+  const tierError = assertAiAccess(auth.ctx.user);
   if (tierError) return tierError;
 
   // 2. Validate request size (max 4MB — sized to fit MAX_INPUT_CHARS=2M plus

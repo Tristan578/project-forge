@@ -6,6 +6,9 @@ import {
   getRequiredTier,
   PANEL_TIER_REQUIREMENTS,
   TIER_LABELS,
+  TRIAL_ACCESS_TIER,
+  effectiveTier,
+  spendableTokensOf,
 } from '../tierAccess';
 import type { Tier } from '@/stores/userStore';
 
@@ -223,5 +226,48 @@ describe('PANEL_TIER_REQUIREMENTS', () => {
     for (const panelId of corePanels) {
       expect(PANEL_TIER_REQUIREMENTS[panelId]).toBeUndefined();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Trial access (#7715)
+// ---------------------------------------------------------------------------
+
+describe('effectiveTier', () => {
+  it('treats a starter account with spendable tokens as the trial access tier', () => {
+    expect(TRIAL_ACCESS_TIER).toBe('hobbyist');
+    expect(effectiveTier('starter', 50)).toBe('hobbyist');
+    expect(effectiveTier('starter', 1)).toBe('hobbyist');
+  });
+
+  it('leaves a starter account with nothing to spend as starter', () => {
+    expect(effectiveTier('starter', 0)).toBe('starter');
+    expect(effectiveTier('starter', -5)).toBe('starter');
+  });
+
+  it('never changes a paid tier, with or without tokens', () => {
+    for (const tier of ['hobbyist', 'creator', 'pro'] as Tier[]) {
+      expect(effectiveTier(tier, 0)).toBe(tier);
+      expect(effectiveTier(tier, 500)).toBe(tier);
+    }
+  });
+
+  it('opens exactly the hobbyist panels for a trial account, never creator or pro ones', () => {
+    const trial = effectiveTier('starter', 50);
+    expect(canAccessPanel('ai-chat', trial)).toBe(true);
+    expect(canAccessPanel('generate-texture', trial)).toBe(true);
+    expect(canAccessPanel('generate-model', trial)).toBe(false);
+    expect(canAccessPanel('playtest', trial)).toBe(false);
+    // and a spent trial opens none of them
+    expect(canAccessPanel('ai-chat', effectiveTier('starter', 0))).toBe(false);
+  });
+});
+
+describe('spendableTokensOf', () => {
+  it('is the unused monthly allocation plus add-ons, floored at zero', () => {
+    expect(spendableTokensOf({ monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 })).toBe(50);
+    expect(spendableTokensOf({ monthlyTokens: 50, monthlyTokensUsed: 20, addonTokens: 5 })).toBe(35);
+    expect(spendableTokensOf({ monthlyTokens: 50, monthlyTokensUsed: 80, addonTokens: 5 })).toBe(5);
+    expect(spendableTokensOf({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 })).toBe(0);
   });
 });

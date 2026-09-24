@@ -102,15 +102,16 @@ describe('grantTrialTokens', () => {
     expect(sql).toContain('RETURNING id');
   });
 
-  it('only updates the balance when the audit insert produced a row, and resets the cycle', async () => {
+  it('only updates the balance when the audit insert produced a row, and never starts a billing cycle', async () => {
     await grantTrialTokens(USER_ID);
     const sql = squash(renderSql(neonCalls[0]));
     expect(sql).toMatch(/^WITH grant_ins AS \( INSERT/);
-    expect(sql).toMatch(/UPDATE users SET monthly_tokens = \$\d+, monthly_tokens_used = 0, billing_cycle_start = \$\d+, updated_at = \$\d+ WHERE id = \$\d+::uuid AND EXISTS \(SELECT 1 FROM grant_ins\)$/);
-    // billing_cycle_start and updated_at are the same ISO timestamp.
+    expect(sql).toMatch(/UPDATE users SET monthly_tokens = \$\d+, monthly_tokens_used = 0, updated_at = \$\d+ WHERE id = \$\d+::uuid AND EXISTS \(SELECT 1 FROM grant_ins\)$/);
+    // Nothing refills a trial, and the balance/status routes derive "next
+    // refill" from billing_cycle_start, so the grant must not write it.
+    expect(sql).not.toContain('billing_cycle_start');
     const isoValues = neonCalls[0].values.filter((v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v));
-    expect(isoValues).toHaveLength(2);
-    expect(isoValues[0]).toBe(isoValues[1]);
+    expect(isoValues).toHaveLength(1);
   });
 
   it('never wraps the statement in a transaction (neon-http db.transaction() throws)', async () => {

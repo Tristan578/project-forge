@@ -135,7 +135,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useUserStore } from '@/stores/userStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
-import { canAccessPanel } from '@/lib/ai/tierAccess';
+import { canAccessPanel, effectiveTier } from '@/lib/ai/tierAccess';
 import { LockedPanelOverlay } from './LockedPanelOverlay';
 
 // ---- Loading skeleton shown while a lazy panel is fetched ----
@@ -175,7 +175,10 @@ function withTierGate(
   Component: React.ComponentType,
 ): React.FunctionComponent<IDockviewPanelProps> {
   return function TierGatedPanel(_props: IDockviewPanelProps) {
-    const tier = useUserStore((s) => s.tier);
+    const rawTier = useUserStore((s) => s.tier);
+    const spendableTokens = useUserStore((s) => s.spendableTokens);
+    // A starter account with trial tokens reads as hobbyist here (#7715).
+    const tier = effectiveTier(rawTier, spendableTokens);
     const hasAccess = canAccessPanel(panelId, tier);
 
     // Track feature flag evaluation once on mount (non-critical analytics)

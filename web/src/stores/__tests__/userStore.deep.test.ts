@@ -19,9 +19,62 @@ describe('userStore deep tests', () => {
       email: null,
       createdAt: null,
       tokenBalance: null,
+      spendableTokens: 0,
       isLoading: false,
       error: null,
       billingStatus: null,
+    });
+  });
+
+  describe('trial access (#7715)', () => {
+    it('a starter account with spendable tokens reads as hobbyist for AI only', () => {
+      useUserStore.setState({ tier: 'starter', spendableTokens: 50 });
+      const state = useUserStore.getState();
+      expect(state.effectiveTier()).toBe('hobbyist');
+      expect(state.canUseAI()).toBe(true);
+      // The trial buys AI access and nothing else.
+      expect(state.canUseMCP()).toBe(false);
+      expect(state.canPublish()).toBe(false);
+      expect(state.canBuyTokens()).toBe(false);
+    });
+
+    it('a starter account with its tokens spent is a starter account again', () => {
+      useUserStore.setState({ tier: 'starter', spendableTokens: 0 });
+      expect(useUserStore.getState().effectiveTier()).toBe('starter');
+      expect(useUserStore.getState().canUseAI()).toBe(false);
+    });
+
+    it('spendable tokens never change a paid tier', () => {
+      useUserStore.setState({ tier: 'creator', spendableTokens: 0 });
+      expect(useUserStore.getState().effectiveTier()).toBe('creator');
+      expect(useUserStore.getState().canUseAI()).toBe(true);
+    });
+
+    it('fetchBalance records the spendable total', async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ monthlyRemaining: 30, monthlyTotal: 50, addon: 7, total: 37, nextRefillDate: null }),
+      });
+      await useUserStore.getState().fetchBalance();
+      expect(useUserStore.getState().spendableTokens).toBe(37);
+    });
+
+    it('fetchProfile records spendableTokens from the profile, defaulting to 0 when absent', async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ displayName: 'x', email: 'x@y.z', tier: 'starter', createdAt: 'now', spendableTokens: 50 }),
+      });
+      await useUserStore.getState().fetchProfile();
+      expect(useUserStore.getState().spendableTokens).toBe(50);
+      expect(useUserStore.getState().effectiveTier()).toBe('hobbyist');
+
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ displayName: 'x', email: 'x@y.z', tier: 'starter', createdAt: 'now' }),
+      });
+      await useUserStore.getState().fetchProfile();
+      expect(useUserStore.getState().spendableTokens).toBe(0);
+      expect(useUserStore.getState().effectiveTier()).toBe('starter');
     });
   });
 

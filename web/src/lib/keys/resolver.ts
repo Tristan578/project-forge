@@ -14,6 +14,8 @@ import {
   type RetiredByokProvider,
 } from '../config/providers';
 import { TIER_DISPLAY_NAMES } from '../billing/tierPlans';
+import { effectiveTier, spendableTokensOf } from '../ai/tierAccess';
+import type { Tier } from '@/stores/userStore';
 
 export interface ResolvedKey {
   type: 'byok' | 'platform';
@@ -147,9 +149,12 @@ export async function resolveApiKey(
   );
   if (!user) throw new Error(`User not found: ${userId}`);
 
-  // Pro tier always has platform key access
-  // Other paid tiers can use platform keys if they have addon tokens
-  if (user.tier === 'starter') {
+  // Pro tier always has platform key access. Other paid tiers can use
+  // platform keys while they have tokens. A starter account with spendable
+  // tokens (the signup trial grant, #7715) is treated as hobbyist here, the
+  // same rule `/api/chat` and the editor's panel gate apply; once the tokens
+  // are spent it is a starter account again and the message below applies.
+  if (effectiveTier(user.tier as Tier, spendableTokensOf(user)) === 'starter') {
     throw new ApiKeyError(
       'TIER_NOT_ALLOWED',
       `The ${TIER_DISPLAY_NAMES.starter} tier cannot use AI generation. Upgrade to ${TIER_DISPLAY_NAMES.hobbyist} and add your own ${provider} API key, or upgrade to ${TIER_DISPLAY_NAMES.pro} for platform keys.`

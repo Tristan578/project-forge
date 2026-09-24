@@ -35,6 +35,7 @@ vi.mock('@/stores/userStore', () => ({
 
 vi.mock('@/lib/ai/tierAccess', () => ({
   canAccessPanel: vi.fn(() => true),
+  effectiveTier: vi.fn((tier: string) => tier),
   getRequiredTier: vi.fn(() => null),
   TIER_LABELS: { free: 'Free', pro: 'Pro', team: 'Team', enterprise: 'Enterprise' },
 }));

@@ -32,6 +32,46 @@ export function tierAtLeast(tier: Tier, required: Tier): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Trial access (#7715)
+// ---------------------------------------------------------------------------
+
+/**
+ * The access level a `starter` account is granted while it holds tokens it
+ * can spend. Signup grants `TRIAL_GRANT_TOKENS` (`grantTrialTokens`), and a
+ * cancelled subscription leaves the starter allocation behind; either way the
+ * tokens are only worth something if the AI surfaces that spend them open.
+ * `hobbyist` is the lowest tier with AI access, so that is what the tokens
+ * buy: chat and the hobbyist generation panels. Creator and pro panels stay
+ * gated on the paid tier.
+ */
+export const TRIAL_ACCESS_TIER: Tier = 'hobbyist';
+
+/**
+ * Tokens the account can spend right now: the unused part of the monthly
+ * allocation plus add-ons. The same arithmetic `getTokenBalance` reports as
+ * `total`; kept here so the server gates and the client gate agree on it.
+ */
+export function spendableTokensOf(user: {
+  monthlyTokens: number;
+  monthlyTokensUsed: number;
+  addonTokens: number;
+}): number {
+  return Math.max(0, user.monthlyTokens - user.monthlyTokensUsed) + user.addonTokens;
+}
+
+/**
+ * The tier to use for an ACCESS decision. A `starter` account with spendable
+ * tokens is treated as `TRIAL_ACCESS_TIER`; every other account is its own
+ * tier. This is the single rule behind `canAccessPanel` in the editor,
+ * `assertAiAccess` on `/api/chat` and the platform-key resolver: the three
+ * gates that had kept a trial grant unusable when they each checked the raw
+ * tier alone.
+ */
+export function effectiveTier(tier: Tier, spendableTokens: number): Tier {
+  return tier === 'starter' && spendableTokens > 0 ? TRIAL_ACCESS_TIER : tier;
+}
+
+// ---------------------------------------------------------------------------
 // Panel tier requirements
 // ---------------------------------------------------------------------------
 

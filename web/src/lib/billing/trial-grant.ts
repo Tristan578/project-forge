@@ -37,6 +37,11 @@ import { TRIAL_GRANT_TOKENS } from '@/lib/tokens/pricing';
  * neon-http binds template parameters as text, and without the cast the
  * ON CONFLICT arbiter inference against the uuid-typed index fails at runtime.
  *
+ * `billing_cycle_start` is deliberately NOT set. The balance and status routes
+ * derive "next refill" from it and nothing refills a trial account — only the
+ * Stripe subscription handlers write a cycle start, which is what keeps the
+ * Token Dashboard's "Next refill" honest for a free account (#7715 review).
+ *
  * `transaction_type` reuses the existing `'monthly_grant'` enum value; there is
  * no `'trial'` value and adding one would need a migration this feature does
  * not. `source = 'trial_grant'` is the disambiguator, mirroring how the
@@ -68,7 +73,6 @@ export async function grantTrialTokens(userId: string): Promise<void> {
       UPDATE users
       SET monthly_tokens      = ${TRIAL_GRANT_TOKENS},
           monthly_tokens_used = 0,
-          billing_cycle_start = ${now},
           updated_at          = ${now}
       WHERE id = ${userId}::uuid
         AND EXISTS (SELECT 1 FROM grant_ins)

@@ -9,7 +9,7 @@ import { GenerateSoundDialog } from './GenerateSoundDialog';
 import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useUserStore } from '@/stores/userStore';
-import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { canAccessPanel, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { resolveAudioAssetId } from '@/lib/audio/entityAudioGraph';
 
@@ -134,7 +134,10 @@ export function AudioInspector() {
   const [generateSoundOpen, setGenerateSoundOpen] = useState(false);
   const [generateMusicOpen, setGenerateMusicOpen] = useState(false);
 
-  const tier = useUserStore((s) => s.tier);
+  const rawTier = useUserStore((s) => s.tier);
+  const spendableTokens = useUserStore((s) => s.spendableTokens);
+  // A starter account with trial tokens reads as hobbyist here (#7715).
+  const tier = effectiveTier(rawTier, spendableTokens);
   // #9117: a capability NO key can enable (`unprovisionable`) is disabled here,
   // at the entry point, not two clicks later inside an empty dialog — for BOTH
   // buttons, so the next declared-unavailable capability is handled the same

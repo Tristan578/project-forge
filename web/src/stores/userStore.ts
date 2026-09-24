@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { hasCapability } from '@/lib/billing/entitlements';
+import { effectiveTier } from '@/lib/ai/tierAccess';
 
 export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 
@@ -29,6 +30,11 @@ interface UserState {
    * then fall back to the legacy tier-derived defaults. */
   activeFeatures: string[] | null;
   tokenBalance: TokenBalance | null;
+  /** Tokens the account can spend now (monthly remaining + add-ons). Written
+   * by both `/api/user/profile` and `/api/tokens/balance`, so the editor knows
+   * on first paint whether a starter account's trial tokens open the AI
+   * surfaces (#7715). 0 until either has resolved. */
+  spendableTokens: number;
   isLoading: boolean;
   error: string | null;
   billingStatus: {
@@ -46,6 +52,9 @@ interface UserState {
   updateDisplayName: (name: string) => Promise<boolean>;
 
   // Derived checks
+  /** The tier access decisions use: a starter account with spendable tokens
+   * reads as `TRIAL_ACCESS_TIER` (#7715). */
+  effectiveTier: () => Tier;
   canUseAI: () => boolean;
   canUseMCP: () => boolean;
   canPublish: () => boolean;
@@ -60,6 +69,7 @@ export const useUserStore = create<UserState>((set, get) => ({
   createdAt: null,
   activeFeatures: null,
   tokenBalance: null,
+  spendableTokens: 0,
   isLoading: false,
   error: null,
   billingStatus: null,
@@ -76,7 +86,11 @@ export const useUserStore = create<UserState>((set, get) => ({
         throw new Error(`Failed to fetch balance: ${res.status}`);
       }
       const balance = await res.json();
-      set({ tokenBalance: balance, isLoading: false });
+      set({
+        tokenBalance: balance,
+        spendableTokens: typeof balance?.total === 'number' ? balance.total : 0,
+        isLoading: false,
+      });
     } catch (err) {
       set({ error: (err as Error).message, isLoading: false });
     }
@@ -89,9 +103,16 @@ export const useUserStore = create<UserState>((set, get) => ({
   // default otherwise. The fallback keeps behavior identical for users whose
   // entitlement summary hasn't arrived (or when Entitlements isn't configured
   // in the Stripe dashboard), so this is purely additive.
+  effectiveTier: () => {
+    const { tier, spendableTokens } = get();
+    return effectiveTier(tier, spendableTokens);
+  },
+
   canUseAI: () => {
-    const { tier, activeFeatures } = get();
-    return hasCapability('canUseAI', activeFeatures, tier !== 'starter');
+    const { activeFeatures } = get();
+    // The trial grant is a platform allocation, not a Stripe entitlement, so
+    // the tier fallback carries it: a starter account with tokens can use AI.
+    return hasCapability('canUseAI', activeFeatures, get().effectiveTier() !== 'starter');
   },
 
   canUseMCP: () => {
@@ -129,6 +150,7 @@ export const useUserStore = create<UserState>((set, get) => ({
         createdAt: data.createdAt,
         // Array of feature lookup_keys, or null/absent → fall back to tier.
         activeFeatures: Array.isArray(data.activeFeatures) ? data.activeFeatures : null,
+        spendableTokens: typeof data.spendableTokens === 'number' ? data.spendableTokens : 0,
         profileLoaded: true,
       });
     } catch {
