@@ -67,8 +67,8 @@
 # makes every `fail "..."` call vanish with the function still frozen (the
 # seventh board round). The words `trap ... DEBUG` (any case; bash accepts
 # `debug`) and `shopt -s extdebug` in command position are reported the
-# same way: a self-defense suite has no use for either. A trap on EXIT, ERR
-# or RETURN whose action exits or execs overrides the exit status the script
+# same way: a self-defense suite has no use for either. A trap on EXIT, ERR,
+# RETURN or 0 whose action exits or execs overrides the exit status the script
 # itself chose — `trap 'exit 0' EXIT` turns a suite that reached `exit 1`
 # with FAILED=1 into a green one (the ninth board round) — so such an
 # action is reported too, including an action that calls a function this
@@ -88,11 +88,20 @@
 # `name()`, `name ( )` or `function name`, in any position — or an `enable`
 # command word is reported with the `builtin` status.
 #
-# Indented definitions are deliberately out of scope: they are nested inside
-# another function, an `if` arm, or a subshell, and a function defined inside a
-# body that runs more than once cannot be frozen on its first run without
-# breaking its second. The top-level helpers — pass/fail/ok/bad and every fixture
-# builder the assertions route through — are the ones a one-line rebind neuters.
+# Definitions nested in something are out of scope: inside a function body
+# (it runs on every call, so it cannot be frozen on its first run without
+# breaking its second), a loop (the same), a subshell (it does not outlive
+# it), or an `if`/`case` arm or brace group (a conditional helper; the gate
+# does not follow which arm ran). The lexer tracks that nesting by command
+# word — `if`/`fi`, `case`/`esac`, `do`/`done`, `{`/`}` — not by indentation.
+# Every definition at true top level must be where the freeze rule can see it:
+# at column 0, at the start of its own line, with a plain identifier for a
+# name. One anywhere else at top level — indented with nothing enclosing it,
+# after another command on the line, a second definition on one line, or a
+# name bash accepts but the rule does not (a dash, a dot) — is reported with
+# the `shape` status instead of being skipped (the eleventh board round found
+# ` fail() { :; }`, indented by one space with nothing enclosing it, invisible
+# and unfrozen).
 #
 # The derivation is the single implementation of "what does this file define":
 # `--list` prints it as TSV so the sweep tool and the tests read the same
@@ -133,7 +142,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|unsupported|parse-error
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|parse-error
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -157,6 +166,7 @@ derive_file() {
     function flush_def() {
       pending_name = def_name; pending_def = def_line; pending_end = NR
       def_name = ""
+      bs = def_bs
     }
     # Advance the lexer over one line, updating the quote state (q), the
     # context stack (d, st_q[]) and the heredoc queue (hd_n, hd_term[]).
@@ -185,15 +195,22 @@ derive_file() {
       if (w == "") return
       if (!cmd_seen) {
         # Still looking for the command word of this statement.
+        # Compound-command nesting, counted by command word so that layout
+        # cannot fake it: `if`, `do` and `{` open, `fi`, `done` and `}` close
+        # (`case`/`esac` are handled below as ordinary command words).
+        if (w == "if" || w == "do" || w == "{") bs++
+        if ((w == "}") && bs > 0) bs--
         if (w ~ /^(builtin|command|time|-p|!|if|then|elif|else|do|while|until|coproc|\{|\})$/ ||
             w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { w = ""; return }
+        if (w == "case") bs++
+        if ((w == "fi" || w == "done" || w == "esac") && bs > 0) bs--
         cmd_seen = 1; cmd_word = w; nwords = 1
         # Inside a definition, remember what the body runs: an exit or exec
         # marks the function as one that ends the shell, anything else is a
         # call the trap rule may have to follow (see resolve_traps).
         if (def_name != "") {
           if (w == "exit" || w == "exec") fexits[def_name] = 1
-          else fcalls[def_name] = fcalls[def_name] " " w
+          else if (w != def_name) fcalls[def_name] = fcalls[def_name] " " w
         }
         if (w == "alias") in_alias = 1
         if (w == "shopt") in_shopt = 1
@@ -206,6 +223,7 @@ derive_file() {
       # The word after `function` is a definition name whatever follows it.
       if (in_function) {
         if (index(builtins, " " w " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "function " w, NR, NR
+        shape_check("function " w, w)
         in_function = 0
       }
       if (in_alias && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/)
@@ -251,7 +269,11 @@ derive_file() {
     }
     # Whether function f, as defined in this file, can end the shell: its
     # own body runs exit or exec, or it calls another function of this file
-    # that can. `seen` stops recursion on a cycle.
+    # that can. `seen` stops recursion on a cycle (case 19k-d holds one);
+    # without it a call cycle recurses forever, so a regression there shows
+    # up as a hung job rather than a red case. A function does not record
+    # a call to itself (the definition line names it as a word), so only a
+    # real cycle between two functions can reach that path.
     function fn_exits(f,   cs, nc, j) {
       if (f in fexits) return 1
       nc = split(fcalls[f], cs, " ")
@@ -261,11 +283,20 @@ derive_file() {
     }
     function resolve_traps(   k) {
       for (k = 1; k <= nt; k++) {
-        if (!(t_word[k] in defined)) continue
         delete seen; seen[t_word[k]] = 1
         if (fn_exits(t_word[k]))
           printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " t_word[k] " ..." t_sigs[k] " (" t_word[k] "() exits)", t_line[k], t_line[k]
       }
+    }
+    # A definition the lexer found at the start of a statement is in scope when
+    # it is outside every function body (def_name empty, or the line that
+    # defines def_name itself), every subshell (d == 0) and every compound
+    # command (bs back at the depth it had outside any definition). If the
+    # column-0 rule did not derive it on this line, the freeze rule cannot see
+    # it, so it is reported rather than left unfrozen and unmentioned.
+    function shape_check(label, n) {
+      if (d == 0 && bs == def_bs && (def_name == "" || def_name == line_def) && n != line_def)
+        printf "%s\t%s\t%d\t%d\tshape\n", file, label, NR, NR
     }
     function end_command() { end_word(); if (in_trap) check_trap(); cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = "" }
     # Entering `$( ... )` or `( ... )` starts a new context: the enclosing
@@ -364,6 +395,7 @@ derive_file() {
           if (!cmd_seen && w != "") dn = w
           else if (cmd_seen && w == "" && nwords == 1) dn = cmd_word
           if (dn != "" && index(builtins, " " dn " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, dn "()", NR, NR
+          if (dn != "" && dn !~ /[=$]/) shape_check(dn "()", dn)
         }
         if (c == "(" && w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=$/) { arr = 1; arr_d = 1; w = ""; i++; continue }
         if (c2 == "((" && w == "") { open_sub("", 1, 1); i += 2; continue }
@@ -399,7 +431,7 @@ derive_file() {
       if (q == "" && !cont) { end_word(); if (in_trap) check_trap() }
     }
     {
-      line = $0
+      line = $0; line_def = ""
 
       # Inside a heredoc body: only its terminator matters.
       # Only a `<<-` heredoc lets bash strip leading tabs before matching
@@ -487,7 +519,7 @@ derive_file() {
         opener = length(line) - length(rest)
         # The name is recorded before the line is lexed, so the commands of a
         # one-line body are attributed to it (the trap rule reads them).
-        def_name = name; def_line = NR; defined[name] = 1
+        def_name = name; def_line = NR; defined[name] = 1; line_def = name; def_bs = bs
         lex_line(line)
         body = (code_end > opener + 1) ? substr(line, opener + 1, code_end - opener - 1) : ""
         sub(/^[[:space:]]+/, "", body); sub(/[[:space:]]+$/, "", body)
@@ -581,7 +613,7 @@ if [ "${total:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|unsupported)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
   # The report is the block reason, so it goes to stderr like every other
@@ -596,6 +628,7 @@ if [ -n "$violations" ]; then
         alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion" ;;
         trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 that exits or execs, directly or through a function of this file, replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may)" ;;
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable" ;;
+        shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
         unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as a one-liner '$name() { ...; }', or multi-line with the closing '}' at column 0, then freeze it on the next line" ;;
       esac
     done <<<"$violations"

@@ -270,7 +270,8 @@ FIX
 expect_rc "9. a commented-out definition is not a definition" 0 \
   "$(run_gate "$d_cdef")" "1 function(s) across 1 file(s) are frozen"
 
-# ---- 10. indented (nested) definitions are out of scope ------------------------
+# ---- 10. nested definitions are out of scope ----------------------------------
+# Nesting is counted by command word (a function body, `if`), not indentation.
 d_nested="$(mkfixture nested <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -284,7 +285,7 @@ if true; then
 fi
 FIX
 )"
-expect_rc "10. indented definitions (nested in a body, an if arm or a subshell) are not scanned" 0 \
+expect_rc "10. definitions nested in a body or an if arm are not scanned" 0 \
   "$(run_gate "$d_nested")" "2 function(s) across 1 file(s) are frozen"
 
 # ---- 11. a multi-line body whose braces are unbalanced in quoted text ----------
@@ -753,6 +754,8 @@ readonly -f on_term
 trap external_helper EXIT
 FIX
 )"
+# The third negative holds without a guard of its own: fn_exits reads no
+# body facts for a name this file does not define, so it answers no.
 expect_rc "19k-d. a trap function that never exits (even through a call cycle), a TERM trap function that exits, and a function this file does not define are not violations" 0 \
   "$(run_gate "$d_fn_trap_ok")" "5 function(s) across 1 file(s) are frozen"
 
@@ -1042,6 +1045,80 @@ FIX
 )"
 expect_rc "27c. a shift inside \$(( )) in an array literal is not a heredoc, so the decoy after it is reported" 1 \
   "$(run_gate "$d_arith_arr")" "1 violation(s)" "fixture.test.sh:6: decoy6() is not frozen"
+
+# ---- 28. every top-level definition the freeze rule cannot see is reported ----
+# ` fail() { :; }` indented by one space, with nothing enclosing it, redefines
+# fail exactly like a column-0 line; the gate saw neither definition (eleventh
+# board round, security seat). Prove it in this bash, then that the lexer
+# reports every placement the column-0 rule cannot tie to a freeze line.
+indent_probe="$(bash -c ' fail() { echo REAL; }
+ fail() { echo FAKE; }
+fail' 2>&1)"
+if [ "$indent_probe" = "FAKE" ]; then
+  pass "28-probe. in this bash an indented top-level redefinition takes the name"
+else
+  fail "28-probe. the indented redefinition probe did not rebind (got '$indent_probe')"
+fi
+d_shape="$(mkfixture def-shape <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+ fail() { echo "  FAIL: $1"; }
+ fail() { :; }
+true; helper() { :; }
+one() { :; }; two() { :; }
+readonly -f one
+my-helper() { :; }
+case "$1" in
+  x) arm() { :; } ;;
+esac
+	function tabbed { :; }
+wrap() {
+  inner() { :; }
+}
+readonly -f wrap
+out="$(sub() { :; }; sub)"
+( scoped() { :; }; scoped )
+FIX
+)"
+expect_rc "28. top-level indented, after-a-command, second-on-a-line and dashed definitions are reported; case-arm, body- and subshell-local ones are not" 1 \
+  "$(run_gate "$d_shape")" "6 violation(s)" "fixture.test.sh:3: 'fail()'" "fixture.test.sh:4: 'fail()'" "fixture.test.sh:5: 'helper()'" "fixture.test.sh:6: 'two()'" "fixture.test.sh:8: 'my-helper()'" "fixture.test.sh:12: 'function tabbed'"
+if printf '%s' "$(run_gate "$d_shape")" | grep -q "'arm()'"; then
+  fail "28c. the definition inside a case arm was reported, but a case arm is nested"
+else
+  pass "28c. the definition inside a case arm is nested, so it is not reported"
+fi
+shape_list="$(FN_FREEZE_DIRS="$d_shape" bash "$GATE" --list 2>&1 | awk -F'\t' '$5 == "frozen" { printf "%s ", $2 }')"
+if [ "$shape_list" = "pass one wrap " ]; then
+  pass "28b. --list still derives the three column-0 definitions around them as frozen"
+else
+  fail "28b. --list frozen rows: '$shape_list'"
+fi
+
+# ---- 28d. nesting is counted by command word, not by layout ---------------------
+# A block closed on the same line, a keyword used as an argument, and a
+# one-line function body must all leave the depth where it was, or a later
+# top-level indented definition would be wrongly treated as nested.
+d_depth="$(mkfixture nesting-depth <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+if true; then :; fi
+for x in a b; do :; done
+case "$1" in *) : ;; esac
+{ :; }
+echo if do case {
+one() { if true; then :; fi; }
+readonly -f one
+two() {
+  if true; then
+    :
+  fi
+}
+readonly -f two
+ hidden() { :; }
+FIX
+)"
+expect_rc "28d. after same-line blocks, keywords as arguments, a one-line body and a multi-line body, an indented top-level definition is still reported" 1 \
+  "$(run_gate "$d_depth")" "1 violation(s)" "fixture.test.sh:16: 'hidden()'"
 
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
 # Same posture as check-suite-wiring.test.sh: comment-stripped scan of every

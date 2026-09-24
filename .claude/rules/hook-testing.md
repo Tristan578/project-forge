@@ -203,6 +203,12 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   for a one-liner; a trailing comment is not part of it). A subshell body or a
   bare compound body is reported as `unsupported` — the gate never skips a
   definition it cannot follow.
+- Every function at true top level (outside any function body, subshell,
+  loop, `if`/`case` arm or brace group, counted by command word, not
+  indentation) is defined at column 0, at the start of its own line, with a
+  plain identifier name. Anything else at top level — indented, after another
+  command, second on a line, a dashed name — is reported as `shape`, because
+  the freeze rule cannot tie it to a freeze line.
 - `<<` inside `(( ))`, `$(( ))` or the deprecated `$[ ]` is a shift operator,
   not a heredoc.
 - A heredoc delimiter is any word (`<<1EOF`, `<<-ZEOF`, `<<'.EOF'`), and a

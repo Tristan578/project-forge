@@ -816,7 +816,9 @@ by construction rather than by measurement.
 ### What changed
 
 - `readonly -f <name>` directly after every top-level definition: 349 new
-  freezes, 369 in total, 68 files scanned (64 of them define something; the 20
+  freezes, 369 in total, 68 files scanned at the time of the sweep (later
+  merges from main brought the live derivation to 376 across 69; `--list`
+  gives the current figure) (64 of them define something; the 20
   from round 40 included). Those are the GATE's numbers — `bash
   scripts/check-fn-freeze.sh --list | wc -l` — and the only ones this guide
   cites. A raw `grep -c 'readonly -f'` reads higher (about 400 on this branch)
@@ -858,7 +860,12 @@ by construction rather than by measurement.
   directly or through a function the same file defines — `trap 'exit 0' EXIT`
   replaces the `exit 1` the suite reached (ninth round), and so does
   `cleanup() { exit 0; }` + `trap cleanup EXIT` (tenth round); signal traps
-  and cleanup traps whose functions never exit are fine. No files, no definitions, or a file the
+  and cleanup traps whose functions never exit are fine. A top-level
+  definition the freeze rule cannot see — indented with nothing enclosing it,
+  after another command, a dashed name — is reported as `shape` (eleventh
+  round: one space of indentation made a neutering redefinition invisible);
+  nesting is counted by command word, so a helper inside an `if` arm stays out
+  of scope as before. No files, no definitions, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state
   from a fixture, runs the gate on the real tree behind a 300-function floor
