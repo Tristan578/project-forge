@@ -122,4 +122,24 @@ describe('AssetPanel trial access (#7715)', () => {
     expect(texture).not.toHaveAttribute('aria-disabled');
     expect(texture).not.toHaveTextContent('Unavailable');
   });
+
+  // #7715 review round 3 — the pre-load bypass covers only items the trial
+  // could open. 'generate-model' is creator-gated, which no $0 account can
+  // reach, so it stays locked before the profile lands while the
+  // hobbyist-gated 'generate-texture' in the same menu does not.
+  it('keeps a creator-gated generate item locked while the profile is still loading', () => {
+    useUserStore.setState({ tier: 'starter', spendableTokens: 0, profileLoaded: false });
+    setupStore();
+    render(<AssetPanel />);
+    fireEvent.click(screen.getByLabelText('AI Generate'));
+
+    const model = screen.getByRole('menuitem', { name: /^Generate 3D Model/ });
+    expect(model).toHaveAttribute('aria-disabled', 'true');
+    expect(model).toHaveTextContent('Creator');
+    fireEvent.click(model);
+    expect(screen.queryByTestId('gen-model-dialog')).toBeNull();
+
+    const texture = screen.getByRole('menuitem', { name: 'Generate Texture' });
+    expect(texture).not.toHaveAttribute('aria-disabled');
+  });
 });

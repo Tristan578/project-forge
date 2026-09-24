@@ -53,7 +53,7 @@
     ".agents/skills/frontend/scripts/component-scaffold.sh": "ab186e1b1f3b7dbdfab7bc57d1bb177264ef091703a89c57df406428c33f7697",
     ".agents/skills/frontend/templates/component-template.tsx": "f3ffc12596a29f8da13ec35aa291d7cd06f2b714e7755bae43550243b6281afd",
     ".agents/skills/frontend/templates/hook-template.ts": "eef807f344e119319243ae7a5ecb6e8bde7ce4d2274bcf96f04549ba983efa4f",
-    ".agents/skills/generate-route/SKILL.md": "d79e223fa6c0093192d9741e478f11ed464381f965ae055da4c87d3964c6b6f7",
+    ".agents/skills/generate-route/SKILL.md": "538295847e0574aee0fd1b664fbc4d61566297a7fe025c7a0960eddac7180a1b",
     ".agents/skills/infra-services/SKILL.md": "df401dd75403256f217d6e8ec8178b9d484a6e0308da0a0d2c9d4194240d92f6",
     ".agents/skills/infra-services/references/runbook.md": "136a8a724fad500d524090a663560c7e91d9592cf81a9531cd6998bd9f7f1571",
     ".agents/skills/infra-services/references/service-accounts.md": "4feba7983a266f5971e4b74fa9302fd47971b4799d3637be06e20fbf90d6b78c",

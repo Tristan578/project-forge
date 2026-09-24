@@ -5,7 +5,7 @@ import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Sparkles, C
 import { Tabs } from '@spawnforge/ui';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
-import { canAccessPanel, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { canAccessPanel, canAccessPanelBeforeProfileLoad, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { showError } from '@/lib/toast';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -309,14 +309,17 @@ export const AssetPanel = memo(function AssetPanel() {
                           // known, so the item must not paint as ready and then flip
                           // to a disabled amber badge when the answer arrives
                           // (#9725 p8).
-                          // `!profileLoaded` reads as access-unknown, not
-                          // locked — before /api/user/profile resolves,
-                          // `tier`/`spendableTokens` are still defaults, and
-                          // showing the lock badge here would flash it in
-                          // front of a trial-eligible starter account for the
-                          // one render before the real balance lands (#7715
-                          // review round 2).
-                          const allowed = (!profileLoaded || canAccessPanel(id, tier)) && !gated && !gate.loading;
+                          // Before /api/user/profile resolves, `tier`/
+                          // `spendableTokens` are still defaults. An item the
+                          // trial could open reads as access-unknown rather
+                          // than flash a lock badge at a trial-eligible
+                          // starter; a creator-gated item (3D model, skybox)
+                          // stays locked until the profile loads, since no $0
+                          // account can open it (#7715 review round 3).
+                          const tierOk = profileLoaded
+                            ? canAccessPanel(id, tier)
+                            : canAccessPanelBeforeProfileLoad(id);
+                          const allowed = tierOk && !gated && !gate.loading;
                           const required = getRequiredTier(id);
                           return (
                             <button

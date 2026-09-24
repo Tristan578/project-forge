@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { ChatPanel } from '../ChatPanel';
+import { TRIAL_GRANT_TOKENS } from '@/lib/tokens/pricing';
 
 vi.mock('lucide-react', () => ({
   MessageSquare: (props: Record<string, unknown>) => <span data-testid="message-square" {...props} />,
@@ -147,11 +148,16 @@ describe('ChatPanel', () => {
   it('shows upgrade prompt when canUseAI is false', () => {
     mockCanUseAI.mockReturnValue(false);
     render(<ChatPanel />);
-    // #7715 review round 2 — `canUseAI` is false only for a starter account,
-    // whose only path to AI is the one-time signup trial, so the empty state
-    // must say the trial is spent rather than imply no free AI was ever
-    // offered.
-    expect(screen.getByText(/free trial AI tokens/)).toBeDefined();
+    // #7715 review round 3 — accounts created before the signup grant existed
+    // never received it, so the copy states what signup grants and the current
+    // balance, never "you've used your trial" (a history the client cannot
+    // verify). The grant size is read from the constant, not restated.
+    expect(
+      screen.getByText(
+        `New accounts get ${TRIAL_GRANT_TOKENS} free trial AI tokens at signup. You have none left to spend — upgrade for ongoing AI access.`,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/used your/i)).toBeNull();
     const link = screen.getByText('View plans');
     expect(link).toBeDefined();
     expect(link.getAttribute('href')).toBe('/pricing');

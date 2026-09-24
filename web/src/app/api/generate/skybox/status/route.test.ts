@@ -181,4 +181,56 @@ describe('GET /api/generate/skybox/status', () => {
     expect(data.error).not.toContain('Network error');
     expect(data.error).toBe('Could not read the Skybox generation status. Please try again.');
   });
+
+  // Per-panel tier gate (#7715). This route resolves the platform key itself
+  // rather than going through `createGenerationHandler`, so without its own
+  // `panelTierGateResponse('generate-skybox', …)` call a trial starter (effective
+  // hobbyist) could poll the creator-gated skybox provider with the platform key.
+  describe('panel tier gate (generate-skybox, creator)', () => {
+    function authAs(user: Record<string, unknown>) {
+      vi.mocked(authenticateRequest).mockResolvedValue({
+        ok: true as const,
+        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', ...user } as unknown as User },
+      });
+    }
+
+    it('refuses a starter holding 50 spendable trial tokens with 403 TIER_REQUIRED and never resolves a key', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(403);
+      const data = await res.json();
+      expect(data).toEqual({
+        error: 'TIER_REQUIRED',
+        message: 'This feature requires the Creator plan',
+        currentTier: 'starter',
+        requiredTier: 'creator',
+      });
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
+    it('refuses a real hobbyist account the same way', async () => {
+      authAs({ tier: 'hobbyist', monthlyTokens: 300, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toBe('TIER_REQUIRED');
+      expect(resolveApiKey).not.toHaveBeenCalled();
+    });
+
+    it('lets a creator account through to resolveApiKey', async () => {
+      authAs({ tier: 'creator', monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0 });
+      vi.mocked(MeshyClient).mockImplementation(
+        function (this: InstanceType<typeof MeshyClient>) {
+          this.getTextureStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 40 });
+        } as unknown as typeof MeshyClient
+      );
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    });
+  });
 });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withApiMiddleware } from '@/lib/api/middleware';
+import { panelTierGateResponse } from '@/lib/api/panelTierGate';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -15,6 +16,12 @@ async function GET_impl(request: NextRequest) {
     rateLimitConfig: { key: (id) => `user:generate-sprite-status:${id}`, max: 60, windowSeconds: 60 },
   });
   if (mid.error) return mid.error;
+
+  // Per-panel tier gate (#7715): the same check `createGenerationHandler`
+  // runs for POST /api/generate/sprite (panel 'generate-sprite'), BEFORE any
+  // provider key is resolved — this route calls `resolveApiKey` directly.
+  const tierDenied = panelTierGateResponse('generate-sprite', mid.authContext!.user);
+  if (tierDenied) return tierDenied;
 
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get('jobId');

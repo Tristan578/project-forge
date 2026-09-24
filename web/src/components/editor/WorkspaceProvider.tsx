@@ -135,7 +135,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useUserStore } from '@/stores/userStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
-import { canAccessPanel, effectiveTier } from '@/lib/ai/tierAccess';
+import { canAccessPanel, canAccessPanelBeforeProfileLoad, effectiveTier } from '@/lib/ai/tierAccess';
 import { LockedPanelOverlay } from './LockedPanelOverlay';
 
 // ---- Loading skeleton shown while a lazy panel is fetched ----
@@ -182,11 +182,14 @@ function withTierGate(
     const tier = effectiveTier(rawTier, spendableTokens);
     // Before /api/user/profile resolves, `tier`/`spendableTokens` read their
     // defaults ('starter'/0), which is indistinguishable from "no trial
-    // access" — showing the lock here would flash it in front of a
-    // trial-eligible account for the one render before the real balance
-    // lands. `!profileLoaded` reads as access-unknown, not locked, mirroring
-    // `ChatInput.tsx`'s `!profileLoaded || ...` (#7715 review round 2).
-    const hasAccess = !profileLoaded || canAccessPanel(panelId, tier);
+    // access" — showing the lock on a panel the trial could open would flash
+    // it in front of a trial-eligible account for the one render before the
+    // real balance lands. Only those panels are ambiguous: a creator/pro panel
+    // is locked for every $0 account, so it stays locked until the profile
+    // loads (#7715 review round 3).
+    const hasAccess = profileLoaded
+      ? canAccessPanel(panelId, tier)
+      : canAccessPanelBeforeProfileLoad(panelId);
 
     // Track feature flag evaluation once on mount (non-critical analytics)
     useEffect(() => {

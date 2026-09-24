@@ -64,8 +64,9 @@ export function spendableTokensOf(user: {
  * tokens is treated as `TRIAL_ACCESS_TIER`; every other account is its own
  * tier. This is the single rule behind `canAccessPanel` in the editor,
  * `assertAiAccess` on `/api/chat` and `/api/game/decompose`, the platform-key
- * resolver, and `createGenerationHandler`'s per-route `panel` gate (#7715
- * review round 2) — the gates that had kept a trial grant unusable, or left a
+ * resolver, and the per-route `panel` gate (`panelTierGateResponse`, run by
+ * `createGenerationHandler` and by every generate route that resolves a key
+ * directly — #7715 review rounds 2-3) — the gates that had kept a trial grant unusable, or left a
  * generation route reachable past its own panel's tier, when they each
  * checked the raw tier alone.
  */
@@ -133,6 +134,24 @@ export function canAccessPanel(panelId: string, tier: Tier): boolean {
   const required = PANEL_TIER_REQUIREMENTS[panelId];
   if (required === undefined) return true;
   return tierAtLeast(tier, required);
+}
+
+/**
+ * The access answer for `panelId` BEFORE `/api/user/profile` resolves, when
+ * the client still holds the store defaults (`starter`, 0 tokens) and cannot
+ * tell a trial-eligible starter from one with nothing to spend.
+ *
+ * Only the tiers a trial can grant are ambiguous at that point: a starter's
+ * spendable tokens raise it to `TRIAL_ACCESS_TIER` and never above, so a
+ * panel requiring more than that is locked for every $0 account regardless of
+ * balance. Those panels stay locked until the profile loads (a paid account
+ * sees the lock for one render, which is the safe direction); panels the trial
+ * could open render unlocked rather than flash a lock in front of a trial
+ * account. Used by the editor's `withTierGate` and the Asset panel's AI menu
+ * (#7715 review round 3).
+ */
+export function canAccessPanelBeforeProfileLoad(panelId: string): boolean {
+  return canAccessPanel(panelId, TRIAL_ACCESS_TIER);
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   TRIAL_ACCESS_TIER,
   effectiveTier,
   spendableTokensOf,
+  canAccessPanelBeforeProfileLoad,
 } from '../tierAccess';
 import type { Tier } from '@/lib/db/schema';
 
@@ -269,5 +270,38 @@ describe('spendableTokensOf', () => {
     expect(spendableTokensOf({ monthlyTokens: 50, monthlyTokensUsed: 20, addonTokens: 5 })).toBe(35);
     expect(spendableTokensOf({ monthlyTokens: 50, monthlyTokensUsed: 80, addonTokens: 5 })).toBe(5);
     expect(spendableTokensOf({ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 })).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canAccessPanelBeforeProfileLoad (#7715 review round 3)
+// ---------------------------------------------------------------------------
+
+describe('canAccessPanelBeforeProfileLoad', () => {
+  // Derived from the map, so a panel added or re-tiered later is covered
+  // without editing this test (lessons-learned #18).
+  const entries = Object.entries(PANEL_TIER_REQUIREMENTS) as [string, Tier][];
+
+  it('walks a non-empty requirement map', () => {
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.some(([, t]) => t === 'hobbyist')).toBe(true);
+    expect(entries.some(([, t]) => t === 'creator' || t === 'pro')).toBe(true);
+  });
+
+  it('is open exactly for panels the trial tier could reach, and locked above it', () => {
+    for (const [panelId, required] of entries) {
+      expect(canAccessPanelBeforeProfileLoad(panelId), panelId).toBe(tierAtLeast(TRIAL_ACCESS_TIER, required));
+    }
+  });
+
+  it('keeps creator- and pro-gated panels locked', () => {
+    expect(canAccessPanelBeforeProfileLoad('generate-model')).toBe(false);
+    expect(canAccessPanelBeforeProfileLoad('world-builder')).toBe(false);
+    expect(canAccessPanelBeforeProfileLoad('playtest')).toBe(false);
+  });
+
+  it('is open for hobbyist-gated and unmapped panels', () => {
+    expect(canAccessPanelBeforeProfileLoad('generate-texture')).toBe(true);
+    expect(canAccessPanelBeforeProfileLoad('scene-hierarchy')).toBe(true);
   });
 });

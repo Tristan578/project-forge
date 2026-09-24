@@ -211,4 +211,33 @@ describe('GET /api/generate/texture/status', () => {
     expect(data.error).not.toContain('Provider error');
     expect(data.error).toBe('Could not read the Texture generation status. Please try again.');
   });
+
+  // Per-panel tier gate (#7715). 'generate-texture' is hobbyist-gated, so a
+  // starter holding spendable trial tokens (effective hobbyist) must reach the
+  // provider, and a starter with nothing left to spend must not.
+  describe('panel tier gate (generate-texture, hobbyist)', () => {
+    it('lets a starter holding 50 spendable trial tokens through to resolveApiKey', async () => {
+      const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+      mockGetTextureStatus.mockResolvedValue({ status: 'IN_PROGRESS', progress: 30 });
+
+      const res = await GET(makeRequest({ jobId: 'task_123' }));
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a starter with no spendable tokens with 403 TIER_REQUIRED and never resolves a key', async () => {
+      const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+      const res = await GET(makeRequest({ jobId: 'task_123' }));
+      expect(res.status).toBe(403);
+      const data = await res.json();
+      expect(data.error).toBe('TIER_REQUIRED');
+      expect(data.requiredTier).toBe('hobbyist');
+      expect(resolveApiKey).not.toHaveBeenCalled();
+    });
+  });
 });

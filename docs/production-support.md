@@ -483,12 +483,15 @@ as `hobbyist` by the four AI gates — `effectiveTier` in
 `/api/game/decompose`, by the platform-key resolver, by
 `createGenerationHandler`'s per-route `panel` check (every `/api/generate/*`
 route, checked right after auth and before any token deduction — #7715 review
-round 2), and by the editor's panel gate (the profile route ships
+round 2; the routes that call `resolveApiKey` directly — every `*/status`
+poller and `voice/batch` — run the same check through `panelTierGateResponse`
+in `web/src/lib/api/panelTierGate.ts` before resolving a key), and by the
+editor's panel gate (the profile route ships
 `spendableTokens` so the editor knows on first paint). A user whose grant
 landed but who still sees every AI panel locked has a stale profile (reload) or
-a balance of zero; the SQL above distinguishes the two. `billing_cycle_start`
-is not set by the grant, so the Token Dashboard shows no "Next refill" for a
-trial account — nothing refills it.
+a balance of zero; the SQL above distinguishes the two. The Token Dashboard
+labels a `starter` balance "Trial Remaining" with a one-time, does-not-renew
+note and never shows "Next refill" for it — nothing refills a starter account.
 
 **Abuse boundary (known, accepted):** the grant is exactly-once **per
 account**. `users.email` is `NOT NULL UNIQUE` and `users.clerk_id` is unique

@@ -27,9 +27,12 @@ import { useGenerationGate } from '@/hooks/useGenerationGate';
 /** The default "nothing is blocked" gate result. */
 const OPEN = { blocked: false, reason: undefined, loading: false, unprovisionable: false, byokConfigurable: false } as const;
 
+// `profileLoaded: true` so the tier decision goes through the mocked
+// `canAccessPanel` below rather than the pre-load branch
+// (`canAccessPanelBeforeProfileLoad`), which the trial suite covers for real.
 vi.mock('@/stores/userStore', () => ({
-  useUserStore: vi.fn((selector: (s: { tier: string }) => unknown) =>
-    selector({ tier: 'pro' }),
+  useUserStore: vi.fn((selector: (s: { tier: string; profileLoaded: boolean }) => unknown) =>
+    selector({ tier: 'pro', profileLoaded: true }),
   ),
 }));
 

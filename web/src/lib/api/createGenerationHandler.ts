@@ -19,8 +19,8 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import type { Provider, Tier } from '@/lib/db/schema';
-import { canAccessPanel, effectiveTier, getRequiredTier, spendableTokensOf, TIER_LABELS } from '@/lib/ai/tierAccess';
+import type { Provider } from '@/lib/db/schema';
+import { panelTierGateResponse } from './panelTierGate';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 import { checkBotIdGate } from '@/lib/security/botId';
@@ -436,19 +436,13 @@ export function createGenerationHandler<TParams, TResult>(
     // checks, the response cache, and any token deduction, so a locked caller
     // never spends rate-limit budget or a token on a request that was always
     // going to be refused.
-    const accessTier = effectiveTier(tier as Tier, spendableTokensOf(authResult.ctx.user));
-    if (!canAccessPanel(panel, accessTier)) {
+    // The check itself lives in `panelTierGateResponse` so the direct
+    // `resolveApiKey` callers (status pollers, `voice/batch`) apply the SAME
+    // rule and body instead of skipping it.
+    const tierDenied = panelTierGateResponse(panel, authResult.ctx.user);
+    if (tierDenied) {
       mctx.outcome = 'tier_required';
-      const requiredTier = getRequiredTier(panel);
-      return NextResponse.json(
-        {
-          error: 'TIER_REQUIRED',
-          message: `This feature requires the ${requiredTier ? TIER_LABELS[requiredTier] : 'a higher'} plan`,
-          currentTier: tier,
-          requiredTier,
-        },
-        { status: 403 },
-      );
+      return tierDenied;
     }
 
     // 1b. Declared-unavailable capability (#9117). Static config, checked as

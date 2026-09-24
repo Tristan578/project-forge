@@ -361,5 +361,17 @@ describe('WorkspaceProvider', () => {
       expect(screen.getByRole('region', { name: 'Panel locked — upgrade required' })).toBeInTheDocument();
       expect(screen.getByText(/plan required/i)).toBeInTheDocument();
     });
+
+    // #7715 review round 3 — the pre-load bypass covers only panels the trial
+    // could open. A creator-gated panel is locked for every $0 account, so it
+    // must not render unlocked (even for one render) before the profile lands.
+    it('keeps a creator-gated panel locked while the profile is still loading', () => {
+      useUserStore.setState({ tier: 'starter', spendableTokens: 0, profileLoaded: false });
+
+      renderPanel('world-builder');
+
+      expect(screen.getByRole('region', { name: 'Panel locked — upgrade required' })).toBeInTheDocument();
+      expect(screen.getByText(/plan required/i)).toBeInTheDocument();
+    });
   });
 });

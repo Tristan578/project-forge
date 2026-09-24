@@ -125,11 +125,14 @@ export function ChatPanel() {
               <>
                 <Sparkles size={28} className="text-zinc-700" />
                 <p className="text-xs text-zinc-400">
-                  {/* `canUseAI` is false only for a starter account here, and every
-                      starter account's only path to AI is the one-time signup
-                      trial (#7715) — so this empty state is always "the trial
-                      is spent", never "no plan was ever offered" (review round 2). */}
-                  You&apos;ve used your {TRIAL_GRANT_TOKENS} free trial AI tokens — upgrade for ongoing access.
+                  {/* `canUseAI` is false here when the account has no AI access —
+                      for a starter, no spendable tokens. That is NOT proof the
+                      trial was spent: accounts created before #7715 never
+                      received the signup grant (it runs only on Clerk
+                      `user.created`, with no backfill). So the copy states what
+                      signup grants and what the balance is now, never a usage
+                      history the client cannot verify (review round 3). */}
+                  New accounts get {TRIAL_GRANT_TOKENS} free trial AI tokens at signup. You have none left to spend — upgrade for ongoing AI access.
                 </p>
                 <a
                   href="/pricing"

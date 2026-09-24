@@ -39,8 +39,15 @@ vi.mock('@/lib/generate/spriteClient', () => ({
 // without auth/rate-limit/key-resolution side effects. Mocking these modules
 // also keeps their heavy transitive deps (redis, DB) out of the test. ---
 vi.mock('@/lib/api/middleware', () => ({
-  withApiMiddleware: vi.fn(async () => ({ error: null, userId: 'user-1' })),
+  withApiMiddleware: vi.fn(async () => ({
+    error: null,
+    userId: 'user-1',
+    authContext: { user: { id: 'user-1', tier: 'pro' } },
+  })),
 }));
+// The per-panel tier gate (#7715) runs before the status mapping this suite
+// compares; it has its own route tests, so it is passed through here.
+vi.mock('@/lib/api/panelTierGate', () => ({ panelTierGateResponse: vi.fn(() => null) }));
 vi.mock('@/lib/keys/resolver', () => ({
   resolveApiKey: vi.fn(async () => ({ key: 'provider-key' })),
   ApiKeyError: class ApiKeyError extends Error {
