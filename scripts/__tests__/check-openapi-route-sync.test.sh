@@ -50,7 +50,9 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 command -v jq  >/dev/null 2>&1 || { echo "jq not found — required to run these tests"; exit 1; }
@@ -67,14 +69,18 @@ make_repo() {
   mkdir -p "$repo/api"
   echo "$repo"
 }
+readonly -f make_repo
 
 # Write the spec / allowlist verbatim.
 write_spec()      { printf '%s' "$2" > "$1/spec.json"; }
+readonly -f write_spec
 write_allowlist() { printf '%s' "$2" > "$1/allowlist.json"; }
+readonly -f write_allowlist
 
 # add_route <repo> <segments> — create api/<segments>/route.ts. <segments> may
 # contain literal [param], [...rest] and (group) dirs (quoted, so no globbing).
 add_route() { mkdir -p "$1/api/$2" && : > "$1/api/$2/route.ts"; }
+readonly -f add_route
 
 # Run the gate inside $repo with the three inputs pointed at the throwaway tree;
 # echo "<exit>|<output>". $2 overrides the api dir (default 'api') for the
@@ -87,6 +93,7 @@ run_gate() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate
 
 EMPTY_ALLOWLIST='{"categories":{},"routes":{}}'
 

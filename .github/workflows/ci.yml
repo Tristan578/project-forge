@@ -1166,6 +1166,7 @@ jobs:
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
+            scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -1333,6 +1334,19 @@ jobs:
         # suite-wiring pair above: the gate's own suite runs first so a broken
         # gate is distinguishable from a genuine finding.
         run: bash scripts/check-pin-strength.sh
+
+      - name: Run function-freeze gate test suite
+        run: bash scripts/__tests__/check-fn-freeze.test.sh
+
+      - name: Run function-freeze gate
+        # Every function a bash self-defense suite defines must be frozen with
+        # `readonly -f` directly after its definition (PF-1076 / #9125): a
+        # bash function resolves by name at call time, so one inserted
+        # `fail() { :; }` otherwise turns every FAIL into silence and the suite
+        # exits 0 having checked nothing. Same pairing as the two gates above:
+        # the gate's own suite runs first so a broken gate is distinguishable
+        # from a genuine finding.
+        run: bash scripts/check-fn-freeze.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without

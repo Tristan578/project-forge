@@ -29,7 +29,9 @@ ARTIFACT_TEST="$REPO_ROOT/apps/docs/lib/__tests__/capabilityMatrixArtifact.test.
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "script not found: $SCRIPT"; echo "SUITE FAILED"; exit 1; }
 
@@ -75,8 +77,10 @@ run_with() {
   rm -rf "$tmp"
   printf '%s\n---RC---%s' "$out" "$rc"
 }
+readonly -f run_with
 
 rc_of() { local r="${1#*---RC---}"; printf '%s' "$r"; }
+readonly -f rc_of
 
 echo "=== the body check must fail on everything but a rendered matrix row ==="
 
@@ -199,6 +203,7 @@ e2e() {
     bash "$SCRIPT" "${URL:-https://docs.example.test/}" 2>&1
   )
 }
+readonly -f e2e
 
 OUT="$(e2e 200 "$TABLE_HTML")"; RC=$?
 if [ "$RC" = 0 ] && grep -q 'Capability matrix check passed' <<<"$OUT"; then

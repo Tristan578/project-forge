@@ -36,7 +36,9 @@ TMPDIR_T="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_T"' EXIT
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$GATE" ] || { echo "gate script not found: $GATE"; exit 1; }
 
@@ -45,12 +47,14 @@ run_gate() {
   bash "$GATE" "$1" "$2" ${3:+"$3"} >/dev/null 2>&1
   echo $?
 }
+readonly -f run_gate
 
 mkfile() {
   local path="$TMPDIR_T/$1"
   printf '%s\n' "$2" > "$path"
   echo "$path"
 }
+readonly -f mkfile
 
 # ── Real vitest fixtures ──────────────────────────────────────────────────────
 PASS_OUTPUT=' Test Files  120 passed (120)
@@ -400,6 +404,7 @@ if [ "$rc" = "0" ]; then pass "--coverage: 132 after both phases complete → ga
 large_tail() {
   awk 'BEGIN { for (i = 0; i < 50000; i++) print "src/coverage-row.ts | 100 | 100 | 100 | 100 |                         " }'
 }
+readonly -f large_tail
 
 check_large_log() {
   local label="$1" expected="$2" prefix="$3" suffix="$4" diagnostic="$5"
@@ -418,6 +423,7 @@ check_large_log() {
     fail "$label: expected rc=$expected diagnostic='$diagnostic', got rc=$rc output='$output'"
   fi
 }
+readonly -f check_large_log
 
 check_large_log "large coverage output preserves passing evidence" 0 "$COVERAGE_PASS_OUTPUT" "" "::warning::"
 check_large_log "large output detects early test failure directly" 124 "$TESTFAIL_OUTPUT" "$COVERAGE_PASS_OUTPUT" ""
@@ -471,6 +477,7 @@ pin_coverage_wiring() {
     fail "$label: gate invoked without the --coverage mode flag"
   fi
 }
+readonly -f pin_coverage_wiring
 
 # -- SIGPIPE under `pipefail`: the gate reported a GREEN run as red (#9964) ----
 #
@@ -498,6 +505,7 @@ big_tail() {
     i=$((i + 1))
   done
 }
+readonly -f big_tail
 
 BIG_PASS_FILE="$TMPDIR_T/big-pass.txt"
 {

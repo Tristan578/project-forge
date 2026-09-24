@@ -40,6 +40,7 @@ run_hook() {
   HOOK_OUT="$HOOK_OUT$HOOK_ERR"
   rm -f "$errfile"
 }
+readonly -f run_hook
 
 check() {
   local desc="$1" expected="$2"
@@ -51,6 +52,7 @@ check() {
     echo "FAIL: $desc (expected exit $expected, got $HOOK_EXIT)"
   fi
 }
+readonly -f check
 
 # check_err <desc>  → assert the block reason reached STDERR, not just stdout
 check_err() {
@@ -63,6 +65,7 @@ check_err() {
     echo "FAIL: $desc (nothing on stderr — the caller sees a mute block)"
   fi
 }
+readonly -f check_err
 
 # check_out <desc> <substring>  → assert the hook's output mentions it
 check_out() {
@@ -72,6 +75,7 @@ check_out() {
     *) FAIL=$((FAIL + 1)); echo "FAIL: $desc (output lacked '$needle')" ;;
   esac
 }
+readonly -f check_out
 
 MS="--milestone 'S1: Quality & Reliability'"
 

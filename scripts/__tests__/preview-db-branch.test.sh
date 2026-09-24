@@ -38,7 +38,9 @@ CLEANUP_YML="$REPO_ROOT/.github/workflows/preview-db-cleanup.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "script not found: $SCRIPT"; exit 1; }
 [ -f "$NEON_HELPER" ] || { echo "neon-branch.sh not found next to the script"; exit 1; }
@@ -94,13 +96,19 @@ stub_reset() {
   printf '{}' > "$TMPDIR_T/stub/body.default"
   printf '200' > "$TMPDIR_T/stub/status.default"
 }
+readonly -f stub_reset
 stub_body()    { cat > "$TMPDIR_T/stub/body.$1"; }
+readonly -f stub_body
 stub_status()  { printf '%s' "$2" > "$TMPDIR_T/stub/status.$1"; }
+readonly -f stub_status
 stub_default() { cat > "$TMPDIR_T/stub/body.default"; }
+readonly -f stub_default
 # Branch ids that were DELETEd, one per line, in request order.
 deletes() { sed -nE 's#^DELETE .*/branches/([^ ]+).*$#\1#p' "$TMPDIR_T/stub.log"; }
+readonly -f deletes
 # How many create attempts reached Neon.
 posts()   { grep -c '^POST ' "$TMPDIR_T/stub.log" || true; }
+readonly -f posts
 
 # --- gh stub: `gh api repos/<owner>/<repo>/pulls/<n> --jq .state` ---------------
 # Replays $GH_STUB_DIR/pr.<n> (its content is the state) and appends the call
@@ -118,8 +126,11 @@ GHEOF
 chmod +x "$TMPDIR_T/bin/gh"
 
 gh_reset() { rm -rf "$TMPDIR_T/gh"; mkdir -p "$TMPDIR_T/gh"; : > "$TMPDIR_T/gh.log"; }
+readonly -f gh_reset
 gh_pr()    { printf '%s' "$2" > "$TMPDIR_T/gh/pr.$1"; }
+readonly -f gh_pr
 gh_calls() { cat "$TMPDIR_T/gh.log"; }
+readonly -f gh_calls
 
 # Run the script against both stubs; echo "<exit>|<output>". Every seam is set
 # on the child only. Leading VAR=value arguments override on the child too.
@@ -136,6 +147,7 @@ run_script() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_script
 
 # Same, with stderr kept APART in $TMPDIR_T/stderr.log — for the output-channel
 # case, which is the only one that must tell the two streams apart.
@@ -152,7 +164,9 @@ run_script_split() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_script_split
 stderr_log() { cat "$TMPDIR_T/stderr.log"; }
+readonly -f stderr_log
 
 NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 CREATE_OK='{"branch":{"id":"br-new-1"},"connection_uris":[{"connection_uri":"postgresql://u:p@ep-new.neon.tech/db"}]}'
@@ -552,6 +566,7 @@ assert_usage() {
   rc="${res%%|*}"
   if [ "$rc" = "64" ]; then pass "$label is a usage error (exit 64)"; else fail "$label should exit 64, got $rc"; fi
 }
+readonly -f assert_usage
 assert_usage "no subcommand" ""
 assert_usage "unknown subcommand" bogus
 assert_usage "create with no arguments" create

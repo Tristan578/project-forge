@@ -23,7 +23,9 @@ TMPDIR_T="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_T"' EXIT
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 command -v node >/dev/null 2>&1 || { echo "node not on PATH — suite cannot run"; exit 1; }
 [ -f "$GATE" ] || { echo "gate script not found: $GATE"; exit 1; }
@@ -41,6 +43,7 @@ mktree() {
   done
   echo "$nm"
 }
+readonly -f mktree
 
 # Run the gate against a tree with optional platform/arch seam overrides.
 # Usage: run_gate <nm_dir> [platform] [arch]
@@ -49,6 +52,7 @@ run_gate() {
     bash "$GATE" "$1" >/dev/null 2>&1
   echo $?
 }
+readonly -f run_gate
 
 HOST_PLATFORM="$(node -p process.platform)"
 HOST_ARCH="$(node -p process.arch)"
@@ -276,6 +280,7 @@ next_build_jobs() {
     esac
   done <<<"$rows" | sort -u
 }
+readonly -f next_build_jobs
 
 # Reads workflow text on stdin; prints one line per way <job> fails to run the
 # gate, and nothing when it is wired. Job blocks are extracted individually so
@@ -323,6 +328,7 @@ job_wiring_defects() {
     echo "native-bindings step does not run 'bash scripts/check-native-bindings.sh' as its whole run: line — neutered, rewritten, or comment-suffixed"
   fi
 }
+readonly -f job_wiring_defects
 
 if [ -f "$CI_YML" ]; then
   ci="$(cat "$CI_YML")"
@@ -497,6 +503,7 @@ mkrolldown() {
   done
   echo "$nm"
 }
+readonly -f mkrolldown
 
 # R1. Happy path: the host's rolldown binding present with a .node binary → 0.
 nm="$(mkrolldown r-ok linux x64 binding-linux-x64-gnu)"

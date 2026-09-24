@@ -16,7 +16,9 @@ WORKFLOW="$HERE/../../.github/workflows/changeset-check.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$WORKFLOW" ] || { echo "workflow not found: $WORKFLOW"; exit 1; }
 
@@ -63,6 +65,7 @@ run_decision() {
   grep -oE 'skip=(true|false)' "$out" | tail -1 | cut -d= -f2
   rm -f "$out"
 }
+readonly -f run_decision
 
 check() {
   local desc="$1" expected="$2" actual="$3"
@@ -72,6 +75,7 @@ check() {
     fail "$desc — expected skip=$expected, got '$actual'"
   fi
 }
+readonly -f check
 
 echo "=== changeset-check.yml skip-decision tests ==="
 

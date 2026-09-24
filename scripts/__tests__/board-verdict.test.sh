@@ -38,6 +38,7 @@ run_case() {
     *) FAIL=$((FAIL+1)); echo "  FAIL $name: expected '$expected*', got '$out'" ;;
   esac
 }
+readonly -f run_case
 
 echo "board-verdict decision logic"
 
@@ -108,6 +109,7 @@ publish_case() {
     sed 's/^/         /' "$RECORD" | head -8
   fi
 }
+readonly -f publish_case
 
 publish_case "a FAIL verdict publishes state=failure"  'state=failure' "<!-- board-verdict: FAIL sha=$HEAD -->"
 publish_case "a PASS verdict publishes state=success"  'state=success' "<!-- board-verdict: PASS sha=$HEAD -->"
@@ -146,6 +148,7 @@ post_case() {
     FAIL=$((FAIL+1)); echo "  FAIL $name: nothing published matching '$expected'"
   fi
 }
+readonly -f post_case
 
 post_case "a PASS comment carries the marker board-verdict.sh reads" \
   "<!-- board-verdict: PASS sha=$REAL_SHA -->" 1 PASS "$REAL_SHA"

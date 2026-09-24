@@ -37,7 +37,9 @@ CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "key script not found: $SCRIPT"; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "git not found — required to run these tests"; exit 1; }
@@ -69,12 +71,15 @@ make_repo() {
   )
   printf '%s' "$repo"
 }
+readonly -f make_repo
 
 key_in() { ( cd "$1" && bash "$SCRIPT" 2>/dev/null ); }
+readonly -f key_in
 
 commit_in() {
   ( cd "$1" && git add -A && git commit -qm "$2" )
 }
+readonly -f commit_in
 
 REPO="$(make_repo)"
 BASE_KEY="$(key_in "$REPO")"
@@ -326,6 +331,7 @@ echo ""
 echo "=== all4 mode identifies the four-variant set with the same tree hash ==="
 REPO4="$(make_repo)"
 key4_in() { ( cd "$1" && bash "$SCRIPT" all4 2>/dev/null ); }
+readonly -f key4_in
 ALL4_KEY="$(key4_in "$REPO4")"
 WEBGL2_KEY="$(key_in "$REPO4")"
 
@@ -417,6 +423,7 @@ echo ""
 echo "=== ci-reuse mode identifies the PR-built set CD may adopt ==="
 REPOR="$(make_repo)"
 keyr_in() { ( cd "$1" && bash "$SCRIPT" ci-reuse 2>/dev/null ); }
+readonly -f keyr_in
 REUSE_KEY="$(keyr_in "$REPOR")"
 REUSE_ALL4="$(key4_in "$REPOR")"
 REUSE_WEBGL2="$(key_in "$REPOR")"

@@ -30,7 +30,9 @@ CD_YML="$HERE/../../.github/workflows/cd.yml"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 
@@ -56,6 +58,7 @@ printf '%s\n' "\$out"
 STUB
   chmod +x "$dir/gh"
 }
+readonly -f make_gh
 
 # run_case <label> <subject> <pr_head> <conclusion> <pr_tree> [event]
 # Echoes the script's stdout.
@@ -81,6 +84,7 @@ run_case() {
       bash "$SCRIPT" 2>&1 )
   rm -rf "$dir" "$repo"
 }
+readonly -f run_case
 
 assert_verdict() {
   local label="$1" want="$2" out="$3"
@@ -90,6 +94,7 @@ assert_verdict() {
     fail "$label -> expected validated=${want}, got: $(tr '\n' ' ' <<<"$out")"
   fi
 }
+readonly -f assert_verdict
 
 echo "=== ci-tree-already-validated.sh ==="
 

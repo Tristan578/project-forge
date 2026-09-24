@@ -10,13 +10,16 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 pass() { echo "ok   - $1"; }
+readonly -f pass
 fail() { echo "FAIL - $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 assert_eq() {
   local description="$1" expected="$2" actual="$3"
   if [ "$actual" = "$expected" ]; then pass "$description"; else
     fail "$description (expected '$expected', got '$actual')"
   fi
 }
+readonly -f assert_eq
 
 STUB="$TMP/bin"
 mkdir -p "$STUB"
@@ -60,6 +63,7 @@ run_case() {
     PLAYWRIGHT_INSTALL_BUDGET_SECONDS="${PLAYWRIGHT_INSTALL_BUDGET_SECONDS:-600}" \
     PATH="$STUB:$PATH" bash "$SCRIPT" "$mode" >"$TMP/out" 2>"$TMP/err"
 }
+readonly -f run_case
 
 run_case browsers 1
 assert_eq "a transient timeout is retried and then succeeds" "0" "$?"

@@ -26,7 +26,9 @@ REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "verifier script not found: $SCRIPT"; exit 1; }
 
@@ -134,6 +136,7 @@ mk() {
       "portable-paths":       { result: $pp }
     }'
 }
+readonly -f mk
 
 # Run the verifier with a given NEEDS_JSON; echo "<exit>|<output>".
 run_verify() {
@@ -142,6 +145,7 @@ run_verify() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_verify
 
 echo "=== check-ci-success.sh tests ==="
 

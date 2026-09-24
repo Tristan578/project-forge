@@ -32,6 +32,7 @@ run_gate() {
   (cd "$tmp" && PATH="$tmp/bin:$PATH" VERCEL_TEAM_ID=team VERCEL_TOKEN=token \
     bash "$gate" project '^app\.txt$' test)
 }
+readonly -f run_gate
 
 output=$(run_gate)
 grep -q 'changed=false' <<<"$output"

@@ -25,6 +25,7 @@ require() {
     exit 1
   fi
 }
+readonly -f require
 require git
 
 [ -f "$HOOK" ] || { echo "hook not found: $HOOK" >&2; exit 1; }
@@ -38,6 +39,7 @@ assert_exit() {
     FAILURES=$((FAILURES + 1))
   fi
 }
+readonly -f assert_exit
 
 assert_contains() {
   local desc="$1" needle="$2" haystack="$3"
@@ -48,6 +50,7 @@ assert_contains() {
     FAILURES=$((FAILURES + 1))
   fi
 }
+readonly -f assert_contains
 
 TMPROOT="$(mktemp -d)"
 trap 'rm -rf "$TMPROOT"' EXIT
@@ -91,6 +94,7 @@ chmod +x "$PASS_BIN/npx" "$FAIL_BIN/npx"
 # assertions.
 GIT_BIN_DIR="$(cd "$(dirname "$(command -v git)")" && pwd)"
 MINIMAL_PATH() { printf '%s:%s:/usr/bin:/bin' "$1" "$GIT_BIN_DIR"; }
+readonly -f MINIMAL_PATH
 
 # The "npx unavailable" case is only meaningful if npx really is unreachable
 # from that PATH. If a future toolchain puts npx beside git, this assertion is
@@ -108,6 +112,7 @@ run_hook() {
   out="$(cd "$cwd" && PATH="$(MINIMAL_PATH "$bin")" TOOL_INPUT_file_path="$file" bash "$HOOK" 2>&1)" || RC=$?
   OUT="$out"
 }
+readonly -f run_hook
 
 # ---- Non-matching paths: exit 0, and do it without touching the toolchain ----
 #
