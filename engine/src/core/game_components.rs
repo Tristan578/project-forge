@@ -803,6 +803,144 @@ pub struct GameEvent {
     pub target_entity_id: Option<String>,
 }
 
+// ---- Staged inserts for same-frame adds (#10193) ----
+
+/// Game components staged for entities that had no `GameComponents` when the
+/// current `add_game_component` drain began.
+///
+/// The bridge's `apply_game_component_adds` inserts a missing `GameComponents`
+/// through deferred `Commands`, which Bevy applies only after the system
+/// returns. A second add for the same entity in the same drain therefore
+/// still sees no component, and building a fresh `GameComponents` for it made
+/// the second insert REPLACE the first: an entity given a Character Controller
+/// and Health in one frame kept only Health. Staging the pending inserts here
+/// keeps every add for one entity in ONE `GameComponents`, inserted once at
+/// the end of the drain, and lets each add's event and history entry describe
+/// the accumulated set.
+///
+/// Lives in `core/` so it can be tested natively; the bridge is wasm32-only.
+#[derive(Debug, Default)]
+pub struct StagedGameComponents {
+    staged: Vec<(Entity, GameComponents)>,
+}
+
+impl StagedGameComponents {
+    /// The components already staged for `entity`, if any.
+    pub fn get(&self, entity: Entity) -> Option<&GameComponents> {
+        self.staged.iter().find(|(e, _)| *e == entity).map(|(_, gc)| gc)
+    }
+
+    /// Stage `component` for `entity`, merging into anything already staged
+    /// for it under `GameComponents::add`'s replace-by-type rule.
+    ///
+    /// Returns the staged set before the add (`None` for the entity's first
+    /// add this drain) and a clone of the set after it, the pair a history
+    /// entry records.
+    pub fn add(
+        &mut self,
+        entity: Entity,
+        component: GameComponentData,
+    ) -> (Option<GameComponents>, GameComponents) {
+        if let Some((_, gc)) = self.staged.iter_mut().find(|(e, _)| *e == entity) {
+            let before = gc.clone();
+            gc.add(component);
+            return (Some(before), gc.clone());
+        }
+        let mut gc = GameComponents::default();
+        gc.add(component);
+        self.staged.push((entity, gc.clone()));
+        (None, gc)
+    }
+
+    /// Every staged insert, one per entity, in first-seen order.
+    pub fn into_inserts(self) -> Vec<(Entity, GameComponents)> {
+        self.staged
+    }
+}
+
+#[cfg(test)]
+mod staged_game_components_tests {
+    use super::{
+        CharacterControllerData, GameComponentData, HealthData, StagedGameComponents,
+    };
+    use bevy::prelude::*;
+
+    fn controller() -> GameComponentData {
+        GameComponentData::CharacterController(CharacterControllerData::default())
+    }
+
+    fn health(max_hp: f32) -> GameComponentData {
+        GameComponentData::Health(HealthData { max_hp, current_hp: max_hp, ..HealthData::default() })
+    }
+
+    fn names(gc: &super::GameComponents) -> Vec<&'static str> {
+        gc.components.iter().map(|c| c.component_name()).collect()
+    }
+
+    /// The #10193 case: two different components for one entity in one drain
+    /// end up in ONE insert holding both, and the second add's history pair
+    /// records the first add as its `old` side.
+    #[test]
+    fn two_adds_for_one_entity_share_one_insert() {
+        let mut world = World::new();
+        let player = world.spawn_empty().id();
+        let mut staged = StagedGameComponents::default();
+
+        let (old_first, new_first) = staged.add(player, controller());
+        assert!(old_first.is_none());
+        assert_eq!(names(&new_first), vec!["character_controller"]);
+
+        let (old_second, new_second) = staged.add(player, health(100.0));
+        assert_eq!(names(old_second.as_ref().expect("first add is the old side")), vec!["character_controller"]);
+        assert_eq!(names(&new_second), vec!["character_controller", "health"]);
+
+        let inserts = staged.into_inserts();
+        assert_eq!(inserts.len(), 1, "one insert per entity, never one per add");
+        assert_eq!(inserts[0].0, player);
+        assert_eq!(names(&inserts[0].1), vec!["character_controller", "health"]);
+    }
+
+    /// Same type twice in one drain keeps ONE component of that type carrying
+    /// the second payload — the existing replace-by-type rule of `add`.
+    #[test]
+    fn same_type_twice_keeps_the_second_payload() {
+        let mut world = World::new();
+        let player = world.spawn_empty().id();
+        let mut staged = StagedGameComponents::default();
+
+        staged.add(player, health(50.0));
+        let (_, after) = staged.add(player, health(200.0));
+
+        assert_eq!(names(&after), vec!["health"]);
+        match &after.components[0] {
+            GameComponentData::Health(h) => assert_eq!(h.max_hp, 200.0),
+            other => panic!("expected health, got {other:?}"),
+        }
+        assert_eq!(staged.into_inserts().len(), 1);
+    }
+
+    #[test]
+    fn different_entities_stay_separate_in_first_seen_order() {
+        let mut world = World::new();
+        let a = world.spawn_empty().id();
+        let b = world.spawn_empty().id();
+        let mut staged = StagedGameComponents::default();
+
+        assert!(staged.get(a).is_none());
+        staged.add(a, controller());
+        staged.add(b, health(10.0));
+        staged.add(a, health(20.0));
+        assert!(staged.get(a).is_some());
+
+        let inserts = staged.into_inserts();
+        assert_eq!(inserts.len(), 2);
+        assert_eq!(inserts[0].0, a);
+        assert_eq!(names(&inserts[0].1), vec!["character_controller", "health"]);
+        assert_eq!(inserts[1].0, b);
+        assert_eq!(names(&inserts[1].1), vec!["health"]);
+    }
+}
+
 // ---- Plugin ----
 
 pub struct GameComponentsPlugin;
