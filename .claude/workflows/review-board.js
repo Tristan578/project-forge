@@ -133,8 +133,9 @@ if (reviewedSha) {
   published = await agent(
     `Publish the review board's verdict onto the pull request for the current branch.\n` +
     `1. \`gh pr view --json number --jq .number\`. If there is no PR for this branch, report that and STOP — do not create one, and do not substitute another sha.\n` +
-    `2. Run EXACTLY: bash scripts/post-board-verdict.sh <pr number> ${overall} ${reviewedSha} "<one line: how many reviewers reported and how many failed>"\n` +
+    `2. Run EXACTLY: bash scripts/post-board-verdict.sh <pr number> ${overall} ${reviewedSha} ${boards.length}/${REVIEWERS.length} "<one line: how many reviewers reported and how many failed>"\n` +
     `   The sha is fixed above. It is the commit the reviewers actually read. Do NOT look up the PR's current head and do NOT substitute it — if they differ, that difference is the signal, and the check reports the verdict as stale on purpose.\n` +
+    `   The seat count is fixed above too (${boards.length} of ${REVIEWERS.length} seats reported): the script refuses a PASS with a seat missing, and \`board-verdict.sh\` reads a partial or countless PASS as pending (#10141). Do NOT change it.\n` +
     `3. Report the script's output verbatim. Do not edit any file, and do not post any other comment.`,
     // Mechanical: read a PR number, run one fixed script, echo its output.
     { label: 'publish:verdict', phase: 'Publish', model: 'haiku', effort: 'low' }

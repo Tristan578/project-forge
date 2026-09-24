@@ -80,7 +80,14 @@ export interface GameSlice {
   clearExportPreset: () => void;
   setGameWon: (won: boolean) => void;
   setGameScore: (score: number) => void;
-  play: () => void;
+  /**
+   * Enter Play. Returns `true` only when the `play` command was dispatched;
+   * `false` when the winnability gate refused (its explanation is in the chat
+   * overlay) or no engine dispatcher is attached. `() => boolean` is
+   * assignable where `() => void` is expected, so existing callers are
+   * unaffected (#10166).
+   */
+  play: () => boolean;
   stop: () => void;
   pause: () => void;
   resume: () => void;
@@ -147,20 +154,30 @@ function surfaceWinnabilityMessage(message: string): void {
   // Compute the impure id/timestamp once, outside the updater, so the message
   // is identical no matter how many times the store runs the updater.
   const entry = { id: messageId(), role: 'system' as const, content: message, timestamp: Date.now() };
-  import('@/stores/chatStore').then(({ useChatStore }) => {
-    // Updater form: read-modify-write atomically so a concurrent chat write
-    // (e.g. a streaming token) can't be clobbered between get and set.
-    useChatStore.setState((state) => ({
-      messages: [...state.messages, entry],
-      rightPanelTab: 'chat',
-      // We switch the user TO the chat tab in this same update, so the message
-      // is immediately on-screen — there is nothing "unread". Setting it true
-      // would flag an unread badge on the very tab they're now viewing, and
-      // contradicts chatStore's invariant (tab === 'chat' ⟹ unread false; see
-      // chatStore setRightPanelTab + the rightPanelTab !== 'chat' append rule).
-      hasUnreadMessages: false,
-    }));
-  }).catch(() => { /* chat surface is best-effort */ });
+  // Both imports are dynamic: chatStore and revealChat reach back into the
+  // editor store, so a static import here would be a cycle.
+  Promise.all([import('@/stores/chatStore'), import('@/lib/chat/revealChat')])
+    .then(([{ useChatStore }, { revealChat }]) => {
+      // Updater form: read-modify-write atomically so a concurrent chat write
+      // (e.g. a streaming token) can't be clobbered between get and set.
+      useChatStore.setState((state) => ({
+        messages: [...state.messages, entry],
+        rightPanelTab: 'chat',
+        // The tab switch here plus revealChat() below put the message on
+        // screen on both layouts, so there is nothing "unread". Setting it
+        // true would badge the very tab the user is now viewing, and
+        // contradicts chatStore's invariant (tab === 'chat' ⟹ unread false;
+        // see chatStore setRightPanelTab + the rightPanelTab !== 'chat'
+        // append rule).
+        hasUnreadMessages: false,
+      }));
+      // The tab alone is not enough: on desktop nothing renders from
+      // rightPanelTab (the dockview has no chat panel), so a refused Play used
+      // to post its explanation where nobody could see it and read as a
+      // broken editor (#10166). revealChat() opens the overlay as well.
+      revealChat();
+    })
+    .catch(() => { /* chat surface is best-effort */ });
 }
 
 export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set, get) => ({
@@ -374,17 +391,22 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
         const report = validateWinnability(sceneGraph, allGameComponents, sceneGraph.completionMode);
         if (!report.winnable) {
           surfaceWinnabilityMessage(formatWinnabilityMessage(report));
-          return;
+          return false;
         }
       } catch {
         /* gate failure must never block Play — proceed as if winnable */
       }
     }
+    // No engine attached: nothing can start, so report it as a refusal and
+    // count nothing. Firing trackPlayModeStarted here used to record a Play
+    // that never happened (#10166).
+    if (!dispatchCommand) return false;
     // Each play session starts fresh: clear any win/score carried over from a prior run.
     // Runs only after the winnability gate passes — a blocked Play leaves state untouched.
     set({ gameWon: false, gameScore: 0 });
-    if (dispatchCommand) dispatchCommand('play', {});
+    dispatchCommand('play', {});
     import('@/lib/analytics/events').then(m => m.trackPlayModeStarted()).catch(() => { /* analytics non-critical */ });
+    return true;
   },
   stop: () => {
     set({ gameWon: false, gameScore: 0 });

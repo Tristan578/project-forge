@@ -443,8 +443,13 @@ export function ToolCallCard({
           <span>Blocked — needs your approval</span>
         </div>
       )}
+      {/* The Undo control is a SIBLING of the header button, never its child:
+          a <button> inside a <button> is invalid HTML, browsers hoist the inner
+          one out while parsing, and assistive tech then sees a tree React never
+          declared (two overlapping button roles at one position). */}
+      <div className="flex w-full items-center">
       <button
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
+        className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-left"
         onClick={() => setExpanded(!expanded)}
       >
         {statusIcon}
@@ -467,22 +472,20 @@ export function ToolCallCard({
           {isUndone && (
             <span className="text-[9px] text-zinc-400">Undone</span>
           )}
-          {toolCall.status === 'success' && toolCall.undoable && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                undo();
-              }}
-              aria-label="Undo this action"
-              className="rounded px-1 py-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
-              title="Undo this action"
-            >
-              <Undo2 size={12} />
-            </button>
-          )}
           {expanded ? <ChevronDown size={12} className="text-zinc-400" /> : <ChevronRight size={12} className="text-zinc-400" />}
         </span>
       </button>
+      {toolCall.status === 'success' && toolCall.undoable && (
+        <button
+          onClick={() => undo()}
+          aria-label="Undo this action"
+          className="mr-2 rounded px-1 py-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+          title="Undo this action"
+        >
+          <Undo2 size={12} />
+        </button>
+      )}
+      </div>
 
       {/* Outside the expand chevron on purpose: a card that reads "Add Game
           Component ✓" while the platform runs at a tenth of the requested speed

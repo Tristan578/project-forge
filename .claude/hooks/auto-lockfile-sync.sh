@@ -15,7 +15,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 [ -n "$REPO_ROOT" ] || exit 0
 
 # Check if lockfile is now out of sync
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 DRIFT=$(npm install --dry-run 2>&1 | grep -cE "added|removed|changed" || true)
 
 if [ "$DRIFT" -gt 0 ]; then
