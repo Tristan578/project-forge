@@ -667,8 +667,45 @@ shopt -u extdebug
 pass "the words as arguments, an EXIT trap and shopt -u are not violations"
 FIX
 )"
-expect_rc "19j-b. DEBUG/extdebug as arguments of another command, an EXIT or ERR trap and 'shopt -u extdebug' are not violations" 0 \
+expect_rc "19j-b. DEBUG/extdebug as arguments of another command, a cleanup EXIT trap, 'trap - ERR' and 'shopt -u extdebug' are not violations" 0 \
   "$(run_gate "$d_debug_words")" "1 function(s) across 1 file(s) are frozen"
+
+# ---- 19k. an EXIT/ERR/RETURN trap that exits replaces the verdict --------------
+# `trap 'exit 0' EXIT` turns a suite that set FAILED=1 and reached `exit 1`
+# into exit 0 (ninth board round, security seat). Prove it in this bash, then
+# that the gate reports the shape and leaves signal traps and cleanup alone.
+exit_trap_probe="$(bash -c 'trap "exit 0" EXIT; echo "FAIL: seen"; exit 1' >/dev/null 2>&1; echo "rc=$?")"
+if [ "$exit_trap_probe" = "rc=0" ]; then
+  pass "19k-probe. in this bash an EXIT trap that exits 0 overrides a script that reached 'exit 1' (the gate must refuse it)"
+else
+  fail "19k-probe. the EXIT-trap probe did not override the exit status (got '$exit_trap_probe')"
+fi
+d_exit_trap="$(mkfixture exit-trap <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+trap 'exit 0' EXIT
+trap 'exit 0' ERR
+trap 'cleanup; \exit 0' 0
+trap -- 'exec true' exit
+trap 'e\xit 1' RETURN
+FIX
+)"
+expect_rc "19k. a trap on EXIT, ERR, RETURN or 0 whose action exits or execs, in any spelling, is a violation" 1 \
+  "$(run_gate "$d_exit_trap")" "5 violation(s)" "fixture.test.sh:3: 'trap exit 0 ... EXIT'" "fixture.test.sh:4: 'trap exit 0 ... ERR'" "fixture.test.sh:5: 'trap cleanup; exit 0 ... 0'" "fixture.test.sh:6: 'trap exec true ... EXIT'" "fixture.test.sh:7: 'trap exit 1 ... RETURN'"
+d_signal_trap="$(mkfixture signal-trap <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'rm -rf "$TMP"; echo exited' EXIT
+trap cleanup EXIT
+trap - ERR
+trap -p EXIT
+pass "signal traps and cleanup traps are not violations"
+FIX
+)"
+expect_rc "19k-b. exit in a trap on a real signal, a cleanup EXIT trap (even one whose text contains the letters exit), 'trap - ERR' and 'trap -p' are not violations" 0 \
+  "$(run_gate "$d_signal_trap")" "1 function(s) across 1 file(s) are frozen"
 
 # ---- 19h. an array literal holds words, it does not run them ------------------
 # `arr=(alias fail=1)` stores two strings; nothing is aliased (the fifth board
@@ -922,6 +959,24 @@ FIX
 )"
 expect_rc "27. shift operators inside (( )), \$(( )) and a nested ( ) are not heredocs, so the frozen helper stays frozen and the decoy after it is reported" 1 \
   "$(run_gate "$d_arith")" "1 violation(s)" "fixture.test.sh:8: decoy5() is not frozen"
+
+# ---- 27b. << inside the deprecated $[ ] is a shift too ------------------------
+# `x=$[1 << 2]` opened a phantom heredoc with delimiter `2]`; a later
+# column-0 `2]` closed it, so an `alias fail=:` between them was heredoc text
+# and the file passed (ninth board round, infra seat).
+d_arith_br="$(mkfixture arithmetic-bracket <<'FIX'
+fail() {
+  local x=$[1 << 2]
+  echo "$x $1"
+}
+readonly -f fail
+alias fail=:
+2]
+fail "boom"
+FIX
+)"
+expect_rc "27b. a shift inside \$[ ] is not a heredoc, so the alias after it is reported" 1 \
+  "$(run_gate "$d_arith_br")" "1 violation(s)" "fixture.test.sh:6: 'alias fail=:'"
 
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
 # Same posture as check-suite-wiring.test.sh: comment-stripped scan of every

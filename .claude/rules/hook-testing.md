@@ -189,8 +189,11 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   DEBUG trap that returns non-zero makes bash skip the next command, so every
   `fail "..."` call can be made to vanish with the function still frozen. Same
   tokeniser, same rule (the word `DEBUG` in any case after a `trap` command
-  word; `extdebug` after `shopt` plus an `s` flag); `trap ... EXIT`, `trap - ERR`
-  and `shopt -u extdebug` are not violations.
+  word; `extdebug` after `shopt` plus an `s` flag). A trap on EXIT, ERR,
+  RETURN or 0 whose action exits or execs is one too — `trap 'exit 0' EXIT`
+  overrides the `exit 1` the suite reached — while a cleanup EXIT trap, a
+  trap on a real signal (`trap 'exit 143' TERM`), `trap - ERR` and
+  `shopt -u extdebug` are not violations.
 - No function named after a bash builtin, at any depth, and no `enable`: a
   `readonly() { return 0; }` makes every later freeze a no-op, an `exit()` or
   `test()` that returns 0 makes the final verdict a no-op, and `enable -n
@@ -202,7 +205,8 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   for a one-liner; a trailing comment is not part of it). A subshell body or a
   bare compound body is reported as `unsupported` — the gate never skips a
   definition it cannot follow.
-- `<<` inside `(( ))` or `$(( ))` is a shift operator, not a heredoc.
+- `<<` inside `(( ))`, `$(( ))` or the deprecated `$[ ]` is a shift operator,
+  not a heredoc.
 - A heredoc delimiter is any word (`<<1EOF`, `<<-ZEOF`, `<<'.EOF'`), and a
   column-0 definition inside a multi-line `( )` or `$( )` is subshell-local,
   not a top-level helper.
