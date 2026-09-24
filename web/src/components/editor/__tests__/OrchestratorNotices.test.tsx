@@ -13,6 +13,7 @@ import {
 } from '../OrchestratorNotices';
 import {
   ACCOUNT_BLOCKED_MESSAGE,
+  ENGINE_NOT_READY_MESSAGE,
   INSUFFICIENT_TOKENS_MESSAGE,
   PLAN_REJECTED_MESSAGE,
   RATE_LIMITED_MESSAGE,
@@ -36,12 +37,14 @@ describe('orchestratorErrorAction', () => {
   it.each([
     [INSUFFICIENT_TOKENS_MESSAGE, { label: 'Buy tokens', href: '/settings?tab=tokens' }],
     [RESERVATION_UNCONFIRMED_MESSAGE, { label: 'Check balance', href: '/settings?tab=tokens' }],
+    // Building again is refused until they sign in.
+    [SIGNED_OUT_MESSAGE, { label: 'Sign in', href: '/sign-in' }],
   ])('names the follow-up for %s', (error, action) => {
     expect(orchestratorErrorAction(error)).toEqual(action);
   });
 
   // Their own sentence carries the next step; a token link would mislead.
-  it.each([SIGNED_OUT_MESSAGE, PLAN_REJECTED_MESSAGE, RATE_LIMITED_MESSAGE, ACCOUNT_BLOCKED_MESSAGE, 'Engine not loaded'])(
+  it.each([PLAN_REJECTED_MESSAGE, RATE_LIMITED_MESSAGE, ACCOUNT_BLOCKED_MESSAGE, ENGINE_NOT_READY_MESSAGE])(
     'names no link for %s',
     (error) => {
       expect(orchestratorErrorAction(error)).toBeNull();
@@ -71,9 +74,9 @@ describe('OrchestratorErrorNotice', () => {
   });
 
   it('renders a linkless error as text alone', () => {
-    render(<OrchestratorErrorNotice error={SIGNED_OUT_MESSAGE} />);
+    render(<OrchestratorErrorNotice error={ENGINE_NOT_READY_MESSAGE} />);
 
-    expect(screen.getByRole('alert').textContent).toBe(SIGNED_OUT_MESSAGE);
+    expect(screen.getByRole('alert').textContent).toBe(ENGINE_NOT_READY_MESSAGE);
     expect(screen.queryByRole('link')).toBeNull();
   });
 });

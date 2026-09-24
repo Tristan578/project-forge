@@ -5,6 +5,7 @@ import {
   INSUFFICIENT_TOKENS_MESSAGE,
   RESERVATION_UNCONFIRMED_MESSAGE,
   SIGNED_OUT_MESSAGE,
+  ENGINE_NOT_READY_MESSAGE,
   PLAN_REJECTED_MESSAGE,
   RATE_LIMITED_MESSAGE,
   ACCOUNT_BLOCKED_MESSAGE,
@@ -180,6 +181,10 @@ describe('orchestratorSlice', () => {
 
   beforeEach(() => {
     store = createSliceStore(createOrchestratorSlice);
+    // A module-factory vi.fn keeps its call history across restoreAllMocks, so
+    // without this a Sentry assertion is only meaningful in the first test
+    // that reaches it, and a "not called" one depends on test order.
+    vi.mocked(captureException).mockClear();
     mockFetch.mockReset();
     mockFetch.mockImplementation(defaultFetch);
     // `runPipeline` is a bare `vi.fn()` from the module factory, and
@@ -543,7 +548,7 @@ describe('orchestratorSlice', () => {
       await store.getState().runPipelineFromPlan();
 
       expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
-      expect(store.getState().orchestratorError).toBe('Engine not loaded');
+      expect(store.getState().orchestratorError).toBe(ENGINE_NOT_READY_MESSAGE);
       expect(store.getState().currentPlan).toBe(plan);
       expect(Object.values(store.getState().stepStatuses).every((st) => st === 'pending')).toBe(true);
       expect(runPipeline).not.toHaveBeenCalled();
@@ -1481,7 +1486,7 @@ describe('orchestratorSlice', () => {
       // The same route's JSON-parse branch.
       ['400 unparseable body', 400, { error: 'validation_error', details: ['Invalid JSON body'] }, PLAN_REJECTED_MESSAGE],
       // lib/auth/api-auth.ts unauthorized().
-      ['401 Unauthorized', 401, { error: 'Unauthorized', reason: 'no_session' }, SIGNED_OUT_MESSAGE],
+      ['401 Unauthorized', 401, { error: 'Unauthorized', reason: 'NO_SESSION' }, SIGNED_OUT_MESSAGE],
       // api-auth.ts bannedResponse(): the readable message carries the appeal contact.
       ['403 ACCOUNT_BANNED', 403, { error: 'ACCOUNT_BANNED', message: BANNED }, BANNED],
       ['403 with no message', 403, { error: 'Forbidden' }, ACCOUNT_BLOCKED_MESSAGE],
@@ -1549,6 +1554,7 @@ describe('orchestratorSlice', () => {
       expect(store.getState().orchestratorStatus).toBe('failed');
       expect(store.getState().orchestratorError).toBe(RESERVATION_UNCONFIRMED_MESSAGE);
       // Only the server's ledger can say whether tokens moved, so it is reported.
+      expect(captureException).toHaveBeenCalledTimes(1);
       expect(captureException).toHaveBeenCalledWith(
         expect.any(Error),
         expect.objectContaining({ extra: expect.objectContaining({ context: 'orchestrator.reserveUnconfirmed' }) }),

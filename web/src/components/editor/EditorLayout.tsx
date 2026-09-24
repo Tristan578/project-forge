@@ -514,7 +514,7 @@ export function EditorLayout() {
       // Install a caller-supplied command dispatcher.
       //
       // WHY THIS EXISTS: `runPipelineFromPlan` (orchestratorSlice) refuses with
-      // 'Engine not loaded' and returns before a single step runs when
+      // `ENGINE_NOT_READY_MESSAGE` and returns before a single step runs when
       // `getCommandDispatcher()` is null. The strict journey gate builds no WASM
       // and launches Chromium with `--disable-gpu`, which hangs `init_engine` —
       // so a dispatcher can never be installed there by the real engine, and the

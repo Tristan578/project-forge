@@ -203,7 +203,7 @@ let _abortController: AbortController | null = null;
  * Every surface that shows it offers "Buy tokens" beside it, through
  * `OrchestratorErrorNotice`.
  */
-export const INSUFFICIENT_TOKENS_MESSAGE = 'Insufficient tokens — add tokens or upgrade your plan';
+export const INSUFFICIENT_TOKENS_MESSAGE = 'Your token balance is too low for this build.';
 
 /**
  * Shown when the reserve request's outcome is unknown, so the hold may or may
@@ -216,8 +216,20 @@ export const INSUFFICIENT_TOKENS_MESSAGE = 'Insufficient tokens — add tokens o
 export const RESERVATION_UNCONFIRMED_MESSAGE =
   'We could not confirm the build started. Check your token balance before trying again.';
 
-/** A 401 on reserve: the session ended. Building again cannot succeed until they sign in. */
-export const SIGNED_OUT_MESSAGE = 'Your session has ended. Sign in again to build this plan.';
+/**
+ * A 401 on reserve: the session ended. Building again cannot succeed until
+ * they sign in; `OrchestratorErrorNotice` links to sign-in beside it. It does
+ * not promise the plan survives signing in: whether Clerk's return trip is a
+ * full page load is not ours to guarantee.
+ */
+export const SIGNED_OUT_MESSAGE = 'Your session has ended. Sign in again to keep building.';
+
+/**
+ * "Build" was pressed before the engine finished loading (no command
+ * dispatcher yet). Nothing ran and nothing was reserved, so the plan waits
+ * and the same button works once the editor is ready -- likely on a first run.
+ */
+export const ENGINE_NOT_READY_MESSAGE = 'The editor is still loading. Wait a moment, then build it again.';
 
 /**
  * A 400 on reserve: the route rejected the plan's cost estimate
@@ -622,7 +634,7 @@ export const createOrchestratorSlice: StateCreator<
       // Same run-identity gate as every other writer here: a reset during the
       // import above must not get a live status painted over its idle store.
       if (get().currentPlan === currentPlan) {
-        set({ orchestratorStatus: 'awaiting_approval', orchestratorError: 'Engine not loaded' });
+        set({ orchestratorStatus: 'awaiting_approval', orchestratorError: ENGINE_NOT_READY_MESSAGE });
       }
       settle();
       return;

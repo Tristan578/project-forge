@@ -7,6 +7,7 @@ import { useUserStore } from '@/stores/userStore';
 import { SETTINGS_BILLING_HREF, SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
 
 const DISMISSED_KEY = 'forge-token-warning-dismissed';
+const PAYMENT_DISMISSED_KEY = 'forge-payment-warning-dismissed';
 
 /**
  * Both banners' action link and dismiss control. Links are client-side
@@ -18,7 +19,6 @@ const ACTION_CLASSES =
   'inline-flex min-h-11 shrink-0 items-center rounded bg-[var(--sf-bg-elevated)] px-2 text-xs font-medium text-[var(--sf-text)] hover:bg-[var(--sf-bg-overlay)] sm:min-h-6';
 const DISMISS_CLASSES =
   'inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-[var(--sf-text)] hover:bg-[var(--sf-bg-overlay)] sm:min-h-6 sm:min-w-6';
-const PAYMENT_DISMISSED_KEY = 'forge-payment-warning-dismissed';
 
 /**
  * Shows a warning banner when:

@@ -382,7 +382,7 @@ test.describe('Pipeline Game Creation Journey @journey', () => {
     //
     // This gate builds no WASM and Chromium runs with --disable-gpu, so
     // `init_engine` never completes and `getCommandDispatcher()` stays null —
-    // `runPipelineFromPlan` refuses with 'Engine not loaded' before a single
+    // `runPipelineFromPlan` refuses with `ENGINE_NOT_READY_MESSAGE` before a single
     // step runs. `__FORGE_SET_DISPATCH` (EditorLayout, behind the same
     // build-time `e2eHooksEnabled()` gate as `__EDITOR_STORE`) hands the
     // stand-in to the production `setCommandDispatcher`, so it goes through the

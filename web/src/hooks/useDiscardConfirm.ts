@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 /**
  * Two-step Discard for a plan waiting to be built.
@@ -15,7 +15,9 @@ import { useCallback, useState } from 'react';
  *   long enough to render (#6831 review).
  *
  * Both plan surfaces use this, so a plan is guarded the same way wherever it
- * waits.
+ * waits. Attach `discardRef` to the Discard button: `keep` backs out of the
+ * arm and puts focus back on it, since the Keep plan button the user pressed
+ * unmounts with the prompt and focus would otherwise fall to the body.
  */
 export function useDiscardConfirm(plan: object | null, awaiting: boolean) {
   const [armedFor, setArmedFor] = useState<object | null>(null);
@@ -31,5 +33,12 @@ export function useDiscardConfirm(plan: object | null, awaiting: boolean) {
   const armed = awaiting && plan !== null && armedFor === plan;
   const arm = useCallback(() => setArmedFor(plan), [plan]);
   const disarm = useCallback(() => setArmedFor(null), []);
-  return { armed, arm, disarm };
+  const discardRef = useRef<HTMLButtonElement>(null);
+  const keep = useCallback(() => {
+    setArmedFor(null);
+    // The Discard button stays mounted (only its label changes), so it can
+    // take focus now, before the prompt holding the pressed button goes away.
+    discardRef.current?.focus();
+  }, []);
+  return { armed, arm, disarm, keep, discardRef };
 }

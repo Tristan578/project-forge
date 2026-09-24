@@ -13,8 +13,12 @@ import { Button } from '@spawnforge/ui';
 import {
   INSUFFICIENT_TOKENS_MESSAGE,
   RESERVATION_UNCONFIRMED_MESSAGE,
+  SIGNED_OUT_MESSAGE,
 } from '@/stores/slices/orchestratorSlice';
 import { SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
+
+/** Clerk's sign-in page (`app/sign-in`), public in `proxy.ts`. */
+const SIGN_IN_HREF = '/sign-in';
 
 /** The follow-up an orchestrator error names, as a link, or null when it names none. */
 export function orchestratorErrorAction(error: string): { label: string; href: string } | null {
@@ -22,6 +26,8 @@ export function orchestratorErrorAction(error: string): { label: string; href: s
   // The message tells the user to check their balance, since the hold may or
   // may not have been taken; give them the way to.
   if (error === RESERVATION_UNCONFIRMED_MESSAGE) return { label: 'Check balance', href: SETTINGS_TOKENS_HREF };
+  // Building again is refused until they do, so the way to is right here.
+  if (error === SIGNED_OUT_MESSAGE) return { label: 'Sign in', href: SIGN_IN_HREF };
   return null;
 }
 

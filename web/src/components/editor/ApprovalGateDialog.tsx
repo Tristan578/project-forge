@@ -15,7 +15,7 @@
  * only appeared on 6 of the 7 themes.
  */
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode, type Ref } from 'react';
 import { Button, cn } from '@spawnforge/ui';
 import type { ApprovalGate } from '@/lib/game-creation/types';
 
@@ -29,6 +29,7 @@ export function ApprovalGateDialog({
   approveLabel = 'Approve',
   cancelLabel = 'Cancel',
   cancelVariant = 'ghost',
+  cancelRef,
   approveDisabled = false,
   children,
 }: {
@@ -59,6 +60,8 @@ export function ApprovalGateDialog({
    * press and shows the armed button as destructive.
    */
   cancelVariant?: 'ghost' | 'destructive';
+  /** Ref to the cancel button, so the plan review can return focus to Discard. */
+  cancelRef?: Ref<HTMLButtonElement>;
   /** Disables approve, e.g. while the confirmed action is already starting. */
   approveDisabled?: boolean;
   /**
@@ -171,7 +174,7 @@ export function ApprovalGateDialog({
         >
           {approveLabel}
         </Button>
-        <Button type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
+        <Button ref={cancelRef} type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
           {cancelLabel}
         </Button>
       </div>

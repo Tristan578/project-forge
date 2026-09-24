@@ -6,7 +6,7 @@
  * Playwright specs can drive and read editor state deterministically —
  * `__FORGE_SET_DISPATCH` additionally lets the engine-less journey gate install a
  * stand-in dispatcher, without which the game-creation pipeline refuses to run at
- * all ('Engine not loaded'). That surface is a test/debug
+ * all (`ENGINE_NOT_READY_MESSAGE`). That surface is a test/debug
  * affordance, never meant for end users, so it is OFF by default.
  *
  * It turns on in exactly two situations:

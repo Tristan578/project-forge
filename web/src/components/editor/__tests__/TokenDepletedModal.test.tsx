@@ -96,7 +96,7 @@ describe('TokenDepletedModal', () => {
     expect(pushMock).toHaveBeenCalledExactlyOnceWith('/pricing');
   });
 
-  // Asserted as a literal, not as SETTINGS_BILLING_HREF: the point of the test
+  // Asserted as a literal, not as SETTINGS_TOKENS_HREF: the point of the test
   // is that the destination is a real, reachable URL, and importing the same
   // constant the component uses would make it pass for any value.
   it('navigates to the Tokens tab on /settings, where the packs are, when Buy Token Pack is clicked', () => {

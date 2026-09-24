@@ -12,7 +12,11 @@ import {
   _resetQuickStartGateOwner,
 } from '../quickStartGateOwner';
 import { getLayoutConfig, useResponsiveLayout } from '@/hooks/useResponsiveLayout';
-import { RESERVATION_UNCONFIRMED_MESSAGE, SIGNED_OUT_MESSAGE } from '@/stores/slices/orchestratorSlice';
+import {
+  INSUFFICIENT_TOKENS_MESSAGE,
+  RESERVATION_UNCONFIRMED_MESSAGE,
+  SIGNED_OUT_MESSAGE,
+} from '@/stores/slices/orchestratorSlice';
 import type { OrchestratorPlan } from '@/lib/game-creation/types';
 
 vi.mock('@/stores/editorStore', () => ({
@@ -306,7 +310,7 @@ describe('OrchestratorPanel', () => {
       orchestratorStatus: 'awaiting_approval',
       currentPlan: MOCK_PLAN,
       stepStatuses: {},
-      orchestratorError: 'Insufficient tokens — add tokens or upgrade your plan',
+      orchestratorError: INSUFFICIENT_TOKENS_MESSAGE,
     });
     render(<OrchestratorPanel />);
 
@@ -333,9 +337,15 @@ describe('OrchestratorPanel', () => {
       expect(screen.getByRole('button', { name: 'Discard it' })).toBe(discard);
       expect(document.activeElement).toBe(discard);
 
-      fireEvent.click(screen.getByRole('button', { name: 'Keep plan' }));
+      // fireEvent does not move focus the way a real click does, so put it on
+      // Keep plan first; otherwise Discard would still hold it from above.
+      const keep = screen.getByRole('button', { name: 'Keep plan' });
+      keep.focus();
+      fireEvent.click(keep);
 
-      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+      // The pressed button unmounts with the prompt; focus goes back to Discard.
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBe(discard);
+      expect(document.activeElement).toBe(discard);
       expect(mockCancelPipeline).not.toHaveBeenCalled();
     });
 
@@ -417,11 +427,11 @@ describe('OrchestratorPanel', () => {
       currentPlan: MOCK_PLAN,
       tokenEstimate: { ...MOCK_PLAN.tokenEstimate, sufficientBalance: false },
       stepStatuses: {},
-      orchestratorError: 'Insufficient tokens — add tokens or upgrade your plan',
+      orchestratorError: INSUFFICIENT_TOKENS_MESSAGE,
     });
     render(<OrchestratorPanel />);
 
-    expect(screen.getByRole('alert').textContent).toContain('Insufficient tokens');
+    expect(screen.getByRole('alert').textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
     expect(screen.getAllByRole('link', { name: 'Buy tokens' })).toHaveLength(1);
     // The cost bar's speculative "may cost more" row gives way to the refusal.
     expect(screen.queryByText(/may cost more than your token balance/)).toBeNull();

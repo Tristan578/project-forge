@@ -373,10 +373,13 @@ export function OrchestratorPanel() {
 
   // Two-step discard for a waiting plan (see the footer), shared with the
   // quick-start plan review.
-  const { armed: discardArmed, arm: armDiscard, disarm: disarmDiscard } = useDiscardConfirm(
-    plan,
-    status === 'awaiting_approval',
-  );
+  const {
+    armed: discardArmed,
+    arm: armDiscard,
+    disarm: disarmDiscard,
+    keep: keepPlan,
+    discardRef,
+  } = useDiscardConfirm(plan, status === 'awaiting_approval');
 
   const handleStartPipeline = useCallback(() => {
     disarmDiscard();
@@ -523,7 +526,7 @@ export function OrchestratorPanel() {
       <div className="border-t border-[var(--sf-border)] px-3 py-2">
         {status === 'awaiting_approval' && !pendingGate && (
           <div className="space-y-2">
-            {discardArmed && <DiscardConfirmPrompt onKeep={disarmDiscard} />}
+            {discardArmed && <DiscardConfirmPrompt onKeep={keepPlan} />}
             <div className="flex gap-2">
               <Button size="sm" onClick={handleStartPipeline} className="flex-1 gap-2">
                 <Play className="h-3.5 w-3.5" aria-hidden="true" />
@@ -534,6 +537,7 @@ export function OrchestratorPanel() {
                   The design cost tokens, so dropping it asks once. One button
                   whose label changes, so focus stays on it when it arms. */}
               <Button
+                ref={discardRef}
                 variant={discardArmed ? 'destructive' : 'ghost'}
                 size="sm"
                 onClick={discardArmed ? handleDiscard : armDiscard}

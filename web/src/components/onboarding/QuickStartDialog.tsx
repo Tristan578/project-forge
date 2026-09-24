@@ -13,8 +13,10 @@
  * 'awaiting_approval'. The running view then shows the plan and its estimated
  * token cost, and the build's tokens are reserved only when the user presses
  * "Build it" there (owner decision on #6831: confirm the cost first). "Build
- * it" means exactly that one action. "Discard plan" drops the plan; "Close"
- * keeps it, and reopening the dialog returns to the review. The confirmation
+ * it" means exactly that one action. "Discard plan" arms on the first press
+ * and drops the plan on the second ("Keep plan" backs out; `useDiscardConfirm`,
+ * shared with OrchestratorPanel); "Close" keeps it, and reopening the dialog
+ * returns to the review. The confirmation
  * is the user's answer to `gate_plan`, which the slice therefore
  * auto-approves; `gate_assets` / `gate_final` still stop the
  * pipeline, so this dialog renders the very same `ApprovalGateDialog` the
@@ -330,15 +332,18 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     }
   }, [prompt, selectedId]);
 
+  // Same two-step Discard as OrchestratorPanel: the plan cost tokens to design.
+  const {
+    armed: discardArmed,
+    arm: armDiscard,
+    disarm: disarmDiscard,
+    keep: keepPlan,
+    discardRef,
+  } = useDiscardConfirm(currentPlan, planGate !== null);
+
   // The plan review's "Build it": the first point at which build tokens are
   // spent. Failures land on the store, not as throws (same contract as
   // `handleSubmit` above), so read the status the run left behind.
-  // Same two-step Discard as OrchestratorPanel: the plan cost tokens to design.
-  const { armed: discardArmed, arm: armDiscard, disarm: disarmDiscard } = useDiscardConfirm(
-    currentPlan,
-    planGate !== null,
-  );
-
   const handleConfirmBuild = useCallback(async () => {
     disarmDiscard();
     setError(null);
@@ -555,6 +560,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               onCancel={discardArmed ? handleCancelRun : armDiscard}
               cancelLabel={discardArmed ? 'Discard it' : 'Discard plan'}
               cancelVariant={discardArmed ? 'destructive' : 'ghost'}
+              cancelRef={discardRef}
               autoFocus
             >
               {reviewError && (
@@ -570,7 +576,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               )}
               {discardArmed && (
                 <div className="mt-3">
-                  <DiscardConfirmPrompt onKeep={disarmDiscard} />
+                  <DiscardConfirmPrompt onKeep={keepPlan} />
                 </div>
               )}
             </ApprovalGateDialog>

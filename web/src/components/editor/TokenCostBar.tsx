@@ -24,8 +24,11 @@ export function TokenCostBar({
 }: {
   estimate: TokenEstimate;
   /**
-   * Suppress the low-balance row. The quick-start review sets this while it
-   * shows the server's actual refusal, which supersedes a cached estimate.
+   * Suppress the low-balance row. Both plan surfaces pass
+   * `errorReportsShortBalance(error)`: the row gives way only while a
+   * short-balance refusal is on screen with its own Buy tokens link. For any
+   * other refusal (a rate limit, a lapsed session) this row is the only
+   * balance warning left, so it stays.
    */
   hideBalanceWarning?: boolean;
 }) {
@@ -61,7 +64,7 @@ export function TokenCostBar({
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
           <span>
             This may cost more than your token balance. If it does, the build stops before
-            anything is spent.{' '}
+            any build tokens are spent.{' '}
             <Link href={SETTINGS_TOKENS_HREF} className="underline underline-offset-2">
               Buy tokens
             </Link>

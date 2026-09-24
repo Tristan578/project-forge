@@ -17,6 +17,7 @@ import {
   INSUFFICIENT_TOKENS_MESSAGE,
   RESERVATION_UNCONFIRMED_MESSAGE,
   SIGNED_OUT_MESSAGE,
+  ENGINE_NOT_READY_MESSAGE,
 } from '@/stores/slices/orchestratorSlice';
 import {
   QUICK_START_GAME_TYPES,
@@ -625,7 +626,8 @@ describe('QuickStartDialog', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Keep plan' }));
 
-      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+      // The pressed button unmounts with the prompt; focus goes back to Discard.
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Discard plan' }));
       expect(screen.queryByText(/Discard this plan\?/)).toBeNull();
       expect(cancelPipeline).not.toHaveBeenCalled();
     });
@@ -768,12 +770,12 @@ describe('QuickStartDialog', () => {
     it('keeps the review up when the engine is not ready, with no Buy tokens link', async () => {
       runPipelineFromPlan.mockImplementationOnce(async () => {
         hoisted.state.orchestratorStatus = 'awaiting_approval';
-        hoisted.state.orchestratorError = 'Engine not loaded';
+        hoisted.state.orchestratorError = ENGINE_NOT_READY_MESSAGE;
       });
       await reachPlanReview();
       await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
 
-      expect((await screen.findByRole('alert')).textContent).toContain('Engine not loaded');
+      expect((await screen.findByRole('alert')).textContent).toContain(ENGINE_NOT_READY_MESSAGE);
       expect(screen.queryByRole('link', { name: 'Buy tokens' })).toBeNull();
       expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
