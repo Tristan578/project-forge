@@ -190,6 +190,15 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   suite wrote, and `declare -n` stay out of reach. The word
   as an argument (`echo alias fail=:`), inside a quoted string
   that holds more than the word, in a heredoc fixture or in a comment is text.
+- No posix mode either: it turns `expand_aliases` on as a side effect (bash
+  5.2: `set -o posix` alone makes `shopt -p expand_aliases` print `-s`). The
+  gate reports `set` with an `o` flag cluster before `posix` (`set -o posix`,
+  `set -eo posix`, until `--` or `-` ends the options), `shopt -s -o posix`,
+  and ANY word naming `POSIXLY_CORRECT`, text included: assigning it enters
+  posix mode from more positions than a list would stay complete for
+  (`POSIXLY_CORRECT=1 :`, `export`, `declare`, `printf -v`, `read`,
+  `${POSIXLY_CORRECT:=1}`). A suite that must print the name builds it from
+  an expansion (`"${head}_CORRECT"`), as `check-fn-freeze.test.sh` does.
 - No `trap ... DEBUG` and no `shopt -s extdebug` either: with extdebug on, a
   DEBUG trap that returns non-zero makes bash skip the next command, so every
   `fail "..."` call can be made to vanish with the function still frozen. Same

@@ -901,13 +901,20 @@ by construction rather than by measurement.
   bound, in a command name or an alias, shopt or trap statement, is now a
   `brace` violation, and a numeric range (`trap 'exit 0' {0..0}`) is pinned.
   The twenty-first found that bash reads a numeric trap signal as an
-  optionally signed decimal after leading blanks, so `00`, `+0`, `-0` and
-  `' 00'` are all signal 0 (EXIT); the gate now stores each numeric signal
-  as its value (the twenty-second round added the minus sign). The
+  optionally signed decimal after leading blanks, so `00`, `+0` and `' 00'`
+  are all signal 0 (EXIT); the gate now stores each numeric signal as its
+  value. The twenty-second added the minus sign (`-0`, `-00`, `' -0'`). The
   twenty-third found the trailing side: bash's legal_number() takes any
   whitespace before the number but also a space or tab after it, so
   `'0 '` is 0 too. sig_word now models that parser exactly, checked in
-  bash for every whitespace class on each side.
+  bash for every whitespace class on each side. The twenty-fourth found two
+  things. Posix mode turns `expand_aliases` on as a side effect, so
+  `set -o posix` passed a gate that refused `shopt -s expand_aliases`; it
+  is now the same violation (below). And the fixture never used a tab,
+  form feed or carriage return as the blank before a zero, so dropping any
+  of them from sig_word passed the suite. Both fixtures are now also run
+  line by line in bash, and each line must be reported exactly when bash
+  says it has the effect.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
@@ -966,8 +973,17 @@ keywords) — while `echo alias fail=:`, the word as an argument, stays text. Wh
 is a word assembled at run time — an expansion (`$x`, `$(...)`) whose
 output must contribute text to spell the word, `eval`, a `source` of a file
 the suite wrote — and `declare -n`, which aliases a variable, not a
-function. Nested definitions are deliberately
-unfrozen. And removing BOTH a definition and its freeze still satisfies the
+function. Posix mode is the same violation as `shopt -s expand_aliases`,
+because it turns that option on (measured in bash 5.2: `set -o posix`, then
+`shopt -p expand_aliases` prints `-s`; round twenty-four). The gate reports
+a `set` statement with an `o` flag cluster before `posix`, until `--` or `-`
+ends its options; `shopt -s -o posix`; and any word naming
+`POSIXLY_CORRECT`. bash enters posix mode on any assignment to that
+variable, from more positions than a list would stay complete for: a prefix
+(`POSIXLY_CORRECT=1 :` counts), `export`, `declare`, `printf -v`, `read`, a
+default expansion, and also arithmetic and `for`. So the rule is on the
+name, text included, not on a list of sinks. Nested definitions are
+deliberately unfrozen. And removing BOTH a definition and its freeze still satisfies the
 gate, as it did the round-40 drift check — the effect probe and the neuter
 reproduction are what prove a surviving freeze is in force.
 

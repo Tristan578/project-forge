@@ -68,6 +68,16 @@
 # remain outside this gate (the Honest bound of the Sweep section in
 # docs/guides/npm-audit-gate-hardening.md).
 #
+# posix mode turns expand_aliases on as a side effect, so entering it is the
+# same violation (the twenty-fourth board round; checked in bash 5.2, where
+# `set -o posix` alone makes `shopt -p expand_aliases` print `-s`): a `set`
+# statement with an o flag cluster before a later `posix` word (`set -o
+# posix`, `set -eo posix`, until a `--` or `-` ends its options), a `shopt`
+# statement with an s flag cluster before `posix` (`shopt -s -o posix`), and
+# any word that names POSIXLY_CORRECT, since assigning it enters posix mode
+# from every position bash allows (`POSIXLY_CORRECT=1`, `export`, `declare`,
+# `printf -v`, `read`, `${POSIXLY_CORRECT:=1}`, even as a prefix of `:`).
+#
 # A DEBUG trap under `shopt -s extdebug` is the other binding-independent
 # neuter: bash skips the NEXT command whenever a command run by the DEBUG
 # trap returns non-zero, so `trap '[[ $BASH_COMMAND != fail\ * ]]' DEBUG`
@@ -324,6 +334,14 @@ derive_file() {
         } else pat_n++
         w = ""; return
       }
+      # Assigning POSIXLY_CORRECT enters posix mode, which turns
+      # expand_aliases on (twenty-fourth board round), and bash lets it be
+      # assigned from any position (a prefix, export, declare, read, printf
+      # -v, a default expansion), so any word naming it is a violation. The
+      # word is judged as written (a default expansion is removed by no_exp)
+      # and as every word it expands to.
+      if (w ~ /(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)/ || anym("(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)"))
+        printf "%s\t%s\t%d\t%d\talias\n", file, w, NR, NR
       # A word whose brace expansion was cut short is judged as a guarded
       # word would be only on the words it produced; where the missing ones
       # could be guarded (a command name, or any word of an alias, shopt or
@@ -360,6 +378,7 @@ derive_file() {
         }
         if (has("alias")) in_alias = 1
         if (has("shopt")) in_shopt = 1
+        if (has("set")) in_set = 1
         if (has("trap")) in_trap = 1
         if (!rq && w == "function") in_function = 1
         if (has("enable")) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "enable", NR, NR
@@ -382,6 +401,12 @@ derive_file() {
         printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
       if (in_shopt && sflag != "" && has("expand_aliases"))
         printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " sflag " " w, NR, NR
+      # posix mode turns expand_aliases on too (twenty-fourth board round):
+      # set with an o flag cluster before posix, or shopt -s -o posix.
+      if (in_set && oflag != "" && has("posix"))
+        printf "%s\t%s\t%d\t%d\talias\n", file, "set " oflag " " w, NR, NR
+      if (in_shopt && sflag != "" && has("posix"))
+        printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " sflag " " w, NR, NR
       if (in_shopt && sflag != "" && has("extdebug"))
         printf "%s\t%s\t%d\t%d\ttrap\n", file, "shopt " sflag " " w, NR, NR
       if (in_trap && anym("^[Dd][Ee][Bb][Uu][Gg]$"))
@@ -398,6 +423,9 @@ derive_file() {
         else for (k = 1; k <= nbx; k++) trap_sigs = trap_sigs " " sig_word(bx[k])
       }
       if (in_shopt && anym("^-[a-z]*s[a-z]*$")) sflag = w
+      # set takes options until -- or a lone -, after which every word is a
+      # positional parameter, so posix there sets nothing.
+      if (in_set && !set_end) { if (has("--") || has("-")) set_end = 1; else if (anym("^-[A-Za-z]*o[A-Za-z]*$")) oflag = w }
       w = ""
     }
     # An EXIT, ERR or RETURN trap (or 0, the EXIT alias) whose action holds
@@ -463,7 +491,7 @@ derive_file() {
     }
     # Every statement starts with no trap state of its own; a trap inside a
     # substitution must not read the enclosing trap action as its own.
-    function end_command() { end_word(); if (in_trap) check_trap(); cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; trap_action = ""; trap_sigs = ""; trap_has_action = 0 }
+    function end_command() { end_word(); if (in_trap) check_trap(); cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; in_set = 0; oflag = ""; set_end = 0; trap_action = ""; trap_sigs = ""; trap_has_action = 0 }
     # Entering `$( ... )` or `( ... )` starts a new context: the enclosing
     # quote state and the enclosing array-literal state are both pushed and
     # both cleared, and the matching `)` restores them. Array-literal skipping
@@ -583,7 +611,7 @@ derive_file() {
       # word and the two words before it carry over (`alias \` + `fail=:`,
       # or `al\` + `ias`, are one statement to bash).
       carry = cont; cont = 0
-      if (q == "" && !carry) { cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; w = ""; wq = 0; trap_action = ""; trap_sigs = ""; trap_has_action = 0 }
+      if (q == "" && !carry) { cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; in_set = 0; oflag = ""; set_end = 0; w = ""; wq = 0; trap_action = ""; trap_sigs = ""; trap_has_action = 0 }
       # Where the code of this line ends: at its trailing comment, or at the
       # end of the line. The definition rules read the body of a definition
       # line off this ONE lexer, so a comment inside any quote kind or inside
@@ -926,7 +954,7 @@ if [ -n "$violations" ]; then
       case "$status" in
         unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
         stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, a freeze inside a quoted string or fixture is text, not a statement, and a freeze naming a function this file never defines is left over from a rename or a deletion: move this line to directly after the closing brace of $name(), or delete it" ;;
-        alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion — delete this line" ;;
+        alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion (shopt -s expand_aliases, or posix mode: set -o posix, shopt -s -o posix, or any use of POSIXLY_CORRECT) — delete this line" ;;
         trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 (or any numeric spelling of 0, such as 00, +0, -0 or a quoted '0 ') that exits or execs, directly or through a function of this file, replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — delete this trap or extdebug line, or make its action return without exiting" ;;
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable — rename this function, or delete the enable call" ;;
         shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command or a closing brace, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;

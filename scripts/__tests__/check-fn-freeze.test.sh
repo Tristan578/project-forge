@@ -633,6 +633,80 @@ else
   fail "19d. alias probe did not shadow the frozen function (got '$alias_probe') — re-examine whether the alias rule is still needed"
 fi
 
+# ---- 19l. posix mode turns expand_aliases on, so entering it is a violation ---
+# `set -o posix` alone flips expand_aliases on in bash 5.2 (twenty-fourth
+# board round, security seat: the gate passed that line while refusing
+# `shopt -s expand_aliases`), and so does any assignment of POSIXLY_CORRECT.
+# Lines 3 to 15 each enter posix mode and are reported (line 13 names the
+# variable around an expansion that is empty; 14 and 15 assign it by
+# arithmetic and as a loop variable). Line 16 ends the options before -o,
+# line 17 ends them before posix, line 18 is an argument of another command,
+# line 19 turns the mode off, and lines 20 to 22 put posix in a statement
+# after a set statement, which ends it; none of those is. Line 23 repeats
+# line 3 after all of them, so no state they set survives into the next
+# statement.
+# The variable rule is deliberately broad (any word naming it, text
+# included), because bash can assign a variable from more positions than a
+# list would stay complete for; so this file spells the name at run time
+# from an expansion that contributes text ($px, which the gate cannot see
+# through) wherever the words are executable; only the fixture writes it.
+px_head=POSIXLY
+px="${px_head}_CORRECT"
+d_posix="$(mkfixture posix <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+set -o posix
+set -eo posix
+set -o errexit -o posix
+builtin set -o po""six
+shopt -s -o posix
+POSIXLY_CORRECT=1 :
+export POSIXLY_CORRECT=y
+declare POSIXLY_CORRECT=
+: "${POSIXLY_CORRECT:=1}"
+printf -v POSIXLY_CORRECT x
+declare POSIX$()LY_CORRECT=1
+(( POSIXLY_CORRECT=1 ))
+for POSIXLY_CORRECT in 1; do :; done
+set -- -o posix
+set -e -- posix
+echo set -o posix
+set +o posix
+set -o errexit; echo posix
+set -o nounset
+echo posix
+set -o posix
+FIX
+)"
+out_posix="$(run_gate "$d_posix")"
+expect_rc "19l. set -o posix in every flag spelling, shopt -s -o posix and any word naming the posix-mode variable are violations" 1 \
+  "$out_posix" "14 violation(s)" \
+  "fixture.test.sh:3: 'set -o posix'" "fixture.test.sh:4: 'set -eo posix'" "fixture.test.sh:5: 'set -o posix'" \
+  "fixture.test.sh:6: 'set -o posix'" "fixture.test.sh:7: 'shopt -s posix'" "fixture.test.sh:8: '$px=1'" \
+  "fixture.test.sh:9: '$px=y'" "fixture.test.sh:10: '$px='" \
+  "fixture.test.sh:11: '\${$px:=1}'" "fixture.test.sh:12: '$px'" "fixture.test.sh:13: '${px_head%LY}\$()LY_CORRECT=1'" \
+  "fixture.test.sh:14: '$px=1'" "fixture.test.sh:15: '$px'" "fixture.test.sh:23: 'set -o posix'"
+# The fixture's own lines are the subject: each is run in this bash and must
+# be reported exactly when it turns expand_aliases on, so a spelling added
+# to the fixture is checked against bash rather than against this comment.
+posix_checked=0; posix_mismatch=""
+for n in $(seq 3 "$(wc -l < "$d_posix/fixture.test.sh")"); do
+  line="$(sed -n "${n}p" "$d_posix/fixture.test.sh")"
+  [ "$line" = "FIX" ] && continue
+  state="$(bash -c "$line"$'\n''shopt -p expand_aliases' 2>/dev/null | tail -n 1)"
+  reported=0; grep -q "fixture.test.sh:$n: " <<<"$out_posix" && reported=1
+  enables=0; [ "$state" = "shopt -s expand_aliases" ] && enables=1
+  [ "$reported" = "$enables" ] || posix_mismatch="$posix_mismatch line $n ($line: bash $state, reported $reported);"
+  posix_checked=$((posix_checked + 1))
+done
+if [ "$posix_checked" -ne 21 ]; then
+  fail "19m. expected to check 21 fixture lines against bash, checked $posix_checked" "$out_posix"
+elif [ -n "$posix_mismatch" ]; then
+  fail "19m. the gate and bash disagree on which lines enter posix mode:$posix_mismatch" "$out_posix"
+else
+  pass "19m. every fixture line is reported exactly when this bash turns expand_aliases on after it"
+fi
+
 # ---- 19j. a DEBUG trap under extdebug skips the next command ------------------
 # Neither line redefines, aliases or unfreezes anything, and the suite prints
 # no FAIL (seventh board round, security seat). First prove in this bash that
@@ -1395,13 +1469,17 @@ expect_rc "30j. every expansion that can be empty, in every guarded position, is
 # 17 is signal 0 (EXIT) and replaces the exit status (checked in bash 5.2:
 # `trap 'echo FIRED' 00; exit 3` prints FIRED). Round twenty-two added the
 # minus sign; round twenty-three the blanks bash's legal_number() accepts:
-# any whitespace before the number (line 16 is a vertical tab, line 17 a
-# newline) but only a space or tab after it (lines 12 to 15). Lines 18 and
-# 19 (signal 10, and signal 1 spelled 01) are real signals; line 20, a bare
-# sign, is not a number; line 21 ends in a newline, line 22 has a blank
-# inside it and line 23 is a name with a blank before it, and bash rejects
-# all three (the gate joins signal words with blanks, so a blank inside a
-# word must not split it). None of lines 18 to 23 is reported.
+# any whitespace before the number (a space on lines 7, 8 and 11, then line
+# 16 a vertical tab, 17 a newline, 18 a tab, 19 a form feed and 20 a
+# carriage return: round twenty-four found tab, form feed and carriage
+# return unexercised, so dropping any of them from the gate passed) but only
+# a space or tab after it (lines 12 to 15). Lines 21 and 22 (signal 10, and
+# signal 1 spelled 01) are real signals; line 23, a bare sign, is not a
+# number; line 24 ends in a newline, line 25 has a blank inside it and line
+# 26 is a name with a blank before it, and bash rejects all three (the gate
+# joins signal words with blanks, so a blank inside a word must not split
+# it). None of lines 21 to 26 is reported, and 30n-c runs every line in bash
+# to check the split against bash itself.
 d_numsig="$(mkfixture numeric-signals <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -1420,6 +1498,9 @@ trap 'exit 0' '-00 '
 trap 'exit 0' $'0\t'
 trap 'exit 0' $'\v0'
 trap 'exit 0' $'\n0'
+trap 'exit 0' $'\t0'
+trap 'exit 0' $'\f0'
+trap 'exit 0' $'\r0'
 trap 'exit 0' 10
 trap 'exit 0' 01
 trap 'exit 0' +
@@ -1429,16 +1510,36 @@ trap 'exit 0' ' EXIT'
 FIX
 )"
 out_numsig="$(run_gate "$d_numsig")"
-expect_rc "30n. every signed, zero-padded or blank-surrounded spelling of 0 bash accepts is signal 0" 1 "$out_numsig" "15 violation(s)" \
+expect_rc "30n. every signed, zero-padded or blank-surrounded spelling of 0 bash accepts is signal 0" 1 "$out_numsig" "18 violation(s)" \
   "fixture.test.sh:3: 'trap exit 0 ..." "fixture.test.sh:4: 'trap exit 0 ..." "fixture.test.sh:5: 'trap exit 0 ..." \
   "fixture.test.sh:6: 'trap exit 0 ..." "fixture.test.sh:7: 'trap exit 0 ..." "fixture.test.sh:8: 'trap exit 0 ..." \
   "fixture.test.sh:9: 'trap exit 0 ..." "fixture.test.sh:10: 'trap exit 0 ..." "fixture.test.sh:11: 'trap exit 0 ..." \
   "fixture.test.sh:12: 'trap exit 0 ..." "fixture.test.sh:13: 'trap exit 0 ..." "fixture.test.sh:14: 'trap exit 0 ..." \
-  "fixture.test.sh:15: 'trap exit 0 ..." "fixture.test.sh:16: 'trap exit 0 ..." "fixture.test.sh:17: 'trap exit 0 ..."
-if grep -Eq 'fixture.test.sh:(18|19|20|21|22|23):' <<<"$out_numsig"; then
+  "fixture.test.sh:15: 'trap exit 0 ..." "fixture.test.sh:16: 'trap exit 0 ..." "fixture.test.sh:17: 'trap exit 0 ..." \
+  "fixture.test.sh:18: 'trap exit 0 ..." "fixture.test.sh:19: 'trap exit 0 ..." "fixture.test.sh:20: 'trap exit 0 ..."
+if grep -Eq 'fixture.test.sh:(21|22|23|24|25|26):' <<<"$out_numsig"; then
   fail "30n-b. real signals and spellings bash rejects are not signal 0" "$out_numsig"
 else
   pass "30n-b. real signals and spellings bash rejects are not signal 0"
+fi
+# The fixture's own lines are the subject: each runs in this bash before an
+# exit 3, and a line must be reported exactly when its trap replaces that
+# status, so a spelling added above is checked against bash, not a comment.
+numsig_checked=0; numsig_mismatch=""
+for n in $(seq 3 "$(wc -l < "$d_numsig/fixture.test.sh")"); do
+  line="$(sed -n "${n}p" "$d_numsig/fixture.test.sh")"
+  bash -c "$line"$'\n''exit 3' >/dev/null 2>&1; rc=$?
+  reported=0; grep -q "fixture.test.sh:$n: " <<<"$out_numsig" && reported=1
+  overrides=0; [ "$rc" -eq 0 ] && overrides=1
+  [ "$reported" = "$overrides" ] || numsig_mismatch="$numsig_mismatch line $n ($line: bash exit $rc, reported $reported);"
+  numsig_checked=$((numsig_checked + 1))
+done
+if [ "$numsig_checked" -ne 24 ]; then
+  fail "30n-c. expected to check 24 fixture lines against bash, checked $numsig_checked" "$out_numsig"
+elif [ -n "$numsig_mismatch" ]; then
+  fail "30n-c. the gate and bash disagree on which traps replace the exit status:$numsig_mismatch" "$out_numsig"
+else
+  pass "30n-c. every fixture line is reported exactly when its trap replaces the exit status in this bash"
 fi
 
 # ---- 30k. an ANSI-C quoted string is decoded before the word is judged -------
