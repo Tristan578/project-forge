@@ -329,6 +329,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Typecheck Observatory
         run: npx tsc --noEmit -p tools/observatory/tsconfig.json
 
@@ -415,6 +424,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Install docs dependencies
         run: cd apps/docs && npm install
 
@@ -468,6 +486,15 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - run: npm ci
+
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
 
       # Same key as quality-gates' ui-cache-typecheck / ui-cache-test-web —
       # whichever job builds packages/ui first warms the cache for the others.

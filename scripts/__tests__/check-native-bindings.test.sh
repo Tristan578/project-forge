@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Unit tests for scripts/check-native-bindings.sh — the native swc binding gate.
+# Unit tests for scripts/check-native-bindings.sh — the native binding gate
+# (@next/swc for next build / next dev, @rolldown/binding for vitest).
 #
 # The bug class this suite locks down (PF-947 / #8920): npm's optional-dependency
 # handling can exit 0 from `npm ci` while silently dropping the platform-native
@@ -191,33 +192,70 @@ touch "$space_nm/@next/swc-linux-x64-gnu/next-swc.linux-x64-gnu.node"
 rc="$(run_gate "$space_nm" linux x64)"
 if [ "$rc" = "0" ]; then pass "path with spaces → gate 0 (quoting holds)"; else fail "path with spaces → expected 0, got $rc"; fi
 
-# ── ci.yml structural wiring (self-defense — canonical pattern from
+# ── workflow structural wiring (self-defense — canonical pattern from
 #    check-npm-audit.test.sh's quality-gates/ci.yml sections). The gate is only
 #    real if CI actually invokes it; a PR that unwires an invocation, adds
 #    continue-on-error, or drops the self-defense registration must fail here.
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
+QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 
-# WHICH jobs build Next.js is DERIVED from the workflow text, never typed out.
-# This list was hand-maintained twice and wrong both times: first "all four"
-# while test-e2e-api carried the step unpinned, then "every next-build job"
-# naming six while test-e2e-crossbrowser (which already carried the step) and
-# docs-e2e (which did not) both ran `next build` outside it (#8632). A typed
-# list records which jobs someone remembered; this records which jobs build.
+# WHICH jobs need a native binding is DERIVED from the workflow text, never
+# typed out. This list was hand-maintained twice and wrong both times: first
+# "all four" while test-e2e-api carried the step unpinned, then "every
+# next-build job" naming six while test-e2e-crossbrowser (which already carried
+# the step) and docs-e2e (which did not) both ran `next build` outside it
+# (#8632). Then the derivation itself was too narrow: it knew only `next build`
+# and read only ci.yml, so quality-gates.yml — where no job runs `next build`
+# directly but four depend on the bindings — had no invocation at all, and
+# three ci.yml jobs that only run vitest (which loads @rolldown/binding-*) sat
+# outside the pin (#10200). A typed list records which jobs someone remembered;
+# this records which jobs load a binding.
 #
-# A job is a next-build job when an executable line runs `next build` itself,
-# or when a step runs `npm run build` in a workspace whose package.json `build`
-# script runs `next build` (build-nextjs → web, docs-e2e → apps/docs). The
-# workspace is the line's own `cd <dir> &&`, else the step's working-directory:,
-# else the job's defaults, else the repo root. Comment lines and name: values
-# never count. Emits `D<TAB>job` (direct) and `W<TAB>job<TAB>dir` (via a
-# workspace build script) rows; next_build_jobs() below resolves the W rows.
+# A job needs the gate when an executable line, in any step:
+#   - runs `next build` or `next dev` itself, or runs vitest as a command
+#     (`npx vitest run`, `vitest run`)                          → D row
+#   - runs `npm run build`, `npm test` / `npm run test`, or `npm run dev[:x]`
+#     in a workspace whose package.json script does one of the above
+#     (build-nextjs → web, docs-e2e → apps/docs, design-internal-gate →
+#     packages/ui's "vitest run")                               → W row
+#   - runs `playwright test` in a workspace whose config's webServer command
+#     does one of the above, directly or via `npm run <script>` (editor-boot:
+#     web/playwright.config.ts starts `npm run dev:raw`, i.e. `next dev`)
+#                                                               → P row
+# The workspace is the line's own `cd <dir> &&`, else the step's
+# working-directory:, else the job's defaults, else the repo root. Comment
+# lines and name: values never count. vitest must appear as a command word —
+# `scripts/check-vitest-exit.sh` and `/tmp/vitest-output.txt` are paths, not
+# invocations. Rows are `D<TAB>job<TAB>why`, `W<TAB>job<TAB>dir<TAB>script`
+# and `P<TAB>job<TAB>dir<TAB>config`; native_binding_jobs() below resolves
+# the W and P rows against the files they name.
 # shellcheck disable=SC2016  # an awk program, not a shell string: $0/$1 are
 # awk fields and must NOT expand here. shellcheck suppresses SC2016 for a
 # literal `awk '...'` but cannot see through the variable it is passed in.
-NEXT_BUILD_JOBS_AWK='
-function flush() {
-  if (nb_step) print "W\t" job "\t" (wd != "" ? wd : (job_wd != "" ? job_wd : "."))
-  nb_step = 0; wd = ""
+NATIVE_JOBS_AWK='
+function flush(   i, n, parts, dir) {
+  if (pend != "") {
+    dir = (wd != "" ? wd : (job_wd != "" ? job_wd : "."))
+    n = split(pend, parts, "\n")
+    for (i = 1; i <= n; i++) {
+      split(parts[i], kv, "\t")
+      print kv[1] "\t" job "\t" dir "\t" kv[2]
+    }
+  }
+  pend = ""; wd = ""
+}
+function cd_dir(line,   d) {
+  if (match(line, /(^|[[:space:]|&;(])cd [^[:space:];&|]+[[:space:]]*&&/)) {
+    d = substr(line, RSTART, RLENGTH)
+    sub(/^.*cd /, "", d); sub(/[[:space:]]*&&$/, "", d)
+    return d
+  }
+  return ""
+}
+function emit(kind, value,   d) {
+  d = cd_dir($0)
+  if (d != "") print kind "\t" job "\t" d "\t" value
+  else pend = pend (pend != "" ? "\n" : "") kind "\t" value
 }
 /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
 !in_jobs { next }
@@ -235,44 +273,117 @@ function flush() {
   next
 }
 /^[[:space:]]*(- )?name:/ { next }
-/(^|[^[:alnum:]_-])next build([^[:alnum:]_-]|$)/ { print "D\t" job }
-/npm run build([^[:alnum:]_:-]|$)/ {
-  if (match($0, /cd [^[:space:];&|]+[[:space:]]*&&[[:space:]]*npm run build/)) {
-    d = substr($0, RSTART + 3, RLENGTH - 3)
-    sub(/[[:space:]]*&&.*$/, "", d)
-    print "W\t" job "\t" d
-  } else nb_step = 1
+/(^|[^[:alnum:]_-])next build([^[:alnum:]_-]|$)/ { print "D\t" job "\tnext build" }
+/(^|[^[:alnum:]_-])next dev([^[:alnum:]_-]|$)/ { print "D\t" job "\tnext dev" }
+/(^|[[:space:];&|(])vitest([[:space:]]|$)/ { print "D\t" job "\tvitest" }
+/npm run build([^[:alnum:]_:-]|$)/ { emit("W", "build") }
+/npm (run )?test([^[:alnum:]_:-]|$)/ { emit("W", "test") }
+/npm run dev(:[[:alnum:]_-]+)?([^[:alnum:]_:-]|$)/ {
+  s = $0
+  match(s, /npm run dev(:[[:alnum:]_-]+)?/)
+  emit("W", substr(s, RSTART + 8, RLENGTH - 8))
+}
+/(^|[^[:alnum:]_-])playwright test([^[:alnum:]_-]|$)/ {
+  c = ""
+  if (match($0, /--config[= ][^[:space:]]+/)) c = substr($0, RSTART + 9, RLENGTH - 9)
+  emit("P", c)
 }
 END { flush() }
 '
 
-# Reads workflow text on stdin; prints each next-build job once, sorted. An
-# `npm run build` whose workspace has no package.json prints `?<TAB>job<TAB>dir`
-# instead: the caller FAILS on it, because an unresolvable build is an unknown,
-# and an unknown silently read as "not a next build" is how a job falls out of
+# Classifies one shell command string, as a workflow line, a package.json
+# script or a Playwright webServer command would carry it. Returns 0 when it
+# loads a native binding, 1 when it does not, 2 when that cannot be told (a
+# missing package.json, script or config). $1 = command, $2 = workspace dir
+# (repo-relative), $3 = resolution depth — `npm run e2e` → `playwright test`
+# → config → `npm run dev` is three hops; anything deeper is reported as
+# unresolvable rather than followed forever.
+command_needs_bindings() {
+  local cmd="$1" dir="$2" depth="${3:-0}" cfg script
+  [ "$depth" -le 3 ] || return 2
+  if grep -qE '(^|[^[:alnum:]_-])next (build|dev)([^[:alnum:]_-]|$)|(^|[[:space:];&|(])vitest([[:space:]]|$)' <<<"$cmd"; then
+    return 0
+  fi
+  if grep -qE '(^|[^[:alnum:]_-])playwright test([^[:alnum:]_-]|$)' <<<"$cmd"; then
+    cfg="$(grep -oE -- '--config[= ][^[:space:]]+' <<<"$cmd" | head -1 | sed -E 's/^--config[= ]//')"
+    config_needs_bindings "$dir" "$cfg" "$((depth + 1))"
+    return $?
+  fi
+  if grep -qE 'npm (run )?test([^[:alnum:]_:-]|$)|npm run (build|dev)(:[[:alnum:]_-]+)?([^[:alnum:]_:-]|$)' <<<"$cmd"; then
+    script="$(grep -oE 'npm (run )?(test|build|dev)(:[[:alnum:]_-]+)?' <<<"$cmd" | head -1 | sed -E 's/^npm (run )?//')"
+    script_needs_bindings "$dir" "$script" "$((depth + 1))"
+    return $?
+  fi
+  return 1
+}
+
+# $1 = workspace dir, $2 = package.json script name, $3 = depth. A workspace
+# with no package.json, or a script it does not declare, is UNRESOLVABLE (2),
+# never "not a binding": an unknown read as "no" is how a job falls out of
 # the pin.
-next_build_jobs() {
-  local rows kind job dir pkg
-  local -A is_next=()
-  rows="$(awk "$NEXT_BUILD_JOBS_AWK")"
-  while IFS=$'\t' read -r kind job dir; do
+script_needs_bindings() {
+  local dir="$1" script="$2" depth="$3" pkg text
+  pkg="$REPO_ROOT/${dir#./}/package.json"
+  [ -f "$pkg" ] || return 2
+  # stdin, not a path argument: node.exe cannot open an MSYS /d/... path.
+  text="$(node -e 'const s=(JSON.parse(require("fs").readFileSync(0,"utf8")).scripts||{})[process.argv[1]];if(s===undefined)process.exit(3);process.stdout.write(String(s))' "$script" <"$pkg")" || return 2
+  command_needs_bindings "$text" "$dir" "$depth"
+}
+
+# $1 = workspace dir, $2 = --config path (empty → playwright.config.*), $3 =
+# depth. Reads every `command: '...'` string in the config (the webServer
+# command; `//` comments stripped first) and grades each. A config that names
+# a webServer but whose command cannot be read as a plain string is
+# unresolvable; a config with no webServer starts no server of its own.
+config_needs_bindings() {
+  local dir="$1" cfg="$2" depth="$3" base file="" cand stripped cmds c rc verdict=1
+  base="$REPO_ROOT/${dir#./}"
+  if [ -n "$cfg" ]; then
+    file="$base/$cfg"
+  else
+    for cand in playwright.config.ts playwright.config.mts playwright.config.js playwright.config.mjs playwright.config.cjs; do
+      if [ -f "$base/$cand" ]; then file="$base/$cand"; break; fi
+    done
+  fi
+  [ -n "$file" ] && [ -f "$file" ] || return 2
+  # Materialise the comment-stripped text once and grep here-strings: a strip
+  # piped into `grep -q` can SIGPIPE its producer under pipefail and invert
+  # the verdict (the check-npm-audit.test.sh discipline).
+  stripped="$(sed -E 's#//.*$##' "$file")"
+  cmds="$(grep -oE "command:[[:space:]]*['\"][^'\"]*['\"]" <<<"$stripped" | sed -E "s/^command:[[:space:]]*['\"]//; s/['\"]$//" || true)"
+  if [ -z "$cmds" ]; then
+    if grep -q 'webServer' <<<"$stripped"; then return 2; fi
+    return 1
+  fi
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    command_needs_bindings "$c" "$dir" "$depth"
+    rc=$?
+    [ "$rc" = 0 ] && return 0
+    [ "$rc" = 2 ] && verdict=2
+  done <<<"$cmds"
+  return "$verdict"
+}
+
+# Reads workflow text on stdin; prints each job that loads a native binding
+# once, sorted. A W or P row that cannot be resolved prints
+# `?<TAB>job<TAB>dir<TAB>what` instead: the caller FAILS on it, because an
+# unresolvable build, test or server command is an unknown, and an unknown
+# silently read as "no binding" is how a job falls out of the pin.
+native_binding_jobs() {
+  local rows kind job dir val rc
+  rows="$(awk "$NATIVE_JOBS_AWK")"
+  while IFS=$'\t' read -r kind job dir val; do
     case "$kind" in
       D) printf '%s\n' "$job" ;;
       W)
-        pkg="$REPO_ROOT/${dir#./}/package.json"
-        if [ ! -f "$pkg" ]; then
-          printf '?\t%s\t%s\n' "$job" "$dir"
-          continue
-        fi
-        if [ -z "${is_next[$dir]:-}" ]; then
-          # stdin, not a path argument: node.exe cannot open an MSYS /d/... path.
-          if node -e 'const s=(JSON.parse(require("fs").readFileSync(0,"utf8")).scripts||{}).build||"";process.exit(/(^|[^\w-])next build(\W|$)/.test(s)?0:1)' <"$pkg"; then
-            is_next[$dir]=yes
-          else
-            is_next[$dir]=no
-          fi
-        fi
-        if [ "${is_next[$dir]}" = yes ]; then printf '%s\n' "$job"; fi ;;
+        script_needs_bindings "$dir" "$val" 0; rc=$?
+        if [ "$rc" = 0 ]; then printf '%s\n' "$job"
+        elif [ "$rc" = 2 ]; then printf '?\t%s\t%s\tnpm script "%s"\n' "$job" "$dir" "$val"; fi ;;
+      P)
+        config_needs_bindings "$dir" "$val" 0; rc=$?
+        if [ "$rc" = 0 ]; then printf '%s\n' "$job"
+        elif [ "$rc" = 2 ]; then printf '?\t%s\t%s\tplaywright config "%s"\n' "$job" "$dir" "${val:-playwright.config.*}"; fi ;;
     esac
   done <<<"$rows" | sort -u
 }
@@ -324,73 +435,97 @@ job_wiring_defects() {
   fi
 }
 
-if [ -f "$CI_YML" ]; then
-  ci="$(cat "$CI_YML")"
-
-  # 14. EVERY next-build job must invoke the gate, where "every" is the derived
-  #     set above rather than a list someone keeps in step with ci.yml.
-  derived="$(next_build_jobs <<<"$ci")"
+# 14. EVERY job that loads a native binding must invoke the gate, where
+#     "every" is the derived set above rather than a list someone keeps in
+#     step with the workflow. $1 = workflow text, $2 = its label, $3.. = the
+#     jobs known to need the gate today. That floor is a self-test of the
+#     derivation, NOT the set under test (lesson 9 — a sweep over zero jobs
+#     reads as zero defects): a new job is checked without being added here,
+#     and a job missing from it is still checked if it loads a binding.
+assert_gate_wired() {
+  local text="$1" label="$2" derived unresolved derived_jobs floor_ok job defects defect
+  shift 2
+  derived="$(native_binding_jobs <<<"$text")"
   unresolved="$(grep '^?' <<<"$derived" || true)"
   derived_jobs="$(grep -v '^?' <<<"$derived" || true)"
   if [ -n "$unresolved" ]; then
-    while IFS=$'\t' read -r _ job dir; do
-      fail "ci.yml job ${job} runs \`npm run build\` in '${dir}', which has no package.json — cannot tell whether it builds Next.js, so it cannot be left out of the pin"
+    while IFS=$'\t' read -r _ job dir what; do
+      fail "$label job ${job} runs ${what} in '${dir}', which cannot be resolved — cannot tell whether it loads a native binding, so it cannot be left out of the pin"
     done <<<"$unresolved"
   fi
-
-  # The derivation must find SOMETHING (lesson 9 — a sweep over zero jobs reads
-  # as zero defects) and must still recognise every job known to build Next.js
-  # today. This floor is a self-test of the derivation, NOT the set under test:
-  # a new next-build job is checked below without being added here, and a job
-  # missing from this list is still checked if it builds.
   if [ -z "$derived_jobs" ]; then
-    fail "the derivation found ZERO next-build jobs in ci.yml — the sweep below would check nothing and pass"
+    fail "the derivation found ZERO native-binding jobs in $label — the sweep below would check nothing and pass"
   fi
   floor_ok=1
-  for job in build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-crossbrowser docs-e2e; do
+  for job in "$@"; do
     if ! grep -qxF "$job" <<<"$derived_jobs"; then
-      fail "the derivation does not recognise ci.yml job ${job} as a next-build job — either it stopped building Next.js (drop it from this floor) or the derivation regressed and 'every next-build job' no longer holds"
+      fail "the derivation does not recognise $label job ${job} as loading a native binding — either it stopped building, testing or serving Next.js/vitest (drop it from this floor) or the derivation regressed and 'every such job' no longer holds"
       floor_ok=0
     fi
   done
   if [ "$floor_ok" = 1 ]; then
-    pass "the derivation recognises all 8 known next-build jobs ($(wc -l <<<"$derived_jobs" | tr -d ' ') derived)"
+    pass "$label: the derivation recognises all $# known native-binding jobs ($(grep -c '' <<<"$derived_jobs") derived)"
   fi
-
   while IFS= read -r job; do
     [ -n "$job" ] || continue
-    defects="$(job_wiring_defects "$job" <<<"$ci")"
+    defects="$(job_wiring_defects "$job" <<<"$text")"
     if [ -z "$defects" ]; then
-      pass "ci.yml job ${job} builds Next.js and runs the gate as its step's single, whole run: line"
+      pass "$label job ${job} loads a native binding and runs the gate as its step's single, whole run: line"
     else
       while IFS= read -r defect; do
-        fail "ci.yml job ${job} builds Next.js but ${defect}"
+        fail "$label job ${job} loads a native binding but ${defect}"
       done <<<"$defects"
     fi
   done <<<"$derived_jobs"
+}
 
-  # 14a. Negative controls. Each mutates the REAL ci.yml text (so the
-  #      derivation is exercised on the file it will actually read) and asserts
-  #      the pin goes red. A negative control whose mutation changed nothing
-  #      fails too — otherwise it passes by testing the unmutated file.
-  #
-  #      The regression from #8632: test-e2e-crossbrowser loses its gate. The
-  #      hand-typed list did not contain that job, so this exact mutation left
-  #      the whole suite green.
-  unwired_xb="$(awk '
-    /^  [a-z][a-z0-9-]*:[[:space:]]*$/ { in_job = ($0 == "  test-e2e-crossbrowser:") }
+# 14a. Negative control: replace <job>'s gate invocation in the text on stdin
+#      with `echo skipped` and assert the pin goes red. Each mutates the REAL
+#      workflow text (so the derivation is exercised on the file it will
+#      actually read). A control whose mutation changed nothing fails too —
+#      otherwise it passes by testing the unmutated file. $1 = job, $2 = label.
+assert_unwiring_caught() {
+  local job="$1" label="$2" text mutated
+  text="$(cat)"
+  mutated="$(awk -v j="  ${job}:" '
+    /^  [a-z][a-z0-9-]*:[[:space:]]*$/ { in_job = ($0 == j) }
     in_job && /^[[:space:]]*run: bash scripts\/check-native-bindings\.sh[[:space:]]*$/ { sub(/run: .*/, "run: echo skipped") }
     { print }
-  ' <<<"$ci")"
-  if [ "$unwired_xb" = "$ci" ]; then
-    fail "negative control: unwiring test-e2e-crossbrowser's gate changed nothing — the control would test the unmutated file"
-  elif ! grep -qxF test-e2e-crossbrowser <<<"$(next_build_jobs <<<"$unwired_xb")"; then
-    fail "negative control: test-e2e-crossbrowser is not derived as a next-build job, so unwiring its gate goes unnoticed"
-  elif [ -z "$(job_wiring_defects test-e2e-crossbrowser <<<"$unwired_xb")" ]; then
-    fail "negative control: test-e2e-crossbrowser with its gate replaced by 'echo skipped' reads as wired"
+  ' <<<"$text")"
+  if [ "$mutated" = "$text" ]; then
+    fail "negative control: unwiring $label ${job}'s gate changed nothing — the control would test the unmutated file"
+  elif ! grep -qxF "$job" <<<"$(native_binding_jobs <<<"$mutated")"; then
+    fail "negative control: $label ${job} is not derived as a native-binding job, so unwiring its gate goes unnoticed"
+  elif [ -z "$(job_wiring_defects "$job" <<<"$mutated")" ]; then
+    fail "negative control: $label ${job} with its gate replaced by 'echo skipped' reads as wired"
   else
-    pass "negative control: unwiring test-e2e-crossbrowser's gate is caught"
+    pass "negative control: unwiring $label ${job}'s gate is caught"
   fi
+}
+
+if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
+  ci="$(cat "$CI_YML")"
+  qg="$(cat "$QG_YML")"
+
+  assert_gate_wired "$ci" ci.yml \
+    build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-crossbrowser docs-e2e \
+    observatory-tests docs-internal-gate design-internal-gate
+  # quality-gates.yml runs no `next build` line of its own: lighthouse-delta
+  # builds through web's `npm run build`, test-web and test-mcp run vitest,
+  # and editor-boot's Playwright config starts `next dev` (#10200).
+  assert_gate_wired "$qg" quality-gates.yml \
+    test-web test-mcp editor-boot lighthouse-delta
+
+  # The regression from #8632: test-e2e-crossbrowser loses its gate. The
+  # hand-typed list did not contain that job, so this exact mutation left the
+  # whole suite green. And the three shapes #10200 added, one per detection
+  # path: a vitest-only job, a job that builds through `npm run build`, and a
+  # job whose only Next.js process is a Playwright webServer.
+  assert_unwiring_caught test-e2e-crossbrowser ci.yml <<<"$ci"
+  assert_unwiring_caught observatory-tests ci.yml <<<"$ci"
+  assert_unwiring_caught test-mcp quality-gates.yml <<<"$qg"
+  assert_unwiring_caught lighthouse-delta quality-gates.yml <<<"$qg"
+  assert_unwiring_caught editor-boot quality-gates.yml <<<"$qg"
 
   # A NEW job appended to ci.yml. $1 = job name, $2 = its steps after npm ci.
   with_job() {
@@ -399,9 +534,9 @@ if [ -f "$CI_YML" ]; then
   # Asserts <job> in the text on stdin is (want=yes) or is not (want=no) derived.
   expect_derived() {
     local want="$1" job="$2" label="$3" got
-    got="$(next_build_jobs)"
+    got="$(native_binding_jobs)"
     if grep -qxF "$job" <<<"$got"; then
-      if [ "$want" = yes ]; then pass "derivation: $label → counted as a next-build job"; else fail "derivation: $label → counted as a next-build job, but it builds no Next app"; fi
+      if [ "$want" = yes ]; then pass "derivation: $label → counted as a native-binding job"; else fail "derivation: $label → counted as a native-binding job, but it loads none"; fi
     else
       if [ "$want" = no ]; then pass "derivation: $label → not counted"; else fail "derivation: $label → NOT counted, so a job doing this could drop the gate unseen"; fi
     fi
@@ -410,9 +545,9 @@ if [ -f "$CI_YML" ]; then
   direct="$(with_job nc-direct $'      - name: Build\n        working-directory: web\n        run: npx next build')"
   expect_derived yes nc-direct "a new job running \`npx next build\`" <<<"$direct"
   if [ -n "$(job_wiring_defects nc-direct <<<"$direct")" ]; then
-    pass "negative control: a NEW next-build job without the gate is caught without editing any list"
+    pass "negative control: a NEW native-binding job without the gate is caught without editing any list"
   else
-    fail "negative control: a NEW next-build job without the gate reads as wired"
+    fail "negative control: a NEW native-binding job without the gate reads as wired"
   fi
   expect_derived yes nc-wd "\`npm run build\` with working-directory: apps/docs" \
     <<<"$(with_job nc-wd $'      - name: Build docs\n        working-directory: apps/docs\n        run: npm run build')"
@@ -420,31 +555,54 @@ if [ -f "$CI_YML" ]; then
     <<<"$(with_job nc-cd $'      - run: cd web && npm run build')"
   expect_derived yes nc-defaults "\`npm run build\` under a job-level defaults working-directory: web" \
     <<<"$(printf '%s\n  nc-defaults:\n    runs-on: ubuntu-latest\n    defaults:\n      run:\n        working-directory: web\n    steps:\n      - run: npm run build\n' "$ci")"
+  expect_derived yes nc-vitest "\`npx vitest run\` piped through tee (test-web's shape)" \
+    <<<"$(with_job nc-vitest $'      - run: |\n          timeout 600 npx vitest run --coverage 2>&1 | tee /tmp/vitest-output.txt')"
+  expect_derived yes nc-npm-test "\`cd packages/ui && npm test\` (a \"vitest run\" script)" \
+    <<<"$(with_job nc-npm-test $'      - run: cd packages/ui && npm test')"
+  expect_derived yes nc-next-dev "a step running \`npx next dev\`" \
+    <<<"$(with_job nc-next-dev $'      - run: cd web && npx next dev')"
+  expect_derived yes nc-dev-script "\`npm run dev:raw\` in web (a \"next dev\" script)" \
+    <<<"$(with_job nc-dev-script $'      - working-directory: web\n        run: npm run dev:raw')"
+  expect_derived yes nc-pw-dev "\`playwright test\` in web with no --config (playwright.config.ts starts \`npm run dev:raw\`, editor-boot's shape)" \
+    <<<"$(with_job nc-pw-dev $'      - working-directory: web\n        run: npx playwright test --grep "@smoke" e2e/tests/editor-boot.spec.ts')"
+  expect_derived no nc-pw-start "\`playwright test --config playwright.ci.config.ts\` alone (its webServer runs \`npx next start\`, which loads no binding)" \
+    <<<"$(with_job nc-pw-start $'      - working-directory: web\n        run: npx playwright test --config playwright.ci.config.ts')"
   expect_derived no nc-ui "\`cd packages/ui && npm run build\` (a tsc build)" \
     <<<"$(with_job nc-ui $'      - run: cd packages/ui && npm run build')"
   expect_derived no nc-storybook "\`npm run build-storybook\` (a different script)" \
     <<<"$(with_job nc-storybook $'      - run: cd apps/design && npm run build-storybook')"
+  expect_derived no nc-vitest-path "vitest named only in paths (\`bash scripts/check-vitest-exit.sh 1 /tmp/vitest-output.txt\`)" \
+    <<<"$(with_job nc-vitest-path $'      - run: bash scripts/check-vitest-exit.sh 1 /tmp/vitest-output.txt')"
   expect_derived no nc-comment "a commented-out \`npx next build\`" \
     <<<"$(with_job nc-comment $'      # - run: npx next build\n      - run: echo hi')"
   expect_derived no nc-name "a step NAMED 'next build' that runs something else" \
     <<<"$(with_job nc-name $'      - name: next build smoke\n        run: echo hi')"
-  unresolvable="$(next_build_jobs <<<"$(with_job nc-missing $'      - working-directory: no/such/dir\n        run: npm run build')")"
-  if grep -q $'^?\tnc-missing\tno/such/dir$' <<<"$unresolvable"; then
+  unresolvable="$(native_binding_jobs <<<"$(with_job nc-missing $'      - working-directory: no/such/dir\n        run: npm run build')")"
+  if grep -q $'^?\tnc-missing\tno/such/dir\t' <<<"$unresolvable"; then
     pass "derivation: \`npm run build\` in a dir with no package.json → reported unresolvable, not skipped"
   else
     fail "derivation: \`npm run build\` in a dir with no package.json was not reported unresolvable (got: ${unresolvable:-nothing})"
   fi
+  unresolvable="$(native_binding_jobs <<<"$(with_job nc-no-config $'      - working-directory: web\n        run: npx playwright test --config no-such.config.ts')")"
+  if grep -q $'^?\tnc-no-config\tweb\t' <<<"$unresolvable"; then
+    pass "derivation: \`playwright test --config <missing file>\` → reported unresolvable, not skipped"
+  else
+    fail "derivation: \`playwright test\` against a missing config was not reported unresolvable (got: ${unresolvable:-nothing})"
+  fi
 
   # 15. No continue-on-error may shadow any gate invocation — it would swallow
   #     the non-zero exit and pass the job on a dropped binding. Windowed to
-  #     the invocation lines so legitimate continue-on-error elsewhere in
-  #     ci.yml does not false-positive.
-  native_windows="$(grep -v '^[[:space:]]*#' <<<"$ci" | grep -B3 -A1 'bash scripts/check-native-bindings.sh' || true)"
-  if grep -q 'continue-on-error' <<<"$native_windows"; then
-    fail "a ci.yml native-bindings gate step has continue-on-error — gate exit code would be ignored"
-  else
-    pass "no continue-on-error shadows any native-bindings gate invocation"
-  fi
+  #     the invocation lines so legitimate continue-on-error elsewhere in a
+  #     workflow does not false-positive.
+  for wf_label in ci.yml quality-gates.yml; do
+    if [ "$wf_label" = ci.yml ]; then wf_text="$ci"; else wf_text="$qg"; fi
+    native_windows="$(grep -v '^[[:space:]]*#' <<<"$wf_text" | grep -B3 -A1 'bash scripts/check-native-bindings.sh' || true)"
+    if grep -q 'continue-on-error' <<<"$native_windows"; then
+      fail "a $wf_label native-bindings gate step has continue-on-error — gate exit code would be ignored"
+    else
+      pass "$wf_label: no continue-on-error shadows any native-bindings gate invocation"
+    fi
+  done
 
   # 16. Self-defense registration: the lockfile-sync-tests (CI Self-Defense
   #     Tests) job must shellcheck the gate + this suite AND run this suite,
@@ -461,7 +619,7 @@ if [ -f "$CI_YML" ]; then
     fail "self-defense job does not run scripts/__tests__/check-native-bindings.test.sh"
   fi
 else
-  fail "ci.yml not found at $CI_YML"
+  fail "workflow files not found at $CI_YML / $QG_YML — structural assertions cannot run"
 fi
 
 # ── @rolldown: the second native binding, and the reason this gate is a list ──
