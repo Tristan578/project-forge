@@ -959,6 +959,56 @@
         }
       }
     },
+    "/api/creator/stats": {
+      "get": {
+        "tags": ["Publishing"],
+        "summary": "Get creator analytics",
+        "description": "Returns the signed-in creator's published games with their play counts, the number of live games, total plays, and token usage this billing cycle. Always scoped to the session's user; the route takes no user id. Rate limited per user to 30 requests per 5 minutes.",
+        "security": [{ "ClerkSession": [] }],
+        "responses": {
+          "200": {
+            "description": "Creator stats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "totalPublishedGames": { "type": "integer", "description": "Games currently live (status published)" },
+                    "totalPlays": { "type": "integer", "description": "Plays across every game listed, live or not" },
+                    "games": {
+                      "type": "array",
+                      "description": "Most played first",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "format": "uuid" },
+                          "title": { "type": "string" },
+                          "slug": { "type": "string" },
+                          "status": { "type": "string", "enum": ["published", "unpublished", "processing", "flagged"] },
+                          "playCount": { "type": "integer" },
+                          "createdAt": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    },
+                    "tokenUsage": {
+                      "type": "object",
+                      "properties": {
+                        "monthlyUsed": { "type": "integer" },
+                        "monthlyTotal": { "type": "integer" },
+                        "addon": { "type": "integer" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "description": "Rate limit exceeded" },
+          "503": { "description": "Stats are temporarily unavailable" }
+        }
+      }
+    },
     "/api/community/games": {
       "get": {
         "tags": ["Community"],

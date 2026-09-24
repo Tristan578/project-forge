@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { UserButton } from '@clerk/nextjs';
-import { Settings, Plus } from 'lucide-react';
+import { BarChart3, Settings, Plus } from 'lucide-react';
 import { ProjectCard } from './ProjectCard';
 import { NewProjectDialog } from './NewProjectDialog';
 
@@ -145,6 +145,14 @@ export function DashboardLayout({ initialProjects }: DashboardLayoutProps = {}) 
             SpawnForge
           </h1>
           <div className="flex items-center gap-3">
+            {/* Creator analytics: plays per published game, token usage (#8352). */}
+            <button
+              onClick={() => router.push('/dashboard/analytics')}
+              className="flex items-center gap-2 rounded-[var(--sf-radius-sm)] px-3 py-2 text-sm text-[var(--sf-text-secondary)] hover:bg-[var(--sf-bg-elevated)] hover:text-[var(--sf-text)]"
+            >
+              <BarChart3 size={18} aria-hidden="true" />
+              Analytics
+            </button>
             <button
               onClick={() => router.push('/settings')}
               className="rounded p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
