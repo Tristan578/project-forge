@@ -1435,10 +1435,16 @@ jobs:
           out="$(bash scripts/preview-db-branch.sh create "$PR_NUMBER" --uri-out "$uri_file")" || rc=$?
           echo "$out"
 
-          evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | head -1)"
+          # EVERY evicted PR, space-separated: a run can reclaim more than one
+          # when a concurrent preview job took the first freed slot (#10245),
+          # and each of them is owed the notice below.
+          evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | tr '\n' ' ' | sed 's/ *$//')"
           if [ -n "$evicted_pr" ]; then
             echo "evicted_pr=${evicted_pr}" >> "$GITHUB_OUTPUT"
-            echo "Reclaimed the preview database of #${evicted_pr} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
+            # shellcheck disable=SC2086 -- a space-separated list, split on purpose
+            for p in $evicted_pr; do
+              echo "Reclaimed the preview database of #${p} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
+            done
           fi
           if [ "$rc" -ne 0 ]; then
             echo "::error::preview-db-branch.sh create exited ${rc}; the lines above say why."
@@ -1472,8 +1478,12 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          gh pr comment "$EVICTED_PR" --repo "$REPO" \
-            --body "**Preview database reclaimed** — the Neon branch allowance was full, so this PR's preview branch (the least recently built) was deleted to make room for #${PR_NUMBER}. The existing preview URL will fail on database access until the next push to this PR rebuilds it."
+          # One notice per evicted PR (the output is space-separated).
+          # shellcheck disable=SC2086 -- a space-separated list, split on purpose
+          for pr in $EVICTED_PR; do
+            gh pr comment "$pr" --repo "$REPO" \
+              --body "**Preview database reclaimed** — the Neon branch allowance was full, so this PR's preview branch (the least recently built) was deleted to make room for #${PR_NUMBER}. The existing preview URL will fail on database access until the next push to this PR rebuilds it."
+          done
 
       - name: Apply migrations to the preview branch
         # THE WHOLE POINT. A migration that cannot apply must fail the PR here,
