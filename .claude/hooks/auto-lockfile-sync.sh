@@ -14,8 +14,9 @@ FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 [ -n "$REPO_ROOT" ] || exit 0
 
-# Check if lockfile is now out of sync
-cd "$REPO_ROOT"
+# Check if lockfile is now out of sync. A repo root we cannot enter is not
+# ours to sync; exit 0 keeps the PostToolUse contract (never block an edit).
+cd "$REPO_ROOT" || exit 0
 DRIFT=$(npm install --dry-run 2>&1 | grep -cE "added|removed|changed" || true)
 
 if [ "$DRIFT" -gt 0 ]; then

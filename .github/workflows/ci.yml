@@ -549,33 +549,16 @@ jobs:
           done
           exit "$rc"
 
-      - name: Shellcheck the hooks owned by this change
+      - name: Shellcheck every hook and hook test
         run: |
-          # Scope shellcheck to the hooks this gate owns + their tests: the
-          # hardened review-loop hooks and the auto-approve permission gate.
-          # The wider .claude/hooks/ tree carries pre-existing findings tracked
-          # separately (see .claude/rules/agent-operations.md §12) — linting all
-          # of it here would fail this gate on unrelated, untouched debt. Newly
-          # added or edited hooks MUST be shellcheck-clean, so they go here.
-          # -x follows `.`-sourced files (scripts/__tests__/lib/platform.sh);
-          # without it every sourcing suite reports SC1091 and the library's own
-          # definitions stay invisible to the analysis.
-          shellcheck -x \
-            .claude/hooks/reject-incomplete-review.sh \
-            .claude/hooks/review-quality-gate.sh \
-            .claude/hooks/auto-approve-safe-commands.sh \
-            .claude/hooks/block-main-commits.sh \
-            .claude/hooks/inject-lessons-learned.sh \
-            .claude/hooks/check-panel-registry.sh \
-            .claude/hooks/inject-post-compact.sh \
-            .claude/hooks/__tests__/inject-post-compact.test.sh \
-            .claude/hooks/__tests__/check-panel-registry.test.sh \
-            .claude/hooks/__tests__/reject-incomplete-review.test.sh \
-            .claude/hooks/__tests__/review-quality-gate.test.sh \
-            .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
-            .claude/hooks/__tests__/block-main-commits.test.sh \
-            .claude/hooks/__tests__/inject-lessons-learned.test.sh \
-            .claude/hooks/__tests__/settings-permissions.test.sh
+          # The WHOLE tree, not a hand-maintained list: a new hook is linted the
+          # day it is added, and a red result here means the PR introduced it.
+          # The pre-existing debt that used to justify a scoped list was cleared
+          # in #8676; do not reintroduce a list. -x follows `.`-sourced files
+          # (scripts/__tests__/lib/platform.sh, hook-utils.sh); without it every
+          # sourcing script reports SC1091 and the library's own definitions
+          # stay invisible to the analysis.
+          shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 
   # ---- Skills Lint ----
   # Runs when any skill file (.claude/skills/**) or the linter/baseline changed.

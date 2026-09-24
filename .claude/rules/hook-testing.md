@@ -21,19 +21,13 @@ bash .claude/hooks/__tests__/reject-incomplete-review.test.sh
 # All hook test suites
 for t in .claude/hooks/__tests__/*.test.sh; do echo "== $t =="; bash "$t" || break; done
 
-# Lint the review-loop hooks this gate owns — zero findings required, and the CI
-# `hook-tests` job (.github/workflows/ci.yml) runs exactly this. Newly added or
-# edited hooks MUST be shellcheck-clean.
-shellcheck \
-  .claude/hooks/reject-incomplete-review.sh \
-  .claude/hooks/review-quality-gate.sh \
-  .claude/hooks/__tests__/reject-incomplete-review.test.sh \
-  .claude/hooks/__tests__/review-quality-gate.test.sh
-
-# Linting the WHOLE tree still surfaces ~10 pre-existing findings across 8 older
-# hooks (tracked in #8676). Scope shellcheck to the files you touched until that
-# cleanup lands rather than treating the legacy debt as a regression:
-#   shellcheck .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
+# Lint the whole tree — zero findings required, and the CI `hook-tests` job
+# (.github/workflows/ci.yml, "Shellcheck every hook and hook test") runs exactly
+# this from the repo root. `-x` follows sourced files; a script that sources a
+# sibling via "$SCRIPT_DIR/..." carries `# shellcheck source-path=SCRIPTDIR` so
+# the analysis can find it. A red result is yours: the tree has been clean since
+# #8676, so there is no legacy debt to filter out mentally.
+shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 ```
 
 Each suite is a self-contained bash script that exits non-zero if any case fails

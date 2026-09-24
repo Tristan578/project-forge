@@ -94,6 +94,7 @@ if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
       BRANCH_ERRORS=""
       while IFS= read -r changed_file; do
         [ -z "$changed_file" ] && continue
+        # shellcheck disable=SC2016  # sed regex: the `$` is for sed, not the shell
         ESCAPED_FILE=$(printf '%s' "$changed_file" | sed 's/[.[\*^$()+?{}|]/\\&/g')
         FILE_ERRORS=$(echo "$TSC_OUTPUT" | grep "^${ESCAPED_FILE}(" || true)
         if [ -n "$FILE_ERRORS" ]; then
@@ -119,9 +120,9 @@ while IFS= read -r f; do
 done <<< "$TS_FILES_RAW"
 TS_FILES=$(echo "$TS_FILES" | xargs)
 if [ -n "$TS_FILES" ]; then
-  # shellcheck disable=SC2086
   ESLINT_BIN="$WEB_DIR/node_modules/.bin/eslint"
   if [ ! -x "$ESLINT_BIN" ]; then exit 0; fi
+  # shellcheck disable=SC2086  # TS_FILES is a space-joined list; splitting is intended
   LINT_OUTPUT=$("$ESLINT_BIN" --max-warnings 0 $TS_FILES 2>&1) || {
     echo "$LINT_OUTPUT" | tail -10 >&2
     ERRORS="${ERRORS}ESLint warnings/errors found. "

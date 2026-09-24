@@ -7,6 +7,7 @@
 # an active ticket, instructs the AI to find or create one before proceeding.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
 source "$SCRIPT_DIR/taskboard-state.sh"
 
 # Read the user's prompt from stdin

@@ -13,7 +13,6 @@ _TB_PROJECT_ROOT="$(cd "$_TB_HOOKS_DIR/../.." && pwd)"
 # All clients share the verified taskboard runtime; IDs are machine-local.
 TB_PYTHON="${PYTHON:-$(command -v python3 || command -v python || true)}"
 TB_API="${TASKBOARD_API:-http://localhost:3010/api}"
-TB_DB=""
 TB_STATE_FILE="$_TB_HOOKS_DIR/.taskboard-active-ticket"
 export PROJECT_ID=""
 export TEAM_ENGINEERING_ID=""

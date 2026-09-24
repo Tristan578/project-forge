@@ -15,6 +15,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
 if ! source "$SCRIPT_DIR/hook-utils.sh"; then
   echo "BLOCKED: Failed to source hook-utils.sh — fail-closed per Boy Scout Rule"
   exit 2

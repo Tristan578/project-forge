@@ -9,6 +9,7 @@
 # 5. Enforce planning-before-development workflow
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
 source "$SCRIPT_DIR/taskboard-state.sh"
 
 # ── Step 1: Check taskboard installation ──────────────────────────────────
