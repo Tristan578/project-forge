@@ -53,6 +53,14 @@ interface StatusResponse {
   durationSeconds?: number;
 }
 
+/** The subset of GET /api/jobs/[id] the durable-completion path reads. */
+interface DurableJobRow {
+  status: string;
+  resultUrl: string | null;
+  resultMeta: unknown;
+  errorMessage: string | null;
+}
+
 export function useGenerationPolling() {
   const jobs = useGenerationStore((s) => s.jobs);
   const updateJob = useGenerationStore((s) => s.updateJob);
@@ -60,6 +68,12 @@ export function useGenerationPolling() {
   const startedAtRef = useRef<Record<string, number>>({});
   const durablePollsRef = useRef<Record<string, () => void>>({});
   const inFlightPollsRef = useRef<Record<string, true>>({});
+  /**
+   * Jobs whose hydrated-terminal sync (#8892) is in flight. `handleCompletion`
+   * mutates `jobs` mid-flight, which re-runs the `[jobs]` effect that started
+   * the sync; this is what stops it starting a second one for the same job.
+   */
+  const syncingRef = useRef<Set<string>>(new Set());
   /**
    * The most recent message a status route sent with a non-OK response.
    *
@@ -187,6 +201,29 @@ export function useGenerationPolling() {
         return;
       }
 
+      // DURABLE COMPLETION, DB FIRST (#8892). When the QStash callback path is
+      // configured, the job's own row is finalized server-side with no tab
+      // open, so it is the authoritative source and the provider status route
+      // is only the fallback. A transient failure here never blocks: the poll
+      // falls through to the provider read below exactly as before.
+      if (durable && useGenerationStore.getState().durableCompletionEnabled) {
+        const durableJob = useGenerationStore.getState().jobs[id];
+        if (durableJob?.dbId) {
+          try {
+            const dbRes = await fetch(`/api/jobs/${encodeURIComponent(durableJob.dbId)}`);
+            if (dbRes.ok) {
+              const dbJob = (await dbRes.json()) as DurableJobRow;
+              if (await settleFromDurableRow(id, type, jobId, dbJob)) {
+                stopPolling(id);
+                return;
+              }
+            }
+          } catch (err) {
+            console.error('DB job status check error:', err);
+          }
+        }
+      }
+
       try {
         const endpoint = getStatusEndpoint(type);
         // Encode the jobId: the status route reads it via
@@ -253,6 +290,49 @@ export function useGenerationPolling() {
 
     // Immediate first poll
     void poll();
+  }
+
+  /**
+   * Apply a DB row the durable callback finalized. Returns true when the row was
+   * terminal and has been reflected (imported or refunded + failed), false when
+   * it is still in flight and the caller should keep polling.
+   *
+   * `refundTokens` is idempotent on usageId (the webhook's own
+   * finalizeFailedAndRefund has usually run already), so the client-side refund
+   * here cannot double-refund; what it adds is the balance refresh and the
+   * toast, which only a live client can do.
+   */
+  async function settleFromDurableRow(
+    id: string,
+    type: string,
+    jobId: string,
+    dbJob: DurableJobRow,
+  ): Promise<boolean> {
+    if (dbJob.status === 'completed') {
+      updateJob(id, { status: 'downloading', progress: 100 });
+      // For a texture, resultMeta IS the { albedo: url, ... } maps object the
+      // completion branch iterates (pollProviderStatus stores status.maps there).
+      const maps =
+        type === 'texture' && dbJob.resultMeta && typeof dbJob.resultMeta === 'object'
+          ? (dbJob.resultMeta as Record<string, string>)
+          : undefined;
+      await handleCompletion(id, type, {
+        jobId,
+        status: 'completed',
+        progress: 100,
+        resultUrl: dbJob.resultUrl ?? undefined,
+        maps,
+      });
+      return true;
+    }
+    if (dbJob.status === 'failed') {
+      await triggerRefund(id);
+      // Same rule as the provider-failure branch: the message a server route
+      // wrote is passed through; the bare fallback gets the next step appended.
+      failJob(id, dbJob.errorMessage || withRetryGuidance('Generation failed'));
+      return true;
+    }
+    return false;
   }
 
   async function handleCompletion(id: string, type: string, data: StatusResponse) {
@@ -749,6 +829,48 @@ export function useGenerationPolling() {
   // Moving the effect below the declarations is behaviour-identical: both of the
   // other effects have `[]` deps and register cleanup only, so the mount order
   // this changes is not observable.
+  // Hydrated-terminal jobs (#8892): the durable callback finished them while no
+  // tab was open, the list route returned them because imported = 0, and
+  // hydrateFromServer marked them. They are NOT active, so the polling effect
+  // below never sees them; this is the only path that runs their import or
+  // refund. The row is re-fetched rather than trusted from hydration so both
+  // this path and the poll fast path read one source, GET /api/jobs/[id].
+  useEffect(() => {
+    for (const job of Object.values(jobs)) {
+      if (job.needsCompletionSync !== true || !job.dbId) continue;
+      if (syncingRef.current.has(job.id)) continue;
+      syncingRef.current.add(job.id);
+      const { id, dbId, type, jobId } = job;
+      void (async () => {
+        try {
+          const res = await fetch(`/api/jobs/${encodeURIComponent(dbId)}`);
+          if (!res.ok) {
+            // Leave needsCompletionSync set so a later load retries.
+            console.error(`Durable completion sync failed: ${res.status}`);
+            return;
+          }
+          const dbJob = (await res.json()) as DurableJobRow;
+          const settled = await settleFromDurableRow(id, type, jobId, dbJob);
+          updateJob(id, { needsCompletionSync: false });
+          if (settled) {
+            // The failed branch's status sync writes imported = false, which
+            // would resurface the row on the next reload; mark it reflected.
+            fetch(`/api/jobs/${encodeURIComponent(dbId)}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imported: true }),
+            }).catch((err) => console.error('Failed to mark job imported:', err));
+          }
+        } catch (err) {
+          console.error('Durable completion sync error:', err);
+        } finally {
+          syncingRef.current.delete(id);
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs]);
+
   useEffect(() => {
     const activeJobs = Object.values(jobs).filter(
       (j) => j.status === 'pending' || j.status === 'processing'
