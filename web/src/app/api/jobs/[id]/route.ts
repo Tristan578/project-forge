@@ -25,6 +25,7 @@ const patchJobSchema = z.object({
  * (at most 2000 chars), resultMeta and imported synchronize polling/import.
  * resultUrl is optional/null: HTTP URL at most 2000 chars or non-empty PNG
  * data URL at most 4 MiB characters, sharing initial POST artifact validation.
+ * imported only ever latches true -> 1; imported:false is accepted and ignored.
  * Returns 200 {updated:true}; middleware handles auth/rate/validation errors,
  * a missing or unowned id returns 404, and database failures return fixed 500.
  * Refund ownership remains server-side; refunded is not accepted here.
@@ -66,7 +67,14 @@ async function PATCH_impl(
     if (body.errorMessage !== undefined) updates.errorMessage = body.errorMessage;
     if (body.resultUrl !== undefined) updates.resultUrl = body.resultUrl;
     if (body.resultMeta !== undefined) updates.resultMeta = body.resultMeta;
-    if (body.imported !== undefined) updates.imported = body.imported ? 1 : 0;
+    // `imported` is a one-way latch (#8892). The client fires independent,
+    // unordered PATCHes for one job (the store's status sync and the durable
+    // completion sync's reflected mark), and this UPDATE is unconditional, so
+    // honouring `false` let whichever request landed last reset a settled row
+    // to imported = 0 -- the list route then resurfaced it on every reload.
+    // No caller needs to un-import a job; `false` is accepted and ignored so an
+    // older client bundle still gets a 200.
+    if (body.imported === true) updates.imported = 1;
     // refunded field intentionally omitted — only server-side refundTokens() may set this
 
     if (body.status === 'completed' || body.status === 'failed') {

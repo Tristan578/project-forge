@@ -177,7 +177,13 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             progress: updates.progress,
             resultUrl: updates.resultUrl,
             errorMessage: updates.error,
-            imported: updates.status === 'completed',
+            // Only ever latch `imported` on; never send `false`. This PATCH is
+            // unawaited and races other writers for the same row (the durable
+            // completion sync's { imported: true }), so a `false` from an
+            // intermediate 'downloading' or a 'failed' update could land last
+            // and resurface a settled job on every reload (#8892). The route
+            // also ignores `false`; omitting it here keeps the intent explicit.
+            ...(updates.status === 'completed' && { imported: true }),
           }),
         })
           .then((res) => {

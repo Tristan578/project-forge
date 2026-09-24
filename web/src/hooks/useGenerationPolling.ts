@@ -853,8 +853,10 @@ export function useGenerationPolling() {
           const settled = await settleFromDurableRow(id, type, jobId, dbJob);
           updateJob(id, { needsCompletionSync: false });
           if (settled) {
-            // The failed branch's status sync writes imported = false, which
-            // would resurface the row on the next reload; mark it reflected.
+            // Mark the row reflected so the list route stops returning it.
+            // The failed branch's own status sync carries no `imported` (the
+            // store never sends false, and the route ignores false), so this
+            // and that unordered PATCH cannot race the row back to 0.
             fetch(`/api/jobs/${encodeURIComponent(dbId)}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },

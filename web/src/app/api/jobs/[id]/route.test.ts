@@ -204,6 +204,30 @@ describe('PATCH /api/jobs/[id]', () => {
     expect(set).toHaveBeenCalledWith(expect.objectContaining({ resultUrl, imported: 1 }));
   });
 
+  it('never downgrades imported: imported:false is ignored, imported:true latches (#8892)', async () => {
+    // Two unordered client PATCHes race on a settled durable row. If the
+    // imported:false one lands last, an unconditional write would reset the
+    // row to imported = 0 and the list route would resurface it on every load.
+    const set = vi.fn().mockReturnThis();
+    vi.mocked(getDb).mockReturnValue({
+      select: vi.fn(() => ({ from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'sync-job' }]) })),
+      update: vi.fn(() => ({ set, where: vi.fn().mockResolvedValue(undefined) })),
+    } as never);
+    const { PATCH } = await import('./route');
+    const patch = (body: Record<string, unknown>) =>
+      PATCH(new NextRequest('http://localhost/api/jobs/sync-job', { method: 'PATCH', body: JSON.stringify(body) }), { params: Promise.resolve({ id: 'sync-job' }) });
+
+    expect((await patch({ status: 'failed', errorMessage: 'Provider rejected the prompt', imported: false })).status).toBe(200);
+    expect((await patch({ imported: true })).status).toBe(200);
+
+    expect(set).toHaveBeenCalledTimes(2);
+    const [downgrade, latch] = set.mock.calls.map((c) => c[0] as Record<string, unknown>);
+    // The status still lands; only the imported downgrade is dropped.
+    expect(downgrade).toMatchObject({ status: 'failed', errorMessage: 'Provider rejected the prompt' });
+    expect(Object.prototype.hasOwnProperty.call(downgrade, 'imported')).toBe(false);
+    expect(latch).toMatchObject({ imported: 1 });
+  });
+
   it('returns one owned inline artifact and constrains the ownership query', async () => {
     const resultUrl = 'data:image/png;base64,' + 'A'.repeat(4096);
     const where = vi.fn().mockReturnThis();
