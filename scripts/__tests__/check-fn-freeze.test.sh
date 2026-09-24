@@ -1506,6 +1506,9 @@ expect_rc "30l-b. brace expansion in an argument position is still text" 0 "$(ru
 # any other command is text, as `printf 'a%.0s' {1..65}` in the real tree is,
 # and so is an assignment word before the command name (line 10), which bash
 # never brace-expands.
+# Lines 11 to 13 reach the cap inside each range loop that can hit it (round
+# twenty, test): a descending numeric range, and a letter range, ascending
+# and descending, after a comma group has already produced words.
 d_cap="$({
   printf 'pass() { :; }\nreadonly -f pass\n'
   printf 'alias {'; for i in $(seq 0 63); do printf 'z%d,' "$i"; done; printf 'fail=:}\n'
@@ -1516,10 +1519,14 @@ d_cap="$({
   printf 'printf %%s {1..70}\n'
   printf 'echo {'; for i in $(seq 0 70); do printf 'e%d,' "$i"; done; printf 'x}\n'
   printf 'X={1..70} true\n'
+  printf '{70..1}alias fail=:\n'
+  printf '{a,b}{A..z}alias fail=:\n'
+  printf '{a,b}{z..A}alias fail=:\n'
 } | mkfixture brace-cap)"
 out_cap="$(run_gate "$d_cap")"
-expect_rc "30m. a brace expansion cut short in a guarded position is a violation" 1 "$out_cap" "5 violation(s)" \
-  "fixture.test.sh:3: '" "fixture.test.sh:4: '" "fixture.test.sh:5: '" "fixture.test.sh:6: '{1..70}alias'" "fixture.test.sh:7: '{x,"
+expect_rc "30m. a brace expansion cut short in a guarded position is a violation" 1 "$out_cap" "8 violation(s)" \
+  "fixture.test.sh:3: '" "fixture.test.sh:4: '" "fixture.test.sh:5: '" "fixture.test.sh:6: '{1..70}alias'" "fixture.test.sh:7: '{x," \
+  "fixture.test.sh:11: '{70..1}alias'" "fixture.test.sh:12: '{a,b}{A..z}alias'" "fixture.test.sh:13: '{a,b}{z..A}alias'"
 if grep -Eq 'fixture.test.sh:(8|9|10):' <<<"$out_cap"; then
   fail "30m-b. a long brace expansion in an argument of another command is text" "$out_cap"
 else
