@@ -691,6 +691,8 @@ if grep -qE "sed -n 's/\^evicted_pr=//p' \| head -1" <<<"$ci_exec"; then
 else
   pass "preview-deploy keeps every evicted_pr= line"
 fi
+# shellcheck disable=SC2016
+# Literal "$EVICTED_PR", "$pr" and "$REPO" in the workflow's run: block.
 if grep -qE '^[[:space:]]+for pr in \$EVICTED_PR; do' <<<"$ci_exec" && grep -qE 'gh pr comment "\$pr" --repo "\$REPO"' <<<"$ci_exec"; then
   pass "the reclaimed-database notice is posted to every evicted PR"
 else
