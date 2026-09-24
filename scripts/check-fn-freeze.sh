@@ -38,6 +38,15 @@
 # function this file never defines, or sits somewhere other than directly after
 # X's definition (a pre-declaration, or a freeze with a window before it).
 #
+# The freeze protects the FUNCTION binding and nothing else. A bash alias of
+# the same name is resolved before functions once `shopt -s expand_aliases`
+# is on, so `alias fail=:` after a frozen `fail()` takes every later call
+# without an error, and neither line is a definition or a freeze. A
+# self-defense suite has no use for aliases, so the gate reports any
+# `alias NAME=` or `shopt -s expand_aliases` in command position of
+# executable text as a violation. `declare -n` and `eval` on a runtime-
+# assembled name remain outside this gate (round 39 of the guide).
+#
 # Indented definitions are deliberately out of scope: they are nested inside
 # another function, an `if` arm, or a subshell, and a function defined inside a
 # body that runs more than once cannot be frozen on its first run without
@@ -83,7 +92,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -112,6 +121,20 @@ derive_file() {
           if (c2 == "$(") { d++; st_q[d] = q; q = ""; i += 2; continue }
           i++; continue
         }
+        # `readonly -f` freezes the FUNCTION binding; it does not stop a bash
+        # alias of the same name from taking every later call once
+        # `expand_aliases` is on, and neither spelling is a definition or a
+        # freeze, so the gate would otherwise never see it. A self-defense
+        # suite has no use for aliases: either builtin in command position
+        # (line start, or after `;`, `&`, `|`, `(`, `)`, `{`, `}`) of
+        # UNQUOTED text is a violation. This sits inside the lexer so an
+        # alias spelled inside a string or a heredoc fixture is text.
+        if ((c == "a" || c == "s") &&
+            match(substr(line, i), /^(shopt[[:space:]]+-s[[:space:]]+expand_aliases|alias[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=)/) &&
+            substr(line, 1, i - 1) ~ /(^|[;&|(){}])[[:space:]]*$/) {
+          printf "%s\t%s\t%d\t%d\talias\n", file, substr(line, i, RLENGTH), NR, NR
+          i += RLENGTH; continue
+        }
         if (c == "\\") { i += 2; continue }
         if (c2 == "$\047") { q = "a"; i += 2; continue }
         if (c == "\047") { q = "s"; i++; continue }
@@ -126,11 +149,12 @@ derive_file() {
         if (c3 == "<<<") { i += 3; continue }
         if (c2 == "<<") {
           rest = substr(line, i + 2)
+          strip = (substr(rest, 1, 1) == "-")
           sub(/^-?[[:space:]]*/, "", rest)
           if (match(rest, /^(\047[A-Za-z_][A-Za-z0-9_]*\047|"[A-Za-z_][A-Za-z0-9_]*"|\\?[A-Za-z_][A-Za-z0-9_]*)/)) {
             tok = substr(rest, RSTART, RLENGTH)
             gsub(/[\047"\\]/, "", tok)
-            hd_n++; hd_term[hd_n] = tok
+            hd_n++; hd_term[hd_n] = tok; hd_strip[hd_n] = strip
             i += 2 + (length(line) - i - 1 - length(rest)) + RLENGTH
             continue
           }
@@ -143,10 +167,13 @@ derive_file() {
       line = $0
 
       # Inside a heredoc body: only its terminator matters.
+      # Only a `<<-` heredoc lets bash strip leading tabs before matching
+      # the terminator; a plain `<<` needs the delimiter byte-exact at column
+      # 0, and a tab-indented body line spelling the delimiter is body text.
       if (hd_n > 0) {
-        t = line; sub(/^\t+/, "", t)
+        t = line; if (hd_strip[1]) sub(/^\t+/, "", t)
         if (t == hd_term[1]) {
-          for (k = 1; k < hd_n; k++) hd_term[k] = hd_term[k + 1]
+          for (k = 1; k < hd_n; k++) { hd_term[k] = hd_term[k + 1]; hd_strip[k] = hd_strip[k + 1] }
           hd_n--
         }
         next
@@ -277,17 +304,22 @@ if [ "${total:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
-  echo "::error::check-fn-freeze: $count violation(s) across ${#files[@]} file(s) ($total definition(s) derived). A function that is not frozen can be rebound by one inserted line, which silently neuters every assertion whose evidence passes through it:"
-  while IFS=$'\t' read -r file name def end status; do
-    [ -n "$file" ] || continue
-    case "$status" in
-      unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
-      stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, and a freeze inside a quoted string or fixture is text, not a statement" ;;
-    esac
-  done <<<"$violations"
+  # The report is the block reason, so it goes to stderr like every other
+  # error path here (the harness surfaces stderr; stdout is dropped).
+  {
+    echo "::error::check-fn-freeze: $count violation(s) across ${#files[@]} file(s) ($total definition(s) derived). A function that is not frozen can be rebound by one inserted line, which silently neuters every assertion whose evidence passes through it:"
+    while IFS=$'\t' read -r file name def end status; do
+      [ -n "$file" ] || continue
+      case "$status" in
+        unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
+        stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, and a freeze inside a quoted string or fixture is text, not a statement" ;;
+        alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion" ;;
+      esac
+    done <<<"$violations"
+  } >&2
   exit 1
 fi
 

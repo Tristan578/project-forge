@@ -816,7 +816,12 @@ by construction rather than by measurement.
 ### What changed
 
 - `readonly -f <name>` directly after every top-level definition: 349 new
-  freezes, 369 in total across 68 files (the 20 from round 40 included).
+  freezes, 369 in total, 68 files scanned (64 of them define something; the 20
+  from round 40 included). Those are the GATE's numbers — `bash
+  scripts/check-fn-freeze.sh --list | wc -l` — and the only ones this guide
+  cites. A raw `grep -c 'readonly -f'` reads higher (about 400 on this branch)
+  because it also counts the freeze lines inside `check-fn-freeze.test.sh`'s
+  heredoc fixtures and this guide's own examples, which are text, not freezes.
 - `scripts/check-fn-freeze.sh`, a DERIVED gate. The round-40 drift check
   compared two lists of file text inside one suite; a per-suite copy of that
   would be 60 restated subjects (lesson #18). Instead one awk lexer walks each
@@ -826,13 +831,25 @@ by construction rather than by measurement.
   The rule is shape, not text: the very next line must be `readonly -f <name>`.
   A freeze anywhere else is a stray (before its definition it cannot bind; after
   a blank line it leaves a window; inside a quoted program or a heredoc fixture
-  it is text, not a statement). No files, no definitions, or a file the lexer
-  cannot carry to EOF → exit 2, never a pass over the visible prefix.
+  it is text, not a statement). Only a `<<-` heredoc has its leading tabs
+  stripped before the terminator is matched, as bash does; a plain `<<` ends at
+  a column-0 delimiter and nowhere else (the review board found the first cut
+  stripping unconditionally, which closed a plain heredoc early on a
+  tab-indented body line and reported a correct suite as two violations). And
+  because `readonly -f` freezes the FUNCTION binding only, an `alias NAME=` or
+  `shopt -s expand_aliases` in command position of executable text is a
+  violation in its own right (below). No files, no definitions, or a file the
+  lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state
   from a fixture, runs the gate on the real tree behind a 300-function floor
-  with per-directory contribution asserted, carries the round-40 effect probe,
-  and reproduces the neuter on an unfrozen copy (exit 0) and its refusal on a
-  frozen one (exit non-zero) so the measurement above is re-run on every PR.
+  with per-directory contribution asserted over the directory list READ FROM
+  THE GATE (a hand-copied three-entry list stayed green with the fourth
+  directory dropped; the derived list follows a rename and a floor of four
+  catches a drop), carries the round-40 effect probe, proves in this bash that
+  an alias really does take a frozen name (so the alias rule guards a measured
+  bypass), and reproduces the neuter on an unfrozen copy (exit 0) and its
+  refusal on a frozen one (exit non-zero) so the measurement above is re-run on
+  every PR.
 
 ### What the first cut got wrong, and why the gate lexes
 
@@ -852,17 +869,29 @@ a freeze found inside one is reported as a stray instead of being invisible.
 The freeze protects the binding, not the counter the helper writes.
 `check-skills.test.sh` assigned `FAILED=0` after defining `fail()`, so a failure
 recorded between the two was reset; the counter now initialises first, and the
-rule is stated in `.claude/rules/hook-testing.md`. `declare -n` aliasing and
-`eval` on a runtime-assembled name remain open (round 39). Nested definitions
-are deliberately unfrozen. And removing BOTH a definition and its freeze still
-satisfies the gate, as it did the round-40 drift check — the effect probe and
-the neuter reproduction are what prove a surviving freeze is in force.
+rule is stated in `.claude/rules/hook-testing.md`.
+
+A bash `alias` is resolved before functions once `shopt -s expand_aliases` is
+on, and `readonly -f` says nothing about it: measured on this bash (5.2), a
+fully frozen `fail()` followed by `shopt -s expand_aliases; alias fail=:` and
+a forced failure exits 0 — the same silent pass as the pre-sweep neuter, from
+two inserted lines the first cut of the gate could not see (the review board's
+security seat found it). The gate now reports either spelling in command
+position of executable text as a violation; a self-defense suite has no use
+for aliases. That closes the direct spelling only — `declare -n` aliasing of a
+VARIABLE and `eval` on a runtime-assembled name remain open (round 39), as
+does an `alias` assembled by `eval`. Nested definitions are deliberately
+unfrozen. And removing BOTH a definition and its freeze still satisfies the
+gate, as it did the round-40 drift check — the effect probe and the neuter
+reproduction are what prove a surviving freeze is in force.
 
 ### What else moved
 
 `lockfile-sync-tests` gained a shellcheck entry and two steps (suite, then
 gate), mirrored in this suite's step-block and shellcheck pins;
 `SELF_EXEC_EXPECTED_DROP` moved 658 → 663 with the heredoc payload. Shellcheck
-clean on every touched file. All 66 suites exit 0 on the frozen tree. No
+clean on every touched file. All 67 suites under the four scanned directories
+(54 in `scripts/__tests__`, 12 in `.claude/hooks/__tests__`, 1 in
+`.claude/tools/__tests__`) exit 0 on the frozen tree. No
 workflow was degated for the measurement; the neuter-plus-forced-failure stand-in
 replaced per-gate degating.

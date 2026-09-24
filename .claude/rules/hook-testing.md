@@ -175,6 +175,13 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
 - A `fail()` you redefine on purpose inside `bash -c '...'` (a child process, as
   `platform-contract.test.sh` does) is unaffected — the freeze lives in the
   parent shell only.
+- No `alias NAME=` and no `shopt -s expand_aliases` anywhere in a suite: an
+  alias is resolved before functions and `readonly -f` does not stop it, so the
+  gate reports either one in executable text as a violation. Inside a quoted
+  string, a heredoc fixture or a comment it is text and is ignored.
+- Heredocs follow bash: only `<<-` strips leading tabs before the terminator;
+  a plain `<<` body runs to the column-0 delimiter, tab-indented lookalikes
+  included.
 
 ## Platform contract (#9611)
 

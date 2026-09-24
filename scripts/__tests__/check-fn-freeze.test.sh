@@ -184,6 +184,36 @@ FIX
 expect_rc "8. function definitions inside quoted and unquoted heredocs are ignored" 0 \
   "$(run_gate "$d_heredoc")" "2 function(s) across 1 file(s) are frozen"
 
+# ---- 8b. a plain << heredoc ends only at a column-0 terminator ----------------
+# Bash strips leading tabs before matching the delimiter ONLY for `<<-`. A
+# tab-indented body line spelling the delimiter inside a plain `<<` heredoc is
+# body text, so the definition that follows it is still fixture text: a lexer
+# that stripped tabs unconditionally closed the heredoc early and reported a
+# false violation on a correct suite.
+d_hd_tab="$(mkfixture heredoc-tab <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+cat > "$1" <<EOF
+	EOF
+bad() { echo hi; }
+EOF
+FIX
+)"
+expect_rc "8b. a tab-indented delimiter inside a plain << heredoc does not end it" 0 \
+  "$(run_gate "$d_hd_tab")" "1 function(s) across 1 file(s) are frozen"
+# ---- 8c. a <<- heredoc DOES end at a tab-indented terminator ------------------
+d_hd_dash="$(mkfixture heredoc-dash <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+cat > "$1" <<-EOF
+	body
+	EOF
+bad() { echo hi; }
+FIX
+)"
+expect_rc "8c. a tab-indented terminator ends a <<- heredoc, so the definition after it is real" 1 \
+  "$(run_gate "$d_hd_dash")" "fixture.test.sh:6: bad() is not frozen"
+
 # ---- 9. a commented-out definition is ignored ---------------------------------
 d_cdef="$(mkfixture commented-def <<'FIX'
 pass() { echo "  PASS: $1"; }
@@ -364,15 +394,30 @@ if [ "${real_count:-0}" -ge 300 ]; then
 else
   fail "15b. the real derivation found only ${real_count:-0} function(s) — below the 300 floor, so the scan has collapsed"
 fi
-# Both suite directories must contribute: a derivation that silently dropped
-# one directory would still clear the floor on the other.
+# Every scanned directory must contribute: a derivation that silently dropped
+# one directory would still clear the floor on the others. The list is READ
+# FROM THE GATE'S OWN DEFAULT (lesson #18), so a directory added to or removed
+# from `DIRS` changes this check with it; a hand-copied list stayed green when
+# one of four directories was dropped.
 real_list="$(bash "$GATE" --list 2>&1)"
-for dir in scripts/__tests__/ .claude/hooks/__tests__/ scripts/__tests__/lib/; do
-  n="$(grep -c "^${dir}[^/]*	" <<<"$real_list" || true)"
+gate_dirs="$(sed -nE 's/^DIRS="\$\{FN_FREEZE_DIRS:-(.*)\}"$/\1/p' "$GATE")"
+# The floor is the CURRENT directory count: deriving the list makes the
+# per-directory check follow a rename, but a directory silently dropped from
+# `DIRS` would shrink this loop with it, so the count is pinned at a floor
+# the way the function count is above. Raise it when a directory is added;
+# never lower it.
+gate_dir_count="$(wc -w <<<"$gate_dirs")"
+if [ "${gate_dir_count:-0}" -ge 4 ]; then
+  pass "15c. the gate's default DIRS parsed to $gate_dir_count directories (floor 4): $gate_dirs"
+else
+  fail "15c. the gate's default DIRS parsed to only ${gate_dir_count:-0} directories (floor 4; got '$gate_dirs') — a scanned directory has been dropped, or the DIRS line no longer parses"
+fi
+for dir in $gate_dirs; do
+  n="$(grep -c "^${dir}/[^/]*	" <<<"$real_list" || true)"
   if [ "${n:-0}" -gt 0 ]; then
-    pass "15c. $dir contributes $n definition(s) to the real derivation"
+    pass "15c. $dir/ contributes $n definition(s) to the real derivation"
   else
-    fail "15c. $dir contributes no definitions to the real derivation"
+    fail "15c. $dir/ contributes no definitions to the real derivation"
   fi
 done
 
@@ -423,6 +468,55 @@ if bash "$TMPDIR_T/neuter-unfrozen.sh" >/dev/null 2>&1; then
   pass "17b. the same insertion on an unfrozen copy exits 0 (the defect this gate closes, reproduced)"
 else
   fail "17b. the unfrozen control did not reproduce the defect — the measurement in 17a proves nothing"
+fi
+
+# ---- 19. an alias shadows a frozen name, so the gate refuses aliases ---------
+# `readonly -f` binds the FUNCTION; with expand_aliases on, `alias fail=:`
+# takes every later call of the frozen helper without an error (the security
+# seat of the #9125 review board measured the same silent exit 0 as the
+# pre-sweep neuter). Neither line is a definition or a freeze, so it is
+# reported on its own.
+d_alias="$(mkfixture alias <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+shopt -s expand_aliases
+alias fail=:
+FIX
+)"
+expect_rc "19. 'shopt -s expand_aliases' and 'alias NAME=' in executable text are violations" 1 \
+  "$(run_gate "$d_alias")" "fixture.test.sh:3: 'shopt -s expand_aliases'" "fixture.test.sh:4: 'alias fail='" "2 violation(s)"
+d_alias_body="$(mkfixture alias-body <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+neuter() {
+  alias fail=:
+}
+readonly -f neuter
+FIX
+)"
+expect_rc "19b. an alias inside a function body is still a violation" 1 \
+  "$(run_gate "$d_alias_body")" "fixture.test.sh:4: 'alias fail='"
+d_alias_text="$(mkfixture alias-text <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+echo "alias fail=:" > "$1"
+printf '%s\n' 'shopt -s expand_aliases' >> "$1"
+cat >> "$1" <<'EOF'
+alias fail=:
+shopt -s expand_aliases
+EOF
+# alias fail=: (a comment is not a statement)
+FIX
+)"
+expect_rc "19c. alias text inside quotes, a heredoc fixture or a comment is not a violation" 0 \
+  "$(run_gate "$d_alias_text")" "1 function(s) across 1 file(s) are frozen"
+# The refusal is the whole point: prove the alias really does shadow a frozen
+# function in this bash, so the rule guards a real bypass and not a theory.
+alias_probe="$(bash -c 'fail() { echo REAL; }; readonly -f fail; shopt -s expand_aliases; alias fail="echo ALIASED"; eval fail' 2>&1)"
+if [ "$alias_probe" = "ALIASED" ]; then
+  pass "19d. an alias shadows a readonly function at call time in this bash (the bypass the rule closes is real)"
+else
+  fail "19d. alias probe did not shadow the frozen function (got '$alias_probe') — re-examine whether the alias rule is still needed"
 fi
 
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
