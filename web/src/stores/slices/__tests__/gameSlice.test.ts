@@ -2,13 +2,27 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createGameSlice, setGameDispatcher, setWinnabilityStateReader, type GameSlice } from '../gameSlice';
 import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, SceneGraph } from '../types';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { buildStoreComponentWithReport } from '@/lib/engine/gameComponentWire';
+import { componentAdjustmentsOf } from '@/lib/engine/gameComponentCorrections';
 
-const { chatSetState, chatGetState } = vi.hoisted(() => ({
-  chatSetState: vi.fn(),
-  chatGetState: vi.fn(() => ({ messages: [] as unknown[] })),
-}));
+const { chatSetState, chatGetState, chatSetRightPanelTab, trackPlayModeStarted } = vi.hoisted(() => {
+  const chatSetRightPanelTab = vi.fn();
+  return {
+    chatSetState: vi.fn(),
+    chatSetRightPanelTab,
+    chatGetState: vi.fn(() => ({ messages: [] as unknown[], setRightPanelTab: chatSetRightPanelTab })),
+    trackPlayModeStarted: vi.fn(),
+  };
+});
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: { getState: chatGetState, setState: chatSetState },
+}));
+// play() reports a Play only after a real dispatch (#10166); the mock lets the
+// tests observe that it stays silent on a refusal.
+vi.mock('@/lib/analytics/events', () => ({
+  trackPlayModeStarted,
+  trackEditorPanelOpened: vi.fn(),
 }));
 
 describe('gameSlice', () => {
@@ -21,11 +35,18 @@ describe('gameSlice', () => {
     store = createSliceStore(createGameSlice);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // play() reports analytics through a dynamic import. Let every pending one
+    // land HERE, before the mocks are cleared: otherwise a start counted by one
+    // test resolves inside the next and fails its "not called" assertion.
+    await vi.dynamicImportSettled();
     setGameDispatcher(null as unknown as (command: string, payload: unknown) => void);
     setWinnabilityStateReader(null);
     chatSetState.mockClear();
     chatGetState.mockClear();
+    chatSetRightPanelTab.mockClear();
+    trackPlayModeStarted.mockClear();
+    useWorkspaceStore.setState({ chatOverlayOpen: false });
   });
 
   describe('Initial State', () => {
@@ -329,6 +350,144 @@ describe('gameSlice', () => {
     });
   });
 
+  // PF-1148: the per-field record of "asked for X, applied Y" the inspector marks
+  // fields from. Ephemeral editor state — it never rides inside a component, a
+  // wire payload or anything a scene save reads.
+  describe('Game component adjustments', () => {
+    const route = (n: number): [number, number, number][] =>
+      Array.from({ length: n }, (_, i) => [i, 0, 0] as [number, number, number]);
+
+    function platformFromTool(props: Record<string, unknown>) {
+      const built = buildStoreComponentWithReport('moving_platform', props);
+      if (built === null) throw new Error('moving_platform did not build');
+      return built;
+    }
+
+    const adjustmentsOf = (entityId: string, type: GameComponentData['type']) =>
+      componentAdjustmentsOf(store.getState().gameComponentAdjustments, entityId, type);
+
+    it('starts with no adjustments', () => {
+      expect(store.getState().gameComponentAdjustments).toEqual({});
+    });
+
+    it('records the corrections a tool call caused, field by field', () => {
+      const built = platformFromTool({ speed: 99999, waypoints: route(300) });
+      store.getState().addGameComponent('e1', built.component, built);
+
+      expect(adjustmentsOf('e1', 'movingPlatform')).toEqual({
+        speed: { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' },
+        waypoints: {
+          component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+          appliedPoints: route(64),
+        },
+      });
+    });
+
+    it('records nothing for an in-range write', () => {
+      const built = platformFromTool({ speed: 6, waypoints: route(3) });
+      expect(built.corrections).toEqual([]);
+      store.getState().addGameComponent('e1', built.component, built);
+      expect(store.getState().gameComponentAdjustments).toEqual({});
+      // And the write itself landed — an empty map is not a skipped write.
+      const stored = store.getState().allGameComponents['e1'][0];
+      expect(stored.type === 'movingPlatform' && stored.movingPlatform.speed).toBe(6);
+    });
+
+    it('records the store’s own coercion of a raw value, with no report passed in', () => {
+      // The inspector hands the store a whole component and no report; a 10.4 in
+      // a whole-number field is still a value the author asked for and did not get.
+      store.getState().addGameComponent('e1', {
+        type: 'collectible',
+        collectible: { value: 10.4, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 90 },
+      });
+      expect(adjustmentsOf('e1', 'collectible')).toEqual({
+        value: { component: 'collectible', field: 'value', requested: 10.4, applied: 10, reason: 'rounded' },
+      });
+    });
+
+    it('keeps the corrections out of the stored component and the engine payload', () => {
+      const built = platformFromTool({ speed: 99999 });
+      store.getState().addGameComponent('e1', built.component, built);
+
+      // Exactly the four fields, nothing smuggled in beside them — this object is
+      // what the winnability gate, the chat context and the scene tools read.
+      const stored = store.getState().allGameComponents['e1'][0];
+      expect(stored).toEqual({
+        type: 'movingPlatform',
+        movingPlatform: { speed: 1000, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration: 0.5, loopMode: 'pingPong' },
+      });
+      expect(mockDispatch).toHaveBeenLastCalledWith('add_game_component', {
+        entityId: 'e1',
+        componentType: 'moving_platform',
+        properties: { speed: 1000, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration: 0.5, loopMode: 'pingPong' },
+      });
+    });
+
+    it('refuses a report whose applied value the stored field does not hold', () => {
+      const stale = platformFromTool({ speed: 99999 });
+      const fresh = platformFromTool({ speed: 7 });
+      // A caller pairing one write's report with another write's component.
+      store.getState().addGameComponent('e1', fresh.component, stale);
+      expect(store.getState().gameComponentAdjustments).toEqual({});
+    });
+
+    it('keeps a marker while a different field is edited, and clears it when its own field is', () => {
+      const built = platformFromTool({ speed: 99999, waypoints: route(300) });
+      store.getState().addGameComponent('e1', built.component, built);
+      const current = store.getState().allGameComponents['e1'][0];
+      if (current.type !== 'movingPlatform') throw new Error('expected a movingPlatform');
+
+      // An inspector edit to the pause: both markers still describe their fields.
+      store.getState().updateGameComponent('e1', {
+        type: 'movingPlatform',
+        movingPlatform: { ...current.movingPlatform, pauseDuration: 2 },
+      });
+      expect(Object.keys(adjustmentsOf('e1', 'movingPlatform') ?? {}).sort()).toEqual(['speed', 'waypoints']);
+
+      // An inspector edit to the speed, in range: that marker is now false.
+      store.getState().updateGameComponent('e1', {
+        type: 'movingPlatform',
+        movingPlatform: { ...current.movingPlatform, pauseDuration: 2, speed: 4 },
+      });
+      expect(Object.keys(adjustmentsOf('e1', 'movingPlatform') ?? {})).toEqual(['waypoints']);
+    });
+
+    it('clears a marker when a tool sets that field explicitly, even to the value it already held', () => {
+      const first = platformFromTool({ speed: 99999 });
+      store.getState().addGameComponent('e1', first.component, first);
+      expect(adjustmentsOf('e1', 'movingPlatform')).toBeDefined();
+
+      // "Set the speed to 1000" — no correction this time, and the marker saying
+      // "you asked for 99999" is no longer what the author asked for.
+      const second = platformFromTool({ speed: 1000 });
+      store.getState().updateGameComponent('e1', second.component, second);
+      expect(adjustmentsOf('e1', 'movingPlatform')).toBeUndefined();
+    });
+
+    it('replaces the markers on add, which replaces the whole component', () => {
+      const first = platformFromTool({ speed: 99999 });
+      store.getState().addGameComponent('e1', first.component, first);
+      const second = platformFromTool({ waypoints: route(70) });
+      store.getState().addGameComponent('e1', second.component, second);
+      expect(Object.keys(adjustmentsOf('e1', 'movingPlatform') ?? {})).toEqual(['waypoints']);
+    });
+
+    it('drops a component’s markers when the component is removed', () => {
+      const built = platformFromTool({ speed: 99999 });
+      store.getState().addGameComponent('e1', built.component, built);
+      store.getState().removeGameComponent('e1', 'moving_platform');
+      expect(store.getState().gameComponentAdjustments).toEqual({});
+    });
+
+    it('keeps markers per entity', () => {
+      const built = platformFromTool({ speed: 99999 });
+      store.getState().addGameComponent('e1', built.component, built);
+      store.getState().addGameComponent('e2', platformFromTool({}).component);
+      expect(adjustmentsOf('e1', 'movingPlatform')).toBeDefined();
+      expect(adjustmentsOf('e2', 'movingPlatform')).toBeUndefined();
+    });
+  });
+
   describe('Game Cameras', () => {
     const thirdPersonCamera: GameCameraData = {
       mode: 'thirdPersonFollow',
@@ -595,12 +754,15 @@ describe('gameSlice', () => {
       },
     });
 
-    it('dispatches play when the scene is winnable', () => {
+    it('dispatches play when the scene is winnable, returns true and reports the start', async () => {
       setWinnabilityStateReader(winnableReader);
 
-      store.getState().play();
+      expect(store.getState().play()).toBe(true);
 
       expect(mockDispatch).toHaveBeenCalledWith('play', {});
+      // The winnable path reveals nothing: the overlay stays exactly as it was.
+      expect(useWorkspaceStore.getState().chatOverlayOpen).toBe(false);
+      await vi.waitFor(() => expect(trackPlayModeStarted).toHaveBeenCalledTimes(1));
     });
 
     it('dispatches play for a sandbox scene with no win condition (#9901)', () => {
@@ -663,7 +825,7 @@ describe('gameSlice', () => {
       // play() is synchronous, but surfaceWinnabilityMessage dynamically imports
       // chatStore (a floating promise), so the chat write lands on a later
       // microtask — vi.waitFor polls until that async surface completes.
-      store.getState().play();
+      expect(store.getState().play()).toBe(false);
 
       expect(mockDispatch).not.toHaveBeenCalledWith('play', {});
       await vi.waitFor(() => expect(chatSetState).toHaveBeenCalled());
@@ -684,6 +846,12 @@ describe('gameSlice', () => {
       // role:'system' — visible to the user, filtered out of the AI request.
       expect(payload.messages[0].role).toBe('system');
       expect(payload.messages[0].content).toContain("can't be won");
+      // Desktop renders nothing from rightPanelTab, so the gate also opens the
+      // chat overlay — the one chat surface both layouts share (#10166).
+      await vi.waitFor(() => expect(useWorkspaceStore.getState().chatOverlayOpen).toBe(true));
+      expect(chatSetRightPanelTab).toHaveBeenCalledWith('chat');
+      // A refused Play never happened, so it is not counted as one.
+      expect(trackPlayModeStarted).not.toHaveBeenCalled();
     });
 
     it('blocks play when a goal win condition targets a missing entity', async () => {
@@ -716,6 +884,19 @@ describe('gameSlice', () => {
       store.getState().play();
 
       expect(mockDispatch).toHaveBeenCalledWith('play', {});
+    });
+
+    it('returns false and reports nothing when no dispatcher is attached', async () => {
+      setWinnabilityStateReader(winnableReader);
+      setGameDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      expect(store.getState().play()).toBe(false);
+
+      expect(mockDispatch).not.toHaveBeenCalled();
+      // The analytics call rides a dynamic import: let every pending one
+      // settle so a wrongly-counted start has reported before this asserts.
+      await vi.dynamicImportSettled();
+      expect(trackPlayModeStarted).not.toHaveBeenCalled();
     });
   });
 

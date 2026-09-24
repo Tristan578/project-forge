@@ -23,11 +23,18 @@ declare module 'jest-axe' {
     nodes?: unknown[];
   }
 
-  /** Accessibility results; web tests assert directly on violations. */
+  /**
+   * Accessibility results; web tests assert directly on violations.
+   *
+   * `incomplete` ("needs review") is typed like `violations` because axe-core
+   * always returns it with the same result shape, and some defects land only
+   * there: an `aria-describedby` naming a missing id (`aria-valid-attr-value`)
+   * or a duplicated one (`duplicate-id-aria`) is never filed as a violation.
+   */
   interface AxeResults {
     violations: AxeViolation[];
     passes?: unknown[];
-    incomplete?: unknown[];
+    incomplete: AxeViolation[];
     inapplicable?: unknown[];
   }
 
