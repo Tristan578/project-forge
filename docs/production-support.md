@@ -173,7 +173,7 @@ vercel rollback <last-good-deployment-url> --yes --scope=<team> --token=$VERCEL_
 **Communication:**
 - No paging service is configured — see `docs/operations/incident-response.md` for how the owner is notified
 - Post in #incidents Slack channel, if one is configured in Sentry
-- If user-facing for > 15 min, update status page
+- If user-facing for > 15 min, post a user-facing update (there is no manually updated status page; https://spawnforge.ai/health shows live status automatically)
 
 **Resolution Verification:**
 ```bash

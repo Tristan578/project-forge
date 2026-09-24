@@ -60,7 +60,7 @@ export const GENERATION_OUTCOMES = [
    * (`UNAVAILABLE_CAPABILITIES`, #9117) and the request was refused before
    * any budget was spent. Its own bucket for the same reason as
    * `empty_artifact`: it is a 503, but a permanent, operator-declared one —
-   * counting it under `provider_unavailable` would page on-call for an
+   * counting it under `provider_unavailable` would raise an alert for an
    * upstream incident that is not happening.
    */
   'capability_unavailable',
@@ -100,7 +100,7 @@ export interface GenerationMetricsContext {
    * HTTP status is a lossy classifier here, and it is lossy in exactly the
    * places that matter most: three distinct gates return 403 or 503 through
    * this handler. Without an override, ban-evasion volume is recorded as bot
-   * traffic, and the Neon circuit breaker opening pages on-call as an upstream
+   * traffic, and the Neon circuit breaker opening raises an alert as an upstream
    * AI-provider incident. Likewise a 422 from the content-safety blocklist —
    * the most security-relevant rejection on this surface — is indistinguishable
    * from a client sending a malformed body.
@@ -130,7 +130,7 @@ const STATUS_OUTCOMES: Record<number, GenerationOutcome> = {
  *
  * Unmapped statuses fall back by CLASS, not to `error`: a future validation
  * branch returning 409/415 is a client rejection and must not inflate the error
- * rate that pages someone.
+ * rate that alerts the owner.
  */
 export function classifyGenerationOutcome(status: number): GenerationOutcome {
   const known = STATUS_OUTCOMES[status];

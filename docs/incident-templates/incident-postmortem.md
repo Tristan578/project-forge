@@ -1,8 +1,8 @@
 # Post-Incident Review (Postmortem) Template
 
-> Complete this document within **5 business days** of incident resolution.
+> Optional. This project has no formal postmortem process (see `docs/operations/incident-response.md` § Resolution); use this template when a paragraph in the closing ticket is not enough.
 > Blameless postmortems focus on systems, processes, and tools — not individuals.
-> Share with the Engineering team and link from the resolved incident ticket.
+> Link it from the resolved incident ticket.
 
 ---
 
@@ -52,11 +52,11 @@
 | {HH:MM} | {event} | {name} |
 | {HH:MM} | Incident detected | {monitoring / user / engineer} |
 | {HH:MM} | Incident commander assigned | {name} |
-| {HH:MM} | First update posted to status page | {name} |
+| {HH:MM} | First update posted | {name} |
 | {HH:MM} | Root cause identified | {name} |
 | {HH:MM} | Fix deployed to production | {name} |
 | {HH:MM} | Recovery validated | {name} |
-| {HH:MM} | Incident resolved, status page updated | {name} |
+| {HH:MM} | Incident resolved | {name} |
 
 ---
 
@@ -104,7 +104,7 @@
 
 ## Response
 
-**Time to first update:** {N minutes from detection to first status page update}
+**Time to first update:** {N minutes from detection to first update}
 **Time to root cause:** {N minutes from detection to root cause identified}
 **Time to fix deployed:** {N minutes from root cause to fix deployed}
 **Time to recovery:** {N minutes from fix deployed to recovery confirmed}

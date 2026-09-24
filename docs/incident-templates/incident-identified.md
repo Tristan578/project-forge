@@ -34,7 +34,7 @@ We have identified the cause of the issue: {PLAIN_LANGUAGE_ROOT_CAUSE_SUMMARY}.
 
 <!-- Describe the fix approach without exposing sensitive implementation details. -->
 
-Our engineering team is {deploying a fix / rolling back / applying a configuration change} and we expect to resolve the issue by **{HH:MM UTC}** (approximately **{N minutes / hours}** from now).
+We are {deploying a fix / rolling back / applying a configuration change} and we expect to resolve the issue by **{HH:MM UTC}** (approximately **{N minutes / hours}** from now).
 
 This estimate may change as we validate the fix. We will update this page if the ETA shifts.
 
@@ -54,11 +54,11 @@ This estimate may change as we validate the fix. We will update this page if the
 
 Next update by **{HH:MM UTC}** or when the fix is deployed.
 
-Status page: https://status.spawnforge.ai
+Live service status (updates automatically from the health checks): https://spawnforge.ai/health
 
 ---
 
-## Internal Notes (not for status page)
+## Internal Notes (not for publication)
 
 ### Root cause (technical detail)
 

@@ -43,7 +43,7 @@ export async function authenticateRequest(): Promise<
   } catch {
     // Expired token, malformed JWT, or Clerk transient error.
     // Fail closed with 401 instead of propagating a 500. The distinct
-    // `reason` lets on-call distinguish an auth-provider outage from a
+    // `reason` lets the owner distinguish an auth-provider outage from a
     // routine missing-session 401 in Sentry without leaking detail to
     // the client.
     return unauthorized('AUTH_PROVIDER_ERROR');

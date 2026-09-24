@@ -70,7 +70,7 @@ or paging service — see `docs/decisions/2026-09-24-no-paging-or-on-call.md`.
 3. If Clerk is experiencing an outage:
    - The app will be largely non-functional for authenticated features
    - The `/dev` route bypasses auth for local testing but is gated in production
-   - Communicate to users via status page
+   - Post an update in #incidents if one is configured (there is no manually updated status page; https://spawnforge.ai/health shows live status)
 4. If keys are rotated or expired:
    - Update keys in Vercel environment variables
    - Redeploy (Vercel > Deployments > Redeploy)

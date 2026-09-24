@@ -52,11 +52,11 @@
 
 We will post the next update by **{HH:MM UTC}**, or sooner if the situation changes.
 
-Status page: https://status.spawnforge.ai
+Live service status (updates automatically from the health checks): https://spawnforge.ai/health
 
 ---
 
-## Internal Notes (not for status page)
+## Internal Notes (not for publication)
 
 ### Timeline (cumulative)
 

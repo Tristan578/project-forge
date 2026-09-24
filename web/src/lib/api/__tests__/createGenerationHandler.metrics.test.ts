@@ -351,8 +351,8 @@ describe('createGenerationHandler — business metrics wiring (PF-1053)', () => 
 
   it('separates a DEGRADED auth path from a provider outage, though both return 503', async () => {
     // authenticateRequest returns 503 when the DB/user-sync path is degraded —
-    // a Neon circuit-breaker signal. Reported as `provider_unavailable` it pages
-    // on-call for an upstream AI incident that is not happening.
+    // a Neon circuit-breaker signal. Reported as `provider_unavailable` it raises an
+    // alert for an upstream AI incident that is not happening.
     mockAuth.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: 'Service degraded', code: 'SERVICE_DEGRADED' }, { status: 503 }),

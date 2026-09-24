@@ -1,7 +1,7 @@
 # Incident Resolved — Resolution Template
 
 > Use this template once the fix is deployed, validated, and the incident is confirmed closed.
-> Post to: status page + #incidents Slack channel. Link to the postmortem ticket.
+> Post to: the #incidents Slack channel, if one is configured. Link to the tracking issue.
 
 ---
 
@@ -58,11 +58,11 @@ We apologize for the disruption. Thank you for your patience while we resolved t
 
 If you are still experiencing problems, please contact support at support@spawnforge.ai.
 
-Status page: https://status.spawnforge.ai
+Live service status (updates automatically from the health checks): https://spawnforge.ai/health
 
 ---
 
-## Internal Notes (not for status page)
+## Internal Notes (not for publication)
 
 ### Root cause (technical)
 

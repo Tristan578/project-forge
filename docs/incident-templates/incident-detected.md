@@ -1,7 +1,7 @@
 # Incident Detected — Initial Alert Template
 
 > Use this template within **15 minutes** of detecting a P0 or P1 incident.
-> Post to: #incidents Slack channel + status page update.
+> Post to: the #incidents Slack channel, if one is configured. There is no manually updated status page; https://spawnforge.ai/health shows live service status on its own.
 
 ---
 
@@ -43,13 +43,13 @@ We are actively investigating. Next update in **{15 / 30} minutes** or when we h
 
 ### Who should I contact?
 
-Do not contact individual engineers directly. Monitor this channel and the status page for updates.
+Updates will be posted here as they happen. SpawnForge is run by a single owner, so there is no one else to contact directly; https://spawnforge.ai/health shows live service status.
 
-Status page: https://status.spawnforge.ai
+Live service status (updates automatically from the health checks): https://spawnforge.ai/health
 
 ---
 
-## Internal Notes (not for status page)
+## Internal Notes (not for publication)
 
 **Incident ID:** INC-{YYYYMMDD}-{N}
 **Alert triggered by:** {monitoring alert / user report / engineer observation}
@@ -72,5 +72,5 @@ Status page: https://status.spawnforge.ai
 
 - [ ] {action}
 - [ ] Notify the project owner (no on-call/paging service — see `docs/operations/incident-response.md`)
-- [ ] Post status page update
+- [ ] Confirm https://spawnforge.ai/health reflects the incident
 - [ ] Open incident bridge channel

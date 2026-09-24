@@ -277,7 +277,7 @@ describe('authenticateRequest — edge cases', () => {
       expect(result.response.status).toBe(401);
       const body = await result.response.json();
       // The `reason` sub-code distinguishes a provider outage from a
-      // routine missing-session 401 for on-call observability.
+      // routine missing-session 401 in Sentry.
       expect(body.reason).toBe('AUTH_PROVIDER_ERROR');
     }
     // Ensure the throw did NOT propagate — it must be caught and converted to 401.
