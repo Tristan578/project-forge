@@ -1087,9 +1087,10 @@ RUNS
   # satisfies the containment grep above — the only per-PR run of the UI suite
   # for a packages/ui-only PR is dead, and this pin reads green. On the
   # `pull_request` path GitHub runs the PR's OWN workflow file, so the mutation
-  # takes effect in the very run that should have caught it. actionlint flags
-  # duplicate keys, but it is not wired into this repo's CI — this count is the
-  # backstop (#9031). Scope it to the STEP so sibling steps' legitimate `run:`
+  # takes effect in the very run that should have caught it. actionlint (the
+  # required `actionlint` job, #8719) flags duplicate keys, but it runs from
+  # this same PR-controlled file — this count is the independent backstop
+  # (#9031). Scope it to the STEP so sibling steps' legitimate `run:`
   # keys are not counted.
   dig_test_step="$(awk '
     !f && /^      - name:/ && index($0, "Test @spawnforge/ui") {f=1; print; next}

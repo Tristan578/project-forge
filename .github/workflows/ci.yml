@@ -942,6 +942,23 @@ jobs:
   # installed pinned to a fixed version — an unpinned install could surface new
   # checks from a future release and break the ratchet on a PR that changed
   # nothing. actionlint uses the runner's preinstalled shellcheck for SCxxxx.
+  # The release tarball is downloaded directly and verified against a sha256
+  # PINNED below (taken from the release's actionlint_<ver>_checksums.txt and
+  # cross-checked by hashing the asset independently) before it is extracted
+  # or executed; a mismatch fails the job. Bumping ACTIONLINT_VERSION means
+  # bumping ACTIONLINT_SHA256 in the same edit — the upstream
+  # download-actionlint.bash script is NOT used, because it fetches from a
+  # mutable tag and performs no integrity check of the tarball.
+  #
+  # Step-level parallel keys (`background:` / `wait:` / `wait-all:` /
+  # `cancel:`, GitHub changelog 2026-06-25) are NOT understood by any released
+  # actionlint (rhysd/actionlint#694 is open; 1.7.11 reports `unexpected key
+  # "background"` plus `step must run script with "run" section or run action
+  # with "uses" section` for a bare `- wait:` step). Adopting them in these
+  # three files under #8861 therefore hard-fails this required gate. Path
+  # forward: bump the pinned actionlint once #694 ships. Do NOT paper over it
+  # with -ignore — the second message is generic and would also hide a
+  # genuinely malformed step.
   #
   # `jobs.<id>.result` inside a workflow_call `outputs.<name>.value`
   # (quality-gates.yml) is valid, documented reusable-workflow syntax that
@@ -964,10 +981,18 @@ jobs:
       - name: Install actionlint (pinned)
         env:
           ACTIONLINT_VERSION: "1.7.11"
+          # sha256 of actionlint_1.7.11_linux_amd64.tar.gz. Must change together
+          # with ACTIONLINT_VERSION.
+          ACTIONLINT_SHA256: "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a"
         run: |
-          curl -fsSL -o "${RUNNER_TEMP}/download-actionlint.bash" \
-            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
-          bash "${RUNNER_TEMP}/download-actionlint.bash" "${ACTIONLINT_VERSION}" "${RUNNER_TEMP}"
+          set -euo pipefail
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/${tarball}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
+          # Fail closed: sha256sum -c exits non-zero on a mismatch, and set -e
+          # stops the step before anything from the tarball is extracted or run.
+          (cd "${RUNNER_TEMP}" && echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum -c -)
+          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}" actionlint
           "${RUNNER_TEMP}/actionlint" -version
           shellcheck --version
 

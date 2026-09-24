@@ -1868,8 +1868,9 @@ STEPS_EOF
   # appended second security: job at end of file replaces the whole job
   # under YAML last-key-wins while every pin below keeps reading the dead
   # first block, and the job reports SUCCESS under the original display
-  # name (actionlint would flag the duplicate job key, but it is not wired
-  # into this repo's CI). The level above THIS — a duplicated top-level
+  # name (the `actionlint` job, #8719, flags the duplicate job key, but it
+  # runs from the same PR-controlled ci.yml, so this pin stays the
+  # independent backstop). The level above THIS — a duplicated top-level
   # jobs: key — is count-pinned above rather than argued away: the
   # rationale (and why "fails closed on its own" was rejected) lives at
   # that pin.
