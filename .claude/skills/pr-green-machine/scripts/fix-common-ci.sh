@@ -46,7 +46,10 @@ if [ "$LINT_FIX_EXIT" -eq 0 ]; then
   pass "ESLint auto-fix completed successfully"
 else
   echo "  ESLint fix output:"
-  echo "$LINT_FIX_OUTPUT" | head -50 | sed 's/^/    /'
+  # Previews use `sed -n '1,Ns/.../p'`, never `head -N`: head closes the pipe
+  # early, and under pipefail the writer's SIGPIPE kills the script (exit 141)
+  # before the remaining checks and the RESULT summary run.
+  echo "$LINT_FIX_OUTPUT" | sed -n '1,50s/^/    /p'
   warn "ESLint auto-fix completed with some remaining issues (see above)"
 fi
 
@@ -64,7 +67,7 @@ else
   fail "Lint issues remain after auto-fix — requires manual fix"
   echo ""
   echo "  Remaining lint issues:"
-  echo "$LINT_CHECK_OUTPUT" | head -60 | sed 's/^/    /'
+  echo "$LINT_CHECK_OUTPUT" | sed -n '1,60s/^/    /p'
   echo ""
   echo "  Common manual fixes:"
   echo "    - Unused vars: prefix with _ or remove"
@@ -90,7 +93,7 @@ else
   fail "TypeScript errors found"
   echo ""
   echo "  TypeScript errors:"
-  echo "$TSC_OUTPUT" | head -80 | sed 's/^/    /'
+  echo "$TSC_OUTPUT" | sed -n '1,80s/^/    /p'
   echo ""
   echo "  Common type error patterns:"
   echo "    - 'Type X is not assignable to Y': check the types match, add proper types"
@@ -113,7 +116,7 @@ for ws in packages/ui apps/docs mcp-server; do
     pass "Zero TypeScript errors (${ws})"
   else
     fail "TypeScript errors found (${ws})"
-    echo "$WS_TSC_OUTPUT" | head -40 | sed 's/^/    /'
+    echo "$WS_TSC_OUTPUT" | sed -n '1,40s/^/    /p'
   fi
 done
 
@@ -150,7 +153,7 @@ fi
 # ---------------------------------------------------------------------------
 section "Changed File Tests"
 
-CHANGED_FILES=$(git diff --name-only HEAD 2>/dev/null | grep -E "\.ts$|\.tsx$" | grep -v "__tests__" | head -20 || echo "")
+CHANGED_FILES=$(git diff --name-only HEAD 2>/dev/null | grep -E "\.ts$|\.tsx$" | grep -v "__tests__" | sed -n '1,20p' || echo "")
 
 if [ -n "$CHANGED_FILES" ]; then
   echo "  Changed source files:"

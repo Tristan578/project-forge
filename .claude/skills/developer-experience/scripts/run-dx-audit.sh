@@ -10,7 +10,6 @@ DX_AUDIT_SCRIPT="${REPO_ROOT}/.claude/tools/dx-audit.sh"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
 NC='\033[0m'
 
 MODE="${1:-audit}"
@@ -63,7 +62,7 @@ if [ "$FAIL_COUNT" -gt 0 ]; then
   echo -e "  ${RED}RESULT: DX ISSUES FOUND — ${FAIL_COUNT} failure(s)${NC}"
   echo ""
   echo "  Top issues to fix:"
-  echo "$AUDIT_OUTPUT" | grep "  FAIL:" | head -10 | sed 's/^/    /'
+  echo "$AUDIT_OUTPUT" | sed -n '/  FAIL:/{s/^/    /;p;}' | sed -n '1,10p'
   echo ""
   echo "  References:"
   echo "  - .claude/skills/developer-experience/references/dx-standards.md"
