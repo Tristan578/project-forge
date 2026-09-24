@@ -332,7 +332,10 @@ export const TUTORIAL_PHYSICS: TutorialFlow = {
 // matches the Adaptive Music inspector's preview button, and a paused editor
 // shows Resume instead of Play. In the compact layout there is no Export
 // control, so that step renders as an untargeted card and says how to export
-// from there (the AI chat's export_game).
+// from there: the AI chat's export_game, which writes an HTML file or a zip
+// (no embed code) and, being a chat message, is charged up front by
+// /api/chat. The step says so, because this tour's promise is showing what
+// costs tokens before anyone spends them.
 export const TUTORIAL_CAPABILITIES: TutorialFlow = {
   id: 'capabilities',
   name: 'What can SpawnForge do?',
@@ -368,7 +371,7 @@ export const TUTORIAL_CAPABILITIES: TutorialFlow = {
       id: 'export',
       title: 'Share it',
       description:
-        'Export your game as a single HTML file or a zip you can host, or copy embed code for your site. On a small screen, ask the AI chat to export it.',
+        "Export your game as a single HTML file or a zip you can host, or copy embed code for your site. On a small screen there's no Export button: ask the AI chat to export it as an HTML file or a zip instead. That's a chat message, so it uses tokens.",
       target: '[data-testid="scene-toolbar-export"]',
       targetPosition: 'bottom',
     },

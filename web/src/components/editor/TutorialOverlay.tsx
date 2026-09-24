@@ -266,12 +266,13 @@ export function TutorialOverlay() {
 const BUBBLE_MAX_WIDTH = 400;
 /**
  * Room a side must offer before the bubble is placed there: a worst case for a
- * 288px-wide bubble (header, title, a six-line description, the key hint and
- * 44px buttons). It only CHOOSES the side. The bubble is anchored to the edge
- * facing its target and capped at the room it was given, so it cannot overlap
- * the target or leave the viewport whatever its real height turns out to be.
+ * 288px-wide bubble (header, title, a seven-line description, a two-line key
+ * hint and 44px buttons, about 350px). It only CHOOSES the side. The bubble is
+ * anchored to the edge facing its target and capped at the room it was given,
+ * so it cannot overlap the target or leave the viewport whatever its real
+ * height turns out to be; a longer one scrolls.
  */
-const BUBBLE_HEIGHT_BUDGET = 340;
+const BUBBLE_HEIGHT_BUDGET = 380;
 /** With less room than this on either side, the step shows as a centred card. */
 const BUBBLE_MIN_HEIGHT = 160;
 /** Minimum gap between the bubble and the viewport edge. */

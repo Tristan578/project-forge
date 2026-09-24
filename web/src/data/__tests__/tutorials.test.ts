@@ -46,6 +46,21 @@ describe('TUTORIAL_CAPABILITIES', () => {
     // keeps its historical meaning.
     expect(tutorialCompletesOnboarding('retired-tutorial')).toBe(true);
   });
+
+  // The tour's promise is showing what costs tokens before anyone spends them.
+  // The compact route to export is an AI chat message, which /api/chat charges
+  // up front, and export_game can write an HTML file or a zip but never embed
+  // code. Only the Export dialog offers embed code.
+  it('says the compact export route is an AI chat message that uses tokens, and promises no embed code there', () => {
+    const description = TUTORIAL_CAPABILITIES.steps.find((s) => s.id === 'export')?.description ?? '';
+    const at = description.indexOf('small screen');
+    expect(at).toBeGreaterThan(0);
+    const compact = description.slice(at);
+    expect(compact).toMatch(/AI chat/);
+    expect(compact).toMatch(/uses tokens/);
+    expect(compact).toMatch(/HTML file or a zip/);
+    expect(compact).not.toMatch(/embed/i);
+  });
 });
 
 // Each target is a dedicated data-testid, so no other control can match it.

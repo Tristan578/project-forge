@@ -330,20 +330,20 @@ describe('TutorialOverlay bubble placement', () => {
     expect(b.top).toBe(b.bottom + GAP);
   });
 
-  // Both sides have the full budget (368px above, 538px below), so the step's
+  // Both sides have the full budget (418px above, 588px below), so the step's
   // own preference decides.
   it('puts a top step above its target when both sides have room, anchored by its bottom edge', () => {
-    const b = place('top', { left: 400, top: 400, width: 40, height: 30 }, { w: 1024, h: 1000 });
+    const b = place('top', { left: 400, top: 450, width: 40, height: 30 }, { w: 1024, h: 1100 });
     expect(b.bubble.style.top).toBe('');
-    expect(b.bubble.style.bottom).toBe(`${1000 - 400 + GAP}px`);
-    expect(b.maxHeight).toBe(400 - GAP - EDGE);
+    expect(b.bubble.style.bottom).toBe(`${1100 - 450 + GAP}px`);
+    expect(b.maxHeight).toBe(450 - GAP - EDGE);
   });
 
   it('puts a bottom step below its target when both sides have room', () => {
-    const b = place('bottom', { left: 400, top: 400, width: 40, height: 30 }, { w: 1024, h: 1000 });
+    const b = place('bottom', { left: 400, top: 450, width: 40, height: 30 }, { w: 1024, h: 1100 });
     expect(b.bubble.style.bottom).toBe('');
     expect(b.top).toBe(b.bottom + GAP);
-    expect(b.maxHeight).toBe(1000 - b.bottom - GAP - EDGE);
+    expect(b.maxHeight).toBe(1100 - b.bottom - GAP - EDGE);
   });
 
   it('puts a right step beside its target when it fits', () => {
