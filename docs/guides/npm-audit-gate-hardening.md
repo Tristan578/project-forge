@@ -867,7 +867,9 @@ by construction rather than by measurement.
   round: one space of indentation made a neutering redefinition invisible;
   twelfth: the text after a closing brace was never read);
   nesting is counted by command word, so a helper inside an `if` arm stays out
-  of scope as before. No files, no definitions, or a file the
+  of scope as before, and only an unquoted reserved word in command position
+  counts (twelfth round: a `"{"` case pattern held the count one level high and
+  hid every later top-level definition). No files, no definitions, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state
   from a fixture, runs the gate on the real tree behind a 300-function floor

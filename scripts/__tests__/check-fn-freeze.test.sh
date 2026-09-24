@@ -1157,6 +1157,68 @@ else
   fail "29b. --list frozen rows: '$after_list'"
 fi
 
+# ---- 30. reserved words count only unquoted, in command position -----------------
+# Twelfth board round, architect seat: a `"}"` case pattern closed the nesting
+# count early (a case-arm helper was reported) and a `"{"` pattern left it one
+# level high for the rest of the file (a later indented top-level definition
+# was never reported). An unquoted `{)` or `if|do)` pattern is the same text.
+d_pat="$(mkfixture case-patterns <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+case "$1" in "}") echo close ;; y) arm() { :; } ;; esac
+case "$1" in "{") echo open ;; esac
+case "$1" in
+  {) echo open ;;
+  }) echo close ;;
+  if|do) echo word ;;
+  $(shopt -s expand_aliases)) echo sub ;;
+  x) inner() { :; } ;;
+esac
+depth() {
+  case "$1" in
+}) echo close ;;
+  *) : ;;
+  esac
+}
+readonly -f depth
+for ((;;)); do break; done
+"{" 2>/dev/null || true
+"case" 2>/dev/null || true
+"if" alias fail=: 2>/dev/null || true
+if true; then
+  "}" 2>/dev/null || true
+  "fi" 2>/dev/null || true
+  nested() { :; }
+fi
+ hidden() { :; }
+FIX
+)"
+expect_rc "30. case patterns and quoted reserved words leave the count alone; code in a pattern is still lexed" 1 \
+  "$(run_gate "$d_pat")" "2 violation(s)" "fixture.test.sh:9: 'shopt -s expand_aliases'" "fixture.test.sh:28: 'hidden()'"
+pat_list="$(FN_FREEZE_DIRS="$d_pat" bash "$GATE" --list 2>&1 | awk -F'\t' '$5 == "frozen" { printf "%s ", $2 }')"
+if [ "$pat_list" = "pass depth " ]; then
+  pass "30b. a column-0 '})' pattern inside a body does not end the body"
+else
+  fail "30b. --list frozen rows: '$pat_list'"
+fi
+# Every arm after the first opens with `;;`, `;&` or `;;&`, and no definition
+# follows the case, so a drifted count cannot be re-captured by a later one.
+d_arms="$(mkfixture case-arms <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+case "$1" in
+  x) : ;;
+  {) : ;&
+  if) : ;;&
+  do) : ;;
+  y) alias fail=: ;;
+esac
+ hidden() { :; }
+FIX
+)"
+expect_rc "30c. patterns after ;;, ;& and ;;& are text, and an arm body after its ) is code" 1 \
+  "$(run_gate "$d_arms")" "2 violation(s)" "fixture.test.sh:8: 'alias fail=:'" "fixture.test.sh:10: 'hidden()'"
+
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
 # Same posture as check-suite-wiring.test.sh: comment-stripped scan of every
 # workflow and composite action, fail closed on a missing dir or a grep error.

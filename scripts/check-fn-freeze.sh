@@ -94,6 +94,12 @@
 # it), or an `if`/`case` arm or brace group (a conditional helper; the gate
 # does not follow which arm ran). The lexer tracks that nesting by command
 # word — `if`/`fi`, `case`/`esac`, `do`/`done`, `{`/`}` — not by indentation.
+# A reserved word counts only where bash would read one: unquoted, in command
+# position. A case pattern (the words before each `)` that follows `in`,
+# `;;`, `;&` or `;;&`) is text, and so is a quoted `"{"` (the twelfth board
+# round found a `"}"` pattern closing the count early and a `"{"` pattern
+# leaving it one level high for the rest of the file, which hid every later
+# top-level definition from the `shape` rule).
 # Every definition at true top level must be where the freeze rule can see it:
 # at column 0, at the start of its own line, with a plain identifier for a
 # name. One anywhere else at top level — indented with nothing enclosing it,
@@ -191,19 +197,32 @@ derive_file() {
     # again, while `echo alias fail=:` (the word as an ARGUMENT) is text. A
     # word assembled at run time (`$x`, `$(...)`, `eval`, a sourced file) is
     # not a word this scan can see; that is the documented bound.
-    function end_word() {
+    function end_word(   rq) {
+      # rq: a quote or a backslash went into this word, so it is never a
+      # reserved word (bash recognises those before quote removal).
+      rq = wq; wq = 0
       if (w == "") return
+      # A case pattern is text. Only an unquoted `esac` where a pattern would
+      # start ends the case (after the last `;;`).
+      if (pat) {
+        if (!rq && w == "esac" && pat_n == 0) {
+          if (bs > 0) bs--
+          pat = 0; cmd_seen = 1; cmd_word = "esac"; nwords = 1
+        } else pat_n++
+        w = ""; return
+      }
       if (!cmd_seen) {
         # Still looking for the command word of this statement.
         # Compound-command nesting, counted by command word so that layout
         # cannot fake it: `if`, `do` and `{` open, `fi`, `done` and `}` close
         # (`case`/`esac` are handled below as ordinary command words).
-        if (w == "if" || w == "do" || w == "{") bs++
-        if ((w == "}") && bs > 0) bs--
-        if (w ~ /^(builtin|command|time|-p|!|if|then|elif|else|do|while|until|coproc|\{|\})$/ ||
+        if (!rq && (w == "if" || w == "do" || w == "{")) bs++
+        if (!rq && (w == "}") && bs > 0) bs--
+        if ((!rq && w ~ /^(!|if|then|elif|else|do|while|until|coproc|\{|\})$/) ||
+            w ~ /^(builtin|command|time|-p)$/ ||
             w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { w = ""; return }
-        if (w == "case") bs++
-        if ((w == "fi" || w == "done" || w == "esac") && bs > 0) bs--
+        if (!rq && w == "case") bs++
+        if (!rq && (w == "fi" || w == "done" || w == "esac") && bs > 0) bs--
         cmd_seen = 1; cmd_word = w; nwords = 1
         # Inside a definition, remember what the body runs: an exit or exec
         # marks the function as one that ends the shell, anything else is a
@@ -220,6 +239,8 @@ derive_file() {
         w = ""; return
       }
       nwords++
+      # `case WORD in`: what follows is a pattern, up to its `)`.
+      if (cmd_word == "case" && nwords == 3 && !rq && w == "in") { pat = 1; pat_n = 0 }
       # The word after `function` is a definition name whatever follows it.
       if (in_function) {
         if (index(builtins, " " w " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "function " w, NR, NR
@@ -326,12 +347,12 @@ derive_file() {
     # fixture could tell apart from their absence, and removed them).
     function open_sub(saved_q, new_arith, dbl) {
       end_command(); d++
-      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_arith[d] = arith; st_dbl[d] = dbl
-      q = ""; arr = 0; arr_d = 0; arith = new_arith
+      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_arith[d] = arith; st_dbl[d] = dbl; st_pat[d] = pat
+      q = ""; arr = 0; arr_d = 0; arith = new_arith; pat = 0
     }
     function close_sub() {
       end_command()
-      if (d > 0) { q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; arith = st_arith[d]; d-- }
+      if (d > 0) { q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; arith = st_arith[d]; pat = st_pat[d]; d-- }
     }
     function lex_line(line,   n, i, c, c2, c3, rest, tok, carry) {
       n = length(line); i = 1
@@ -339,7 +360,7 @@ derive_file() {
       # word and the two words before it carry over (`alias \` + `fail=:`,
       # or `al\` + `ias`, are one statement to bash).
       carry = cont; cont = 0
-      if (q == "" && !carry) { cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; w = ""; trap_action = ""; trap_sigs = ""; trap_has_action = 0 }
+      if (q == "" && !carry) { cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; w = ""; wq = 0; trap_action = ""; trap_sigs = ""; trap_has_action = 0 }
       # Where the code of this line ends: at its trailing comment, or at the
       # end of the line. The definition rules read the body of a definition
       # line off this ONE lexer, so a comment inside any quote kind or inside
@@ -375,14 +396,25 @@ derive_file() {
         }
         if (c == "\\") {
           if (i == n) { cont = 1; i++; continue }
-          w = w substr(line, i + 1, 1); i += 2; continue
+          w = w substr(line, i + 1, 1); wq = 1; i += 2; continue
         }
-        if (c2 == "$\047") { q = "a"; i += 2; continue }
-        if (c == "\047") { q = "s"; i++; continue }
-        if (c == "\"") { q = "d"; i++; continue }
+        if (c2 == "$\047") { q = "a"; wq = 1; i += 2; continue }
+        if (c == "\047") { q = "s"; wq = 1; i++; continue }
+        if (c == "\"") { q = "d"; wq = 1; i++; continue }
         if (c == "#") {
           if (i == 1 || substr(line, i - 1, 1) ~ /[[:space:];(&|]/) { end_word(); code_end = i; break }
           w = w c; i++; continue
+        }
+        # In a case pattern, `(` and `|` separate words and `)` ends it, so
+        # none of them opens a subshell or ends a statement. The word before
+        # them is ended first: if it was `esac`, the case is over and the
+        # character is ordinary again.
+        if (pat && (c == ")" || c == "(" || c == "|")) {
+          end_word()
+          if (pat) {
+            if (c == ")") { pat = 0; end_command() }
+            i++; continue
+          }
         }
         if (c3 == "$((") { open_sub("", 1, 1); i += 3; continue }
         if (c2 == "$[") { open_sub("", 1, 2); i += 2; continue }
@@ -430,6 +462,9 @@ derive_file() {
           }
           i += 2; continue
         }
+        # `;;`, `;&` and `;;&` end an arm, so a pattern follows (a trailing
+        # `&` then ends an empty statement, which changes nothing).
+        if (c2 == ";;" || c2 == ";&") { end_command(); pat = 1; pat_n = 0; i += 2; continue }
         if (c ~ /[;&|]/) { end_command(); i++; continue }
         if (c ~ /[[:space:]<>]/) { end_word(); i++; continue }
         w = w c; i++
@@ -501,7 +536,7 @@ derive_file() {
       # is lexed like any other top-level text once the body is closed (the
       # twelfth board round hid `alias fail=:` after `};` on that line).
       if (def_name != "") {
-        if (line ~ /^\}/) { flush_def(); lex_line(substr(line, 2)); next }
+        if (line ~ /^\}/ && !pat) { flush_def(); lex_line(substr(line, 2)); next }
         lex_line(line)
         next
       }
