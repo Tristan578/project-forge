@@ -24,9 +24,9 @@ cd web && npm install && npm run dev
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # Other suites
-cd packages/ui && npx vitest run       # UI library
-cd apps/docs && npx vitest run         # Docs scripts
-cd mcp-server && npx vitest run        # MCP server
+cd packages/ui && npx tsc --noEmit && npx vitest run   # UI library
+cd apps/docs && npx tsc --noEmit && npx vitest run     # Docs scripts
+cd mcp-server && npx tsc --noEmit && npx vitest run    # MCP server (vitest does not type-check)
 cd web && npx playwright test          # E2E (needs WASM)
 ```
 

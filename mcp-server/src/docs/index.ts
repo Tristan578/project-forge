@@ -24,6 +24,35 @@ function ensureLoaded(): { docIndex: DocIndex; termIndex: TermIndex } {
   return { docIndex, termIndex };
 }
 
+/** One row of the `docs-index` resource. `tags` is absent, never undefined, for an untagged doc. */
+export interface DocsIndexTopic {
+  path: string;
+  title: string;
+  tags?: string[];
+}
+
+/**
+ * Build the `docs-index` rows, sorted by path for stable output.
+ *
+ * Exported so the row shape can be asserted before serialisation: under
+ * exactOptionalPropertyTypes an untagged doc yields a row with NO `tags` key,
+ * and JSON.stringify would drop a `tags: undefined` key, hiding the difference
+ * from any test that only inspects the resource text.
+ */
+export function docsIndexTopics(idx: DocIndex): DocsIndexTopic[] {
+  const topics: DocsIndexTopic[] = [];
+  for (const [path, doc] of idx.docs) {
+    const meta = idx.meta.get(path);
+    topics.push({
+      path,
+      title: doc.title,
+      ...(meta?.tags !== undefined && { tags: meta.tags }),
+    });
+  }
+  topics.sort((a, b) => a.path.localeCompare(b.path));
+  return topics;
+}
+
 /**
  * Register documentation resources and tools on the MCP server.
  */
@@ -34,19 +63,7 @@ export function registerDocs(server: McpServer): void {
     'forge://docs/index',
     async (uri) => {
       const { docIndex: idx } = ensureLoaded();
-
-      const topics: Array<{ path: string; title: string; tags?: string[] }> = [];
-      for (const [path, doc] of idx.docs) {
-        const meta = idx.meta.get(path);
-        topics.push({
-          path,
-          title: doc.title,
-          ...(meta?.tags !== undefined && { tags: meta.tags }),
-        });
-      }
-
-      // Sort by path for stable ordering
-      topics.sort((a, b) => a.path.localeCompare(b.path));
+      const topics = docsIndexTopics(idx);
 
       return {
         contents: [
