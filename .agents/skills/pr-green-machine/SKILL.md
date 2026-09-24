@@ -157,7 +157,7 @@ Do NOT parallelize. Each PR must be fully GREEN before starting the next. If a f
 ## Scripts
 
 - `bash "${CLAUDE_SKILL_DIR}/scripts/pr-status.sh" <pr-number>` — Run the fail-closed repository readiness auditor
-- `bash "${CLAUDE_SKILL_DIR}/scripts/fix-common-ci.sh"` — Auto-fix common CI failures: runs `eslint --fix`, then `tsc --noEmit` to surface remaining type errors, then targeted unit tests
+- `bash "${CLAUDE_SKILL_DIR}/scripts/fix-common-ci.sh"` — Auto-fix common CI failures: runs `eslint --fix`, then `tsc --noEmit` in web, packages/ui, apps/docs and mcp-server to surface remaining type errors, then the MCP suite and targeted unit tests
 
 ## References
 

@@ -99,6 +99,24 @@ else
   echo "    - 'any' type issues: import or define proper interfaces"
 fi
 
+# The other TypeScript workspaces carry their own tsconfig (strict +
+# exactOptionalPropertyTypes, #7592) that web's tsc never reads, and vitest
+# strips types without checking them. CI type-checks each one, so this does too.
+for ws in packages/ui apps/docs mcp-server; do
+  [ -d "${REPO_ROOT}/${ws}" ] || continue
+  echo "  Running: npx tsc --noEmit (${ws})"
+  set +e
+  WS_TSC_OUTPUT=$(cd "${REPO_ROOT}/${ws}" && npx tsc --noEmit 2>&1)
+  WS_TSC_EXIT=$?
+  set -e
+  if [ "$WS_TSC_EXIT" -eq 0 ]; then
+    pass "Zero TypeScript errors (${ws})"
+  else
+    fail "TypeScript errors found (${ws})"
+    echo "$WS_TSC_OUTPUT" | head -40 | sed 's/^/    /'
+  fi
+done
+
 # ---------------------------------------------------------------------------
 # 3. MCP tests (fast, catches manifest sync issues)
 # ---------------------------------------------------------------------------
@@ -136,7 +154,9 @@ CHANGED_FILES=$(git diff --name-only HEAD 2>/dev/null | grep -E "\.ts$|\.tsx$" |
 
 if [ -n "$CHANGED_FILES" ]; then
   echo "  Changed source files:"
-  echo "$CHANGED_FILES" | sed 's/^/    /'
+  while IFS= read -r changed; do
+    echo "    $changed"
+  done <<< "$CHANGED_FILES"
   echo ""
 
   # Find test files for changed source files
@@ -151,9 +171,11 @@ if [ -n "$CHANGED_FILES" ]; then
   if [ -n "$TEST_DIRS" ]; then
     # Deduplicate dirs and strip web/ prefix (we cd into web/ before running vitest)
     UNIQUE_DIRS=$(echo "$TEST_DIRS" | tr ' ' '\n' | sed 's|^web/||' | sort -u | tr '\n' ' ')
+    # One argv entry per directory: an unquoted expansion would also glob.
+    read -r -a DIR_ARGS <<< "$UNIQUE_DIRS"
     echo "  Running targeted tests for changed directories..."
     set +e
-    VITEST_OUTPUT=$(cd "$WEB_DIR" && npx vitest run $UNIQUE_DIRS 2>&1)
+    VITEST_OUTPUT=$(cd "$WEB_DIR" && npx vitest run "${DIR_ARGS[@]}" 2>&1)
     VITEST_EXIT=$?
     set -e
 
