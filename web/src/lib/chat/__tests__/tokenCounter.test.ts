@@ -82,6 +82,14 @@ describe('tokenCounter', () => {
       expect(malformed).toBe(empty);
     });
 
+    // A truthy non-string name: `0` and `false` above cannot tell the name
+    // guard from `String(b.name || '')`, which also maps them to ''.
+    it('counts a non-string tool_use name like an empty one (#9565)', () => {
+      const empty = estimateMessageTokens({ role: 'assistant', content: [{ type: 'tool_use', name: '', input: {} }] });
+      const numericName = estimateMessageTokens({ role: 'assistant', content: [{ type: 'tool_use', name: 123456789012, input: {} }] });
+      expect(numericName).toBe(empty);
+    });
+
     it('counts a non-object tool_use input like an empty object (#9565)', () => {
       const empty = estimateMessageTokens({ role: 'assistant', content: [{ type: 'tool_use', name: 'n', input: {} }] });
       const stringInput = estimateMessageTokens({ role: 'assistant', content: [{ type: 'tool_use', name: 'n', input: 'x'.repeat(40) }] });
