@@ -56,13 +56,26 @@ vi.mock('@/lib/generate/postProcess', () => ({
 import { useGenerationStore, type GenerationJob } from '@/stores/generationStore';
 import { useGenerationPolling } from '../useGenerationPolling';
 
-/** Apply PATCH bodies to a row exactly as PATCH_impl does: an absent field is left alone. */
+/**
+ * Apply PATCH bodies to a row exactly as PATCH_impl does: `imported` is a
+ * one-way latch (`if (body.imported === true) updates.imported = 1`), so an
+ * absent field and an explicit `false` both leave the column alone.
+ */
 function applyPatches(bodies: Array<Record<string, unknown>>): { imported: number } {
   const row = { imported: 0 };
   for (const body of bodies) {
-    if (body.imported !== undefined) row.imported = body.imported ? 1 : 0;
+    if (body.imported === true) row.imported = 1;
   }
   return row;
+}
+
+/**
+ * The client half of the fix, pinned independently of the route's latch: no
+ * writer may send `imported: false`. An older route (or any future path that
+ * honours `false`) would otherwise race the reflected-mark PATCH back to 0.
+ */
+function expectNoImportedFalse(bodies: Array<Record<string, unknown>>) {
+  expect(bodies.filter((b) => b.imported === false)).toEqual([]);
 }
 
 function hydrated(overrides: Partial<GenerationJob>): GenerationJob {
@@ -123,6 +136,7 @@ describe('durable completion sync — imported is order-independent (#8892)', ()
     // Both writers fired: the store's status sync and the hook's reflected mark.
     expect(patchBodies.some((b) => b.status === 'failed')).toBe(true);
     expect(patchBodies.some((b) => b.imported === true)).toBe(true);
+    expectNoImportedFalse(patchBodies);
     // Deterministic regardless of network ordering.
     expect(applyPatches(patchBodies).imported).toBe(1);
     expect(applyPatches([...patchBodies].reverse()).imported).toBe(1);
@@ -139,6 +153,7 @@ describe('durable completion sync — imported is order-independent (#8892)', ()
 
     // The intermediate 'downloading' sync is one of the racing writers too.
     expect(patchBodies.some((b) => b.status === 'downloading')).toBe(true);
+    expectNoImportedFalse(patchBodies);
     expect(applyPatches(patchBodies).imported).toBe(1);
     expect(applyPatches([...patchBodies].reverse()).imported).toBe(1);
   });
