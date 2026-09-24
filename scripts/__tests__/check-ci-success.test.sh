@@ -1047,6 +1047,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   obs_runs="$(grep -E "^[[:space:]]*['\"]?run['\"]?:" <<<"$obs_block")"
   obs_expected_runs="$(cat <<'RUNS'
         run: npm ci
+        run: bash scripts/check-native-bindings.sh
         run: npx tsc --noEmit -p tools/observatory/tsconfig.json
         run: npx vitest run --config tools/observatory/vitest.config.ts
 RUNS

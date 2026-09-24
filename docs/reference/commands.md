@@ -5233,7 +5233,7 @@ Scope: `scene:write` | Token cost: 0
 
 ### `update_game_component`
 
-Update properties of an existing game component
+Update properties of an existing game component. Only the named properties change; every other property keeps its current value. Fails if the entity has no component of that type (use add_game_component to add one)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

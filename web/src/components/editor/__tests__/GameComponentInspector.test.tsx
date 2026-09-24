@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { axe } from 'jest-axe';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { GameComponentInspector } from '../GameComponentInspector';
 import { useEditorStore } from '@/stores/editorStore';
@@ -62,6 +63,8 @@ function setupStore(overrides: {
    * it (PF-1228). Defaults to '3d', matching `spriteSlice`.
    */
   projectType?: '2d' | '3d';
+  /** PF-1148: entityId -> component type -> field -> correction. */
+  gameComponentAdjustments?: Record<string, unknown>;
 } = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => {
@@ -72,6 +75,7 @@ function setupStore(overrides: {
       updateGameComponent: mockUpdateGameComponent,
       removeGameComponent: mockRemoveGameComponent,
       projectType: overrides.projectType ?? '3d',
+      gameComponentAdjustments: overrides.gameComponentAdjustments ?? {},
     };
     return selector(state);
   });
@@ -686,6 +690,305 @@ describe('GameComponentInspector', () => {
     // Click again to expand
     fireEvent.click(toggleBtn);
     expect(screen.getByText('Auto-Save').textContent).toBe('Auto-Save');
+  });
+
+  // ── Adjusted values (PF-1148) ─────────────────────────────────────────
+  //
+  // A field that holds a different value than the one asked for is marked,
+  // with the requested value readable — and nothing is marked when nothing
+  // was adjusted, because a false "we adjusted this" is worse than silence.
+
+  describe('adjusted values', () => {
+    const platform = (speed: number): GameComponentData => ({
+      type: 'movingPlatform',
+      movingPlatform: { speed, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration: 0.5, loopMode: 'pingPong' },
+    });
+    const speedClamp = {
+      component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped',
+    };
+    const sentence = 'Moving Platform speed: you asked for 99999, it was capped at 1000.';
+
+    it('lists the adjustment with the requested value, and marks the field it landed on', () => {
+      setupStore({
+        primaryGameComponents: [platform(1000)],
+        gameComponentAdjustments: { 'ent-1': { movingPlatform: { speed: speedClamp } } },
+      });
+      render(<GameComponentInspector />);
+
+      const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+      expect(Array.from(note.querySelectorAll('li')).map((li) => li.textContent)).toEqual([sentence]);
+
+      // The Speed slider is described by exactly that sentence, so a screen
+      // reader on the field hears what was asked for.
+      const speed = screen.getByLabelText('Speed');
+      const describedBy = speed.getAttribute('aria-describedby');
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy!)?.textContent).toBe(sentence);
+
+      // And the row itself carries the visible mark; the Pause row does not.
+      expect(speed.closest('div')?.textContent).toContain('Adjusted');
+      expect(screen.getByLabelText('Pause').closest('div')?.textContent).not.toContain('Adjusted');
+      expect(screen.getByLabelText('Pause').getAttribute('aria-describedby')).toBeNull();
+    });
+
+    it('keeps the count visible on the header when the section is collapsed', () => {
+      setupStore({
+        primaryGameComponents: [platform(1000)],
+        gameComponentAdjustments: { 'ent-1': { movingPlatform: { speed: speedClamp } } },
+      });
+      render(<GameComponentInspector />);
+      fireEvent.click(screen.getByText('Moving Platform'));
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.getByText('1 adjusted')).toBeDefined();
+    });
+
+    it('shows nothing for a marker the field no longer bears out', () => {
+      // The speed is back to 2 (an undo the store has not heard about yet): the
+      // marker describes a value the field does not hold, so it must not show.
+      setupStore({
+        primaryGameComponents: [platform(2)],
+        gameComponentAdjustments: { 'ent-1': { movingPlatform: { speed: speedClamp } } },
+      });
+      render(<GameComponentInspector />);
+      expect(screen.getByText('Moving Platform')).toBeDefined();
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.queryByText(/adjusted/i)).toBeNull();
+      expect(screen.getByLabelText('Speed').getAttribute('aria-describedby')).toBeNull();
+    });
+
+    describe('a route marker', () => {
+      // "You gave 1 point" left the default route standing: two points, the
+      // same count as plenty of routes the author could put there next. The
+      // one point was usable (`usable: 1`), as the wire layer records it for
+      // `waypoints: [[1, 2, 3]]`.
+      const routeReplaced = {
+        component: 'movingPlatform', field: 'waypoints', requested: 1, applied: 2, reason: 'invalid-replaced',
+        unit: 'points', appliedPoints: [[0, 0, 0], [0, 3, 0]], usable: 1,
+      };
+      const routeSentence = 'Moving Platform waypoints: you gave 1 point, but a route needs at least 2 usable points, '
+        + 'so the default route (2 points) was used instead.';
+      const withRoute = (waypoints: [number, number, number][]): GameComponentData => ({
+        type: 'movingPlatform',
+        movingPlatform: { speed: 2, waypoints, pauseDuration: 0.5, loopMode: 'pingPong' },
+      });
+
+      it('shows while the field holds the route it describes', () => {
+        setupStore({
+          primaryGameComponents: [withRoute([[0, 0, 0], [0, 3, 0]])],
+          gameComponentAdjustments: { 'ent-1': { movingPlatform: { waypoints: routeReplaced } } },
+        });
+        render(<GameComponentInspector />);
+        const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+        expect(Array.from(note.querySelectorAll('li')).map((li) => li.textContent)).toEqual([routeSentence]);
+
+        // The Waypoints row marks itself too, through its own lookup — the
+        // note above is built from the section's list and would still read
+        // correctly with this row's wiring gone, so it cannot stand in for it.
+        const group = screen.getByRole('group', { name: 'Waypoints' });
+        const describedBy = group.getAttribute('aria-describedby');
+        expect(describedBy === null ? null : document.getElementById(describedBy)?.textContent).toBe(routeSentence);
+        const badges = screen.getAllByText('Adjusted');
+        expect(badges).toHaveLength(1);
+        // Beside the row's own label, not somewhere else in the section.
+        expect(screen.getByText('Waypoints').parentElement?.contains(badges[0])).toBe(true);
+      });
+
+      it('shows nothing once the field holds a different route with the same number of points', () => {
+        setupStore({
+          primaryGameComponents: [withRoute([[1, 1, 1], [4, 1, 1]])],
+          gameComponentAdjustments: { 'ent-1': { movingPlatform: { waypoints: routeReplaced } } },
+        });
+        render(<GameComponentInspector />);
+        expect(screen.getByText('Moving Platform')).toBeDefined();
+        expect(screen.queryByRole('status')).toBeNull();
+        expect(screen.queryByText(/adjusted/i)).toBeNull();
+        expect(screen.getByRole('group', { name: 'Waypoints' }).getAttribute('aria-describedby')).toBeNull();
+      });
+    });
+
+    // ── Vector rows ──
+    //
+    // `Vec3Row` has no single input to hang the note on, so it marks a named
+    // group around the three axes and puts the badge beside it. That is its own
+    // lookup by `field`: a typo there, or the group losing `aria-describedby`,
+    // leaves the section note above (driven by the section's list, not by the
+    // row) reading exactly as before. So these assert on the row, per field.
+    describe('a vector row', () => {
+      const notAVector = { description: '[1, 2]' };
+      const vectorRows: readonly {
+        label: string;
+        component: GameComponentData;
+        /** A correction on the row's own vector field. */
+        vector: { component: string; field: string } & Record<string, unknown>;
+        sentence: string;
+        /** A correction on another field in the same section. */
+        other: { component: string; field: string } & Record<string, unknown>;
+      }[] = [
+        {
+          label: 'Respawn Pt',
+          component: {
+            type: 'health',
+            health: { maxHp: 1_000_000, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true },
+          },
+          vector: { component: 'health', field: 'respawnPoint', requested: notAVector, applied: [0, 1, 0], reason: 'invalid-replaced' },
+          sentence: 'Health respawn point: [1, 2] is not a value this field accepts, so [0, 1, 0] was used instead.',
+          other: { component: 'health', field: 'maxHp', requested: 5_000_000, applied: 1_000_000, reason: 'clamped' },
+        },
+        {
+          label: 'Target Pos',
+          component: { type: 'teleporter', teleporter: { targetPosition: [0, 1, 0], cooldownSecs: 300 } },
+          vector: { component: 'teleporter', field: 'targetPosition', requested: notAVector, applied: [0, 1, 0], reason: 'invalid-replaced' },
+          sentence: 'Teleporter target position: [1, 2] is not a value this field accepts, so [0, 1, 0] was used instead.',
+          other: { component: 'teleporter', field: 'cooldownSecs', requested: 900, applied: 300, reason: 'clamped' },
+        },
+        {
+          label: 'Offset',
+          component: {
+            type: 'spawner',
+            spawner: { entityType: 'cube', intervalSecs: 3, maxCount: 1000, spawnOffset: [0, 1, 0], onTrigger: null },
+          },
+          vector: { component: 'spawner', field: 'spawnOffset', requested: notAVector, applied: [0, 1, 0], reason: 'invalid-replaced' },
+          sentence: 'Spawner spawn offset: [1, 2] is not a value this field accepts, so [0, 1, 0] was used instead.',
+          other: { component: 'spawner', field: 'maxCount', requested: 5000, applied: 1000, reason: 'clamped' },
+        },
+      ];
+
+      it.each(vectorRows)('marks the $label row itself when its field was adjusted', ({ label, component, vector, sentence }) => {
+        setupStore({
+          primaryGameComponents: [component],
+          gameComponentAdjustments: { 'ent-1': { [component.type]: { [vector.field]: vector } } },
+        });
+        render(<GameComponentInspector />);
+
+        // A screen reader entering any axis hears what was asked for.
+        const group = screen.getByRole('group', { name: label });
+        const describedBy = group.getAttribute('aria-describedby');
+        expect(describedBy === null ? null : document.getElementById(describedBy)?.textContent).toBe(sentence);
+
+        // The one visible mark in the section, on this row.
+        const badges = screen.getAllByText('Adjusted');
+        expect(badges).toHaveLength(1);
+        expect(group.parentElement?.contains(badges[0])).toBe(true);
+      });
+
+      it.each(vectorRows)('leaves the $label row unmarked when only another field was adjusted', ({ label, component, other }) => {
+        setupStore({
+          primaryGameComponents: [component],
+          gameComponentAdjustments: { 'ent-1': { [component.type]: { [other.field]: other } } },
+        });
+        render(<GameComponentInspector />);
+
+        // Non-vacuous: the section is marking a field — just not this one.
+        const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+        expect(note.querySelectorAll('li')).toHaveLength(1);
+        const badges = screen.getAllByText('Adjusted');
+        expect(badges).toHaveLength(1);
+
+        const group = screen.getByRole('group', { name: label });
+        expect(group.getAttribute('aria-describedby')).toBeNull();
+        expect(group.parentElement?.contains(badges[0])).toBe(false);
+      });
+    });
+
+    it('shows nothing when nothing was adjusted', () => {
+      setupStore({ primaryGameComponents: [platform(1000)] });
+      render(<GameComponentInspector />);
+      expect(screen.getByText('Moving Platform')).toBeDefined();
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.queryByText(/adjusted/i)).toBeNull();
+    });
+
+    it('shows another entity’s markers nowhere', () => {
+      setupStore({
+        primaryGameComponents: [platform(1000)],
+        gameComponentAdjustments: { 'ent-2': { movingPlatform: { speed: speedClamp } } },
+      });
+      render(<GameComponentInspector />);
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+
+    it('lists an adjusted field that has no control of its own', () => {
+      // Current HP has no row in the Health section; the note is still the
+      // place the author can read what they asked for.
+      setupStore({
+        primaryGameComponents: [{
+          type: 'health',
+          health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true },
+        }],
+        gameComponentAdjustments: {
+          'ent-1': {
+            health: {
+              currentHp: { component: 'health', field: 'currentHp', requested: 5000, applied: 100, reason: 'clamped' },
+            },
+          },
+        },
+      });
+      render(<GameComponentInspector />);
+      const note = screen.getByRole('status', { name: 'Adjusted to fit the engine’s limits' });
+      expect(note.textContent).toContain('Health current HP: you asked for 5000, it was capped at 100.');
+    });
+
+    it('has no axe violations with an adjusted field showing', async () => {
+      setupStore({
+        primaryGameComponents: [platform(1000)],
+        gameComponentAdjustments: { 'ent-1': { movingPlatform: { speed: speedClamp } } },
+      });
+      const { container } = render(<GameComponentInspector />);
+      // Non-vacuous: the note being audited is really there.
+      expect(screen.getByRole('status')).toBeDefined();
+      const results = await axe(container);
+      expect(results.violations.map((v) => v.id)).toEqual([]);
+      // axe files an id reference it cannot resolve (`aria-valid-attr-value`)
+      // or one that resolves to a duplicated id (`duplicate-id-aria`) under
+      // "needs review", never as a violation — and every mark here IS an id
+      // reference. So the audit reads that list too; it is empty on this DOM.
+      expect(results.incomplete.map((v) => v.id)).toEqual([]);
+    });
+
+    it('has no axe violations with a route row and a vector row marked', async () => {
+      // The two group-shaped rows: the mark sits on a `role="group"`, not on
+      // an input, and the route row's badge sits inside its group. Two marked
+      // sections, so a note id shared between sections is a duplicate here.
+      // Which line a row points at is pinned by the content assertions in the
+      // row tests above; this audit catches a reference that resolves to no
+      // element, or to more than one.
+      setupStore({
+        primaryGameComponents: [
+          {
+            type: 'movingPlatform',
+            movingPlatform: { speed: 2, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration: 0.5, loopMode: 'pingPong' },
+          },
+          {
+            type: 'health',
+            health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true },
+          },
+        ],
+        gameComponentAdjustments: {
+          'ent-1': {
+            movingPlatform: {
+              waypoints: {
+                component: 'movingPlatform', field: 'waypoints', requested: 1, applied: 2, reason: 'invalid-replaced',
+                unit: 'points', appliedPoints: [[0, 0, 0], [0, 3, 0]], usable: 1,
+              },
+            },
+            health: {
+              respawnPoint: {
+                component: 'health', field: 'respawnPoint', requested: { description: '[1, 2]' }, applied: [0, 1, 0], reason: 'invalid-replaced',
+              },
+            },
+          },
+        },
+      });
+      const { container } = render(<GameComponentInspector />);
+      // Non-vacuous: both rows really are marked in what is being audited.
+      expect(screen.getByRole('group', { name: 'Waypoints' }).getAttribute('aria-describedby')).not.toBeNull();
+      expect(screen.getByRole('group', { name: 'Respawn Pt' }).getAttribute('aria-describedby')).not.toBeNull();
+      expect(screen.getAllByText('Adjusted')).toHaveLength(2);
+      const results = await axe(container);
+      expect(results.violations.map((v) => v.id)).toEqual([]);
+      // "Needs review" too: see the audit above for why.
+      expect(results.incomplete.map((v) => v.id)).toEqual([]);
+    });
   });
 
   // ── Multiple components ───────────────────────────────────────────────
