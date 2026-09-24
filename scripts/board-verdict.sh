@@ -18,15 +18,24 @@
 # actually run against the current head.
 #
 # THE MARKER. A board result comment must carry, on its own line:
-#     <!-- board-verdict: PASS sha=<40-hex> -->
-#     <!-- board-verdict: FAIL sha=<40-hex> -->
-# The sha is the head the board reviewed. Anything else is prose.
+#     <!-- board-verdict: PASS sha=<40-hex> seats=5/5 -->
+#     <!-- board-verdict: FAIL sha=<40-hex> seats=<reported>/5 -->
+# The sha is the head the board reviewed; `seats` is how many of the board's
+# seats reported. Anything else is prose.
 #
 # STATUS SET (context `review-board`):
 #   FAIL for head            -> failure  ("board found N findings at <sha>")
-#   PASS for head            -> success
+#   PASS for head, 5/5 seats -> success
+#   PASS for head, <5 seats  -> pending  ("partial board: 3/5 seats reported")
+#   PASS for head, no count  -> pending  ("records no seat count")
 #   verdict for another sha  -> pending  ("stale: board ran at <sha>, head is <head>")
 #   no verdict at all        -> pending  ("no board verdict for this head")
+#
+# A PASS is only a pass when EVERY seat looked (#10141). The marker used to
+# carry no count, so a three-seat run rendered `success` — the check asserted
+# "a PASS marker exists for this sha", adjacent to "all five seats passed at
+# this sha" (lessons-learned #1). Markers posted before the count existed read
+# as pending, the safe default: re-run the board rather than trust them.
 #
 # Pending rather than success on absence is the whole point: "nobody looked" and
 # "someone looked and it was clean" must not render identically, which is the
@@ -46,13 +55,29 @@ REPO="${GH_REPO:-Tristan578/project-forge}"
 # TEST-ONLY seams, never set in CI (the suite asserts no workflow sets them):
 # BOARD_VERDICT_HEAD_SHA supplies the head and BOARD_VERDICT_COMMENTS_FILE the
 # comment bodies, so the decision logic is testable without the network.
+# THE HEAD READ AND THE STATUS WRITE GO THROUGH A SEAM so the suite can observe
+# them. BOARD_VERDICT_GH_CMD is test-only — the suite asserts no workflow sets
+# it, since pointing it at `true` would make the job succeed while publishing
+# nothing.
+GH_CMD="${BOARD_VERDICT_GH_CMD:-gh}"
+
 if [ -n "${BOARD_VERDICT_HEAD_SHA:-}" ]; then
   head_sha="$BOARD_VERDICT_HEAD_SHA"
 else
-  head_sha="$(gh api "repos/${REPO}/pulls/${PR}" --jq '.head.sha' 2>/dev/null)"
+  # One transient API failure must not turn the check into silence. On
+  # 2026-09-24 a single `gh api` returned nothing right after a push (run
+  # 35938823261): the job exited 2 with gh's reason discarded, and the PR had
+  # no review-board status at all. Retry with a short backoff, and let gh's
+  # own stderr reach the job log so the next failure is readable.
+  head_sha=""
+  for delay in 1 2 0; do
+    head_sha="$("$GH_CMD" api "repos/${REPO}/pulls/${PR}" --jq '.head.sha')" && [ -n "$head_sha" ] && break
+    head_sha=""
+    [ "$delay" -gt 0 ] && sleep "$delay"
+  done
 fi
 if [ -z "$head_sha" ]; then
-  echo "::error::could not read head sha for PR ${PR}" >&2
+  echo "::error::could not read head sha for PR ${PR} after 3 attempts" >&2
   exit 2
 fi
 
@@ -70,7 +95,12 @@ else
   comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
     --jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body' 2>/dev/null)"
 fi
-marker="$(echo "$comments" | grep -oE '<!-- board-verdict: (PASS|FAIL) sha=[0-9a-f]{40} -->' | tail -1)"
+marker="$(echo "$comments" | grep -oE '<!-- board-verdict: (PASS|FAIL) sha=[0-9a-f]{40}( seats=[0-9]+/[0-9]+)? -->' | tail -1)"
+
+# The size of the board. Mirrors `REVIEWERS.length` in
+# `.claude/workflows/review-board.js`; the suite derives that count from the
+# workflow source and fails if the two drift.
+BOARD_SEATS=5
 
 state="pending"
 description="no board verdict for this head — run the review board"
@@ -78,15 +108,25 @@ description="no board verdict for this head — run the review board"
 if [ -n "$marker" ]; then
   verdict="$(printf '%s' "$marker" | grep -oE '(PASS|FAIL)')"
   vsha="$(printf '%s' "$marker" | grep -oE '[0-9a-f]{40}')"
+  seats="$(printf '%s' "$marker" | grep -oE 'seats=[0-9]+/[0-9]+' | cut -d= -f2)"
   if [ "$vsha" != "$head_sha" ]; then
     state="pending"
     description="stale: board ran at ${vsha:0:8}, head is ${head_sha:0:8}"
   elif [ "$verdict" = "FAIL" ]; then
     state="failure"
     description="review board FAILED at ${head_sha:0:8}"
+  elif [ -z "$seats" ]; then
+    state="pending"
+    description="board verdict at ${head_sha:0:8} records no seat count — re-run the board so every seat reports"
+  elif [ "${seats##*/}" -ne "$BOARD_SEATS" ] || [ "${seats%%/*}" -ne "$BOARD_SEATS" ]; then
+    # Exactly BOARD_SEATS/BOARD_SEATS is a full board. Fewer is partial; MORE is
+    # not fuller, it is a marker no producer wrote (post-board-verdict.sh refuses
+    # 6/5), and any owner comment reaches this consumer, so it is pending too.
+    state="pending"
+    description="board verdict at ${head_sha:0:8} counts ${seats} seats; only ${BOARD_SEATS}/${BOARD_SEATS} passes — run the full ${BOARD_SEATS}-seat board"
   else
     state="success"
-    description="review board passed at ${head_sha:0:8}"
+    description="review board passed at ${head_sha:0:8} (${seats} seats)"
   fi
 fi
 
@@ -98,14 +138,11 @@ if [ "${BOARD_VERDICT_DRY_RUN:-}" = "true" ]; then
   exit 0
 fi
 
-# THE WRITE GOES THROUGH A SEAM so the suite can observe it. Every test used to
-# stop at the dry-run exit above, which meant nothing asserted what is actually
-# PUBLISHED: hardcoding `state=success` on the line below, or writing the status
-# under a context nobody looks at, left all fourteen cases green while the gate
-# reported the opposite of its own decision. BOARD_VERDICT_GH_CMD is test-only —
-# the suite asserts no workflow sets it, since pointing it at `true` would make
-# the job succeed while publishing nothing.
-GH_CMD="${BOARD_VERDICT_GH_CMD:-gh}"
+# THE WRITE GOES THROUGH THE SAME SEAM so the suite can observe it. Every test
+# used to stop at the dry-run exit above, which meant nothing asserted what is
+# actually PUBLISHED: hardcoding `state=success` on the line below, or writing
+# the status under a context nobody looks at, left all fourteen cases green
+# while the gate reported the opposite of its own decision.
 
 "$GH_CMD" api -X POST "repos/${REPO}/statuses/${head_sha}" \
   -f state="$state" \

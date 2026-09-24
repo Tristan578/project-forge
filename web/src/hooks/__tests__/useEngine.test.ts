@@ -472,4 +472,15 @@ describe('guarded dispatch', () => {
     expect(engine.handle_command_batch).toHaveBeenCalledWith(commands);
     expect(result).toEqual({ success: true, results: [{ success: true }] });
   });
+
+  it('marks a batch whose engine call threw, which a refused batch is not', () => {
+    // `handle_command_batch` runs the whole batch before serializing the
+    // answers, so a throw says nothing about which commands took effect.
+    // `threw` is the only thing separating that from a batch never sent.
+    const engine = fakeModule();
+    engine.handle_command_batch.mockImplementation(() => { throw new Error('serialize failed'); });
+
+    expect(dispatchGuardedBatch(engine, [{ command: 'new_scene' }]))
+      .toEqual({ success: false, results: [], threw: true });
+  });
 });

@@ -8,6 +8,7 @@ import { RemixButton } from './RemixButton';
 import { ReportGameDialog } from './ReportGameDialog';
 import { withTimeout } from '@/lib/async/withTimeout';
 import { describeOrigin, isCdnOrigin, loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
+import { loadSceneWhenReady, refusalOf, settleDelay, SceneLoadCancelled } from '@/lib/engine/playSceneLoad';
 import { addBreadcrumb, captureException, captureMessage, setTag } from '@/lib/monitoring/sentry-client';
 import {
   ENGINE_GLOBAL_TIMEOUT_MS,
@@ -74,7 +75,14 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   // app owns it and a retry would double-initialize.
   const engineOwnsCanvasRef = useRef(false);
   const cancelledRef = useRef(false);
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Aborts every wait inside initEngine on unmount: `loadSceneWhenReady`
+  // retries an engine that is still initialising every 50 ms for up to ten
+  // seconds, and `cancelledRef` alone was only read once that wait had ended,
+  // so a visitor who left mid-boot kept a dead component dispatching
+  // `load_scene`. The settle delay before `play` rides the same signal, so an
+  // unmount during it RESOLVES the wait (and `cancelledRef` then returns)
+  // instead of leaving initEngine suspended with the runtime in its closure.
+  const initAbortRef = useRef<AbortController | null>(null);
 
   // Reset on mount, not just on unmount: StrictMode double-mounts in dev, and a
   // latch that only ever sets `true` would leave the second mount permanently
@@ -83,10 +91,7 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
     cancelledRef.current = false;
     return () => {
       cancelledRef.current = true;
-      if (settleTimerRef.current !== null) {
-        clearTimeout(settleTimerRef.current);
-        settleTimerRef.current = null;
-      }
+      initAbortRef.current?.abort();
     };
   }, []);
 
@@ -208,9 +213,33 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       engineOwnsCanvasRef.current = true;
       runtime.init_engine(CANVAS_ID);
 
-      // Load scene data
-      const sceneJson = JSON.stringify(gameData.sceneData);
-      runtime.handle_command('load_scene', sceneJson);
+      // A refused command used to be silent here: the response was never
+      // read, so a game that failed to load played the engine's default scene
+      // with nothing reporting it (#10196). Anything the engine refuses after
+      // the scene is in is reported — the game is still playable, so it is
+      // not an error screen — and the scene load itself throws below.
+      const sendReported = (command: string, payload: unknown) => {
+        const refusal = refusalOf(runtime.handle_command(command, payload));
+        if (refusal === null) return;
+        const refused = new Error(`Engine refused ${command}: ${refusal}`);
+        console.error('[SpawnForge Play]', refused.message);
+        captureException(refused, { surface: 'play', phase: 'command', command, userId, slug });
+      };
+
+      // Load scene data. The payload is an OBJECT carrying the scene JSON —
+      // the engine deserialises whatever JS value it is handed, so a JSON
+      // string has no `json` field and is refused — and the engine only
+      // accepts commands once its first frame has run, so this waits for that
+      // within a bound (#10196).
+      const abort = new AbortController();
+      initAbortRef.current = abort;
+      await loadSceneWhenReady(
+        (command, payload) => runtime.handle_command(command, payload),
+        gameData.sceneData,
+        { signal: abort.signal },
+      );
+
+      if (cancelledRef.current) return;
 
       // Auto-reduce quality on mobile
       const isMobile =
@@ -218,21 +247,25 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         'ontouchstart' in window ||
         navigator.maxTouchPoints > 0;
       if (isMobile) {
-        runtime.handle_command(
-          'set_quality',
-          JSON.stringify({ preset: 'low' })
-        );
+        sendReported('set_quality', { preset: 'low' });
       }
 
-      // Start play mode after a short delay for the engine to settle
-      settleTimerRef.current = setTimeout(() => {
-        settleTimerRef.current = null;
-        if (cancelledRef.current) return;
-        runtime.handle_command('play', '{}');
-        setEngineState('ready');
-      }, PLAY_ENGINE_SETTLE_MS);
-    } catch (err) {
+      // Start play mode after a short delay for the engine to settle. An
+      // unmount aborts the delay so this function finishes instead of hanging.
+      await settleDelay(PLAY_ENGINE_SETTLE_MS, abort.signal);
       if (cancelledRef.current) return;
+
+      // `play` is the game starting, not a tune-up like `set_quality`: the
+      // engine can refuse it (no camera, mode queue not ready), and a refusal
+      // used to be logged while the overlay came down over a canvas that was
+      // never going to play. It is a failed start, reported like one.
+      const playRefusal = refusalOf(runtime.handle_command('play', {}));
+      if (playRefusal !== null) {
+        throw new Error(`The game could not start: ${playRefusal}`);
+      }
+      setEngineState('ready');
+    } catch (err) {
+      if (cancelledRef.current || err instanceof SceneLoadCancelled) return;
 
       const failure = err instanceof Error ? err : new Error(String(err));
       // Kept alongside captureException: the Sentry client no-ops silently when

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useId, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useId, useMemo, useState } from 'react';
+import { Badge, InlineAlert } from '@spawnforge/ui';
 import { useEditorStore, type GameComponentData, type DialogueTriggerData, GAME_COMPONENT_TYPES } from '@/stores/editorStore';
 import { useDialogueStore, listTrees } from '@/stores/dialogueStore';
 import { ChevronDown, ChevronRight, Trash2, Plus } from 'lucide-react';
@@ -12,6 +13,45 @@ import {
   jumpHeightUnit,
   type ControllerProjectType,
 } from '@/lib/game/characterControllerDefaults';
+import {
+  componentAdjustmentsOf,
+  currentAdjustments,
+  describeCorrection,
+  type GameComponentAdjustments,
+  type GameComponentFieldCorrection,
+} from '@/lib/engine/gameComponentCorrections';
+
+// ── Adjusted values (PF-1148) ────────────────────────────────────────────
+//
+// A field whose value is not the one asked for — clamped, rounded, a route cut
+// at the engine's 64 points — is marked where it is edited, with the requested
+// value still readable. The section lists every such field in a warning note
+// (fields with no control of their own included, like Current HP); each row
+// with a control carries an "Adjusted" badge and is `aria-describedby` its
+// line in that note. Nothing is shown for a field that holds any other value
+// than the one its correction applied: see `currentAdjustments`.
+
+/** The corrections still true of the section being rendered. */
+const SectionAdjustments = createContext<readonly GameComponentFieldCorrection[]>([]);
+
+/** field -> id of the note line describing its adjustment. */
+const AdjustmentNoteIds = createContext<ReadonlyMap<string, string>>(new Map());
+
+/** The note id for `field`, when that field is adjusted. */
+function useAdjustmentNote(field: string | undefined): string | undefined {
+  const ids = useContext(AdjustmentNoteIds);
+  return field === undefined ? undefined : ids.get(field);
+}
+
+/** The visible per-field mark, placed at the end of the row it marks. */
+function AdjustedBadge({ noteId }: { noteId: string | undefined }) {
+  if (noteId === undefined) return null;
+  return (
+    <Badge variant="warning" className="shrink-0 px-1.5 py-0 text-[10px]">
+      Adjusted
+    </Badge>
+  );
+}
 
 // Shared UI components
 interface SliderRowProps {
@@ -29,10 +69,13 @@ interface SliderRowProps {
    * which is the ambiguity that let a 26-foot default jump ship unnoticed.
    */
   unit?: string | null;
+  /** The store field this row edits, for its adjustment mark (PF-1148). */
+  field?: string;
 }
 
-function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, tooltipTerm, unit }: SliderRowProps) {
+function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, tooltipTerm, unit, field }: SliderRowProps) {
   const inputId = useId();
+  const noteId = useAdjustmentNote(field);
   return (
     <div className="flex items-center gap-2">
       <div className="flex w-20 shrink-0 items-center gap-1">
@@ -41,6 +84,7 @@ function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2,
       </div>
       <input
         id={inputId}
+        aria-describedby={noteId}
         type="range"
         min={min}
         max={max}
@@ -57,6 +101,7 @@ function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2,
       >
         {unit ? `${value.toFixed(precision)} ${unit}` : value.toFixed(precision)}
       </span>
+      <AdjustedBadge noteId={noteId} />
     </div>
   );
 }
@@ -66,14 +111,16 @@ interface CheckboxRowProps {
   checked: boolean;
   onChange: (v: boolean) => void;
   tooltipTerm?: string;
+  field?: string;
 }
 
-function CheckboxRow({ label, checked, onChange, tooltipTerm }: CheckboxRowProps) {
+function CheckboxRow({ label, checked, onChange, tooltipTerm, field }: CheckboxRowProps) {
   // Without `htmlFor`/`id` the visible text is not the checkbox's accessible
   // name, so a screen reader announces a bare "checkbox" and the label is not
   // a click target. Every row in this file shares the component, so associating
   // here fixes all of them at once.
   const inputId = useId();
+  const noteId = useAdjustmentNote(field);
   return (
     <div className="flex items-center gap-2">
       <div className="flex w-20 shrink-0 items-center gap-1">
@@ -82,12 +129,14 @@ function CheckboxRow({ label, checked, onChange, tooltipTerm }: CheckboxRowProps
       </div>
       <input
         id={inputId}
+        aria-describedby={noteId}
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
         className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500
           focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
       />
+      <AdjustedBadge noteId={noteId} />
     </div>
   );
 }
@@ -100,16 +149,21 @@ interface NumberInputRowProps {
   step?: number;
   onChange: (v: number) => void;
   tooltipTerm?: string;
+  field?: string;
 }
 
-function NumberInputRow({ label, value, min, max, step = 1, onChange, tooltipTerm }: NumberInputRowProps) {
+function NumberInputRow({ label, value, min, max, step = 1, onChange, tooltipTerm, field }: NumberInputRowProps) {
+  const inputId = useId();
+  const noteId = useAdjustmentNote(field);
   return (
     <div className="flex items-center gap-2">
       <div className="flex w-20 shrink-0 items-center gap-1">
-        <label className="text-xs text-zinc-400">{label}</label>
+        <label htmlFor={inputId} className="text-xs text-zinc-400">{label}</label>
         {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
       </div>
       <input
+        id={inputId}
+        aria-describedby={noteId}
         type="number"
         value={value}
         min={min}
@@ -119,6 +173,7 @@ function NumberInputRow({ label, value, min, max, step = 1, onChange, tooltipTer
         className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
           focus:ring-1 focus:ring-blue-500"
       />
+      <AdjustedBadge noteId={noteId} />
     </div>
   );
 }
@@ -128,22 +183,28 @@ interface TextInputRowProps {
   value: string;
   onChange: (v: string) => void;
   tooltipTerm?: string;
+  field?: string;
 }
 
-function TextInputRow({ label, value, onChange, tooltipTerm }: TextInputRowProps) {
+function TextInputRow({ label, value, onChange, tooltipTerm, field }: TextInputRowProps) {
+  const inputId = useId();
+  const noteId = useAdjustmentNote(field);
   return (
     <div className="flex items-center gap-2">
       <div className="flex w-20 shrink-0 items-center gap-1">
-        <label className="text-xs text-zinc-400">{label}</label>
+        <label htmlFor={inputId} className="text-xs text-zinc-400">{label}</label>
         {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
       </div>
       <input
+        id={inputId}
+        aria-describedby={noteId}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
           focus:ring-1 focus:ring-blue-500"
       />
+      <AdjustedBadge noteId={noteId} />
     </div>
   );
 }
@@ -154,18 +215,21 @@ interface SelectRowProps {
   options: { value: string; label: string }[];
   onChange: (v: string) => void;
   tooltipTerm?: string;
+  field?: string;
 }
 
-function SelectRow({ label, value, options, onChange, tooltipTerm }: SelectRowProps) {
-  const selectId = useId();
+function SelectRow({ label, value, options, onChange, tooltipTerm, field }: SelectRowProps) {
+  const inputId = useId();
+  const noteId = useAdjustmentNote(field);
   return (
     <div className="flex items-center gap-2">
       <div className="flex w-20 shrink-0 items-center gap-1">
-        <label htmlFor={selectId} className="text-xs text-zinc-400">{label}</label>
+        <label htmlFor={inputId} className="text-xs text-zinc-400">{label}</label>
         {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
       </div>
       <select
-        id={selectId}
+        id={inputId}
+        aria-describedby={noteId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -175,6 +239,37 @@ function SelectRow({ label, value, options, onChange, tooltipTerm }: SelectRowPr
           <option key={opt.value} value={opt.value}>{opt.label}</option>
         ))}
       </select>
+      <AdjustedBadge noteId={noteId} />
+    </div>
+  );
+}
+
+interface Vec3RowProps {
+  label: string;
+  tooltipTerm: string;
+  value: [number, number, number];
+  onChange: (v: [number, number, number]) => void;
+  field: string;
+}
+
+/**
+ * A labelled vector row. The three axis inputs sit in a named group, so the
+ * label and the adjustment note both reach a screen reader that enters any of
+ * them — `Vec3Input` has no single input to hang either one on.
+ */
+function Vec3Row({ label, tooltipTerm, value, onChange, field }: Vec3RowProps) {
+  const labelId = useId();
+  const noteId = useAdjustmentNote(field);
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex w-20 shrink-0 items-center gap-1">
+        <span id={labelId} className="text-xs text-zinc-400">{label}</span>
+        <InfoTooltip term={tooltipTerm} />
+      </div>
+      <div role="group" aria-labelledby={labelId} aria-describedby={noteId} className="min-w-0 flex-1">
+        <Vec3Input label="" value={value} onChange={onChange} />
+      </div>
+      <AdjustedBadge noteId={noteId} />
     </div>
   );
 }
@@ -188,6 +283,13 @@ interface ComponentSectionProps {
 
 function ComponentSection({ title, onRemove, children }: ComponentSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const adjustments = useContext(SectionAdjustments);
+  const baseId = useId();
+  const noteHeadingId = `${baseId}-adjusted`;
+  const noteIds = useMemo(
+    () => new Map(adjustments.map((c) => [c.field, `${baseId}-adjusted-${c.field}`])),
+    [adjustments, baseId],
+  );
 
   // Map title to term for tooltip — memoised because the switch is pure over `title`.
   const tooltipTerm = useMemo(() => {
@@ -218,9 +320,17 @@ function ComponentSection({ title, onRemove, children }: ComponentSectionProps) 
           {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
           {title}
           {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
+          {/* Stays on the header so a collapsed section still says it holds a
+              value that is not the one asked for. */}
+          {adjustments.length > 0 && (
+            <Badge variant="warning" className="ml-1 px-1.5 py-0 text-[10px]">
+              {adjustments.length} adjusted
+            </Badge>
+          )}
         </button>
         <button
           onClick={onRemove}
+          aria-label={`Remove ${title}`}
           className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
         >
           <Trash2 size={12} />
@@ -228,7 +338,17 @@ function ComponentSection({ title, onRemove, children }: ComponentSectionProps) 
       </div>
       {!collapsed && (
         <div className="space-y-2 p-2">
-          {children}
+          {adjustments.length > 0 && (
+            <InlineAlert variant="warning" aria-labelledby={noteHeadingId}>
+              <p id={noteHeadingId} className="font-medium">Adjusted to fit the engine’s limits</p>
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+                {adjustments.map((c) => (
+                  <li key={c.field} id={noteIds.get(c.field)}>{describeCorrection(c)}</li>
+                ))}
+              </ul>
+            </InlineAlert>
+          )}
+          <AdjustmentNoteIds.Provider value={noteIds}>{children}</AdjustmentNoteIds.Provider>
         </div>
       )}
     </div>
@@ -250,7 +370,7 @@ function CharacterControllerSection({ data, onChange, onRemove }: CharacterContr
   const projectType: ControllerProjectType = useEditorStore((s) => s.projectType);
   return (
     <ComponentSection title="Character Controller" onRemove={onRemove}>
-      <SliderRow label="Speed" value={data.speed} min={0} max={20} step={0.1} precision={1} onChange={(v) => onChange({ ...data, speed: v })} tooltipTerm="gcSpeed" />
+      <SliderRow label="Speed" value={data.speed} min={0} max={20} step={0.1} precision={1} onChange={(v) => onChange({ ...data, speed: v })} tooltipTerm="gcSpeed" field="speed" />
       <SliderRow
         label="Jump Height"
         value={data.jumpHeight}
@@ -259,11 +379,11 @@ function CharacterControllerSection({ data, onChange, onRemove }: CharacterContr
         step={0.1}
         precision={1}
         onChange={(v) => onChange({ ...data, jumpHeight: v })}
-        tooltipTerm="gcJumpHeight"
+        tooltipTerm="gcJumpHeight" field="jumpHeight"
         unit={jumpHeightUnit(projectType)}
       />
-      <SliderRow label="Gravity Scale" value={data.gravityScale} min={0} max={5} step={0.1} precision={1} onChange={(v) => onChange({ ...data, gravityScale: v })} tooltipTerm="gcGravityScale" />
-      <CheckboxRow label="Double Jump" checked={data.canDoubleJump} onChange={(v) => onChange({ ...data, canDoubleJump: v })} tooltipTerm="gcDoubleJump" />
+      <SliderRow label="Gravity Scale" value={data.gravityScale} min={0} max={5} step={0.1} precision={1} onChange={(v) => onChange({ ...data, gravityScale: v })} tooltipTerm="gcGravityScale" field="gravityScale" />
+      <CheckboxRow label="Double Jump" checked={data.canDoubleJump} onChange={(v) => onChange({ ...data, canDoubleJump: v })} tooltipTerm="gcDoubleJump" field="canDoubleJump" />
     </ComponentSection>
   );
 }
@@ -277,17 +397,11 @@ interface HealthSectionProps {
 function HealthSection({ data, onChange, onRemove }: HealthSectionProps) {
   return (
     <ComponentSection title="Health" onRemove={onRemove}>
-      <NumberInputRow label="Max HP" value={data.maxHp} min={1} max={1000} onChange={(v) => onChange({ ...data, maxHp: v })} tooltipTerm="gcMaxHP" />
-      <SliderRow label="Invincibility" value={data.invincibilitySecs} min={0} max={5} step={0.1} precision={1} onChange={(v) => onChange({ ...data, invincibilitySecs: v })} tooltipTerm="gcInvincibility" />
-      <CheckboxRow label="Respawn" checked={data.respawnOnDeath} onChange={(v) => onChange({ ...data, respawnOnDeath: v })} tooltipTerm="gcRespawn" />
-      <div className="flex items-center gap-2">
-        <div className="flex w-20 shrink-0 items-center gap-1">
-          <label className="text-xs text-zinc-400">Respawn Pt</label>
-          <InfoTooltip term="gcRespawnPoint" />
-        </div>
-        <Vec3Input label="" value={data.respawnPoint} onChange={(v) => onChange({ ...data, respawnPoint: v })} />
-      </div>
-      <CheckboxRow label="Despawn" checked={data.despawnOnDeath} onChange={(v) => onChange({ ...data, despawnOnDeath: v })} tooltipTerm="gcDespawnOnDeath" />
+      <NumberInputRow label="Max HP" value={data.maxHp} min={1} max={1000} onChange={(v) => onChange({ ...data, maxHp: v })} tooltipTerm="gcMaxHP" field="maxHp" />
+      <SliderRow label="Invincibility" value={data.invincibilitySecs} min={0} max={5} step={0.1} precision={1} onChange={(v) => onChange({ ...data, invincibilitySecs: v })} tooltipTerm="gcInvincibility" field="invincibilitySecs" />
+      <CheckboxRow label="Respawn" checked={data.respawnOnDeath} onChange={(v) => onChange({ ...data, respawnOnDeath: v })} tooltipTerm="gcRespawn" field="respawnOnDeath" />
+      <Vec3Row label="Respawn Pt" tooltipTerm="gcRespawnPoint" value={data.respawnPoint} onChange={(v) => onChange({ ...data, respawnPoint: v })} field="respawnPoint" />
+      <CheckboxRow label="Despawn" checked={data.despawnOnDeath} onChange={(v) => onChange({ ...data, despawnOnDeath: v })} tooltipTerm="gcDespawnOnDeath" field="despawnOnDeath" />
     </ComponentSection>
   );
 }
@@ -301,9 +415,9 @@ interface CollectibleSectionProps {
 function CollectibleSection({ data, onChange, onRemove }: CollectibleSectionProps) {
   return (
     <ComponentSection title="Collectible" onRemove={onRemove}>
-      <NumberInputRow label="Value" value={data.value} min={1} max={100} onChange={(v) => onChange({ ...data, value: v })} tooltipTerm="gcCollectValue" />
-      <CheckboxRow label="Destroy" checked={data.destroyOnCollect} onChange={(v) => onChange({ ...data, destroyOnCollect: v })} tooltipTerm="gcDestroyOnCollect" />
-      <SliderRow label="Rotate Speed" value={data.rotateSpeed} min={0} max={360} step={10} precision={0} onChange={(v) => onChange({ ...data, rotateSpeed: v })} tooltipTerm="gcRotateSpeed" />
+      <NumberInputRow label="Value" value={data.value} min={1} max={100} onChange={(v) => onChange({ ...data, value: v })} tooltipTerm="gcCollectValue" field="value" />
+      <CheckboxRow label="Destroy" checked={data.destroyOnCollect} onChange={(v) => onChange({ ...data, destroyOnCollect: v })} tooltipTerm="gcDestroyOnCollect" field="destroyOnCollect" />
+      <SliderRow label="Rotate Speed" value={data.rotateSpeed} min={0} max={360} step={10} precision={0} onChange={(v) => onChange({ ...data, rotateSpeed: v })} tooltipTerm="gcRotateSpeed" field="rotateSpeed" />
     </ComponentSection>
   );
 }
@@ -317,8 +431,8 @@ interface DamageZoneSectionProps {
 function DamageZoneSection({ data, onChange, onRemove }: DamageZoneSectionProps) {
   return (
     <ComponentSection title="Damage Zone" onRemove={onRemove}>
-      <SliderRow label="Damage/Sec" value={data.damagePerSecond} min={0} max={100} step={1} precision={0} onChange={(v) => onChange({ ...data, damagePerSecond: v })} tooltipTerm="gcDamagePerSecond" />
-      <CheckboxRow label="One-Shot" checked={data.oneShot} onChange={(v) => onChange({ ...data, oneShot: v })} tooltipTerm="gcOneShot" />
+      <SliderRow label="Damage/Sec" value={data.damagePerSecond} min={0} max={100} step={1} precision={0} onChange={(v) => onChange({ ...data, damagePerSecond: v })} tooltipTerm="gcDamagePerSecond" field="damagePerSecond" />
+      <CheckboxRow label="One-Shot" checked={data.oneShot} onChange={(v) => onChange({ ...data, oneShot: v })} tooltipTerm="gcOneShot" field="oneShot" />
     </ComponentSection>
   );
 }
@@ -332,7 +446,7 @@ interface CheckpointSectionProps {
 function CheckpointSection({ data, onChange, onRemove }: CheckpointSectionProps) {
   return (
     <ComponentSection title="Checkpoint" onRemove={onRemove}>
-      <CheckboxRow label="Auto-Save" checked={data.autoSave} onChange={(v) => onChange({ ...data, autoSave: v })} tooltipTerm="gcAutoSave" />
+      <CheckboxRow label="Auto-Save" checked={data.autoSave} onChange={(v) => onChange({ ...data, autoSave: v })} tooltipTerm="gcAutoSave" field="autoSave" />
     </ComponentSection>
   );
 }
@@ -346,14 +460,8 @@ interface TeleporterSectionProps {
 function TeleporterSection({ data, onChange, onRemove }: TeleporterSectionProps) {
   return (
     <ComponentSection title="Teleporter" onRemove={onRemove}>
-      <div className="flex items-center gap-2">
-        <div className="flex w-20 shrink-0 items-center gap-1">
-          <label className="text-xs text-zinc-400">Target Pos</label>
-          <InfoTooltip term="gcTargetPos" />
-        </div>
-        <Vec3Input label="" value={data.targetPosition} onChange={(v) => onChange({ ...data, targetPosition: v })} />
-      </div>
-      <SliderRow label="Cooldown" value={data.cooldownSecs} min={0} max={10} step={0.1} precision={1} onChange={(v) => onChange({ ...data, cooldownSecs: v })} tooltipTerm="gcCooldown" />
+      <Vec3Row label="Target Pos" tooltipTerm="gcTargetPos" value={data.targetPosition} onChange={(v) => onChange({ ...data, targetPosition: v })} field="targetPosition" />
+      <SliderRow label="Cooldown" value={data.cooldownSecs} min={0} max={10} step={0.1} precision={1} onChange={(v) => onChange({ ...data, cooldownSecs: v })} tooltipTerm="gcCooldown" field="cooldownSecs" />
     </ComponentSection>
   );
 }
@@ -362,6 +470,62 @@ interface MovingPlatformSectionProps {
   data: import('@/stores/editorStore').MovingPlatformData;
   onChange: (data: import('@/stores/editorStore').MovingPlatformData) => void;
   onRemove: () => void;
+}
+
+interface WaypointsRowProps {
+  waypoints: [number, number, number][];
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onUpdate: (index: number, value: [number, number, number]) => void;
+}
+
+/**
+ * The route editor, as a named group carrying the route's adjustment mark.
+ *
+ * Its own component rather than inline in `MovingPlatformSection`: the note ids
+ * are provided INSIDE `ComponentSection`, so a lookup made in the section's own
+ * body sits above that provider, reads the empty default, and never marks the
+ * row — which is how the route row shipped unmarked while the section note
+ * above it listed the route correctly.
+ */
+function WaypointsRow({ waypoints, onAdd, onRemove, onUpdate }: WaypointsRowProps) {
+  const labelId = useId();
+  const noteId = useAdjustmentNote('waypoints');
+  return (
+    <div
+      role="group"
+      aria-labelledby={labelId}
+      aria-describedby={noteId}
+      className="space-y-1"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <span id={labelId} className="text-xs text-zinc-400">Waypoints</span>
+          <AdjustedBadge noteId={noteId} />
+        </div>
+        <button
+          onClick={onAdd}
+          aria-label="Add waypoint"
+          className="rounded bg-zinc-800 p-1 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+        >
+          <Plus size={12} />
+        </button>
+      </div>
+      {waypoints.map((wp, i) => (
+        <div key={i} className="flex items-center gap-1">
+          <span className="w-8 text-xs text-zinc-400">{i}</span>
+          <Vec3Input label="" value={wp} onChange={(v) => onUpdate(i, v)} />
+          <button
+            onClick={() => onRemove(i)}
+            aria-label={`Remove waypoint ${i}`}
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function MovingPlatformSection({ data, onChange, onRemove }: MovingPlatformSectionProps) {
@@ -379,8 +543,8 @@ function MovingPlatformSection({ data, onChange, onRemove }: MovingPlatformSecti
 
   return (
     <ComponentSection title="Moving Platform" onRemove={onRemove}>
-      <SliderRow label="Speed" value={data.speed} min={0} max={10} step={0.1} precision={1} onChange={(v) => onChange({ ...data, speed: v })} tooltipTerm="gcPlatformSpeed" />
-      <SliderRow label="Pause" value={data.pauseDuration} min={0} max={5} step={0.1} precision={1} onChange={(v) => onChange({ ...data, pauseDuration: v })} tooltipTerm="gcPauseTime" />
+      <SliderRow label="Speed" value={data.speed} min={0} max={10} step={0.1} precision={1} onChange={(v) => onChange({ ...data, speed: v })} tooltipTerm="gcPlatformSpeed" field="speed" />
+      <SliderRow label="Pause" value={data.pauseDuration} min={0} max={5} step={0.1} precision={1} onChange={(v) => onChange({ ...data, pauseDuration: v })} tooltipTerm="gcPauseTime" field="pauseDuration" />
       <SelectRow
         label="Loop Mode"
         value={data.loopMode}
@@ -390,31 +554,14 @@ function MovingPlatformSection({ data, onChange, onRemove }: MovingPlatformSecti
           { value: 'once', label: 'Once' },
         ]}
         onChange={(v) => onChange({ ...data, loopMode: v as import('@/stores/editorStore').PlatformLoopMode })}
-        tooltipTerm="gcLoopMode"
+        tooltipTerm="gcLoopMode" field="loopMode"
       />
-      <div className="space-y-1">
-        <div className="flex items-center justify-between">
-          <label className="text-xs text-zinc-400">Waypoints</label>
-          <button
-            onClick={addWaypoint}
-            className="rounded bg-zinc-800 p-1 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
-          >
-            <Plus size={12} />
-          </button>
-        </div>
-        {data.waypoints.map((wp, i) => (
-          <div key={i} className="flex items-center gap-1">
-            <span className="w-8 text-xs text-zinc-400">{i}</span>
-            <Vec3Input label="" value={wp} onChange={(v) => updateWaypoint(i, v)} />
-            <button
-              onClick={() => removeWaypoint(i)}
-              className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
-            >
-              <Trash2 size={12} />
-            </button>
-          </div>
-        ))}
-      </div>
+      <WaypointsRow
+        waypoints={data.waypoints}
+        onAdd={addWaypoint}
+        onRemove={removeWaypoint}
+        onUpdate={updateWaypoint}
+      />
     </ComponentSection>
   );
 }
@@ -428,8 +575,8 @@ interface TriggerZoneSectionProps {
 function TriggerZoneSection({ data, onChange, onRemove }: TriggerZoneSectionProps) {
   return (
     <ComponentSection title="Trigger Zone" onRemove={onRemove}>
-      <TextInputRow label="Event Name" value={data.eventName} onChange={(v) => onChange({ ...data, eventName: v })} tooltipTerm="gcEventName" />
-      <CheckboxRow label="One-Shot" checked={data.oneShot} onChange={(v) => onChange({ ...data, oneShot: v })} tooltipTerm="gcOneShot" />
+      <TextInputRow label="Event Name" value={data.eventName} onChange={(v) => onChange({ ...data, eventName: v })} tooltipTerm="gcEventName" field="eventName" />
+      <CheckboxRow label="One-Shot" checked={data.oneShot} onChange={(v) => onChange({ ...data, oneShot: v })} tooltipTerm="gcOneShot" field="oneShot" />
     </ComponentSection>
   );
 }
@@ -453,17 +600,11 @@ function SpawnerSection({ data, onChange, onRemove }: SpawnerSectionProps) {
           { value: 'capsule', label: 'Capsule' },
         ]}
         onChange={(v) => onChange({ ...data, entityType: v })}
-        tooltipTerm="gcEntityType"
+        tooltipTerm="gcEntityType" field="entityType"
       />
-      <SliderRow label="Interval" value={data.intervalSecs} min={0.5} max={30} step={0.5} precision={1} onChange={(v) => onChange({ ...data, intervalSecs: v })} tooltipTerm="gcSpawnInterval" />
-      <NumberInputRow label="Max Count" value={data.maxCount} min={1} max={50} onChange={(v) => onChange({ ...data, maxCount: v })} tooltipTerm="gcMaxCount" />
-      <div className="flex items-center gap-2">
-        <div className="flex w-20 shrink-0 items-center gap-1">
-          <label className="text-xs text-zinc-400">Offset</label>
-          <InfoTooltip term="gcSpawnOffset" />
-        </div>
-        <Vec3Input label="" value={data.spawnOffset} onChange={(v) => onChange({ ...data, spawnOffset: v })} />
-      </div>
+      <SliderRow label="Interval" value={data.intervalSecs} min={0.5} max={30} step={0.5} precision={1} onChange={(v) => onChange({ ...data, intervalSecs: v })} tooltipTerm="gcSpawnInterval" field="intervalSecs" />
+      <NumberInputRow label="Max Count" value={data.maxCount} min={1} max={50} onChange={(v) => onChange({ ...data, maxCount: v })} tooltipTerm="gcMaxCount" field="maxCount" />
+      <Vec3Row label="Offset" tooltipTerm="gcSpawnOffset" value={data.spawnOffset} onChange={(v) => onChange({ ...data, spawnOffset: v })} field="spawnOffset" />
     </ComponentSection>
   );
 }
@@ -477,10 +618,10 @@ interface FollowerSectionProps {
 function FollowerSection({ data, onChange, onRemove }: FollowerSectionProps) {
   return (
     <ComponentSection title="Follower" onRemove={onRemove}>
-      <TextInputRow label="Target ID" value={data.targetEntityId ?? ''} onChange={(v) => onChange({ ...data, targetEntityId: v || null })} tooltipTerm="gcTargetId" />
-      <SliderRow label="Speed" value={data.speed} min={0} max={20} step={0.1} precision={1} onChange={(v) => onChange({ ...data, speed: v })} tooltipTerm="gcFollowSpeed" />
-      <SliderRow label="Stop Dist" value={data.stopDistance} min={0} max={10} step={0.1} precision={1} onChange={(v) => onChange({ ...data, stopDistance: v })} tooltipTerm="gcStopDist" />
-      <CheckboxRow label="Look At" checked={data.lookAtTarget} onChange={(v) => onChange({ ...data, lookAtTarget: v })} tooltipTerm="gcLookAt" />
+      <TextInputRow label="Target ID" value={data.targetEntityId ?? ''} onChange={(v) => onChange({ ...data, targetEntityId: v || null })} tooltipTerm="gcTargetId" field="targetEntityId" />
+      <SliderRow label="Speed" value={data.speed} min={0} max={20} step={0.1} precision={1} onChange={(v) => onChange({ ...data, speed: v })} tooltipTerm="gcFollowSpeed" field="speed" />
+      <SliderRow label="Stop Dist" value={data.stopDistance} min={0} max={10} step={0.1} precision={1} onChange={(v) => onChange({ ...data, stopDistance: v })} tooltipTerm="gcStopDist" field="stopDistance" />
+      <CheckboxRow label="Look At" checked={data.lookAtTarget} onChange={(v) => onChange({ ...data, lookAtTarget: v })} tooltipTerm="gcLookAt" field="lookAtTarget" />
     </ComponentSection>
   );
 }
@@ -494,11 +635,11 @@ interface ProjectileSectionProps {
 function ProjectileSection({ data, onChange, onRemove }: ProjectileSectionProps) {
   return (
     <ComponentSection title="Projectile" onRemove={onRemove}>
-      <SliderRow label="Speed" value={data.speed} min={0} max={50} step={1} precision={0} onChange={(v) => onChange({ ...data, speed: v })} tooltipTerm="gcProjectileSpeed" />
-      <SliderRow label="Damage" value={data.damage} min={0} max={100} step={1} precision={0} onChange={(v) => onChange({ ...data, damage: v })} tooltipTerm="gcProjectileDamage" />
-      <SliderRow label="Lifetime" value={data.lifetimeSecs} min={0.5} max={30} step={0.5} precision={1} onChange={(v) => onChange({ ...data, lifetimeSecs: v })} tooltipTerm="gcProjectileLifetime" />
-      <CheckboxRow label="Gravity" checked={data.gravity} onChange={(v) => onChange({ ...data, gravity: v })} tooltipTerm="gcProjectileGravity" />
-      <CheckboxRow label="Destroy Hit" checked={data.destroyOnHit} onChange={(v) => onChange({ ...data, destroyOnHit: v })} tooltipTerm="gcDestroyOnHit" />
+      <SliderRow label="Speed" value={data.speed} min={0} max={50} step={1} precision={0} onChange={(v) => onChange({ ...data, speed: v })} tooltipTerm="gcProjectileSpeed" field="speed" />
+      <SliderRow label="Damage" value={data.damage} min={0} max={100} step={1} precision={0} onChange={(v) => onChange({ ...data, damage: v })} tooltipTerm="gcProjectileDamage" field="damage" />
+      <SliderRow label="Lifetime" value={data.lifetimeSecs} min={0.5} max={30} step={0.5} precision={1} onChange={(v) => onChange({ ...data, lifetimeSecs: v })} tooltipTerm="gcProjectileLifetime" field="lifetimeSecs" />
+      <CheckboxRow label="Gravity" checked={data.gravity} onChange={(v) => onChange({ ...data, gravity: v })} tooltipTerm="gcProjectileGravity" field="gravity" />
+      <CheckboxRow label="Destroy Hit" checked={data.destroyOnHit} onChange={(v) => onChange({ ...data, destroyOnHit: v })} tooltipTerm="gcDestroyOnHit" field="destroyOnHit" />
     </ComponentSection>
   );
 }
@@ -521,13 +662,13 @@ function WinConditionSection({ data, onChange, onRemove }: WinConditionSectionPr
           { value: 'reachGoal', label: 'Reach Goal' },
         ]}
         onChange={(v) => onChange({ ...data, conditionType: v as import('@/stores/editorStore').WinConditionType })}
-        tooltipTerm="gcWinType"
+        tooltipTerm="gcWinType" field="conditionType"
       />
       {data.conditionType === 'score' && (
-        <NumberInputRow label="Target Score" value={data.targetScore ?? 10} min={1} onChange={(v) => onChange({ ...data, targetScore: v })} tooltipTerm="gcTargetScore" />
+        <NumberInputRow label="Target Score" value={data.targetScore ?? 10} min={1} onChange={(v) => onChange({ ...data, targetScore: v })} tooltipTerm="gcTargetScore" field="targetScore" />
       )}
       {data.conditionType === 'reachGoal' && (
-        <TextInputRow label="Goal ID" value={data.targetEntityId ?? ''} onChange={(v) => onChange({ ...data, targetEntityId: v || null })} tooltipTerm="gcGoalId" />
+        <TextInputRow label="Goal ID" value={data.targetEntityId ?? ''} onChange={(v) => onChange({ ...data, targetEntityId: v || null })} tooltipTerm="gcGoalId" field="targetEntityId" />
       )}
     </ComponentSection>
   );
@@ -563,14 +704,14 @@ function DialogueTriggerSection({ data, onChange, onRemove }: DialogueTriggerSec
         value={data.treeId}
         options={[{ value: '', label: '(none)' }, ...missingTreeOption, ...treeOptions]}
         onChange={(v) => onChange({ ...data, treeId: v })}
-        tooltipTerm="gcDialogueTree"
+        tooltipTerm="gcDialogueTree" field="treeId"
       />
-      <SliderRow label="Radius" value={data.triggerRadius} min={0.5} max={20} step={0.5} precision={1} onChange={(v) => onChange({ ...data, triggerRadius: v })} tooltipTerm="gcTriggerRadius" />
-      <CheckboxRow label="Require Interact" checked={data.requireInteract} onChange={(v) => onChange({ ...data, requireInteract: v })} tooltipTerm="gcRequireInteract" />
+      <SliderRow label="Radius" value={data.triggerRadius} min={0.5} max={20} step={0.5} precision={1} onChange={(v) => onChange({ ...data, triggerRadius: v })} tooltipTerm="gcTriggerRadius" field="triggerRadius" />
+      <CheckboxRow label="Require Interact" checked={data.requireInteract} onChange={(v) => onChange({ ...data, requireInteract: v })} tooltipTerm="gcRequireInteract" field="requireInteract" />
       {data.requireInteract && (
-        <TextInputRow label="Key" value={data.interactKey} onChange={(v) => onChange({ ...data, interactKey: v || 'e' })} tooltipTerm="gcInteractKey" />
+        <TextInputRow label="Key" value={data.interactKey} onChange={(v) => onChange({ ...data, interactKey: v || 'e' })} tooltipTerm="gcInteractKey" field="interactKey" />
       )}
-      <CheckboxRow label="One Shot" checked={data.oneShot} onChange={(v) => onChange({ ...data, oneShot: v })} tooltipTerm="gcOneShot" />
+      <CheckboxRow label="One Shot" checked={data.oneShot} onChange={(v) => onChange({ ...data, oneShot: v })} tooltipTerm="gcOneShot" field="oneShot" />
     </ComponentSection>
   );
 }
@@ -583,6 +724,8 @@ export function GameComponentInspector() {
   const addGameComponent = useEditorStore((s) => s.addGameComponent);
   const updateGameComponent = useEditorStore((s) => s.updateGameComponent);
   const removeGameComponent = useEditorStore((s) => s.removeGameComponent);
+  // PF-1148: which fields hold a value other than the one asked for.
+  const adjustmentMap: GameComponentAdjustments = useEditorStore((s) => s.gameComponentAdjustments);
 
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
@@ -677,6 +820,49 @@ export function GameComponentInspector() {
     }
   }, [primaryId, removeGameComponent]);
 
+  const renderSection = (comp: GameComponentData) => {
+    if (comp.type === 'characterController') {
+      return <CharacterControllerSection key="cc" data={comp.characterController} onChange={(d) => handleUpdate({ type: 'characterController', characterController: d })} onRemove={() => handleRemove('character_controller')} />;
+    }
+    if (comp.type === 'health') {
+      return <HealthSection key="health" data={comp.health} onChange={(d) => handleUpdate({ type: 'health', health: d })} onRemove={() => handleRemove('health')} />;
+    }
+    if (comp.type === 'collectible') {
+      return <CollectibleSection key="collectible" data={comp.collectible} onChange={(d) => handleUpdate({ type: 'collectible', collectible: d })} onRemove={() => handleRemove('collectible')} />;
+    }
+    if (comp.type === 'damageZone') {
+      return <DamageZoneSection key="damageZone" data={comp.damageZone} onChange={(d) => handleUpdate({ type: 'damageZone', damageZone: d })} onRemove={() => handleRemove('damage_zone')} />;
+    }
+    if (comp.type === 'checkpoint') {
+      return <CheckpointSection key="checkpoint" data={comp.checkpoint} onChange={(d) => handleUpdate({ type: 'checkpoint', checkpoint: d })} onRemove={() => handleRemove('checkpoint')} />;
+    }
+    if (comp.type === 'teleporter') {
+      return <TeleporterSection key="teleporter" data={comp.teleporter} onChange={(d) => handleUpdate({ type: 'teleporter', teleporter: d })} onRemove={() => handleRemove('teleporter')} />;
+    }
+    if (comp.type === 'movingPlatform') {
+      return <MovingPlatformSection key="movingPlatform" data={comp.movingPlatform} onChange={(d) => handleUpdate({ type: 'movingPlatform', movingPlatform: d })} onRemove={() => handleRemove('moving_platform')} />;
+    }
+    if (comp.type === 'triggerZone') {
+      return <TriggerZoneSection key="triggerZone" data={comp.triggerZone} onChange={(d) => handleUpdate({ type: 'triggerZone', triggerZone: d })} onRemove={() => handleRemove('trigger_zone')} />;
+    }
+    if (comp.type === 'spawner') {
+      return <SpawnerSection key="spawner" data={comp.spawner} onChange={(d) => handleUpdate({ type: 'spawner', spawner: d })} onRemove={() => handleRemove('spawner')} />;
+    }
+    if (comp.type === 'follower') {
+      return <FollowerSection key="follower" data={comp.follower} onChange={(d) => handleUpdate({ type: 'follower', follower: d })} onRemove={() => handleRemove('follower')} />;
+    }
+    if (comp.type === 'projectile') {
+      return <ProjectileSection key="projectile" data={comp.projectile} onChange={(d) => handleUpdate({ type: 'projectile', projectile: d })} onRemove={() => handleRemove('projectile')} />;
+    }
+    if (comp.type === 'winCondition') {
+      return <WinConditionSection key="winCondition" data={comp.winCondition} onChange={(d) => handleUpdate({ type: 'winCondition', winCondition: d })} onRemove={() => handleRemove('win_condition')} />;
+    }
+    if (comp.type === 'dialogueTrigger') {
+      return <DialogueTriggerSection key="dialogueTrigger" data={comp.dialogueTrigger} onChange={(d) => handleUpdate({ type: 'dialogueTrigger', dialogueTrigger: d })} onRemove={() => handleRemove('dialogue_trigger')} />;
+    }
+    return null;
+  };
+
   if (!primaryId) return null;
 
   return (
@@ -713,48 +899,17 @@ export function GameComponentInspector() {
       </div>
 
       <div className="space-y-2">
-        {(primaryGameComponents ?? []).map((comp) => {
-          if (comp.type === 'characterController') {
-            return <CharacterControllerSection key="cc" data={comp.characterController} onChange={(d) => handleUpdate({ type: 'characterController', characterController: d })} onRemove={() => handleRemove('character_controller')} />;
-          }
-          if (comp.type === 'health') {
-            return <HealthSection key="health" data={comp.health} onChange={(d) => handleUpdate({ type: 'health', health: d })} onRemove={() => handleRemove('health')} />;
-          }
-          if (comp.type === 'collectible') {
-            return <CollectibleSection key="collectible" data={comp.collectible} onChange={(d) => handleUpdate({ type: 'collectible', collectible: d })} onRemove={() => handleRemove('collectible')} />;
-          }
-          if (comp.type === 'damageZone') {
-            return <DamageZoneSection key="damageZone" data={comp.damageZone} onChange={(d) => handleUpdate({ type: 'damageZone', damageZone: d })} onRemove={() => handleRemove('damage_zone')} />;
-          }
-          if (comp.type === 'checkpoint') {
-            return <CheckpointSection key="checkpoint" data={comp.checkpoint} onChange={(d) => handleUpdate({ type: 'checkpoint', checkpoint: d })} onRemove={() => handleRemove('checkpoint')} />;
-          }
-          if (comp.type === 'teleporter') {
-            return <TeleporterSection key="teleporter" data={comp.teleporter} onChange={(d) => handleUpdate({ type: 'teleporter', teleporter: d })} onRemove={() => handleRemove('teleporter')} />;
-          }
-          if (comp.type === 'movingPlatform') {
-            return <MovingPlatformSection key="movingPlatform" data={comp.movingPlatform} onChange={(d) => handleUpdate({ type: 'movingPlatform', movingPlatform: d })} onRemove={() => handleRemove('moving_platform')} />;
-          }
-          if (comp.type === 'triggerZone') {
-            return <TriggerZoneSection key="triggerZone" data={comp.triggerZone} onChange={(d) => handleUpdate({ type: 'triggerZone', triggerZone: d })} onRemove={() => handleRemove('trigger_zone')} />;
-          }
-          if (comp.type === 'spawner') {
-            return <SpawnerSection key="spawner" data={comp.spawner} onChange={(d) => handleUpdate({ type: 'spawner', spawner: d })} onRemove={() => handleRemove('spawner')} />;
-          }
-          if (comp.type === 'follower') {
-            return <FollowerSection key="follower" data={comp.follower} onChange={(d) => handleUpdate({ type: 'follower', follower: d })} onRemove={() => handleRemove('follower')} />;
-          }
-          if (comp.type === 'projectile') {
-            return <ProjectileSection key="projectile" data={comp.projectile} onChange={(d) => handleUpdate({ type: 'projectile', projectile: d })} onRemove={() => handleRemove('projectile')} />;
-          }
-          if (comp.type === 'winCondition') {
-            return <WinConditionSection key="winCondition" data={comp.winCondition} onChange={(d) => handleUpdate({ type: 'winCondition', winCondition: d })} onRemove={() => handleRemove('win_condition')} />;
-          }
-          if (comp.type === 'dialogueTrigger') {
-            return <DialogueTriggerSection key="dialogueTrigger" data={comp.dialogueTrigger} onChange={(d) => handleUpdate({ type: 'dialogueTrigger', dialogueTrigger: d })} onRemove={() => handleRemove('dialogue_trigger')} />;
-          }
-          return null;
-        })}
+        {(primaryGameComponents ?? []).map((comp) => (
+          // Only the corrections the displayed value still bears out: the
+          // inspector shows the engine's echo, which undo or a play session
+          // can have moved without the store action that clears a marker.
+          <SectionAdjustments.Provider
+            key={comp.type}
+            value={currentAdjustments(componentAdjustmentsOf(adjustmentMap, primaryId, comp.type), comp)}
+          >
+            {renderSection(comp)}
+          </SectionAdjustments.Provider>
+        ))}
 
         {(!primaryGameComponents || primaryGameComponents.length === 0) && (
           <p className="text-xs text-zinc-400">No game components attached</p>
