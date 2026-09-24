@@ -18,15 +18,24 @@
 # actually run against the current head.
 #
 # THE MARKER. A board result comment must carry, on its own line:
-#     <!-- board-verdict: PASS sha=<40-hex> -->
-#     <!-- board-verdict: FAIL sha=<40-hex> -->
-# The sha is the head the board reviewed. Anything else is prose.
+#     <!-- board-verdict: PASS sha=<40-hex> seats=5/5 -->
+#     <!-- board-verdict: FAIL sha=<40-hex> seats=<reported>/5 -->
+# The sha is the head the board reviewed; `seats` is how many of the board's
+# seats reported. Anything else is prose.
 #
 # STATUS SET (context `review-board`):
 #   FAIL for head            -> failure  ("board found N findings at <sha>")
-#   PASS for head            -> success
+#   PASS for head, 5/5 seats -> success
+#   PASS for head, <5 seats  -> pending  ("partial board: 3/5 seats reported")
+#   PASS for head, no count  -> pending  ("records no seat count")
 #   verdict for another sha  -> pending  ("stale: board ran at <sha>, head is <head>")
 #   no verdict at all        -> pending  ("no board verdict for this head")
+#
+# A PASS is only a pass when EVERY seat looked (#10141). The marker used to
+# carry no count, so a three-seat run rendered `success` — the check asserted
+# "a PASS marker exists for this sha", adjacent to "all five seats passed at
+# this sha" (lessons-learned #1). Markers posted before the count existed read
+# as pending, the safe default: re-run the board rather than trust them.
 #
 # Pending rather than success on absence is the whole point: "nobody looked" and
 # "someone looked and it was clean" must not render identically, which is the
@@ -70,7 +79,12 @@ else
   comments="$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
     --jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body' 2>/dev/null)"
 fi
-marker="$(echo "$comments" | grep -oE '<!-- board-verdict: (PASS|FAIL) sha=[0-9a-f]{40} -->' | tail -1)"
+marker="$(echo "$comments" | grep -oE '<!-- board-verdict: (PASS|FAIL) sha=[0-9a-f]{40}( seats=[0-9]+/[0-9]+)? -->' | tail -1)"
+
+# The size of the board. Mirrors `REVIEWERS.length` in
+# `.claude/workflows/review-board.js`; the suite derives that count from the
+# workflow source and fails if the two drift.
+BOARD_SEATS=5
 
 state="pending"
 description="no board verdict for this head — run the review board"
@@ -78,15 +92,22 @@ description="no board verdict for this head — run the review board"
 if [ -n "$marker" ]; then
   verdict="$(printf '%s' "$marker" | grep -oE '(PASS|FAIL)')"
   vsha="$(printf '%s' "$marker" | grep -oE '[0-9a-f]{40}')"
+  seats="$(printf '%s' "$marker" | grep -oE 'seats=[0-9]+/[0-9]+' | cut -d= -f2)"
   if [ "$vsha" != "$head_sha" ]; then
     state="pending"
     description="stale: board ran at ${vsha:0:8}, head is ${head_sha:0:8}"
   elif [ "$verdict" = "FAIL" ]; then
     state="failure"
     description="review board FAILED at ${head_sha:0:8}"
+  elif [ -z "$seats" ]; then
+    state="pending"
+    description="board verdict at ${head_sha:0:8} records no seat count — re-run the board so every seat reports"
+  elif [ "${seats##*/}" -ne "$BOARD_SEATS" ] || [ "${seats%%/*}" -lt "$BOARD_SEATS" ]; then
+    state="pending"
+    description="partial board: ${seats} seats reported at ${head_sha:0:8} — run the full ${BOARD_SEATS}-seat board"
   else
     state="success"
-    description="review board passed at ${head_sha:0:8}"
+    description="review board passed at ${head_sha:0:8} (${seats} seats)"
   fi
 fi
 
