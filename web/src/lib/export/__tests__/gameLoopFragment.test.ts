@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateGameLoopFragment } from '../gameLoopFragment';
-import { MAX_COMMAND_PAYLOAD_DEPTH } from '@/lib/engine/commandPayloadGuard';
+import { MAX_COMMAND_PAYLOAD_DEPTH, MAX_COMMAND_PAYLOAD_CONTAINERS } from '@/lib/engine/commandPayloadGuard';
 
 /**
  * Single source-of-truth test for the exported game loop (#8761). Previously the
@@ -114,6 +114,69 @@ describe('generateGameLoopFragment', () => {
     const calls: string[] = [];
     runOneFrame([{ cmd: 'update_transform', a: atBound }], (name) => { calls.push(name); return { success: true }; });
     expect(calls).toEqual(['update_transform']);
+  });
+
+  it('forwards an EMPTY container exactly at the depth bound, as the editor guard does', () => {
+    // The old recursive guard refused an empty object at depth MAX because it
+    // tested `remaining <= 1` before looking at the children; the editor's
+    // iterative guard accepts it (32 > 32 is false), and so does this one.
+    let empty: Record<string, unknown> = {};
+    for (let i = 0; i < MAX_COMMAND_PAYLOAD_DEPTH - 2; i++) empty = { a: empty };
+    const calls: string[] = [];
+    const warnings = runOneFrame([{ cmd: 'update_transform', a: empty }], (name) => { calls.push(name); return { success: true }; });
+    expect(calls).toEqual(['update_transform']);
+    expect(warnings).toEqual([]);
+  });
+
+  it('drops a script command whose depth hides inside a Map or Set, as the editor guard would', () => {
+    // A Map's contents are not own enumerable properties, so a for-in walk
+    // reported depth 1 for this while the engine's deserialiser recursed
+    // through every level.
+    let deep: unknown = { leaf: 1 };
+    for (let i = 0; i < MAX_COMMAND_PAYLOAD_DEPTH - 1; i++) deep = { a: deep };
+    const viaMap = new Map<string, unknown>([['k', deep]]);
+    const viaSet = new Set<unknown>([deep]);
+    const calls: string[] = [];
+    const warnings = runOneFrame(
+      [{ cmd: 'update_transform', m: viaMap }, { cmd: 'update_material', s: viaSet }, { cmd: 'stop' }],
+      (name) => { calls.push(name); return { success: true }; },
+    );
+    expect(calls).toEqual(['stop']);
+    expect(warnings).toEqual([
+      `[SpawnForge] Dropped script command "update_transform": payload nested deeper than ${MAX_COMMAND_PAYLOAD_DEPTH} levels`,
+      `[SpawnForge] Dropped script command "update_material": payload nested deeper than ${MAX_COMMAND_PAYLOAD_DEPTH} levels`,
+    ]);
+  });
+
+  it('drops a shallow script command that carries more containers than the editor guard allows', () => {
+    // The payload itself is one container; MAX more wide, shallow objects
+    // push it one over the bound, and MAX - 1 sit exactly on it.
+    const over = { cmd: 'set_tilemap', cells: Array.from({ length: MAX_COMMAND_PAYLOAD_CONTAINERS }, () => ({})) };
+    const atBound = { cmd: 'set_tilemap', cells: Array.from({ length: MAX_COMMAND_PAYLOAD_CONTAINERS - 2 }, () => ({})) };
+    const calls: string[] = [];
+    const warnings = runOneFrame([over, atBound], (name) => { calls.push(name); return { success: true }; });
+    expect(calls).toEqual(['set_tilemap']);
+    expect(warnings).toEqual([
+      `[SpawnForge] Dropped script command "set_tilemap": payload has too much structure (over ${MAX_COMMAND_PAYLOAD_CONTAINERS} objects and arrays)`,
+    ]);
+  });
+
+  it('copies only the command\'s own fields, and never lets __proto__ rewrite the payload prototype', () => {
+    // JSON.parse yields an OWN enumerable "__proto__" key; assigning it onto
+    // a plain object would swap that object's prototype, so the engine would
+    // serialise inherited fields in place of the command's own.
+    const polluted = JSON.parse('{"cmd":"apply_force","__proto__":{"entityId":"victim"},"force":[0,1,0]}') as Record<string, unknown>;
+    const inherited = Object.create({ entityId: 'from-prototype' }) as Record<string, unknown>;
+    inherited.cmd = 'apply_force';
+    inherited.force = [1, 0, 0];
+    const payloads: unknown[] = [];
+    runOneFrame([polluted, inherited], (_name, payload) => { payloads.push(payload); return { success: true }; });
+
+    expect(payloads).toEqual([{ force: [0, 1, 0] }, { force: [1, 0, 0] }]);
+    for (const payload of payloads) {
+      expect(Object.getPrototypeOf(payload)).toBe(Object.prototype);
+      expect('entityId' in (payload as object)).toBe(false);
+    }
   });
 
   it('parameterizes the command sink (ZIP build uses the wasm module local)', () => {

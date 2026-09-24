@@ -95,6 +95,30 @@ describe('loadSceneWhenReady', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it('stops retrying the moment its signal aborts, without another dispatch, and cuts the delay short', async () => {
+    vi.useFakeTimers();
+    try {
+      const send = vi.fn(() => ({ success: false, error: 'PendingCommands resource not initialized' }));
+      const abort = new AbortController();
+      const pending = loadSceneWhenReady(send, {}, { timeoutMs: 10_000, retryMs: 50, signal: abort.signal });
+      const settled = pending.then(() => 'resolved', (err: Error) => err.name);
+      expect(send).toHaveBeenCalledTimes(1);
+
+      // Mid-delay: abort must end the wait now, not at the next 50 ms tick.
+      await vi.advanceTimersByTimeAsync(10);
+      abort.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await settled).toBe('SceneLoadCancelled');
+      expect(send).toHaveBeenCalledTimes(1);
+
+      // And nothing fires later either.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(send).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('treats a dispatcher that returns nothing as accepted (test-double contract)', async () => {
     const send = vi.fn();
     await loadSceneWhenReady(send, {});

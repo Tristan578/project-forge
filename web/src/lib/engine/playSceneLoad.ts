@@ -58,6 +58,20 @@ export interface LoadSceneOptions {
   timeoutMs?: number;
   /** Poll interval while the engine initialises. */
   retryMs?: number;
+  /**
+   * Abort the wait. Checked before EVERY dispatch and it cuts the retry delay
+   * short, so a `/play` that unmounts mid-boot stops sending `load_scene`
+   * at once instead of for the rest of the ten-second window.
+   */
+  signal?: AbortSignal;
+}
+
+/** Thrown by {@link loadSceneWhenReady} when its `signal` aborts. */
+export class SceneLoadCancelled extends Error {
+  constructor() {
+    super('Scene load cancelled');
+    this.name = 'SceneLoadCancelled';
+  }
 }
 
 /**
@@ -69,18 +83,20 @@ export interface LoadSceneOptions {
  * @returns Resolves once the engine has queued the scene (it emits
  *   `SCENE_LOADED` when it has applied it); rejects with the engine's error text
  *   on any refusal other than "not initialized", or with a timeout message when
- *   the engine never becomes ready.
+ *   the engine never becomes ready; rejects with {@link SceneLoadCancelled}
+ *   once `signal` aborts, without another dispatch.
  * @throws Whatever `send` itself throws — a throwing dispatcher is a harder
  *   failure than a refusal and is not retried.
  */
 export async function loadSceneWhenReady(
   send: EngineCommandSink,
   sceneData: unknown,
-  { timeoutMs = PLAY_SCENE_LOAD_TIMEOUT_MS, retryMs = PLAY_SCENE_LOAD_RETRY_MS }: LoadSceneOptions = {},
+  { timeoutMs = PLAY_SCENE_LOAD_TIMEOUT_MS, retryMs = PLAY_SCENE_LOAD_RETRY_MS, signal }: LoadSceneOptions = {},
 ): Promise<void> {
   const json = JSON.stringify(sceneData);
   const deadline = Date.now() + timeoutMs;
   for (;;) {
+    if (signal?.aborted) throw new SceneLoadCancelled();
     const refusal = refusalOf(send('load_scene', { json }));
     if (refusal === null) return;
     if (!NOT_INITIALIZED.test(refusal)) {
@@ -89,6 +105,16 @@ export async function loadSceneWhenReady(
     if (Date.now() >= deadline) {
       throw new Error(`Scene failed to load: the engine did not accept commands within ${timeoutMs}ms`);
     }
-    await new Promise<void>((resolve) => { setTimeout(resolve, retryMs); });
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, retryMs);
+      function onAbort() {
+        clearTimeout(timer);
+        resolve();
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 }

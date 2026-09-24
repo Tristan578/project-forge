@@ -16,7 +16,7 @@
  * `handle_command`, while the ZIP build holds the WASM module in a `wasm` local
  * and calls `wasm.handle_command`. That reference is the lone parameter.
  */
-import { MAX_COMMAND_PAYLOAD_DEPTH } from '@/lib/engine/commandPayloadGuard';
+import { MAX_COMMAND_PAYLOAD_DEPTH, MAX_COMMAND_PAYLOAD_CONTAINERS } from '@/lib/engine/commandPayloadGuard';
 
 export interface GameLoopFragmentOptions {
   /**
@@ -48,18 +48,62 @@ export function generateGameLoopFragment({ handleCommand, indent = '' }: GameLoo
 // Script commands the engine has already refused once, by name. A script that
 // keeps sending a bad command would otherwise warn on every frame.
 var __forgeRefusedCommands = {};
-// Depth bound on a script-built payload, mirroring the editor's command payload
-// guard: the engine walks the JS value recursively before any engine code runs,
-// and on wasm32 a stack overflow is an unrecoverable trap that kills the engine.
-// Depth is 1-based: a scalar is 1, { a: 1 } is 2.
+// Bounds on a script-built payload, mirroring the editor's command payload
+// guard (commandPayloadGuard.ts): the engine walks the JS value recursively
+// before any engine code runs, and on wasm32 a stack overflow is an
+// unrecoverable trap that kills the engine. Depth is 1-based (a scalar is 1,
+// { a: 1 } is 2); containers are objects, arrays, Maps and Sets — the last two
+// are converted by the engine's deserialiser but hide their contents from a
+// for-in walk, so they are enumerated explicitly. Only own enumerable keys
+// count: a value inherited through a prototype is not what the engine will
+// serialise. The walk is iterative so checking a hostile payload cannot itself
+// overflow, and a cycle runs into the container bound rather than spinning.
 var __forgeMaxCommandDepth = ${MAX_COMMAND_PAYLOAD_DEPTH};
-function __forgeDepthWithin(value, remaining) {
-  if (value === null || typeof value !== 'object') return true;
-  if (remaining <= 1) return false;
-  for (var k in value) {
-    if (!__forgeDepthWithin(value[k], remaining - 1)) return false;
+var __forgeMaxCommandContainers = ${MAX_COMMAND_PAYLOAD_CONTAINERS};
+var __forgeHasOwn = Object.prototype.hasOwnProperty;
+function __forgeIsContainer(value) {
+  return value !== null && typeof value === 'object';
+}
+function __forgeChildrenOf(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof Map !== 'undefined' && value instanceof Map) {
+    var mapChildren = [];
+    value.forEach(function (v, k) { mapChildren.push(k); mapChildren.push(v); });
+    return mapChildren;
   }
-  return true;
+  if (typeof Set !== 'undefined' && value instanceof Set) {
+    var setChildren = [];
+    value.forEach(function (v) { setChildren.push(v); });
+    return setChildren;
+  }
+  var own = [];
+  for (var key in value) {
+    if (__forgeHasOwn.call(value, key)) own.push(value[key]);
+  }
+  return own;
+}
+// Returns null when the payload is within both bounds, else the reason.
+function __forgePayloadProblem(payload) {
+  if (!__forgeIsContainer(payload)) return null;
+  var containers = 1;
+  var stack = [{ value: payload, depth: 1 }];
+  while (stack.length > 0) {
+    var entry = stack.pop();
+    if (entry.depth > __forgeMaxCommandDepth) return 'payload nested deeper than ' + __forgeMaxCommandDepth + ' levels';
+    var children = __forgeChildrenOf(entry.value);
+    var childDepth = entry.depth + 1;
+    for (var i = 0; i < children.length; i++) {
+      var child = children[i];
+      if (__forgeIsContainer(child)) {
+        containers += 1;
+        if (containers > __forgeMaxCommandContainers) return 'payload has too much structure (over ' + __forgeMaxCommandContainers + ' objects and arrays)';
+        stack.push({ value: child, depth: childDepth });
+      } else if (childDepth > __forgeMaxCommandDepth) {
+        return 'payload nested deeper than ' + __forgeMaxCommandDepth + ' levels';
+      }
+    }
+  }
+  return null;
 }
 function gameLoop() {
   var now = performance.now();
@@ -99,14 +143,20 @@ function gameLoop() {
     var cmds = window.__forgeFlushCommands();
     for (var ci = 0; ci < cmds.length; ci++) {
       var cmdName = cmds[ci].cmd;
+      // Own enumerable fields only, and never '__proto__': assigning that key
+      // on a plain object swaps the payload's prototype instead of adding a
+      // field, so the engine would serialise inherited values in place of the
+      // command's own. A script has no legitimate command field by that name.
       var cmdPayload = {};
       for (var cmdKey in cmds[ci]) {
-        if (cmdKey !== 'cmd') cmdPayload[cmdKey] = cmds[ci][cmdKey];
+        if (cmdKey === 'cmd' || cmdKey === '__proto__' || !__forgeHasOwn.call(cmds[ci], cmdKey)) continue;
+        cmdPayload[cmdKey] = cmds[ci][cmdKey];
       }
-      if (!__forgeDepthWithin(cmdPayload, __forgeMaxCommandDepth)) {
+      var cmdProblem = __forgePayloadProblem(cmdPayload);
+      if (cmdProblem !== null) {
         if (!__forgeRefusedCommands[cmdName]) {
           __forgeRefusedCommands[cmdName] = true;
-          console.warn('[SpawnForge] Dropped script command "' + cmdName + '": payload nested deeper than ' + __forgeMaxCommandDepth + ' levels');
+          console.warn('[SpawnForge] Dropped script command "' + cmdName + '": ' + cmdProblem);
         }
         continue;
       }

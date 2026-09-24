@@ -421,7 +421,7 @@ describe('GamePlayer', () => {
       expect(screen.queryByText('Try again')).toBeNull();
     });
 
-    it('reports a refused play command to monitoring without an error screen (#10196)', async () => {
+    it('treats a refused play command as a failed start: an error, never a ready canvas that does not play', async () => {
       global.fetch = okFetch();
       const runtime = stubRuntime();
       runtime.handle_command.mockImplementation((command: string) =>
@@ -434,12 +434,58 @@ describe('GamePlayer', () => {
       fireEvent.click(screen.getByText('Click to play'));
       await advance(PLAY_ENGINE_SETTLE_MS);
 
+      expect(screen.getByText('The game could not start: Cannot play: scene has no camera')).toBeDefined();
       expect(captureException).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(captureException).mock.calls[0][0]).toEqual(
-        new Error('Engine refused play: Cannot play: scene has no camera'),
+      expect(vi.mocked(captureException).mock.calls[0][1]).toMatchObject({ surface: 'play', phase: 'engine-init' });
+      // The engine owns the canvas by now, so no restart is offered.
+      expect(screen.queryByText('Try again')).toBeNull();
+    });
+
+    it('still reports a refused optional command (set_quality) without an error screen (#10196)', async () => {
+      global.fetch = okFetch();
+      const runtime = stubRuntime();
+      runtime.handle_command.mockImplementation((command: string) =>
+        command === 'set_quality' ? { success: false, error: 'Unknown preset' } : { success: true },
       );
-      expect(vi.mocked(captureException).mock.calls[0][1]).toMatchObject({ surface: 'play', phase: 'command', command: 'play' });
+      vi.mocked(loadPlayEngine).mockResolvedValue(runtime);
+      const touch = Object.getOwnPropertyDescriptor(navigator, 'maxTouchPoints');
+      Object.defineProperty(navigator, 'maxTouchPoints', { value: 5, configurable: true });
+      try {
+        render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+        await advance();
+        fireEvent.click(screen.getByText('Click to play'));
+        await advance(PLAY_ENGINE_SETTLE_MS);
+      } finally {
+        if (touch) Object.defineProperty(navigator, 'maxTouchPoints', touch);
+        else delete (navigator as unknown as Record<string, unknown>).maxTouchPoints;
+      }
+
+      expect(runtime.handle_command).toHaveBeenCalledWith('set_quality', { preset: 'low' });
+      expect(captureException).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(captureException).mock.calls[0][0]).toEqual(new Error('Engine refused set_quality: Unknown preset'));
+      expect(vi.mocked(captureException).mock.calls[0][1]).toMatchObject({ surface: 'play', phase: 'command', command: 'set_quality' });
       expect(screen.queryByText('Something Went Wrong')).toBeNull();
+      expect(screen.queryByText('Starting engine...')).toBeNull();
+    });
+
+    it('stops sending load_scene the moment the player unmounts mid-boot', async () => {
+      global.fetch = okFetch();
+      const runtime = stubRuntime();
+      runtime.handle_command.mockReturnValue({ success: false, error: 'PendingCommands resource not initialized' });
+      vi.mocked(loadPlayEngine).mockResolvedValue(runtime);
+
+      const { unmount } = render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+      await advance();
+      fireEvent.click(screen.getByText('Click to play'));
+      await advance(PLAY_SCENE_LOAD_RETRY_MS * 2);
+      const attemptsBeforeLeaving = runtime.handle_command.mock.calls.length;
+      expect(attemptsBeforeLeaving).toBeGreaterThanOrEqual(2);
+
+      unmount();
+      await advance(PLAY_SCENE_LOAD_RETRY_MS * 20);
+
+      expect(runtime.handle_command.mock.calls.length).toBe(attemptsBeforeLeaving);
+      expect(captureException).not.toHaveBeenCalled();
     });
 
     it('does not offer a retry once the engine has taken the canvas', async () => {
