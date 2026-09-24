@@ -194,7 +194,7 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
             <h2 id="game-detail-title" className="text-2xl font-bold text-zinc-100">{game?.title ?? (loading ? 'Loading game' : 'Game unavailable')}</h2>
             {game && <p className="text-sm text-zinc-400">by {game.authorName}</p>}
             {game?.forkedFrom && (
-              <p className="text-xs text-zinc-500 mt-1">
+              <p data-testid="remix-attribution" className="text-xs text-zinc-400 mt-1">
                 {game.forkedFrom.unavailable || !game.forkedFrom.authorClerkId || !game.forkedFrom.slug ? (
                   'Remixed from a game that is no longer available'
                 ) : (
@@ -203,7 +203,7 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
                     {/* The play page is /play/{clerkId}/{slug}; there is no /play/{id}. */}
                     <a
                       href={`/play/${encodeURIComponent(game.forkedFrom.authorClerkId)}/${encodeURIComponent(game.forkedFrom.slug)}`}
-                      className="underline hover:text-zinc-300"
+                      className="underline hover:text-zinc-200"
                     >
                       {game.forkedFrom.title}
                     </a>{' '}
@@ -315,7 +315,8 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
                 {game.comments.length}
               </div>
             </div>
-            <div className="bg-zinc-800 rounded p-3">
+            {/* Fifth tile: span both columns on the 2-column mobile grid so it does not sit alone in a half-empty row. */}
+            <div className="col-span-2 md:col-span-1 bg-zinc-800 rounded p-3">
               <div className="text-xs text-zinc-400">Forks</div>
               <div className="text-lg font-semibold text-zinc-100">
                 {game.forkCount}

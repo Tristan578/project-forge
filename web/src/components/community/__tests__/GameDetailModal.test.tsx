@@ -316,6 +316,25 @@ describe('GameDetailModal fork attribution', () => {
     expect(screen.getByText('Forks').nextElementSibling).toHaveTextContent('3');
   });
 
+  it('draws the attribution line in the byline gray, which meets WCAG AA on the modal background', async () => {
+    // zinc-500 on zinc-900 measures ~3.7:1, below the 4.5:1 AA minimum for 12px text; zinc-400 is ~6.9:1.
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ game: {
+      ...baseGame,
+      forkedFrom: { gameId: 'game-1', title: 'The Original', slug: 'the-original', authorClerkId: 'user_clerkOriginal', authorName: 'Origin Author' },
+    } }) });
+    render(<GameDetailModal gameId="game-2" onClose={() => {}} />);
+    const line = await screen.findByTestId('remix-attribution');
+    expect(line.className.split(/\s+/)).toContain('text-zinc-400');
+    expect(line.className).not.toMatch(/\btext-zinc-(500|600|700)\b/);
+  });
+
+  it('lets the fifth stats tile span the two-column mobile grid', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ game: baseGame }) });
+    render(<GameDetailModal gameId="game-2" onClose={() => {}} />);
+    const tile = (await screen.findByText('Forks')).parentElement!;
+    expect(tile.className.split(/\s+/)).toEqual(expect.arrayContaining(['col-span-2', 'md:col-span-1']));
+  });
+
   it('renders no attribution line when the game is not a fork', async () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ game: baseGame }) });
     render(<GameDetailModal gameId="game-2" onClose={() => {}} />);
