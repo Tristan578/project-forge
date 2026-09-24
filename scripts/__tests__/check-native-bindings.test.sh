@@ -260,7 +260,7 @@ function emit(kind, value,   d) {
 /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
 !in_jobs { next }
 /^[[:space:]]*#/ { next }
-/^  [a-z][a-z0-9_-]*:[[:space:]]*$/ { flush(); job = $1; sub(/:$/, "", job); job_wd = ""; in_steps = 0; next }
+$0 ~ hdr { flush(); job = $1; sub(/:$/, "", job); job_wd = ""; in_steps = 0; next }
 /^    steps:[[:space:]]*$/ { in_steps = 1; next }
 /^      - / { flush() }
 /^[[:space:]]*(- )?working-directory:/ {
@@ -290,6 +290,13 @@ function emit(kind, value,   d) {
 }
 END { flush() }
 '
+
+# A job key under `jobs:` — two-space indent, then a GitHub Actions job id
+# (letters, digits, `-` and `_`). ONE definition, passed to every awk here that
+# cuts a job block: when the derivation accepted `_` and the block extractors did
+# not, an unwired job followed by an underscored gated one absorbed that job's
+# steps and read as wired (Sentry review on #10221).
+JOB_HEADER_RE='^  [a-z][a-z0-9_-]*:[[:space:]]*$'
 
 # Classifies one shell command string, as a workflow line, a package.json
 # script or a Playwright webServer command would carry it. Returns 0 when it
@@ -372,7 +379,7 @@ config_needs_bindings() {
 # silently read as "no binding" is how a job falls out of the pin.
 native_binding_jobs() {
   local rows kind job dir val rc
-  rows="$(awk "$NATIVE_JOBS_AWK")"
+  rows="$(awk -v hdr="$JOB_HEADER_RE" "$NATIVE_JOBS_AWK")"
   while IFS=$'\t' read -r kind job dir val; do
     case "$kind" in
       D) printf '%s\n' "$job" ;;
@@ -395,7 +402,7 @@ native_binding_jobs() {
 job_wiring_defects() {
   local job="$1" text job_block job_executable step_block run_count
   text="$(cat)"
-  job_block="$(awk -v j="  ${job}:" '$0==j{f=1} f{print} f && /^  [a-z][a-z0-9-]*:[[:space:]]*$/ && $0!=j{exit}' <<<"$text")"
+  job_block="$(awk -v j="  ${job}:" -v hdr="$JOB_HEADER_RE" '$0==j{f=1} f{print} f && $0 ~ hdr && $0!=j{exit}' <<<"$text")"
   if [ -z "$job_block" ]; then
     echo "no job named ${job} — nothing to check"
     return
@@ -487,8 +494,8 @@ assert_gate_wired() {
 assert_unwiring_caught() {
   local job="$1" label="$2" text mutated
   text="$(cat)"
-  mutated="$(awk -v j="  ${job}:" '
-    /^  [a-z][a-z0-9-]*:[[:space:]]*$/ { in_job = ($0 == j) }
+  mutated="$(awk -v j="  ${job}:" -v hdr="$JOB_HEADER_RE" '
+    $0 ~ hdr { in_job = ($0 == j) }
     in_job && /^[[:space:]]*run: bash scripts\/check-native-bindings\.sh[[:space:]]*$/ { sub(/run: .*/, "run: echo skipped") }
     { print }
   ' <<<"$text")"
@@ -549,6 +556,23 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   else
     fail "negative control: a NEW native-binding job without the gate reads as wired"
   fi
+  # The same unwired job, now followed by a GATED job whose key has an
+  # underscore. If the block extractor stops only at hyphenated keys, nc-direct
+  # runs on into nc_gated, borrows its gate step and reads as wired.
+  gated_step=$'      - name: Assert native swc binding survived npm ci\n        run: bash scripts/check-native-bindings.sh\n      - run: cd web && npx next build'
+  followed="$(printf '%s\n  nc_gated:\n    runs-on: ubuntu-latest\n    steps:\n%s\n' "$direct" "$gated_step")"
+  if [ -z "$(job_wiring_defects nc_gated <<<"$followed")" ]; then
+    pass "fixture: the underscored job nc_gated reads as wired on its own"
+  else
+    fail "fixture: nc_gated should read as wired — the next case would pass for the wrong reason"
+  fi
+  if [ -n "$(job_wiring_defects nc-direct <<<"$followed")" ]; then
+    pass "negative control: an unwired job followed by an underscored gated job is still caught"
+  else
+    fail "negative control: nc-direct borrowed the gate of the underscored job after it and reads as wired"
+  fi
+  # And an underscored native-binding job is derived AND its unwiring caught.
+  assert_unwiring_caught nc_gated "an appended underscored job" <<<"$(with_job nc_gated "$gated_step")"
   expect_derived yes nc-wd "\`npm run build\` with working-directory: apps/docs" \
     <<<"$(with_job nc-wd $'      - name: Build docs\n        working-directory: apps/docs\n        run: npm run build')"
   expect_derived yes nc-cd "\`cd web && npm run build\`" \
@@ -607,7 +631,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   # 16. Self-defense registration: the lockfile-sync-tests (CI Self-Defense
   #     Tests) job must shellcheck the gate + this suite AND run this suite,
   #     so a PR that neuters either fails a required check.
-  lst_block="$(awk '/^  lockfile-sync-tests:/{f=1} f{print} f && /^  [a-z][a-z0-9-]*:[[:space:]]*$/ && !/^  lockfile-sync-tests:/{exit}' <<<"$ci")"
+  lst_block="$(awk -v hdr="$JOB_HEADER_RE" '/^  lockfile-sync-tests:/{f=1} f{print} f && $0 ~ hdr && !/^  lockfile-sync-tests:/{exit}' <<<"$ci")"
   if grep -qF 'scripts/check-native-bindings.sh scripts/__tests__/check-native-bindings.test.sh' <<<"$lst_block"; then
     pass "self-defense job shellchecks the native-bindings gate + its suite"
   else
