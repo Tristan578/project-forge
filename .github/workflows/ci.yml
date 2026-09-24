@@ -558,6 +558,12 @@ jobs:
           # (scripts/__tests__/lib/platform.sh, hook-utils.sh); without it every
           # sourcing script reports SC1091 and the library's own definitions
           # stay invisible to the analysis.
+          #
+          # The runner image's shellcheck is the authoritative version (0.9.0 on
+          # ubuntu-24.04 at the time of #8676), and it is NOT the newest: a local
+          # 0.11.0 passed a tree that 0.9.0 rejected (SC2120). Print it so a
+          # local-vs-CI disagreement is diagnosable from the job log.
+          shellcheck --version
           shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 
   # ---- Skills Lint ----

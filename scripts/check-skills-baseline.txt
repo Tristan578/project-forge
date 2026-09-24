@@ -3,8 +3,9 @@
 # check-skills.sh enforces the best-practice rules on every skill. A finding in a
 # skill listed here is downgraded to a warning (known debt); a finding in any
 # skill NOT listed here fails the gate. This is the same ratchet the repo uses for
-# openapi-route-sync, and matches the #8676 stance: enforce clean on new/touched
-# skills, track the legacy tail rather than block on it.
+# openapi-route-sync: enforce clean on new/touched skills, track the legacy tail
+# rather than block on it — an interim posture until this tail is swept clean the
+# way the hook tree was in #8676.
 #
 # Rules:
 #  - One skill directory name per line (the dir under .claude/skills/).
@@ -14,8 +15,9 @@
 
 # --- First-party skill SCRIPTS with legacy shellcheck findings -----------------
 # Ours; mechanical (SC2164 cd-without-||exit, SC2034 unused var, SC2259, SC2076,
-# SC2010). Boy-Scout sweep tracked separately — same posture as the hook-tree
-# shellcheck debt in #8676. Prune each as its script is cleaned.
+# SC2010). Boy-Scout sweep tracked separately; #8676 did that sweep for the hook
+# tree and is the model for finishing this one. Prune each as its script is
+# cleaned.
 arch-validator
 babysit-prs
 build

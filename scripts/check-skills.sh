@@ -37,10 +37,12 @@ skills_dir="${SKILLS_DIR:-.claude/skills}"
 # lint findings in scripts, imported cross-platform skills with stub frontmatter).
 # A finding in a baselined skill is reported as a WARNING and does not fail the
 # gate; a finding in ANY other skill (new or touched-clean) fails it. This is the
-# same ratchet pattern the repo uses for openapi-route-sync and matches the
-# #8676 stance on legacy lint debt: enforce clean on new/touched skills,
-# track the legacy tail rather than block on it. Prune an entry once its skill is
-# clean (the linter warns when a baselined skill no longer has findings).
+# same ratchet pattern the repo uses for openapi-route-sync: enforce clean on
+# new/touched skills, track the legacy tail rather than block on it. It is an
+# interim posture — the hook tree held the same debt until #8676 cleared it
+# wholesale and linted the whole tree; the end state here is the same sweep and
+# an empty baseline. Prune an entry once its skill is clean (the linter warns
+# when a baselined skill no longer has findings).
 baseline_file="${SKILLS_BASELINE_FILE:-scripts/check-skills-baseline.txt}"
 
 checked=0

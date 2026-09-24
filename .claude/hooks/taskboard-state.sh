@@ -74,14 +74,12 @@ tb_get_board() {
     curl -fsS --connect-timeout 3 "$TB_API/board" | "$TB_PYTHON" -c 'import json,sys; b=json.load(sys.stdin); [c.update(tickets=[t for t in c.get("tickets", []) if t.get("projectId")==sys.argv[1]]) for c in b.get("columns", [])]; print(json.dumps(b))' "$PROJECT_ID"
 }
 
-# Get tickets by status
+# Get every ticket in the project. (An optional status filter used to live
+# here; nothing ever passed one, and shellcheck 0.9.0 — the runner's version —
+# flags a parameter no caller supplies as SC2120.)
 tb_get_tickets() {
     [ -n "$PROJECT_ID" ] || tb_refresh_identity || return 1
-    local status="${1:-}"
     local url="$TB_API/tickets?project=$PROJECT_ID"
-    if [ -n "$status" ]; then
-        url="$url&status=$status"
-    fi
     curl -s --connect-timeout 3 "$url" 2>/dev/null
 }
 

@@ -25,8 +25,14 @@ for t in .claude/hooks/__tests__/*.test.sh; do echo "== $t =="; bash "$t" || bre
 # (.github/workflows/ci.yml, "Shellcheck every hook and hook test") runs exactly
 # this from the repo root. `-x` follows sourced files; a script that sources a
 # sibling via "$SCRIPT_DIR/..." carries `# shellcheck source-path=SCRIPTDIR` so
-# the analysis can find it. A red result is yours: the tree has been clean since
-# #8676, so there is no legacy debt to filter out mentally.
+# the analysis can find it. #8676 cleared the legacy findings, so a red result
+# is yours — but check the VERSION first: the authoritative shellcheck is the
+# one on the ubuntu-latest runner image (0.9.0 at the time of #8676; the job
+# prints it), and a newer local build can pass what 0.9.0 rejects (0.11.0 did
+# not raise the SC2120 that 0.9.0 did). On a box without shellcheck,
+# `npx --yes shellcheck@latest` is the newest, not the runner's; fetch the
+# runner's version from the koalaman/shellcheck releases before disagreeing
+# with CI.
 shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 ```
 
