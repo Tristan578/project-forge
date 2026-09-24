@@ -32,6 +32,7 @@ import { DEEP_GEN_SURFACES, type DeepGenSurface } from '@/lib/ai/surfaces';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { createSpawnforgeAgent, resolveToolApprovalSecret } from '@/lib/ai/spawnforgeAgent';
+import { resolveAnthropicClientAuth } from '@/lib/ai/wifCredential';
 import {
   verifyApprovedToolApprovals,
   deniedApprovalsAreAuthentic,
@@ -819,8 +820,14 @@ async function POST_impl(request: NextRequest) {
   // Effort piggybacks the same tier gate as thinking — both consume extra reasoning
   // tokens and must be off by default for free/starter tiers.
   const resolvedEffort = canUseThinking && effort ? effort : undefined;
+  // Direct-backend Anthropic auth (#8858): a federated short-lived token when
+  // Workload Identity Federation is configured, else ANTHROPIC_API_KEY. Never
+  // throws — a failed exchange is reported and falls back to the static key.
+  // The gateway branch does not use it and does not resolve it.
+  const anthropicAuth = usingDirect ? await resolveAnthropicClientAuth() : undefined;
   const agent = createSpawnforgeAgent({
     isDirectBackend: usingDirect,
+    ...(anthropicAuth ? { anthropicAuthOverride: anthropicAuth } : {}),
     model: resolvedModelId,
     instructions: instructionBlocks,
     thinking: canUseThinking && thinking === true,
