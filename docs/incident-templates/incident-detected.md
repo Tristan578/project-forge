@@ -70,4 +70,3 @@ Live service status (updates automatically from the health checks): https://spaw
 - [ ] {action}
 - [ ] Notify the project owner (no on-call/paging service — see `docs/operations/incident-response.md`)
 - [ ] Confirm https://spawnforge.ai/health reflects the incident
-- [ ] Open incident bridge channel

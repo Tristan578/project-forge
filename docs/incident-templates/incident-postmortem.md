@@ -50,7 +50,7 @@
 | {HH:MM} | {event} | {name} |
 | {HH:MM} | {event} | {name} |
 | {HH:MM} | Incident detected | {monitoring / user / owner} |
-| {HH:MM} | Incident commander assigned | {name} |
+| {HH:MM} | Owner began response | {name} |
 | {HH:MM} | First update posted | {name} |
 | {HH:MM} | Root cause identified | {name} |
 | {HH:MM} | Fix deployed to production | {name} |

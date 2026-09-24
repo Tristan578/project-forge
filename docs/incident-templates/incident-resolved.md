@@ -85,7 +85,7 @@ Deployed via: {PR link / deployment link}
 | Time (UTC) | Event |
 |------------|-------|
 | {HH:MM} | First symptoms observed (by monitoring / user report) |
-| {HH:MM} | Incident declared, {NAME} assigned as commander |
+| {HH:MM} | Incident declared; {NAME} began response |
 | {HH:MM} | Root cause identified |
 | {HH:MM} | Fix deployed |
 | {HH:MM} | Recovery confirmed |
