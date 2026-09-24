@@ -56,6 +56,10 @@ run_case "PASS from 3 of 5 seats"        pending "<!-- board-verdict: PASS sha=$
 run_case "PASS with no seat count"       pending "<!-- board-verdict: PASS sha=$HEAD -->"
 run_case "PASS over a 6-seat board"      pending "<!-- board-verdict: PASS sha=$HEAD seats=6/6 -->"
 run_case "PASS from 0 of 5 seats"        pending "<!-- board-verdict: PASS sha=$HEAD seats=0/5 -->"
+# A count OVER the board is not a fuller board: the producer refuses 6/5, but
+# any owner comment reaches this consumer, and 6 is not "less than 5"
+# (Sentry review on #10218). Only an exact 5/5 is a full board.
+run_case "PASS with more seats than the board" pending "<!-- board-verdict: PASS sha=$HEAD seats=6/5 -->"
 # Legacy markers (posted before the count existed) are pending, never success.
 run_case "legacy countless PASS"         pending "Review board: **PASS** at abc<!-- board-verdict: PASS sha=$HEAD -->"
 

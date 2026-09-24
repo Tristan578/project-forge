@@ -118,9 +118,12 @@ if [ -n "$marker" ]; then
   elif [ -z "$seats" ]; then
     state="pending"
     description="board verdict at ${head_sha:0:8} records no seat count — re-run the board so every seat reports"
-  elif [ "${seats##*/}" -ne "$BOARD_SEATS" ] || [ "${seats%%/*}" -lt "$BOARD_SEATS" ]; then
+  elif [ "${seats##*/}" -ne "$BOARD_SEATS" ] || [ "${seats%%/*}" -ne "$BOARD_SEATS" ]; then
+    # Exactly BOARD_SEATS/BOARD_SEATS is a full board. Fewer is partial; MORE is
+    # not fuller, it is a marker no producer wrote (post-board-verdict.sh refuses
+    # 6/5), and any owner comment reaches this consumer, so it is pending too.
     state="pending"
-    description="partial board: ${seats} seats reported at ${head_sha:0:8} — run the full ${BOARD_SEATS}-seat board"
+    description="board verdict at ${head_sha:0:8} counts ${seats} seats; only ${BOARD_SEATS}/${BOARD_SEATS} passes — run the full ${BOARD_SEATS}-seat board"
   else
     state="success"
     description="review board passed at ${head_sha:0:8} (${seats} seats)"
