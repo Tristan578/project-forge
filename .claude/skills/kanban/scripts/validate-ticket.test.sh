@@ -37,6 +37,15 @@ case "$id" in
     body='{"title":"Prose is not acceptance criteria","description":"As an engineer, I want formal scenarios so that prose cannot fake coverage. This ticket is given several constraints; when each is evaluated, then a decision follows. It is also given a budget; when costs rise, then caching helps. Finally, given limited time, when delivery approaches, then scope narrows.","priority":"high","labels":["bug"],"teamId":"engineering","subtasks":[1,2,3]}' ;;
   malformed)
     body='{"title":"Too short","description":"missing sections","priority":"","labels":[],"subtasks":[]}' ;;
+  # Each of these differs from `good` in exactly one field.
+  no-subtasks)
+    body='{"title":"A meaningful ticket title","description":"As an engineer, I want validation so that tickets stay useful. Given a valid ticket, When validation runs, Then it passes. Given labels exist, When validation runs, Then they are shown. Given subtasks exist, When validation runs, Then they are counted.","priority":"high","labels":["bug"],"teamId":"engineering","subtasks":[1]}' ;;
+  no-labels)
+    body='{"title":"A meaningful ticket title","description":"As an engineer, I want validation so that tickets stay useful. Given a valid ticket, When validation runs, Then it passes. Given labels exist, When validation runs, Then they are shown. Given subtasks exist, When validation runs, Then they are counted.","priority":"high","labels":[],"teamId":"engineering","subtasks":[1,2,3]}' ;;
+  bad-priority)
+    body='{"title":"A meaningful ticket title","description":"As an engineer, I want validation so that tickets stay useful. Given a valid ticket, When validation runs, Then it passes. Given labels exist, When validation runs, Then they are shown. Given subtasks exist, When validation runs, Then they are counted.","priority":"p9","labels":["bug"],"teamId":"engineering","subtasks":[1,2,3]}' ;;
+  short-title)
+    body='{"title":"Too short","description":"As an engineer, I want validation so that tickets stay useful. Given a valid ticket, When validation runs, Then it passes. Given labels exist, When validation runs, Then they are shown. Given subtasks exist, When validation runs, Then they are counted.","priority":"high","labels":["bug"],"teamId":"engineering","subtasks":[1,2,3]}' ;;
   *) status=404; body='{"error":"not found"}' ;;
 esac
 
@@ -46,16 +55,45 @@ CURL
 chmod +x "$TMP_DIR/curl"
 
 run_validator() {
-  PATH="$TMP_DIR:$PATH" bash "$SCRIPT_DIR/validate-ticket.sh" "$1" 2>&1
+  # tr: Python on Windows ends lines with CRLF, which would defeat the `$`
+  # anchors below on a Git Bash run while passing on Linux.
+  PATH="$TMP_DIR:$PATH" bash "$SCRIPT_DIR/validate-ticket.sh" "$1" 2>&1 | tr -d '\r'
+}
+
+# `! grep -q ...` cannot fail under `set -e`: bash exempts a negated command
+# from errexit, so it would pass whatever the output held. Fail explicitly.
+refute() {
+  if grep -q -- "$1" <<< "$2"; then
+    echo "FAIL: output unexpectedly contains '$1'" >&2
+    exit 1
+  fi
 }
 
 good=$(run_validator good)
 grep -q 'RESULT: PASS' <<< "$good"
-! grep -q 'Traceback' <<< "$good"
+refute 'Traceback' "$good"
+refute '\[FAIL\]' "$good"
 
 literal=$(run_validator literal-404)
 grep -q 'RESULT: PASS' <<< "$literal"
-! grep -q 'Could not fetch' <<< "$literal"
+refute 'Could not fetch' "$literal"
+
+# The verdict must agree with the rows: every [FAIL] row fails the ticket.
+# `.*` stands in for the em dash, which Python on Windows prints as cp1252.
+no_subtasks=$(run_validator no-subtasks)
+grep -q 'RESULT: FAIL .* missing: subtasks$' <<< "$no_subtasks"
+
+bad_priority=$(run_validator bad-priority)
+grep -q 'RESULT: FAIL .* missing: priority$' <<< "$bad_priority"
+
+short_title=$(run_validator short-title)
+grep -q 'RESULT: FAIL .* missing: title$' <<< "$short_title"
+
+# Labels are a SHOULD in the template: a warning, never a failure.
+no_labels=$(run_validator no-labels)
+grep -q 'Labels set.*\[WARN\]' <<< "$no_labels"
+grep -q 'RESULT: PASS' <<< "$no_labels"
+refute '\[FAIL\]' "$no_labels"
 
 two=$(run_validator two-scenarios)
 grep -q 'RESULT: FAIL' <<< "$two"

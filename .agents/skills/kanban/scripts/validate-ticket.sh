@@ -53,8 +53,21 @@ PASS = "PASS"
 FAIL = "FAIL"
 WARN = "WARN"
 
-def check(label, passed, detail=""):
-    marker = PASS if passed else FAIL
+# The verdict is collected BY check(), from the same boolean each row prints,
+# so a row can never read [FAIL] beside RESULT: PASS. It used to be a separate
+# hand-written list that left out the title, subtasks and an invalid priority.
+# `required=False` marks a SHOULD in the kanban skill's template: it prints
+# [WARN] and does not fail the ticket.
+failures = []
+
+def check(label, passed, detail="", name=None, required=True):
+    if passed:
+        marker = PASS
+    elif required:
+        marker = FAIL
+        failures.append(name or label)
+    else:
+        marker = WARN
     detail_str = f"  {detail}" if detail else ""
     print(f"  {label:<45} [{marker}]{detail_str}")
 
@@ -70,19 +83,22 @@ print("--- Validation Checks ---")
 # 1. Title exists and is meaningful
 check("Title present and meaningful",
       bool(title) and len(title) > 10,
-      f"'{title[:60]}'" if title else "MISSING")
+      f"'{title[:60]}'" if title else "MISSING",
+      name="title")
 
 # 2. User story
 has_user_story = bool(re.search(r'As an?\s+.+,\s*I want\s+.+\s+so that\s+.+', description, re.IGNORECASE))
 check("User story (As a... I want... so that...)",
       has_user_story,
-      "present" if has_user_story else "MISSING — add 'As a [persona], I want [goal] so that [benefit]'")
+      "present" if has_user_story else "MISSING — add 'As a [persona], I want [goal] so that [benefit]'",
+      name="user story")
 
 # 3. Description length beyond template
 has_description = len(description.strip()) > 100
 check("Description has technical context (>100 chars)",
       has_description,
-      f"{len(description)} chars" if description else "EMPTY")
+      f"{len(description)} chars" if description else "EMPTY",
+      name="description")
 
 # 4. Given/When/Then acceptance criteria (at least 3 complete scenarios)
 gwt_count = len(re.findall(
@@ -92,37 +108,35 @@ gwt_count = len(re.findall(
 ))
 check("Acceptance Criteria (min 3 complete Given/When/Then scenarios)",
       gwt_count >= 3,
-      f"{gwt_count} complete scenario(s) found (need at least 3)")
+      f"{gwt_count} complete scenario(s) found (need at least 3)",
+      name="acceptance criteria")
 
 # 5. Priority set
 valid_priorities = {"urgent", "high", "medium", "low"}
 check("Priority set",
       priority.lower() in valid_priorities if priority else False,
-      f"'{priority}'" if priority else "MISSING — set to: urgent/high/medium/low")
+      f"'{priority}'" if priority else "MISSING — set to: urgent/high/medium/low",
+      name="priority")
 
 # 6. Team assigned
 check("Team assigned",
       bool(team),
-      f"'{team}'" if team else "MISSING — set teamId to Engineering/PM")
+      f"'{team}'" if team else "MISSING — set teamId to Engineering/PM",
+      name="team")
 
-# 7. Labels set
+# 7. Labels set — a SHOULD in the template, so it warns rather than fails.
 check("Labels set",
       bool(labels),
-      f"{labels}" if labels else "MISSING — add: bug/feature/refactor/test/docs")
+      f"{labels}" if labels else "MISSING — add: bug/feature/refactor/test/docs",
+      name="labels", required=False)
 
-# 8. Subtasks (at least 3 for complex work)
-check("Subtasks defined (min 3 for complex work)",
+# 8. Subtasks — the template's MUST: at least 3 before work begins.
+check("Subtasks defined (min 3 before work begins)",
       len(subtasks) >= 3,
-      f"{len(subtasks)} subtask(s)" if subtasks else "0 subtasks — add implementation steps")
+      f"{len(subtasks)} subtask(s)" if subtasks else "0 subtasks — add implementation steps",
+      name="subtasks")
 
 print("")
-
-failures = []
-if not has_user_story: failures.append("user story")
-if not has_description: failures.append("description")
-if gwt_count < 3: failures.append("acceptance criteria")
-if not priority: failures.append("priority")
-if not team: failures.append("team")
 
 if failures:
     print(f"RESULT: FAIL — missing: {', '.join(failures)}")
