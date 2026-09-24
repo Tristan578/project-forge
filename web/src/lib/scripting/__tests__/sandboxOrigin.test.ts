@@ -87,6 +87,8 @@ const openPorts: MessagePort[] = [];
  */
 interface HeldDataPort {
   release: () => void;
+  /** Hold the control port instead of the data port. */
+  control?: boolean;
 }
 
 /** Run SANDBOX_BOOTSTRAP in its own realm, as the srcdoc frame would. */
@@ -119,7 +121,8 @@ function bootFakeFrame(frameOptions: { holdData?: HeldDataPort } = {}): FakeFram
     for (const port of event.ports) openPorts.push(port as MessagePort);
     let ports = event.ports;
     if (frameOptions.holdData && ports.length === 2) {
-      const real = ports[0] as MessagePort;
+      const which = frameOptions.holdData.control ? 1 : 0;
+      const real = ports[which] as MessagePort;
       const held: unknown[] = [];
       const proxy = {
         postMessage: (message: unknown) => held.push(message),
@@ -131,7 +134,7 @@ function bootFakeFrame(frameOptions: { holdData?: HeldDataPort } = {}): FakeFram
       frameOptions.holdData.release = () => {
         for (const message of held.splice(0)) real.postMessage(message);
       };
-      ports = [proxy, ports[1]];
+      ports = which === 0 ? [proxy, ports[1]] : [ports[0], proxy];
     }
     for (const listener of listeners) listener({ ...event, ports });
   };
@@ -471,6 +474,29 @@ describe('failure reporting', () => {
     hold.release();
     await vi.waitFor(() => expect(received).toEqual([{ type: 'commands', commands: [] }]));
     expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('a later message that overtakes an earlier boot error does not turn it into a runtime failure', async () => {
+    // The reverse order: the worker errors before it has said anything (a
+    // boot failure), keeps running, and later posts. If that message reached
+    // the host first, a host-side flag would read the error as runtime and
+    // Play would carry on. The frame's verdict (started: false) must decide.
+    const hold: HeldDataPort = { release: () => {}, control: true };
+    const onError = vi.fn();
+    const { host } = await startHost({ onError }, { holdData: hold });
+    hosts.push(host);
+    const received: unknown[] = [];
+    host.onmessage = (event) => received.push(event.data);
+    await vi.waitFor(() => expect(FakeWorker.created).toHaveLength(1));
+    FakeWorker.created[0].onerror?.({ message: 'Error: Script error.' });
+    FakeWorker.created[0].emit({ type: 'commands', commands: [] });
+    await vi.waitFor(() => expect(received).toEqual([{ type: 'commands', commands: [] }]));
+    expect(onError).not.toHaveBeenCalled();
+
+    hold.release();
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(onError).toHaveBeenCalledWith('Script sandbox worker-error: Error: Script error.', 'boot', 'worker-error');
+    expect(host.frame).toBeNull();
   });
 
   it('reports a boot failure ONCE: the boot timer does not report the same frame again', async () => {

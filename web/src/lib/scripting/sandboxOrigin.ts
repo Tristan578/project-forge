@@ -337,8 +337,6 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
   let frame: HTMLIFrameElement | null = null;
   let terminated = false;
   let bootTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The worker has sent at least one protocol message, i.e. its code is running. */
-  let started = false;
 
   const report = (...args: SandboxFailureReport) => {
     if (terminated) return;
@@ -386,7 +384,6 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
 
   data.port1.onmessage = (event: MessageEvent) => {
     if (terminated) return;
-    started = true;
     host.onmessage?.(event);
   };
   control.port1.onmessage = (event: MessageEvent) => {
@@ -404,10 +401,12 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
       // means the scripts never started — and, unlike a timeout, will not
       // start on a retry, so it carries the `worker-error` reason. So does a
       // worker the frame could not construct at all. Whether the worker had
-      // spoken is the FRAME's to say: it sees both events from one Worker
-      // object, while here they arrive on two ports with no ordering between
-      // them, so an error can overtake the message that preceded it.
-      if (msg.type === 'worker-error' && (started || msg.started === true)) report(detail, 'runtime');
+      // spoken is the FRAME's alone to say: it sees both events from one
+      // Worker object, while here they arrive on two ports with no ordering
+      // between them, so a message can overtake an earlier error just as an
+      // error can overtake an earlier message. No host-side observation is
+      // mixed in, in either direction.
+      if (msg.type === 'worker-error' && msg.started === true) report(detail, 'runtime');
       else failBoot(detail, 'worker-error');
     }
   };
