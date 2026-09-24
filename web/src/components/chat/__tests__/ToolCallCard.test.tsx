@@ -400,9 +400,18 @@ describe('ToolCallCard', () => {
       // The server gate band exists for approval-required alone.
       if (want.gate) expect(screen.getByTestId('server-approval-gate')).toBeDefined();
       else expect(screen.queryByTestId('server-approval-gate')).toBeNull();
-      // Undo is offered only for a successful, undoable call.
-      if (want.undo) expect(screen.getByLabelText('Undo this action')).toBeDefined();
-      else expect(screen.queryByLabelText('Undo this action')).toBeNull();
+      // Undo is offered only for a successful, undoable call, and it is a
+      // sibling of the header button, never nested inside it: a <button> in a
+      // <button> is invalid HTML that browsers repair by hoisting, so the
+      // tree assistive tech sees is not the one React declared (#8931 board).
+      if (want.undo) {
+        const undoButton = screen.getByLabelText('Undo this action');
+        expect(undoButton.closest('button')).toBe(undoButton);
+        expect(undoButton.parentElement?.closest('button')).toBeNull();
+      } else {
+        expect(screen.queryByLabelText('Undo this action')).toBeNull();
+      }
+      expect(document.querySelectorAll('button button')).toHaveLength(0);
       cleanup();
     });
   });

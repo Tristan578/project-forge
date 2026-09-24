@@ -183,20 +183,87 @@ describe('tool-invocation states from the wire (#8931)', () => {
     expect(executeToolCall).not.toHaveBeenCalled();
   });
 
+  it('success → undone: batchUndoMessage undoes each undoable call and marks exactly those', async () => {
+    // The only writer of 'undone' is batchUndoMessage, and its existing
+    // coverage reached only the no-op branches (the editor store's canUndo is
+    // false in a bare test), so the positive path had no test at all. The
+    // editor store is mocked with two undos available; the message carries a
+    // successful undoable call, a successful non-undoable one and an error,
+    // so the slicing that pairs undo() calls with tool calls is observed.
+    const undo = vi.fn();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      mockSSEResponse(
+        makeChatSSEEvents({
+          toolCalls: [
+            { id: 'tc-undoable', name: 'spawn_entity', input: { type: 'cube' } },
+            { id: 'tc-fixed', name: 'spawn_entity', input: { type: 'sphere' } },
+          ],
+          toolErrors: [{ id: 'tc-broken', name: 'spawn_entity', phase: 'input', errorText: 'bad input' }],
+        }),
+      ),
+    );
+    vi.resetModules();
+    vi.doMock('../../lib/chat/executor', () => ({ executeToolCall }));
+    // Keep the real editor store (sendMessage reads scene context from it) and
+    // override only the undo surface batchUndoMessage consults.
+    vi.doMock('../editorStore', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../editorStore')>();
+      const real = actual.useEditorStore;
+      const realGetState = real.getState;
+      return {
+        ...actual,
+        useEditorStore: Object.assign(real, {
+          getState: () => ({ ...realGetState(), canUndo: true, undo }),
+        }),
+      };
+    });
+    const { useChatStore } = await import('../chatStore');
+    useChatStore.setState(BASE_STATE as never);
+    await useChatStore.getState().sendMessage('two spawns');
+    const assistantId = useChatStore.getState().messages[1].id;
+    const before = useChatStore.getState().messages[1].toolCalls ?? [];
+    expect(before.map((t) => [t.id, t.status])).toEqual([
+      ['tc-undoable', 'success'],
+      ['tc-fixed', 'success'],
+      ['tc-broken', 'error'],
+    ]);
+    // Mark the second success as not undoable so the filter has something to skip.
+    useChatStore.setState({
+      messages: useChatStore.getState().messages.map((m) =>
+        m.id === assistantId
+          ? { ...m, toolCalls: (m.toolCalls ?? []).map((t) => (t.id === 'tc-fixed' ? { ...t, undoable: false } : t)) }
+          : m,
+      ),
+    });
+
+    useChatStore.getState().batchUndoMessage(assistantId);
+    // batchUndoMessage resolves the editor store through a dynamic import.
+    await vi.waitFor(() => {
+      expect(useChatStore.getState().messages[1].toolCalls?.find((t) => t.id === 'tc-undoable')?.status).toBe('undone');
+    });
+    expect(undo).toHaveBeenCalledTimes(1);
+    const after = useChatStore.getState().messages[1].toolCalls ?? [];
+    expect(after.map((t) => [t.id, t.status])).toEqual([
+      ['tc-undoable', 'undone'],
+      ['tc-fixed', 'success'],
+      ['tc-broken', 'error'],
+    ]);
+  });
+
   it('every state in TOOL_CALL_STATUSES is reached by some documented path', () => {
-    // The states the wire produces are proven above; the three client-only
-    // states are produced by store actions with their own suites
-    // (approvalMode → preview/rejected in chatStore.test.ts; undo → undone in
-    // the editor undo path). This pins that the list has not grown a state
-    // nobody documented: extend BOTH this map and the docblock on
-    // TOOL_CALL_STATUSES together.
+    // The states the wire produces are proven above; undone is proven by the
+    // batchUndoMessage case above; the two remaining client-only states are
+    // produced by store actions with their own suites (approvalMode →
+    // preview/rejected in chatStore.test.ts). This pins that the list has not
+    // grown a state nobody documented: extend BOTH this map and the docblock
+    // on TOOL_CALL_STATUSES together.
     const reachedBy: Record<ToolCallStatusName, string> = {
       pending: 'tool-input-start',
       success: 'local execution after finish',
       error: 'tool-input-error | tool-output-error | failed local execution',
       preview: 'approvalMode (client-only)',
       rejected: 'rejectToolCalls (client-only)',
-      undone: 'undo of a successful call (client-only)',
+      undone: 'batchUndoMessage after a successful undoable call (client-only, proven above)',
       'approval-required': 'tool-approval-request',
       denied: 'tool-output-denied',
     };
