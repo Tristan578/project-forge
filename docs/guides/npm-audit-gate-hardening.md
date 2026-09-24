@@ -869,7 +869,15 @@ by construction rather than by measurement.
   nesting is counted by command word, so a helper inside an `if` arm stays out
   of scope as before, and only an unquoted reserved word in command position
   counts (twelfth round: a `"{"` case pattern held the count one level high and
-  hid every later top-level definition). No files, no definitions, or a file the
+  hid every later top-level definition). The thirteenth round found three more
+  ways into the same state, each fixed in the case-pattern lexer: an extglob
+  group's own `)` (`@(a|b)|do)`) ended the pattern early, a pattern's optional
+  leading `(` had to be told apart from a group, and `in` written on the line
+  after `case WORD` never opened the pattern state. The fourteenth found a
+  fourth: a command substitution in the case word (`case "$(cmd)" in`) reset
+  the statement, so a `$( )`, `$(( ))` or `$[ ]` now resumes the statement it
+  sits in. A file whose only row is a violation reports that violation rather
+  than "nothing derived". No files, no definitions, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state
   from a fixture, runs the gate on the real tree behind a 300-function floor

@@ -221,7 +221,7 @@ derive_file() {
         # line is that `in` (only blank and comment lines may come between).
         if (case_wait) {
           case_wait = 0
-          if (!rq && w == "in") { pat = 1; pat_n = 0; pat_d = 0; w = ""; return }
+          if (!rq && w == "in") { pat = 1; pat_n = 0; w = ""; return }
         }
         # Still looking for the command word of this statement.
         # Compound-command nesting, counted by command word so that layout
@@ -252,10 +252,10 @@ derive_file() {
       nwords++
       # `case WORD in`: what follows is a pattern, up to its `)`.
       if (cmd_word == "case" && nwords == 2) case_wait = 1
-      if (cmd_word == "case" && nwords == 3) {
-        case_wait = 0
-        if (!rq && w == "in") { pat = 1; pat_n = 0; pat_d = 0 }
-      }
+      # (`pat_d` needs no reset where a pattern opens: a pattern ends only at
+      # depth zero, and `case_wait` needs none here: the first word of the next
+      # statement consumes it; the fourteenth round found both unobservable.)
+      if (cmd_word == "case" && nwords == 3 && !rq && w == "in") { pat = 1; pat_n = 0 }
       # The word after `function` is a definition name whatever follows it.
       if (in_function) {
         if (index(builtins, " " w " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "function " w, NR, NR
@@ -340,7 +340,9 @@ derive_file() {
       if (d == 0 && bs == def_bs && (def_name == "" || def_name == line_def))
         printf "%s\t%s\t%d\t%d\tshape\n", file, label, NR, NR
     }
-    function end_command() { end_word(); if (in_trap) check_trap(); cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = "" }
+    # Every statement starts with no trap state of its own; a trap inside a
+    # substitution must not read the enclosing trap action as its own.
+    function end_command() { end_word(); if (in_trap) check_trap(); cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; trap_action = ""; trap_sigs = ""; trap_has_action = 0 }
     # Entering `$( ... )` or `( ... )` starts a new context: the enclosing
     # quote state and the enclosing array-literal state are both pushed and
     # both cleared, and the matching `)` restores them. Array-literal skipping
@@ -360,14 +362,45 @@ derive_file() {
     # string and array branches consume every character and never reach the
     # heredoc rule (the tenth board round found two such openers that no
     # fixture could tell apart from their absence, and removed them).
-    function open_sub(saved_q, new_arith, dbl) {
-      end_command(); d++
-      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_arith[d] = arith; st_dbl[d] = dbl; st_pat[d] = pat
+    # A `$( )`, `$(( ))` or `$[ ]` (dol = 1) is part of a word, so the
+    # statement around it resumes when it closes: its command word, word
+    # count and alias/shopt/trap state are pushed with the context and
+    # restored, and the substitution counts as a word part (fourteenth board
+    # round: `case "$(cmd)" in` lost the statement, so the `in` never opened
+    # the pattern state). A pending `case ... in` and the pattern counters
+    # need no push: neither can be set while a substitution is open in a
+    # valid file. A statement inside the substitution starts with no trap
+    # state of its own (end_command resets it). A bare `( )` or `(( ))` is a
+    # compound command, and the `()` of a function definition relies on the
+    # statement being reset, so those keep the old behaviour.
+    function open_sub(saved_q, new_arith, dbl, dol) {
+      # A substitution is part of the word it sits in (`$(a)$(b)` is one
+      # word), so the pending word is carried across it, not ended here.
+      if (dol) { d++; st_w[d] = w; w = ""; wq = 0 }
+      else { end_word(); d++ }
+      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_arith[d] = arith; st_dbl[d] = dbl
+      st_pat[d] = pat; st_dol[d] = dol
+      st_cs[d] = cmd_seen; st_cw[d] = cmd_word; st_nw[d] = nwords
+      st_ia[d] = in_alias; st_ish[d] = in_shopt; st_it[d] = in_trap; st_sf[d] = sflag
+      st_ta[d] = trap_action; st_ts[d] = trap_sigs; st_th[d] = trap_has_action
+      # A trap statement is judged once, when it really ends, not here too.
+      if (dol) in_trap = 0
+      end_command()
       q = ""; arr = 0; arr_d = 0; arith = new_arith; pat = 0
     }
     function close_sub() {
       end_command()
-      if (d > 0) { q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; arith = st_arith[d]; pat = st_pat[d]; d-- }
+      if (d > 0) {
+        q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; arith = st_arith[d]
+        pat = st_pat[d]
+        if (st_dol[d]) {
+          cmd_seen = st_cs[d]; cmd_word = st_cw[d]; nwords = st_nw[d]
+          in_alias = st_ia[d]; in_shopt = st_ish[d]; in_trap = st_it[d]; sflag = st_sf[d]
+          trap_action = st_ta[d]; trap_sigs = st_ts[d]; trap_has_action = st_th[d]
+          w = st_w[d] "$()"; wq = 1
+        }
+        d--
+      }
     }
     function lex_line(line,   n, i, c, c2, c3, rest, tok, carry) {
       n = length(line); i = 1
@@ -394,8 +427,8 @@ derive_file() {
         if (q == "d") {
           if (c == "\\") { w = w substr(line, i + 1, 1); i += 2; continue }
           if (c == "\"") { q = ""; i++; continue }
-          if (c3 == "$((") { open_sub(q, 1, 1); i += 3; continue }
-          if (c2 == "$(") { open_sub(q, 0, 0); i += 2; continue }
+          if (c3 == "$((") { open_sub(q, 1, 1, 1); i += 3; continue }
+          if (c2 == "$(") { open_sub(q, 0, 0, 1); i += 2; continue }
           w = w c; i++; continue
         }
         if (arr) {
@@ -403,8 +436,8 @@ derive_file() {
           if (c2 == "$\047") { q = "a"; i += 2; continue }
           if (c == "\047") { q = "s"; i++; continue }
           if (c == "\"") { q = "d"; i++; continue }
-          if (c3 == "$((") { open_sub("", 1, 1); i += 3; continue }
-          if (c2 == "$(") { open_sub("", 0, 0); i += 2; continue }
+          if (c3 == "$((") { open_sub("", 1, 1, 1); i += 3; continue }
+          if (c2 == "$(") { open_sub("", 0, 0, 1); i += 2; continue }
           if (c == "(") arr_d++
           if (c == ")") { arr_d--; if (arr_d == 0) { arr = 0; w = "" } }
           i++; continue
@@ -439,9 +472,9 @@ derive_file() {
             i++; continue
           }
         }
-        if (c3 == "$((") { open_sub("", 1, 1); i += 3; continue }
-        if (c2 == "$[") { open_sub("", 1, 2); i += 2; continue }
-        if (c2 == "$(") { open_sub("", 0, 0); i += 2; continue }
+        if (c3 == "$((") { open_sub("", 1, 1, 1); i += 3; continue }
+        if (c2 == "$[") { open_sub("", 1, 2, 1); i += 2; continue }
+        if (c2 == "$(") { open_sub("", 0, 0, 1); i += 2; continue }
         if (c == "]" && d > 0 && st_dbl[d] == 2) { close_sub(); i++; continue }
         # `NAME=(` / `NAME+=(` opens an ARRAY LITERAL: its elements are words
         # that are stored, never run, so none of them can be a command word.
@@ -459,8 +492,8 @@ derive_file() {
           if (dn != "" && dn !~ /[=$]/) shape_check(dn "()", dn)
         }
         if (c == "(" && w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=$/) { arr = 1; arr_d = 1; w = ""; i++; continue }
-        if (c2 == "((" && w == "") { open_sub("", 1, 1); i += 2; continue }
-        if (c == "(") { open_sub("", arith, 0); i++; continue }
+        if (c2 == "((" && w == "") { open_sub("", 1, 1, 0); i += 2; continue }
+        if (c == "(") { open_sub("", arith, 0, 0); i++; continue }
         if (c == ")") {
           if (d > 0 && st_dbl[d] && c2 == "))") { close_sub(); i += 2; continue }
           close_sub(); i++; continue
@@ -487,7 +520,7 @@ derive_file() {
         }
         # `;;`, `;&` and `;;&` end an arm, so a pattern follows (a trailing
         # `&` then ends an empty statement, which changes nothing).
-        if (c2 == ";;" || c2 == ";&") { end_command(); pat = 1; pat_n = 0; pat_d = 0; i += 2; continue }
+        if (c2 == ";;" || c2 == ";&") { end_command(); pat = 1; pat_n = 0; i += 2; continue }
         if (c ~ /[;&|]/) { end_command(); i++; continue }
         if (c ~ /[[:space:]<>]/) { end_word(); i++; continue }
         w = w c; i++
@@ -674,8 +707,12 @@ if [ -n "$parse_errors" ]; then
   exit 2
 fi
 
+# The vacuity guard counts every derived row: a file whose only definition
+# is malformed (a `shape`, `stray` or `unsupported` row) must get that
+# violation's report, not "nothing derived" (fourteenth board round).
 total="$(grep -cE $'\t(frozen|unfrozen)$' <<<"$rows" || true)"
-if [ "${total:-0}" -eq 0 ]; then
+derived="$(grep -c . <<<"$rows" || true)"
+if [ "${derived:-0}" -eq 0 ]; then
   echo "::error::check-fn-freeze: ${#files[@]} file(s) scanned and no function definition derived — either the derivation broke or the suites define nothing (fail closed)" >&2
   exit 2
 fi

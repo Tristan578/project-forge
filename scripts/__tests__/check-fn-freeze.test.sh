@@ -1261,6 +1261,59 @@ FIX
 expect_rc "30e. pattern text after a subshell inside a pattern is still pattern text" 1 \
   "$(run_gate "$d_subpat")" "1 violation(s)" "fixture.test.sh:7: 'hidden()'"
 
+# ---- 30f. a substitution inside a word keeps the statement it sits in ----------
+# Fourteenth board round (architect): `case "$(cmd)" in` reset the statement
+# when the substitution opened, so `in` never opened the pattern state and an
+# `if)` arm raised the nesting count, hiding the indented definition. The
+# shape is in the scanned tree (scripts/__tests__/lib/platform.sh).
+d_casesub="$(mkfixture case-substitution <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+case "$(compute_verb)" in
+  if) : ;;
+  other) : ;;
+esac
+case $(a)$(b) in
+  do) : ;;
+esac
+ hidden() { :; }
+FIX
+)"
+expect_rc "30f. a case word built from command substitutions still opens the pattern state" 1 \
+  "$(run_gate "$d_casesub")" "1 violation(s)" "fixture.test.sh:10: 'hidden()'"
+
+# A trap statement with a substitution among its signals is judged once, when
+# it really ends, not also when the substitution opens (valid bash: the
+# substitution expands to a further signal name).
+d_trapsub="$(mkfixture trap-substitution <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+trap 'exit 0' EXIT $(echo INT)
+alias x=$(echo y) fail=:
+trap 'exit 0' EXIT $(trap ':' INT; echo TERM)
+shopt -s $(echo nullglob) expand_aliases
+FIX
+)"
+expect_rc "30g. a trap or alias statement holding a substitution is judged once, as the whole statement" 1 \
+  "$(run_gate "$d_trapsub")" "5 violation(s)" "fixture.test.sh:4: 'alias x=\$()'" "fixture.test.sh:4: 'alias fail=:'" "fixture.test.sh:5: 'trap" "fixture.test.sh:6: 'shopt -s expand_aliases'"
+
+# ---- 12c. a file whose only definition is malformed gets that report --------------
+# Fourteenth board round (ux): the vacuity guard counted only frozen and
+# unfrozen rows, so a file holding just ` fail() { :; }` (the eleventh round's
+# own example) or just a stray freeze reported "nothing derived".
+d_onlyshape="$(mkfixture only-shape <<'FIX'
+ fail() { :; }
+FIX
+)"
+expect_rc "12c. a file whose only definition is a shape violation reports it" 1 \
+  "$(run_gate "$d_onlyshape")" "1 violation(s)" "fixture.test.sh:1: 'fail()'"
+d_onlystray="$(mkfixture only-stray <<'FIX'
+readonly -f ghost
+FIX
+)"
+expect_rc "12c-b. a file whose only row is a stray freeze reports it" 1 \
+  "$(run_gate "$d_onlystray")" "1 violation(s)" "'readonly -f ghost' does not directly follow"
+
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
 # Same posture as check-suite-wiring.test.sh: comment-stripped scan of every
 # workflow and composite action, fail closed on a missing dir or a grep error.
