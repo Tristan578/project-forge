@@ -127,11 +127,15 @@ These steps are for project `spawnforge`, Vercel scope `tnolan`, team
 
 ## Verifying it is live
 
-- **Claude Console → Settings → Workload identity → authentication history.**
-  Each exchange attempt is recorded with the rule that was evaluated. A denial
-  also shows its reason, such as `match_subject_prefix` or `jti_reused`. This is
-  the authoritative signal. The API's own 401 is always the opaque
-  `Authentication failed`.
+- **The Console's authentication history. [HUMAN]** Anthropic's
+  [WIF reference](https://platform.claude.com/docs/en/manage-claude/wif-reference)
+  says every assertion denial returns the same opaque 401
+  (`authentication_error`, `Authentication failed`), and that the deny reason
+  is recorded on the attempt's entry in the authentication history instead,
+  for example `match_subject_prefix`, `workspace_id_required` or `jti_reused`.
+  That entry is the authoritative signal. This guide was written without
+  Console access, so it does not name the menu path to that page; find it from
+  the federation rule you created in step 3.
 - **Sentry.** A failed exchange is captured once, followed by 60 seconds of
   backoff during which the static key is used without retrying. The captured
   error is one of these fixed messages:
