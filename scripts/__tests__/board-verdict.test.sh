@@ -145,6 +145,66 @@ else
   FAIL=$((FAIL+1)); echo "  FAIL a FAIL verdict did not exit 1"
 fi
 
+# --- the head read survives a transient API failure ---
+#
+# On 2026-09-24 a single `gh api` returned nothing right after a push (run
+# 35938823261): the job exited 2 with gh's reason discarded, and the PR had no
+# review-board status at all — silence in exactly the place this design exists
+# to remove. The read now retries through the same seam the write uses, and
+# gh's stderr reaches the log. The stub below fails the head read
+# GH_FLAKY_FAILURES times, then answers GH_FLAKY_SHA; every other call records
+# its argv and succeeds, like gh-stub.
+echo "the head read"
+FLAKY_COUNT="$TMP/flaky-count.txt"
+cat > "$TMP/gh-flaky" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "$GH_STUB_RECORD"
+if [ "$1" = "api" ] && [ "$3" = "--jq" ] && [ "$4" = ".head.sha" ]; then
+  n=$(( $(cat "$GH_FLAKY_COUNT" 2>/dev/null || echo 0) + 1 ))
+  echo "$n" > "$GH_FLAKY_COUNT"
+  if [ "$n" -le "$GH_FLAKY_FAILURES" ]; then
+    echo "gh: HTTP 502 Bad Gateway (stub)" >&2
+    exit 1
+  fi
+  echo "$GH_FLAKY_SHA"
+fi
+exit 0
+STUB
+chmod +x "$TMP/gh-flaky"
+
+# head_read_case <name> <failures> <expected rc> <expected read count> <expected stdout+stderr substring>...
+head_read_case() {
+  local name="$1" failures="$2" want_rc="$3" want_reads="$4"; shift 4
+  : > "$RECORD"; rm -f "$FLAKY_COUNT"
+  # A full-board PASS for the stub's sha: `success ... (5/5 seats)` in the
+  # output proves the head the script graded is the one the stub finally
+  # answered, not an empty string or a stale value.
+  printf '%s\n' "<!-- board-verdict: PASS sha=$HEAD seats=5/5 -->" > "$TMP/comments.txt"
+  local out rc reads needle ok=1
+  out="$(GH_STUB_RECORD="$RECORD" GH_FLAKY_COUNT="$FLAKY_COUNT" GH_FLAKY_FAILURES="$failures" GH_FLAKY_SHA="$HEAD" \
+        BOARD_VERDICT_GH_CMD="$TMP/gh-flaky" BOARD_VERDICT_DRY_RUN=true \
+        BOARD_VERDICT_COMMENTS_FILE="$TMP/comments.txt" \
+        bash "$SCRIPT" 1 2>&1)"
+  rc=$?
+  reads="$(grep -cx '.head.sha' "$RECORD")"
+  [ "$rc" -eq "$want_rc" ] || ok=0
+  [ "$reads" -eq "$want_reads" ] || ok=0
+  for needle in "$@"; do
+    case "$out" in *"$needle"*) ;; *) ok=0 ;; esac
+  done
+  if grep -q 'statuses/' "$RECORD"; then ok=0; fi
+  if [ "$ok" -eq 1 ]; then
+    PASS=$((PASS+1)); echo "  ok   $name (rc=$rc, $reads read attempt(s))"
+  else
+    FAIL=$((FAIL+1)); echo "  FAIL $name: rc=$rc (want $want_rc), reads=$reads (want $want_reads), no status write expected; output: $out"
+  fi
+}
+
+head_read_case "one failed head read is retried and the second answer is graded" 1 0 2 \
+  "success: review board passed at ${HEAD:0:8} (5/5 seats)"
+head_read_case "a head read that fails every attempt exits 2, names the PR and carries gh's reason" 99 2 3 \
+  "could not read head sha for PR 1" "502 Bad Gateway"
+
 # --- the producer: without it, success and failure are unreachable states ---
 echo "the producer"
 

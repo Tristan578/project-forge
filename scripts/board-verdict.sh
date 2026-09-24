@@ -55,13 +55,29 @@ REPO="${GH_REPO:-Tristan578/project-forge}"
 # TEST-ONLY seams, never set in CI (the suite asserts no workflow sets them):
 # BOARD_VERDICT_HEAD_SHA supplies the head and BOARD_VERDICT_COMMENTS_FILE the
 # comment bodies, so the decision logic is testable without the network.
+# THE HEAD READ AND THE STATUS WRITE GO THROUGH A SEAM so the suite can observe
+# them. BOARD_VERDICT_GH_CMD is test-only — the suite asserts no workflow sets
+# it, since pointing it at `true` would make the job succeed while publishing
+# nothing.
+GH_CMD="${BOARD_VERDICT_GH_CMD:-gh}"
+
 if [ -n "${BOARD_VERDICT_HEAD_SHA:-}" ]; then
   head_sha="$BOARD_VERDICT_HEAD_SHA"
 else
-  head_sha="$(gh api "repos/${REPO}/pulls/${PR}" --jq '.head.sha' 2>/dev/null)"
+  # One transient API failure must not turn the check into silence. On
+  # 2026-09-24 a single `gh api` returned nothing right after a push (run
+  # 35938823261): the job exited 2 with gh's reason discarded, and the PR had
+  # no review-board status at all. Retry with a short backoff, and let gh's
+  # own stderr reach the job log so the next failure is readable.
+  head_sha=""
+  for delay in 1 2 0; do
+    head_sha="$("$GH_CMD" api "repos/${REPO}/pulls/${PR}" --jq '.head.sha')" && [ -n "$head_sha" ] && break
+    head_sha=""
+    [ "$delay" -gt 0 ] && sleep "$delay"
+  done
 fi
 if [ -z "$head_sha" ]; then
-  echo "::error::could not read head sha for PR ${PR}" >&2
+  echo "::error::could not read head sha for PR ${PR} after 3 attempts" >&2
   exit 2
 fi
 
@@ -119,14 +135,11 @@ if [ "${BOARD_VERDICT_DRY_RUN:-}" = "true" ]; then
   exit 0
 fi
 
-# THE WRITE GOES THROUGH A SEAM so the suite can observe it. Every test used to
-# stop at the dry-run exit above, which meant nothing asserted what is actually
-# PUBLISHED: hardcoding `state=success` on the line below, or writing the status
-# under a context nobody looks at, left all fourteen cases green while the gate
-# reported the opposite of its own decision. BOARD_VERDICT_GH_CMD is test-only —
-# the suite asserts no workflow sets it, since pointing it at `true` would make
-# the job succeed while publishing nothing.
-GH_CMD="${BOARD_VERDICT_GH_CMD:-gh}"
+# THE WRITE GOES THROUGH THE SAME SEAM so the suite can observe it. Every test
+# used to stop at the dry-run exit above, which meant nothing asserted what is
+# actually PUBLISHED: hardcoding `state=success` on the line below, or writing
+# the status under a context nobody looks at, left all fourteen cases green
+# while the gate reported the opposite of its own decision.
 
 "$GH_CMD" api -X POST "repos/${REPO}/statuses/${head_sha}" \
   -f state="$state" \
