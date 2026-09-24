@@ -18,8 +18,7 @@
     },
     "github": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "alwaysLoad": true
+      "args": ["-y", "@modelcontextprotocol/server-github"]
     },
     "sentry": {
       "command": "npx",

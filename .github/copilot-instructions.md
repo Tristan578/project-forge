@@ -82,7 +82,13 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 
 See `AGENTS.md` for full taskboard setup, workflow, and GitHub Project sync details.
 
-### Plan mode (Copilot CLI)
+### Sync Architecture (Non-Negotiable)
+- `github_issue_number` (SQLite column) is the SOLE link between local tickets and GitHub Issues. NEVER match by title.
+- `sync_repo` (SQLite column) controls which repo a ticket syncs to. Only `sync_repo = 'project-forge'` tickets are synced.
+- The JSON map file is a cache. SQLite columns are authoritative.
+- Tickets from other local projects are NEVER synced (they have `sync_repo = NULL`).
+
+## Plan Mode (Copilot CLI)
 
 This repository is spec-first. `.claude/CLAUDE.md` says "Spec-First: Never implement
 without an approved spec in `specs/`". In Copilot CLI, enter plan mode before you
@@ -107,12 +113,6 @@ for.
 To trust this checkout so Copilot CLI stops asking on every start, follow
 `docs/guides/copilot-cli-trusted-folders.md`. The trust list is local state and is never
 committed.
-
-### Sync Architecture (Non-Negotiable)
-- `github_issue_number` (SQLite column) is the SOLE link between local tickets and GitHub Issues. NEVER match by title.
-- `sync_repo` (SQLite column) controls which repo a ticket syncs to. Only `sync_repo = 'project-forge'` tickets are synced.
-- The JSON map file is a cache. SQLite columns are authoritative.
-- Tickets from other local projects are NEVER synced (they have `sync_repo = NULL`).
 
 ## Security
 

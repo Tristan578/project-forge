@@ -31,12 +31,15 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 - `upstash` — Redis cache operations and rate limiting
 - `taskboard` — the local ticket board (launched through a git alias; see `docs/guides/taskboard-sync.md`)
 
-Claude Code defers MCP tools behind Tool Search by default. `github` and `context7`
-set `"alwaysLoad": true`, so their tools are in context from session start: nearly
-every session uses them. The others stay deferred on purpose. Four carry credentials,
-and none is needed in most sessions. `alwaysLoad` also makes startup wait for those two
-servers, for up to the 5-second connect timeout. Add it to another server only if that
-server is needed in nearly every session. The key and its behavior are documented at
+Claude Code defers MCP tools behind Tool Search by default. Only `context7` sets
+`"alwaysLoad": true`, so its tools are in context from session start: it needs no
+credential, only reads documentation, and nearly every session uses it. Every other
+server stays deferred on purpose. `neon`, `sentry`, `stripe` and `upstash` read
+credentials from the environment, and `github` needs a GitHub token and can write to
+the repository (push, merge, create and delete files), so loading its tools into every
+context, reviewer seats included, is not worth the saved search. `alwaysLoad` also
+makes startup wait for the server. Add it to another server only if that server needs
+no credential, cannot write, and is needed in nearly every session. The key and its behavior are documented at
 https://code.claude.com/docs/en/mcp#exempt-a-server-from-deferral. The key affects
 Claude Code only: Codex does not read `.mcp.json`.
 
