@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invokeHandler, createMockStore } from './handlerTestUtils';
 import { gameplayHandlers } from '../gameplayHandlers';
+import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
 
 // ---------------------------------------------------------------------------
 // Material preset mocks
@@ -342,25 +343,84 @@ describe('update_game_component', () => {
     expect(result.error).toContain('Unknown component type');
   });
 
-  it('calls store.updateGameComponent with built component', async () => {
+  // A six-point route, a non-default loop mode and a non-default pause: every
+  // field an update that names only `speed` must leave alone (#10144).
+  const platformRoute: [number, number, number][] = [[0, 0, 0], [2, 0, 0], [4, 1, 0], [6, 1, 0], [8, 2, 0], [10, 2, 0]];
+  const platform = {
+    type: 'movingPlatform' as const,
+    movingPlatform: { waypoints: platformRoute, speed: 2, loopMode: 'once' as const, pauseDuration: 3 },
+  };
+
+  it('keeps every field the caller did not name (partial update, #10144)', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
+      entityId: 'ent-1',
+      componentType: 'moving_platform',
+      properties: { speed: 5 },
+    }, { allGameComponents: { 'ent-1': [platform] } });
+    expect(result.success).toBe(true);
+    expect(store.updateGameComponent).toHaveBeenCalledTimes(1);
+    // The FULL component, so the engine's whole-replace receives the merged
+    // values and not the defaults `expect.objectContaining` would hide.
+    expect((store.updateGameComponent as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+      'ent-1',
+      {
+        type: 'movingPlatform',
+        movingPlatform: { waypoints: platformRoute, speed: 5, loopMode: 'once', pauseDuration: 3 },
+      },
+      // The report names what the caller WROTE: the carried fields are not
+      // supplied, or a stale marker on the route would be cleared by a speed edit.
+      expect.objectContaining({ corrections: [], supplied: ['speed'] }),
+    ]);
+  });
+
+  it('merges onto the component of the named type, not a sibling on the same entity', async () => {
+    const health = { type: 'health' as const, health: { maxHp: 250, currentHp: 40, invincibilitySecs: 2, respawnOnDeath: false, respawnPoint: [1, 2, 3] as [number, number, number], despawnOnDeath: false } };
     const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
       entityId: 'ent-1',
       componentType: 'health',
-      properties: { maxHp: 50 },
-    });
+      properties: { maxHp: 300 },
+    }, { allGameComponents: { 'ent-1': [platform, health] } });
     expect(result.success).toBe(true);
-    expect(store.updateGameComponent).toHaveBeenCalledTimes(1);
-    const [entityId, comp] = (store.updateGameComponent as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { type: string }];
-    expect(entityId).toBe('ent-1');
-    expect(comp.type).toBe('health');
+    expect((store.updateGameComponent as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+      'ent-1',
+      { type: 'health', health: { ...health.health, maxHp: 300 } },
+      expect.objectContaining({ corrections: [], supplied: ['maxHp'] }),
+    ]);
   });
+
+  it('reports a missing component instead of success', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
+      entityId: 'ent-1',
+      componentType: 'moving_platform',
+      properties: { speed: 5 },
+    }, { allGameComponents: { 'ent-1': [{ type: 'health', health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0.5, respawnOnDeath: true, respawnPoint: [0, 1, 0], despawnOnDeath: true } }] } });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('has no moving_platform component');
+    expect(result.error).toContain('add_game_component');
+    expect(store.updateGameComponent).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a prototype key as a stored entity', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
+      entityId: 'constructor',
+      componentType: 'health',
+      properties: { maxHp: 5 },
+    });
+    expect(result.success).toBe(false);
+    expect(store.updateGameComponent).not.toHaveBeenCalled();
+  });
+
+  // A stored projectile for the two report cases: an update is a partial write
+  // onto a component that exists (#10144).
+  const projectile = buildStoreComponent('projectile', {});
+  if (!projectile) throw new Error('fixture: projectile did not build');
 
   it('reports the values it adjusted and hands the store the same report', async () => {
     const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
       entityId: 'ent-1',
       componentType: 'projectile',
       properties: { speed: 50_000, damage: 25 },
-    });
+    }, { allGameComponents: { 'ent-1': [projectile] } });
     expect(result.success).toBe(true);
     const data = result.result as { message: string; corrections: unknown[] };
     const expected = [
@@ -381,7 +441,7 @@ describe('update_game_component', () => {
       entityId: 'ent-1',
       componentType: 'projectile',
       properties: { speed: 40, damage: 25 },
-    });
+    }, { allGameComponents: { 'ent-1': [projectile] } });
     expect(result.result).toEqual({ message: 'Updated projectile', corrections: [] });
   });
 });
