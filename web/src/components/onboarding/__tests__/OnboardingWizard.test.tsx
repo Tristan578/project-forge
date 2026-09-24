@@ -45,6 +45,13 @@ vi.mock('@/lib/analytics/posthog', async (importOriginal) => ({
   trackEvent: vi.fn(),
 }));
 
+// The toast's own behaviour is pinned in customizeWithAi.test.ts; here only
+// WHEN the wizard offers it (#10172).
+const mockOfferCustomizeWithAi = vi.fn();
+vi.mock('@/lib/chat/customizeWithAi', () => ({
+  offerCustomizeWithAi: (...args: unknown[]) => mockOfferCustomizeWithAi(...args),
+}));
+
 // The user store is REAL so a profile arriving after mount is observable: the
 // static selector mock this file used to carry could not reproduce #10156's
 // first-render defect at all. Reset to a loaded, paying user by default.
@@ -301,11 +308,18 @@ describe('OnboardingWizard', () => {
     expect(mockCompleteOnboarding).not.toHaveBeenCalled();
     expect(onComplete).not.toHaveBeenCalled();
     expect(trackEvent).not.toHaveBeenCalled();
+    expect(mockOfferCustomizeWithAi).not.toHaveBeenCalled();
     expect(screen.getByTestId('template-card-runner')).toHaveProperty('disabled', true);
 
     await act(async () => {
       settle(LOADED_OK);
     });
+
+    // #10172: offered once the template is in, naming it as the registry does.
+    const name = TEMPLATE_REGISTRY.find((t) => t.id === 'platformer')?.name;
+    expect(name).toBeTruthy();
+    expect(mockOfferCustomizeWithAi).toHaveBeenCalledTimes(1);
+    expect(mockOfferCustomizeWithAi).toHaveBeenCalledWith(name);
 
     expect(mockCompleteOnboarding).toHaveBeenCalledTimes(1);
     expect(onComplete).toHaveBeenCalledTimes(1);
@@ -388,6 +402,7 @@ describe('OnboardingWizard', () => {
     expect(mockCompleteOnboarding).not.toHaveBeenCalled();
     expect(onComplete).not.toHaveBeenCalled();
     expect(trackEvent).not.toHaveBeenCalled();
+    expect(mockOfferCustomizeWithAi).not.toHaveBeenCalled();
   });
 
   it('treats a thrown load like a failed one, with a generic message', async () => {
