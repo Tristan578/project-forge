@@ -782,10 +782,11 @@ async function POST_impl(request: NextRequest) {
     // On the premium direct path the scene goes in just before the latest
     // user turn instead — see `messagesForAgent` below.
     // sceneContext is client-supplied and user-authored (entity names, script
-    // text, whatever a .forge file or modified client sends), so it is
-    // screened by the SAME `sanitizeSceneContext` the premium placement uses:
-    // control characters stripped, injection patterns redacted (not rejected —
-    // see the function for why). No 10k system-prompt length cap — scene
+    // text, whatever a .forge file or modified client sends), so it goes
+    // through the SAME `sanitizeSceneContext` the premium placement uses:
+    // NFKC, control characters stripped, `&` `<` `>` and angle lookalikes
+    // escaped, otherwise verbatim (nothing redacted — see the function for
+    // why). No 10k system-prompt length cap — scene
     // context for complex scenes can legitimately be 50k+ chars. The total
     // input budget (MAX_INPUT_CHARS = 2M) at step 5b is the real size guard
     // for the entire conversation.
@@ -859,8 +860,9 @@ async function POST_impl(request: NextRequest) {
 
   // 8. Convert messages
   const modelMessages = buildModelMessages(messages);
-  // 8a. Mid-conversation scene context (#8859). Same screen + nonce as the
-  // leading embed, plus data framing, inserted immediately BEFORE the latest
+  // 8a. Mid-conversation scene context (#8859). Same escaping + nonce as the
+  // leading embed, plus data framing (and an annotation when the scene text
+  // resembles instructions), inserted immediately BEFORE the latest
   // user turn — never after it, so the highest-recency slot stays the user's
   // own message and user-authored scene text cannot pose as the last word.
   // Null (and `messagesForAgent === modelMessages`) whenever the leading embed

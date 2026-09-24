@@ -325,29 +325,55 @@ function redactInjectionPatterns(input: string): string {
 }
 
 /**
- * Screen the client-supplied engine scene context before it reaches the model.
+ * Angle-bracket lookalikes that survive NFKC folding, escaped as numeric
+ * character references so no visual spelling of a tag appears raw in the scene
+ * body. (NFKC already folds the fullwidth and small-form variants —
+ * U+FF1C/FF1E/FE64/FE65 and U+FF06/FE60 — to ASCII `<`, `>`, `&`, and those
+ * are escaped as ASCII.)
+ */
+const ANGLE_LOOKALIKES =
+  /[‹›〈〉〈〉⟨⟩˂˃ᐳᐸ❬❭❮❯︿﹀]/g;
+
+/**
+ * Prepare the client-supplied engine scene context for the model.
  *
  * THREAT MODEL. The scene context is built in the browser from the scene graph,
  * so it carries user-authored text — entity names, scene names, script
  * snippets — and a `.forge` file or remixed project can put a stranger's text
- * there. A modified client can send anything at all. It is therefore as
- * forgeable as a tool result, and gets the same treatment as the tool channel:
- * control characters stripped and injection patterns REDACTED, never rejected.
- * A 400 would lock the user out of chat for as long as the offending entity
- * exists, and the `system:` pattern false-positives on ordinary text.
+ * there. A modified client can send anything at all. On the premium path the
+ * chat route wraps it in a `<scene_context>` … `</scene_context>` data block,
+ * so the one structural property this function guarantees is that the body
+ * CANNOT contain markup that closes (or opens) that block:
  *
- * NO length cap, unlike `sanitizeToolText`: a complex scene is legitimately
- * 50k+ chars, and the request-wide MAX_INPUT_CHARS budget in the chat route is
- * the real size guard. No trim either, so the cached bytes are exactly what the
- * client sent minus what was screened out.
+ *  1. NFKC-normalize, so fullwidth / small-form brackets become ASCII first;
+ *  2. strip control characters (`stripControlChars`);
+ *  3. escape — the ONE escaping scheme for scene text — `&` → `&amp;`, then
+ *     `<` → `&lt;` and `>` → `&gt;` (ampersand first, so an escape is never
+ *     double-read), and every character in `ANGLE_LOOKALIKES` → `&#xHHHH;`.
+ *
+ * With no raw `<` or `>` left in the body, no spelling of a closing tag can
+ * form — whether spaced, entity-encoded (its `&` is escaped) or homoglyph. The
+ * text is otherwise kept VERBATIM: nothing is redacted, because ordinary game
+ * content ("You are now a hero!", an entity named "System: Health") trips the
+ * injection patterns. Detection is the caller's job — `detectPromptInjection`
+ * on the unescaped text, which annotates the framing rather than altering the
+ * scene (see `buildTrailingSceneContextMessage`).
+ *
+ * NO length cap and no trim: a complex scene is legitimately 50k+ chars, and
+ * the request-wide MAX_INPUT_CHARS budget in the chat route is the real size
+ * guard.
  *
  * Used by BOTH scene-context placements in the chat route (the leading
- * instruction-block embed and the trailing system message, #8859), so the two
- * cannot screen differently.
+ * instruction-block embed and the mid-conversation system message, #8859), so
+ * the two cannot prepare the scene differently.
  */
 export function sanitizeSceneContext(input: string): string {
   if (typeof input !== 'string') {
     return '';
   }
-  return redactInjectionPatterns(stripControlChars(input));
+  return stripControlChars(input.normalize('NFKC'))
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(ANGLE_LOOKALIKES, (c) => `&#x${(c.codePointAt(0) ?? 0).toString(16).toUpperCase()};`);
 }
