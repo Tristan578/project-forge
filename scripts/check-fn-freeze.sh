@@ -120,8 +120,8 @@
 # restate it).
 #
 # Exit codes: 0 every definition frozen; 1 at least one violation; 2 tooling
-# or vacuity error (no files, or no definitions — a gate that scans nothing is
-# not a passing gate, lesson #9).
+# or vacuity error (no files, or nothing derived from them — a gate that scans
+# nothing is not a passing gate, lesson #9).
 #
 # Usage:
 #   bash scripts/check-fn-freeze.sh           # check, report violations
@@ -202,11 +202,19 @@ derive_file() {
     # again, while `echo alias fail=:` (the word as an ARGUMENT) is text. A
     # word assembled at run time (`$x`, `$(...)`, `eval`, a sourced file) is
     # not a word this scan can see; that is the documented bound.
-    function end_word(   rq) {
+    # A substitution may expand to nothing (`$()` always does, `$(true)` does
+    # at run time), so a word is also judged with every substitution in it
+    # removed: `ali$()as`, `expand$(true)_aliases` and `DEBU$()G` are the
+    # guarded words to bash (fifteenth board round). wk is that form; it is
+    # used for command names and arguments, never for reserved words, which
+    # bash recognises before any expansion. Only a substitution that must
+    # CONTRIBUTE text to spell the word stays outside the scan.
+    function end_word(   rq, wk) {
       # rq: a quote or a backslash went into this word, so it is never a
       # reserved word (bash recognises those before quote removal).
       rq = wq; wq = 0
       if (w == "") return
+      wk = w; gsub(/\$\(\)/, "", wk); gsub(/`[^`]*`/, "", wk)
       # A case pattern is text. Only an unquoted `esac` where a pattern would
       # start ends the case (after the last `;;`).
       if (pat) {
@@ -239,14 +247,14 @@ derive_file() {
         # marks the function as one that ends the shell, anything else is a
         # call the trap rule may have to follow (see resolve_traps).
         if (def_name != "") {
-          if (w == "exit" || w == "exec") fexits[def_name] = 1
-          else if (w != def_name) fcalls[def_name] = fcalls[def_name] " " w
+          if (wk == "exit" || wk == "exec") fexits[def_name] = 1
+          else if (wk != def_name) fcalls[def_name] = fcalls[def_name] " " wk
         }
-        if (w == "alias") in_alias = 1
-        if (w == "shopt") in_shopt = 1
-        if (w == "trap") in_trap = 1
-        if (w == "function") in_function = 1
-        if (w == "enable") printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "enable", NR, NR
+        if (wk == "alias") in_alias = 1
+        if (wk == "shopt") in_shopt = 1
+        if (wk == "trap") in_trap = 1
+        if (!rq && w == "function") in_function = 1
+        if (wk == "enable") printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "enable", NR, NR
         w = ""; return
       }
       nwords++
@@ -262,28 +270,28 @@ derive_file() {
         shape_check("function " w, w)
         in_function = 0
       }
-      if (in_alias && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/)
+      if (in_alias && wk ~ /^[A-Za-z_][A-Za-z0-9_]*=/)
         printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
-      if (in_shopt && sflag != "" && w == "expand_aliases")
+      if (in_shopt && sflag != "" && wk == "expand_aliases")
         printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " sflag " " w, NR, NR
-      if (in_shopt && sflag != "" && w == "extdebug")
+      if (in_shopt && sflag != "" && wk == "extdebug")
         printf "%s\t%s\t%d\t%d\ttrap\n", file, "shopt " sflag " " w, NR, NR
-      if (in_trap && toupper(w) == "DEBUG")
+      if (in_trap && toupper(wk) == "DEBUG")
         printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap ... " w, NR, NR
       # The first non-flag argument of trap is its action; every later word
       # is a signal. The pair is judged when the statement ends.
       if (in_trap) {
         if (!trap_has_action) { if (w !~ /^-/) { trap_action = w; trap_has_action = 1 } }
-        else trap_sigs = trap_sigs " " toupper(w)
+        else trap_sigs = trap_sigs " " toupper(wk)
       }
-      if (in_shopt && w ~ /^-[a-z]*s[a-z]*$/) sflag = w
+      if (in_shopt && wk ~ /^-[a-z]*s[a-z]*$/) sflag = wk
       w = ""
     }
     # An EXIT, ERR or RETURN trap (or 0, the EXIT alias) whose action holds
     # the word exit or exec, after the backslashes bash would drop, replaces
     # the exit status the script chose.
     function check_trap(   a) {
-      a = trap_action; gsub(/\\/, "", a)
+      a = trap_action; gsub(/\\/, "", a); gsub(/\$\([[:space:]]*\)/, "", a); gsub(/`[[:space:]]*`/, "", a)
       if (a ~ /(^|[^A-Za-z0-9_])(exit|exec)([^A-Za-z0-9_]|$)/ && trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/)
         printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " a " ..." trap_sigs, NR, NR
       else if (trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/) {

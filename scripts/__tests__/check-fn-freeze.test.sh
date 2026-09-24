@@ -1297,6 +1297,56 @@ FIX
 expect_rc "30g. a trap or alias statement holding a substitution is judged once, as the whole statement" 1 \
   "$(run_gate "$d_trapsub")" "5 violation(s)" "fixture.test.sh:4: 'alias x=\$()'" "fixture.test.sh:4: 'alias fail=:'" "fixture.test.sh:5: 'trap" "fixture.test.sh:6: 'shopt -s expand_aliases'"
 
+# ---- 30h. every substitution opener resumes the statement it sits in ------------
+# Fifteenth board round (test): only the top-level and double-quoted `$(`
+# openers were pinned; the other five could lose the statement unnoticed.
+# Each line sends one opener through a case word or an array literal whose
+# statement goes on to an `if` argument. If the statement is lost at the
+# opener, `if` or the pattern opens a nesting level no `fi` closes, and the
+# indented definition at the end is hidden.
+d_openers="$(mkfixture openers <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+case $((1+1)) in
+  if) : ;;
+esac
+case $[1+1] in
+  if) : ;;
+esac
+case "pre$((1+1))post" in
+  if) : ;;
+esac
+declare -a arr=($((1+1))) if
+declare -a arr=($(true)) if
+ hidden() { :; }
+FIX
+)"
+expect_rc "30h. \$((, \$[, a quoted \$(( and both array-literal openers keep the statement" 1 \
+  "$(run_gate "$d_openers")" "1 violation(s)" "fixture.test.sh:14: 'hidden()'"
+
+# ---- 30i. a substitution that can expand to nothing hides no keyword ---------
+# Fifteenth board round (security): `ali$()as` is `alias` to bash, and
+# `$(true)` expands to nothing at run time, so a word is judged with its
+# substitutions removed. Each line is a real neuter (the round reproduced
+# the alias and the DEBUG trap against a frozen `fail` in bash).
+d_emptysub="$(mkfixture empty-substitution <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+shopt -s expand$()_aliases
+ali$()as fail=:
+al$(true)ias fail=:
+alias fail$()=:
+shopt -s extdeb`true`ug
+trap '[[ $BASH_COMMAND != fail\ * ]]' DEBU$()G
+trap 'ex$()it 0' EXIT
+sh$()opt -s expand_aliases
+tr$()ap ':' DEBUG
+en$()able -n fail
+FIX
+)"
+expect_rc "30i. a word spelled around an empty substitution is still the guarded word" 1 \
+  "$(run_gate "$d_emptysub")" "10 violation(s)" "fixture.test.sh:3: 'shopt -s expand\$()_aliases'" "fixture.test.sh:4: 'alias fail=:'" "fixture.test.sh:5: 'alias fail=:'" "fixture.test.sh:6: 'alias fail\$()=:'" "fixture.test.sh:7: 'shopt -s extdeb" "fixture.test.sh:8: 'trap ... DEBU\$()G'" "fixture.test.sh:9: 'trap ex" "fixture.test.sh:10: 'shopt -s expand_aliases'" "fixture.test.sh:11: 'trap ... DEBUG'" "fixture.test.sh:12: 'enable'"
+
 # ---- 12c. a file whose only definition is malformed gets that report --------------
 # Fourteenth board round (ux): the vacuity guard counted only frozen and
 # unfrozen rows, so a file holding just ` fail() { :; }` (the eleventh round's

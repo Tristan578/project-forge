@@ -877,7 +877,11 @@ by construction rather than by measurement.
   fourth: a command substitution in the case word (`case "$(cmd)" in`) reset
   the statement, so a `$( )`, `$(( ))` or `$[ ]` now resumes the statement it
   sits in. A file whose only row is a violation reports that violation rather
-  than "nothing derived". No files, no definitions, or a file the
+  than "nothing derived". The fifteenth found two more: five of the nine
+  substitution openers were unpinned (each now has a case), and a word
+  spelled around a substitution that expands to nothing (`ali$()as`,
+  `DEBU$()G`) is the guarded word to bash, so a word is also judged with its
+  substitutions removed. No files, nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state
   from a fixture, runs the gate on the real tree behind a 300-function floor
@@ -931,8 +935,9 @@ then `alias nothing fail=:` and `shopt -s nocasematch expand_aliases`), where
 the two prefix lists and the next-word rule that preceded it were each defeated
 by the next spelling (the same treadmill round 39 documents for assignment
 keywords) — while `echo alias fail=:`, the word as an argument, stays text. What stays open
-is a word assembled at run time — `$x`, `$(...)`, `eval`, a `source` of a
-file the suite wrote — and `declare -n`, which aliases a variable, not a
+is a word assembled at run time — `$x`, a `$(...)` whose output must
+contribute text to spell the word, `eval`, a `source` of a file the suite
+wrote — and `declare -n`, which aliases a variable, not a
 function. Nested definitions are deliberately
 unfrozen. And removing BOTH a definition and its freeze still satisfies the
 gate, as it did the round-40 drift check — the effect probe and the neuter
