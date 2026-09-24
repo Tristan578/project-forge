@@ -22,6 +22,12 @@ import { collider2dHalfHeight } from '@/lib/scripting/collider2dExtent';
 import { isScriptAllowedCommand } from '@/lib/scripting/scriptAllowlist';
 import { handleLocalScriptCommand } from '@/lib/scripting/localScriptCommands';
 import { publishPlayTick, resetPlayTickBus } from '@/lib/playtest/playTickBus';
+import { getScriptIsolationMode, resolveScriptTransport } from '@/lib/scripting/sandboxConfig';
+import {
+  createSandboxedScriptHost,
+  loadSandboxWorkerSource,
+  type ScriptWorkerLike,
+} from '@/lib/scripting/sandboxOrigin';
 
 /**
  * The Y scale the engine reported for one entity this tick, or 1.
@@ -75,7 +81,7 @@ interface ScriptRunnerOptions {
 
 export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const engineMode = useEditorStore((s) => s.engineMode);
-  const workerRef = useRef<Worker | null>(null);
+  const workerRef = useRef<ScriptWorkerLike | null>(null);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addScriptLog = useEditorStore((s) => s.addScriptLog);
   const elapsedRef = useRef(0);
@@ -151,16 +157,41 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
     [wasmModule, reportDispatchFailure]
   );
 
+  // Sandboxed transport only: fetch the bundled worker text now, not at Play.
+  // The 5 s watchdog starts on the first tick, and a cold chunk load of ~150 KB
+  // must not be what spends it. A failure here is retried (and reported) when
+  // Play actually starts.
+  useEffect(() => {
+    if (resolveScriptTransport(getScriptIsolationMode()).transport !== 'sandboxed-origin') return;
+    loadSandboxWorkerSource().catch(() => undefined);
+  }, []);
+
   // Start worker when entering Play mode
   useEffect(() => {
     if (engineMode === 'play' && !workerRef.current && wasmModule) {
       // Fresh session, fresh dedupe: a name refused during the last run must be
       // reported again if the author hits Play without having fixed it.
       reportedFailuresRef.current.clear();
-      const worker = new Worker(
-        new URL('./scriptWorker.ts', import.meta.url),
-        { type: 'module' }
-      );
+      // Transport only (#8700). Both branches run the same scriptWorker.ts and
+      // receive/emit the same messages; everything below this line is shared.
+      // NEXT_PUBLIC_SCRIPT_ISOLATION is read inside getScriptIsolationMode() as a
+      // literal member expression — see sandboxConfig.ts.
+      const { transport, notice } = resolveScriptTransport(getScriptIsolationMode());
+      const worker: ScriptWorkerLike =
+        transport === 'sandboxed-origin'
+          ? createSandboxedScriptHost({
+              onError: (message) => {
+                console.error(`[ScriptRunner] ${message}`);
+                addScriptLog({ entityId: '*', level: 'error', message, timestamp: Date.now() });
+              },
+            })
+          : new Worker(
+              new URL('./scriptWorker.ts', import.meta.url),
+              { type: 'module' }
+            );
+      if (notice) {
+        addScriptLog({ entityId: '*', level: 'warn', message: notice, timestamp: Date.now() });
+      }
 
       // Initialize async channel router
       const router = new AsyncChannelRouter();

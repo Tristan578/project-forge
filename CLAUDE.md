@@ -48,6 +48,7 @@ Optional feature flags (defaults noted below):
 - `NEXT_PUBLIC_MCP_BRIDGE=true` — lets a **production** build attach the editor tab to the local MCP relay (#9293). Outside production the bridge is available without the flag; in either case it is inert until the tab is opened with `?mcp=<token>` AND the person approves the in-tab consent prompt. Any value other than the exact string `"true"` leaves it off in production. The gate is `mcpBridgeEnabled()` in `web/src/lib/mcp/bridgeOptIn.ts`, and it must read `process.env.NEXT_PUBLIC_MCP_BRIDGE` as a **literal member expression** — Next.js only substitutes fully-qualified `process.env.NEXT_PUBLIC_*`, so an aliased or injected `env` object reads `{}` in the browser and the gate fails OPEN. A test pins the source shape because no runtime test can see this.
 - `NEXT_PUBLIC_MCP_RELAY_URL` — overrides the relay the editor dials (default `ws://127.0.0.1:3001/api/mcp/ws`). Same literal-member-expression rule.
 - `MCP_RELAY_TOKEN` (≥32 chars, required), `MCP_RELAY_PORT`, `MCP_RELAY_EDITOR_ORIGINS` — server-side, read by `npm run relay` in `mcp-server/`. Never set in Vercel: the relay is loopback-only. Setup: `docs/guides/mcp-server-setup.md`.
+- `NEXT_PUBLIC_SCRIPT_ISOLATION=sandboxed-origin` — opt-in isolation boundary for editor game scripts (#8700); **default off** (`revoke`, today's same-origin worker). Only the exact strings `sandboxed-origin` and `ast` are recognised; unset, empty, `true`, `TRUE`, `1` or anything else stays `revoke`. `sandboxed-origin` runs the same `scriptWorker.ts` as a `blob:` worker inside a `sandbox="allow-scripts"` iframe (opaque origin: no cookies) whose own CSP, delivered in the srcdoc, is `connect-src 'none'` with no script host. `ast` is reserved — not implemented — and runs the sandboxed transport with a notice in the script console. Read only in `getScriptIsolationMode()` (`web/src/lib/scripting/sandboxConfig.ts`) as a literal member expression, pinned by `sandboxConfig.test.ts`. The worker ships as text: `web/scripts/sandbox-worker-loader.cjs` replaces `scriptWorkerSource.bundle.ts` at build time under both webpack and Turbopack (`next.config.ts`; wiring pinned by `sandboxWorkerLoader.test.ts`).
 - `CRON_SECRET` — activates the synthetic health monitor. `isAuthorizedCron()` in `web/src/app/api/cron/health-monitor/route.ts` fails **closed**: with the variable unset every scheduled invocation is answered `401`, which is the state production was in when last checked (2026-09-05, #9118). Earlier 401s have a different cause - see the runbook. Setting it is an owner-only action with an evidence checklist. Runbook: `docs/guides/health-monitor-cron.md`.
 
 Always-on protections & observability (not env-gated):
@@ -93,6 +94,7 @@ creator's scripts by design — the sandbox below is the only control there.
 | Per-frame command cap | `MAX_COMMANDS_PER_FRAME` | `scriptSecurity.test.ts` |
 | Loop watchdog | `loopGuards.ts` | `loopGuards.test.ts`, `loopWatchdog.test.ts` |
 | Source size cap (512 KiB) | `MAX_SCRIPT_SOURCE_BYTES` | `scriptWorker.ts` |
+| Sandboxed origin — **opt-in, off by default** (`NEXT_PUBLIC_SCRIPT_ISOLATION=sandboxed-origin`) | `sandboxOrigin.ts`, `buildSandboxFrameContentSecurityPolicy()` in `csp.ts` | `sandboxOrigin.test.ts`, `sandboxConfig.test.ts`, `sandboxWorkerLoader.test.ts`, `e2e/tests/script-sandbox-isolation.spec.ts` |
 
 There is **no rate limiter**. Earlier comments claimed one; it has never existed.
 
@@ -100,7 +102,15 @@ There is **no rate limiter**. Earlier comments claimed one; it has never existed
 `(0).constructor.constructor('return fetch')()` still resolves. This is stated
 in `sandboxGlobals.ts` and documented (not prevented) by the
 "nested Function constructor limitation" test in `scriptSandbox.test.ts`. Real
-containment requires a different execution substrate — tracked at #8700.
+containment requires a different execution substrate — tracked at #8700. That
+substrate now exists behind a flag: under `NEXT_PUBLIC_SCRIPT_ISOLATION=
+sandboxed-origin` the escape still reaches a live `fetch`, but the frame's CSP
+refuses every request and the opaque origin carries no cookies, independent of
+`revokeNetworkGlobals()` (proven in Chromium by
+`e2e/tests/script-sandbox-isolation.spec.ts`). With the flag unset — the default
+— the table above is still the whole story. The sandbox attribute must stay
+exactly `allow-scripts` (adding `allow-same-origin` hands back the editor's
+origin) and the CSP must stay in the srcdoc (a route header cannot reach it).
 
 **Suppression.** GitHub does not honour `// lgtm[...]` or `// codeql[...]`
 comments unless the language's `AlertSuppression.ql` runs alongside the analysis

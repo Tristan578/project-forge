@@ -1296,3 +1296,59 @@ describe('useScriptRunner', () => {
     expect(mockResetPlayTickBus).toHaveBeenCalledTimes(1);
   });
 });
+// ---------------------------------------------------------------------------
+// Script isolation transport (#8700). NOT mocked: the flag is read through the
+// real sandboxConfig, and the sandboxed path runs the real sandboxOrigin module.
+// Vitest does not run the build-time loader, so the bundled worker is the empty
+// placeholder — which is itself the observable: the host must refuse it loudly
+// rather than start a worker with no code.
+// ---------------------------------------------------------------------------
+describe('useScriptRunner — script isolation transport', () => {
+  const mockWasmModule = { handle_command: vi.fn() };
+
+  // The suite above unstubs every global in its afterAll.
+  afterAll(() => vi.unstubAllGlobals());
+
+  beforeEach(() => {
+    vi.stubGlobal('Worker', TestWorker);
+    vi.clearAllMocks();
+    mockEngineMode = 'play';
+    latestWorker = null;
+    workerPostMessages = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    document.body.innerHTML = '';
+  });
+
+  it('flag unset: the same-origin module Worker, exactly as before', () => {
+    vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', undefined);
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    expect(latestWorker).not.toBeNull();
+    expect(workerPostMessages.some((m) => (m as { type?: string }).type === 'init')).toBe(true);
+    unmount();
+  });
+
+  it("'sandboxed-origin': no same-origin Worker is constructed, and an unbundled worker is reported, not run", async () => {
+    vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', 'sandboxed-origin');
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    expect(latestWorker).toBeNull();
+    await vi.waitFor(() =>
+      expect(mockAddScriptLog).toHaveBeenCalledWith(
+        expect.objectContaining({ entityId: '*', level: 'error', message: expect.stringMatching(/was not bundled/) }),
+      ),
+    );
+    unmount();
+  });
+
+  it("'ast': says it is not implemented and runs the sandboxed transport — never the weaker one", () => {
+    vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', 'ast');
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    expect(latestWorker).toBeNull();
+    expect(mockAddScriptLog).toHaveBeenCalledWith(
+      expect.objectContaining({ entityId: '*', level: 'warn', message: expect.stringMatching(/not implemented/) }),
+    );
+    unmount();
+  });
+});
