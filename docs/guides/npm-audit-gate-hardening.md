@@ -878,9 +878,15 @@ a forced failure exits 0 — the same silent pass as the pre-sweep neuter, from
 two inserted lines the first cut of the gate could not see (the review board's
 security seat found it). The gate now reports either spelling in command
 position of executable text as a violation; a self-defense suite has no use
-for aliases. That closes the direct spelling only — `declare -n` aliasing of a
-VARIABLE and `eval` on a runtime-assembled name remain open (round 39), as
-does an `alias` assembled by `eval`. Nested definitions are deliberately
+for aliases. Command position is tracked through the scan and survives every
+word bash lets stand in front of a command — a leading backslash (`\alias`),
+`builtin`, `command`, `time`, `!`, the compound keywords and an unquoted
+`NAME=value` prefix — because the second board round measured `\alias`,
+`builtin alias` and `command alias` as silent bypasses of an anchor that
+looked only at separator characters. That closes the literal spellings —
+`declare -n` aliasing of a VARIABLE, `eval` on a runtime-assembled name and a
+`source` of a file written at runtime remain open (round 39), as does an
+`alias` assembled by `eval`. Nested definitions are deliberately
 unfrozen. And removing BOTH a definition and its freeze still satisfies the
 gate, as it did the round-40 drift check — the effect probe and the neuter
 reproduction are what prove a surviving freeze is in force.

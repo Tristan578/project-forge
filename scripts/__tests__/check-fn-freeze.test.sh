@@ -510,6 +510,36 @@ FIX
 )"
 expect_rc "19c. alias text inside quotes, a heredoc fixture or a comment is not a violation" 0 \
   "$(run_gate "$d_alias_text")" "1 function(s) across 1 file(s) are frozen"
+# Every word bash lets stand in front of a command still defines the alias:
+# the review board measured `\alias`, `builtin alias` and `command alias` as
+# silent bypasses of an anchor that only looked at separator characters.
+d_alias_prefix="$(mkfixture alias-prefix <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+\shopt -s expand_aliases
+builtin alias fail=:
+command alias fail=:
+time alias fail=:
+if alias fail=:; then :; fi
+X=1 alias fail=:
+! alias fail=:
+\builtin \alias fail=:
+FIX
+)"
+expect_rc "19e. a backslash, builtin, command, time, if, an assignment prefix, ! and their combinations do not hide an alias" 1 \
+  "$(run_gate "$d_alias_prefix")" "8 violation(s)" \
+  "fixture.test.sh:3: '\shopt -s expand_aliases'" "fixture.test.sh:4: 'builtin alias fail='" \
+  "fixture.test.sh:5: 'command alias fail='" "fixture.test.sh:6: 'time alias fail='" \
+  "fixture.test.sh:7: 'if alias fail='" "fixture.test.sh:8: 'X=1 alias fail='" \
+  "fixture.test.sh:9: '! alias fail='" "fixture.test.sh:10: '\builtin \alias fail='"
+# ...and each of those really binds in this bash, so the rule guards measured
+# bypasses, not a list someone imagined (lessons-learned #19 in reverse).
+alias_prefix_probe="$(bash -c 'fail() { echo REAL; }; readonly -f fail; \shopt -s expand_aliases; builtin alias fail="echo ALIASED"; eval fail' 2>&1)"
+if [ "$alias_prefix_probe" = "ALIASED" ]; then
+  pass "19f. '\\shopt' and 'builtin alias' define the alias for real in this bash"
+else
+  fail "19f. prefix probe did not shadow the frozen function (got '$alias_prefix_probe')"
+fi
 # The refusal is the whole point: prove the alias really does shadow a frozen
 # function in this bash, so the rule guards a real bypass and not a theory.
 alias_probe="$(bash -c 'fail() { echo REAL; }; readonly -f fail; shopt -s expand_aliases; alias fail="echo ALIASED"; eval fail' 2>&1)"
