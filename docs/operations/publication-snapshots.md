@@ -2,8 +2,9 @@
 
 Publishing stores a scene snapshot in Postgres. When `PUBLISH_TO_R2` is enabled,
 the server also writes an immutable JSON object to the existing private assets
-bucket. This is a storage foundation; public CDN hosting and standalone exported
-game deployment remain outstanding under #7580.
+bucket. Public CDN hosting of published games is deliberately not built — see
+`docs/decisions/2026-09-23-published-game-hosting.md` for the decision and
+what would reopen it. Standalone exported-game deployment is tracked by #9884.
 
 ## Request behavior
 

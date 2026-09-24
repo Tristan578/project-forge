@@ -94,7 +94,7 @@ Vercel Edge (CDN, routing, headers)
 | **Clerk (Auth)** | Login, signup, all authenticated API routes, user tier checks | Public pages, health check, already-loaded editor sessions (until token expires) |
 | **Stripe** | New subscriptions, plan changes, webhook processing | Existing users retain current tier, all editing features work |
 | **Anthropic API** | AI chat, scene generation, compound AI actions | Manual editing, all non-AI features, asset import/export |
-| **R2 (Assets)** | Asset upload/download, marketplace, published game hosting | Editor with local assets, WASM engine (separate CDN) |
+| **R2 (Assets)** | Asset upload/download, marketplace, private publication-snapshot mirror (play falls back to the Postgres snapshot) | Editor with local assets, WASM engine (separate CDN), playing published games |
 | **Engine CDN** | New WASM loads for new visitors | Returning visitors with cached WASM, Vercel fallback if R2_CDN_ENABLED=false |
 | **Upstash Redis** | Distributed rate limiting (falls back to in-memory per-instance) | All features; rate limiting still works per-instance |
 | **Sentry** | Error tracking, tracing, replay capture | All features; errors just go untracked |

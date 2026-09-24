@@ -288,6 +288,12 @@ export const publishedGames = pgTable(
     description: text('description'),
     status: publishStatusEnum('status').notNull().default('processing'),
     version: integer('version').notNull().default(1),
+    // The game's PLAY-PAGE path (`/play/{clerkId}/{slug}`), despite the name.
+    // Every consumer (publish/list `url`, the community routes' `cdnUrl`,
+    // GameDetailModal's `href`) treats it as the link to the player. Published
+    // games are served through the gated play API, not from a CDN; the object
+    // that IS in storage is `cdnBundleKey` below. Kept under this name because
+    // it is a public API field. docs/decisions/2026-09-23-published-game-hosting.md
     cdnUrl: text('cdn_url'),
     // Private immutable R2 snapshot; NULL when optional storage is unavailable.
     cdnBundleKey: text('cdn_bundle_key'),
