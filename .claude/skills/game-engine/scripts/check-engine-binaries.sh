@@ -23,13 +23,25 @@ section() { echo -e "\n${CYAN}=== $1 ===${NC}"; }
 
 MIN_SIZE_BYTES=1048576  # 1MB minimum — a real WASM binary is 5-20MB
 
-# The 4 variants that must exist
-declare -A VARIANTS=(
-  ["engine-pkg-webgl2"]="WebGL2 editor (fallback renderer)"
-  ["engine-pkg-webgl2-runtime"]="WebGL2 runtime (exported games, fallback)"
-  ["engine-pkg-webgpu"]="WebGPU editor (primary renderer)"
-  ["engine-pkg-webgpu-runtime"]="WebGPU runtime (exported games, primary)"
+# The 4 variants that must exist. A plain list plus a `case` lookup rather
+# than `declare -A`: associative arrays need Bash 4, and macOS still ships 3.2,
+# where `declare -A` aborts the script under `set -e`.
+VARIANTS=(
+  "engine-pkg-webgl2"
+  "engine-pkg-webgl2-runtime"
+  "engine-pkg-webgpu"
+  "engine-pkg-webgpu-runtime"
 )
+
+variant_desc() {
+  case "$1" in
+    engine-pkg-webgl2) echo "WebGL2 editor (fallback renderer)" ;;
+    engine-pkg-webgl2-runtime) echo "WebGL2 runtime (exported games, fallback)" ;;
+    engine-pkg-webgpu) echo "WebGPU editor (primary renderer)" ;;
+    engine-pkg-webgpu-runtime) echo "WebGPU runtime (exported games, primary)" ;;
+    *) echo "unknown variant" ;;
+  esac
+}
 
 # Key files that must exist in each variant package
 KEY_FILES=(
@@ -44,8 +56,8 @@ echo "=============================================="
 
 section "Binary Package Presence"
 
-for pkg in "${!VARIANTS[@]}"; do
-  desc="${VARIANTS[$pkg]}"
+for pkg in "${VARIANTS[@]}"; do
+  desc="$(variant_desc "$pkg")"
   pkg_dir="${ENGINE_DIR}/${pkg}"
 
   if [ ! -d "$pkg_dir" ]; then
@@ -83,7 +95,7 @@ section "Binary Staleness Check"
 
 # Check if any Rust source files are newer than the WASM binaries
 NEWEST_WASM=""
-for pkg in "${!VARIANTS[@]}"; do
+for pkg in "${VARIANTS[@]}"; do
   wasm="${ENGINE_DIR}/${pkg}/forge_engine_bg.wasm"
   if [ -f "$wasm" ]; then
     # Track the newest WASM file
