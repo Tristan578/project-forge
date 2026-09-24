@@ -208,7 +208,7 @@ export interface SceneSlice {
    * @returns Whether the engine accepted the request, not whether it applied it.
    * @throws The original dispatch error after rollback attempts and optional lockout.
    */
-  loadScene: (json: string, opts?: { rejectionStrandsEditor?: boolean; strandOnThrow?: boolean }) => boolean;
+  loadScene: (json: string, opts?: LoadSceneOptions) => boolean;
   /**
    * Return false when no engine is available or it rejects the new scene.
    * A successful new scene clears {@link sceneLoadError}: an empty scene the
@@ -415,6 +415,39 @@ export function setSceneDispatcher(
  */
 export function hasDeferredSceneLoad(): boolean {
   return deferredSceneLoad !== null;
+}
+
+/**
+ * Drop the scene load waiting for the engine to attach, if any.
+ *
+ * The page that deferred a load owns it: it calls this from its effect
+ * cleanup, so a project abandoned before the engine attached (navigating to
+ * another project, or to `/dev`, mid-boot) does not replay into the editor
+ * that attaches next — where the next save would write project A's scene
+ * over project B's.
+ */
+export function cancelDeferredSceneLoad(): void {
+  deferredSceneLoad = null;
+}
+
+/** Options for {@link SceneSlice.loadScene}. */
+export interface LoadSceneOptions {
+  /** Whether a REJECTION strands the editor (default `true`, see #10056). */
+  rejectionStrandsEditor?: boolean;
+  /** Whether a THROWN dispatch strands the editor (default `true`, see #10079). */
+  strandOnThrow?: boolean;
+  /**
+   * Hold the load until the engine attaches when no dispatcher is installed
+   * yet, and replay it then (#10192). Off by default, and only the editor
+   * page's cold open turns it on: every other caller reports a `false` return
+   * to its user as a failed load, so queueing that scene would apply a load
+   * the UI has already called failed — a file import chosen before WASM
+   * finished loading would replace the project scene a moment after the
+   * toolbar said it was not loaded. The caller that defers owns the held
+   * load and cancels it with {@link cancelDeferredSceneLoad} when it goes
+   * away, so it cannot replay into a different editor.
+   */
+  deferUntilEngineAttaches?: boolean;
 }
 
 /** Outcome of {@link SceneSlice.loadTemplate}. */
@@ -790,8 +823,14 @@ export const createSceneSlice: StateCreator<
     // Deferred means HELD, not dropped: `setSceneDispatcher` replays this
     // exact call once the engine attaches (#10192), with the same options,
     // so a rejection then strands the editor the same way a live one would.
+    // Only a caller that asked for it (`deferUntilEngineAttaches`) is held;
+    // an interactive load that answers `false` to its UI is simply not done,
+    // because that UI reports `false` as a failure and must not be
+    // contradicted by a load that lands later.
     if (!dispatchCommand) {
-      deferredSceneLoad = { json, replay: () => { get().loadScene(json, opts); } };
+      if (opts?.deferUntilEngineAttaches) {
+        deferredSceneLoad = { json, replay: () => { get().loadScene(json, opts); } };
+      }
       return false;
     }
     // Restore the scene's linked prefab instances (and merge its embedded

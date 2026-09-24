@@ -140,7 +140,7 @@ describe('editorStore', () => {
       // `EditorLayout` mounts `useEngineEvents` and installs the dispatcher.
       setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
       const scene = JSON.stringify({ entities: [] });
-      expect(useEditorStore.getState().loadScene(scene)).toBe(false);
+      expect(useEditorStore.getState().loadScene(scene, { deferUntilEngineAttaches: true })).toBe(false);
       expect(mockDispatch).not.toHaveBeenCalledWith('load_scene', expect.anything());
 
       const engine = createMockDispatch();

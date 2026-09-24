@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMockDispatch } from './sliceTestTemplate';
 import { createSceneTestStore } from './sceneSliceTestStore';
-import { setSceneDispatcher } from '../sceneSlice';
+import { setSceneDispatcher, hasDeferredSceneLoad, cancelDeferredSceneLoad } from '../sceneSlice';
 import { loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
 import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
@@ -539,7 +539,7 @@ describe('sceneSlice', () => {
     it('replays the load deferred before the engine attached, exactly once', () => {
       setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
       const scene = JSON.stringify({ entities: [{ entityId: 'e1', name: 'Cube', parentId: null, visible: true }] });
-      expect(store.getState().loadScene(scene)).toBe(false);
+      expect(store.getState().loadScene(scene, { deferUntilEngineAttaches: true })).toBe(false);
       expect(store.getState().sceneLoadError).toBeNull();
       const revisionBefore = store.getState().sceneOperationRevision;
 
@@ -563,8 +563,8 @@ describe('sceneSlice', () => {
       setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
       const first = JSON.stringify({ entities: [], metadata: { name: 'first' } });
       const second = JSON.stringify({ entities: [], metadata: { name: 'second' } });
-      store.getState().loadScene(first);
-      store.getState().loadScene(second);
+      store.getState().loadScene(first, { deferUntilEngineAttaches: true });
+      store.getState().loadScene(second, { deferUntilEngineAttaches: true });
 
       const engine = createMockDispatch();
       setSceneDispatcher(engine);
@@ -576,7 +576,7 @@ describe('sceneSlice', () => {
 
     it('strands the editor when the engine rejects the replayed load, so nothing saves over the stored scene', () => {
       setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
-      store.getState().loadScene(healthyScene);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
 
       const engine = vi.fn((command: string) =>
         command === 'load_scene' ? { success: false, error: 'Scene JSON too large' } : undefined,
@@ -592,7 +592,7 @@ describe('sceneSlice', () => {
 
     it('locks saving and does not throw out of the attach when the replayed load throws', () => {
       setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
-      store.getState().loadScene(healthyScene);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       try {
@@ -607,12 +607,40 @@ describe('sceneSlice', () => {
 
     it('discards the deferred load when the engine detaches before attaching', () => {
       setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
-      store.getState().loadScene(healthyScene);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
       setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
 
       const engine = createMockDispatch();
       setSceneDispatcher(engine);
 
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('does not hold a load its caller did not ask to defer: an interactive import before the engine attaches is refused, not queued', () => {
+      // SceneToolbar, AutoSaveRecovery and the AI/MCP load_scene handler all
+      // report a `false` return as a failed load. Queueing that scene anyway
+      // would make the toolbar say "not loaded" and then load it over the
+      // project scene once the engine attached.
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      expect(store.getState().loadScene(healthyScene, { rejectionStrandsEditor: false })).toBe(false);
+      expect(store.getState().loadScene(healthyScene)).toBe(false);
+      expect(hasDeferredSceneLoad()).toBe(false);
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
+      expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('cancelDeferredSceneLoad drops the held load, so an abandoned cold open cannot replay into the next editor', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().loadScene(healthyScene, { deferUntilEngineAttaches: true });
+      expect(hasDeferredSceneLoad()).toBe(true);
+
+      cancelDeferredSceneLoad();
+      expect(hasDeferredSceneLoad()).toBe(false);
+
+      const engine = createMockDispatch();
+      setSceneDispatcher(engine);
       expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
     });
 
