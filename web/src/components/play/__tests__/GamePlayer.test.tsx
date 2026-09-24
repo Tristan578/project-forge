@@ -37,9 +37,11 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock('@/lib/engine/loadPlayEngine', () => ({
+vi.mock('@/lib/engine/loadPlayEngine', async (importOriginal) => ({
+  // Real isCdnOrigin/describeOrigin: the wasm.source tag assertions below must
+  // exercise the exported implementation, not a copy of its regex.
+  ...(await importOriginal<typeof import('@/lib/engine/loadPlayEngine')>()),
   loadPlayEngine: vi.fn(),
-  isCdnOrigin: (basePath: string) => /^https?:\/\//.test(basePath),
 }));
 
 vi.mock('@/lib/monitoring/sentry-client', () => ({
@@ -359,10 +361,14 @@ describe('GamePlayer', () => {
         expect.objectContaining({
           category: 'wasm',
           level: 'warning',
-          // Host only: the versioned path would leak the build SHA.
           message: expect.stringMatching(/^Play engine load skipped engine\.example\.test: .*timed out/),
         }),
       );
+      // Host only: the error fed in above quotes the full versioned URL, and
+      // neither the SHA nor the path may reach Sentry.
+      const breadcrumb = vi.mocked(addBreadcrumb).mock.calls[0][0] as { message?: string };
+      expect(breadcrumb.message).not.toContain('abc1234');
+      expect(breadcrumb.message).not.toContain('/engine-pkg-');
       expect(captureMessage).toHaveBeenCalledWith('Play engine origin skipped, falling back', 'warning');
       expect(setTag).toHaveBeenCalledWith('wasm.source', 'same-origin');
       // A fallback that succeeded is not an error.

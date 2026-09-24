@@ -173,7 +173,11 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
           // through the slower origin with nothing in Sentry to show for it.
           // Same signals the editor emits (`wasm.source`, breadcrumb, #8250).
           onOriginSkipped: (basePath, err) => {
-            const reason = err instanceof Error ? err.message : String(err);
+            // Browser import errors quote the full URL, which carries the
+            // build SHA; the loader's own messages use the host, and this
+            // scrub makes the breadcrumb host-only whichever produced it.
+            const reason = (err instanceof Error ? err.message : String(err))
+              .replace(/https?:\/\/\S+/g, '<url>');
             addBreadcrumb({
               category: 'wasm',
               message: `Play engine load skipped ${originHost(basePath)}: ${reason}`,

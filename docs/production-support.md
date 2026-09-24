@@ -122,7 +122,7 @@ Vercel Edge (CDN, routing, headers)
 
 ### CDN Down
 - New users cannot load WASM engine
-- If `R2_CDN_ENABLED != 'true'`, Vercel serves WASM from `/public/` as fallback
+- Both loaders (`useEngine.getWasmBasePaths` for the editor, `loadPlayEngine.getPlayEngineBasePaths` for `/play`) fall through to the same-origin `/engine-pkg-*` copy served from `web/public/`, so a CDN outage degrades to a slower load rather than a broken page; `R2_CDN_ENABLED` is the GitHub variable that gates the CD upload only
 - Users with browser-cached WASM are unaffected
 
 ---

@@ -1,4 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+// Two cases below switch to fake timers; nothing in vitest.setup.ts switches
+// back, so without this the describes after them run in an order-dependent
+// timer mode.
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 /**
  * The module holds a module-level latch, so every case needs a fresh copy.
@@ -263,6 +270,46 @@ describe('instantiateFromPaths', () => {
     expect(calls.at(-1)).toBe(`wasm:${SAME}forge_engine_bg.wasm`);
   });
 
+  it('does not cut a slow binary download with the glue deadline', async () => {
+    vi.useFakeTimers();
+    const { instantiateFromPaths } = await import('../loadPlayEngine');
+    const calls: string[] = [];
+    // The glue arrives at once; the ~23 MiB binary takes five times the
+    // per-origin budget. That is a slow link, not a stalled origin, and it
+    // must still succeed on the origin it started on.
+    const slowGlue = glue(calls);
+    let finishBinary: (() => void) | undefined;
+    slowGlue.default = vi.fn(
+      (wasmUrl: string) => new Promise<void>((resolve) => {
+        finishBinary = () => { calls.push(`wasm:${wasmUrl}`); resolve(); };
+      }),
+    );
+    const load = vi.fn(async () => slowGlue);
+    const onOriginSkipped = vi.fn();
+
+    const pending = instantiateFromPaths([CDN, SAME], { load, originTimeoutMs: 1_000, onOriginSkipped });
+    // Five glue budgets pass while the binary is still downloading...
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(onOriginSkipped).not.toHaveBeenCalled();
+    // ...and when it lands, the origin it started on is the one that serves.
+    finishBinary!();
+
+    await expect(pending).resolves.toBeDefined();
+    expect(onOriginSkipped).not.toHaveBeenCalled();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([`wasm:${CDN}forge_engine_bg.wasm`]);
+  });
+
+  it('labels a deadline by host, never by the versioned path', async () => {
+    vi.useFakeTimers();
+    const { instantiateFromPaths } = await import('../loadPlayEngine');
+    const load = vi.fn(() => new Promise<never>(() => {}));
+    const pending = instantiateFromPaths(['https://cdn.test/abc1234/engine-pkg-webgpu/'], { load, originTimeoutMs: 1_000 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(pending).rejects.toThrow('Engine glue from cdn.test timed out');
+    await expect(pending).rejects.not.toThrow('abc1234');
+  });
+
   it('does not instantiate a CDN glue module that arrives after its deadline', async () => {
     vi.useFakeTimers();
     const { instantiateFromPaths } = await import('../loadPlayEngine');
@@ -305,6 +352,17 @@ describe('instantiateFromPaths', () => {
   it('rejects rather than resolving to nothing when given no origins', async () => {
     const { instantiateFromPaths } = await import('../loadPlayEngine');
     await expect(instantiateFromPaths([], { load: vi.fn() })).rejects.toThrow('No engine base path');
+  });
+});
+
+describe('isCdnOrigin / describeOrigin', () => {
+  it('tells an absolute http(s) origin from a same-origin path', async () => {
+    const { isCdnOrigin, describeOrigin } = await import('../loadPlayEngine');
+    expect(isCdnOrigin('https://engine.example.test/abc1234/engine-pkg-webgpu/')).toBe(true);
+    expect(isCdnOrigin('http://localhost:8787/latest/engine-pkg-webgl2/')).toBe(true);
+    expect(isCdnOrigin('/engine-pkg-webgpu/')).toBe(false);
+    expect(describeOrigin('https://engine.example.test/abc1234/engine-pkg-webgpu/')).toBe('engine.example.test');
+    expect(describeOrigin('/engine-pkg-webgpu/')).toBe('same-origin');
   });
 });
 

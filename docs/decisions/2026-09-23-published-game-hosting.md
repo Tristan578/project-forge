@@ -106,8 +106,11 @@ the Vercel origin even though the play CSP already allowed the CDN
 `getPlayEngineBasePaths` mirrors the editor's resolution (versioned CDN prefix
 when `NEXT_PUBLIC_ENGINE_VERSION` is set, `/latest/` otherwise, then
 same-origin), and `instantiateFromPaths` falls through to the next origin when
-one fails or exceeds its own deadline (`PLAY_ENGINE_ORIGIN_TIMEOUT_MS`), so a
-stalled CDN still leaves time for same-origin inside the page's global budget.
+one fails or its glue import exceeds `PLAY_ENGINE_ORIGIN_TIMEOUT_MS`. The
+deadline covers only the small glue file — that is what a blackholed CDN never
+delivers — while the ~23 MiB binary keeps the page's global budget it always
+had, so a slow-but-working link is not cut short; two glue deadlines fit inside
+that budget provided the WebGPU adapter probe answers promptly.
 A skipped origin is reported from the play page (a Sentry breadcrumb, a
 warning-level message, and the `wasm.source` tag the editor also sets), so a
 broken CDN prefix cannot silently route every player through the origin. That

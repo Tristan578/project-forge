@@ -63,6 +63,21 @@ export function isCdnOrigin(basePath: string): boolean {
 }
 
 /**
+ * A label for an origin that never carries its path: the host for the CDN,
+ * `same-origin` otherwise. The versioned path carries the build SHA, and this
+ * is what the loader's own error messages use so a breadcrumb built from them
+ * stays host-only.
+ */
+export function describeOrigin(basePath: string): string {
+  if (!isCdnOrigin(basePath)) return 'same-origin';
+  try {
+    return new URL(basePath).host;
+  } catch {
+    return 'cdn';
+  }
+}
+
+/**
  * Pick the engine build, load its JS glue, and instantiate the WASM binary.
  *
  * The glue and the binary MUST come from the same origin — wasm-bindgen bakes
@@ -111,26 +126,31 @@ export interface PlayEngineLoadOptions {
   onOriginUsed?: (basePath: string) => void;
   /** Test seam: replaces the dynamic `import()`. */
   load?: GlueImporter;
-  /** Per-origin deadline; defaults to PLAY_ENGINE_ORIGIN_TIMEOUT_MS. */
+  /** Per-origin deadline for the GLUE import; defaults to PLAY_ENGINE_ORIGIN_TIMEOUT_MS. */
   originTimeoutMs?: number;
 }
 
 /**
  * Try each base path in order and return the first runtime that instantiates.
  *
- * Every origin gets its OWN deadline. Without one, a CDN that stalls (a
- * blackholed connection, a hung edge) would never reject, the loop would never
- * reach the same-origin path, and the caller's single global deadline would
- * expire on a page that had a working fallback the whole time — and because
- * `loadPlayEngine`'s latch only clears on rejection, Retry would join the
- * same hung attempt. The per-origin budget is sized so that CDN + same-origin
- * both fit inside `ENGINE_GLOBAL_TIMEOUT_MS`.
+ * Each origin's GLUE import gets its own deadline. Without one, a CDN that
+ * stalls (a blackholed connection, a hung edge) would never reject, the loop
+ * would never reach the same-origin path, and the caller's single global
+ * deadline would expire on a page that had a working fallback the whole time
+ * — and because `loadPlayEngine`'s latch only clears on rejection, Retry
+ * would join the same hung attempt.
  *
- * `withTimeout` bounds the wait, not the work: an abandoned attempt keeps
- * running. The `abandoned` flag stops a late-arriving glue module from
- * instantiating a rival WASM instance after the loop has moved on; a binary
- * that was already mid-instantiation when the deadline fired cannot be
- * stopped, which is the same trade the editor's per-origin timeout makes.
+ * The deadline deliberately covers ONLY the glue file (a few KB): that is the
+ * stall signal, and a stalled origin never delivers it. The binary that
+ * `wasm.default()` then fetches is ~23 MiB and runs under the page's global
+ * budget alone, exactly as it did before the CDN was in front — bounding it
+ * per origin would turn a slow-but-working link into a failed load, and a
+ * Retry into the same failure with double the bytes.
+ *
+ * `withTimeout` bounds the wait, not the work: a glue import that arrives
+ * after its deadline is simply never instantiated, because `default()` is
+ * only reached through the deadline's fulfilment. A binary fetch that fails
+ * falls through to the next origin like any other error.
  */
 export async function instantiateFromPaths(
   paths: readonly string[],
@@ -142,20 +162,17 @@ export async function instantiateFromPaths(
 
   for (let i = 0; i < paths.length; i++) {
     const basePath = paths[i];
-    let abandoned = false;
-    const attempt = load(`${basePath}forge_engine.js`).then(async (wasm) => {
-      if (abandoned) throw new Error(`Engine load from ${basePath} abandoned after its deadline`);
-      await wasm.default(`${basePath}forge_engine_bg.wasm`);
-      return wasm;
-    });
+    const origin = describeOrigin(basePath);
+    const glueImport = load(`${basePath}forge_engine.js`);
+    // A glue import abandoned by its deadline may still reject later; that
+    // rejection is ours, not the page's.
+    glueImport.catch(() => {});
     try {
-      const wasm = await withTimeout(attempt, originTimeoutMs, `Engine load from ${basePath}`);
+      const wasm = await withTimeout(glueImport, originTimeoutMs, `Engine glue from ${origin}`);
+      await wasm.default(`${basePath}forge_engine_bg.wasm`);
       options.onOriginUsed?.(basePath);
       return wasm as unknown as PlayEngineRuntime;
     } catch (err) {
-      abandoned = true;
-      // The abandoned attempt may still reject later; that rejection is ours.
-      attempt.catch(() => {});
       lastErr = err;
       if (i < paths.length - 1) options.onOriginSkipped?.(basePath, err);
     }
