@@ -5,7 +5,7 @@
  *
  * A measurement is only trustworthy if you know the machine and build it was
  * taken on. This manifest pins that identity alongside every captured
- * performance report: build SHA, fixture checksum, OS, browser major version,
+ * performance report: build SHA, fixture checksum, OS, exact browser version,
  * GPU/driver, render backend, viewport, device memory, warm/cold cache state
  * and sample count.
  *
@@ -52,11 +52,18 @@ export interface MeasurementManifest {
   schemaVersion: number;
   /** Git commit SHA of the build under test, or `'unknown'`. */
   buildSha: string | Unknown;
-  /** Stable digest of the exported fixture's serialized bytes, or `'unknown'`. */
+  /**
+   * Digest of the measured scene's canonical serialization
+   * ({@link computeSceneFixtureChecksum}), or `'unknown'`.
+   */
   fixtureChecksum: string | Unknown;
   /** Operating system family (e.g. `'macOS'`, `'Windows'`), or `'unknown'`. */
   os: string | Unknown;
-  /** Browser name and major version (e.g. `'Chrome 140'`), or `'unknown'`. */
+  /**
+   * Browser name and version: exact (`'Chrome 153.0.8010.53'`) when the caller
+   * resolved it via {@link readExactBrowserVersion}, else as precise as the
+   * user-agent string (`'Chrome 140'`), or `'unknown'`.
+   */
   browserVersion: string | Unknown;
   /** GPU/driver string when the platform exposes it, else `'unknown'`. */
   gpuDriver: string | Unknown;
@@ -72,11 +79,23 @@ export interface MeasurementManifest {
   sampleCount: number | Unknown;
 }
 
+/** One `{ brand, version }` entry of a client-hints brand list. */
+export interface UaBrandVersion {
+  brand: string;
+  version: string;
+}
+
+/** Minimal `navigator.userAgentData` surface (Chromium client hints). */
+export interface ManifestUserAgentData {
+  getHighEntropyValues?: (hints: string[]) => Promise<{ fullVersionList?: UaBrandVersion[] }>;
+}
+
 /** Minimal navigator surface the manifest reads. Injectable for tests. */
 export interface ManifestNavigator {
   userAgent?: string;
   deviceMemory?: number;
   gpu?: { requestAdapter: () => Promise<unknown> };
+  userAgentData?: ManifestUserAgentData;
 }
 
 /** Minimal window surface the manifest reads. Injectable for tests. */
@@ -172,14 +191,115 @@ export async function detectRenderBackend(
 }
 
 /**
+ * Chromium brand names, most specific first. Edge and Opera also report the
+ * `Chromium` brand, so they must win over it; `Not;A=Brand`-style GREASE
+ * entries match nothing and are skipped.
+ */
+const CLIENT_HINT_BRANDS: Array<[string, string]> = [
+  ['Microsoft Edge', 'Edge'],
+  ['Opera', 'Opera'],
+  ['Google Chrome', 'Chrome'],
+  ['Chromium', 'Chromium'],
+];
+
+/**
+ * Resolve the browser's EXACT version where the platform exposes it.
+ *
+ * Chromium's reduced user-agent string freezes everything after the major
+ * version (`Chrome/153.0.0.0`), so the exact build only comes from the
+ * high-entropy client hint `fullVersionList`. Other browsers (and a refused
+ * hint request) fall back to {@link parseBrowserVersion}, whose precision is
+ * whatever the user-agent string carries. Two reports only compare as the same
+ * browser when these strings are identical, so a fallback that is less precise
+ * than the other side reads as a different browser — the safe direction.
+ * @param nav Navigator surface, or undefined when unavailable.
+ * @returns e.g. `'Chrome 153.0.8010.53'`, `'Firefox 130'`, or unknown.
+ */
+export async function readExactBrowserVersion(nav: ManifestNavigator | undefined): Promise<string | Unknown> {
+  if (!nav) return UNKNOWN;
+  try {
+    const hints = await nav.userAgentData?.getHighEntropyValues?.(['fullVersionList']);
+    const list = hints?.fullVersionList ?? [];
+    for (const [brand, name] of CLIENT_HINT_BRANDS) {
+      const entry = list.find((b) => b.brand === brand);
+      if (entry && /^\d+(\.\d+)*$/.test(entry.version)) return `${name} ${entry.version}`;
+    }
+  } catch {
+    // Client hints refused or unsupported: fall through to the UA string.
+  }
+  return parseBrowserVersion(nav.userAgent);
+}
+
+/** Minimal WebGL context surface {@link readGpuDriver} probes. */
+export interface WebGlProbeContext {
+  RENDERER: number;
+  getExtension: (name: string) => unknown;
+  getParameter: (param: number) => unknown;
+}
+
+function defaultWebGlProbe(): WebGlProbeContext | null {
+  if (typeof document === 'undefined') return null;
+  try {
+    return document.createElement('canvas').getContext('webgl2') as unknown as WebGlProbeContext | null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Describe the GPU the measured backend runs on, as far as the browser exposes
+ * it. For WebGPU this is the adapter's `GPUAdapterInfo` (description, else
+ * vendor + architecture + device); for WebGL2 the unmasked renderer string.
+ * Browsers do not expose a driver version, so none is claimed here: a run's
+ * driver version has to be declared from the OS alongside the report.
+ * @param nav Navigator surface (for `navigator.gpu`).
+ * @param backend The backend the measured engine actually runs.
+ * @param createWebGlContext Injectable WebGL2 probe; defaults to a throwaway canvas.
+ * @returns The adapter/renderer description, or unknown.
+ */
+export async function readGpuDriver(
+  nav: ManifestNavigator | undefined,
+  backend: RenderBackend | Unknown,
+  createWebGlContext: () => WebGlProbeContext | null = defaultWebGlProbe,
+): Promise<string | Unknown> {
+  try {
+    if (backend === 'webgpu') {
+      const adapter = (await nav?.gpu?.requestAdapter()) as
+        | { info?: { vendor?: string; architecture?: string; device?: string; description?: string } }
+        | null
+        | undefined;
+      const info = adapter?.info;
+      if (!info) return UNKNOWN;
+      const description = (info.description ?? '').trim();
+      if (description) return description;
+      const composed = [info.vendor, info.architecture, info.device]
+        .map((part) => (part ?? '').trim())
+        .filter(Boolean)
+        .join(' ');
+      return composed || UNKNOWN;
+    }
+    if (backend === 'webgl2') {
+      const gl = createWebGlContext();
+      if (!gl) return UNKNOWN;
+      const debug = gl.getExtension('WEBGL_debug_renderer_info') as { UNMASKED_RENDERER_WEBGL: number } | null;
+      const renderer = gl.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
+      (gl.getExtension('WEBGL_lose_context') as { loseContext?: () => void } | null)?.loseContext?.();
+      return typeof renderer === 'string' && renderer.trim() ? renderer.trim() : UNKNOWN;
+    }
+  } catch {
+    // A lost device or blocked probe is "could not determine", not a GPU name.
+  }
+  return UNKNOWN;
+}
+
+/**
  * Compute a stable checksum for an exported scene's serialized bytes.
  *
- * NOTE: the 2D/3D exported **fixture files** themselves are OUT OF SCOPE for
- * this slice — they are owned by the fixture-harness child issue. This helper
- * only defines the checksum contract so that harness can adopt it without a
- * schema change: given the raw serialized bytes of an exported scene it returns
- * a stable hex digest. Given no bytes it returns {@link UNKNOWN} rather than an
- * empty or zero digest that would read as a real, comparable fixture identity.
+ * Given the raw serialized bytes of an exported scene it returns a stable hex
+ * digest. Given no bytes it returns {@link UNKNOWN} rather than an empty or
+ * zero digest that would read as a real, comparable fixture identity. Pinned
+ * fixtures and live scenes are identified through
+ * {@link computeSceneFixtureChecksum}, which canonicalizes before hashing.
  *
  * Uses a synchronous djb2 variant (matching `promptCache.computeKey`'s
  * fallback) so the manifest builder stays pure and non-async.
@@ -200,6 +320,60 @@ export function computeFixtureChecksum(
   return h.toString(16).padStart(8, '0');
 }
 
+/** Save timestamps the engine rewrites on every export of an unchanged scene. */
+const VOLATILE_METADATA_KEYS = new Set(['createdAt', 'modifiedAt']);
+
+function canonicalValue(value: unknown, path: string): unknown {
+  if (Array.isArray(value)) {
+    const items = value.map((item) => canonicalValue(item, `${path}[]`));
+    // Entity order follows ECS query order, which is not stable between
+    // sessions; identity must not depend on it.
+    if (path === 'entities') {
+      const id = (item: unknown) =>
+        item && typeof item === 'object' ? String((item as Record<string, unknown>).entityId ?? '') : '';
+      return [...items].sort((a, b) => (id(a) < id(b) ? -1 : id(a) > id(b) ? 1 : 0));
+    }
+    return items;
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value).sort()) {
+      if (path === 'metadata' && VOLATILE_METADATA_KEYS.has(key)) continue;
+      out[key] = canonicalValue((value as Record<string, unknown>)[key], path ? `${path}.${key}` : key);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Canonical text of a scene for fixture identity: object keys sorted at every
+ * depth, top-level `entities` ordered by `entityId`, and the volatile
+ * `metadata.createdAt` / `metadata.modifiedAt` dropped.
+ *
+ * Hashing the file bytes directly would make identity depend on line endings
+ * (a CRLF checkout), indentation, key order (the engine serializes `assets` from
+ * a HashMap) and ECS iteration order — none of which change what is measured.
+ * @param scene A parsed scene object.
+ * @returns Minified canonical JSON.
+ */
+export function canonicalSceneJson(scene: unknown): string {
+  return JSON.stringify(canonicalValue(scene, ''));
+}
+
+/**
+ * Fixture identity of a parsed scene: {@link computeFixtureChecksum} over
+ * {@link canonicalSceneJson}. The pinned 2D/3D fixtures (`lib/perf/perfFixtures.ts`)
+ * and a live editor scene are identified the same way, so a capture of the
+ * pinned fixture and a capture of an edited copy never share a checksum.
+ * @param scene Parsed scene object; anything else is unknown.
+ * @returns Eight hex digits, or unknown for a missing / non-object scene.
+ */
+export function computeSceneFixtureChecksum(scene: unknown): string | Unknown {
+  if (!scene || typeof scene !== 'object' || Array.isArray(scene)) return UNKNOWN;
+  return computeFixtureChecksum(canonicalSceneJson(scene));
+}
+
 /** Inputs the caller resolves out-of-band (async or run-specific). */
 export interface BuildManifestOptions {
   /** Resolved render backend (see {@link detectRenderBackend}). */
@@ -214,6 +388,11 @@ export interface BuildManifestOptions {
   buildSha?: string | Unknown;
   /** GPU/driver string when the caller can obtain one. */
   gpuDriver?: string | Unknown;
+  /**
+   * Exact browser version when the caller resolved one (see
+   * {@link readExactBrowserVersion}); defaults to the user-agent parse.
+   */
+  browserVersion?: string | Unknown;
   /** Injectable navigator (defaults to the global). */
   nav?: ManifestNavigator;
   /** Injectable window (defaults to the global). */
@@ -272,7 +451,7 @@ export function buildMeasurementManifest(options: BuildManifestOptions = {}): Me
     buildSha,
     fixtureChecksum: options.fixtureChecksum ?? UNKNOWN,
     os: parseOs(nav?.userAgent),
-    browserVersion: parseBrowserVersion(nav?.userAgent),
+    browserVersion: options.browserVersion || parseBrowserVersion(nav?.userAgent),
     gpuDriver: options.gpuDriver ?? UNKNOWN,
     backend: options.backend ?? UNKNOWN,
     viewport: readViewport(win),

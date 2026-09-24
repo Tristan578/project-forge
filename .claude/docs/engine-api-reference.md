@@ -2,10 +2,10 @@
 
 > Hand-written against `web/src/data/commands.json` — no generator emits this
 > file, so the "Generated from" claim it used to carry was itself a rotted
-> number's cover story. The manifest holds 375 commands across 41 categories,
-> measured 2026-09-05 and pinned by
+> number's cover story. The manifest holds 380 commands across 41 categories,
+> measured 2026-09-22 and pinned by
 > `web/src/lib/config/__tests__/capabilityMatrix.test.ts`.
-> Last updated: 2026-09-05
+> Last updated: 2026-09-22
 
 ## System Boundaries
 

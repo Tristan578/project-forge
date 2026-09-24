@@ -1,3 +1,4 @@
+import { notifyCaptureWorkloadChange } from '@/lib/perf/captureStability';
 import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { logInitEvent, type InitPhase } from '@/lib/initLog';
 import { emitStatusEvent } from './useEngineStatus';
@@ -44,11 +45,30 @@ export function useLoadingState(): LoadingState {
 export interface CommandResponse {
   success: boolean;
   error?: string;
+  /**
+   * Set only by a dispatcher that CAUGHT a throw from the engine call and
+   * answered with `success: false` instead of rethrowing. It separates "the
+   * engine said no" from "the engine threw, and may already have acted":
+   * `handle_command` dispatches the command before it serializes its answer,
+   * and the `Err` it returns after dispatching comes from that serialization
+   * (`engine/src/bridge/mod.rs`); a panic part-way through a handler throws
+   * too. A caller that must not treat an unknown outcome as a refusal reads
+   * this. The engine's own answer never carries it.
+   */
+  threw?: true;
 }
 
 export interface BatchResult {
   success: boolean;
   results: CommandResponse[];
+  /**
+   * The batch counterpart of {@link CommandResponse.threw}: the engine call
+   * threw, so `results` is empty and says nothing about which commands ran.
+   * `handle_command_batch` runs the whole batch before it serializes the
+   * answers, so every command in it may have taken effect. Absent when the
+   * batch was never sent (too long, or no engine entry point).
+   */
+  threw?: true;
 }
 
 export type WasmModule = {
@@ -67,6 +87,39 @@ export type WasmModule = {
 
 let wasmModule: WasmModule | null = null;
 let initPromise: Promise<WasmModule> | null = null;
+
+/**
+ * The engine's WebAssembly linear memory, from the wasm-bindgen init output.
+ * Read by the performance capture to report WASM memory (#10013); null until an
+ * engine module has initialised, and again after a reset or crash.
+ */
+let engineWasmMemory: { buffer: { byteLength: number } } | null = null;
+
+/**
+ * Performance-timeline mark set the first time the engine reports ready. Its
+ * `startTime` is milliseconds since navigation start: the editor capture's
+ * first-interactive time (`lib/perf/editorCapture.ts`, #10013).
+ */
+export const ENGINE_READY_MARK = 'forge:engine-ready';
+
+/**
+ * Milliseconds from navigation start to the engine first reporting ready.
+ * @returns The mark's start time, or `'unknown'` when the engine has not become
+ *   ready in this page (or the browser has no performance timeline).
+ */
+export function getEngineReadyMs(): number | 'unknown' {
+  try {
+    const mark = performance.getEntriesByName(ENGINE_READY_MARK, 'mark')[0];
+    return mark && Number.isFinite(mark.startTime) ? Math.round(mark.startTime * 10) / 10 : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** The running engine's WebAssembly memory, or null when none is loaded. */
+export function getEngineWasmMemory(): { buffer: { byteLength: number } } | null {
+  return engineWasmMemory;
+}
 let panicInterceptorInstalled = false;
 
 // --- Engine snapshot provider (registered by editorStore for crash diagnostics) ---
@@ -117,9 +170,11 @@ export function getEngineCrashMessage(): string | null {
 
 /** Mark the engine as crashed and notify all listeners. */
 function setEngineCrashed(message: string): void {
+  notifyCaptureWorkloadChange();
   _engineCrashed = true;
   _engineCrashMessage = message;
   wasmModule = null;
+  engineWasmMemory = null;
   for (const listener of _crashListeners) {
     try { listener(message); } catch { /* prevent listener errors from breaking the loop */ }
   }
@@ -374,11 +429,16 @@ async function loadWasmFromPath(
     ? wrapResponseWithProgress(rawResponse, onProgress)
     : rawResponse;
 
-  await withTimeout(
+  const initOutput = (await withTimeout(
     wasm.default(wasmInput),
     WASM_FETCH_TIMEOUT_MS,
     'WASM fetch',
-  );
+  )) as { memory?: { buffer?: { byteLength?: unknown } } } | undefined;
+  const memory = initOutput?.memory;
+  engineWasmMemory =
+    memory && memory.buffer && typeof memory.buffer.byteLength === 'number'
+      ? (memory as { buffer: { byteLength: number } })
+      : null;
 
   const mod = wasm as unknown as WasmModule;
   if (mod.set_init_callback) {
@@ -539,12 +599,14 @@ async function loadWasm(): Promise<WasmModule> {
 
 // Reset for retry
 export function resetEngine(): void {
+  notifyCaptureWorkloadChange();
   if (loadAbortController) {
     loadAbortController.abort();
     loadAbortController = null;
   }
   wasmModule = null;
   initPromise = null;
+  engineWasmMemory = null;
   setLoadingState({ phase: 'idle' });
   clearEngineCrash();
 }
@@ -690,14 +752,23 @@ export function dispatchGuardedBatch(
       phase: 'handle_command_batch',
       batchSize: commands.length,
     });
-    return { success: false, results: [] };
+    // `threw`: the engine may have run the batch before its answer failed.
+    return { success: false, results: [], threw: true };
   }
 }
 
 export function useEngine(canvasId: string, options?: UseEngineOptions) {
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const initializedRef = useRef(false);
+  // Ownership of the initialization in flight (#10208). One object per
+  // effect run: `cancelled` retires an attempt that never reached
+  // `init_engine` (StrictMode replay, unmount, canvas change while loading),
+  // `started` marks one that did — Bevy owns that canvas from then on and no
+  // later effect run may start a second. A plain boolean could not tell the
+  // two apart: it stayed set through the replay's cleanup, so the second run
+  // returned early while the first continuation had been cancelled, and the
+  // engine never initialized in development.
+  const attemptRef = useRef<{ cancelled: boolean; started: boolean } | null>(null);
   const onReadyRef = useRef(options?.onReady);
   const onErrorRef = useRef(options?.onError);
 
@@ -708,7 +779,9 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
   }, [options?.onReady, options?.onError]);
 
   useEffect(() => {
-    if (initializedRef.current) return;
+    // An attempt that reached `init_engine` owns the canvas for the life of
+    // this hook; re-entering init_engine on a live Bevy app is not supported.
+    if (attemptRef.current?.started) return;
 
     // SSR guard
     if (typeof document === 'undefined') return;
@@ -719,13 +792,15 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
       return;
     }
 
-    initializedRef.current = true;
-
-    let cancelled = false;
+    const attempt = { cancelled: false, started: false };
+    attemptRef.current = attempt;
 
     loadWasm()
       .then((wasm) => {
-        if (cancelled) return;
+        // Retired before the module arrived: a replayed, unmounted or
+        // re-targeted effect run. Its successor (if any) owns the canvas.
+        if (attempt.cancelled) return;
+        attempt.started = true;
         emitEvent('engine_starting', `Calling init_engine("${canvasId}")`);
 
         // Set Sentry context for all subsequent errors in this session
@@ -741,6 +816,15 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           // Expose readiness flag for E2E tests (Playwright)
           if (typeof window !== 'undefined') {
             (window as unknown as Record<string, unknown>).__FORGE_ENGINE_READY = true;
+          }
+          // First-interactive mark for the performance capture: only the first
+          // ready in this page, so a later recovery cannot move it.
+          try {
+            if (performance.getEntriesByName(ENGINE_READY_MARK, 'mark').length === 0) {
+              performance.mark(ENGINE_READY_MARK);
+            }
+          } catch {
+            // No performance timeline: first interactive stays unknown.
           }
           // Track editor session start (non-critical analytics)
           import('@/lib/analytics/posthog').then(({ trackEvent, AnalyticsEvent }) => {
@@ -760,16 +844,19 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           });
           setError(engineError);
           onErrorRef.current?.(engineError);
-          initializedRef.current = false;
+          // init_engine threw before Bevy took the canvas: a later effect
+          // run may try again.
+          attempt.started = false;
+          if (attemptRef.current === attempt) attemptRef.current = null;
         }
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (attempt.cancelled) return;
+        if (attemptRef.current === attempt) attemptRef.current = null;
         const loadError = err instanceof Error ? err : new Error(String(err));
         // AbortError is raised when the user navigates away mid-load. It is not
         // a real failure — suppress the error toast and Sentry capture. (#7689)
         if (loadError.name === 'AbortError') {
-          initializedRef.current = false;
           return;
         }
         captureException(loadError, {
@@ -783,11 +870,17 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         }
         setError(loadError);
         onErrorRef.current?.(loadError);
-        initializedRef.current = false;
       });
 
     return () => {
-      cancelled = true;
+      // Before init_engine: this run is obsolete. Retire it and release
+      // ownership so the next run (StrictMode's replay, or a new canvas)
+      // starts its own attempt; the shared load promise is reused, so
+      // nothing is downloaded twice. After init_engine: Bevy owns the
+      // canvas, so the attempt stays and the next run returns early.
+      if (attempt.started) return;
+      attempt.cancelled = true;
+      if (attemptRef.current === attempt) attemptRef.current = null;
     };
   }, [canvasId]);
 

@@ -10,6 +10,7 @@ const EditorLayout = dynamic(
   { ssr: false, loading: () => (<div className="flex h-full items-center justify-center bg-zinc-950"><div className="text-zinc-400">Loading editor...</div></div>) }
 );
 import { useEditorStore } from '@/stores/editorStore';
+import { cancelDeferredSceneLoad } from '@/stores/slices/sceneSlice';
 import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
 import { readCompletionModeFromSceneData } from '@/lib/scenes/sceneCompletionMode';
 import { trackProjectOpen } from '@/lib/workspace/recentProjects';
@@ -48,11 +49,17 @@ function EditorPageContent() {
   }, []);
 
   useEffect(() => {
+    // Set by the cleanup: a fetch that settles after this mount is gone (or
+    // after the project changed) must not touch the store, and above all must
+    // not defer a scene load that the next editor to attach would replay.
+    let cancelled = false;
     const fetchProject = async () => {
       try {
         const res = await fetch(`/api/projects/${projectId}`);
+        if (cancelled) return;
         if (!res.ok) { if (res.status === 404) { router.push('/dashboard'); return; } throw new Error('Failed to load project'); }
         const project = await res.json() as { name: string; sceneData: unknown; updatedAt?: string };
+        if (cancelled) return;
         setProjectId(projectId);
         setSceneName(project.name);
         trackProjectOpen(projectId, project.name);
@@ -62,7 +69,11 @@ function EditorPageContent() {
         if (project.updatedAt) {
           setLastCloudSave(project.updatedAt);
         }
-        loadScene(JSON.stringify(project.sceneData));
+        // The cold open is the ONE caller allowed to defer: `EditorLayout`
+        // (and so the engine dispatcher) mounts after this effect, and the
+        // held load replays once it attaches (#10192). The cleanup below
+        // cancels it if this page goes away first.
+        loadScene(JSON.stringify(project.sceneData), { deferUntilEngineAttaches: true });
         // Restore the music arrangement persisted alongside the scene (#9854).
         // `loadScene` itself now does this too (#10058, for every OTHER
         // caller of loadScene/newScene) — this direct call stays as a
@@ -71,19 +82,29 @@ function EditorPageContent() {
         // ready yet.
         useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(project.sceneData));
         // Same guarantee for the completion mode (#9998). When `loadScene`
-        // does reach the engine it stages this very value for SCENE_LOADED, so
-        // the two agree; when it defers (the cold open — nothing re-issues that
-        // load yet, #10192), this is the only thing that stops a sandbox
-        // project reopening as a win game.
+        // reaches the engine it stages this very value for SCENE_LOADED, so
+        // the two agree. When it defers (the cold open, #10192) the mode is
+        // live from here on — the picker works before WASM attaches — and the
+        // replay hands SCENE_LOADED the store's current mode rather than this
+        // saved one, so an edit made while the engine loaded survives.
         useEditorStore.getState().hydrateCompletionMode(readCompletionModeFromSceneData(project.sceneData));
         setLoading(false);
       } catch (err) {
+        if (cancelled) return;
         console.error('Failed to fetch project:', err);
         setError((err as Error).message);
         setLoading(false);
       }
     };
     void fetchProject();
+    return () => {
+      cancelled = true;
+      // A load deferred for THIS project belongs to this mount. Without this,
+      // opening project A and navigating away before WASM attached replayed
+      // A's scene into whichever editor attached next (a different project,
+      // or /dev), where the next save wrote it over that project's scene.
+      cancelDeferredSceneLoad();
+    };
   }, [projectId, router, setProjectId, loadScene, setSceneName, setLastCloudSave]);
 
   if (loading) return (<div className="flex h-full items-center justify-center bg-zinc-950"><div className="text-zinc-400">Loading project...</div></div>);

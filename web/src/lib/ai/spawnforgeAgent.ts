@@ -16,7 +16,7 @@
 
 import { ToolLoopAgent, stepCountIs, type SystemModelMessage } from 'ai';
 import { gateway } from '@ai-sdk/gateway';
-import { anthropic } from '@ai-sdk/anthropic';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { convertManifestToolsToSdkTools, type ManifestTool } from '@/lib/ai/toolAdapter';
 import { modelToolSchema } from '@/lib/ai/modelToolSchema';
 import {
@@ -90,7 +90,7 @@ function isAgentAdvertised(cmd: ManifestEntry): boolean {
  * Build AI SDK tool definitions from the MCP command manifest.
  *
  * Filter policy: includes available `:write`-scoped and `query`-category commands.
- * Read-only informational commands are excluded to reduce tool count (291 of 375)
+ * Read-only informational commands are excluded to reduce tool count (296 of 380)
  * and prevent the model from calling informational endpoints when it should be acting.
  *
  * Schemas go through `modelToolSchema`, which withholds the manifest parameters
@@ -147,7 +147,7 @@ export const AGENT_TOOLS = getAgentTools();
  * exactly today's path.
  *
  * Derived from the manifest's `destructive` flag rather than from
- * `requiredScope`: `:write` covers 278 of 375 commands, so scope-gating would
+ * `requiredScope`: `:write` covers 281 of 380 commands, so scope-gating would
  * put an approval prompt in front of every `spawn_entity` in a normal
  * "build me a platformer" turn. A gate that fires on 95% of ordinary edits is
  * a gate users turn off.
@@ -266,6 +266,15 @@ export interface SpawnforgeAgentOptions {
    * observability — never influences routing or output.
    */
   tags?: string[];
+  /**
+   * Auth for the direct Anthropic client (direct backend only; #8858). The
+   * chat route resolves it with `resolveAnthropicClientAuth()` — a short-lived
+   * federated `authToken` when Workload Identity Federation is configured, else
+   * the static `apiKey`. Omitted, the client reads `ANTHROPIC_API_KEY` exactly
+   * as the SDK's default singleton did. Must be a concrete value: the installed
+   * SDK has no credential-provider hook, so it cannot refresh mid-stream.
+   */
+  anthropicAuthOverride?: { apiKey?: string; authToken?: string };
 }
 
 /**
@@ -307,7 +316,9 @@ export function createSpawnforgeAgent(options: SpawnforgeAgentOptions) {
   const canonicalModel = model || AI_MODEL_PRIMARY;
 
   const gatewayModelId = canonicalModel.includes('/') ? canonicalModel : AI_MODELS.gatewayChat;
-  const modelInstance = isDirectBackend ? anthropic(canonicalModel) : gateway(gatewayModelId);
+  const modelInstance = isDirectBackend
+    ? createAnthropic({ ...(options.anthropicAuthOverride ?? { apiKey: process.env.ANTHROPIC_API_KEY }) }).languageModel(canonicalModel)
+    : gateway(gatewayModelId);
 
   // Provider options for thinking + effort (Anthropic direct only). Both fields
   // are independent in the Anthropic provider schema. Gateway routes ignore

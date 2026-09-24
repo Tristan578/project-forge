@@ -8,6 +8,7 @@ import { useEditorStore, type GameComponentData, firePlayTick } from '@/stores/e
 // `null` for a payload it cannot read.
 import { parseGameCameraWire } from '@/lib/game/gameCameraPayload';
 import { parseEmittedGameComponent } from '@/lib/engine/gameComponentWire';
+import { pruneEntityAdjustments } from '@/lib/engine/gameComponentCorrections';
 import { getScriptGameEventCallback } from '@/lib/scripting/useScriptRunner';
 import { setCharacterGrounded } from '@/lib/scripting/groundedRegistry';
 import { parseSkippedCharacters, describeSkippedCharacters } from '@/lib/engine/characterDiagnostics';
@@ -70,7 +71,22 @@ export function handleGameEvent(
       const newAll = { ...state.allGameComponents, [payload.entityId]: payload.components };
       // Update primaryGameComponents if this entity is selected
       const primary = state.primaryId === payload.entityId ? payload.components : state.primaryGameComponents;
-      useEditorStore.setState({ allGameComponents: newAll, primaryGameComponents: primary });
+      // An adjustment marker (PF-1148) says "this field holds X because you asked
+      // for Y". Undo, a play session and a collab sync move values through the
+      // engine without the store action that clears markers, so the engine's own
+      // report is where a marker whose field no longer holds X is dropped — a
+      // marker on a value it does not describe is a false report. A scene
+      // replacement is not left to this: the same id can come back holding the
+      // same value, so every marker goes when the engine accepts the command
+      // (`forgetOutgoingSceneAdjustments` in editorStore.ts).
+      const adjustments = pruneEntityAdjustments(state.gameComponentAdjustments, payload.entityId, components);
+      useEditorStore.setState({
+        allGameComponents: newAll,
+        primaryGameComponents: primary,
+        // Written only when something was dropped, so an echo of the values the
+        // store already holds does not re-render every marker's reader.
+        ...(adjustments !== state.gameComponentAdjustments ? { gameComponentAdjustments: adjustments } : {}),
+      });
       return true;
     }
 

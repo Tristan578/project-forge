@@ -226,6 +226,16 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "cancel_performance_capture",
+      "category": "performance",
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "capture_performance_report",
+      "category": "performance",
+      "requiredScope": "performance:write"
+    },
+    {
       "name": "clear_selection",
       "category": "scene",
       "requiredScope": "scene:read"
@@ -244,6 +254,11 @@
       "name": "combine_meshes",
       "category": "mesh",
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "compare_performance_reports",
+      "category": "query",
+      "requiredScope": "performance:read"
     },
     {
       "name": "compile_shader",
@@ -734,6 +749,11 @@
       "name": "get_particle",
       "category": "particles",
       "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_performance_report",
+      "category": "query",
+      "requiredScope": "performance:read"
     },
     {
       "name": "get_performance_stats",
@@ -1529,6 +1549,11 @@
       "name": "set_particle_preset",
       "category": "particles",
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_performance_baseline",
+      "category": "performance",
+      "requiredScope": "performance:write"
     },
     {
       "name": "set_performance_budget",

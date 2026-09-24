@@ -9,6 +9,7 @@
 # 5. Enforce planning-before-development workflow
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091  # dynamic $SCRIPT_DIR path; taskboard-state.sh is linted on its own by the whole-tree glob
 source "$SCRIPT_DIR/taskboard-state.sh"
 
 # ── Step 1: Check taskboard installation ──────────────────────────────────

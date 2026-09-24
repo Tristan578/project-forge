@@ -151,6 +151,15 @@ jobs:
 
       - run: npm ci
 
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Cache @spawnforge/ui build
         id: ui-cache-test-web
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -272,6 +281,15 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
 
       - run: npx vitest run
         working-directory: mcp-server
@@ -397,6 +415,52 @@ jobs:
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
+      # PUBLISH THESE EXACT BYTES FOR CD (#9525).
+      #
+      # CD's first build after this PR merges would otherwise compile the same
+      # four variants again. Instead it finds this run
+      # (scripts/resolve-ci-wasm-artifact.sh find) and adopts this artifact
+      # (... adopt) only when the ci-reuse key recorded here equals the key it
+      # recomputes on main. On a pull_request run this checkout is
+      # refs/pull/N/merge, so the key describes the tree this PR produces if it
+      # merges now; if a build input changes on main first, the keys differ and
+      # CD builds.
+      #
+      # BEFORE wasm-opt, and as a separate artifact from `wasm-binaries`:
+      # cd.yml runs no wasm-opt and production ships what cd.yml builds, so the
+      # optimised packages below would be a different binary. The build and
+      # bindgen steps above must stay byte-identical to cd.yml's, which
+      # scripts/__tests__/resolve-ci-wasm-artifact.test.sh pins.
+      #
+      # On EVERY event that runs this job, with no `if:`. The resolver reads
+      # only pull_request runs, so an upload from a push or dispatch run is
+      # never adopted. It is still made there, because an event gate in this
+      # file makes CI Success mean something different on the dispatch path
+      # that unblocks bot PRs than on a human PR (#9161).
+      # resolve-ci-diff-range.test.sh refuses `github.event_name` anywhere in
+      # quality-gates.yml, and resolve-ci-wasm-artifact.test.sh refuses any
+      # `if:` on these three steps.
+      - name: Verify the pre-optimisation WASM variants for CD reuse
+        run: node scripts/verify-engine-wasm.mjs engine
+
+      - name: Record the CD reuse key
+        run: |
+          bash scripts/engine-wasm-cache-key.sh ci-reuse > engine/wasm-ci-reuse-key.txt
+          echo "CD reuse key: $(cat engine/wasm-ci-reuse-key.txt)"
+
+      - name: Upload pre-optimisation WASM for CD reuse
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: wasm-binaries-cd-reuse
+          path: |
+            engine/pkg-webgl2/
+            engine/pkg-webgpu/
+            engine/pkg-webgl2-runtime/
+            engine/pkg-webgpu-runtime/
+            engine/wasm-ci-reuse-key.txt
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Run wasm-opt (Oz) on all variants
         working-directory: engine
         run: |
@@ -517,6 +581,15 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
 
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
@@ -663,6 +736,15 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - run: npm ci
+
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
 
       - name: Cache @spawnforge/ui build
         id: ui-cache-lighthouse
@@ -940,7 +1022,7 @@ jobs:
 
       - name: Run Chromatic
         if: steps.check-design.outputs.changed == 'true'
-        uses: chromaui/action@259eda5f0e44c0c1eab38b672f1c4c967cc969b7 # v18.8.1
+        uses: chromaui/action@bb3b582719a93c1828c5e520e62992b2937d7889 # v18.9.4
         with:
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
           workingDir: apps/design

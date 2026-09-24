@@ -214,7 +214,7 @@ export interface SceneSlice {
    * @returns Whether the engine accepted the request, not whether it applied it.
    * @throws The original dispatch error after rollback attempts and optional lockout.
    */
-  loadScene: (json: string, opts?: { rejectionStrandsEditor?: boolean; strandOnThrow?: boolean }) => boolean;
+  loadScene: (json: string, opts?: LoadSceneOptions) => boolean;
   /**
    * Return false when no engine is available or it rejects the new scene.
    * A successful new scene clears {@link sceneLoadError}: an empty scene the
@@ -372,7 +372,39 @@ type DispatchResult = { success: boolean; error?: string } | void;
 let dispatchCommand: ((command: string, payload: unknown) => DispatchResult) | null = null;
 
 /**
+ * The one scene load that arrived while no engine was attached, held until
+ * one is (#10192).
+ *
+ * The editor page calls `loadScene` with the project's stored scene inside
+ * its fetch, BEFORE `EditorLayout` mounts `useEngineEvents` and installs the
+ * dispatcher. That load used to return `false` and vanish: nothing re-issued
+ * it, so a project opened in a fresh tab showed the engine's starter scene,
+ * and the next autosave could write that starter scene over the stored one.
+ *
+ * Held as a closure over the store that deferred it, so the replay goes
+ * through that store's own `loadScene` — audio staging, prefab restore, the
+ * music arrangement and the completion mode all land the same way as any
+ * other load. Only the LATEST deferred load is kept: a later call describes
+ * a later intent and the earlier one would only be overwritten by it.
+ */
+let deferredSceneLoad: { json: string; replay: () => void } | null = null;
+
+/**
+ * True only while `setSceneDispatcher` replays a deferred load. The page that
+ * deferred it hydrated the music arrangement from the same scene data at
+ * once (the arrangement store is JS-only, so it is editable while the engine
+ * is still loading), so the replay must leave the arrangement store alone —
+ * re-hydrating it here would silently drop whatever the user changed while
+ * waiting for the engine (Sentry review on #10210).
+ */
+let replayingDeferredSceneLoad = false;
+
+/**
  * Attach the engine command dispatcher and matching scene validator.
+ *
+ * Attaching replays the load deferred while no engine was present, exactly
+ * once (#10192). Detaching (`null`) discards it: a deferred load belongs to
+ * the mount that deferred it, and a fresh mount issues its own.
  * @param dispatcher Engine dispatch function, or null when detached.
  * @returns Nothing.
  */
@@ -384,6 +416,62 @@ export function setSceneDispatcher(
     if (!dispatchCommand) return false;
     return dispatchCommand('validate_scene', { json })?.success === true;
   } : null);
+  const pending = deferredSceneLoad;
+  deferredSceneLoad = null;
+  if (!dispatcher || !pending) return;
+  try {
+    pending.replay();
+  } catch (error) {
+    // `loadScene` rethrows a THROWN dispatch after setting the save lockout
+    // (#10079). This runs inside the effect that installs the dispatcher, so
+    // letting it escape would unmount the editor through its error boundary
+    // instead of showing the lockout notice the throw already produced.
+    console.error('[Scenes] The deferred scene load threw while the engine attached:', error);
+  }
+}
+
+/**
+ * Whether a scene load is waiting for the engine to attach (#10192).
+ * @returns True while a deferred load is held.
+ */
+export function hasDeferredSceneLoad(): boolean {
+  return deferredSceneLoad !== null;
+}
+
+/**
+ * Drop the scene load waiting for the engine to attach, if any.
+ *
+ * The page that deferred a load owns it: it calls this from its effect
+ * cleanup, so a project abandoned before the engine attached (navigating to
+ * another project, or to `/dev`, mid-boot) does not replay into the editor
+ * that attaches next — where the next save would write project A's scene
+ * over project B's.
+ */
+export function cancelDeferredSceneLoad(): void {
+  deferredSceneLoad = null;
+}
+
+/** Options for {@link SceneSlice.loadScene}. */
+export interface LoadSceneOptions {
+  /** Whether a REJECTION strands the editor (default `true`, see #10056). */
+  rejectionStrandsEditor?: boolean;
+  /** Whether a THROWN dispatch strands the editor (default `true`, see #10079). */
+  strandOnThrow?: boolean;
+  /**
+   * Hold the load until the engine attaches when no dispatcher is installed
+   * yet, and replay it then (#10192). Off by default, and only the editor
+   * page's cold open turns it on: every other caller reports a `false` return
+   * to its user as a failed load, so queueing that scene would apply a load
+   * the UI has already called failed — a file import chosen before WASM
+   * finished loading would replace the project scene a moment after the
+   * toolbar said it was not loaded. The caller that defers owns the held
+   * load and cancels it with {@link cancelDeferredSceneLoad} when it goes
+   * away, so it cannot replay into a different editor. It also hydrates the
+   * music arrangement from the same scene data itself: the replay leaves the
+   * arrangement store alone, so edits made while the engine was loading
+   * survive it.
+   */
+  deferUntilEngineAttaches?: boolean;
 }
 
 /** Outcome of {@link SceneSlice.loadTemplate}. */
@@ -666,11 +754,20 @@ function rollbackPrefabState(snapshot: PrefabRestoreSnapshot): void {
  * same reason — `SCENE_LOADED` carries only a name, and it is the boundary that
  * clears the outgoing scene's mode — and rolls back with it. A legacy scene
  * stages `undefined`, which displaces anything a rejected load left behind.
+ *
+ * `modeOverride` replaces the JSON's mode: a deferred cold-open replay passes
+ * the store's CURRENT mode, because the page already hydrated the saved one
+ * when it deferred and the user may have changed it while the engine loaded.
  */
-function dispatchSceneLoad(json: string): boolean {
+function dispatchSceneLoad(
+  json: string,
+  modeOverride?: { completionMode: CompletionMode | undefined },
+): boolean {
   if (!dispatchCommand) return false;
   const rollbackAudio = stageSceneAudio(json);
-  const rollbackMode = stageSceneCompletionMode(readCompletionModeFromSceneJson(json));
+  const rollbackMode = stageSceneCompletionMode(
+    modeOverride ? modeOverride.completionMode : readCompletionModeFromSceneJson(json),
+  );
   try {
     const response = dispatchCommand('load_scene', { json });
     if (response?.success === false) {
@@ -763,7 +860,30 @@ export const createSceneSlice: StateCreator<
     // `EditorLayout` (and therefore `useEngineEvents`' `setCommandDispatcher`)
     // has mounted, so every healthy cold open takes this branch. Flagging it
     // would put an error banner on a working editor and block its saves.
-    if (!dispatchCommand) return false;
+    //
+    // Deferred means HELD, not dropped: `setSceneDispatcher` replays this
+    // exact call once the engine attaches (#10192), with the same options,
+    // so a rejection then strands the editor the same way a live one would.
+    // Only a caller that asked for it (`deferUntilEngineAttaches`) is held;
+    // an interactive load that answers `false` to its UI is simply not done,
+    // because that UI reports `false` as a failure and must not be
+    // contradicted by a load that lands later.
+    if (!dispatchCommand) {
+      if (opts?.deferUntilEngineAttaches) {
+        deferredSceneLoad = {
+          json,
+          replay: () => {
+            replayingDeferredSceneLoad = true;
+            try {
+              get().loadScene(json, opts);
+            } finally {
+              replayingDeferredSceneLoad = false;
+            }
+          },
+        };
+      }
+      return false;
+    }
     // Restore the scene's linked prefab instances (and merge its embedded
     // definitions) into the prefab store before the engine load. Done
     // alongside the dispatch for the same reason audio is: with no
@@ -776,7 +896,12 @@ export const createSceneSlice: StateCreator<
     }
     let accepted: boolean;
     try {
-      accepted = dispatchSceneLoad(json);
+      // A deferred replay keeps the mode the page hydrated at deferral time
+      // (and any edit made since) — same rule as the arrangement below.
+      accepted = dispatchSceneLoad(
+        json,
+        replayingDeferredSceneLoad ? { completionMode: get().sceneGraph.completionMode } : undefined,
+      );
     } catch (error) {
       // `dispatchSceneLoad` already rolled its own (audio) state back; the
       // prefab registry/library are this caller's state, so they roll back
@@ -811,8 +936,10 @@ export const createSceneSlice: StateCreator<
     // once again describing the project rather than overwriting it.
     set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
     // Swap in this scene's own arrangement (or clear it) — see
-    // `syncArrangementFromLoadedScene` (#10058).
-    syncArrangementFromLoadedScene(json);
+    // `syncArrangementFromLoadedScene` (#10058). A deferred replay is the one
+    // exception: its caller hydrated from this same data when it deferred,
+    // and the user may have edited the arrangement since.
+    if (!replayingDeferredSceneLoad) syncArrangementFromLoadedScene(json);
     return true;
   },
   newScene: (opts) => {

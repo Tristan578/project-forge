@@ -162,15 +162,17 @@ describe('SceneSettings', () => {
     expect(screen.getByTestId('scene-statistics')).toBeInTheDocument();
   });
 
-  it('renders the completion-mode picker outside the a11y-deferred subtree (#9998)', () => {
-    // The E2E axe audits exclude `[data-a11y-defer="scene-settings"]`; the
-    // picker is new and built accessible, so it must stay where they can see it.
+  it('renders the completion-mode picker first, where the axe audits can see it (#9998)', () => {
+    // #10188 dropped the Scene Settings axe exemption, so no part of this panel
+    // may reintroduce a `data-a11y-defer` subtree the audits would skip.
     setupStore();
-    render(<SceneSettings />);
+    const { container } = render(<SceneSettings />);
     const picker = screen.getByTestId('completion-mode-section');
     expect(picker.closest('[data-a11y-defer]')).toBeNull();
-    // The legacy controls are still deferred — the wrapper did not un-defer them.
-    expect(screen.getByTestId('scene-statistics').closest('[data-a11y-defer="scene-settings"]')).not.toBeNull();
+    expect(container.querySelector('[data-a11y-defer]')).toBeNull();
+    // The picker leads the panel: it precedes the scene statistics in document order.
+    const stats = screen.getByTestId('scene-statistics');
+    expect(picker.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders Quality Preset section', () => {

@@ -1,7 +1,7 @@
 /** Manual editor-local pixel layers, drawing history, and flattened PNG export/apply. */
 'use client';
 
-import { useState, useRef, useCallback, useEffect, useMemo, memo } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, memo, useId } from 'react';
 import {
   Pencil,
   Eraser,
@@ -205,6 +205,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
   entityId,
 }: PixelArtEditorProps) {
   const loadTexture = useEditorStore((s) => s.loadTexture);
+  const colorInputId = useId();
 
   // Canvas state
   const [canvasSize, setCanvasSize] = useState<CanvasSize>(16);
@@ -642,6 +643,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
           <div className="flex items-center gap-2">
             {/* Canvas size */}
             <select
+              aria-label="Canvas size"
               value={canvasSize}
               onChange={(e) => handleResize(parseInt(e.target.value) as CanvasSize)}
               className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
@@ -750,11 +752,12 @@ export const PixelArtEditor = memo(function PixelArtEditor({
           <div className="flex w-full flex-col border-l border-zinc-800 p-3 sm:w-44 sm:shrink-0">
             {/* Current Color */}
             <div className="mb-3">
-              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+              <label htmlFor={colorInputId} className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
                 Color
               </label>
               <div className="flex items-center gap-2">
                 <input
+                  id={colorInputId}
                   type="color"
                   value={color}
                   onChange={(e) => setColor(e.target.value)}
@@ -762,6 +765,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
                 />
                 <input
                   type="text"
+                  aria-label="Color hex value"
                   value={color}
                   onChange={(e) => {
                     if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) {
