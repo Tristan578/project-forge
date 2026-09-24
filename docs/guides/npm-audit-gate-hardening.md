@@ -901,9 +901,9 @@ by construction rather than by measurement.
   bound, in a command name or an alias, shopt or trap statement, is now a
   `brace` violation, and a numeric range (`trap 'exit 0' {0..0}`) is pinned.
   The twenty-first found that bash reads a numeric trap signal as an
-  optionally signed decimal after leading blanks, so `00`, `+0` and `' 00'`
-  are all signal 0 (EXIT); the gate now stores each numeric signal as its
-  value.
+  optionally signed decimal after leading blanks, so `00`, `+0`, `-0` and
+  `' 00'` are all signal 0 (EXIT); the gate now stores each numeric signal
+  as its value (the twenty-second round added the minus sign).
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

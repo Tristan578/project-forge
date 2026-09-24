@@ -199,7 +199,9 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   it again when the trap fires, to its action (`trap 'ex$()it 0' EXI$()T`).
   A trap on EXIT, ERR,
   RETURN or 0 whose action exits or execs is one too — `trap 'exit 0' EXIT`
-  overrides the `exit 1` the suite reached — and so is one whose action calls
+  overrides the `exit 1` the suite reached; a numeric signal is judged by its
+  value, since bash reads it as a signed decimal after leading blanks, so
+  `00`, `+0`, `-0` and `' 00'` are all 0 — and so is one whose action calls
   a function of the same file that exits or execs, directly or through another
   function (`cleanup() { exit 0; }` + `trap cleanup EXIT`), while a cleanup
   EXIT trap whose functions never exit, a

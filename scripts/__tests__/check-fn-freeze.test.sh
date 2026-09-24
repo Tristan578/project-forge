@@ -1392,9 +1392,12 @@ expect_rc "30j. every expansion that can be empty, in every guarded position, is
 # ---- 30n. a numeric signal is read as its value -----------------------------
 # Twenty-first board round (security): bash reads a numeric trap signal as an
 # optionally signed decimal after leading blanks, so every spelling on lines
-# 3 to 8 is signal 0 (EXIT) and replaces the exit status (checked in bash
-# 5.2: `trap 'echo FIRED' 00; exit 3` prints FIRED). Line 9, signal 10, and
-# line 10, signal 1 spelled 01, are real signals and are not reported.
+# 3 to 11 is signal 0 (EXIT) and replaces the exit status (checked in bash
+# 5.2: `trap 'echo FIRED' 00; exit 3` prints FIRED; round twenty-two added
+# the minus sign, `-0`, which bash also reads as EXIT). Line 12, signal 10,
+# and line 13, signal 1 spelled 01, are real signals and are not reported;
+# line 14, a bare sign, is not a number at all (bash rejects it), and would
+# read as 0 only if the numeric normalisation ran on a non-numeric word.
 d_numsig="$(mkfixture numeric-signals <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -1404,15 +1407,20 @@ trap 'exit 0' +0
 trap 'exit 0' +00
 trap 'exit 0' ' 0'
 trap 'exit 0' ' 00'
+trap 'exit 0' -0
+trap 'exit 0' -00
+trap 'exit 0' ' -0'
 trap 'exit 0' 10
 trap 'exit 0' 01
+trap 'exit 0' +
 FIX
 )"
 out_numsig="$(run_gate "$d_numsig")"
-expect_rc "30n. 00, 000, +0, +00 and a quoted leading blank, alone or before 00, are all signal 0" 1 "$out_numsig" "6 violation(s)" \
+expect_rc "30n. 00, 000, +0, +00, -0, -00 and a quoted leading blank are all signal 0" 1 "$out_numsig" "9 violation(s)" \
   "fixture.test.sh:3: 'trap exit 0 ..." "fixture.test.sh:4: 'trap exit 0 ..." "fixture.test.sh:5: 'trap exit 0 ..." \
-  "fixture.test.sh:6: 'trap exit 0 ..." "fixture.test.sh:7: 'trap exit 0 ..." "fixture.test.sh:8: 'trap exit 0 ..."
-if grep -Eq 'fixture.test.sh:(9|10):' <<<"$out_numsig"; then
+  "fixture.test.sh:6: 'trap exit 0 ..." "fixture.test.sh:7: 'trap exit 0 ..." "fixture.test.sh:8: 'trap exit 0 ..." \
+  "fixture.test.sh:9: 'trap exit 0 ..." "fixture.test.sh:10: 'trap exit 0 ..." "fixture.test.sh:11: 'trap exit 0 ..."
+if grep -Eq 'fixture.test.sh:(12|13):' <<<"$out_numsig"; then
   fail "30n-b. signal 10 and 01 are real signals, not 0" "$out_numsig"
 else
   pass "30n-b. signal 10 and 01 are real signals, not 0"
