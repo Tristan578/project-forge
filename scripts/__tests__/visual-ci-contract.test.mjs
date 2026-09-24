@@ -10,8 +10,21 @@ import YAML from 'yaml';
 import { validateVisualResults } from '../check-visual-results.mjs';
 
 const workflow = YAML.parse(readFileSync(fileURLToPath(new URL('../../.github/workflows/quality-gates.yml', import.meta.url)), 'utf8'));
+const baseline = YAML.parse(readFileSync(fileURLToPath(new URL('../../.github/workflows/chromatic-baseline.yml', import.meta.url)), 'utf8'));
 const changed = "steps.check-design.outputs.changed == 'true'";
-function validate(document) {
+// The pin is asserted by SHAPE plus LOCKSTEP, never by literal value: a literal
+// reddened every Dependabot bump (#10136) while proving nothing a shape check
+// does not. The comparer here and the baseline writer in chromatic-baseline.yml
+// must run the same CLI commit, or the reference snapshots were captured by
+// different code than the ones being diffed (#9621).
+const pinned = /^chromaui\/action@[0-9a-f]{40}$/;
+function baselinePin(document) {
+  const writers = document.jobs.baseline.steps.filter(step => step.name === 'Publish and accept baseline');
+  assert.equal(writers.length, 1, 'one baseline writer');
+  assert.match(writers[0].uses, pinned, 'baseline writer must pin chromaui/action to a full commit SHA');
+  return writers[0].uses;
+}
+function validate(document, baselineDocument = baseline) {
   const job = document.jobs.chromatic;
   assert.ok(job && job.if === undefined && !job['continue-on-error'], 'visual job must execute');
   const tokens = job.steps.filter(step => step.name === 'Require Chromatic token');
@@ -27,7 +40,8 @@ function validate(document) {
   const action = actions[0];
   assert.equal(action.if, changed, 'visual action must execute for design changes');
   assert.ok(!action['continue-on-error'], 'visual failures cannot be ignored');
-  assert.equal(action.uses, 'chromaui/action@259eda5f0e44c0c1eab38b672f1c4c967cc969b7');
+  assert.match(action.uses, pinned, 'visual action must pin chromaui/action to a full commit SHA');
+  assert.equal(action.uses, baselinePin(baselineDocument), 'visual action and baseline writer must run the same chromaui/action commit');
   assert.equal(action.with.exitOnceUploaded, false, 'upload alone cannot certify visual results');
   assert.equal(action.with.exitZeroOnChanges, false, 'unaccepted visual changes must fail');
   assert.equal(action.with.autoAcceptChanges, false, 'visual changes require review');
@@ -96,6 +110,40 @@ for (const [name, mutate] of controls) {
     assert.throws(() => validate(YAML.parse(YAML.stringify(document))));
   });
 }
+// Each pin control names the assertion that must fire, so a mutation caught by
+// some unrelated check cannot pass as proof that the pin contract works.
+const comparerOf = doc => doc.jobs.chromatic.steps.find(s => s.name === 'Run Chromatic');
+const writerOf = doc => doc.jobs.baseline.steps.find(s => s.name === 'Publish and accept baseline');
+// A different, still well-formed commit SHA: only the lockstep check can see it.
+const otherCommit = uses => uses.slice(0, -1) + (uses.endsWith('0') ? '1' : '0');
+const pinControls = [
+  ['mutable visual action tag', 'comparer', doc => { comparerOf(doc).uses = 'chromaui/action@v18.9.4'; }, /visual action must pin/],
+  ['abbreviated visual action SHA', 'comparer', doc => { comparerOf(doc).uses = comparerOf(doc).uses.slice(0, -28); }, /visual action must pin/],
+  ['forked visual action', 'comparer', doc => { comparerOf(doc).uses = comparerOf(doc).uses.replace('chromaui/', 'chromaui-fork/'); }, /visual action must pin/],
+  ['visual action drifted from baseline', 'comparer', doc => { comparerOf(doc).uses = otherCommit(comparerOf(doc).uses); }, /same chromaui\/action commit/],
+  ['baseline drifted from visual action', 'baseline', doc => { writerOf(doc).uses = otherCommit(writerOf(doc).uses); }, /same chromaui\/action commit/],
+  ['mutable baseline tag', 'baseline', doc => { writerOf(doc).uses = 'chromaui/action@v18.9.4'; }, /baseline writer must pin/],
+  ['missing baseline writer', 'baseline', doc => { doc.jobs.baseline.steps = doc.jobs.baseline.steps.filter(s => s.name !== 'Publish and accept baseline'); }, /one baseline writer/],
+  ['duplicate baseline writer', 'baseline', doc => { doc.jobs.baseline.steps.push(structuredClone(writerOf(doc))); }, /one baseline writer/],
+];
+const reparse = doc => YAML.parse(YAML.stringify(doc));
+for (const [name, side, mutate, expected] of pinControls) {
+  test('visual contract rejects ' + name, () => {
+    const documents = { comparer: structuredClone(workflow), baseline: structuredClone(baseline) };
+    const before = YAML.stringify(documents[side]);
+    mutate(documents[side]);
+    assert.notEqual(YAML.stringify(documents[side]), before, 'control must change the actual fixture');
+    assert.throws(() => validate(reparse(documents.comparer), reparse(documents.baseline)), expected);
+  });
+}
+test('a lockstep bump of both chromaui/action pins keeps the visual contract green', () => {
+  const comparer = structuredClone(workflow), writer = structuredClone(baseline);
+  const next = otherCommit(comparerOf(comparer).uses);
+  assert.notEqual(next, comparerOf(workflow).uses, 'control must move the pin');
+  comparerOf(comparer).uses = next;
+  writerOf(writer).uses = next;
+  validate(reparse(comparer), reparse(writer));
+});
 test('visual contracts remain imported by the required production CI suite', () => {
   const entry = readFileSync(fileURLToPath(new URL('./production-ci-contract.test.mjs', import.meta.url)), 'utf8');
   assert.match(entry, /^import '\.\/visual-ci-contract\.test\.mjs';$/m);

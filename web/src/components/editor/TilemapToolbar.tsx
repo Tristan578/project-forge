@@ -1,12 +1,16 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useId } from 'react';
 import { Paintbrush, Eraser, PaintBucket, Square, Pipette } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 
 type TilemapTool = 'paint' | 'erase' | 'fill' | 'rectangle' | 'picker';
 
 export function TilemapToolbar() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const tilemapData = useEditorStore((s) => primaryId ? s.tilemaps?.[primaryId] : null);
   const projectType = useEditorStore((s) => s.projectType);
@@ -61,8 +65,9 @@ export function TilemapToolbar() {
 
       {/* Layer selector */}
       <div className="flex items-center gap-2">
-        <label className="text-xs text-zinc-400">Layer:</label>
+        <label htmlFor={fieldId('layer')} className="text-xs text-zinc-400">Layer:</label>
         <select
+          id={fieldId('layer')}
           value={activeLayerIndex}
           onChange={(e) => setActiveLayerIndex(parseInt(e.target.value, 10))}
           className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300"

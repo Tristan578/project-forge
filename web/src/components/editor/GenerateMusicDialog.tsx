@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
@@ -22,6 +22,10 @@ interface GenerateMusicDialogProps {
 }
 
 export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusicDialogProps) {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [prompt, setPrompt] = useState('');
   const [duration, setDuration] = useState(30);
   const [instrumental, setInstrumental] = useState(true);
@@ -195,10 +199,11 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
 
           {/* Duration */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-300">
+            <label htmlFor={fieldId('duration')} className="mb-1 block text-xs font-medium text-zinc-300">
               Duration: {duration}s
             </label>
             <input
+              id={fieldId('duration')}
               type="range"
               min={15}
               max={120}

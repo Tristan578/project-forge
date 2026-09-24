@@ -1,5 +1,12 @@
 import { create } from 'zustand';
 import { buildMeasurementManifest, UNKNOWN, type MeasurementManifest, type Unknown } from '@/lib/config/measurementManifest';
+import { safeGetItem, safeSetItem } from '@/lib/storage/safeLocalStorage';
+import type { CaptureProtocol } from '@/lib/perf/frameCapture';
+import {
+  parsePerformanceReport,
+  type PerformanceReport,
+  type ReportComparison,
+} from '@/lib/perf/performanceReport';
 
 export interface PerformanceStats {
   fps: number;
@@ -7,7 +14,17 @@ export interface PerformanceStats {
   triangleCount: number;
   drawCalls: number;
   entityCount: number;
-  memoryUsage: number; // MB
+  /**
+   * Engine mesh memory in MB (`PERFORMANCE_STATS.meshMemoryBytes`), or unknown
+   * until the engine has reported it — never a placeholder 0.
+   */
+  memoryUsage: number | Unknown;
+  /**
+   * JS heap in use, MB (`performance.memory`, Chromium only), or unknown where
+   * the browser does not expose it. It used to be written into `memoryUsage`
+   * as `0` on Firefox/Safari, which read as "measured, and empty" (#10013).
+   */
+  jsHeapMb: number | Unknown;
   wasmHeapSize: number;
   gpuMemory: number;
 }
@@ -122,6 +139,83 @@ export function computeSystemCosts(history: SystemTimingFrame[]): SystemCost[] {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Timed capture + reports (performance.FR-3.OP-01, #9904 / #10013)
+// ---------------------------------------------------------------------------
+
+/** Lifecycle of the editor's timed performance capture. */
+export type TimedCaptureStatus = 'idle' | 'running' | 'complete' | 'failed' | 'cancelled';
+
+/** Where a running capture is. */
+export type TimedCapturePhase = 'reading-scene' | 'warmup' | 'capturing' | 'building-report';
+
+/**
+ * State of the timed capture that the profiler's Run capture button and the
+ * in-app AI's `capture_performance_report` both start (`lib/perf/editorCapture.ts`).
+ */
+export interface TimedCaptureState {
+  status: TimedCaptureStatus;
+  captureId: string | null;
+  phase: TimedCapturePhase | null;
+  /** Fraction of warm-up + capture elapsed, 0..1. */
+  progress: number;
+  profileKey: string | null;
+  protocol: CaptureProtocol | null;
+  /** Epoch ms the capture was started. */
+  startedAt: number | null;
+  /** Report produced by the last completed capture. */
+  reportId: string | null;
+  error: string | null;
+}
+
+/** A capture that has never run. */
+export const IDLE_TIMED_CAPTURE: Readonly<TimedCaptureState> = Object.freeze({
+  status: 'idle',
+  captureId: null,
+  phase: null,
+  progress: 0,
+  profileKey: null,
+  protocol: null,
+  startedAt: null,
+  reportId: null,
+  error: null,
+});
+
+/** Reports kept in memory for the session (each carries its raw samples). */
+export const MAX_STORED_REPORTS = 10;
+
+/** localStorage key of the pinned baseline, versioned with the report schema. */
+export const PERFORMANCE_BASELINE_STORAGE_KEY = 'forge:perf-baseline:v1';
+
+/**
+ * Read the pinned baseline back from localStorage. A value that fails the
+ * report schema is ignored rather than trusted: a baseline is only useful if
+ * its manifest can be compared field for field.
+ * @returns The stored baseline report, or null.
+ */
+export function loadStoredBaseline(): PerformanceReport | null {
+  const raw = safeGetItem(PERFORMANCE_BASELINE_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = parsePerformanceReport(JSON.parse(raw));
+    return parsed.ok ? parsed.report : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeBaseline(report: PerformanceReport | null): void {
+  if (report) {
+    safeSetItem(PERFORMANCE_BASELINE_STORAGE_KEY, JSON.stringify(report));
+    return;
+  }
+  try {
+    localStorage.removeItem(PERFORMANCE_BASELINE_STORAGE_KEY);
+  } catch {
+    // Storage unavailable: nothing persisted to remove.
+  }
+}
+
 interface PerformanceState {
   stats: PerformanceStats;
   isProfilerOpen: boolean;
@@ -140,6 +234,14 @@ interface PerformanceState {
   systemTimingHistory: SystemTimingFrame[];
   /** Ranked per-group totals for the current session (derived from history). */
   systemCosts: SystemCost[];
+  /** The timed capture shared by the manual control and the in-app AI. */
+  timedCapture: TimedCaptureState;
+  /** Reports captured this session, oldest first, at most {@link MAX_STORED_REPORTS}. */
+  performanceReports: PerformanceReport[];
+  /** The pinned baseline comparisons default to; persisted across reloads. */
+  baselineReport: PerformanceReport | null;
+  /** The most recent comparison, shown in the profiler. */
+  lastComparison: ReportComparison | null;
 
   // Actions
   updateStats: (stats: Partial<PerformanceStats>) => void;
@@ -160,18 +262,28 @@ interface PerformanceState {
   stopSystemCapture: () => void;
   /** Append one per-frame timing snapshot (ignored unless capturing). */
   pushSystemTimingFrame: (frame: SystemTimingFrame) => void;
+  /** Merge fields into the timed-capture state. */
+  setTimedCapture: (next: Partial<TimedCaptureState>) => void;
+  /** Keep a finished report (bounded, newest last). */
+  addPerformanceReport: (report: PerformanceReport) => void;
+  /** Pin (or with null, clear) the baseline; persisted to localStorage. */
+  setBaselineReport: (report: PerformanceReport | null) => void;
+  /** Record the latest comparison. */
+  setLastComparison: (comparison: ReportComparison | null) => void;
 }
 
-const defaultStats: PerformanceStats = {
+/** Stats before the engine or the profiler has reported anything. */
+export const DEFAULT_PERFORMANCE_STATS: Readonly<PerformanceStats> = Object.freeze({
   fps: 60,
   frameTime: 16.67,
   triangleCount: 0,
   drawCalls: 0,
   entityCount: 0,
-  memoryUsage: 0,
+  memoryUsage: UNKNOWN,
+  jsHeapMb: UNKNOWN,
   wasmHeapSize: 0,
   gpuMemory: 0,
-};
+});
 
 const defaultBudget: PerformanceBudget = {
   maxTriangles: 500_000,
@@ -181,7 +293,7 @@ const defaultBudget: PerformanceBudget = {
 };
 
 export const usePerformanceStore = create<PerformanceState>((set) => ({
-  stats: defaultStats,
+  stats: { ...DEFAULT_PERFORMANCE_STATS },
   isProfilerOpen: false,
   history: [],
   budget: defaultBudget,
@@ -192,6 +304,10 @@ export const usePerformanceStore = create<PerformanceState>((set) => ({
   captureActive: false,
   systemTimingHistory: [],
   systemCosts: computeSystemCosts([]),
+  timedCapture: { ...IDLE_TIMED_CAPTURE },
+  performanceReports: [],
+  baselineReport: typeof window === 'undefined' ? null : loadStoredBaseline(),
+  lastComparison: null,
 
   updateStats: (newStats) =>
     set((state) => {
@@ -256,4 +372,16 @@ export const usePerformanceStore = create<PerformanceState>((set) => ({
       const history = [...state.systemTimingHistory, frame].slice(-MAX_SYSTEM_TIMING_FRAMES);
       return { systemTimingHistory: history, systemCosts: computeSystemCosts(history) };
     }),
+
+  setTimedCapture: (next) => set((state) => ({ timedCapture: { ...state.timedCapture, ...next } })),
+
+  addPerformanceReport: (report) =>
+    set((state) => ({ performanceReports: [...state.performanceReports, report].slice(-MAX_STORED_REPORTS), lastComparison: null })),
+
+  setBaselineReport: (report) => {
+    storeBaseline(report);
+    set({ baselineReport: report, lastComparison: null });
+  },
+
+  setLastComparison: (comparison) => set({ lastComparison: comparison }),
 }));

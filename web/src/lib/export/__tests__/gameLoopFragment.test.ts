@@ -135,3 +135,27 @@ describe('generateGameLoopFragment', () => {
     expect(indented).toContain('\n\n');
   });
 });
+
+describe('generateGameLoopFragment perf harness hook (#10013)', () => {
+  const frag = generateGameLoopFragment({ handleCommand: 'handle_command' });
+
+  it('hands each frame timestamp to the harness, guarded, before any per-frame work', () => {
+    const hook = frag.indexOf('if (window.__forgePerfHooks) window.__forgePerfHooks.frame(now);');
+    expect(hook).toBeGreaterThan(frag.indexOf('lastTime = now;'));
+    expect(hook).toBeLessThan(frag.indexOf('window.__forgeScriptUpdate(dt)'));
+  });
+
+  it('calls the hook with the same clock the loop uses for dt', () => {
+    const run = new Function('window', 'performance', 'requestAnimationFrame', `${frag}\nreturn gameLoop;`);
+    const seen: number[] = [];
+    let clock = 100;
+    const loop = run(
+      { __forgePerfHooks: { frame: (now: number) => seen.push(now) } },
+      { now: () => (clock += 16) },
+      () => undefined,
+    ) as () => void;
+    loop();
+    loop();
+    expect(seen).toEqual([132, 148]);
+  });
+});

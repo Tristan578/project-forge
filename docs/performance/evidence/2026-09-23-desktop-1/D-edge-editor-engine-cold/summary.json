@@ -1,0 +1,20 @@
+[
+  {
+    "fixture": "perf-3d@1",
+    "run": 1,
+    "file": "perf-3d-v1-cold-run1.json",
+    "verdict": "fail",
+    "cacheState": "cold",
+    "backend": "webgpu",
+    "sampleCount": 3941,
+    "p50Ms": 15.399999998509884,
+    "p95Ms": 17.600000001490116,
+    "p99Ms": 21.5,
+    "firstInteractiveMs": 3095.4,
+    "distinctColours": 320,
+    "budgets": {
+      "frame-time-p95": "fail (observed 17.600000001490116, limit 16.7)",
+      "first-interactive-cold": "pass (observed 3095.4, limit 5000)"
+    }
+  }
+]

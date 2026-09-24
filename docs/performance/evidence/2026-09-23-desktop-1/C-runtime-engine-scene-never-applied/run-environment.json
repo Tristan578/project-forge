@@ -1,0 +1,56 @@
+{
+  "operationId": "performance.FR-3.OP-01",
+  "capturedAt": "2026-09-23T05:02:53.137Z",
+  "gitHead": "5b659888050904f7f354ff61a8439e54293e60d6",
+  "buildSha": "5b659888050904f7f354ff61a8439e54293e60d6",
+  "engineTree": "efd64ce248aea65dba5e07b5244918cf10e03b28",
+  "enginePackage": {
+    "name": "engine-pkg-webgpu-runtime",
+    "variant": "runtime",
+    "wasmBytes": 90842966,
+    "wasmSha256": "aa1f6782858186ee9cbef4c229574ddddf418443b7ec9f08a29c5bb5dc06c40d"
+  },
+  "browser": {
+    "name": "chromium",
+    "version": "153.0.8010.53",
+    "channel": "chrome",
+    "headless": true,
+    "launchArgs": [
+      "--enable-gpu",
+      "--ignore-gpu-blocklist",
+      "--enable-unsafe-webgpu",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--disable-backgrounding-occluded-windows",
+      "--use-angle=d3d11",
+      "--disable-gpu-vsync",
+      "--disable-frame-rate-limit"
+    ],
+    "vsync": "off (uncapped: --disable-gpu-vsync --disable-frame-rate-limit)"
+  },
+  "os": {
+    "platform": "win32",
+    "release": "10.0.26200",
+    "cpus": "AMD Ryzen 7 3800X 8-Core Processor             ",
+    "cpuCount": 16,
+    "totalMemGb": 64
+  },
+  "gpuFromOs": "{\"Name\":\"NVIDIA GeForce RTX 2080 SUPER\",\"DriverVersion\":\"32.0.16.1060\"}",
+  "protocol": {
+    "warmupMs": 10000,
+    "captureMs": 60000
+  },
+  "profile": "desktop@1",
+  "cache": "cold",
+  "cpuThrottle": 1,
+  "forcedBackend": null,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "deltaFromProduction": [
+    "engine served over loopback, not the CDN: no network latency or bandwidth limit in the cold first-interactive time",
+    "engine binary served uncompressed; production negotiates brotli",
+    "Chrome launched by Playwright with GPU flags (see playwright.perf.config.ts), not a user profile"
+  ]
+}

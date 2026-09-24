@@ -3,8 +3,8 @@ export const meta = {
   description: 'Run the 5 specialized reviewers (architect/security/dx/ux/test) in parallel on the current branch; PASS only if all five PASS',
   whenToUse: 'Before opening a PR, or when /review-protocol asks for the review board. args: optional {base: "main", focus: "free text"}',
   phases: [
-    { title: 'Review', detail: 'one agent per reviewer definition' },
-    { title: 'Publish', detail: 'post the verdict marker onto the PR so it becomes the review-board commit status' },
+    { title: 'Review', detail: 'one agent per reviewer definition', model: 'sonnet' },
+    { title: 'Publish', detail: 'post the verdict marker onto the PR so it becomes the review-board commit status', model: 'haiku' },
   ],
 }
 
@@ -78,11 +78,22 @@ const results = await parallel(REVIEWERS.map(r => () =>
     `1. Resolve the agent definition \`${r.def}\` — it may be a shell glob, so run \`ls ${r.def}\` first; exactly one file must match. Read that file and adopt its role, standards and checklist as a reviewer. If zero or more than one file matches, return verdict FAIL with a single finding naming the unresolved definition — never substitute a generic reviewer.\n` +
     `2. Run \`git rev-parse HEAD\` FIRST and return it as \`sha\`. That is the commit your review covers, and it is what the published verdict is recorded against — so read it before you read the diff, not after.\n` +
     `3. Run \`git fetch origin --quiet\` before anything else, so ${base} is the trunk as it stands NOW rather than as this worktree last saw it.\n` +
-    `4. Review the diff of the current branch against ${base}: run \`git diff ${base}...HEAD --stat\` first, then \`git diff ${base}...HEAD\`, and read every changed file in full. If that diff is much larger than the change the orchestrator described, STOP and return FAIL with one finding saying so — a diff far bigger than the PR means the base is wrong, and every finding you would write is about somebody else's already-merged work.\n` +
+    `4. Review the diff of the current branch against ${base}: run \`git diff ${base}...HEAD --stat\` first, then \`git diff ${base}...HEAD\`, and read every changed file in full.\n` +
+    `   If that diff contains work plainly UNRELATED to what the orchestrator described — other features, other tickets' files, commits that look already-merged — STOP and return FAIL with one finding naming two or three of those unrelated paths, because the base is wrong and every finding you would write is about somebody else's work. Check it with \`git merge-base ${base} HEAD\` before you conclude that: a three-dot diff is measured from the merge base, so a busy trunk does NOT pull other people's commits into it.\n` +
+    `   SIZE ALONE IS NOT THAT SIGNAL. A large PR is legitimately large, and the orchestrator may describe only the latest increment of one — being handed a 150-file diff after a note about a 2-file change is the expected shape of a long-running branch, not evidence of a wrong base. Judge by whether the CONTENT belongs to the described work.\n` +
     `5. Verdict is PASS or FAIL only — ANY finding at ANY severity is a FAIL (no "pass with issues").\n` +
     `6. Before returning, run \`git status --porcelain\`; if it shows anything you changed, revert it and add a finding saying the review attempted a write.${focus}\n` +
     `Return the structured verdict.`,
-    { label: `review:${r.key}`, phase: 'Review', schema: VERDICT }
+    // A REVIEWER SEAT IS A SONNET SEAT. Left unset, every seat inherits the
+    // orchestrator's model, and five frontier agents re-reading a whole diff is
+    // what this board costs — measured on #10130: ~1.3-1.5M subagent tokens per
+    // round at frontier, ~1.0M on sonnet, over sixteen rounds. The work is reading
+    // a diff and applying a role checklist, which sonnet does; the one genuine
+    // blocker that board ever found (a carriage return inside a patch header, run
+    // 14) was reported independently by four of the five seats, so it did not turn
+    // on any single seat's depth. Raise a seat to opus deliberately, for one round,
+    // when the change is security-critical — do not raise the board.
+    { label: `review:${r.key}`, phase: 'Review', schema: VERDICT, model: 'sonnet', effort: 'high' }
   ).then(v => ({ reviewer: r.key, ...v }))
 ))
 
@@ -125,7 +136,8 @@ if (reviewedSha) {
     `2. Run EXACTLY: bash scripts/post-board-verdict.sh <pr number> ${overall} ${reviewedSha} "<one line: how many reviewers reported and how many failed>"\n` +
     `   The sha is fixed above. It is the commit the reviewers actually read. Do NOT look up the PR's current head and do NOT substitute it — if they differ, that difference is the signal, and the check reports the verdict as stale on purpose.\n` +
     `3. Report the script's output verbatim. Do not edit any file, and do not post any other comment.`,
-    { label: 'publish:verdict', phase: 'Publish' }
+    // Mechanical: read a PR number, run one fixed script, echo its output.
+    { label: 'publish:verdict', phase: 'Publish', model: 'haiku', effort: 'low' }
   ).catch(err => ({ error: String(err) }))
 
   // A publish that fails must be LOUD. Folding it into the return value with no

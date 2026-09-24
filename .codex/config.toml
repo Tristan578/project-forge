@@ -1,15 +1,87 @@
 # SpawnForge — OpenAI Codex project configuration
 # See: https://developers.openai.com/codex/config-reference/
+#
+# HAND-EDITED, not generated. tools/agentic-sync/port.mjs only READS this file, to
+# check that the [mcp_servers.*] tables below match .mcp.json (name, command, args
+# and secret names) — Codex never reads .mcp.json, so without these blocks a Codex
+# session has none of the 8 servers a Claude Code session has (#8767). Parity is
+# enforced even when every table is removed; adding or removing a server here means
+# doing the same in .mcp.json. The same check requires
+# default_tools_approval_mode = "prompt" on every server, which .mcp.json has no
+# counterpart for, and fails a command, arg or cwd that is a relative path: Codex
+# resolves those against the directory the session started in (see taskboard).
 
 # Model & approval
 model = "gpt-5.3-codex"
-approval_policy = "never"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
 
-# Sandbox: allow writes only within the project
-[sandbox_workspace_write]
-allow = ["**/*"]
+# Interactive tool calls request approval. Headless runs must explicitly approve
+# only their required tools; starting an MCP server does not approve its calls.
+# Codex protects .codex from sandboxed writes; no custom allow glob is supported.
 
 # Disable features that could bypass workflow
 [features]
 shell_tool = false
 web_search = false
+
+# --- MCP servers: the same 8 as .mcp.json -------------------------------------
+# SECRETS ARE FORWARDED BY NAME, never written here. `.mcp.json` uses Claude's
+# `${VAR}` interpolation in `env`; Codex has no interpolation and instead takes
+# `env_vars = [...]`, a list of variable NAMES it passes through from the
+# environment that starts it. A non-secret value (an org slug) goes in `env` as a
+# literal. So this file contains no credential, and each server is inert unless
+# the named variables are already exported.
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp@latest"]
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.neon]
+command = "npx"
+args = ["-y", "@neondatabase/mcp-server-neon"]
+env_vars = ["NEON_API_KEY"]
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@playwright/mcp@latest"]
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.sentry]
+command = "npx"
+args = ["-y", "@sentry/mcp-server@latest"]
+env_vars = ["SENTRY_AUTH_TOKEN"]
+default_tools_approval_mode = "prompt"
+
+# Non-secret identifiers, already public in this repo's docs.
+[mcp_servers.sentry.env]
+SENTRY_ORG = "tristan-nolan"
+SENTRY_PROJECT = "spawnforge-ai"
+
+[mcp_servers.stripe]
+command = "npx"
+args = ["-y", "@stripe/mcp@latest"]
+env_vars = ["STRIPE_SECRET_KEY"]
+default_tools_approval_mode = "prompt"
+
+# Launched through a git alias, because git runs a `!` alias from the repository's
+# top-level directory (git-config(1), alias.*). A bare `node .claude/hooks/...`
+# resolves against the directory the Codex session started in, so it fails to
+# start from web/ or any other subdirectory; so does a relative `cwd`.
+[mcp_servers.taskboard]
+command = "git"
+args = ["-c", "alias.spawnforge-taskboard=!node .claude/hooks/taskboard-launch.mjs", "spawnforge-taskboard", "mcp"]
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.upstash]
+command = "npx"
+args = ["-y", "@upstash/mcp-server@latest"]
+env_vars = ["UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"]
+default_tools_approval_mode = "prompt"

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useId } from 'react';
 import {
   generateQuestChain,
   validateGenerateOptions,
@@ -107,6 +107,10 @@ function QuestCard({ quest, isExpanded, onToggle }: {
 const TEMPLATE_IDS = Object.keys(CHAIN_TEMPLATES) as ChainTemplateId[];
 
 export function QuestGeneratorPanel() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [templateId, setTemplateId] = useState<ChainTemplateId>('hero_origin');
   const [description, setDescription] = useState('');
   const [difficulty, setDifficulty] = useState(3);
@@ -181,10 +185,11 @@ export function QuestGeneratorPanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {/* Template Picker */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
+          <label htmlFor={fieldId('chain-template')} className="mb-1 block text-xs font-medium text-zinc-400">
             Chain Template
           </label>
           <select
+            id={fieldId('chain-template')}
             value={templateId}
             onChange={(e) => setTemplateId(e.target.value as ChainTemplateId)}
             className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 focus:border-blue-500 focus:outline-none"
@@ -221,10 +226,11 @@ export function QuestGeneratorPanel() {
 
         {/* Difficulty */}
         <div>
-          <label className="mb-1 block text-xs font-medium text-zinc-400">
+          <label htmlFor={fieldId('difficulty')} className="mb-1 block text-xs font-medium text-zinc-400">
             Difficulty: {difficulty}
           </label>
           <input
+            id={fieldId('difficulty')}
             type="range"
             min={1}
             max={10}
