@@ -10,6 +10,7 @@ import { CheckCircle2, Circle, ChevronDown, ChevronUp, X, Trophy } from 'lucide-
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
+import { hasCelebrated } from '@/lib/celebrations/milestones';
 
 interface ChecklistTask {
   id: string;
@@ -61,6 +62,18 @@ const CHECKLIST_TASKS: ChecklistTask[] = [
     category: 'basics',
     checkCompletion: () =>
       useChatStore.getState().messages.filter((m) => m.role === 'user').length > 0,
+  },
+  {
+    id: 'build-with-ai',
+    title: 'Build a Game with AI',
+    description: 'Describe a game and let AI build it',
+    category: 'basics',
+    // Completion is recomputed from live state on every store change, so a
+    // status check alone would untick the moment the next run starts. The
+    // FIRST_AI_GENERATION record, written once by useCelebrations when a run
+    // completes, is what keeps it ticked (#10170).
+    checkCompletion: (state) =>
+      state.orchestratorStatus === 'completed' || hasCelebrated('FIRST_AI_GENERATION'),
   },
   {
     id: 'export-game',

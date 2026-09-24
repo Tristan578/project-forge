@@ -127,10 +127,10 @@ describe('OnboardingChecklist', () => {
     expect(screen.getByText('Progress')).toBeInTheDocument();
   });
 
-  it('shows task count as 0/12 by default', () => {
+  it('shows task count as 0/13 by default', () => {
     setupStore();
     render(<OnboardingChecklist />);
-    expect(screen.getByText('0 / 12')).toBeInTheDocument();
+    expect(screen.getByText('0 / 13')).toBeInTheDocument();
   });
 
   // Every test above renders against a store whose `subscribe` captures the
@@ -157,6 +157,7 @@ describe('OnboardingChecklist', () => {
           hudElements: [],
           primaryAnimationClip: null,
           projectId: null,
+          orchestratorStatus: 'idle',
           ...over,
         });
       });
@@ -170,7 +171,7 @@ describe('OnboardingChecklist', () => {
 
       emitState({ entityAudio: { 'ent-1': { assetId: 'asset-1' } } });
 
-      expect(screen.getByText('1 / 12')).toBeInTheDocument();
+      expect(screen.getByText('1 / 13')).toBeInTheDocument();
     });
 
     it('leaves the audio task incomplete when no entity carries audio', () => {
@@ -179,7 +180,7 @@ describe('OnboardingChecklist', () => {
 
       emitState({ entityAudio: {} });
 
-      expect(screen.getByText('0 / 12')).toBeInTheDocument();
+      expect(screen.getByText('0 / 13')).toBeInTheDocument();
     });
 
     it('survives a snapshot with no entityAudio at all', () => {
@@ -190,7 +191,7 @@ describe('OnboardingChecklist', () => {
       render(<OnboardingChecklist />);
 
       expect(() => emitState({ entityAudio: undefined })).not.toThrow();
-      expect(screen.getByText('0 / 12')).toBeInTheDocument();
+      expect(screen.getByText('0 / 13')).toBeInTheDocument();
     });
 
     it('counts several completed tasks together', () => {
@@ -203,7 +204,60 @@ describe('OnboardingChecklist', () => {
         entityAudio: { 'ent-1': { assetId: 'asset-1' } },
       });
 
-      expect(screen.getByText('3 / 12')).toBeInTheDocument();
+      expect(screen.getByText('3 / 13')).toBeInTheDocument();
+    });
+
+    // #10170: the first AI-built game. Completion is rebuilt from each snapshot,
+    // so the status alone would untick the task when the next run starts; the
+    // FIRST_AI_GENERATION record (written by useCelebrations) keeps it ticked.
+    describe('"Build a Game with AI"', () => {
+      const recordFirstAiGeneration = () =>
+        localStorage.setItem(
+          'spawnforge-celebrated-milestones',
+          JSON.stringify(['FIRST_AI_GENERATION']),
+        );
+
+      it('ticks when a run completes', () => {
+        setupStore();
+        render(<OnboardingChecklist />);
+
+        emitState({ orchestratorStatus: 'completed' });
+
+        expect(screen.getByText('1 / 13')).toBeInTheDocument();
+      });
+
+      it.each([['failed'], ['cancelled'], ['executing']])(
+        'stays unticked when the run is %s',
+        (status) => {
+          setupStore();
+          render(<OnboardingChecklist />);
+
+          emitState({ orchestratorStatus: status });
+
+          expect(screen.getByText('0 / 13')).toBeInTheDocument();
+        },
+      );
+
+      it('stays ticked when a new run starts once the milestone is recorded', () => {
+        setupStore();
+        render(<OnboardingChecklist />);
+        emitState({ orchestratorStatus: 'completed' });
+        recordFirstAiGeneration();
+
+        emitState({ orchestratorStatus: 'decomposing' });
+
+        expect(screen.getByText('1 / 13')).toBeInTheDocument();
+      });
+
+      it('would untick on the next run without the record: the status alone is not enough', () => {
+        setupStore();
+        render(<OnboardingChecklist />);
+        emitState({ orchestratorStatus: 'completed' });
+
+        emitState({ orchestratorStatus: 'decomposing' });
+
+        expect(screen.getByText('0 / 13')).toBeInTheDocument();
+      });
     });
 
     it('drops a task back to incomplete when the state that satisfied it goes away', () => {
@@ -213,10 +267,10 @@ describe('OnboardingChecklist', () => {
       render(<OnboardingChecklist />);
 
       emitState({ entityAudio: { 'ent-1': { assetId: 'asset-1' } } });
-      expect(screen.getByText('1 / 12')).toBeInTheDocument();
+      expect(screen.getByText('1 / 13')).toBeInTheDocument();
 
       emitState({ entityAudio: {} });
-      expect(screen.getByText('0 / 12')).toBeInTheDocument();
+      expect(screen.getByText('0 / 13')).toBeInTheDocument();
     });
   });
 });
