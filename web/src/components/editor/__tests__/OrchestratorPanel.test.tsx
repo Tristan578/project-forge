@@ -267,7 +267,12 @@ describe('OrchestratorPanel', () => {
     });
     render(<OrchestratorPanel />);
 
-    expect(screen.getByText('Insufficient token balance')).toBeTruthy();
+    // The balance this tab holds can be stale, so the row says what happens if
+    // it is short (the build stops before spending) and where to get more.
+    expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Buy tokens' }).getAttribute('href')).toBe(
+      '/settings?tab=billing',
+    );
   });
 
   /**
@@ -286,7 +291,7 @@ describe('OrchestratorPanel', () => {
     });
     render(<OrchestratorPanel />);
 
-    const row = screen.getByText('Insufficient token balance').closest('div');
+    const row = screen.getByText(/may cost more than your token balance/).closest('div');
     const rowClasses = Array.from(row?.classList ?? []);
     expect(rowClasses.some((c) => /^(bg|text)-red-/.test(c))).toBe(false);
     expect(rowClasses).toContain('bg-[var(--sf-destructive)]/10');
@@ -901,13 +906,13 @@ describe('OrchestratorPanel', () => {
     const TINT_ROWS: Array<{
       label: string;
       tokenEstimate: Record<string, unknown>;
-      copy: string;
+      copy: string | RegExp;
       token: string;
     }> = [
       {
         label: 'insufficient balance',
         tokenEstimate: { ...MOCK_PLAN.tokenEstimate, sufficientBalance: false },
-        copy: 'Insufficient token balance',
+        copy: /may cost more than your token balance/,
         token: '--sf-destructive',
       },
       {
@@ -933,12 +938,14 @@ describe('OrchestratorPanel', () => {
         });
         render(<OrchestratorPanel />);
 
-        const row = screen.getByText(copy);
+        // The copy sits in a span beside the icon; the tint is on the row.
+        const row = screen.getByText(copy).closest('div');
+        if (!row) throw new Error('warning copy is not inside a row');
         expect(Array.from(row.classList).sort()).toEqual(
           [
             'mt-2',
             'flex',
-            'items-center',
+            'items-start',
             'gap-1.5',
             'rounded',
             `bg-[var(${token})]/10`,

@@ -161,7 +161,7 @@ describe('QuickStartDialog', () => {
       screen.getByLabelText(/what happens in your platformer/i),
       'lava caves with three gems',
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     expect(hoisted.openPanel).toHaveBeenCalledWith('orchestrator');
     expect(startQuickStart).toHaveBeenCalledWith(
@@ -173,7 +173,7 @@ describe('QuickStartDialog', () => {
   it('falls back to the card placeholder when the prompt is left blank', async () => {
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const card = QUICK_START_GAME_TYPES[0];
     expect(startQuickStart).toHaveBeenCalledWith(
@@ -189,7 +189,7 @@ describe('QuickStartDialog', () => {
     });
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const region = await screen.findByRole('status');
     expect(region.getAttribute('aria-live')).toBe('polite');
@@ -200,7 +200,7 @@ describe('QuickStartDialog', () => {
     startQuickStart.mockRejectedValueOnce(new Error('decompose route is down'));
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('decompose route is down');
@@ -218,7 +218,7 @@ describe('QuickStartDialog', () => {
     });
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Not enough tokens to build this game.');
@@ -242,7 +242,7 @@ describe('QuickStartDialog', () => {
     });
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Could not start building your game. Please try again.');
@@ -256,7 +256,7 @@ describe('QuickStartDialog', () => {
   it('shows a gate the run did not auto-approve so the user is never stranded', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     setState({
       orchestratorStatus: 'executing',
@@ -284,7 +284,7 @@ describe('QuickStartDialog', () => {
   it('never nests the approval gate action row inside a scroll-bounded container', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     setState({
       orchestratorStatus: 'executing',
@@ -316,7 +316,7 @@ describe('QuickStartDialog', () => {
     await userEvent.tab();
     await userEvent.tab();
 
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Build it' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Plan my game' }));
   });
 
   it('closes on Escape', async () => {
@@ -349,7 +349,7 @@ describe('QuickStartDialog', () => {
   it('focuses the live region when the build view replaces the prompt', async () => {
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
     const status = await screen.findByRole('status');
     expect(document.activeElement).toBe(status);
   });
@@ -381,7 +381,7 @@ describe('QuickStartDialog', () => {
     startQuickStart.mockResolvedValueOnce(false);
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('A build is already running');
@@ -396,7 +396,7 @@ describe('QuickStartDialog', () => {
     setState({ orchestratorStatus: 'executing' });
     render(<QuickStartDialog open onClose={vi.fn()} />);
 
-    // Reopening must not put "Build it" back in front of a user whose second
+    // Reopening must not put "Plan my game" back in front of a user whose second
     // run the slice would refuse.
     expect(screen.queryByRole('button', { name: /platformer/i })).toBeNull();
     expect(screen.getByRole('status').textContent).toContain('Building your game');
@@ -446,7 +446,7 @@ describe('QuickStartDialog', () => {
     });
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     expect((await screen.findByRole('status')).textContent).toContain('ready');
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
@@ -457,7 +457,7 @@ describe('QuickStartDialog', () => {
     startQuickStart.mockRejectedValueOnce(new Error('decompose route is down'));
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
     await screen.findByRole('alert');
 
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
@@ -469,7 +469,7 @@ describe('QuickStartDialog', () => {
   it('lands focus on Approve when a gate appears and rejects it on Cancel', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     setState({
       orchestratorStatus: 'executing',
@@ -494,13 +494,10 @@ describe('QuickStartDialog', () => {
     expect(resolveGate).toHaveBeenCalledWith('rejected');
   });
 
-  // The real UI can never leave `selectedId` pointing at a card that isn't in
-  // `QUICK_START_GAME_TYPES` -- `handlePick` only ever sets it from that same
-  // list. This forces the one lookup miss `handleSubmit` defends against.
-  // #6831, owner decision "confirm cost first": the describe step's "Build it"
-  // only DESIGNS the game (startQuickStart stops at 'awaiting_approval'). The
-  // plan and its token estimate are shown here, and nothing that spends build
-  // tokens runs until the user presses "Build it" on this review.
+  // #6831, owner decision "confirm cost first": the describe step's "Plan my
+  // game" only DESIGNS the game (startQuickStart stops at 'awaiting_approval').
+  // The plan and its token estimate are shown here, and the build's tokens are
+  // reserved only when the user presses "Build it" on this review.
   describe('plan review before any build spend (#6831)', () => {
     const PLAN_GATE = {
       id: 'gate_plan',
@@ -540,7 +537,7 @@ describe('QuickStartDialog', () => {
       });
       const utils = render(<QuickStartDialog open onClose={onClose} />);
       await pickPlatformer();
-      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
       await screen.findByRole('button', { name: 'Build it' });
       return utils;
     }
@@ -591,11 +588,11 @@ describe('QuickStartDialog', () => {
       finish();
     });
 
-    it('releases the hold and closes on Cancel', async () => {
+    it('drops the plan and closes on "Discard plan"', async () => {
       const onClose = vi.fn();
       await reachPlanReview({}, onClose);
 
-      await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
 
       expect(cancelPipeline).toHaveBeenCalledTimes(1);
       expect(onClose).toHaveBeenCalledTimes(1);
@@ -634,14 +631,14 @@ describe('QuickStartDialog', () => {
       expect((await screen.findByRole('alert')).textContent).toContain('pipeline import failed');
     });
 
-    // The server reserved the estimate's upper bound before this review
-    // appeared, so a successful reservation IS the balance check;
-    // `sufficientBalance` reads a cached client balance. The warning is shown,
-    // and the build is not blocked on it (the panel's Start Building agrees).
-    it('shows a low-balance warning without blocking a build the server already reserved for', async () => {
+    // "Build it" reserves the build's tokens, and the server's answer is the
+    // real balance check; `sufficientBalance` reads a cached client balance.
+    // The warning is shown and the build is not blocked on it (the panel's
+    // Start Building agrees). A refused reservation surfaces as an error.
+    it('shows a low-balance warning without blocking the build on a cached balance', async () => {
       await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
 
-      expect(screen.getByText('Insufficient token balance')).toBeTruthy();
+      expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Build it' })).toHaveProperty('disabled', false);
     });
 
@@ -651,6 +648,65 @@ describe('QuickStartDialog', () => {
       expect(screen.getByRole('heading', { name: 'Review your game plan' })).toBeTruthy();
       await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
       expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
+    });
+
+    // "Close", Escape and the backdrop all keep the plan: nothing has been
+    // reserved yet, the design is already paid for, and reopening the dialog
+    // returns to this review. "Discard plan" is the way to drop it.
+    it.each([
+      ['the footer Close button', () => userEvent.click(screen.getByRole('button', { name: 'Close' }))],
+      ['Escape', () => userEvent.keyboard('{Escape}')],
+    ])('keeps the plan when the review is dismissed with %s', async (_how, dismiss) => {
+      const onClose = vi.fn();
+      await reachPlanReview({}, onClose);
+
+      await dismiss();
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(cancelPipeline).not.toHaveBeenCalled();
+      expect(runPipelineFromPlan).not.toHaveBeenCalled();
+    });
+
+    it('returns to the review when reopened with the plan still waiting', () => {
+      setState({ orchestratorStatus: 'awaiting_approval', currentPlan: PLAN, tokenEstimate: ESTIMATE });
+      render(<QuickStartDialog open onClose={vi.fn()} />);
+
+      expect(screen.getByRole('heading', { name: 'Review your game plan' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /platformer/i })).toBeNull();
+    });
+
+    it('says the build is starting, not "review it", while Build it is in flight', async () => {
+      let finish!: () => void;
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await reachPlanReview();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Starting the build'));
+      expect(screen.queryByText(/only when you press Build it/)).toBeNull();
+      finish();
+    });
+
+    // "Build it" unmounts with the review once the run moves to 'executing'.
+    // Without a hand-off, focus falls to document.body inside the modal.
+    it('hands focus to the status line when the review goes away after Build it', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'executing';
+      });
+      await reachPlanReview();
+      const build = screen.getByRole('button', { name: 'Build it' });
+      await waitFor(() => expect(document.activeElement).toBe(build));
+
+      await userEvent.click(build);
+
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull());
+      expect(document.activeElement).toBe(screen.getByRole('status'));
     });
 
     it('shows a mid-run gate, not the plan review, when a gate is pending', async () => {
@@ -682,7 +738,7 @@ describe('QuickStartDialog', () => {
       });
       render(<QuickStartDialog open onClose={onClose} />);
       await pickPlatformer();
-      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
       await screen.findByRole('status');
       return onClose;
     }
@@ -729,12 +785,15 @@ describe('QuickStartDialog', () => {
     });
   });
 
+  // The real UI can never leave `selectedId` pointing at a card that isn't in
+  // `QUICK_START_GAME_TYPES` -- `handlePick` only ever sets it from that same
+  // list. This forces the one lookup miss `handleSubmit` defends against.
   it('refuses to submit and returns to pick when the selected card cannot be found', async () => {
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
 
     vi.mocked(findQuickStartGameType).mockReturnValueOnce(null);
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Pick a game type first.');

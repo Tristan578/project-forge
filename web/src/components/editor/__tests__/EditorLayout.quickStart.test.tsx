@@ -20,6 +20,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
+import { useOnboardingStore } from '@/stores/onboardingStore';
 
 vi.mock('next/navigation', async (importOriginal) => ({
   ...(await importOriginal<typeof import('next/navigation')>()),
@@ -90,13 +91,30 @@ vi.mock('../PerformanceProfiler', () => ({ PerformanceProfiler: () => null }));
 vi.mock('../../ui/Celebration', () => ({ Celebration: () => null }));
 vi.mock('../GenerationStatus', () => ({ GenerationStatus: () => null }));
 vi.mock('../HelpMenu', () => ({ HelpMenu: () => <div data-testid="help-menu">Help</div> }));
-vi.mock('../../onboarding/OnboardingWizard', () => ({ OnboardingWizard: () => null }));
+// The wizard is reduced to its AI report, so the gate wiring below can be
+// driven through the real OnboardingGate that EditorLayout renders.
+vi.mock('../../onboarding/OnboardingWizard', () => ({
+  OnboardingWizard: ({ onStartAi }: { onComplete: () => void; onStartAi?: () => void }) => (
+    <div role="dialog" aria-label="Welcome wizard">
+      <button type="button" onClick={onStartAi}>
+        Build with AI
+      </button>
+    </div>
+  ),
+}));
 
 // Stubbed so this file pins the WIRING (trigger -> open prop). The dialog's own
 // behaviour is covered by QuickStartDialog.test.tsx.
 vi.mock('../../onboarding/QuickStartDialog', () => ({
-  QuickStartDialog: ({ open }: { open: boolean; onClose: () => void }) =>
-    open ? <div data-testid="quick-start-dialog">Quick start</div> : null,
+  QuickStartDialog: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
+    open ? (
+      <div data-testid="quick-start-dialog">
+        Quick start
+        <button type="button" onClick={onClose}>
+          Close quick start
+        </button>
+      </div>
+    ) : null,
 }));
 
 function setupStores(mode: 'desktop' | 'compact') {
@@ -122,6 +140,8 @@ function setupStores(mode: 'desktop' | 'compact') {
   vi.mocked(useEditorStore).mockImplementation((selector: any) =>
     selector({
       sceneName: 'My Game',
+      // Read by the real OnboardingGate.
+      orchestratorStatus: 'idle',
       // Read by the real MobileToolbar.
       gizmoMode: 'translate',
       setGizmoMode: vi.fn(),
@@ -160,6 +180,7 @@ describe('EditorLayout quick-start entry (PF-1215)', () => {
 
   afterEach(() => {
     cleanup();
+    localStorage.clear();
   });
 
   it('renders exactly one "Make me a game" button on desktop', () => {
@@ -196,4 +217,41 @@ describe('EditorLayout quick-start entry (PF-1215)', () => {
 
     expect(await screen.findByTestId('quick-start-dialog')).toBeInTheDocument();
   });
+});
+
+/**
+ * #6831: EditorLayout owns the quick-start dialog's open state and must hand
+ * it to OnboardingGate at BOTH render sites. A wrong value (a constant false,
+ * the wrong state variable) type-checks and leaves the wizard hidden for good
+ * after an AI attempt is abandoned, so drive the real gate through the layout.
+ */
+describe('EditorLayout wires the quick-start dialog into the onboarding gate (#6831)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useOnboardingStore.setState({ isNewUser: true, onboardingCompleted: false });
+  });
+
+  afterEach(() => {
+    cleanup();
+    localStorage.clear();
+  });
+
+  it.each([['desktop'], ['compact']] as const)(
+    'brings the wizard back on %s when the AI dialog is closed with nothing started',
+    async (mode) => {
+      setupStores(mode);
+      render(<EditorLayout />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Build with AI' }));
+
+      expect(await screen.findByTestId('quick-start-dialog')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog', { name: 'Welcome wizard' })).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close quick start' }));
+
+      expect(await screen.findByRole('dialog', { name: 'Welcome wizard' })).toBeInTheDocument();
+      expect(useOnboardingStore.getState().onboardingCompleted).toBe(false);
+    },
+  );
 });

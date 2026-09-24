@@ -351,8 +351,9 @@ describe('OnboardingWizard', () => {
     await act(async () => {
       settle(LOADED_OK);
     });
-    // Exactly once, from the load itself (the flag is the caller's to write).
+    // The wizard never writes the completed flag (the caller does, #6831)...
     expect(mockCompleteOnboarding).not.toHaveBeenCalled();
+    // ...and reports completion exactly once, from the load itself.
     expect(onComplete).toHaveBeenCalledTimes(1);
 
     // And the exits work again after a failed load re-enables the selector.

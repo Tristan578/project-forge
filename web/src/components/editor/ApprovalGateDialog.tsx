@@ -27,6 +27,7 @@ export function ApprovalGateDialog({
   onCancel,
   autoFocus = false,
   approveLabel = 'Approve',
+  cancelLabel = 'Cancel',
   approveDisabled = false,
   children,
 }: {
@@ -46,6 +47,12 @@ export function ApprovalGateDialog({
    * that click is what starts spending tokens, so it names the action (#6831).
    */
   approveLabel?: string;
+  /**
+   * Label for the cancel button. The plan review says "Discard plan" because
+   * its footer also has "Close", which keeps the plan: two exits with different
+   * consequences must not share a vague name.
+   */
+  cancelLabel?: string;
   /** Disables approve, e.g. while the confirmed action is already starting. */
   approveDisabled?: boolean;
   /**
@@ -159,7 +166,7 @@ export function ApprovalGateDialog({
           {approveLabel}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel} className="flex-1">
-          Cancel
+          {cancelLabel}
         </Button>
       </div>
     </div>

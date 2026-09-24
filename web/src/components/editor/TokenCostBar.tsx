@@ -7,10 +7,16 @@
  * Shared by the orchestrator panel and the quick-start dialog's plan review
  * (#6831): a first-time user confirms the cost in the dialog before any build
  * step spends tokens, and must see the same numbers the panel shows.
+ *
+ * It stays in the app rather than `@spawnforge/ui` because it renders the
+ * orchestrator's own `TokenEstimate` type; the design library takes no
+ * dependency on app domain types.
  */
 
+import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import type { TokenEstimate } from '@/lib/game-creation/types';
+import { SETTINGS_BILLING_HREF } from '@/lib/navigation/settingsRoutes';
 
 export function TokenCostBar({ estimate }: { estimate: TokenEstimate }) {
   return (
@@ -21,22 +27,32 @@ export function TokenCostBar({ estimate }: { estimate: TokenEstimate }) {
       </div>
       <div className="space-y-1">
         {estimate.breakdown.map((item) => (
-          <div key={item.category} className="flex items-center justify-between text-[11px] text-[var(--sf-text)]">
+          <div key={item.category} className="flex items-center justify-between text-xs text-[var(--sf-text)]">
             <span>{item.category}</span>
             <span className="font-mono">{item.estimatedTokens}</span>
           </div>
         ))}
       </div>
+      {/* `sufficientBalance` compares against the balance this tab last
+          fetched, so it can be stale in either direction. The server checks
+          for real when the build starts and refuses before spending anything,
+          so say that, and say where to get more (#6831 review). */}
       {!estimate.sufficientBalance && (
-        <div className="mt-2 flex items-center gap-1.5 rounded bg-[var(--sf-destructive)]/10 px-2 py-1 text-xs text-[var(--sf-text)]">
-          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-          Insufficient token balance
+        <div className="mt-2 flex items-start gap-1.5 rounded bg-[var(--sf-destructive)]/10 px-2 py-1 text-xs text-[var(--sf-text)]">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+          <span>
+            This may cost more than your token balance. If it does, the build stops before
+            anything is spent.{' '}
+            <Link href={SETTINGS_BILLING_HREF} className="underline underline-offset-2">
+              Buy tokens
+            </Link>
+          </span>
         </div>
       )}
       {estimate.warningMessage && estimate.sufficientBalance && (
-        <div className="mt-2 flex items-center gap-1.5 rounded bg-[var(--sf-warning)]/10 px-2 py-1 text-xs text-[var(--sf-text)]">
-          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-          {estimate.warningMessage}
+        <div className="mt-2 flex items-start gap-1.5 rounded bg-[var(--sf-warning)]/10 px-2 py-1 text-xs text-[var(--sf-text)]">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+          <span>{estimate.warningMessage}</span>
         </div>
       )}
     </div>

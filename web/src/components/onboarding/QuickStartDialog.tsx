@@ -8,12 +8,15 @@
  * the product's headline capability had no control anywhere in the UI.
  *
  * Three states, in order: pick a game type -> describe it -> watch it build.
- * "Build it" on the describe step calls `startQuickStart`, which only DESIGNS
- * the game and stops at 'awaiting_approval'. The running view then shows the
- * plan and its estimated token cost, and nothing that spends build tokens runs
- * until the user presses "Build it" there (owner decision on #6831: confirm the
- * cost first). That confirmation is the user's answer to `gate_plan`, which the
- * slice therefore auto-approves; `gate_assets` / `gate_final` still stop the
+ * "Plan my game" on the describe step calls `startQuickStart`, which only
+ * DESIGNS the game (metered by the decompose route) and stops at
+ * 'awaiting_approval'. The running view then shows the plan and its estimated
+ * token cost, and the build's tokens are reserved only when the user presses
+ * "Build it" there (owner decision on #6831: confirm the cost first). "Build
+ * it" means exactly that one action. "Discard plan" drops the plan; "Close"
+ * keeps it, and reopening the dialog returns to the review. The confirmation
+ * is the user's answer to `gate_plan`, which the slice therefore
+ * auto-approves; `gate_assets` / `gate_final` still stop the
  * pipeline, so this dialog renders the very same `ApprovalGateDialog` the
  * orchestrator panel uses rather than leaving a quick-start user stranded
  * behind a gate they cannot see.
@@ -75,6 +78,9 @@ const GENERIC_FAILURE = 'Could not start building your game. Please try again.';
 /** Status line while the designed plan waits for the user's "Build it". */
 const PLAN_READY = 'Your game plan is ready. Review it, then build.';
 
+/** Status line between "Build it" and the run reporting 'executing'. */
+const STARTING_BUILD = 'Starting the build…';
+
 /**
  * Stand-in for a plan with no `gate_plan`. `planBuilder` always adds one, but
  * the plan is caller-supplied data (`setPlan` is public), and a missing gate
@@ -90,7 +96,7 @@ const FALLBACK_PLAN_GATE: ApprovalGate = {
 };
 
 /**
- * Shown when "Build it" is pressed while a run is already live. The slice
+ * Shown when "Plan my game" is pressed while a run is already live. The slice
  * refuses (it would clear the live run's plan, gates and abort controller), so
  * the user has to be told why nothing new started.
  */
@@ -202,6 +208,24 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       if (!(active && runningRef.current?.contains(active))) statusRef.current?.focus();
     } else firstCardRef.current?.focus();
   }, [phase]);
+
+  // The plan review and the approval gates own the focused button while they
+  // are up, and each one unmounts the moment it is answered ("Build it" moves
+  // the run to 'executing', Approve resolves the gate). That drops focus to
+  // document.body inside an aria-modal region, and the phase effect above does
+  // not fire because the phase stays 'running'. Hand focus to the live status
+  // line, unless something else in the build view already took it.
+  const askingUser = planGate !== null || pendingGate !== null;
+  const wasAskingRef = useRef(false);
+  useEffect(() => {
+    const was = wasAskingRef.current;
+    wasAskingRef.current = askingUser;
+    if (!was || askingUser || phase !== 'running') return;
+    const active = document.activeElement;
+    if (!(active && active !== document.body && runningRef.current?.contains(active))) {
+      statusRef.current?.focus();
+    }
+  }, [askingUser, phase]);
 
   // "Play now" appears when the run completes, which is the moment the user
   // has been waiting for: put focus on it so Enter plays. Declared after the
@@ -330,7 +354,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
           Back
         </Button>
         <Button size="sm" onClick={handleSubmit} disabled={starting || runIsLive}>
-          Build it
+          Plan my game
         </Button>
       </>
     ) : phase === 'running' ? (
@@ -380,8 +404,8 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
           ? 'Pick a kind of game. We build a playable scene from there.'
           : phase === 'describe'
             ? 'Describe it in your own words, or leave it blank for our take.'
-            : planGate
-              ? 'Nothing is built until you press Build it.'
+            : planGate && !confirming
+              ? 'The build starts, and its tokens are taken, only when you press Build it. Close keeps this plan for later.'
               : 'Building. You can keep working while this runs.'
       }
       className="max-w-lg"
@@ -461,8 +485,28 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             {(starting || confirming || status === 'decomposing' || status === 'planning' || status === 'executing') && (
               <Loader2 className="h-4 w-4 animate-spin text-[var(--sf-accent)]" aria-hidden="true" />
             )}
-            <span>{planGate ? PLAN_READY : STATUS_MESSAGES[status]}</span>
+            <span>{confirming ? STARTING_BUILD : planGate ? PLAN_READY : STATUS_MESSAGES[status]}</span>
           </div>
+
+          {/* Plan review. "Build it" is where the build's tokens are reserved,
+              and the server's answer to that reservation is the real balance
+              check: `sufficientBalance` reads a cached client balance, so it
+              does not disable the button (the orchestrator panel's Start
+              Building makes the same choice). A refused reservation comes back
+              as an error here, with nothing spent. */}
+          {planGate && (
+            <ApprovalGateDialog
+              gate={planGate}
+              approveLabel="Build it"
+              approveDisabled={confirming}
+              onApprove={() => void handleConfirmBuild()}
+              onCancel={handleCancelRun}
+              cancelLabel="Discard plan"
+              autoFocus
+            >
+              {tokenEstimate && <TokenCostBar estimate={tokenEstimate} />}
+            </ApprovalGateDialog>
+          )}
 
           {/* A gate_assets list is as long as the plan makes it. ApprovalGateDialog
               already bounds its own scrollable body to max-h-[50vh] and renders
@@ -473,24 +517,6 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               outer scrollbar always engaged first, the inner max-h-[50vh] region
               could never reach its own limit, and the buttons scrolled out of
               view again inside the outer box (round 2 review, 4/5 agreement). */}
-          {/* Plan review. The server has already reserved the estimate's upper
-              bound as a hold, so a successful reservation IS the balance check;
-              "Build it" is not disabled on the client-side `sufficientBalance`,
-              which reads a cached balance (the orchestrator panel's Start
-              Building makes the same choice). The bar still shows its warning. */}
-          {planGate && (
-            <ApprovalGateDialog
-              gate={planGate}
-              approveLabel="Build it"
-              approveDisabled={confirming}
-              onApprove={() => void handleConfirmBuild()}
-              onCancel={handleCancelRun}
-              autoFocus
-            >
-              {tokenEstimate && <TokenCostBar estimate={tokenEstimate} />}
-            </ApprovalGateDialog>
-          )}
-
           {pendingGate && (
             <ApprovalGateDialog
               gate={pendingGate}
