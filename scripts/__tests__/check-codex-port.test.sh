@@ -335,12 +335,46 @@ gen "$F" --check; expect_rc 2 "a handAuthored agent that is missing is an error"
 OUT="$(CODEX_PORT_ROOT="$F" node "$GEN" 2>&1)"; RC=$?
 expect_rc 2 "no mode argument is a usage error"
 
+
+echo "== generator: MCP value types must match the Codex schema =="
+F="$(mkfix)"; gen "$F" --write
+# shellcheck disable=SC2016  # The fixture must preserve Claude interpolation syntax literally.
+printf '%s\n' '{"mcpServers":{"alpha":{"command":"npx","args":["mcp"],"env":{"TOKEN":"${TOKEN}","ORG":"acme"}}}}' > "$F/.mcp.json"
+TYPE_OK='[mcp_servers.alpha]
+command = "npx"
+args = ["mcp"]
+env_vars = ["TOKEN"]
+default_tools_approval_mode = "prompt"
+[mcp_servers.alpha.env]
+ORG = "acme"'
+for mutation in scalar_args scalar_env array_command array_cwd array_approval array_env numeric_args nested_args missing_comma trailing_value; do
+  printf '%s\n' "$TYPE_OK" > "$F/.codex/config.toml"
+  node -e '
+    const fs=require("fs"),p=process.argv[1],kind=process.argv[2];
+    const changes={"scalar_args":["args = [\"mcp\"]","args = \"mcp\""],"scalar_env":["env_vars = [\"TOKEN\"]","env_vars = \"TOKEN\""],"array_command":["command = \"npx\"","command = [\"npx\"]"],"array_cwd":["command = \"npx\"","command = \"npx\"\ncwd = [\"/tmp\"]"],"array_approval":["default_tools_approval_mode = \"prompt\"","default_tools_approval_mode = [\"prompt\"]"],"array_env":["ORG = \"acme\"","ORG = [\"acme\"]"],"numeric_args":["args = [\"mcp\"]","args = [\"mcp\", 1]"],"nested_args":["args = [\"mcp\"]","args = [[\"mcp\"]]"],"missing_comma":["args = [\"mcp\"]","args = [\"mcp\" \"extra\"]"],"trailing_value":["command = \"npx\"","command = \"npx\" true"]};
+    const [from,to]=changes[kind];fs.writeFileSync(p,fs.readFileSync(p,"utf8").replace(from,()=>to));
+  ' "$F/.codex/config.toml" "$mutation"
+  gen "$F" --check; expect_rc 1 "invalid MCP property type/syntax rejected: $mutation"
+  expect_out 'expected ' "…reports the required property type: $mutation"
+done
+printf '%s\n' "$TYPE_OK" > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "string scalars and string arrays remain valid"
+rm "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 1 "deleting the entire Codex config cannot bypass parity"
+printf '%s\n' "$TYPE_OK" > "$F/.codex/config.toml"
+rm "$F/.mcp.json"
+gen "$F" --check; expect_rc 1 "deleting the MCP manifest cannot bypass parity"
+printf '%s\n' '{"mcpServers":{}}' > "$F/.mcp.json"
+printf '%s\n' 'model = "x"' > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "two explicitly empty server sets are in parity"
+
 echo "== generator: MCP server parity =="
 F="$(mkfix)"; gen "$F" --write
 printf '{"mcpServers":{"alpha":{"command":"npx"},"beta":{"command":"npx"}}}\n' > "$F/.mcp.json"
 printf 'model = "x"\n' > "$F/.codex/config.toml"
-gen "$F" --check; expect_rc 0 "a config.toml with no MCP block passes…"
-expect_out "declares no [mcp_servers.*]" "…but says so out loud instead of reading as parity"
+gen "$F" --check; expect_rc 1 "removing all MCP tables fails parity"
+expect_out "alpha is in .mcp.json but not in .codex/config.toml" "…reports the first missing server"
+expect_out "beta is in .mcp.json but not in .codex/config.toml" "…reports every missing server"
 printf '[mcp_servers.alpha]\ncommand = "npx"\n\n[mcp_servers.alpha.env]\nA = "1"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 1 "a server in .mcp.json that Codex lacks is a failure"
 expect_out "beta is in .mcp.json but not in .codex/config.toml" "…naming the missing server"
@@ -355,18 +389,392 @@ fi
 printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n[mcp_servers.gamma]\ncommand = "npx"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 1 "a server Codex declares that .mcp.json lacks is a failure too"
 expect_out "gamma is in .codex/config.toml but not in .mcp.json" "…naming the extra server"
-printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+printf '[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n[mcp_servers.beta]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "matching server names pass"
-# Quoted table names. If that branch of the header regex regresses, a config whose
-# servers are ALL written quoted yields zero declared servers — the warning-only
-# path — and parity silently stops being enforced.
-printf '[mcp_servers."alpha"]\ncommand = "npx"\n[mcp_servers."beta"]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+# Quoted table names must be decoded and counted just like bare table names.
+# Removing all declarations is now an error rather than a migration exception.
+printf '[mcp_servers."alpha"]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n[mcp_servers."beta"]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 0 "QUOTED server table names are read as servers"
 expect_out "2 MCP servers declared for Codex, matching .mcp.json" "…counted, not mistaken for 'declares no servers'"
-printf '[mcp_servers."alpha"]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+printf '[mcp_servers."alpha"]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
 gen "$F" --check; expect_rc 1 "…and a quoted config missing a server is still a failure"
 expect_out "beta is in .mcp.json but not in .codex/config.toml" "…naming it"
-printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+printf '[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n[mcp_servers.beta]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
+
+# SHAPE, not just names. Comparing names alone let a server be restated with the
+# wrong package, the wrong command or a dropped credential NAME and still read as
+# parity — Codex would then run something other than what .mcp.json describes, or
+# start a server whose secret never reaches it. Each row mutates one field of a
+# config that is otherwise in parity.
+# shellcheck disable=SC2016  # ${ALPHA_TOKEN} is Claude's interpolation syntax, the literal text under test — it must NOT expand
+printf '{"mcpServers":{"alpha":{"command":"npx","args":["-y","@scope/pkg@latest"],"env":{"ALPHA_TOKEN":"${ALPHA_TOKEN}","ALPHA_ORG":"acme"}}}}\n' > "$F/.mcp.json"
+MCP_OK='[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n'
+# shellcheck disable=SC2059  # the fixtures carry \n escapes that printf must expand
+printf "$MCP_OK" > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "a server matching on command, args and env is parity"
+expect_out 'name, command, args, secret names, approval mode and launch paths' "…and the note says what was compared, so a name-only check cannot masquerade as this one"
+SHAPE_ROWS=0
+while IFS='|' read -r LABEL FIXTURE NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  SHAPE_ROWS=$((SHAPE_ROWS + 1))
+  # shellcheck disable=SC2059  # as above
+  printf "$FIXTURE" > "$F/.codex/config.toml"
+  gen "$F" --check
+  if [ "$RC" -eq 1 ] && grep -qF "$NEEDLE" <<<"$OUT"; then
+    ok "MCP shape drift is caught: $LABEL"
+  else
+    bad "MCP shape drift went unreported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-200)"
+  fi
+done <<'MCP_SHAPE_TABLE'
+the wrong package in args|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@0.0.1"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha args are
+the wrong command|[mcp_servers.alpha]\ncommand = "node"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha command is
+a dropped credential NAME, so the secret never reaches the server|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha forwards ALPHA_TOKEN
+a changed non-secret literal|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "someone-else"\n|alpha sets ALPHA_ORG
+an args array that is never closed is REPORTED, not read as empty|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n|could not be read
+an EXTRA arg after a continuation line whose COMMENT holds a stray bracket|[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y", "@scope/pkg@latest", # ] note\n    "--allow-shell-exec",\n]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha args are
+MCP_SHAPE_TABLE
+if [ "$SHAPE_ROWS" -eq 6 ]; then ok "all 6 MCP shape-drift rows were driven"; else bad "the MCP shape table was not walked: $SHAPE_ROWS of 6"; fi
+# …and the SAME shape with no extra argument is parity, so the bracket-in-a-comment
+# fix did not simply make every commented array unreadable. A `#` or a bracket
+# INSIDE a quoted value is data, not a delimiter, on the same reasoning.
+# shellcheck disable=SC2059  # the fixtures carry \n escapes that printf must expand
+printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y", "@scope/pkg@latest", # ] note\n]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "a comment containing a bracket does not close the array early"
+# The Codex app rewrites this file with MULTI-LINE arrays. That is the same TOML,
+# so it must read as parity — a check that called it drift would go red every time
+# the app touched the file.
+# shellcheck disable=SC2059  # as above
+printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = [\n    "-y",\n    "@scope/pkg@latest",\n]\nenv_vars = [\n    "ALPHA_TOKEN",\n]\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "the multi-line array form the Codex app writes is parity, not drift"
+
+# STRINGS are compared DECODED, the way Codex reads them: a basic string ("…")
+# decodes TOML's escapes, and a literal string ('…') has none. The first cut took
+# the raw text between the quotes, so a Windows path written the ordinary TOML way,
+# "C:\\Users\\…", read as C:\\Users\\… against .mcp.json's decoded C:\Users\… and
+# failed parity, and an escaped quote ended the string early (found writing the
+# Windows launch-path rows below, board round 3 on #10135). Each row is in parity:
+# .mcp.json holds the decoded value as JSON, config.toml the same value as TOML.
+# The values go through printf's %s, never its format, so no backslash is eaten.
+FS="$(mkfix)"; gen "$FS" --write
+STRING_ROWS=0
+while IFS='|' read -r LABEL JSON_ARGS TOML_ARGS; do
+  [ -n "$LABEL" ] || continue
+  STRING_ROWS=$((STRING_ROWS + 1))
+  printf '{"mcpServers":{"alpha":{"command":"node","args":%s}}}\n' "$JSON_ARGS" > "$FS/.mcp.json"
+  printf '[mcp_servers.alpha]\ncommand = "node"\nargs = %s\ndefault_tools_approval_mode = "prompt"\n' "$TOML_ARGS" > "$FS/.codex/config.toml"
+  gen "$FS" --check
+  if [ "$RC" -eq 0 ] && ! grep -qF 'mcp:' <<<"$OUT" && grep -qF '1 MCP servers declared for Codex, matching .mcp.json' <<<"$OUT"; then
+    ok "a TOML string is compared decoded: $LABEL"
+  else
+    bad "a TOML string was not read as Codex reads it ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-300)"
+  fi
+done <<'MCP_STRING_TABLE'
+escaped backslashes in a basic string (a Windows path)|["C:\\Users\\fixture\\run.mjs"]|["C:\\Users\\fixture\\run.mjs"]
+an escaped double quote, which does not end the string|["-e", "console.log(\"a # [x]\")"]|["-e", "console.log(\"a # [x]\")"]
+a \u escape|["x-y"]|["x\u002Dy"]
+a \U escape|["x-y"]|["x\U0000002Dy"]
+the short escapes \t \n \b \f \r|["a\tb\nc\bd\fe\rf"]|["a\tb\nc\bd\fe\rf"]
+a literal string, whose backslashes are not escapes|["C:\\Users\\fixture\\run.mjs"]|['C:\Users\fixture\run.mjs']
+MCP_STRING_TABLE
+if [ "$STRING_ROWS" -eq 6 ]; then ok "all 6 MCP string rows were driven"; else bad "the MCP string table was not walked: $STRING_ROWS of 6"; fi
+# A string the reader cannot decode is REPORTED, never compared as whatever text it
+# happened to hold. TOML 1.0 makes an undefined escape and an unclosed string
+# errors, and a multi-line string ("""…""" or '''…''') spans lines this
+# line-based reader would otherwise take for keys. .mcp.json is in parity with the
+# readable spelling of every row, so only the unreadable string can fail it.
+printf '{"mcpServers":{"alpha":{"command":"node","args":["x"]}}}\n' > "$FS/.mcp.json"
+UNREADABLE_ROWS=0
+while IFS='|' read -r LABEL TOML_COMMAND TOML_ARGS NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  UNREADABLE_ROWS=$((UNREADABLE_ROWS + 1))
+  printf '[mcp_servers.alpha]\ncommand = %s\nargs = %s\ndefault_tools_approval_mode = "prompt"\n' "$TOML_COMMAND" "$TOML_ARGS" > "$FS/.codex/config.toml"
+  gen "$FS" --check
+  if [ "$RC" -eq 1 ] && grep -qF 'alpha could not be read from .codex/config.toml' <<<"$OUT" && grep -qF -- "$NEEDLE" <<<"$OUT"; then
+    ok "an unreadable TOML string is reported, not compared: $LABEL"
+  else
+    bad "an unreadable TOML string was not reported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-300)"
+  fi
+done <<'MCP_UNREADABLE_TABLE'
+a Windows path in a basic string with single backslashes (\U then non-hex), an error in TOML 1.0|"node"|["C:\Users\x"]|args: invalid escape \U in a basic string
+an escape TOML does not define|"node"|["a\qb"]|args: invalid escape \q in a basic string
+a \u escape with too few hex digits|"node"|["\u12"]|args: invalid escape \u12 in a basic string
+a \u escape naming a surrogate, which is not a Unicode scalar value|"node"|["\uD800"]|args: invalid escape \uD800 in a basic string
+an unclosed basic string|"node|["x"]|command: a string is not closed
+an unclosed literal string|'node|["x"]|command: a string is not closed
+a multi-line basic string|"""node"""|["x"]|command: a multi-line string
+a multi-line literal string|'''node'''|["x"]|command: a multi-line string
+MCP_UNREADABLE_TABLE
+if [ "$UNREADABLE_ROWS" -eq 8 ]; then ok "all 8 unreadable-string rows were driven"; else bad "the unreadable-string table was not walked: $UNREADABLE_ROWS of 8"; fi
+# The same holds on a CONTINUATION line of a multi-line array, which is read by the
+# array loop rather than as a key.
+printf '[mcp_servers.alpha]\ncommand = "node"\nargs = [\n    %s,\n]\ndefault_tools_approval_mode = "prompt"\n' '"a\qb"' > "$FS/.codex/config.toml"
+gen "$FS" --check; expect_rc 1 "an invalid escape on an array's continuation line fails the check"
+expect_out 'alpha could not be read from .codex/config.toml (args: invalid escape \q in a basic string' "…naming the array and the escape, not 'array is not closed'"
+# A multi-line string in a key the check does not compare is still reported: its
+# body can hold lines that look like keys. Here the real command is "evil" and the
+# decoy inside the string restates the parity values — read line by line, the
+# decoy is the LAST command and the server would pass as parity.
+printf '[mcp_servers.alpha]\ncommand = "evil"\nnote = """\ncommand = "node"\nargs = ["x"]\n"""\ndefault_tools_approval_mode = "prompt"\n' > "$FS/.codex/config.toml"
+gen "$FS" --check; expect_rc 1 "a multi-line string in a key that is not compared still fails the check"
+expect_out 'alpha could not be read from .codex/config.toml (note: a multi-line string' "…naming the key that holds it, so its body is never read as keys"
+# OUTSIDE every server table the check stops before comparing anything, because
+# there a multi-line string's body can pose as a whole server table. Here the only
+# [mcp_servers.alpha] is inside a string, so Codex has NO server; read line by
+# line, it passed as parity.
+printf 'developer_instructions = """\n[mcp_servers.alpha]\ncommand = "node"\nargs = ["x"]\ndefault_tools_approval_mode = "prompt"\n"""\n' > "$FS/.codex/config.toml"
+gen "$FS" --check; expect_rc 1 "a multi-line string outside every server table stops the check"
+expect_out '.codex/config.toml cannot be read at line 1: a multi-line string' "…naming the line that could not be read"
+expect_no_out 'MCP servers declared for Codex' "…and printing no parity note for a server list it could not trust"
+# A string it cannot decode outside the server tables is reported the same way,
+# even though the servers after it are in parity.
+printf '%s\n[mcp_servers.alpha]\ncommand = "node"\nargs = ["x"]\ndefault_tools_approval_mode = "prompt"\n' 'model = "a\qb"' > "$FS/.codex/config.toml"
+gen "$FS" --check; expect_rc 1 "an invalid escape outside every server table fails the check"
+expect_out '.codex/config.toml cannot be read at line 1: invalid escape \q in a basic string' "…naming the line and the escape"
+
+
+# Alternate TOML key spellings must not hide servers or launch arguments.
+FK="$(mkfix)"; gen "$FK" --write
+printf '{"mcpServers":{"alpha":{"command":"node"}}}\n' > "$FK/.mcp.json"
+KEY_ROWS=0
+while IFS='|' read -r LABEL HEADER KEY VALUE EXPECT NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  KEY_ROWS=$((KEY_ROWS + 1))
+  printf '%s\ncommand = "node"\ndefault_tools_approval_mode = "prompt"\n%s = %s\n' "$HEADER" "$KEY" "$VALUE" > "$FK/.codex/config.toml"
+  gen "$FK" --check
+  if [ "$RC" -eq "$EXPECT" ] && grep -qF "$NEEDLE" <<<"$OUT"; then
+    ok "alternate TOML syntax is checked: $LABEL"
+  else
+    bad "alternate TOML syntax escaped checking ($LABEL): exit $RC, output: $OUT"
+  fi
+done <<'MCP_KEY_TABLE'
+literal server name|[mcp_servers.'alpha']|args|[]|0|1 MCP servers declared for Codex
+spaced table path|[ mcp_servers . alpha ]|args|[]|0|1 MCP servers declared for Codex
+escaped namespace and name|["mcp_\u0073ervers"."al\u0070ha"]|args|[]|0|1 MCP servers declared for Codex
+literal args key|[mcp_servers.alpha]|'args'|["-e","0"]|1|alpha args are
+escaped args key|[mcp_servers.alpha]|"ar\u0067s"|["-e","0"]|1|alpha args are
+inline env|[mcp_servers.alpha]|env|{TOKEN="literal"}|1|unsupported MCP property
+dotted env|[mcp_servers.alpha]|env.TOKEN|"literal"|1|unsupported MCP property
+MCP_KEY_TABLE
+if [ "$KEY_ROWS" -eq 7 ]; then ok "all 7 alternate key rows were driven"; else bad "alternate key rows: $KEY_ROWS of 7"; fi
+
+DECL_ROWS=0
+while IFS='|' read -r LABEL DECL NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  DECL_ROWS=$((DECL_ROWS + 1))
+  printf '%b\n[mcp_servers.alpha]\ncommand = "node"\ndefault_tools_approval_mode = "prompt"\n' "$DECL" > "$FK/.codex/config.toml"
+  gen "$FK" --check
+  if [ "$RC" -eq 1 ] && grep -qF "$NEEDLE" <<<"$OUT"; then
+    ok "hidden MCP declaration is caught: $LABEL"
+  else
+    bad "hidden MCP declaration passed ($LABEL): exit $RC, output: $OUT"
+  fi
+done <<'MCP_DECL_TABLE'
+literal extra server|[mcp_servers.'hidden']\ncommand="node"|hidden is in .codex/config.toml but not in .mcp.json
+spaced extra server|[mcp_servers . hidden]\ncommand="node"|hidden is in .codex/config.toml but not in .mcp.json
+inline server under parent|[mcp_servers]\nhidden={command="node"}|unsupported MCP declaration
+root inline namespace|mcp_servers={hidden={command="node"}}|unsupported MCP declaration
+root dotted server|mcp_servers.hidden.command="node"|unsupported MCP declaration
+literal root namespace|'mcp_servers'.hidden.command="node"|unsupported MCP declaration
+array server table|[[mcp_servers.hidden]]\ncommand="node"|unsupported MCP table
+implicit server in env sub-table|[mcp_servers.hidden.env]\nTOKEN="literal"|hidden is in .codex/config.toml but not in .mcp.json
+MCP_DECL_TABLE
+if [ "$DECL_ROWS" -eq 8 ]; then ok "all 8 hidden declaration rows were driven"; else bad "hidden declaration rows: $DECL_ROWS of 8"; fi
+
+printf '[mcp_servers.alpha]\ncommand="node"\nargs=[""]\ndefault_tools_approval_mode="prompt"\n' > "$FK/.codex/config.toml"
+gen "$FK" --check; expect_rc 1 "an empty argument differs from no arguments"
+expect_out 'alpha args are [""]' "empty argument mismatch preserves array boundaries"
+printf '[mcp_servers.alpha]\ncommand="node"\nenabled_tools=[\n "read",\n]\ndefault_tools_approval_mode="prompt"\n' > "$FK/.codex/config.toml"
+gen "$FK" --check; expect_rc 0 "uncompared simple-key arrays may span lines"
+expect_out '1 MCP servers declared for Codex, matching .mcp.json' "multiline options preserve server discovery"
+# shellcheck disable=SC2016  # credential references are fixture data
+printf '%s\n' '{"mcpServers":{"alpha":{"command":"node","env":{"API_KEY":"${API_KEY}"}}}}' > "$FK/.mcp.json"
+printf '[mcp_servers.alpha]\ncommand="node"\nenv_vars=["API_KEY"]\ndefault_tools_approval_mode="prompt"\n' > "$FK/.codex/config.toml"
+gen "$FK" --check; expect_rc 0 "same-name secret forwarding is parity"
+expect_out '1 MCP servers declared for Codex, matching .mcp.json' "same-name forwarding is actually compared"
+for ENV_KEY in API_KEY api_key; do
+  printf '[mcp_servers.alpha]\ncommand="node"\nenv_vars=["API_KEY"]\ndefault_tools_approval_mode="prompt"\n[mcp_servers.alpha.env]\n%s="WRONG"\n' "$ENV_KEY" > "$FK/.codex/config.toml"
+  gen "$FK" --check; expect_rc 1 "literal override of forwarded secret is rejected ($ENV_KEY)"
+  expect_out 'alpha overrides forwarded secret API_KEY' "override diagnostic names the secret without its value"
+done
+
+# shellcheck disable=SC2016  # credential references are fixture data
+printf '%s\n' '{"mcpServers":{"alpha":{"command":"node","env":{"API_KEY":"${OTHER_TOKEN}"}}}}' > "$FK/.mcp.json"
+printf '[mcp_servers.alpha]\ncommand="node"\nenv_vars=["API_KEY","OTHER_TOKEN"]\ndefault_tools_approval_mode="prompt"\n' > "$FK/.codex/config.toml"
+gen "$FK" --check; expect_rc 1 "a secret alias cannot masquerade as same-name forwarding"
+expect_out 'alpha aliases OTHER_TOKEN to API_KEY' "the alias diagnostic names source and destination"
+
+# APPROVAL MODE, which has no .mcp.json counterpart, so parity alone never saw it.
+# docs/guides/codex-cli-support-matrix.md ("MCP servers") has every server set
+# default_tools_approval_mode = "prompt", so its tools stay human-gated if Codex's
+# own default moves. Nothing checked that: board round 1 on #10135 found taskboard
+# (delete_ticket, move_ticket among its tools) as the one server of eight without
+# it. Each row starts from MCP_OK, which is parity, and changes ONLY that setting.
+APPROVAL_ROWS=0
+while IFS='|' read -r LABEL FIXTURE NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  APPROVAL_ROWS=$((APPROVAL_ROWS + 1))
+  # shellcheck disable=SC2059  # as above
+  printf "$FIXTURE" > "$F/.codex/config.toml"
+  gen "$F" --check
+  if [ "$RC" -eq 1 ] && grep -qF "$NEEDLE" <<<"$OUT"; then
+    ok "an unpinned MCP approval mode is caught: $LABEL"
+  else
+    bad "an unpinned MCP approval mode went unreported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-200)"
+  fi
+done <<'MCP_APPROVAL_TABLE'
+the setting is absent, so the server runs on Codex's unpinned default|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha does not set default_tools_approval_mode = "prompt"
+the setting is commented out|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n# default_tools_approval_mode = "prompt"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha does not set default_tools_approval_mode = "prompt"
+the setting sits in the env sub-table, where it is an environment variable, not the setting|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\ndefault_tools_approval_mode = "prompt"\n|alpha does not set default_tools_approval_mode = "prompt"
+the setting approves every tool|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "approve"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha sets default_tools_approval_mode = "approve"
+the setting is auto|[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\ndefault_tools_approval_mode = "auto"\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n|alpha sets default_tools_approval_mode = "auto"
+MCP_APPROVAL_TABLE
+if [ "$APPROVAL_ROWS" -eq 5 ]; then ok "all 5 MCP approval-mode rows were driven"; else bad "the MCP approval table was not walked: $APPROVAL_ROWS of 5"; fi
+# The message says what to write and why, not merely that something differs.
+# shellcheck disable=SC2059  # as above
+printf '[mcp_servers.alpha]\ncommand = "npx"\nargs = ["-y", "@scope/pkg@latest"]\nenv_vars = ["ALPHA_TOKEN"]\n\n[mcp_servers.alpha.env]\nALPHA_ORG = "acme"\n' > "$F/.codex/config.toml"
+gen "$F" --check
+expect_out 'stay human-gated' "…and the approval report says why the setting matters"
+expect_out "adding default_tools_approval_mode = \"prompt\" to that server's own table" "footer: …and the recipe says where the setting goes"
+# The check is per server: with two declared, only the one that lacks it is named.
+printf '{"mcpServers":{"alpha":{"command":"npx"},"beta":{"command":"node"}}}\n' > "$F/.mcp.json"
+printf '[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.beta]\ncommand = "node"\n' > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 1 "one server of two without the setting fails the check"
+expect_out 'beta does not set default_tools_approval_mode = "prompt"' "…naming the server that lacks it"
+expect_no_out 'alpha does not set' "…and not the server that has it"
+# A literal-string value with a trailing comment is the same TOML as "prompt", so it
+# must pass — a check that false-reds on valid spelling gets switched off.
+printf "[mcp_servers.alpha]\ncommand = \"npx\"\ndefault_tools_approval_mode = 'prompt' # ask first\n\n[mcp_servers.beta]\ncommand = \"node\"\ndefault_tools_approval_mode = \"prompt\"\n" > "$F/.codex/config.toml"
+gen "$F" --check; expect_rc 0 "a literal-string 'prompt' with a trailing comment is read as prompt"
+
+# LAUNCH PATHS. Codex starts a stdio server in the directory the SESSION started
+# in, and resolves a relative `cwd` against that same directory — not against
+# .codex/ and not against the repository root (observed with codex-cli 0.144.1;
+# docs/guides/codex-cli-support-matrix.md, "MCP servers"). So a path written
+# relative to the repository root launches only from the root: board round 2 on
+# #10135 found taskboard committed as `node .claude/hooks/taskboard-launch.mjs`,
+# which fails its handshake in a session started in web/. Each row is otherwise
+# in parity and prompt-gated; only the launch path differs. The args are written
+# once and used in both files, since a JSON array of strings is also TOML.
+F="$(mkfix)"; gen "$F" --write
+printf '#!/usr/bin/env node\n' > "$F/.claude/hooks/launch.mjs"
+# mcp_launch <command> <args-array-text> <cwd or empty> — write both files.
+mcp_launch() {
+  local cwd_line=''
+  [ -z "$3" ] || cwd_line="cwd = \"$3\""$'\n'
+  printf '{"mcpServers":{"alpha":{"command":"%s","args":%s}}}\n' "$1" "$2" > "$F/.mcp.json"
+  printf '[mcp_servers.alpha]\ncommand = "%s"\nargs = %s\n%sdefault_tools_approval_mode = "prompt"\n' "$1" "$2" "$cwd_line" > "$F/.codex/config.toml"
+}
+LAUNCH_ROWS=0
+while IFS='|' read -r LABEL COMMAND ARGS CWD NEEDLE; do
+  [ -n "$LABEL" ] || continue
+  LAUNCH_ROWS=$((LAUNCH_ROWS + 1))
+  mcp_launch "$COMMAND" "$ARGS" "$CWD"
+  gen "$F" --check
+  if [ "$RC" -eq 1 ] && grep -qF -- "$NEEDLE" <<<"$OUT"; then
+    ok "a launch path that depends on the start directory is caught: $LABEL"
+  else
+    bad "a start-directory-dependent launch path went unreported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-300)"
+  fi
+done <<'MCP_LAUNCH_TABLE'
+a script path relative to the repository root, in args (taskboard's shape before the fix)|node|[".claude/hooks/launch.mjs", "mcp"]||alpha runs ".claude/hooks/launch.mjs", a path relative to the repository root
+an explicitly relative ./ path, even one that does not exist|node|["./launch.mjs", "mcp"]||alpha runs "./launch.mjs", a path relative to the repository root
+a command that is itself a repo-relative path|.claude/hooks/launch.mjs|["mcp"]||alpha runs ".claude/hooks/launch.mjs", a path relative to the repository root
+a relative cwd, which Codex resolves against the start directory, not .codex/|node|["-e", "0"]|..|alpha sets cwd = "..", a relative path
+a repo-relative script path written with Windows separators|node|[".claude\\hooks\\launch.mjs", "mcp"]||alpha runs ".claude\\hooks\\launch.mjs", a path relative to the repository root
+MCP_LAUNCH_TABLE
+if [ "$LAUNCH_ROWS" -eq 5 ]; then ok "all 5 MCP launch-path rows were driven"; else bad "the MCP launch-path table was not walked: $LAUNCH_ROWS of 5"; fi
+# ABSOLUTE on either convention is not start-directory relative. isAbs() accepts
+# a Windows absolute path as well as a POSIX one, since this config is shared by
+# sessions on both, and nothing pinned that half: board round 3 on #10135 dropped
+# the win32 branch and this suite stayed green. Every row is in parity and
+# prompt-gated, and must pass with no launch-path line.
+#   - The cwd rows (a drive letter with either separator, and a UNC share) go red
+#     without the win32 branch, because the cwd check flags anything not absolute.
+#   - The command and arg rows use `\…`, which win32 reads as the root of the
+#     current drive. It is the one Windows-absolute shape that ALSO names a file
+#     relative to the repository root, so it is where dropping the branch turns
+#     into a false positive on a command or an arg.
+#   - A drive-letter arg (`C:\…`) names nothing under the root and passes either
+#     way; its row pins the string decoding instead (read raw, "C:\\…" fails
+#     parity against .mcp.json).
+WIN_ROWS=0
+while IFS='|' read -r LABEL COMMAND ARGS CWD; do
+  [ -n "$LABEL" ] || continue
+  WIN_ROWS=$((WIN_ROWS + 1))
+  mcp_launch "$COMMAND" "$ARGS" "$CWD"
+  gen "$F" --check
+  if [ "$RC" -eq 0 ] && ! grep -qF 'mcp:' <<<"$OUT" && grep -qF 'approval mode and launch paths' <<<"$OUT"; then
+    ok "a Windows-absolute launch path is not start-directory relative: $LABEL"
+  else
+    bad "a Windows-absolute launch path was misreported ($LABEL): exit $RC, output: $(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-300)"
+  fi
+done <<'MCP_WINDOWS_ABSOLUTE_TABLE'
+a drive-letter cwd written with backslashes|node|["-e", "0"]|C:\\Users\\fixture
+a drive-letter cwd written with forward slashes|node|["-e", "0"]|C:/Users/fixture
+a UNC cwd|node|["-e", "0"]|\\\\fixture-host\\share
+a script path rooted at the current drive, in args|node|["\\.claude\\hooks\\launch.mjs", "mcp"]|
+a command rooted at the current drive|\\.claude\\hooks\\launch.mjs|["mcp"]|
+a drive-letter script path in args|node|["C:\\Users\\fixture\\.claude\\hooks\\launch.mjs", "mcp"]|
+MCP_WINDOWS_ABSOLUTE_TABLE
+if [ "$WIN_ROWS" -eq 6 ]; then ok "all 6 Windows-absolute launch rows were driven"; else bad "the Windows-absolute launch table was not walked: $WIN_ROWS of 6"; fi
+# The fix taskboard uses: git runs a `!` alias from the repository's top-level
+# directory (git-config(1), alias.*), so the SAME relative path resolves from any
+# start directory. The path sits inside one argument there, not as one, and must
+# not read as a start-directory-dependent path.
+mcp_launch git '["-c", "alias.fixture-launch=!node .claude/hooks/launch.mjs", "fixture-launch", "mcp"]' ''
+gen "$F" --check; expect_rc 0 "a repo script launched through a git alias is not a start-directory-dependent path"
+expect_out 'launch paths' "…and the parity note says launch paths were compared"
+mcp_launch node '[".claude/hooks/launch.mjs", "mcp"]' ''
+gen "$F" --check
+expect_out 'launching it through a git alias' "footer: a launch-path line says how to fix it"
+
+echo "== committed MCP config: taskboard launches from a subdirectory =="
+# The property a user depends on (lessons-learned #1), checked on the COMMITTED
+# files rather than a fixture: a session started anywhere in the checkout can
+# start taskboard, the one server whose launcher is a file in this repository.
+# Its committed command runs here from two directories below the root, with the
+# final `mcp` swapped for `db-path` — the one runtime command with no side
+# effect — so the answer proves the launcher was found, Python ran the runtime,
+# and the argument arrived. TASKBOARD_API and TASKBOARD_BIN point at nothing
+# usable: were the argument ever dropped, the runtime's default command
+# (`doctor`) would try to START a board, and this way it fails fast instead.
+TB_SPEC="$(node -e '
+  const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).mcpServers.taskboard || {};
+  process.stdout.write([s.command || "", ...(s.args || [])].join("\n"));
+' "$REPO_ROOT/.mcp.json")"
+mapfile -t TB <<<"$TB_SPEC"
+TB_N=${#TB[@]}
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import tomllib' >/dev/null 2>&1; then
+  TB_CODEX="$(python3 - "$REPO_ROOT/.codex/config.toml" <<'PY'
+import sys, tomllib
+s = tomllib.load(open(sys.argv[1], "rb")).get("mcp_servers", {}).get("taskboard", {})
+sys.stdout.buffer.write("\n".join([s.get("command", "")] + list(s.get("args", []))).encode())
+PY
+)"
+  if [ -n "$TB_CODEX" ] && [ "$TB_CODEX" = "$TB_SPEC" ]; then
+    ok "the committed .codex/config.toml launches taskboard exactly as .mcp.json does, so the run below covers both"
+  else
+    bad "taskboard's launch differs between the files, so the run below covers only .mcp.json: codex=[$TB_CODEX] mcp.json=[$TB_SPEC]"
+  fi
+elif [ "${CI:-}" = "true" ]; then
+  bad "python3 with tomllib is required in CI to read the committed .codex/config.toml taskboard launch"
+else
+  skip "python3/tomllib absent locally — the .codex/config.toml taskboard launch is not compared on this host"
+fi
+if [ "$TB_N" -lt 2 ] || [ "${TB[$((TB_N - 1))]}" != "mcp" ]; then
+  bad "the committed taskboard launch no longer ends in \`mcp\` (got: ${TB[*]}), so swapping in db-path would test something else"
+else
+  NATIVE_TMP="$(cd "$TMP_ROOT" && { pwd -W 2>/dev/null || pwd; })"
+  printf 'not a program\n' > "$TMP_ROOT/not-a-binary"
+  TB_OUT="$(cd "$REPO_ROOT/tools/agentic-sync" && TASKBOARD_DB="$NATIVE_TMP/sentinel-taskboard.db" TASKBOARD_API='http://127.0.0.1:9/api' TASKBOARD_BIN="$NATIVE_TMP/not-a-binary" "${TB[@]:0:TB_N-1}" db-path 2>&1)"; TB_RC=$?
+  if [ "$TB_RC" -eq 0 ] && grep -qF 'sentinel-taskboard.db' <<<"$TB_OUT"; then
+    ok "the committed taskboard command, started in tools/agentic-sync/, finds its launcher and delivers its argument (exit 0, db-path answered)"
+  elif grep -qF 'Taskboard requires Python 3' <<<"$TB_OUT" && [ "${CI:-}" != "true" ]; then
+    skip "no Python 3 on this host — the launcher was found, but the runtime could not run"
+  else
+    bad "the committed taskboard command does not start from a subdirectory (exit $TB_RC): $(printf '%s' "$TB_OUT" | tr '\n' ' ' | cut -c1-300)"
+  fi
+fi
 
 echo "== generator: --write may delete ONLY what it generated =="
 # The lock is a committed text file. A bad merge resolution, or an edit, can put
@@ -1132,11 +1540,11 @@ else
   # MCP parity reads the COMMITTED config, like check-codex-config-safety.sh.
   F="$(gitfix)"; gen "$F" --write
   printf '{"mcpServers":{"alpha":{"command":"npx"},"beta":{"command":"npx"}}}\n' > "$F/.mcp.json"
-  printf '[mcp_servers.alpha]\ncommand = "npx"\n[mcp_servers.beta]\ncommand = "npx"\n' > "$F/.codex/config.toml"
+  printf '[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n[mcp_servers.beta]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
   git -C "$F" add -A; git -C "$F" commit -q -m fixture
   gen "$F" --check; expect_rc 0 "committed config in parity passes"
-  printf 'model = "x"\n[mcp_servers.alpha]\ncommand = "npx"\n' > "$F/.codex/config.toml"
-  gen "$F" --check; expect_rc 0 "an UNCOMMITTED local edit to config.toml (the taskboard guide suggests one) does not turn a local check red"
+  printf 'model = "x"\n[mcp_servers.alpha]\ncommand = "npx"\ndefault_tools_approval_mode = "prompt"\n' > "$F/.codex/config.toml"
+  gen "$F" --check; expect_rc 0 "an UNCOMMITTED local edit to config.toml (a contributor trying out a server) does not turn a local check red"
   git -C "$F" add -A; git -C "$F" commit -q -m "commit the partial block"
   gen "$F" --check; expect_rc 1 "…but once COMMITTED, a partial server list is a failure"
   expect_out "beta is in .mcp.json but not in .codex/config.toml" "…naming the missing server"

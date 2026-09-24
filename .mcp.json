@@ -44,8 +44,8 @@
       }
     },
     "taskboard": {
-      "command": "node",
-      "args": [".claude/hooks/taskboard-launch.mjs", "mcp"]
+      "command": "git",
+      "args": ["-c", "alias.spawnforge-taskboard=!node .claude/hooks/taskboard-launch.mjs", "spawnforge-taskboard", "mcp"]
     }
   }
 }

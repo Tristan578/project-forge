@@ -104,6 +104,22 @@ describe('SceneHierarchy accessibility (localization.FR-2.OP-01 / OP-04)', () =>
     expect(results.violations, summarize(results.violations)).toHaveLength(0);
   });
 
+  it('nests child rows in a group owned by their parent treeitem (#9677)', async () => {
+    // aria-required-children (critical) was one of the three violations the
+    // old .dv-dockview exclusion hid. The fixture nests Sword under Player, so
+    // this audit covers the treeitem > group > treeitem shape, not only a flat
+    // list of roots that would pass the rule trivially.
+    const { container } = render(<SceneHierarchy />);
+    const tree = screen.getByRole('tree');
+    const player = within(tree).getByRole('treeitem', { name: 'Player' });
+    const group = within(player).getByRole('group');
+    expect(within(group).getByRole('treeitem', { name: 'Sword' })).toHaveAttribute('aria-level', '2');
+
+    const results = await axe(container);
+    expect(results.passes?.map((p) => (p as { id: string }).id)).toContain('aria-required-children');
+    expect(results.violations.map((v) => v.id)).not.toContain('aria-required-children');
+  });
+
   it('exposes exactly one row in the tab order (roving tabindex)', () => {
     render(<SceneHierarchy />);
     const rows = screen.getAllByRole('treeitem');

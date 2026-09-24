@@ -11958,6 +11958,79 @@
       "visibility": "internal"
     },
     {
+      "name": "capture_performance_report",
+      "description": "Start a timed, manifest-pinned performance capture of the running scene: a warm-up, then a capture window of animation-frame times (default 10 s + 60 s). Returns immediately with status 'pending' and a captureId; poll get_performance_report for progress and the finished report (p50/p95/p99 frame time, first-interactive time, memory availability, fixture checksum, build SHA, exact browser version, GPU, backend, viewport, cache state, sample count, and a pass/fail/unknown verdict per budget of the device profile). A metric the browser cannot measure is reported as 'unknown', never 0, and never passes a budget. Authoring changes, scene/project changes and engine restarts invalidate an active capture without publishing a report, even if Undo restores the scene. Keep the editor workload unchanged until completion. Refused while another capture runs or when the engine is not loaded. Same controls as the profiler's Run capture button.",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "warmupSeconds": {
+            "type": "integer",
+            "description": "Warm-up before measuring, whole seconds 0-60 (default 10). The frame-time budget is only judged on the profile protocol (10 s warm-up, 60 s capture)."
+          },
+          "captureSeconds": {
+            "type": "integer",
+            "description": "Capture window, whole seconds 5-300 (default 60)."
+          },
+          "profileId": {
+            "type": "string",
+            "description": "Device profile whose budgets judge the run, as id@version (default 'desktop@1': p95 frame time <= 16.7 ms, cold first interactive <= 5 s)."
+          },
+          "cacheState": {
+            "type": "string",
+            "enum": [
+              "warm",
+              "cold",
+              "unknown"
+            ],
+            "description": "Declare the asset-cache state of the run. Omit to detect it from the engine binary's resource timing (unknown when it cannot be told)."
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "set_performance_baseline",
+      "description": "Pin a captured performance report as the baseline that compare_performance_reports uses by default (persisted in this browser), or clear the pin. Defaults to the latest report. Capturing never changes the pin, so a baseline pinned manually in the profiler survives later captures. Same as the profiler's Pin as baseline / Unpin baseline button.",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "description": "Report to pin (from get_performance_report). Defaults to the latest report of this session."
+          },
+          "clear": {
+            "type": "boolean",
+            "description": "Clear the pinned baseline instead of setting one."
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "cancel_performance_capture",
+      "description": "Cancel the running performance capture. No report is kept. Errors when no capture is running. Same as the profiler's Cancel capture button.",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
       "name": "create_leaderboard",
       "description": "Define a leaderboard for the current published game. Leaderboards are identified by name and can be sorted highest-first (desc) or lowest-first (asc). Call this once per leaderboard during game setup.",
       "category": "publishing",
@@ -12731,6 +12804,52 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "get_performance_report",
+      "description": "Read the latest (or a named) performance report and the capture status. While a capture runs the status carries its phase and progress (0-1); once finished the report carries the measurement manifest (build SHA, fixture checksum and id, OS, exact browser version, GPU, backend, viewport, device memory, cache state, sample count), p50/p95/p99 frame time, first-interactive time, memory availability, every budget's observed value, limit and pass/fail/unknown status, and the overall verdict. Values the browser could not measure are 'unknown'. Raw frame samples are omitted unless includeSamples is true.",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "description": "A report id from this session or the pinned baseline. Defaults to the latest report."
+          },
+          "includeSamples": {
+            "type": "boolean",
+            "description": "Include the raw frame-time samples (thousands of numbers). Default false: only their count."
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:read",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "compare_performance_reports",
+      "description": "Compare a performance report (default: latest) with a baseline (default: pinned). Fixture checksum, exact browser version and backend must be known and equal; source, first-interactive timing basis, device profile and capture protocol must match. Hidden-tab captures and known warm-versus-cold cache states are incompatible: no deltas or directional claim. Unknown cache state on either side is an advisory and retains deltas; equal cache conditions are not established. Compatible reports return p50/p95/p99 and first-interactive deltas with improved, regressed, unchanged (within 5% on p95), or inconclusive.",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "description": "Report to compare. Defaults to the latest report."
+          },
+          "baselineReportId": {
+            "type": "string",
+            "description": "Report to compare against. Defaults to the pinned baseline."
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:read",
       "destructive": false,
       "visibility": "public"
     },

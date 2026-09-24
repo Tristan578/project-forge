@@ -14,6 +14,7 @@ const glInit = vi.fn();
 const gpuDownload = vi.fn(async () => {});
 const glDownload = vi.fn(async () => {});
 let engine: typeof import('../useEngine');
+let stability: typeof import('@/lib/perf/captureStability');
 
 beforeAll(async () => {
   vi.resetModules();
@@ -30,6 +31,7 @@ beforeAll(async () => {
     set_event_callback: vi.fn(), handle_command: vi.fn(), handle_command_batch: vi.fn(),
   }));
   engine = await import('../useEngine');
+  stability = await import('@/lib/perf/captureStability');
 });
 
 beforeEach(() => {
@@ -85,9 +87,13 @@ describe('actual engine backend reporting', () => {
     const { result } = renderHook(() => engine.useEngine('forge-canvas'));
     await waitFor(() => expect(result.current.isReady).toBe(true));
     expect(engine.getActiveEngineBackend()).toBe('webgpu');
+    const changed = vi.fn();
+    const unsubscribe = stability.onCaptureWorkloadChange(changed);
     const crash = new Event('unhandledrejection');
     Object.defineProperty(crash, 'reason', { value: new WebAssembly.RuntimeError('unreachable') });
     await act(async () => { window.dispatchEvent(crash); });
+    expect(changed).toHaveBeenCalledTimes(1);
+    unsubscribe();
     expect(engine.isEngineCrashed()).toBe(true);
     expect(engine.getActiveEngineBackend()).toBe('unknown');
     engine.resetEngine();
@@ -99,7 +105,43 @@ describe('actual engine backend reporting', () => {
     const { result } = renderHook(() => engine.useEngine('forge-canvas'));
     await waitFor(() => expect(result.current.isReady).toBe(true));
     expect(engine.getActiveEngineBackend()).toBe('webgpu');
+    const changed = vi.fn();
+    const unsubscribe = stability.onCaptureWorkloadChange(changed);
     engine.resetEngine();
+    expect(changed).toHaveBeenCalledTimes(1);
+    unsubscribe();
     expect(engine.getActiveEngineBackend()).toBe('unknown');
+  });
+});
+
+describe('performance-capture readiness and memory (#10013)', () => {
+  beforeEach(() => {
+    performance.clearMarks(engine.ENGINE_READY_MARK);
+  });
+
+  it('marks the first engine ready on the performance timeline', async () => {
+    expect(engine.getEngineReadyMs()).toBe('unknown');
+    const { result } = renderHook(() => engine.useEngine('forge-canvas'));
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+    const readyMs = engine.getEngineReadyMs();
+    expect(typeof readyMs).toBe('number');
+    expect(readyMs as number).toBeGreaterThanOrEqual(0);
+    expect(performance.getEntriesByName(engine.ENGINE_READY_MARK, 'mark')).toHaveLength(1);
+  });
+
+  it('keeps the wasm-bindgen memory from the init output, and forgets it on reset', async () => {
+    const memory = { buffer: { byteLength: 64 * 1024 * 1024 } };
+    gpuDownload.mockResolvedValue({ memory } as never);
+    const { result } = renderHook(() => engine.useEngine('forge-canvas'));
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+    expect(engine.getEngineWasmMemory()).toBe(memory);
+    act(() => engine.resetEngine());
+    expect(engine.getEngineWasmMemory()).toBeNull();
+  });
+
+  it('reports no memory when the init output carries none', async () => {
+    const { result } = renderHook(() => engine.useEngine('forge-canvas'));
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+    expect(engine.getEngineWasmMemory()).toBeNull();
   });
 });

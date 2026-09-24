@@ -28,3 +28,7 @@ tools/agentic-sync/port.lock.json linguist-generated=true
 *.sh            text eol=lf
 *.bash          text eol=lf
 *.py            text eol=lf
+
+# Captured performance evidence (#9904): machine-written reports carrying raw
+# frame samples, one per line. Review them through the README beside them.
+docs/performance/evidence/**/*.json linguist-generated=true

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { Paintbrush, Check } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { getCommandDispatcher } from '@/stores/editorStore';
@@ -32,6 +32,10 @@ const BLEND_LABELS: Record<BlendMode, string> = {
 };
 
 export function TexturePainterPanel() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryMaterial = useEditorStore((s) => s.primaryMaterial);
 
@@ -135,10 +139,11 @@ export function TexturePainterPanel() {
 
       {/* Target slot */}
       <div className="mb-3">
-        <label className="mb-1 block text-xs font-medium text-zinc-400">
+        <label htmlFor={fieldId('target-map')} className="mb-1 block text-xs font-medium text-zinc-400">
           Target Map
         </label>
         <select
+          id={fieldId('target-map')}
           value={targetSlot}
           onChange={(e) => setTargetSlot(e.target.value as TextureSlot)}
           className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 focus:border-blue-500 focus:outline-none"
@@ -153,10 +158,11 @@ export function TexturePainterPanel() {
 
       {/* Blend mode */}
       <div className="mb-3">
-        <label className="mb-1 block text-xs font-medium text-zinc-400">
+        <label htmlFor={fieldId('blend-mode')} className="mb-1 block text-xs font-medium text-zinc-400">
           Blend Mode
         </label>
         <select
+          id={fieldId('blend-mode')}
           value={blendMode}
           onChange={(e) => setBlendMode(e.target.value as BlendMode)}
           className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 focus:border-blue-500 focus:outline-none"
@@ -171,11 +177,12 @@ export function TexturePainterPanel() {
 
       {/* Intensity slider */}
       <div className="mb-4">
-        <label className="mb-1 flex items-center justify-between text-xs font-medium text-zinc-400">
+        <label htmlFor={fieldId('intensity')} className="mb-1 flex items-center justify-between text-xs font-medium text-zinc-400">
           <span>Intensity</span>
           <span className="text-zinc-400">{Math.round(intensity * 100)}%</span>
         </label>
         <input
+          id={fieldId('intensity')}
           type="range"
           min={0}
           max={1}
