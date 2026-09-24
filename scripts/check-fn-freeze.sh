@@ -61,7 +61,8 @@
 # `ali${x:+Q}as`, `DEBU$1G`): every command name and argument is also judged
 # with its expansions removed (see end_word), an ANSI-C string decoded, a
 # locale string read as its text, and every word a brace group expands to
-# (`al{i,}as`) checked. A word whose spelling needs an
+# (`al{i,}as`) checked; an expansion too long to enumerate, in a guarded
+# position, is reported as `brace` rather than judged on a prefix. A word whose spelling needs an
 # expansion to CONTRIBUTE text (`al$(echo i)as`), `eval`, a `source` of a
 # file written by the suite, and `declare -n` (a variable, not a function)
 # remain outside this gate (the Honest bound of the Sweep section in
@@ -159,7 +160,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|parse-error
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|parse-error
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -235,11 +236,16 @@ derive_file() {
     # its own only candidate. has(t) is true when any candidate equals t and
     # anym(re) when any matches re. Checking every candidate, not only the
     # first, is deliberately conservative: a guarded word anywhere in the
-    # expansion is reported.
-    function brace_exp(s) { delete bx; nbx = 0; bexp(s, 0); return nbx }
+    # expansion is reported. The caps bound the work, not the verdict: when
+    # an expansion has more words than the cap, or nests deeper, bx_trunc
+    # is set, and end_word reports a truncated word in a guarded position
+    # as `brace` instead of judging the prefix it saw (nineteenth board
+    # round: a guarded word at position 65 was silently passed).
+    function brace_exp(s) { delete bx; nbx = 0; bx_trunc = 0; bexp(s, 0); return nbx }
     function bexp(s, depth,   n, i, j, c, lvl, en, comma, body, pre, post, parts, np, k, lo, hi, st, al, v) {
       n = length(s)
-      if (nbx >= 64) return
+      if (nbx >= 64) { bx_trunc = 1; return }
+      if (depth > 8 && index(s, "{")) bx_trunc = 1
       if (depth <= 8) for (i = 1; i <= n; i++) {
         if (substr(s, i, 1) != "{") continue
         lvl = 0; comma = 0; en = 0
@@ -266,16 +272,16 @@ derive_file() {
         if (body ~ /^-?[0-9]+\.\.-?[0-9]+(\.\.-?[0-9]+)?$/) {
           split(body, parts, /\.\./); lo = parts[1] + 0; hi = parts[2] + 0
           st = (parts[3] == "" || parts[3] + 0 == 0) ? 1 : parts[3] + 0; if (st < 0) st = -st
-          if (lo <= hi) { for (v = lo; v <= hi && nbx < 64; v += st) bexp(pre v post, depth + 1) }
-          else { for (v = lo; v >= hi && nbx < 64; v -= st) bexp(pre v post, depth + 1) }
+          if (lo <= hi) { for (v = lo; v <= hi; v += st) { if (nbx >= 64) { bx_trunc = 1; break }; bexp(pre v post, depth + 1) } }
+          else { for (v = lo; v >= hi; v -= st) { if (nbx >= 64) { bx_trunc = 1; break }; bexp(pre v post, depth + 1) } }
           return
         }
         if (body ~ /^[A-Za-z]\.\.[A-Za-z](\.\.-?[0-9]+)?$/) {
           al = "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz"
           split(body, parts, /\.\./); lo = index(al, parts[1]); hi = index(al, parts[2])
           st = (parts[3] == "" || parts[3] + 0 == 0) ? 1 : parts[3] + 0; if (st < 0) st = -st
-          if (lo <= hi) { for (v = lo; v <= hi && nbx < 64; v += st) bexp(pre substr(al, v, 1) post, depth + 1) }
-          else { for (v = lo; v >= hi && nbx < 64; v -= st) bexp(pre substr(al, v, 1) post, depth + 1) }
+          if (lo <= hi) { for (v = lo; v <= hi; v += st) { if (nbx >= 64) { bx_trunc = 1; break }; bexp(pre substr(al, v, 1) post, depth + 1) } }
+          else { for (v = lo; v >= hi; v -= st) { if (nbx >= 64) { bx_trunc = 1; break }; bexp(pre substr(al, v, 1) post, depth + 1) } }
           return
         }
       }
@@ -298,6 +304,14 @@ derive_file() {
         } else pat_n++
         w = ""; return
       }
+      # A word whose brace expansion was cut short is judged as a guarded
+      # word would be only on the words it produced; where the missing ones
+      # could be guarded (a command name, or any word of an alias, shopt or
+      # trap statement) that is not a verdict, so it is a violation. An
+      # assignment word before the command name is not brace-expanded by
+      # bash at all, so its value is never judged.
+      if (bx_trunc && (!cmd_seen || in_alias || in_shopt || in_trap) && !(!cmd_seen && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/))
+        printf "%s\t%s\t%d\t%d\tbrace\n", file, w, NR, NR
       if (!cmd_seen) {
         # `case WORD` ended its line without `in`: the first word of a later
         # line is that `in` (only blank and comment lines may come between).
@@ -875,7 +889,7 @@ if [ "${derived:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported|brace)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
   # The report is the block reason, so it goes to stderr like every other
@@ -891,6 +905,7 @@ if [ -n "$violations" ]; then
         trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 that exits or execs, directly or through a function of this file, replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — delete this trap or extdebug line, or make its action return without exiting" ;;
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable — rename this function, or delete the enable call" ;;
         shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command or a closing brace, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
+        brace)    echo "  - $file:$def: '$name' — this brace expansion produces more words than the gate enumerates (64, nested 8 deep), in a command name or an alias, shopt or trap statement, so a guarded word could sit past the cut where the gate cannot see it — list the words it needs explicitly, or split the statement" ;;
         unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as a one-liner '$name() { ...; }', or multi-line with the closing '}' at column 0, then freeze it on the next line" ;;
       esac
     done <<<"$violations"

@@ -895,8 +895,12 @@ by construction rather than by measurement.
   (the decoder knew only the letters and `@[\]^_`); a `$"..."` locale string
   was read as a variable; and brace expansion runs before a command is looked
   up, so `al{i,}as`, `{a..a}lias` and `alias {x,fail=:}` define an alias.
-  A word is now judged as every word its brace groups expand to (at most
-  64). No files,
+  A word is now judged as every word its brace groups expand to. The
+  nineteenth found that the 64-word enumeration cap passed a guarded word at
+  position 65; an expansion cut short by the cap or by the 8-level nesting
+  bound, in a command name or an alias, shopt or trap statement, is now a
+  `brace` violation, and a numeric range (`trap 'exit 0' {0..0}`) is pinned.
+  No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state

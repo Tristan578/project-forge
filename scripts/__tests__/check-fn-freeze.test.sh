@@ -1455,6 +1455,11 @@ fi
 # put the guarded word in a LATER expansion (`trap 'exit 0' INT EXIT`,
 # `alias x fail=:`, `trap : INT DEBUG`, `shopt -p -s expand_aliases`), so
 # a check that judged only the first expansion would miss each of them.
+# Lines 15 to 17 pin the numeric range (nineteenth round, test): signal 0
+# is EXIT, reached by a one-element range, a descending stepped range and
+# a range from a negative bound; each exits 3 from `trap 'exit 3' ...` in
+# bash 5.2, while `{1..3}` (HUP INT QUIT, real signals) does not, which
+# 30l-b pins.
 d_static="$(mkfixture static-spellings <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -1470,22 +1475,56 @@ trap 'exit 0' {INT,EXIT}
 alias {x,fail=:}
 trap : {INT,DEBUG}
 shopt {-p,-s} expand_aliases
+trap 'exit 0' {0..0}
+trap 'exit 0' {2..0..2}
+trap 'exit 0' {-1..0}
 FIX
 )"
 expect_rc "30l. locale strings and brace expansions that produce a guarded word are that word" 1 \
-  "$(run_gate "$d_static")" "12 violation(s)" "fixture.test.sh:3: 'alias fail=:'" "fixture.test.sh:4: 'shopt -s expand_aliases'" \
+  "$(run_gate "$d_static")" "15 violation(s)" "fixture.test.sh:3: 'alias fail=:'" "fixture.test.sh:4: 'shopt -s expand_aliases'" \
   "fixture.test.sh:5: 'alias fail=:'" "fixture.test.sh:6: 'alias fail=:'" "fixture.test.sh:7: 'alias fail=:'" \
   "fixture.test.sh:8: 'alias fail=:'" "fixture.test.sh:9: 'shopt -s expand{_aliases,}'" "fixture.test.sh:10: 'alias {fail=:,x}'" \
   "fixture.test.sh:11: 'trap exit 0 ..." "fixture.test.sh:12: 'alias {x,fail=:}'" "fixture.test.sh:13: 'trap ... {INT,DEBUG}'" \
-  "fixture.test.sh:14: 'shopt {-p,-s} expand_aliases'"
+  "fixture.test.sh:14: 'shopt {-p,-s} expand_aliases'" "fixture.test.sh:15: 'trap exit 0 ..." \
+  "fixture.test.sh:16: 'trap exit 0 ..." "fixture.test.sh:17: 'trap exit 0 ..."
 d_nobrace="$(mkfixture plain-braces <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
 echo {alias,x} fail=:
 echo {a..c}
+trap 'exit 0' {1..3}
 FIX
 )"
 expect_rc "30l-b. brace expansion in an argument position is still text" 0 "$(run_gate "$d_nobrace")" "frozen"
+
+# ---- 30m. a brace expansion past the enumeration cap fails closed -----------
+# Nineteenth board round (security): the enumeration stopped at 64 words, so
+# `alias {z0,...,z63,fail=:}` defined an alias in bash and passed the gate.
+# A word cut short in a guarded position (command name, alias, shopt or trap
+# statement), or nested more than 8 expansions deep (line 7), is now a
+# `brace` violation; the same length in an argument of
+# any other command is text, as `printf 'a%.0s' {1..65}` in the real tree is,
+# and so is an assignment word before the command name (line 10), which bash
+# never brace-expands.
+d_cap="$({
+  printf 'pass() { :; }\nreadonly -f pass\n'
+  printf 'alias {'; for i in $(seq 0 63); do printf 'z%d,' "$i"; done; printf 'fail=:}\n'
+  printf 'shopt -s {'; for i in $(seq 0 63); do printf 'q%d,' "$i"; done; printf 'expand_aliases}\n'
+  printf 'trap : {'; for i in $(seq 0 63); do printf 'q%d,' "$i"; done; printf 'DEBUG}\n'
+  printf '{1..70}alias fail=:\n'
+  printf 'alias '; for i in $(seq 1 10); do printf '{x,'; done; printf 'fail=:'; for i in $(seq 1 10); do printf '}'; done; printf '\n'
+  printf 'printf %%s {1..70}\n'
+  printf 'echo {'; for i in $(seq 0 70); do printf 'e%d,' "$i"; done; printf 'x}\n'
+  printf 'X={1..70} true\n'
+} | mkfixture brace-cap)"
+out_cap="$(run_gate "$d_cap")"
+expect_rc "30m. a brace expansion cut short in a guarded position is a violation" 1 "$out_cap" "5 violation(s)" \
+  "fixture.test.sh:3: '" "fixture.test.sh:4: '" "fixture.test.sh:5: '" "fixture.test.sh:6: '{1..70}alias'" "fixture.test.sh:7: '{x,"
+if grep -Eq 'fixture.test.sh:(8|9|10):' <<<"$out_cap"; then
+  fail "30m-b. a long brace expansion in an argument of another command is text" "$out_cap"
+else
+  pass "30m-b. a long brace expansion in an argument of another command is text"
+fi
 
 # ---- 12c. a file whose only definition is malformed gets that report --------------
 # Fourteenth board round (ux): the vacuity guard counted only frozen and

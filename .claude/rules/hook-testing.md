@@ -184,7 +184,8 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   expand_aliases` are caught too, and an ANSI-C quoted string is decoded
   first (`$'\141lias'` is `alias`). A `$"..."` locale string is its text,
   and a word with brace groups is judged as every word it expands to
-  (`al{i,}as`, `{a..a}lias`, `alias {x,fail=:}`). Only an expansion that must contribute
+  (`al{i,}as`, `{a..a}lias`, `alias {x,fail=:}`); one longer than the gate
+  enumerates, in a guarded position, is itself a violation. Only an expansion that must contribute
   text to spell the word (`al$(echo i)as`), `eval`, a `source` of a file the
   suite wrote, and `declare -n` stay out of reach. The word
   as an argument (`echo alias fail=:`), inside a quoted string
