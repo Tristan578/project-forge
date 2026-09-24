@@ -10,6 +10,7 @@ import {
   createSandboxedScriptHost,
   loadSandboxWorkerSource,
   type SandboxedScriptHost,
+  type SandboxedScriptHostOptions,
 } from '../sandboxOrigin';
 import { buildSandboxFrameContentSecurityPolicy } from '@/lib/security/csp';
 
@@ -116,8 +117,19 @@ function bootFakeFrame(): FakeFrame {
   return { contentWindow, parentWindow, deliver, blobs, revoked };
 }
 
+/**
+ * Failure reports from hosts whose test did not ask for them. `onError` is a
+ * required option (an unbounded fallback logger is exactly what it replaced),
+ * so every host here gets one; a report nobody expected fails the test in
+ * afterEach instead of vanishing into a no-op spy.
+ */
+let unexpectedReports: string[] = [];
+const unexpectedReport: SandboxedScriptHostOptions['onError'] = (detail, phase) => {
+  unexpectedReports.push(`${phase}: ${detail}`);
+};
+
 /** Start a host whose frame is the fake realm above. */
-async function startHost(options: Parameters<typeof createSandboxedScriptHost>[0] = {}) {
+async function startHost(options: Partial<SandboxedScriptHostOptions> = {}) {
   const frame = bootFakeFrame();
   vi.spyOn(HTMLIFrameElement.prototype, 'contentWindow', 'get').mockReturnValue(
     frame.contentWindow as unknown as Window,
@@ -127,6 +139,7 @@ async function startHost(options: Parameters<typeof createSandboxedScriptHost>[0
   const host = createSandboxedScriptHost({
     loadWorkerSource: async () => 'WORKER_SOURCE_TEXT',
     container,
+    onError: unexpectedReport,
     ...options,
   });
   await vi.waitFor(() => expect(host.frame).not.toBeNull());
@@ -140,10 +153,12 @@ beforeEach(() => {
   FakeWorker.created = [];
   FakeWorker.throwOnConstruct = false;
   hosts = [];
+  unexpectedReports = [];
 });
 
 afterEach(() => {
   for (const host of hosts) host.terminate();
+  expect(unexpectedReports).toEqual([]);
   for (const port of openPorts.splice(0)) port.close();
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -229,6 +244,7 @@ describe('MessagePort relay', () => {
     let release: (source: string) => void = () => {};
     const host = createSandboxedScriptHost({
       loadWorkerSource: () => new Promise<string>((resolve) => (release = resolve)),
+      onError: unexpectedReport,
     });
     hosts.push(host);
     // Posted synchronously, exactly as useScriptRunner posts init + scene_info.
@@ -352,6 +368,39 @@ describe('failure reporting', () => {
     // Before the worker has said anything: its code never ran, so this is a
     // failure to START, not an error in a running game.
     await vi.waitFor(() => expect(onError2).toHaveBeenCalledWith(expect.stringMatching(/worker-error: SyntaxError: bad bundle/), 'boot'));
+  });
+
+  it("WebKit's shape — 'ready', then an uncaught error before the first message — fails CLOSED as a boot failure", async () => {
+    // What CI run 35997735154 recorded in WebKit: the frame constructed the
+    // worker (so the bootstrap said 'ready' and the boot timer was cleared),
+    // then the worker reported the sanitised "Script error." without ever
+    // posting a message. The scripts never ran; the host must say so ONCE and
+    // tear itself down, never relay anything, and never report again.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const onError = vi.fn();
+    const { host, container } = await startHost({ onError, bootTimeoutMs: 1000 });
+    const received: unknown[] = [];
+    host.onmessage = (event) => received.push(event.data);
+    await vi.waitFor(() => expect(FakeWorker.created).toHaveLength(1));
+    // 'ready' arrived: the boot timer is gone, so ONLY the error can report.
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(0));
+    const worker = FakeWorker.created[0];
+
+    worker.onerror?.({ message: 'Error: Script error.' });
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(onError).toHaveBeenCalledWith('Script sandbox worker-error: Error: Script error.', 'boot');
+    expect(host.frame).toBeNull();
+    expect(container.querySelector('iframe')).toBeNull();
+    // Finished: nothing further is relayed or reported, however long we wait.
+    host.postMessage({ type: 'tick', n: 1 });
+    worker.emit({ type: 'commands', commands: [] });
+    worker.onerror?.({ message: 'Error: Script error.' });
+    vi.advanceTimersByTime(10_000);
+    await vi.waitFor(() => expect(worker.terminated).toBe(true));
+    expect(worker.posted).toEqual([]);
+    expect(received).toEqual([]);
+    expect(onError).toHaveBeenCalledTimes(1);
   });
 
   it('an uncaught error in a worker that has STARTED is a runtime failure, not a boot failure', async () => {

@@ -2,7 +2,9 @@
  * Real-browser proof for the sandboxed-origin script transport (#8700).
  *
  * jsdom enforces neither `sandbox` nor CSP, so the unit tests can only check
- * the configuration. This spec runs it in Chromium:
+ * the configuration. This spec runs it in a real browser — Chromium
+ * (playwright.ci.config.ts) and Firefox and WebKit
+ * (playwright.crossbrowser.config.ts):
  *
  *   1. An escaped script — `(0).constructor.constructor('return fetch')()` —
  *      cannot get a single request out of the page: not same-origin, not a
@@ -27,6 +29,25 @@
  * stands in for `useScriptRunner` — no engine, no stores, no Next server — so
  * that every request the browser makes is one this spec served or recorded.
  * Hence the substitution annotation and title marker (#10158).
+ *
+ * ## Per-browser expectations (CI run 35997735154, head a17c010f)
+ *
+ * - Chromium and Firefox: the transport RUNS scripts. All four tests assert the
+ *   functional behaviour; the network assertions are identical in both.
+ * - Firefox reports less ATTRIBUTION: see the escape test. The requests are
+ *   still refused and asserted as refused; only the event naming the
+ *   script-src directive was never delivered.
+ * - WebKit: the transport does NOT run scripts. All four tests failed on both
+ *   attempts: two recorded the host reporting
+ *   `Script sandbox worker-error: Error: Script error.`, and the other two
+ *   timed out at 30 s. The honest expectation there is FAIL CLOSED, so in
+ *   WebKit every test asserts exactly that ({@link expectFailedClosed}): one
+ *   `boot` failure, nothing relayed, the frame gone, nothing on the network.
+ *   That run did not record the failure's PHASE or whether anything was
+ *   relayed first; this branch is the first measurement of both, and it
+ *   prints the whole account on failure. If WebKit starts running the worker,
+ *   these assertions go red — the signal to move WebKit to the functional
+ *   branch and to update the docs that say Safari fails closed.
  *
  * "No request left the page" is asserted at the ROUTE layer: `context.route`
  * sees every request the browser would put on the network. CDP's `request`
@@ -155,12 +176,16 @@ async function openHarness(context: BrowserContext): Promise<{ page: Page; net: 
 
 interface RunResult {
   messages: Array<{ type: string; [key: string]: unknown }>;
-  errors: string[];
+  /** Everything the host passed to its (required) `onError`, in order. */
+  failures: Array<{ detail: string; phase: string }>;
 }
 
 /**
  * Start a host in the page, send init (+ optional ticks), and collect every
- * message until `until` matches one, or the timeout passes.
+ * message until `until` matches one, the host reports a `boot` failure (after
+ * which it has torn itself down, so nothing more can arrive), or the timeout
+ * passes. Bounded in every browser: a transport that never answers ends the
+ * wait at 15 s instead of hanging the test.
  */
 async function runInSandbox(
   page: Page,
@@ -179,14 +204,17 @@ async function runInSandbox(
           };
         }).__sandbox;
         const messages: RunResult['messages'] = [];
-        const errors: string[] = [];
+        const failures: RunResult['failures'] = [];
+        const finish = () => resolve({ messages, failures });
         const host = api.createSandboxedScriptHost({
           // undefined => the module's own default loader, i.e. the bundled string.
           loadWorkerSource: source === undefined ? undefined : () => Promise.resolve(source),
-          onError: (message: string) => errors.push(message),
+          onError: (detail: string, phase: string) => {
+            failures.push({ detail, phase });
+            if (phase === 'boot') finish();
+          },
         });
         (window as unknown as { __host: unknown }).__host = host;
-        const finish = () => resolve({ messages, errors });
         host.onmessage = (event) => {
           const data = event.data as RunResult['messages'][number];
           messages.push(data);
@@ -206,6 +234,32 @@ async function runInSandbox(
       }),
     opts,
   );
+}
+
+/**
+ * WebKit's expectation: the scripts never start, and that is reported and
+ * contained rather than silent (see the header). Every clause is the property a
+ * creator or an attacker depends on:
+ *
+ * - exactly one failure, phase `boot` — which is what makes `useScriptRunner`
+ *   stop Play and show the creator message instead of letting ticks run into
+ *   the watchdog, and it never falls back to the same-origin transport
+ *   (pinned in useScriptRunner.test.ts);
+ * - no protocol message relayed — no script output of any kind came back;
+ * - the frame is gone — the host tore itself down, so nothing can start later;
+ * - nothing on the network but the harness's own two files.
+ *
+ * The whole result goes in the failure message, so a WebKit that behaves
+ * differently says exactly how in the CI log.
+ */
+async function expectFailedClosed(page: Page, net: NetworkLog, result: RunResult): Promise<void> {
+  const account = JSON.stringify({ failures: result.failures, messageTypes: result.messages.map((m) => m.type) });
+  test.info().annotations.push({ type: 'webkit-fail-closed', description: account });
+  expect(result.failures.map((f) => f.phase), account).toEqual(['boot']);
+  expect(result.messages, account).toEqual([]);
+  expect(await page.locator('iframe').count(), account).toBe(0);
+  expect(net.routed).toEqual(HARNESS_ASSETS);
+  expect(net.websockets).toEqual([]);
 }
 
 const logs = (result: RunResult, prefix: string) =>
@@ -287,44 +341,69 @@ test.describe(
   'Script sandbox isolation (#8700) [substituted: editor page] @ui',
   { annotation: { type: 'substitution', description: 'editor page' } },
   () => {
-    test('an escaped script cannot make any network request, with revokeNetworkGlobals stubbed out', async ({ context }) => {
+    test('an escaped script cannot make any network request, with revokeNetworkGlobals stubbed out', async ({ context, browserName }) => {
       const { page, net } = await openHarness(context);
       const result = await runInSandbox(page, {
         source: unrevokedWorker,
         scripts: [{ entityId: 'attacker', source: ESCAPE_SCRIPT }],
         until: 'probe:done',
       });
-      expect(result.errors).toEqual([]);
-      expect(logs(result, 'probe:').at(-1)).toBe('done');
 
+      if (browserName === 'webkit') {
+        // The escape script never runs in WebKit, so there are no outcomes to
+        // inspect; what CAN be asserted is that nothing ran and nothing left.
+        await expectFailedClosed(page, net, result);
+        return;
+      }
+
+      // Preconditions: the probe ran to the end, so the outcomes below are all
+      // of them and not a prefix.
+      expect(result.failures).toEqual([]);
+      expect(logs(result, 'probe:').at(-1)).toBe('done');
       // The enumeration is OFF: the constructor chain hands back a live fetch.
       // Whatever blocks the requests below, it is not revokeNetworkGlobals().
       expect(logs(result, 'probe:fetch-type:')).toEqual(['function']);
       // The frame is an opaque origin, so it cannot read the editor's cookies or storage.
       expect(logs(result, 'probe:origin:')).toEqual(['null']);
 
+      // LOAD-BEARING, first: every attempt ran and was refused — none silently
+      // skipped (lessons #11) — and nothing reached the network but the two
+      // files this spec served. These hold in every browser that runs scripts.
       const outcomes = logs(result, 'probe:result:');
-      // Every attempt ran and settled — none silently skipped (lessons #11).
       expect(outcomes).toHaveLength(11);
       for (const outcome of outcomes) {
         expect(outcome, outcome).toMatch(/:rejected:/);
       }
-      // The browser says why: CSP, in the frame's policy.
-      const violations = JSON.parse(logs(result, 'probe:violations:')[0] ?? '[]') as string[];
-      expect(violations.some((v) => v.startsWith('connect-src '))).toBe(true);
-      expect(violations.some((v) => v.startsWith('script-src'))).toBe(true);
-
-      // THE assertion: nothing reached the network but the two files this spec served.
       expect(net.routed).toEqual(HARNESS_ASSETS);
       expect(net.websockets).toEqual([]);
-      // Any request CDP announced beyond those was cancelled before sending.
+      // Any request the browser announced beyond those was cancelled before sending.
       for (const announced of net.announced.filter((r) => !HARNESS_ASSETS.includes(r))) {
         expect(net.failed.get(announced), announced).toBeTruthy();
       }
+
+      // ATTRIBUTION, last: the browser's own account of WHY — CSP violations in
+      // the frame's policy, as seen by a listener on the worker's global. This
+      // is diagnostic, not the control: the refusals above are asserted whether
+      // or not an event names them. Which events a worker receives is
+      // browser-specific, so each browser asserts only what it has been SEEN
+      // to report:
+      // - Chromium reports both directives.
+      // - Firefox reports connect-src only. In CI run 35997735154 (head
+      //   a17c010f, both attempts) every assertion above the script-src one
+      //   passed in Firefox — 11 refusals, live fetch, null origin, and a
+      //   connect-src event — but no script-src violation event reached the
+      //   worker for the refused import()/importScripts() loads. The loads were
+      //   still refused; only the event is missing, so Firefox does not assert it.
+      // - WebKit never gets here (fail-closed branch above).
+      const violations = JSON.parse(logs(result, 'probe:violations:')[0] ?? '[]') as string[];
       test.info().annotations.push({ type: 'csp-violations', description: violations.join(' | ') });
+      expect(violations.some((v) => v.startsWith('connect-src ')), violations.join(' | ')).toBe(true);
+      if (browserName === 'chromium') {
+        expect(violations.some((v) => v.startsWith('script-src')), violations.join(' | ')).toBe(true);
+      }
     });
 
-    test('a normal script runs end to end through the sandboxed transport, with revocation still on', async ({ context }) => {
+    test('a normal script runs end to end through the sandboxed transport, with revocation still on', async ({ context, browserName }) => {
       const { page, net } = await openHarness(context);
       const script = `
         function onStart() {
@@ -343,7 +422,13 @@ test.describe(
       // No `source`: the host loads the worker through its own default path —
       // the string the build-time loader put in scriptWorkerSource.bundle.ts.
       const result = await runInSandbox(page, { scripts: [{ entityId: 'player', source: script }], ticks: 3, until: '"position":[3,' });
-      expect(result.errors).toEqual([]);
+      if (browserName === 'webkit') {
+        // Does not hold in WebKit today (CI run 35997735154): the scripts never
+        // start, so assert the fail-closed behaviour instead of this one.
+        await expectFailedClosed(page, net, result);
+        return;
+      }
+      expect(result.failures).toEqual([]);
 
       const commands = result.messages
         .filter((m) => m.type === 'commands')
@@ -356,15 +441,33 @@ test.describe(
       expect(net.routed).toEqual(HARNESS_ASSETS);
     });
 
-    test('terminate() ends the worker, even one that never yields', async ({ context }) => {
-      const { page } = await openHarness(context);
-      const workerStarted = page.waitForEvent('worker');
-      await runInSandbox(page, {
-        scripts: [{ entityId: 'spin', source: "function onStart() { forge.log('spinning'); }" }],
-        until: 'spinning',
-      });
+    test('terminate() ends the worker, even one that never yields', async ({ context, browserName }) => {
+      const { page, net } = await openHarness(context);
+      const spinning = { scripts: [{ entityId: 'spin', source: "function onStart() { forge.log('spinning'); }" }], until: 'spinning' };
+      if (browserName === 'webkit') {
+        // No worker runs in WebKit (CI run 35997735154, where this test timed
+        // out at 30 s), so there is nothing to terminate. The host has already
+        // torn itself down; terminating it again is a no-op.
+        const result = await runInSandbox(page, spinning);
+        await expectFailedClosed(page, net, result);
+        await page.evaluate(() => (window as unknown as { __host: { terminate(): void } }).__host.terminate());
+        expect(await page.locator('iframe').count()).toBe(0);
+        return;
+      }
+      // Every wait below is bounded, so a transport that never starts fails
+      // here with a named reason instead of burning the test timeout.
+      const workerStarted = page.waitForEvent('worker', { timeout: 20_000 });
+      const started = await runInSandbox(page, spinning);
+      expect(started.failures).toEqual([]);
+      expect(logs(started, 'spinning')).toEqual(['']);
       const worker = await workerStarted;
-      const closed = new Promise<void>((resolve) => worker.once('close', () => resolve()));
+      const closed = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('the worker did not close within 5 s of terminate()')), 5_000);
+        worker.once('close', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
       // Spin the worker's thread so it can never read a terminate message: only
       // discarding the frame can stop it.
       await page.evaluate(() => {
@@ -376,15 +479,30 @@ test.describe(
       expect(await page.locator('iframe').count()).toBe(0);
     });
 
-    test('relay cost per tick against a plain Worker (measurement, loose bound)', async ({ context }) => {
-      const { page } = await openHarness(context);
+    test('relay cost per tick against a plain Worker (measurement, loose bound)', async ({ context, browserName }) => {
+      const { page, net } = await openHarness(context);
+      if (browserName === 'webkit') {
+        // Nothing to measure: the sandboxed worker does not run in WebKit (CI
+        // run 35997735154, where this test timed out at 30 s inside the
+        // measurement, which had no bound of its own).
+        const result = await runInSandbox(page, {
+          scripts: [{ entityId: 'bench', source: 'function onUpdate(dt) { forge.setPosition(entityId, dt, 0, 0); }' }],
+          ticks: 3,
+          until: 'update_transform',
+        });
+        await expectFailedClosed(page, net, result);
+        return;
+      }
       const ROUNDS = 200;
       const measured = await page.evaluate(
         async ({ source, rounds }) => {
           const script = { entityId: 'bench', enabled: true, source: 'function onUpdate(dt) { forge.setPosition(entityId, dt, 0, 0); }' };
           const init = { type: 'init', scripts: [script], entities: {}, entityInfos: {}, inputState: {} };
           type Port = { postMessage(m: unknown): void; onmessage: ((e: MessageEvent) => void) | null };
-          const roundTrips = async (port: Port) => {
+          // Each round trip is bounded, and a host failure is named in the
+          // rejection, so a transport that stops answering fails fast.
+          let hostFailure = 'none reported';
+          const roundTrips = async (port: Port, label: string) => {
             let waiting: (() => void) | null = null;
             port.onmessage = (event) => {
               if ((event.data as { type?: string }).type === 'commands' && waiting) waiting();
@@ -395,8 +513,15 @@ test.describe(
             for (let i = 0; i < rounds + 20; i++) {
               if (i === 20) batchStart = performance.now();
               const t0 = performance.now();
-              await new Promise<void>((resolve) => {
-                waiting = resolve;
+              await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(
+                  () => reject(new Error(`${label}: no answer to tick ${i} within 5000 ms (host failure: ${hostFailure})`)),
+                  5_000,
+                );
+                waiting = () => {
+                  clearTimeout(timer);
+                  resolve();
+                };
                 port.postMessage({ type: 'tick', dt: 0.016, elapsed: i, entities: {}, entityInfos: {}, inputState: {} });
               });
               if (i >= 20) times.push(performance.now() - t0); // skip warm-up
@@ -409,11 +534,16 @@ test.describe(
             return { mean, p50: times[Math.floor(times.length / 2)], p95: times[Math.floor(times.length * 0.95)] };
           };
           const direct = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
-          const baseline = await roundTrips(direct);
+          const baseline = await roundTrips(direct, 'plain Worker');
           direct.terminate();
-          const api = (window as unknown as { __sandbox: { createSandboxedScriptHost: (o: object) => Port & { terminate(): void } } }).__sandbox;
-          const host = api.createSandboxedScriptHost({});
-          const sandboxed = await roundTrips(host);
+          type HostOptions = { onError: (detail: string, phase: string) => void };
+          const api = (window as unknown as { __sandbox: { createSandboxedScriptHost: (o: HostOptions) => Port & { terminate(): void } } }).__sandbox;
+          const host = api.createSandboxedScriptHost({
+            onError: (detail, phase) => {
+              hostFailure = `${phase}: ${detail}`;
+            },
+          });
+          const sandboxed = await roundTrips(host, 'sandboxed host');
           host.terminate();
           return { baseline, sandboxed };
         },

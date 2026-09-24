@@ -1430,6 +1430,12 @@ describe('useScriptRunner — script isolation transport', () => {
       // Play is stopped, and no further tick can re-arm the watchdog.
       expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
       expect(mockPlayTickCallback).toBeNull();
+      // Fail CLOSED: a sandbox that cannot start is never replaced by the
+      // weaker same-origin transport. This is the path WebKit takes today
+      // (CI run 35997735154), so "no Worker" is what keeps its scripts off
+      // the network rather than merely off the sandbox.
+      expect(latestWorker).toBeNull();
+      expect(vi.mocked(createSandboxedScriptHost)).toHaveBeenCalledTimes(1);
       unmount();
     } finally {
       errorSpy.mockRestore();
@@ -1450,7 +1456,7 @@ describe('useScriptRunner — script isolation transport', () => {
 // ---------------------------------------------------------------------------
 describe('useScriptRunner — sandbox runtime failures (fake sandboxed host)', () => {
   const mockWasmModule = { handle_command: vi.fn() };
-  type OnError = NonNullable<SandboxedScriptHostOptions['onError']>;
+  type OnError = SandboxedScriptHostOptions['onError'];
   let fakeHosts: { host: SandboxedScriptHost; onError: OnError }[] = [];
   let actualCreate: typeof createSandboxedScriptHost;
   let errorSpy: MockInstance<typeof console.error>;
@@ -1489,9 +1495,9 @@ describe('useScriptRunner — sandbox runtime failures (fake sandboxed host)', (
     mockPlayTickCallback = null;
     latestWorker = null;
     fakeHosts = [];
-    vi.mocked(createSandboxedScriptHost).mockImplementation((options = {}) => {
+    vi.mocked(createSandboxedScriptHost).mockImplementation((options) => {
       const host: SandboxedScriptHost = { onmessage: null, frame: null, postMessage: vi.fn(), terminate: vi.fn() };
-      fakeHosts.push({ host, onError: options.onError! });
+      fakeHosts.push({ host, onError: options.onError });
       return host;
     });
   });

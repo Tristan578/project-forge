@@ -48,6 +48,28 @@
  * starts it from a `blob:` URL. Nothing is fetched by the frame or the worker,
  * which is what lets the policy stay at `connect-src 'none'` with no script host.
  *
+ * ## Browser support — do NOT enable for production users yet
+ *
+ * Measured, not assumed (CI run 35997735154, head a17c010f,
+ * `e2e/tests/script-sandbox-isolation.spec.ts`):
+ *
+ * - Chromium and Firefox: scripts RUN through this transport — a normal script
+ *   runs end to end, `terminate()` ends a spinning worker, and an escaped
+ *   script gets no request out.
+ * - WebKit (Safari): scripts do NOT run. Every sandbox test failed there; the
+ *   host reported `Script sandbox worker-error: Error: Script error.` (the
+ *   sanitised text a browser gives a cross-origin error) and the tests waiting
+ *   on the worker never got an answer. A `worker-error` that arrives before
+ *   the worker's first message is a `boot` failure below, so the host FAILS
+ *   CLOSED: it reports once, removes the frame and relays nothing, and the
+ *   runner stops Play with {@link SCRIPT_SANDBOX_START_FAILED_MESSAGE} and
+ *   never falls back to the same-origin transport. The spec's WebKit branch
+ *   asserts that — one `boot` failure, nothing relayed, nothing on the
+ *   network. Why WebKit refuses the worker has not been diagnosed.
+ *
+ * So a creator on Safari cannot run their game's scripts at all with the flag
+ * on. It must stay off for production users until WebKit support exists.
+ *
  * ## What is unchanged
  *
  * The host is a drop-in for the three members of `Worker` the runner uses
@@ -212,8 +234,14 @@ export interface SandboxedScriptHostOptions {
    * DEVELOPER account (raw error text, bundling hints): log it to the devtools
    * and show the creator {@link SCRIPT_SANDBOX_START_FAILED_MESSAGE} or
    * {@link SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE} instead.
+   *
+   * REQUIRED, deliberately. A `runtime` report fires once per uncaught worker
+   * error for as long as the worker runs (a script can throw from a
+   * zero-delay interval), so whoever receives it must bound it —
+   * `useScriptRunner` does. A built-in fallback could only log 1:1, which is
+   * an unbounded console; there is none, so a new caller has to decide.
    */
-  onError?: (detail: string, phase: SandboxFailurePhase) => void;
+  onError: (detail: string, phase: SandboxFailurePhase) => void;
   /** Where the hidden frame is attached. Defaults to `document.body`. */
   container?: HTMLElement;
   /** How long to wait for the frame to report `ready` before calling `onError`. */
@@ -240,7 +268,7 @@ export interface SandboxedScriptHost extends ScriptWorkerLike {
  * order once the worker exists, so the caller can post `init` immediately, as it
  * does with a plain `Worker`.
  */
-export function createSandboxedScriptHost(options: SandboxedScriptHostOptions = {}): SandboxedScriptHost {
+export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): SandboxedScriptHost {
   const {
     loadWorkerSource = loadSandboxWorkerSource,
     onError,
@@ -258,8 +286,7 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions = 
 
   const report = (detail: string, phase: SandboxFailurePhase) => {
     if (terminated) return;
-    if (onError) onError(detail, phase);
-    else console.error(`[ScriptSandbox] ${phase} failure: ${detail}`);
+    onError(detail, phase);
   };
 
   const host: SandboxedScriptHost = {
