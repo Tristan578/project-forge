@@ -80,6 +80,12 @@ export function OnboardingGate({ onRequestQuickStart, quickStartOpen }: Onboardi
   // THIS attempt has been observed live (decomposing / awaiting approval /
   // executing), so a later `completed` belongs to it and not to an older run.
   const [aiRunSeen, setAiRunSeen] = useState(false);
+  // THIS attempt's dialog has been observed open. The attempt can only have
+  // ENDED once its dialog or its run has actually been seen: EditorLayout opens
+  // the dialog in the same event batch today, but a parent that opened it a
+  // render later would otherwise read "closed, nothing running" on the very
+  // first render and bring the wizard straight back.
+  const [aiDialogSeen, setAiDialogSeen] = useState(false);
 
   const runLive = isOrchestratorRunLive(orchestratorStatus);
   const aiSucceeded = aiPending && aiRunSeen && orchestratorStatus === 'completed';
@@ -90,12 +96,22 @@ export function OnboardingGate({ onRequestQuickStart, quickStartOpen }: Onboardi
   if (aiPending && runLive && !aiRunSeen) {
     setAiRunSeen(true);
   }
+  if (aiPending && quickStartOpen && !aiDialogSeen) {
+    setAiDialogSeen(true);
+  }
   // The dialog is gone and nothing is running or finished: the attempt ended
   // without a game (never started, failed, cancelled, or closed before
   // "Build it"). Onboarding stays incomplete and the wizard comes back.
-  if (aiPending && !quickStartOpen && !runLive && !aiSucceeded) {
+  if (
+    aiPending &&
+    (aiDialogSeen || aiRunSeen) &&
+    !quickStartOpen &&
+    !runLive &&
+    !aiSucceeded
+  ) {
     setAiPending(false);
     setAiRunSeen(false);
+    setAiDialogSeen(false);
   }
 
   const markComplete = useCallback(() => {
@@ -118,6 +134,7 @@ export function OnboardingGate({ onRequestQuickStart, quickStartOpen }: Onboardi
   const handleStartAi = useCallback(() => {
     setAiPending(true);
     setAiRunSeen(false);
+    setAiDialogSeen(false);
     onRequestQuickStart();
   }, [onRequestQuickStart]);
 

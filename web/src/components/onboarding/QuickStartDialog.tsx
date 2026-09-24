@@ -124,6 +124,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
 
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const statusRef = useRef<HTMLDivElement>(null);
+  const runningRef = useRef<HTMLDivElement>(null);
   const firstCardRef = useRef<HTMLButtonElement>(null);
   const playNowRef = useRef<HTMLButtonElement>(null);
   const prevPhaseRef = useRef<Phase | null>(null);
@@ -185,13 +186,21 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // Every phase change unmounts the element that was focused (the card on
   // pick->describe, "Build it" on describe->running), which drops focus to
   // document.body inside an aria-modal region. Move it explicitly.
+  //
+  // Except when the build view already placed focus itself: a plan review or
+  // gate that mounts in the SAME commit as the phase change focuses its own
+  // primary button first (child effects run before this parent effect), and
+  // pulling focus back to the status line would undo it. That happens whenever
+  // the design finishes before React commits the phase change.
   useEffect(() => {
     const previous = prevPhaseRef.current;
     prevPhaseRef.current = phase;
     if (previous === null || previous === phase) return;
     if (phase === 'describe') promptRef.current?.focus();
-    else if (phase === 'running') statusRef.current?.focus();
-    else firstCardRef.current?.focus();
+    else if (phase === 'running') {
+      const active = document.activeElement;
+      if (!(active && runningRef.current?.contains(active))) statusRef.current?.focus();
+    } else firstCardRef.current?.focus();
   }, [phase]);
 
   // "Play now" appears when the run completes, which is the moment the user
@@ -441,7 +450,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       )}
 
       {phase === 'running' && (
-        <div className="space-y-3">
+        <div ref={runningRef} className="space-y-3">
           <div
             ref={statusRef}
             tabIndex={-1}
