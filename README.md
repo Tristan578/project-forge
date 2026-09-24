@@ -1,6 +1,6 @@
 # SpawnForge
 
-**SpawnForge is a source-available, AI-native 2D/3D game engine that runs entirely in the browser.** It combines a Bevy-based Rust/WebAssembly rendering engine with a React visual editor and a 374-command MCP manifest (measured 2026-09-15 — which of those commands work today through which entry point is recorded in the [capability matrix](docs/capability-matrix.md)), enabling game creation through natural language, visual scripting, or manual editing. Games are built, tested, and published without leaving the browser — no install, no compile step, no deployment pipeline.
+**SpawnForge is a source-available, AI-native 2D/3D game engine that runs entirely in the browser.** It combines a Bevy-based Rust/WebAssembly rendering engine with a React visual editor and a 379-command MCP manifest (measured 2026-09-22 — which of those commands work today through which entry point is recorded in the [capability matrix](docs/capability-matrix.md)), enabling game creation through natural language, visual scripting, or manual editing. Games are built, tested, and published without leaving the browser — no install, no compile step, no deployment pipeline.
 
 [![CI](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml)
 [![CD](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml)
@@ -12,7 +12,7 @@
 ## Why SpawnForge
 
 - **Browser-native** — No download, no IDE setup. Open a URL and start building 2D or 3D games.
-- **AI-first** — 25+ AI modules; the in-app AI is offered 290 of the 374 manifest commands (every `:write`-scoped command plus the `query` category) to drive the editor. External MCP agents can attach only in local builds, through an allowlist of 316 commands; permitted names can still return unavailable results, and that path is not yet verified end to end (production access is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722)). Describe a scene in plain text and watch it materialize. Which capabilities are proven, unverified or unavailable per entry point: [capability matrix](docs/capability-matrix.md).
+- **AI-first** — 25+ AI modules; the in-app AI is offered 295 of the 379 manifest commands (every `:write`-scoped command plus the `query` category) to drive the editor. External MCP agents can attach only in local builds, through an allowlist of 321 commands; permitted names can still return unavailable results, and that path is not yet verified end to end (production access is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722)). Describe a scene in plain text and watch it materialize. Which capabilities are proven, unverified or unavailable per entry point: [capability matrix](docs/capability-matrix.md).
 - **Real engine** — Bevy ECS compiled to WebAssembly, WebGPU rendering (WebGL2 fallback), Rapier physics, spatial audio, GPU particles, skeletal animation. Not a toy.
 - **One command interface** — The visual editor, AI chat, and external MCP agents all call the same `handle_command()` JSON API. There is no separate "AI mode."
 - **Publish instantly** — One-click publish to a shareable URL. Export as a standalone ZIP with PWA support.
@@ -21,7 +21,7 @@
 
 | Metric | Value |
 |--------|-------|
-| MCP commands | 374 across 41 categories (301 public), measured 2026-09-15 with `jq '.commands \| length' mcp-server/manifest/commands.json` — per-category status in the [capability matrix](docs/capability-matrix.md) |
+| MCP commands | 379 across 41 categories (303 public), measured 2026-09-22 with `jq '.commands \| length' mcp-server/manifest/commands.json` — per-category status in the [capability matrix](docs/capability-matrix.md) |
 | Visual scripting nodes | 73 across 10 categories |
 | Material presets | 56 across 9 categories |
 | AI modules | 25+ (chat, generation, asset creation) |
@@ -30,7 +30,7 @@
 | Rendering | WebGPU primary, WebGL2 fallback |
 | Engine | Bevy 0.18, Rust/WASM |
 
-A source-available, AI-native 2D/3D game engine for the browser. Editor operations are JSON commands through `handle_command()`, and 374 of them (301 public) are published in the MCP manifest for the [Model Context Protocol](https://modelcontextprotocol.io/). Registration is not the same as a working feature: which capabilities are proven, implemented but unverified, partial or unavailable through the editor UI, the in-app AI, game scripts and external MCP is recorded per capability in [docs/capability-matrix.md](docs/capability-matrix.md). As of 2026-09-15, external MCP agents can attach only to local builds ([#9722](https://github.com/Tristan578/project-forge/issues/9722)) and platform-key asset generation is unavailable in production ([#9117](https://github.com/Tristan578/project-forge/issues/9117)). Build games by conversation, by code, or by hand — within those limits.
+A source-available, AI-native 2D/3D game engine for the browser. Editor operations are JSON commands through `handle_command()`, and 379 of them (303 public) are published in the MCP manifest for the [Model Context Protocol](https://modelcontextprotocol.io/). Registration is not the same as a working feature: which capabilities are proven, implemented but unverified, partial or unavailable through the editor UI, the in-app AI, game scripts and external MCP is recorded per capability in [docs/capability-matrix.md](docs/capability-matrix.md). As of 2026-09-15, external MCP agents can attach only to local builds ([#9722](https://github.com/Tristan578/project-forge/issues/9722)) and platform-key asset generation is unavailable in production ([#9117](https://github.com/Tristan578/project-forge/issues/9117)). Build games by conversation, by code, or by hand — within those limits.
 
 Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a React-based visual editor.
 
@@ -50,7 +50,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
 - **AI Asset Generation** — Generate 3D models, textures, sound effects, and voice lines via provider integrations (Meshy, ElevenLabs, DALL-E, Stable Diffusion). Music generation is not available yet — its move to ElevenLabs is tracked in [#9522](https://github.com/Tristan578/project-forge/issues/9522); platform provisioning status per capability is in [docs/guides/platform-keys.md](docs/guides/platform-keys.md)
-- **MCP Server** — 374 commands across 41 categories (301 public). In a local build, an MCP-compatible agent can attach to the editor (after the in-tab consent prompt) with an allowlist that permits 316 of those command names — scene authoring, materials, physics, animation, inspection. Availability checks can still reject permitted names: linked prefab placement, nested placement, and source propagation are not implemented. Commands for script authoring, export, publishing, generation, security and economy are withheld over the bridge by design (`web/src/lib/mcp/bridgeAllowlist.ts`). That local path is not yet verified end to end, and attaching to production is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722). Per-category status for MCP and the other entry points: [capability matrix](docs/capability-matrix.md). See the [MCP command reference](https://docs.spawnforge.ai/mcp) for the full public command listing.
+- **MCP Server** — 379 commands across 41 categories (303 public). In a local build, an MCP-compatible agent can attach to the editor (after the in-tab consent prompt) with an allowlist that permits 321 of those command names — scene authoring, materials, physics, animation, inspection. Availability checks can still reject permitted names: linked prefab placement, nested placement, and source propagation are not implemented. Commands for script authoring, export, publishing, generation, security and economy are withheld over the bridge by design (`web/src/lib/mcp/bridgeAllowlist.ts`). That local path is not yet verified end to end, and attaching to production is pending [#9722](https://github.com/Tristan578/project-forge/issues/9722). Per-category status for MCP and the other entry points: [capability matrix](docs/capability-matrix.md). See the [MCP command reference](https://docs.spawnforge.ai/mcp) for the full public command listing.
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28+ structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features on demand
@@ -112,7 +112,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ## Architecture
 
 ```
-MCP Server (374 commands, 41 categories)       AI agents + LLM tool use
+MCP Server (379 commands, 41 categories)       AI agents + LLM tool use
     |  JSON commands
 React Shell (Next.js 16, Zustand, Tailwind)    Visual editor UI
     |  JSON events via wasm-bindgen
@@ -223,7 +223,7 @@ project-forge/
 │   ├── public/              # Static assets + WASM binaries (generated)
 │   └── package.json
 ├── mcp-server/              # MCP command manifest + tools
-│   ├── manifest/commands.json  # 374 commands across 41 categories (see docs/capability-matrix.md)
+│   ├── manifest/commands.json  # 379 commands across 41 categories (see docs/capability-matrix.md)
 │   └── src/
 ├── docs/                    # User-facing documentation (human + AI readable)
 │   ├── getting-started/     # Installation, first scene, editor overview
@@ -392,7 +392,7 @@ The `tb_validate_ticket()` function in `taskboard-state.sh` enforces:
 
 Skills are callable capabilities loaded on-demand. Each tool stores them in its own directory, but all reference the same shared hook scripts.
 
-The project's own skills are authored once, under `.claude/skills/`, and **mirrored** byte-for-byte into `.agents/skills/` by `node tools/agentic-sync/port.mjs --write` — the directory Codex, Gemini CLI and Copilot read. "Mirrored" below means the text is available there; it was written for Claude Code and names Claude's tools. **Three skills are the exception: `game-engine`, `kanban` and `web-accessibility` exist on both sides and have drifted apart**, so they are exempt from the mirror until a canonical side is chosen (#10131) — under Codex, Gemini CLI or Copilot those three names resolve to the `.agents/skills/` copy, which is NOT the one Claude Code reads. `skills.independent` in `tools/agentic-sync/port.json` is the list.
+The project's own skills are authored once, under `.claude/skills/`, and **mirrored** byte-for-byte into `.agents/skills/` by `node tools/agentic-sync/port.mjs --write` — the directory Codex, Gemini CLI and Copilot read. "Mirrored" below means the text is available there; it was written for Claude Code and names Claude's tools. There are no exceptions: `game-engine`, `kanban` and `web-accessibility` once existed on both sides and had drifted apart, and #10131 made `.claude/skills/` canonical for them too (the `.agents/` copies' extra content was merged into the `.claude/` side first), so every tool now reads the same text. `skills.independent` in `tools/agentic-sync/port.json` is the escape hatch for a skill that must stay unmirrored; it is empty.
 
 | Skill | Available In | Purpose |
 |-------|-------------|---------|

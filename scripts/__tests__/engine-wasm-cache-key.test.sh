@@ -55,11 +55,14 @@ make_repo() {
     git init -q
     git config user.email t@t.t
     git config user.name t
-    mkdir -p engine/src .transform-gizmo-fork/crates .github/workflows
+    mkdir -p engine/src .transform-gizmo-fork/crates .github/workflows scripts
     printf 'fn main() {}\n' > engine/src/lib.rs
     printf '[package]\nname = "forge_engine"\n' > engine/Cargo.toml
     printf 'gizmo source\n' > .transform-gizmo-fork/crates/lib.rs
     printf 'jobs:\n  build-wasm:\n    steps:\n      - run: cargo build --features webgl2\n' > .github/workflows/cd.yml
+    # The ci-reuse mode also hashes the PR-side recipe and its bindgen installer.
+    printf 'jobs:\n  build-wasm:\n    steps:\n      - run: cargo build --features webgl2\n' > .github/workflows/quality-gates.yml
+    printf '#!/usr/bin/env bash\ncargo install --locked wasm-bindgen-cli\n' > scripts/install-wasm-bindgen-cli.sh
     printf 'unrelated\n' > README.md
     git add -A
     git commit -qm base
@@ -402,6 +405,115 @@ else
   pass "an unknown mode exits non-zero rather than emitting a degenerate key"
 fi
 
+# --- ci-reuse mode: the PR CI artifact CD may adopt (#9525) --------------------
+# quality-gates.yml builds the four variants on the PR's merge ref; cd.yml adopts
+# them on the first CD run after the merge instead of rebuilding. The identity
+# has to cover everything that decides those bytes on EITHER side: the engine,
+# its path dependency and bindgen version (shared with all4), the CD recipe
+# (shared with all4), the quality-gates recipe that actually built them, and the
+# installer that put wasm-bindgen on the PR runner. If any of those moved
+# between the PR's CI run and the merge, the keys differ and CD builds.
+echo ""
+echo "=== ci-reuse mode identifies the PR-built set CD may adopt ==="
+REPOR="$(make_repo)"
+keyr_in() { ( cd "$1" && bash "$SCRIPT" ci-reuse 2>/dev/null ); }
+REUSE_KEY="$(keyr_in "$REPOR")"
+REUSE_ALL4="$(key4_in "$REPOR")"
+REUSE_WEBGL2="$(key_in "$REPOR")"
+
+if [[ "$REUSE_KEY" =~ ^engine-wasm-ci-reuse-[0-9a-f]{40}-[0-9a-f]{40}-wb[0-9.]+-recipe[0-9a-f]{40}-qg[0-9a-f]{40}-bgi[0-9a-f]{40}$ ]]; then
+  pass "ci-reuse key has the expected shape (all4 identity + quality-gates recipe + bindgen installer)"
+else
+  fail "unexpected ci-reuse key shape: '$REUSE_KEY'"
+fi
+
+REUSE_BODY="${REUSE_KEY#engine-wasm-ci-reuse-}"
+if [ "${REUSE_BODY%-qg*}" = "${REUSE_ALL4#engine-wasm-all4-}" ]; then
+  pass "ci-reuse extends the all4 identity (same engine, fork, bindgen and CD recipe) rather than redefining it"
+else
+  fail "ci-reuse body '${REUSE_BODY%-qg*}' != all4 body '${REUSE_ALL4#engine-wasm-all4-}' — an adopted set could be persisted under an all4 key that describes different sources"
+fi
+
+if [ "$REUSE_KEY" != "$REUSE_ALL4" ] && [ "$REUSE_KEY" != "$REUSE_WEBGL2" ]; then
+  pass "ci-reuse is distinct from the all4 and webgl2 keys"
+else
+  fail "ci-reuse collided with another mode's key"
+fi
+
+if [ "$(keyr_in "$REPOR")" = "$REUSE_KEY" ]; then
+  pass "the same tree yields the same ci-reuse key"
+else
+  fail "ci-reuse key is not deterministic for an unchanged tree"
+fi
+
+printf 'unrelated ci-reuse edit\n' >> "$REPOR/README.md"
+commit_in "$REPOR" "unrelated edit"
+if [ "$(keyr_in "$REPOR")" = "$REUSE_KEY" ]; then
+  pass "an unrelated commit leaves the ci-reuse key unchanged (a web-only merge in between keeps the reuse)"
+else
+  fail "an unrelated commit changed the ci-reuse key — the reuse would miss on every merge"
+fi
+
+# Each build input must move the key on its own. Run in order, each compared
+# with the key just before it, so a single missing input names itself.
+PREV_REUSE="$(keyr_in "$REPOR")"
+for input in \
+  "engine source|engine/src/lib.rs" \
+  "transform-gizmo path dependency|.transform-gizmo-fork/crates/lib.rs" \
+  "quality-gates recipe (it BUILT the binaries)|.github/workflows/quality-gates.yml" \
+  "CD recipe|.github/workflows/cd.yml" \
+  "wasm-bindgen installer the PR runner used|scripts/install-wasm-bindgen-cli.sh"; do
+  label="${input%%|*}"
+  path="${input#*|}"
+  printf '# edit\n' >> "$REPOR/$path"
+  commit_in "$REPOR" "edit $path"
+  NOW_REUSE="$(keyr_in "$REPOR")"
+  if [ -n "$NOW_REUSE" ] && [ "$NOW_REUSE" != "$PREV_REUSE" ]; then
+    pass "a change to the ${label} changes the ci-reuse key"
+  else
+    fail "a change to the ${label} (${path}) left the ci-reuse key unchanged — CD would adopt a binary built from different inputs than main"
+  fi
+  PREV_REUSE="$NOW_REUSE"
+done
+
+CUR_REUSE="$(keyr_in "$REPOR")"
+BUMPED_REUSE="$( ( cd "$REPOR" && WASM_BINDGEN_VERSION=9.9.9 bash "$SCRIPT" ci-reuse 2>/dev/null ) )"
+if [ -n "$BUMPED_REUSE" ] && [ "$BUMPED_REUSE" != "$CUR_REUSE" ]; then
+  pass "the wasm-bindgen version participates in the ci-reuse key"
+else
+  fail "changing the bindgen version left the ci-reuse key identical"
+fi
+
+# A missing input must fail loudly, never produce a key that happens to match.
+for missing in .github/workflows/quality-gates.yml scripts/install-wasm-bindgen-cli.sh; do
+  MISS_REPO="$(make_repo)"
+  rm "$MISS_REPO/$missing"
+  commit_in "$MISS_REPO" "remove $missing"
+  OUTR="$( ( cd "$MISS_REPO" && bash "$SCRIPT" ci-reuse 2>&1 ) )" && RCR=0 || RCR=$?
+  if [ "$RCR" -ne 0 ] && grep -qF "$missing" <<<"$OUTR"; then
+    pass "a missing ${missing} fails ci-reuse (exit $RCR) and names the input"
+  else
+    fail "a missing ${missing} gave exit $RCR and output '$OUTR' — expected a non-zero exit naming it"
+  fi
+  if [ -n "$(key4_in "$MISS_REPO")" ]; then
+    pass "all4 does not depend on ${missing} (only ci-reuse hashes it)"
+  else
+    fail "all4 now fails without ${missing}; the CD cache key must not depend on PR-side inputs"
+  fi
+  rm -rf "$MISS_REPO"
+done
+rm -rf "$REPOR"
+
+# The real inputs must resolve in THIS repository. A fixture proves the logic;
+# only the live tree proves the paths the key names still exist here. If one
+# moved, adopt would fail on every CD run -- better to fail this suite first.
+REAL_REUSE="$( ( cd "$REPO_ROOT" && bash "$SCRIPT" ci-reuse 2>&1 ) )" && RC_REAL=0 || RC_REAL=$?
+if [ "$RC_REAL" -eq 0 ] && [[ "$REAL_REUSE" =~ ^engine-wasm-ci-reuse- ]]; then
+  pass "ci-reuse resolves every input in this repository's own tree"
+else
+  fail "ci-reuse cannot resolve this repository's inputs (exit $RC_REAL): $REAL_REUSE"
+fi
+
 # --- build-wasm reuses the content-addressed cache for ALL FOUR variants -------
 # The ticket replaces build-wasm's broken same-SHA `download-artifact` reuse
 # (no run-id/github-token, `continue-on-error` masking every failure) with a
@@ -501,15 +613,20 @@ else
       pass "build-wasm has no continue-on-error field to mask a failed restore action"
     fi
 
-    # 5. Every BUILD step is gated on a cache MISS. On a hit the four variants
-    #    were restored, so installing a toolchain and rebuilding all four is pure
-    #    waste; more importantly, if any of these `if:` guards is ever dropped
-    #    (an edit near the block, a bad merge resolution) build-wasm silently
-    #    reverts to ALWAYS rebuilding — the exact silent-reuse-breakage #9525
-    #    exists to fix, and nothing would go red to say so. Each guarded step is
-    #    checked by name (or by its `uses:` for the two unnamed action steps) so
-    #    a dropped guard names the specific step that lost it.
-    guard="if: steps.engine-cache-all4.outputs.cache-hit != 'true'"
+    # 5. Every BUILD step is gated on the single build decision (wasm-plan),
+    #    which is 'true' only when neither the all4 cache nor the PR's CI
+    #    artifact supplied the four variants. On a reuse, installing a toolchain
+    #    and rebuilding all four is pure waste; more importantly, if any of these
+    #    `if:` guards is ever dropped (an edit near the block, a bad merge
+    #    resolution) build-wasm silently reverts to ALWAYS rebuilding — the
+    #    exact silent-reuse-breakage #9525 exists to fix, and nothing would go
+    #    red to say so. Each guarded step is checked by name (or by its `uses:`
+    #    for the two unnamed action steps) so a dropped guard names the specific
+    #    step that lost it.
+    guard="if: steps.wasm-plan.outputs.build == 'true'"
+    # The all4-miss guard, for the steps that must run only when the cache did
+    # not hit: the PR-artifact lookup, and the Persist save.
+    miss_guard="if: steps.engine-cache-all4.outputs.cache-hit != 'true'"
     # Extract a single step's block (its opening `- ` line through the line
     # before the next `- ` step) and report whether it carries the guard:
     # 0 = guarded, 1 = present but unguarded, 2 = no such step.
@@ -529,7 +646,7 @@ else
     }
     # label => identifying substring of the step's opening line. The three setup
     # steps (toolchain, cargo cache, wasm-bindgen-cli) plus the six cargo
-    # build/bindgen steps are the nine that must never run on a hit.
+    # build/bindgen steps are the nine that must never run on a reuse.
     gated_steps=(
       "rust toolchain install|dtolnay/rust-toolchain"
       "cargo target cache|Swatinem/rust-cache"
@@ -547,24 +664,36 @@ else
       step_has_guard "$ident"
       rc=$?
       if [ "$rc" -eq 0 ]; then
-        pass "build-wasm's '$label' step is gated on a cache miss"
+        pass "build-wasm's '$label' step is gated on the build decision"
       elif [ "$rc" -eq 2 ]; then
-        fail "build-wasm has no step matching '$ident' — the '$label' build step was renamed or removed, so its cache-miss gate is unverifiable"
+        fail "build-wasm has no step matching '$ident' — the '$label' build step was renamed or removed, so its build gate is unverifiable"
       else
         fail "build-wasm's '$label' step lost its '$guard' guard — on a MISS a dropped guard is invisible, but a merge that drops it silently reverts build-wasm to rebuilding on every run (#9525)"
       fi
     done
 
-    # The guard total pins the whole set at once: nine build steps above, the
-    # Persist save below, and the reuse-miss notice just after the restore = 11.
-    # A guard silently dropped from any one of them takes this count off 11 even
-    # if a step was also renamed past the per-step checks above, so this catches
-    # the drop the per-step loop would miss.
-    guard_count="$(grep -cF "$guard" <<<"$buildwasm")"
-    if [ "$guard_count" -eq 11 ]; then
-      pass "build-wasm carries exactly 11 cache-miss guards (9 build steps + the Persist save + the reuse-miss notice)"
+    # The guard totals pin the whole set at once. Exact LINES, not substrings:
+    # the download and adopt steps carry the all4-miss guard as the first half
+    # of a compound condition, and a substring count would conflate the two.
+    # A guard silently dropped from any step takes its count off even if the
+    # step was also renamed past the per-step checks above.
+    guard_count="$(grep -cxF "        ${guard}" <<<"$buildwasm")"
+    if [ "$guard_count" -eq 9 ]; then
+      pass "build-wasm carries exactly 9 build-decision guards (the 9 build steps)"
     else
-      fail "build-wasm has $guard_count cache-miss guards (expected 11) — a guard was added or dropped; a dropped one silently reverts build-wasm to rebuilding on every run"
+      fail "build-wasm has $guard_count build-decision guards (expected 9) — a guard was added or dropped; a dropped one silently reverts build-wasm to rebuilding on every run"
+    fi
+    miss_count="$(grep -cxF "        ${miss_guard}" <<<"$buildwasm")"
+    if [ "$miss_count" -eq 2 ]; then
+      pass "build-wasm carries exactly 2 bare all4-miss guards (the PR-artifact lookup and the Persist save)"
+    else
+      fail "build-wasm has $miss_count bare all4-miss guards (expected 2: the PR-artifact lookup and the Persist save)"
+    fi
+    both_count="$(grep -cxF "        ${miss_guard} && steps.ci-artifact.outputs.run-id != ''" <<<"$buildwasm")"
+    if [ "$both_count" -eq 2 ]; then
+      pass "build-wasm carries exactly 2 miss-and-run-found guards (the download and the adopt step)"
+    else
+      fail "build-wasm has $both_count miss-and-run-found guards (expected 2: the download and the adopt step)"
     fi
 
     # 6. The `Persist all 4 WASM variants` save step exists, is itself gated on a
@@ -582,10 +711,12 @@ else
       fail "build-wasm has no 'Persist all 4 WASM variants' step — the four-variant set is never written to the content-addressed cache from CD, so every later run rebuilds it"
     else
       pass "build-wasm has the 'Persist all 4 WASM variants' save step"
-      if grep -qF "$guard" <<<"$persist"; then
-        pass "the Persist step is gated on a cache miss (no redundant re-save on a hit)"
+      # On the all4 miss, not on the build decision: a set adopted from the PR's
+      # CI run must be persisted too, so a CD re-run hits the cache.
+      if grep -qxF "        ${miss_guard}" <<<"$persist"; then
+        pass "the Persist step is gated on an all4 miss (no redundant re-save on a hit; an adopted set is still persisted)"
       else
-        fail "the Persist step is not gated on '$guard' — on a hit it re-saves a key that already exists (warns/no-ops), and losing the gate here hides the reuse's write path"
+        fail "the Persist step is not gated on exactly '$miss_guard' — on a hit it re-saves a key that already exists (warns/no-ops), gated on the build decision it would skip persisting an adopted set, and losing the gate hides the reuse's write path"
       fi
       if grep -qE '^[[:space:]]*uses:[[:space:]]*actions/cache/save' <<<"$persist"; then
         pass "the Persist step uses actions/cache/save"
@@ -606,26 +737,91 @@ else
       fi
     fi
 
-    # 7. Successful restore actions without an exact hit rebuild visibly.
-    # SDK-internally handled errors can return a miss; errors escaping the SDK
-    # fail the restore action and stop subsequent default-guarded steps.
-    miss_step="$(awk '
-      /^      - / { instep = (index($0, "Note engine WASM reuse miss") > 0) }
+    # 7. The build decision, EXECUTED. Restore actions without an exact hit,
+    #    and PR artifacts that are absent or fail their key check, rebuild
+    #    visibly. SDK-internally handled errors can return a miss; errors
+    #    escaping the SDK (or the download) fail the step and stop subsequent
+    #    default-guarded steps. The step body is run from this very file, so
+    #    what is tested is what CD runs.
+    plan_step="$(awk '
+      /^      - / { instep = (index($0, "Decide whether to build all four variants") > 0) }
       instep { print }
     ' <<<"$buildwasm")"
-    if [ -z "$miss_step" ]; then
-      fail "build-wasm has no 'Note engine WASM reuse miss' step — a cold key or a suppressed cache-service error is a silent rebuild with nothing in the log naming it (#9525)"
+    plan_script="$(awk '
+      /^        run: \|/ { in_run = 1; next }
+      in_run && /^          / { sub(/^          /, ""); print; next }
+      in_run && /^[[:space:]]*$/ { print ""; next }
+      in_run { exit }
+    ' <<<"$plan_step")"
+    if [ -z "$plan_step" ] || [ -z "$plan_script" ]; then
+      fail "build-wasm has no executable 'Decide whether to build all four variants' step — nothing decides between reuse and a rebuild, and a miss is a silent rebuild with nothing in the log naming it (#9525)"
     else
-      pass "build-wasm has the reuse-miss notice step"
-      if grep -qF "$guard" <<<"$miss_step"; then
-        pass "the reuse-miss notice is gated on a cache miss (it fires only when reuse did not hit)"
+      pass "build-wasm has the build-decision step"
+      if grep -qxF '        id: wasm-plan' <<<"$plan_step"; then
+        pass "the decision publishes wasm-plan, the id every build guard reads"
       else
-        fail "the reuse-miss notice is not gated on '$guard' — it would fire on every run, including a genuine hit"
+        fail "the decision step's id is not wasm-plan, so every build guard reads an empty output and nothing builds"
       fi
-      if grep -q '::notice::' <<<"$miss_step"; then
-        pass "the reuse-miss notice emits a ::notice:: line naming the miss"
+      if grep -qE '^        if:' <<<"$plan_step"; then
+        fail "the decision step is conditional — when skipped, build is empty and no build step runs, whatever the reuse did"
       else
-        fail "the reuse-miss notice does not emit a ::notice:: line — the miss stays invisible in the log"
+        pass "the decision step always runs"
+      fi
+      # shellcheck disable=SC2016  # the literal ${{ ... }} expressions ARE the text cd.yml must carry
+      for wiring in \
+        '          CACHE_HIT: ${{ steps.engine-cache-all4.outputs.cache-hit }}' \
+        '          CI_REUSED: ${{ steps.ci-reuse.outputs.reused }}' \
+        '          CI_RUN_ID: ${{ steps.ci-artifact.outputs.run-id }}'; do
+        if grep -qxF "$wiring" <<<"$plan_step"; then
+          pass "the decision reads ${wiring#          }"
+        else
+          fail "the decision does not read '${wiring#          }' — it is deciding on something other than the two reuse tiers"
+        fi
+      done
+
+      # decide <cache-hit> <reused> -> "<build value>|<log>"
+      decide() {
+        local out_file log
+        out_file="$(mktemp)"
+        log="$(CACHE_HIT="$1" CI_REUSED="$2" CI_RUN_ID=777 KEY=engine-wasm-all4-k GITHUB_OUTPUT="$out_file" bash -c "$plan_script" 2>&1)"
+        printf '%s|%s' "$(sed -n 's/^build=//p' "$out_file" | tr '\n' ',')" "$log"
+        rm -f "$out_file"
+      }
+      # Explicit cases rather than a table: each asserts different log content.
+      r="$(decide true '')"
+      if [ "${r%%|*}" = "false," ] && ! grep -qF '::notice::' <<<"${r#*|}"; then
+        pass "all4 hit -> build=false, and no miss notice"
+      else
+        fail "all4 hit -> expected build=false with no notice, got build='${r%%|*}' log='${r#*|}'"
+      fi
+      r="$(decide '' true)"
+      if [ "${r%%|*}" = "false," ] && grep -qF '::notice::' <<<"${r#*|}" && grep -qF 'run 777' <<<"${r#*|}"; then
+        pass "PR CI artifact adopted -> build=false, with a notice naming the run it came from"
+      else
+        fail "adopted -> expected build=false and a notice naming run 777, got build='${r%%|*}' log='${r#*|}'"
+      fi
+      r="$(decide '' false)"
+      if [ "${r%%|*}" = "true," ] && grep -qF '::notice::engine WASM reuse MISS' <<<"${r#*|}"; then
+        pass "all4 miss + PR artifact refused -> build=true, with a MISS notice"
+      else
+        fail "refused -> expected build=true and a MISS notice, got build='${r%%|*}' log='${r#*|}'"
+      fi
+      r="$(decide '' '')"
+      if [ "${r%%|*}" = "true," ] && grep -qF '::notice::engine WASM reuse MISS' <<<"${r#*|}"; then
+        pass "all4 miss + no PR run found (adopt never ran) -> build=true, with a MISS notice"
+      else
+        fail "no PR run -> expected build=true and a MISS notice, got build='${r%%|*}' log='${r#*|}'"
+      fi
+
+      # Placed after both reuse tiers and before the first build step, or it
+      # decides before the reuse has happened.
+      ln_plan="$(grep -nF 'Decide whether to build all four variants' <<<"$buildwasm" | head -1 | cut -d: -f1)"
+      ln_adopt="$(grep -nF "Adopt the PR's WASM only on an exact key match" <<<"$buildwasm" | head -1 | cut -d: -f1)"
+      ln_toolchain="$(grep -nF 'dtolnay/rust-toolchain' <<<"$buildwasm" | head -1 | cut -d: -f1)"
+      if [ -n "$ln_plan" ] && [ -n "$ln_adopt" ] && [ -n "$ln_toolchain" ] && [ "$ln_adopt" -lt "$ln_plan" ] && [ "$ln_plan" -lt "$ln_toolchain" ]; then
+        pass "the decision runs after the adopt step and before the first build step"
+      else
+        fail "the decision is out of place (adopt=$ln_adopt decide=$ln_plan toolchain=$ln_toolchain)"
       fi
     fi
 

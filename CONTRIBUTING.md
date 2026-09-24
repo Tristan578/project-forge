@@ -49,7 +49,7 @@ For web-only changes (TypeScript, React), you can skip step 3 — the editor wil
 ## Architecture Overview: The Sandwich
 
 ```
-MCP Server (374 commands, 41 categories)
+MCP Server (379 commands, 41 categories)
     | JSON commands
 React Shell (Next.js 16, Zustand, Tailwind)   <- Editor UI + AI chat
     | JSON events via wasm-bindgen
@@ -437,7 +437,7 @@ A retired ID may legitimately survive in exactly two places, and nowhere else:
 | [README.md](README.md) | Feature overview, project structure, tech stack |
 | [TESTING.md](TESTING.md) | Manual test cases for all shipped features |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md) | Full project constitution: architecture rules, workflow rules, code-quality policy, on-demand skills |
-| [.claude/SANDBOX.md](.claude/SANDBOX.md) | Agent permission posture: what is auto-approved, the two off-limits config files (and why), how a human changes them |
+| [.claude/SANDBOX.md](.claude/SANDBOX.md) | Agent permission posture: what is auto-approved, the hard-blocked config file (`.claude/settings.json`), the ask-first one (`.codex/config.toml`), why each is gated that way, and how a human changes them |
 | [.claude/rules/bevy-api.md](.claude/rules/bevy-api.md) | Bevy 0.18 API patterns, 0.16→0.18 migration notes |
 | [.claude/rules/entity-snapshot.md](.claude/rules/entity-snapshot.md) | EntityType, EntitySnapshot, history system |
 | [.claude/rules/web-quality.md](.claude/rules/web-quality.md) | ESLint rules, React patterns, Next.js constraints |

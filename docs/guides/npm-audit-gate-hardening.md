@@ -451,7 +451,7 @@ FAIL naming the consequence. The reference implementation is
 | `check-lockfile-sync.test.sh` | `lockfile-sync`, step *Check root lockfile is in sync with the manifests* | job-level `if:`, step `run:` |
 | `check-openapi-route-sync.test.sh` | `openapi-route-sync`, step *Check OpenAPI spec is valid and in sync with API routes* | job-level `if:`, step `run:` |
 | `check-ghaw-lock-sync.test.sh` | `ghaw-lock-sync`, step *Reject drift between gh-aw sources and their compiled …* | job-level `if:`, step `run:` |
-| `check-native-bindings.test.sh` | all four next-build jobs, step *Assert native swc binding survived npm ci* | step `run:` (per job) |
+| `check-native-bindings.test.sh` | every job in `ci.yml` and `quality-gates.yml` that loads a native binding: `next build`, `next dev` (including a Playwright webServer) or vitest, directly or through an npm script (derived from the workflow, not listed — eleven and four as of #10200), step *Assert native swc binding survived npm ci* | step `run:` (per job) |
 | `check-ci-success.test.sh` | `design-internal-gate`, step *Test @spawnforge/ui* | job-level `if:`, step `run:` |
 
 Each pin was red-verified by mutating the real `.github/workflows/ci.yml` —

@@ -1,0 +1,645 @@
+/**
+ * What happened to a game-component value between the request and the engine.
+ *
+ * `gameComponentWire.ts` coerces every field into the range the engine will
+ * actually hold — it clamps, rounds, caps a waypoint route at 64 points and
+ * replaces what it cannot use with the default. That keeps the store and the
+ * engine on one value, which is what PF-1147 fixed. It also meant the author's
+ * stated intent and the running game could disagree with no record that they
+ * ever differed: `dispatchCommand` returns `void`, the chat said "Added", and the
+ * inspector showed the capped number as if it were the one asked for (PF-1148).
+ *
+ * This module is the record. The wire layer writes one
+ * {@link GameComponentFieldCorrection} per field whose applied value differs
+ * from the value the caller supplied, and nothing else: a field the caller left
+ * out, a value already in range, or a default filling a gap is not a correction.
+ * A false "we adjusted this" is worse than silence, so the absence of a record
+ * is as deliberate as its presence.
+ *
+ * The record is built from the TypeScript mirror of the engine's coercions, not
+ * reported back by the engine. `dispatchCommand` returns `void`, so an
+ * engine-emitted report would need a new event and a WASM build; the mirror is
+ * pinned to the Rust source by `__tests__/gameComponentWire.test.ts`, which is
+ * what makes it a faithful stand-in.
+ */
+
+import type { GameComponentData } from '@/stores/slices/types';
+import { gameComponentFields } from './gameComponentWire';
+
+export type GameComponentType = GameComponentData['type'];
+
+/**
+ * Why a value changed.
+ *
+ * - `clamped`: a number outside the engine's range, moved to the nearest bound.
+ * - `rounded`: a whole-number field given a fraction.
+ * - `truncated`: a list longer than the engine keeps; the tail was dropped.
+ * - `dropped`: some list entries were unusable and left out; the rest were kept.
+ * - `invalid-replaced`: a value the field cannot take at all, replaced by the default.
+ */
+export type CorrectionReason = 'clamped' | 'rounded' | 'truncated' | 'dropped' | 'invalid-replaced';
+
+/**
+ * A value as it can be shown and serialized.
+ *
+ * Numbers, booleans and short strings are carried as themselves, so an MCP
+ * client reading `requested: 99999, applied: 1000` gets numbers it can compare.
+ * Anything that would not survive JSON (`NaN`, a hole) or is not worth echoing
+ * (a 300-character id) is carried as a `description` instead.
+ */
+export type CorrectionValue =
+  | number
+  | boolean
+  | string
+  | null
+  | readonly number[]
+  | { readonly description: string };
+
+/** One waypoint as the store and the engine hold it. */
+export type CorrectionPoint = readonly [number, number, number];
+
+interface CorrectionCommon {
+  /** The store discriminant, e.g. `movingPlatform`. */
+  readonly component: GameComponentType;
+  /** The store field name, e.g. `speed` or `waypoints`. */
+  readonly field: string;
+  readonly requested: CorrectionValue;
+  readonly reason: CorrectionReason;
+  /**
+   * The entity the value landed on. The wire layer never sets it — a build
+   * knows nothing about entities — and the store keys markers by entity
+   * already. A tool result that spans several entities (the compound tools)
+   * tags each record so the author can tell which one it was.
+   */
+  readonly entityId?: string;
+}
+
+/** A correction to one value: `applied` is the value the field now holds. */
+export interface ValueCorrection extends CorrectionCommon {
+  readonly applied: CorrectionValue;
+  readonly unit?: undefined;
+  readonly appliedPoints?: undefined;
+  readonly usable?: undefined;
+}
+
+/**
+ * A correction to a list of points, reported in counts: `requested` is how many
+ * entries the caller gave (or a description, for something that was not a list)
+ * and `applied` how many points the field now holds. Only `waypoints` uses it.
+ *
+ * A count cannot tell one route from another of the same length, so the record
+ * also carries `appliedPoints`, the route it applied. That is what lets a marker
+ * notice an undo or a collab sync that put back a different route with as many
+ * points — see {@link correctionMatchesValue}. It is bounded by the engine's
+ * 64-point cap, the same cap the record reports, and the author never reads it:
+ * {@link describeCorrection} speaks in counts.
+ *
+ * Required, not optional, so a route record without its route is a compile error
+ * in the one place that builds them.
+ */
+export interface PointsCorrection extends CorrectionCommon {
+  readonly applied: number;
+  readonly unit: 'points';
+  readonly appliedPoints: readonly CorrectionPoint[];
+  /**
+   * How many of the entries given were usable points — set only on a list
+   * refused for having fewer than two of them (`invalid-replaced` with a count
+   * in `requested`), so it is always 0 or 1.
+   *
+   * Neither count says it: `requested` counts every entry, usable or not, and
+   * `applied` counts the DEFAULT route that replaced them. Without it the only
+   * sentence available was "you gave 3 points, but a route needs at least 2
+   * usable points", which contradicts itself. A truncated or dropped route
+   * needs no such field — what it kept is `applied`.
+   *
+   * Optional because the sentence is still true without it (see
+   * {@link describeCorrection}); only a record that states a count the build
+   * could not have written is refused, by {@link isGameComponentFieldCorrection}.
+   */
+  readonly usable?: number;
+}
+
+export type GameComponentFieldCorrection = ValueCorrection | PointsCorrection;
+
+/**
+ * What a write did to the caller's request: the corrections, and which fields
+ * the caller named at all. `supplied` is what lets a later write clear a stale
+ * marker on a field it set explicitly, even to the value it already held.
+ */
+export interface GameComponentWriteReport {
+  readonly corrections: readonly GameComponentFieldCorrection[];
+  readonly supplied: readonly string[];
+}
+
+// ---------------------------------------------------------------------------
+// Author-facing wording
+// ---------------------------------------------------------------------------
+
+type ComponentOf<K extends GameComponentType> = Extract<GameComponentData, { type: K }>;
+type DataOf<K extends GameComponentType> = ComponentOf<K>[K & keyof ComponentOf<K>];
+
+const COMPONENT_LABELS: Record<GameComponentType, string> = {
+  characterController: 'Character Controller',
+  health: 'Health',
+  collectible: 'Collectible',
+  damageZone: 'Damage Zone',
+  checkpoint: 'Checkpoint',
+  teleporter: 'Teleporter',
+  movingPlatform: 'Moving Platform',
+  triggerZone: 'Trigger Zone',
+  spawner: 'Spawner',
+  follower: 'Follower',
+  projectile: 'Projectile',
+  winCondition: 'Win Condition',
+  dialogueTrigger: 'Dialogue Trigger',
+};
+
+/**
+ * One label per store field, typed so a new field is a compile error until it
+ * has one — a correction whose field fell back to its camelCase key would be
+ * the raw diff the author is not supposed to see.
+ */
+const FIELD_LABELS: { [K in GameComponentType]: { [F in keyof DataOf<K>]-?: string } } = {
+  characterController: {
+    speed: 'speed',
+    jumpHeight: 'jump height',
+    gravityScale: 'gravity scale',
+    canDoubleJump: 'double jump',
+  },
+  health: {
+    maxHp: 'max HP',
+    currentHp: 'current HP',
+    invincibilitySecs: 'invincibility time',
+    respawnOnDeath: 'respawn on death',
+    respawnPoint: 'respawn point',
+    despawnOnDeath: 'despawn on death',
+  },
+  collectible: {
+    value: 'value',
+    destroyOnCollect: 'destroy on collect',
+    pickupSoundAsset: 'pickup sound',
+    rotateSpeed: 'rotate speed',
+  },
+  damageZone: { damagePerSecond: 'damage per second', oneShot: 'one-shot' },
+  checkpoint: { autoSave: 'auto-save' },
+  teleporter: { targetPosition: 'target position', cooldownSecs: 'cooldown' },
+  movingPlatform: {
+    speed: 'speed',
+    waypoints: 'waypoints',
+    pauseDuration: 'pause',
+    loopMode: 'loop mode',
+  },
+  triggerZone: { eventName: 'event name', oneShot: 'one-shot' },
+  spawner: {
+    entityType: 'entity type',
+    intervalSecs: 'interval',
+    maxCount: 'max count',
+    spawnOffset: 'spawn offset',
+    onTrigger: 'trigger event',
+  },
+  follower: {
+    targetEntityId: 'target',
+    speed: 'speed',
+    stopDistance: 'stop distance',
+    lookAtTarget: 'look at target',
+  },
+  projectile: {
+    speed: 'speed',
+    damage: 'damage',
+    lifetimeSecs: 'lifetime',
+    gravity: 'gravity',
+    destroyOnHit: 'destroy on hit',
+  },
+  winCondition: {
+    conditionType: 'condition type',
+    targetScore: 'target score',
+    targetEntityId: 'goal',
+  },
+  dialogueTrigger: {
+    treeId: 'dialogue tree',
+    triggerRadius: 'radius',
+    requireInteract: 'require interact',
+    interactKey: 'interact key',
+    oneShot: 'one-shot',
+  },
+};
+
+function fieldLabel(component: GameComponentType, field: string): string {
+  const labels = FIELD_LABELS[component] as Record<string, string>;
+  return Object.hasOwn(labels, field) ? labels[field] : field;
+}
+
+/**
+ * Why a refused route's entries were not enough, in words — or `null` when
+ * every entry was usable and the list was simply shorter than two.
+ *
+ * `given` counts every entry, usable or not, so a list of two or more that was
+ * still refused has to say the entries were the problem; "you gave 3 points,
+ * but a route needs at least 2" would contradict itself. Without a `usable`
+ * count, a refused list of two or more supports only "fewer than 2", and that
+ * is all it says.
+ */
+function unusableEntries(given: number, usable: number | undefined): string | null {
+  if (usable === undefined) return given < 2 ? null : 'fewer than 2 of them could be used';
+  if (usable >= given) return null;
+  if (usable === 0) return given === 1 ? 'it could not be used' : 'none of them could be used';
+  return `only ${usable} could be used`;
+}
+
+function formatValue(value: CorrectionValue, unit: 'points' | undefined): string {
+  if (value === null) return 'an empty value';
+  if (typeof value === 'number') {
+    if (unit === 'points') return `${value} ${value === 1 ? 'point' : 'points'}`;
+    return String(value);
+  }
+  if (typeof value === 'boolean') return value ? 'on' : 'off';
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.join(', ')}]`;
+  return (value as { description: string }).description;
+}
+
+/**
+ * One sentence per correction, in the author's terms: the component and field
+ * by name, what was asked for, what was used, and why — never a raw diff.
+ *
+ * `entityName` prefixes the sentence with the entity, for a report that spans
+ * several of them.
+ */
+export function describeCorrection(c: GameComponentFieldCorrection, entityName?: string): string {
+  const field = `${COMPONENT_LABELS[c.component]} ${fieldLabel(c.component, c.field)}`;
+  const where = entityName === undefined ? field : `${JSON.stringify(entityName)} ${field}`;
+  const requested = formatValue(c.requested, c.unit);
+  const applied = formatValue(c.applied, c.unit);
+  switch (c.reason) {
+    case 'clamped':
+      return typeof c.requested === 'number' && typeof c.applied === 'number' && c.requested < c.applied
+        ? `${where}: you asked for ${requested}, it was raised to the minimum of ${applied}.`
+        : `${where}: you asked for ${requested}, it was capped at ${applied}.`;
+    case 'rounded':
+      return `${where}: you asked for ${requested}, it was rounded to the whole number ${applied}.`;
+    case 'truncated':
+      return `${where}: you gave ${requested}; only the first ${applied} were kept, the most the engine supports.`;
+    case 'dropped': {
+      const unusable = typeof c.requested === 'number' && typeof c.applied === 'number'
+        ? c.requested - c.applied
+        : null;
+      return unusable === null
+        ? `${where}: some of the ${requested} you gave could not be used, so ${applied} were kept.`
+        : `${where}: you gave ${requested}; ${unusable} could not be used, so ${applied} were kept.`;
+    }
+    case 'invalid-replaced':
+      if (c.unit === 'points') {
+        if (typeof c.requested !== 'number') {
+          return `${where}: ${requested} is not a list of points, so the default route (${applied}) was used instead.`;
+        }
+        const unusable = unusableEntries(c.requested, c.usable);
+        return unusable === null
+          ? `${where}: you gave ${requested}, but a route needs at least 2 usable points, so the default route (${applied}) was used instead.`
+          : `${where}: you gave ${requested}, but ${unusable}, and a route needs at least 2, so the default route (${applied}) was used instead.`;
+      }
+      return `${where}: ${requested} is not a value this field accepts, so ${applied} was used instead.`;
+  }
+}
+
+/**
+ * A tool's result message with its corrections said out loud.
+ *
+ * `message` alone when nothing was adjusted — the absence of the sentence is a
+ * claim too, and it has to be a true one.
+ */
+export function withCorrectionSummary(
+  message: string,
+  corrections: readonly GameComponentFieldCorrection[],
+  entityNameOf?: (entityId: string) => string | undefined,
+): string {
+  if (corrections.length === 0) return message;
+  const count = corrections.length === 1 ? '1 value was' : `${corrections.length} values were`;
+  const sentences = corrections.map((c) =>
+    describeCorrection(c, c.entityId === undefined ? undefined : (entityNameOf?.(c.entityId) ?? c.entityId)));
+  // A message that already ends a sentence is not given a second full stop.
+  const lead = /[.!?]$/.test(message) ? message : `${message}.`;
+  return `${lead} ${count} adjusted to fit the engine’s limits: ${sentences.join(' ')}`;
+}
+
+// ---------------------------------------------------------------------------
+// Matching a correction against the value a component holds now
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether `actual` is a list of exactly these numbers, each compared at f32
+ * precision. Indexed, so a hole reads as `undefined` and fails rather than being
+ * skipped the way `every` would skip it.
+ */
+function sameNumbersAtF32(expected: readonly number[], actual: unknown): boolean {
+  if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+  for (let i = 0; i < expected.length; i += 1) {
+    const value: unknown = actual[i];
+    if (typeof value !== 'number' || Math.fround(value) !== Math.fround(expected[i])) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether `current` is still the value the correction applied.
+ *
+ * A marker is only true while the field holds the value it describes. Undo, a
+ * play session and a collab sync can all move a field without going through the
+ * store actions that clear markers, and a marker left on a value it no longer
+ * describes is exactly the false report this whole mechanism must not make.
+ * (A scene replacement drops every marker outright when the engine accepts it —
+ * a reload can bring the same entity back holding the same value, which this
+ * check would pass.)
+ *
+ * Numbers compare at f32 precision because the inspector reads the engine's
+ * echo, which has been through an `f32` and back.
+ *
+ * A route compares point by point against `appliedPoints`, never by count
+ * alone: an undo can put back a different 64-point route, and "only the first
+ * 64 of the 300 you gave were kept" is false about points nobody gave. A route
+ * record whose points are missing, or disagree with its own count, matches
+ * nothing — it cannot vouch for any value.
+ */
+export function correctionMatchesValue(c: GameComponentFieldCorrection, current: unknown): boolean {
+  if (c.unit === 'points') {
+    // Checked at runtime as well as by type: a record can arrive from a cast.
+    const route: unknown = c.appliedPoints;
+    if (!Array.isArray(route) || route.length !== c.applied) return false;
+    if (!Array.isArray(current) || current.length !== route.length) return false;
+    for (let i = 0; i < route.length; i += 1) {
+      const point: unknown = route[i];
+      if (!Array.isArray(point) || !sameNumbersAtF32(point as number[], current[i])) return false;
+    }
+    return true;
+  }
+  const applied = c.applied;
+  if (typeof applied === 'number') {
+    return typeof current === 'number' && Math.fround(current) === Math.fround(applied);
+  }
+  if (Array.isArray(applied)) return sameNumbersAtF32(applied, current);
+  if (applied === null || typeof applied !== 'object') return current === applied;
+  // A `description` is never what the wire layer APPLIES — only requested
+  // values are described — so there is nothing it could still match.
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Reading corrections back out of an untrusted result
+// ---------------------------------------------------------------------------
+
+/**
+ * The reasons each kind of record can carry, as the wire layer gives them:
+ * `record` (every scalar and vector field) clamps, rounds or replaces a value,
+ * and `recordRoute` (the one route field) cuts, thins or replaces a list.
+ * Crossed over, a reason renders a sentence the build never produces.
+ */
+const VALUE_REASONS: ReadonlySet<string> = new Set<CorrectionReason>(['clamped', 'rounded', 'invalid-replaced']);
+const ROUTE_REASONS: ReadonlySet<string> = new Set<CorrectionReason>(['truncated', 'dropped', 'invalid-replaced']);
+
+/**
+ * Whether `field` is one of `component`'s own store fields — the only names the
+ * wire layer can write, since `fieldReader` types them as `keyof` the
+ * component's data. An own-key check, so `toString` or `__proto__` is not one.
+ */
+function isComponentField(component: GameComponentType, field: string): boolean {
+  return Object.hasOwn(FIELD_LABELS[component], field);
+}
+
+/** The one field the wire layer reports as a route, in counts (`recordRoute`). */
+function isRouteField(component: GameComponentType, field: string): boolean {
+  return component === 'movingPlatform' && field === 'waypoints';
+}
+
+/**
+ * Whether `value` is an array of `length` numbers with no holes. Indexed rather
+ * than `every`, which skips a hole without ever calling its callback.
+ */
+function isNumberList(value: unknown, length?: number): value is readonly number[] {
+  if (!Array.isArray(value) || (length !== undefined && value.length !== length)) return false;
+  for (let i = 0; i < value.length; i += 1) {
+    if (typeof value[i] !== 'number') return false;
+  }
+  return true;
+}
+
+function isCorrectionValue(value: unknown): value is CorrectionValue {
+  if (value === null) return true;
+  switch (typeof value) {
+    case 'number':
+    case 'boolean':
+    case 'string':
+      return true;
+    case 'object':
+      if (Array.isArray(value)) return isNumberList(value);
+      return typeof (value as { description?: unknown }).description === 'string';
+    default:
+      return false;
+  }
+}
+
+/** Whether `value` is a list of points, each exactly three numbers. */
+function isRoute(value: unknown): value is readonly CorrectionPoint[] {
+  if (!Array.isArray(value)) return false;
+  for (let i = 0; i < value.length; i += 1) {
+    if (!isNumberList(value[i], 3)) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether a route record's `usable` count is one the wire layer could have
+ * written: only on a list refused for having fewer than two usable entries
+ * (so 0 or 1), and never more than the entries given. Any other count would
+ * render a sentence the build never produces.
+ */
+function isRefusedRouteCount(c: Record<string, unknown>): boolean {
+  const { usable, requested } = c;
+  return c.reason === 'invalid-replaced'
+    && typeof requested === 'number'
+    && (usable === 0 || usable === 1)
+    && usable <= requested;
+}
+
+/**
+ * Whether `value` is a correction record the wire layer could have written.
+ *
+ * Well formed is not enough: a record naming a field its component does not
+ * have, a route on a field that is not a route, or a reason on the wrong kind
+ * of record all render as sentences the build never produces — and the
+ * sentence falls back to the raw key for an unknown field.
+ */
+export function isGameComponentFieldCorrection(value: unknown): value is GameComponentFieldCorrection {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const c = value as Record<string, unknown>;
+  if (typeof c.component !== 'string' || !Object.hasOwn(COMPONENT_LABELS, c.component)) return false;
+  const component = c.component as GameComponentType;
+  const common = typeof c.field === 'string'
+    && isComponentField(component, c.field)
+    && typeof c.reason === 'string'
+    && isCorrectionValue(c.requested)
+    && (c.entityId === undefined || typeof c.entityId === 'string');
+  if (!common) return false;
+  const route = isRouteField(component, c.field as string);
+  if (c.unit === undefined) {
+    return !route
+      && VALUE_REASONS.has(c.reason as string)
+      && c.appliedPoints === undefined
+      && c.usable === undefined
+      && isCorrectionValue(c.applied);
+  }
+  // A route record is only well formed on the route field, with the route its
+  // count describes.
+  return route
+    && c.unit === 'points'
+    && ROUTE_REASONS.has(c.reason as string)
+    && isRoute(c.appliedPoints)
+    && c.applied === c.appliedPoints.length
+    && (c.usable === undefined || isRefusedRouteCount(c));
+}
+
+/**
+ * The corrections a tool result carries under its own `corrections` key, with
+ * anything malformed left out.
+ *
+ * The chat card renders these, and a tool result is only as trustworthy as the
+ * handler that produced it — a result from a stale bundle or a hand-written MCP
+ * reply must not render as a note the wire layer never wrote.
+ */
+export function readCorrections(result: unknown): GameComponentFieldCorrection[] {
+  if (typeof result !== 'object' || result === null || !Object.hasOwn(result, 'corrections')) return [];
+  const list = (result as { corrections: unknown }).corrections;
+  return Array.isArray(list) ? list.filter(isGameComponentFieldCorrection) : [];
+}
+
+// ---------------------------------------------------------------------------
+// The editor's per-field marker map
+// ---------------------------------------------------------------------------
+
+/** field -> the correction currently marking it. */
+export type ComponentAdjustments = Readonly<Record<string, GameComponentFieldCorrection>>;
+
+/**
+ * entityId -> component type -> field -> correction.
+ *
+ * Ephemeral editor state. It is never written into a component, a wire payload,
+ * a scene file or an export: it records how a value came to be, which is a fact
+ * about this session's edits and not part of the game. For the same reason it
+ * does not outlive the scene it describes: the tracked dispatchers in
+ * editorStore.ts empty it when the engine accepts `load_scene` or `new_scene`.
+ */
+export type GameComponentAdjustments = Readonly<
+  Record<string, Readonly<Partial<Record<GameComponentType, ComponentAdjustments>>>>
+>;
+
+/** The markers for one component, read without walking the prototype chain. */
+export function componentAdjustmentsOf(
+  map: GameComponentAdjustments,
+  entityId: string,
+  type: GameComponentType,
+): ComponentAdjustments | undefined {
+  if (!Object.hasOwn(map, entityId)) return undefined;
+  const byType = map[entityId];
+  return Object.hasOwn(byType, type) ? byType[type] : undefined;
+}
+
+/**
+ * Only the corrections that still describe the component as it is — the ones
+ * the inspector may show.
+ */
+export function currentAdjustments(
+  adjustments: ComponentAdjustments | undefined,
+  component: GameComponentData,
+): GameComponentFieldCorrection[] {
+  if (!adjustments) return [];
+  const fields = gameComponentFields(component);
+  return Object.values(adjustments).filter(
+    (c) => c.component === component.type
+      && Object.hasOwn(fields, c.field)
+      && correctionMatchesValue(c, fields[c.field]),
+  );
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * The markers a component should carry after a write.
+ *
+ * - `previous` (with `previousFields`, the component before the write) is kept
+ *   field by field, except where the write supplied that field or changed its
+ *   value — either one means the old marker no longer describes it.
+ * - Each correction the write produced then marks its field, but only if the
+ *   field really holds the value the correction says was applied.
+ *
+ * Returns `undefined` when nothing is left, so the caller can drop the key
+ * rather than keep an empty record.
+ */
+export function nextComponentAdjustments(input: {
+  previous: ComponentAdjustments | undefined;
+  previousFields: Readonly<Record<string, unknown>> | undefined;
+  nextFields: Readonly<Record<string, unknown>>;
+  corrections: readonly GameComponentFieldCorrection[];
+  supplied: readonly string[];
+}): ComponentAdjustments | undefined {
+  const { previous, previousFields, nextFields, corrections, supplied } = input;
+  const result: Record<string, GameComponentFieldCorrection> = {};
+  if (previous && previousFields) {
+    const suppliedSet = new Set(supplied);
+    for (const [field, correction] of Object.entries(previous)) {
+      if (suppliedSet.has(field)) continue;
+      if (!sameValue(previousFields[field], nextFields[field])) continue;
+      result[field] = correction;
+    }
+  }
+  for (const correction of corrections) {
+    if (!Object.hasOwn(nextFields, correction.field)) continue;
+    if (!correctionMatchesValue(correction, nextFields[correction.field])) continue;
+    result[correction.field] = correction;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+/** `map` with one component's markers replaced (or removed, for `undefined`). */
+export function withComponentAdjustments(
+  map: GameComponentAdjustments,
+  entityId: string,
+  type: GameComponentType,
+  adjustments: ComponentAdjustments | undefined,
+): GameComponentAdjustments {
+  const existing = Object.hasOwn(map, entityId) ? map[entityId] : undefined;
+  if (adjustments === undefined) {
+    if (!existing || !Object.hasOwn(existing, type)) return map;
+    const { [type]: _removed, ...restTypes } = existing;
+    if (Object.keys(restTypes).length > 0) return { ...map, [entityId]: restTypes };
+    const { [entityId]: _entity, ...restEntities } = map;
+    return restEntities;
+  }
+  // Computed keys in a literal are DefineOwnProperty, so an entity id of
+  // `__proto__` lands as an own key instead of reparenting the record.
+  return { ...map, [entityId]: { ...existing, [type]: adjustments } };
+}
+
+/**
+ * Drop every marker on `entityId` that the engine's latest report no longer
+ * bears out: a component that is gone, or a field that now holds a different
+ * value than the one the marker says was applied.
+ */
+export function pruneEntityAdjustments(
+  map: GameComponentAdjustments,
+  entityId: string,
+  components: readonly GameComponentData[],
+): GameComponentAdjustments {
+  if (!Object.hasOwn(map, entityId)) return map;
+  let next = map;
+  for (const type of Object.keys(map[entityId]) as GameComponentType[]) {
+    const markers = componentAdjustmentsOf(map, entityId, type);
+    const component = components.find((c) => c.type === type);
+    const kept = component ? currentAdjustments(markers, component) : [];
+    const keptCount = kept.length;
+    if (markers && keptCount === Object.keys(markers).length) continue;
+    const rebuilt: Record<string, GameComponentFieldCorrection> = {};
+    for (const c of kept) rebuilt[c.field] = c;
+    next = withComponentAdjustments(next, entityId, type, keptCount > 0 ? rebuilt : undefined);
+  }
+  return next;
+}

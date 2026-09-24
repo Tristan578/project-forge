@@ -23,8 +23,8 @@ function execute(script, cwd) {
 }
 
 test('weekly gate keeps the complete PR ShellCheck scope', () => {
-  const scheduled = runBlock(schedule, 'Shellcheck the hooks this gate owns');
-  const current = runBlock(ci, 'Shellcheck the hooks owned by this change');
+  const scheduled = runBlock(schedule, 'Shellcheck all hooks');
+  const current = runBlock(ci, 'Shellcheck all hooks');
   assert.equal(scheduled.slice(scheduled.indexOf('shellcheck -x')).trimEnd(), current.slice(current.indexOf('shellcheck -x')).trimEnd());
 });
 

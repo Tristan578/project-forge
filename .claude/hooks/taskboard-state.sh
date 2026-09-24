@@ -13,7 +13,6 @@ _TB_PROJECT_ROOT="$(cd "$_TB_HOOKS_DIR/../.." && pwd)"
 # All clients share the verified taskboard runtime; IDs are machine-local.
 TB_PYTHON="${PYTHON:-$(command -v python3 || command -v python || true)}"
 TB_API="${TASKBOARD_API:-http://localhost:3010/api}"
-TB_DB=""
 TB_STATE_FILE="$_TB_HOOKS_DIR/.taskboard-active-ticket"
 export PROJECT_ID=""
 export TEAM_ENGINEERING_ID=""
@@ -75,7 +74,10 @@ tb_get_board() {
     curl -fsS --connect-timeout 3 "$TB_API/board" | "$TB_PYTHON" -c 'import json,sys; b=json.load(sys.stdin); [c.update(tickets=[t for t in c.get("tickets", []) if t.get("projectId")==sys.argv[1]]) for c in b.get("columns", [])]; print(json.dumps(b))' "$PROJECT_ID"
 }
 
-# Get tickets by status
+# Get tickets, optionally filtered by status. The optional argument is part of
+# the sourced API; the one in-tree caller (tb_check_consistency) wants every
+# ticket, so shellcheck sees no call that passes one.
+# shellcheck disable=SC2120
 tb_get_tickets() {
     [ -n "$PROJECT_ID" ] || tb_refresh_identity || return 1
     local status="${1:-}"
@@ -298,6 +300,7 @@ else:
 
 tb_check_consistency() {
     local tickets
+    # shellcheck disable=SC2119  # no status filter on purpose: consistency is checked across every ticket
     tickets=$(tb_get_tickets)
     if [ -z "$tickets" ]; then
         return 1

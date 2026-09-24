@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { Lightbulb, RefreshCw, Play, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import {
@@ -27,6 +27,10 @@ interface IdeaGeneratorModalProps {
 // ---------------------------------------------------------------------------
 
 export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorModalProps) {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [ideas, setIdeas] = useState<GameIdea[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -112,11 +116,11 @@ export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorMo
           {showFilters && (
             <div className="mt-2 grid grid-cols-2 gap-2">
               <div>
-                <label htmlFor="genre-filter" className="mb-1 block text-xs text-zinc-400">
+                <label htmlFor={fieldId('genre-filter')} className="mb-1 block text-xs text-zinc-400">
                   Genre
                 </label>
                 <select
-                  id="genre-filter"
+                  id={fieldId('genre-filter')}
                   value={selectedGenre}
                   onChange={(e) => setSelectedGenre(e.target.value)}
                   className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -131,11 +135,11 @@ export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorMo
                 </select>
               </div>
               <div>
-                <label htmlFor="complexity-filter" className="mb-1 block text-xs text-zinc-400">
+                <label htmlFor={fieldId('complexity-filter')} className="mb-1 block text-xs text-zinc-400">
                   Max complexity
                 </label>
                 <select
-                  id="complexity-filter"
+                  id={fieldId('complexity-filter')}
                   value={selectedComplexity}
                   onChange={(e) => setSelectedComplexity(e.target.value as typeof selectedComplexity)}
                   className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-blue-500"

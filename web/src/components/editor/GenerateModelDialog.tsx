@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
@@ -27,6 +27,10 @@ const POLY_BUDGET_LABELS: Record<PolyBudget, string> = {
 };
 
 export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProps) {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [prompt, setPrompt] = useState('');
   const [artStyle, setArtStyle] = useState<ArtStyle>('realistic');
   const [quality, setQuality] = useState<Quality>('standard');
@@ -139,8 +143,9 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
 
           {/* Art Style */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-300">Art Style</label>
+            <label htmlFor={fieldId('art-style')} className="mb-1 block text-xs font-medium text-zinc-300">Art Style</label>
             <select
+              id={fieldId('art-style')}
               value={artStyle}
               onChange={(e) => setArtStyle(e.target.value as ArtStyle)}
               disabled={isSubmitting || gate.blocked}
@@ -155,8 +160,9 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
 
           {/* Quality */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-300">Quality</label>
+            <label htmlFor={fieldId('quality')} className="mb-1 block text-xs font-medium text-zinc-300">Quality</label>
             <select
+              id={fieldId('quality')}
               value={quality}
               onChange={(e) => setQuality(e.target.value as Quality)}
               disabled={isSubmitting || gate.blocked}
@@ -169,8 +175,9 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
 
           {/* Poly Budget */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-300">Poly Budget</label>
+            <label htmlFor={fieldId('poly-budget')} className="mb-1 block text-xs font-medium text-zinc-300">Poly Budget</label>
             <select
+              id={fieldId('poly-budget')}
               value={polyBudget}
               onChange={(e) => setPolyBudget(e.target.value as PolyBudget)}
               disabled={isSubmitting || gate.blocked}

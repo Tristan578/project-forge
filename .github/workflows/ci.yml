@@ -329,6 +329,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Typecheck Observatory
         run: npx tsc --noEmit -p tools/observatory/tsconfig.json
 
@@ -415,6 +424,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Install docs dependencies
         run: cd apps/docs && npm install
 
@@ -468,6 +486,15 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - run: npm ci
+
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
 
       # Same key as quality-gates' ui-cache-typecheck / ui-cache-test-web —
       # whichever job builds packages/ui first warms the cache for the others.
@@ -552,33 +579,19 @@ jobs:
           done
           exit "$rc"
 
-      - name: Shellcheck the hooks owned by this change
+      - name: Shellcheck all hooks
         run: |
-          # Scope shellcheck to the hooks this gate owns + their tests: the
-          # hardened review-loop hooks and the auto-approve permission gate.
-          # The wider .claude/hooks/ tree carries pre-existing findings tracked
-          # separately (see .claude/rules/agent-operations.md §12) — linting all
-          # of it here would fail this gate on unrelated, untouched debt. Newly
-          # added or edited hooks MUST be shellcheck-clean, so they go here.
+          # The whole .claude/hooks/ tree is shellcheck-clean as of #8676, so
+          # this lints ALL of it: the glob is the ratchet that stops hook debt
+          # from re-accumulating silently, and a new or edited hook that is not
+          # clean fails here. It used to name seven hooks and eight suites by
+          # hand while the rest of the tree carried ten known findings.
           # -x follows `.`-sourced files (scripts/__tests__/lib/platform.sh);
           # without it every sourcing suite reports SC1091 and the library's own
-          # definitions stay invisible to the analysis.
-          shellcheck -x \
-            .claude/hooks/reject-incomplete-review.sh \
-            .claude/hooks/review-quality-gate.sh \
-            .claude/hooks/auto-approve-safe-commands.sh \
-            .claude/hooks/block-main-commits.sh \
-            .claude/hooks/inject-lessons-learned.sh \
-            .claude/hooks/check-panel-registry.sh \
-            .claude/hooks/inject-post-compact.sh \
-            .claude/hooks/__tests__/inject-post-compact.test.sh \
-            .claude/hooks/__tests__/check-panel-registry.test.sh \
-            .claude/hooks/__tests__/reject-incomplete-review.test.sh \
-            .claude/hooks/__tests__/review-quality-gate.test.sh \
-            .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
-            .claude/hooks/__tests__/block-main-commits.test.sh \
-            .claude/hooks/__tests__/inject-lessons-learned.test.sh \
-            .claude/hooks/__tests__/settings-permissions.test.sh
+          # definitions stay invisible to the analysis. The tree is also clean
+          # under plain shellcheck (every dynamic `source` carries a line-level
+          # SC1091 disable), so a local run without -x agrees with this gate.
+          shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 
   # ---- Skills Lint ----
   # Runs when any skill file (.claude/skills/**) or the linter/baseline changed.
@@ -1155,6 +1168,7 @@ jobs:
             scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
+            scripts/resolve-ci-wasm-artifact.sh scripts/__tests__/resolve-ci-wasm-artifact.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
@@ -1303,6 +1317,8 @@ jobs:
         run: bash scripts/__tests__/ci-tree-already-validated.test.sh
       - name: Run engine WASM cache-key test suite
         run: bash scripts/__tests__/engine-wasm-cache-key.test.sh
+      - name: Run CD WASM artifact-reuse resolver test suite
+        run: bash scripts/__tests__/resolve-ci-wasm-artifact.test.sh
 
       - name: Run source-encoding gate test suite
         run: bash scripts/__tests__/check-source-encoding.test.sh
@@ -1452,10 +1468,16 @@ jobs:
           out="$(bash scripts/preview-db-branch.sh create "$PR_NUMBER" --uri-out "$uri_file")" || rc=$?
           echo "$out"
 
-          evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | head -1)"
+          # EVERY evicted PR, space-separated: a run can reclaim more than one
+          # when a concurrent preview job took the first freed slot (#10245),
+          # and each of them is owed the notice below.
+          evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | tr '\n' ' ' | sed 's/ *$//')"
           if [ -n "$evicted_pr" ]; then
             echo "evicted_pr=${evicted_pr}" >> "$GITHUB_OUTPUT"
-            echo "Reclaimed the preview database of #${evicted_pr} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
+            # shellcheck disable=SC2086 -- a space-separated list, split on purpose
+            for p in $evicted_pr; do
+              echo "Reclaimed the preview database of #${p} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
+            done
           fi
           if [ "$rc" -ne 0 ]; then
             echo "::error::preview-db-branch.sh create exited ${rc}; the lines above say why."
@@ -1489,8 +1511,12 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          gh pr comment "$EVICTED_PR" --repo "$REPO" \
-            --body "**Preview database reclaimed** — the Neon branch allowance was full, so this PR's preview branch (the least recently built) was deleted to make room for #${PR_NUMBER}. The existing preview URL will fail on database access until the next push to this PR rebuilds it."
+          # One notice per evicted PR (the output is space-separated).
+          # shellcheck disable=SC2086 -- a space-separated list, split on purpose
+          for pr in $EVICTED_PR; do
+            gh pr comment "$pr" --repo "$REPO" \
+              --body "**Preview database reclaimed** — the Neon branch allowance was full, so this PR's preview branch (the least recently built) was deleted to make room for #${PR_NUMBER}. The existing preview URL will fail on database access until the next push to this PR rebuilds it."
+          done
 
       - name: Apply migrations to the preview branch
         # THE WHOLE POINT. A migration that cannot apply must fail the PR here,
@@ -1761,6 +1787,112 @@ jobs:
           path: web/blob-report/
           retention-days: 7
 
+  # Signup/auth journey against a real Clerk TEST instance (#8632, F40). The
+  # ONLY job that builds and serves the app with Clerk keys.
+  #
+  # Why not put the keys on test-e2e-ui: with valid keys the proxy switches to
+  # clerkMiddleware for every request, and under `next start`
+  # (NODE_ENV=production) buildPublicRoutes() drops /dev from the public routes
+  # (web/src/proxy.ts). The editor fixture opens /dev for every editor spec, so
+  # keys there would send hundreds of @ui specs to /sign-in. This job runs only
+  # the @auth specs (web/playwright.auth.config.ts), and the keys are mapped
+  # onto the build and test steps alone, never the job env, so `npm ci`'s
+  # install scripts never see them.
+  #
+  # Secrets are the CI-only TEST instance's (CLERK_TEST_*), never production's;
+  # clerkGlobalSetup refuses anything but sk_test_/pk_test_.
+  # E2E_CLERK_TEST_REQUIRED follows the E2E_UPSTASH_TEST_REQUIRED pattern:
+  # fork and Dependabot PRs receive no repository secrets, so the specs skip
+  # there; everywhere else a missing secret FAILS the run (the global setup
+  # throws) and requiredRunReporter fails any run that skipped a test.
+  # Setup and rotation: docs/guides/e2e-clerk-test-user.md.
+  test-e2e-auth:
+    name: E2E Auth Journey
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      E2E_CLERK_TEST_REQUIRED: ${{ github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      # Same silent-drop guard as test-e2e-ui (npm/cli#4828 class, PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          # Same single-root-lockfile key as test-e2e-ui (#8589).
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh browsers
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh deps
+
+      # No Next.js build cache here, deliberately: the publishable key is
+      # inlined into this build, so a cache shared with the keyless jobs would
+      # cross-contaminate, and a per-key cache would have to be keyed on a
+      # secret.
+      - name: Build for auth E2E (Clerk test instance)
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          # Inlined into the client bundle at build time, so it MUST be here.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+        run: npx next build
+
+      - name: Run auth-journey E2E tests
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_TEST_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+          E2E_CLERK_TEST_EMAIL: ${{ secrets.E2E_CLERK_TEST_EMAIL }}
+          E2E_CLERK_TEST_PASSWORD: ${{ secrets.E2E_CLERK_TEST_PASSWORD }}
+          # The proxy passes buildAuthorizedParties() to clerkMiddleware, which
+          # rejects a session token whose azp claim is not listed. Under
+          # NODE_ENV=production that list is the production origins plus
+          # STAGING_URL, and this browser signs in on http://localhost:3000 --
+          # without this line every session the journey creates is treated as
+          # signed out on the server.
+          STAGING_URL: 'http://localhost:3000'
+        run: npx playwright test --config playwright.auth.config.ts
+
+      - name: Upload auth-journey report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-auth-report
+          path: web/auth-results/summary.json
+          if-no-files-found: error
+          retention-days: 14
+
   # Strict interactive-journey gate (#8601 F09 + #8604 F12). Proves the core
   # new-user journey — idea -> generated scene -> entities spawn -> Play ->
   # winnable -> export — survives on the SAME production server users hit
@@ -1804,6 +1936,18 @@ jobs:
 
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
+
+      # #10158: a spec that stands store injection or a mock in for the
+      # component it names must say so, in a `substitution` annotation AND a
+      # `[substituted: <component>]` title marker, and capabilityMatrix.test.ts
+      # keeps such specs out of `proven` cells. This lists every spec with
+      # Playwright's --list mode (no browser, no server) and fails on an
+      # unpaired annotation or marker, a listing that misses a spec file, or
+      # zero specs. Its summary line names the counts it listed. Pinned by
+      # scripts/__tests__/production-ci-contract.test.mjs.
+      - name: Check substitution naming
+        working-directory: web
+        run: npx tsx scripts/check-substitution-naming.ts
 
       - name: Cache Playwright browsers
         id: playwright-cache
@@ -2284,6 +2428,12 @@ jobs:
 
       - run: npm ci
 
+      # apps/docs builds with the hoisted root `next`, so the npm/cli#4828 drop
+      # of @next/swc kills its `next build` exactly as it does web's — with an
+      # opaque "Failed to load SWC binary" three steps from the cause (PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Verify production workflow contracts
         run: node --test scripts/__tests__/production-ci-contract.test.mjs
 
@@ -2370,6 +2520,7 @@ jobs:
       - portable-paths
       - test-e2e-ui
       - test-e2e-api
+      - test-e2e-auth
       - test-e2e-journey
       - test-e2e-engine-smoke
     runs-on: ubuntu-latest

@@ -961,6 +961,20 @@ describe('Sentry profiling config must stay pinned', () => {
     expect(config).toContain('"@sentry/profiling-node"');
   });
 
+  it('imports withSentryConfig from the @sentry/nextjs/config entry, not the runtime root', async () => {
+    // #8947: `@sentry/nextjs/config` is the v11 entry for build-time config
+    // helpers. The runtime root still re-exports `withSentryConfig` on 10.x, so
+    // a revert (an editor auto-import, say) would type-check and build; only
+    // this pin sees it. Anchored to an executable import line, not a
+    // containment grep a comment could satisfy (lessons-learned #16).
+    const config = await readSource('next.config.ts');
+    const importLines = config
+      .split('\n')
+      .filter((line) => /^import\s*\{[^}]*\bwithSentryConfig\b[^}]*\}\s*from\s*["'][^"']+["']/.test(line));
+    expect(importLines, 'exactly one executable withSentryConfig import').toHaveLength(1);
+    expect(importLines[0]).toMatch(/from\s*["']@sentry\/nextjs\/config["']/);
+  });
+
   it('serves the Document-Policy header browser profiling requires', async () => {
     const config = await readSource('next.config.ts');
     expect(

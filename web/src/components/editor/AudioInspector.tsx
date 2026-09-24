@@ -127,6 +127,10 @@ function NumberRowWithTerm({
 }
 
 export function AudioInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [generateSoundOpen, setGenerateSoundOpen] = useState(false);
   const [generateMusicOpen, setGenerateMusicOpen] = useState(false);
 
@@ -332,14 +336,14 @@ export function AudioInspector() {
           {/* Asset Dropdown */}
           <div className="flex items-center gap-2">
             <label
-              htmlFor="audio-asset-select"
+              htmlFor={fieldId('audio-asset-select')}
               className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1"
             >
               Asset
               <InfoTooltip term="audioAsset" />
             </label>
             <select
-              id="audio-asset-select"
+              id={fieldId('audio-asset-select')}
               value={selectedAssetId}
               onChange={(e) => handleUpdate({ assetId: e.target.value || null })}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
@@ -360,14 +364,14 @@ export function AudioInspector() {
           {/* Bus Assignment */}
           <div className="flex items-center gap-2">
             <label
-              htmlFor="audio-bus-select"
+              htmlFor={fieldId('audio-bus-select')}
               className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1"
             >
               Bus
               <InfoTooltip term="audioBus" />
             </label>
             <select
-              id="audio-bus-select"
+              id={fieldId('audio-bus-select')}
               value={primaryAudio.bus ?? 'sfx'}
               onChange={(e) => handleUpdate({ bus: e.target.value })}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none

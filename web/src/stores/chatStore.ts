@@ -4,6 +4,7 @@ import { showError } from '@/lib/toast';
 import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODEL_PREMIUM } from '@/lib/ai/models';
 import { detectGameCreationIntent } from '@/lib/chat/intentDetector';
 import { isDestructiveCommand } from '@/lib/chat/destructiveCommands';
+import { formatToolResultOutput } from '@/lib/chat/toolResultOutput';
 
 /**
  * Confidence at or above which a message is routed to the game-creation
@@ -13,6 +14,40 @@ import { isDestructiveCommand } from '@/lib/chat/destructiveCommands';
  * direction, and the reason this can afford to be a plain threshold.
  */
 const GAME_CREATION_CONFIDENCE_THRESHOLD = 0.7;
+
+/**
+ * Every lifecycle state a tool invocation can be in, as ONE runtime list
+ * (PF-950 / #8931). The `status` field below is typed from it, so adding a
+ * state here is the only way to add one — and `ToolCallCard.test.tsx` and
+ * `chatStore.toolStates.test.ts` iterate it, so a new state without a
+ * rendering branch or a wire transition fails a test instead of falling
+ * through a `default`.
+ *
+ * How each state is reached (chunk names are the AI SDK v6 `UIMessageChunk`
+ * types `streamOneTurn` switches on; the fixtures in
+ * `test/utils/streamingTestUtils.ts` are the canonical bytes):
+ *   pending            `tool-input-start`
+ *   success | error    local execution after `finish` drains the buffered
+ *                      `tool-input-available`; or `tool-input-error` /
+ *                      `tool-output-error` from the wire (→ error, errorText)
+ *   preview | rejected the client-only `approvalMode` toggle: held for the
+ *                      user, then approveToolCalls / rejectToolCalls
+ *   undone             the user reverted a successful call
+ *   approval-required  `tool-approval-request` (server gate, PF-8860)
+ *   denied             `tool-output-denied` on the resumed stream
+ */
+export const TOOL_CALL_STATUSES = [
+  'pending',
+  'success',
+  'error',
+  'preview',
+  'rejected',
+  'undone',
+  'approval-required',
+  'denied',
+] as const;
+
+export type ToolCallStatusName = (typeof TOOL_CALL_STATUSES)[number];
 
 export interface ToolCallStatus {
   id: string;
@@ -26,16 +61,9 @@ export interface ToolCallStatus {
    * and the model is never told about it; an `'approval-required'` call is
    * blocked by the SDK server-side and can only be resolved by resuming the
    * turn with an approval-response — which is what `resumeAfterApproval` does.
+   * The full list, with how each state is reached, is `TOOL_CALL_STATUSES`.
    */
-  status:
-    | 'pending'
-    | 'success'
-    | 'error'
-    | 'preview'
-    | 'rejected'
-    | 'undone'
-    | 'approval-required'
-    | 'denied';
+  status: ToolCallStatusName;
   result?: unknown;
   error?: string;
   undoable: boolean;
@@ -664,7 +692,10 @@ function appendToolTurn(
     if (tc.status === 'error') {
       output = { type: 'error-text', value: `Error: ${tc.error || 'Unknown error'}` };
     } else if (tc.status === 'success' || tc.status === 'undone') {
-      output = { type: 'text', value: String(tc.result ?? 'Success') };
+      // Serialised, not `String()`-coerced: most handlers return an object
+      // here, and `String({...})` handed the model "[object Object]" for every
+      // one of them, so query tools returned nothing (#10143).
+      output = { type: 'text', value: formatToolResultOutput(tc.result) };
     } else {
       output = { type: 'error-text', value: `Not executed (status: ${tc.status}).` };
     }

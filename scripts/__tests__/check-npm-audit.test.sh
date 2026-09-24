@@ -2643,6 +2643,7 @@ STEPS_EOF
   preview-deploy:
   test-e2e-ui:
   test-e2e-api:
+  test-e2e-auth:
   test-e2e-journey:
   test-e2e-engine-smoke:
   test-e2e-crossbrowser:
@@ -3203,6 +3204,7 @@ OUTPUTS_EOF
             scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
+            scripts/resolve-ci-wasm-artifact.sh scripts/__tests__/resolve-ci-wasm-artifact.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
@@ -3393,7 +3395,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=657
+readonly SELF_EXEC_EXPECTED_DROP=660
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3736,6 +3738,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/cd-rolling-release.sh scripts/__tests__/cd-rolling-release.test.sh \
             scripts/ci-tree-already-validated.sh scripts/__tests__/ci-tree-already-validated.test.sh \
             scripts/engine-wasm-cache-key.sh scripts/__tests__/engine-wasm-cache-key.test.sh \
+            scripts/resolve-ci-wasm-artifact.sh scripts/__tests__/resolve-ci-wasm-artifact.test.sh \
             scripts/check-source-encoding.sh scripts/__tests__/check-source-encoding.test.sh \
             scripts/__tests__/claude-refs-resolve.test.sh \
             scripts/__tests__/e2e-tag-routing.test.sh \
@@ -3840,6 +3843,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/ci-tree-already-validated.test.sh
       - name: Run engine WASM cache-key test suite
         run: bash scripts/__tests__/engine-wasm-cache-key.test.sh
+      - name: Run CD WASM artifact-reuse resolver test suite
+        run: bash scripts/__tests__/resolve-ci-wasm-artifact.test.sh
       - name: Run source-encoding gate test suite
         run: bash scripts/__tests__/check-source-encoding.test.sh
       - name: Run source-encoding gate

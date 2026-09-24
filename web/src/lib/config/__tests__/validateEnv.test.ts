@@ -268,6 +268,59 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('Anthropic WIF all-three-or-none (#8858)', () => {
+    // Names derived from the config module, not restated (lessons-learned #18).
+    async function wifNames(): Promise<string[]> {
+      const { ANTHROPIC_WIF_REQUIRED_ENV_NAMES } = await import('../anthropicWif');
+      expect(ANTHROPIC_WIF_REQUIRED_ENV_NAMES).toHaveLength(3);
+      return [...ANTHROPIC_WIF_REQUIRED_ENV_NAMES];
+    }
+    const isPartialWarning = (w: string) => w.includes('partially configured');
+
+    it('registers every WIF variable, plus the workspace id, as OPTIONAL (never required)', async () => {
+      const names = await wifNames();
+      const { OPTIONAL_VARS, REQUIRED_VARS } = await import('../validateEnv');
+      const optional = OPTIONAL_VARS.map((v) => v.key);
+      for (const name of [...names, 'ANTHROPIC_WIF_WORKSPACE_ID']) {
+        expect(optional).toContain(name);
+        expect(REQUIRED_VARS.map((v) => v.key)).not.toContain(name);
+      }
+    });
+
+    it.each([1, 2])('warns (does not fail boot) when exactly %i of the 3 are set, naming the missing ones', async (setCount) => {
+      stubAllRequired();
+      const names = await wifNames();
+      for (const name of names) vi.stubEnv(name, '');
+      for (const name of names.slice(0, setCount)) vi.stubEnv(name, 'set-for-test');
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      expect(result.valid).toBe(true);
+      expect(result.missing).toEqual([]);
+      const partial = result.warnings.filter(isPartialWarning);
+      expect(partial).toHaveLength(1);
+      for (const name of names.slice(setCount)) expect(partial[0]).toContain(name);
+      expect(partial[0]).toContain('ANTHROPIC_API_KEY');
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('partially configured'));
+      warnSpy.mockRestore();
+    });
+
+    it.each([0, 3])('does not emit the partial warning when %i of the 3 are set', async (setCount) => {
+      stubAllRequired();
+      const names = await wifNames();
+      for (const name of names) vi.stubEnv(name, '');
+      for (const name of names.slice(0, setCount)) vi.stubEnv(name, 'set-for-test');
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      expect(result.warnings.filter(isPartialWarning)).toEqual([]);
+    });
+  });
+
   describe('getOptionalEnv', () => {
     it('returns the env value when set', async () => {
       vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://spawnforge.ai');

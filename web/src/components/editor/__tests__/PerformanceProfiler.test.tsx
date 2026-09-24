@@ -4,7 +4,17 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestUtils';
+import {
+  PRIMITIVE_ATTR,
+  controlsIn,
+  expectedPrimitive,
+  findColourLiterals,
+  findRawControls,
+  hasMobileTouchTarget,
+} from '@/test/utils/designSystemAudit';
 import { PerformanceProfiler } from '../PerformanceProfiler';
 import { usePerformanceStore } from '@/stores/performanceStore';
 import type { MeasurementManifest } from '@/lib/config/measurementManifest';
@@ -18,6 +28,11 @@ vi.mock('@/hooks/useEngine', () => ({
 vi.mock('@/stores/performanceStore', () => ({
   usePerformanceStore: vi.fn(() => ({})),
 }));
+
+// The REAL library components, each marking the element it renders.
+vi.mock('@spawnforge/ui', async (importOriginal) =>
+  (await import('@/test/utils/designSystemAudit')).tagUiPrimitives(await importOriginal()),
+);
 
 vi.mock('lucide-react', () => ({
   ChevronDown: (props: Record<string, unknown>) => <span data-testid="chevron-down" {...props} />,
@@ -153,11 +168,53 @@ describe('PerformanceProfiler', () => {
     expect(screen.getByText('42')).toBeInTheDocument();
   });
 
-  it('shows memory usage when expanded', () => {
+  it('shows the engine mesh memory when expanded', () => {
     setupStore({ isProfilerOpen: true, stats: { ...defaultStats, memoryUsage: 64.3 } });
     render(<PerformanceProfiler />);
-    expect(screen.getByText('Memory')).toBeInTheDocument();
-    expect(screen.getByText(/64\.3 MB/)).toBeInTheDocument();
+    const row = screen.getByText('Mesh memory').parentElement!;
+    expect(row.textContent).toContain('64.3 MB');
+  });
+
+  // #10013: a missing measurement must read "unknown", never "0.0 MB".
+  it('shows mesh memory and JS heap as unknown until measured', () => {
+    setupStore({ isProfilerOpen: true, stats: { ...defaultStats, memoryUsage: 'unknown', jsHeapMb: 'unknown' } as never });
+    render(<PerformanceProfiler />);
+    expect(screen.getByText('Mesh memory').parentElement!.textContent).toBe('Mesh memoryunknown');
+    expect(screen.getByText('JS heap').parentElement!.textContent).toBe('JS heapunknown');
+    expect(screen.queryByText(/0\.0 MB/)).toBeNull();
+  });
+
+  it('shows the JS heap when the browser measures it', () => {
+    setupStore({ isProfilerOpen: true, stats: { ...defaultStats, jsHeapMb: 42.5 } as never });
+    render(<PerformanceProfiler />);
+    expect(screen.getByText('JS heap').parentElement!.textContent).toContain('42.5 MB');
+  });
+
+  it('reports the JS heap as unknown — not 0 MB — where performance.memory does not exist (#10013)', () => {
+    // jsdom, like Firefox and Safari, has no performance.memory.
+    expect((performance as unknown as { memory?: unknown }).memory).toBeUndefined();
+    setupStore({ isProfilerOpen: true });
+    render(<PerformanceProfiler />);
+    vi.advanceTimersByTime(1100);
+    expect(mockUpdateStats).toHaveBeenCalled();
+    const update = mockUpdateStats.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(update.jsHeapMb).toBe('unknown');
+    // And the profiler no longer overwrites the engine's mesh-memory figure.
+    expect(update).not.toHaveProperty('memoryUsage');
+  });
+
+  it('reports the measured JS heap in MB where performance.memory exists', () => {
+    const perf = performance as unknown as { memory?: unknown };
+    perf.memory = { usedJSHeapSize: 50 * 1024 * 1024, jsHeapSizeLimit: 4096 * 1024 * 1024 };
+    try {
+      setupStore({ isProfilerOpen: true });
+      render(<PerformanceProfiler />);
+      vi.advanceTimersByTime(1100);
+      const update = mockUpdateStats.mock.calls.at(-1)![0] as Record<string, unknown>;
+      expect(update.jsHeapMb).toBe(50);
+    } finally {
+      delete perf.memory;
+    }
   });
 
   it('shows warnings when present', () => {
@@ -337,6 +394,102 @@ describe('PerformanceProfiler', () => {
       render(<PerformanceProfiler />);
       expect(screen.queryByLabelText('Top costly systems')).not.toBeInTheDocument();
     });
+  });
+
+  /**
+   * #9904 board round 1 (ux). The timed-capture panel this PR nests here was
+   * moved onto --sf-* tokens and library primitives. Its tokens are only
+   * readable on a THEMED background: left on this host's fixed gray-900, the
+   * light theme would put #52525b secondary text on #111827. So the host
+   * paints the token surface its children's contrast pins are graded against
+   * (packages/ui/src/tokens/__tests__/themes.test.ts), and follows the same
+   * rules itself.
+   */
+  describe('design system', () => {
+    const SOURCE = readFileSync(resolve(__dirname, '../PerformanceProfiler.tsx'), 'utf-8');
+
+    it.each([false, true])('paints the opaque theme surface and text colour (expanded: %s)', (isProfilerOpen) => {
+      setupStore({ isProfilerOpen });
+      const { container } = render(<PerformanceProfiler />);
+      const root = container.firstElementChild!;
+      expect(root.classList).toContain('bg-[var(--sf-bg-surface)]');
+      expect(root.classList).toContain('text-[var(--sf-text)]');
+    });
+
+    it.each([
+      [false, 1],
+      // Toggle, triangle + draw-call bars, Capture systems, Capture report,
+      // and the nested capture panel's 2 inputs, 2 selects and Run capture.
+      [true, 10],
+    ])('renders every control through the library, with a 44px touch target (expanded: %s)', (isProfilerOpen, count) => {
+      setupStore({ isProfilerOpen, warnings: ['Low FPS'] });
+      const { container } = render(<PerformanceProfiler />);
+      const controls = controlsIn(container);
+      expect(controls).toHaveLength(count);
+      const nameOf = (el: HTMLElement) => el.getAttribute('aria-label') || el.textContent?.trim() || el.tagName.toLowerCase();
+      expect(controls.map((el) => `${nameOf(el)}: ${el.getAttribute(PRIMITIVE_ATTR)}`)).toEqual(
+        controls.map((el) => `${nameOf(el)}: ${expectedPrimitive(el)}`),
+      );
+      const short = controls
+        .filter((el) => el.getAttribute('role') !== 'progressbar' && !hasMobileTouchTarget(el))
+        .map((el) => `${nameOf(el)}: ${el.className}`);
+      expect(short).toEqual([]);
+    });
+
+    it.each([
+      [5_000, 'healthy'], // 1% of the triangle budget
+      [350_000, 'degraded'], // 70%: past the 60% caution line
+      [450_000, 'down'], // 90%: past the 80% warning threshold
+    ])('fills a %i-triangle budget bar with the %s status token', (triangleCount, status) => {
+      setupStore({ isProfilerOpen: true, stats: { ...defaultStats, triangleCount } });
+      render(<PerformanceProfiler />);
+      const bar = screen.getByRole('progressbar', { name: 'Triangle budget usage' });
+      expect(bar.getAttribute(PRIMITIVE_ATTR)).toBe('Progress');
+      expect(bar.style.getPropertyValue('--sf-accent')).toBe(`var(--sf-status-${status}-indicator)`);
+    });
+
+    it.each([
+      [60, 'healthy'],
+      [30, 'down'],
+    ])('colours %i FPS, its readouts and its sparkline with the %s status token', (fps, status) => {
+      const token = `var(--sf-status-${status}-indicator)`;
+      setupStore({ isProfilerOpen: false, stats: { ...defaultStats, fps } });
+      const { unmount } = render(<PerformanceProfiler />);
+      expect(screen.getByText(`${fps} FPS`).classList).toContain(`text-[${token}]`);
+      unmount();
+
+      setupStore({ isProfilerOpen: true, stats: { ...defaultStats, fps }, history: [{ fps }, { fps }] });
+      const { container } = render(<PerformanceProfiler />);
+      expect(screen.getByText('FPS').nextElementSibling!.classList).toContain(`text-[${token}]`);
+      expect(container.querySelector('polyline')!.classList).toContain(`stroke-[${token}]`);
+    });
+
+    it('lists warnings in the library warning notice', () => {
+      setupStore({ isProfilerOpen: true, warnings: ['High triangle count', 'Low FPS'] });
+      render(<PerformanceProfiler />);
+      const notice = screen.getByLabelText('Performance warnings');
+      expect(notice.getAttribute(PRIMITIVE_ATTR)).toBe('InlineAlert');
+      expect(notice.textContent).toBe('High triangle countLow FPS');
+    });
+
+    // A DOM walk only covers rendered branches; the source scan covers all of them.
+    it('names every colour through a var(--sf-*) token, in every branch', () => {
+      expect(findColourLiterals(SOURCE)).toEqual([]);
+    });
+
+    it('renders no raw form control where a library primitive exists', () => {
+      expect(findRawControls(SOURCE)).toEqual([]);
+    });
+  });
+  it('renders FPS history with numeric SVG coordinates and a scalable viewBox', () => {
+    setupStore({ isProfilerOpen: true, history: [{ fps: 60 }, { fps: 30 }] });
+    const { container } = render(<PerformanceProfiler />);
+    const svg = screen.getByRole('img', { name: 'FPS history sparkline' });
+    const line = container.querySelector('polyline')!;
+    expect(svg).toHaveAttribute('viewBox', '0 0 100 100');
+    expect(svg).toHaveAttribute('preserveAspectRatio', 'none');
+    expect(line.getAttribute('points')).toBe('0,0 1.694915254237288,50');
+    expect(line).toHaveAttribute('vector-effect', 'non-scaling-stroke');
   });
 
 });
