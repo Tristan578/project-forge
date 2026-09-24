@@ -107,19 +107,22 @@ test.describe('Game Creation Flow @ui @dev', () => {
     await editor.load();
     await editor.waitForEditorStore();
 
+    const nodeCount = () =>
+      readStore<number>(
+        page,
+        '__EDITOR_STORE',
+        `Object.keys(window.__EDITOR_STORE.getState().sceneGraph.nodes).length`,
+      );
+    // `expect.poll` drops its `message` on timeout (Playwright #28129), so the
+    // one failure with a different cause — no store at all, i.e. the hooks
+    // build is off — is asserted once, up front, where its message is shown.
+    // The poll below then waits only for the engine.
+    expect(await nodeCount(), 'store read requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').not.toBeNull();
     await expect
-      .poll(
-        () =>
-          readStore<number>(
-            page,
-            '__EDITOR_STORE',
-            `Object.keys(window.__EDITOR_STORE?.getState?.()?.sceneGraph?.nodes ?? {}).length`,
-          ),
-        {
-          message: 'the engine-created Camera never reached sceneGraph.nodes (a null count means the hooks build is off)',
-          timeout: E2E_TIMEOUT_LOAD_MS,
-        },
-      )
+      .poll(nodeCount, {
+        message: 'the engine-created Camera never reached sceneGraph.nodes',
+        timeout: E2E_TIMEOUT_LOAD_MS,
+      })
       .toBeGreaterThanOrEqual(1);
 
     const hierarchyContent = page.locator('.dv-dockview').first();
