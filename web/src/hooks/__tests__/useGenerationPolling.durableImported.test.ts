@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act, waitFor, cleanup } from '@testing-library/react';
 
 vi.mock('sonner', () => ({ toast: { warning: vi.fn() } }));
 vi.mock('@/lib/monitoring/sentry-client', () => ({ captureException: vi.fn() }));
@@ -121,6 +121,10 @@ describe('durable completion sync — imported is order-independent (#8892)', ()
   });
 
   afterEach(() => {
+    // Unmount explicitly (no RTL auto-cleanup without vitest globals): a hook
+    // left mounted by the previous test runs its own sync of the next test's
+    // row, and the two instances' writes interleave.
+    cleanup();
     vi.restoreAllMocks();
     useGenerationStore.setState({ jobs: {} });
   });
@@ -145,14 +149,17 @@ describe('durable completion sync — imported is order-independent (#8892)', ()
   it('a hydrated COMPLETED row ends imported = 1 whichever PATCH the server applies last', async () => {
     stubServer({ status: 'completed', resultUrl: 'https://cdn.example.com/tower.glb', resultMeta: null, errorMessage: null });
     // autoPlace false: the model branch records the result without a download.
-    useGenerationStore.setState({ jobs: { job: hydrated({ status: 'completed', progress: 100, autoPlace: false }) } });
+    // Hydrated as 'downloading': hydrateFromServer's shape for a completed row.
+    useGenerationStore.setState({ jobs: { job: hydrated({ status: 'downloading', progress: 100, autoPlace: false }) } });
 
     renderHook(() => useGenerationPolling());
     await waitFor(() => expect(useGenerationStore.getState().jobs.job?.needsCompletionSync).toBe(false));
     await act(async () => { await Promise.resolve(); });
 
-    // The intermediate 'downloading' sync is one of the racing writers too.
-    expect(patchBodies.some((b) => b.status === 'downloading')).toBe(true);
+    // Both writers fired: the store's completed sync and the hook's reflected
+    // mark. No 'downloading' write: the finalized row is never regressed.
+    expect(patchBodies.some((b) => b.status === 'completed')).toBe(true);
+    expect(patchBodies.some((b) => b.status === 'downloading')).toBe(false);
     expectNoImportedFalse(patchBodies);
     expect(applyPatches(patchBodies).imported).toBe(1);
     expect(applyPatches([...patchBodies].reverse()).imported).toBe(1);

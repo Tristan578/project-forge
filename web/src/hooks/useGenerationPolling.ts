@@ -31,6 +31,7 @@ import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import { enqueueFailedRefund, processFailedRefunds } from '@/lib/utils/refundQueue';
 import { showPersistentError, showSuccess } from '@/lib/toast';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { ESTIMATED_TIMES } from '@/lib/generation/estimatedTimes';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
@@ -309,7 +310,13 @@ export function useGenerationPolling() {
     dbJob: DurableJobRow,
   ): Promise<boolean> {
     if (dbJob.status === 'completed') {
-      updateJob(id, { status: 'downloading', progress: 100 });
+      // A hydrated row is already 'downloading' (hydrateFromServer). Writing it
+      // again would change nothing on screen and would PATCH the finalized row
+      // back to a live status: if the tab closed mid-import, the next load
+      // would hydrate a 'downloading' row that nothing ever settles.
+      if (useGenerationStore.getState().jobs[id]?.status !== 'downloading') {
+        updateJob(id, { status: 'downloading', progress: 100 });
+      }
       // For a texture, resultMeta IS the { albedo: url, ... } maps object the
       // completion branch iterates (pollProviderStatus stores status.maps there).
       const maps =
@@ -333,6 +340,45 @@ export function useGenerationPolling() {
       return true;
     }
     return false;
+  }
+
+  /**
+   * The row read for a hydrated completed job failed, so its import has not
+   * started. Put it back to the terminal status the server reported rather
+   * than leave a 'downloading' spinner that nothing is working on. LOCAL ONLY:
+   * `updateJob` would PATCH `completed` + `imported: true`, marking the row
+   * reflected without importing it and dropping it from the next load's list.
+   * `needsCompletionSync` stays set, so the next sync attempt retries.
+   */
+  function restoreHydratedTerminal(id: string) {
+    const current = useGenerationStore.getState().jobs[id];
+    if (current?.status !== 'downloading' || current.needsCompletionSync !== true) return;
+    useGenerationStore.setState((state) => {
+      const job = state.jobs[id];
+      if (!job || job.status !== 'downloading' || job.needsCompletionSync !== true) return state;
+      return { jobs: { ...state.jobs, [id]: { ...job, status: 'completed' } } };
+    });
+  }
+
+  /**
+   * One confirmation for a job the durable callback finished while no tab was
+   * open (#8892). Without it the job's only trace is a spinner that appears on
+   * load and quietly disappears. Called only from the completion-sync effect,
+   * which runs once per hydrated job, so a job completed live in this session
+   * never gets it; a failed row gets the failure toast `failJob` already shows.
+   */
+  function announceFinishedWhileAway(id: string) {
+    const job = useGenerationStore.getState().jobs[id];
+    if (job?.status !== 'completed') return;
+    const label = ESTIMATED_TIMES[job.type]?.label ?? 'generation';
+    // Say "added to your project" only when the import actually placed it:
+    // with autoPlace off (or no target entity) the result is recorded, not used.
+    const placed = job.metadata?.autoPlaced === true || job.type === 'skybox';
+    showSuccess(
+      placed
+        ? `Your ${label} finished while you were away and was added to your project.`
+        : `Your ${label} finished while you were away.`,
+    );
   }
 
   async function handleCompletion(id: string, type: string, data: StatusResponse) {
@@ -847,12 +893,14 @@ export function useGenerationPolling() {
           if (!res.ok) {
             // Leave needsCompletionSync set so a later load retries.
             console.error(`Durable completion sync failed: ${res.status}`);
+            restoreHydratedTerminal(id);
             return;
           }
           const dbJob = (await res.json()) as DurableJobRow;
           const settled = await settleFromDurableRow(id, type, jobId, dbJob);
           updateJob(id, { needsCompletionSync: false });
           if (settled) {
+            announceFinishedWhileAway(id);
             // Mark the row reflected so the list route stops returning it.
             // The failed branch's own status sync carries no `imported` (the
             // store never sends false, and the route ignores false), so this
@@ -865,6 +913,7 @@ export function useGenerationPolling() {
           }
         } catch (err) {
           console.error('Durable completion sync error:', err);
+          restoreHydratedTerminal(id);
         } finally {
           syncingRef.current.delete(id);
         }

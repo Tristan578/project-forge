@@ -606,7 +606,9 @@ describe('generationStore', () => {
 
       const state = useGenerationStore.getState();
       expect(state.durableCompletionEnabled).toBe(true);
-      expect(state.jobs['hydrated_srv-done']).toEqual(expect.objectContaining({ status: 'completed', needsCompletionSync: true, dbId: 'srv-done' }));
+      // Hydrated already 'downloading' — the state the completion sync puts it
+      // in — so the status indicator never flips completed -> downloading.
+      expect(state.jobs['hydrated_srv-done']).toEqual(expect.objectContaining({ status: 'downloading', needsCompletionSync: true, dbId: 'srv-done' }));
       expect(state.jobs['hydrated_srv-failed']).toEqual(expect.objectContaining({ status: 'failed', needsCompletionSync: true }));
       // A live job is polled, not synced: the key is absent, not false.
       expect(state.jobs['hydrated_srv-live']).not.toHaveProperty('needsCompletionSync');

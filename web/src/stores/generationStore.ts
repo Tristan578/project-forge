@@ -256,13 +256,28 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             continue;
           }
         }
+        // A terminal row in the ACTIVE list is one the durable callback
+        // finished while no tab was open (the route only returns terminal
+        // rows with imported = 0). Its import/refund still has to run here.
+        const needsCompletionSync = sj.status === 'completed' || sj.status === 'failed';
         hydratedJobs[localId] = {
           id: localId,
           jobId: sj.providerJobId,
           type: sj.type,
           prompt: sj.prompt,
           // A reload interrupts import. Requeue synchronous active artifacts.
-          status: sj.providerJobId.startsWith('dalle3-sync:') && resultUrl ? 'pending' : sj.status,
+          // A completed-but-unimported durable row is hydrated as 'downloading'
+          // — the state its completion sync is about to put it in — so the
+          // status indicator shows it finishing from the first render instead
+          // of flipping completed -> downloading moments after load (#8892).
+          // Only the completion-sync effect settles it: the polling effect
+          // picks up pending/processing only, so it never reaches the provider
+          // status route. A failed row stays 'failed' — no spinner at all.
+          status: sj.providerJobId.startsWith('dalle3-sync:') && resultUrl
+            ? 'pending'
+            : needsCompletionSync && sj.status === 'completed'
+              ? 'downloading'
+              : sj.status,
           progress: sj.progress,
           provider: sj.provider,
           createdAt: new Date(sj.createdAt).getTime(),
@@ -278,10 +293,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           materialSlot:
             typeof params['materialSlot'] === 'string' ? params['materialSlot'] : undefined,
           durable: params['durable'] === true,
-          // A terminal row in the ACTIVE list is one the durable callback
-          // finished while no tab was open (the route only returns terminal
-          // rows with imported = 0). Its import/refund still has to run here.
-          ...((sj.status === 'completed' || sj.status === 'failed') && { needsCompletionSync: true }),
+          ...(needsCompletionSync && { needsCompletionSync: true }),
         };
       }
 
