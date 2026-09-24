@@ -420,15 +420,19 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       }
 
       const title = p.data.title ?? ctx.store.sceneName;
+      const mode = p.data.mode ?? 'single-html';
       const blob = await exportGame({
         title,
-        mode: p.data.mode ?? 'single-html',
+        mode,
         resolution,
         bgColor: '#18181b',
         includeDebug: false,
       });
 
-      const filename = `${title.replace(/[^a-z0-9_-]/gi, '_')}.html`;
+      // In zip mode exportGame returns a zip archive; naming it .html made the
+      // download open as a broken page. Same rule as ExportDialog.
+      const extension = mode === 'single-html' ? 'html' : 'zip';
+      const filename = `${title.replace(/[^a-z0-9_-]/gi, '_')}.${extension}`;
       downloadBlob(blob, filename);
 
       return { success: true, result: { message: 'Game exported successfully', filename } };
