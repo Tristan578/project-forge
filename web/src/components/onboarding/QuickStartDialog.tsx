@@ -13,6 +13,10 @@
  * renders the very same `ApprovalGateDialog` the orchestrator panel uses rather
  * than leaving a quick-start user stranded behind a gate they cannot see.
  *
+ * Once the build completes the dialog offers "Play now": the status line
+ * tells the user to press Play, and the only Play control lived in the
+ * toolbar behind the modal (#10166).
+ *
  * PF-1215 (#9338), golden-path item 4.
  */
 
@@ -92,12 +96,14 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const statusRef = useRef<HTMLDivElement>(null);
   const firstCardRef = useRef<HTMLButtonElement>(null);
+  const playNowRef = useRef<HTMLButtonElement>(null);
   const prevPhaseRef = useRef<Phase | null>(null);
 
   const status = useEditorStore((s) => s.orchestratorStatus);
   const pendingGate = useEditorStore((s) => s.pendingGate);
   const resolveGate = useEditorStore((s) => s.resolveGate);
   const cancelPipeline = useEditorStore((s) => s.cancelPipeline);
+  const play = useEditorStore((s) => s.play);
 
   const runIsLive = isOrchestratorRunLive(status);
 
@@ -148,6 +154,13 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     else if (phase === 'running') statusRef.current?.focus();
     else firstCardRef.current?.focus();
   }, [phase]);
+
+  // "Play now" appears when the run completes, which is the moment the user
+  // has been waiting for: put focus on it so Enter plays. Declared after the
+  // phase effect so it wins when both fire in the same commit.
+  useEffect(() => {
+    if (phase === 'running' && status === 'completed') playNowRef.current?.focus();
+  }, [phase, status]);
 
   const selected = findQuickStartGameType(selectedId);
   const promptMax = selected ? quickStartPromptMaxLength(selected) : 0;
@@ -226,6 +239,16 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     onClose();
   }, [cancelPipeline, onClose]);
 
+  // Close whichever way play() went. A refusal (the winnability gate, or no
+  // engine) has already opened the chat overlay with its explanation, and
+  // that overlay and this Dialog are both z-50 modals listening for Escape,
+  // so keeping the dialog open would stack two. `engineMode` only moves when
+  // the engine emits ENGINE_MODE_CHANGED, so it is never set from here.
+  const handlePlayNow = useCallback(() => {
+    play();
+    onClose();
+  }, [play, onClose]);
+
   if (!open) return null;
 
   const actions =
@@ -253,7 +276,17 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             Stop
           </Button>
         )}
-        <Button size="sm" onClick={onClose}>
+        {status === 'completed' && (
+          <Button
+            ref={playNowRef}
+            size="sm"
+            data-testid="quick-start-play-now"
+            onClick={handlePlayNow}
+          >
+            Play now
+          </Button>
+        )}
+        <Button variant={status === 'completed' ? 'ghost' : undefined} size="sm" onClick={onClose}>
           Close
         </Button>
       </>

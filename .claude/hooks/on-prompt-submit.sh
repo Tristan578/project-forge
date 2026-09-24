@@ -7,6 +7,7 @@
 # an active ticket, instructs the AI to find or create one before proceeding.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091  # dynamic $SCRIPT_DIR path; taskboard-state.sh is linted on its own by the whole-tree glob
 source "$SCRIPT_DIR/taskboard-state.sh"
 
 # Read the user's prompt from stdin
