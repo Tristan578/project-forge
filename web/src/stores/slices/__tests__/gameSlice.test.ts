@@ -35,7 +35,11 @@ describe('gameSlice', () => {
     store = createSliceStore(createGameSlice);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // play() reports analytics through a dynamic import. Let every pending one
+    // land HERE, before the mocks are cleared: otherwise a start counted by one
+    // test resolves inside the next and fails its "not called" assertion.
+    await vi.dynamicImportSettled();
     setGameDispatcher(null as unknown as (command: string, payload: unknown) => void);
     setWinnabilityStateReader(null);
     chatSetState.mockClear();
