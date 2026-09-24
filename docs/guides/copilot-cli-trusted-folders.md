@@ -57,13 +57,13 @@ and keep every other key in the file:
 ```json
 {
   "trustedFolders": [
-    "/home/you/src/project-forge"
+    "<absolute path of your checkout>"
   ]
 }
 ```
 
-Use the path as your machine spells it. On Windows that is a path such as
-`C:\\Users\\you\\src\\project-forge` (backslashes doubled inside JSON). The CLI owns this
+Replace the placeholder with the path as your machine spells it (what `pwd` prints
+at the root of the checkout). On Windows, double every backslash inside JSON. The CLI owns this
 file and writes other state to it. As of 1.0.88 it also moves user **settings** out of
 `config.json` into a separate `settings.json`, so the prompt above is the safer route
 across upgrades.
