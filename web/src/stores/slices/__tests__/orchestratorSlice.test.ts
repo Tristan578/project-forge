@@ -1327,6 +1327,8 @@ describe('orchestratorSlice', () => {
       await store.getState().runPipelineFromPlan();
       await store.getState().runPipelineFromPlan();
 
+      // Both runs ran: the in-flight guard let go after the first settled.
+      expect(runPipeline).toHaveBeenCalledTimes(2);
       expect(store.getState().orchestratorWarnings).toEqual([
         { message: 'No win condition detected — the game cannot be completed.' },
       ]);
@@ -1432,6 +1434,61 @@ describe('orchestratorSlice', () => {
       expect(runPipeline).not.toHaveBeenCalled();
     });
 
+    it('fails with the route\'s own reason when it refuses for something else', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Pipeline budget unavailable' }) });
+      store.getState().setPlan(makeMockPlan());
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorError).toBe('Pipeline budget unavailable');
+      expect(runPipeline).not.toHaveBeenCalled();
+    });
+
+    // A build with an undefined reservation would run and never be refunded.
+    it('refuses to build on a reservation reply with no id', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ reservationId: '' }) });
+      store.getState().setPlan(makeMockPlan());
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorError).toContain('invalid ID');
+      expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
+      expect(runPipeline).not.toHaveBeenCalled();
+    });
+
+    // The in-flight guard must let go on every exit, or the plan can never
+    // be built again after a refusal.
+    it('builds the same plan on retry after a refused reservation', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'insufficient_tokens' }) });
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
+      await store.getState().runPipelineFromPlan();
+      expect(store.getState().orchestratorStatus).toBe('failed');
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(budgetCalls().filter((c) => c.action === 'reserve')).toHaveLength(2);
+      expect(runPipeline).toHaveBeenCalledOnce();
+    });
+
+    // Everything between the reservation and the run is inside the try whose
+    // finally releases it: a throw there must not keep the tokens.
+    it('releases the reservation and fails when setup after it throws', async () => {
+      mockEditorState.setProjectType.mockImplementationOnce(() => {
+        throw new Error('engine rejected set_project_type');
+      });
+      store.getState().setPlan(makeMockPlan());
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorError).toBe('engine rejected set_project_type');
+      expect(budgetCalls()).toContainEqual({ action: 'release', reservationId: 'res-default', actualUsed: 0 });
+      expect(runPipeline).not.toHaveBeenCalled();
+    });
+
     it('reserves nothing for a plan with nothing to reserve', async () => {
       const plan = makeMockPlan();
       plan.tokenEstimate.totalVarianceHigh = 0;
@@ -1443,22 +1500,36 @@ describe('orchestratorSlice', () => {
       expect(runPipeline).toHaveBeenCalledOnce();
     });
 
-    it('stops without running when cancelled while the reservation is in flight', async () => {
-      mockFetch.mockImplementationOnce((_url: string, opts?: { signal?: AbortSignal }) =>
-        new Promise((_resolve, reject) => {
+    /**
+     * Modelled on REAL fetch (lesson #14): the server deducts as soon as the
+     * request arrives, and an aborted fetch rejects and discards the reply,
+     * reservation id and all. So a reserve POST that carried the run's abort
+     * signal could never be refunded after a cancel. This mock rejects on
+     * abort exactly as fetch does, so passing the signal fails this test.
+     */
+    it('releases the reservation when the user cancels while it is in flight', async () => {
+      let deducted = false;
+      let answer!: () => void;
+      mockFetch.mockImplementationOnce((_url: string, opts?: { signal?: AbortSignal }) => {
+        deducted = true; // the route has committed `deductTokens`
+        return new Promise((resolve, reject) => {
           opts?.signal?.addEventListener('abort', () => {
             reject(new DOMException('The operation was aborted.', 'AbortError'));
           });
-        }),
-      );
+          answer = () =>
+            resolve({ ok: true, json: async () => ({ reservationId: 'res-inflight', remaining: { total: 1 } }) });
+        });
+      });
       store.getState().setPlan(makeMockPlan());
 
       const run = store.getState().runPipelineFromPlan();
-      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(deducted).toBe(true));
       store.getState().cancelPipeline();
+      answer();
       await run;
 
       expect(store.getState().orchestratorStatus).toBe('cancelled');
+      expect(budgetCalls()).toContainEqual({ action: 'release', reservationId: 'res-inflight', actualUsed: 0 });
       expect(runPipeline).not.toHaveBeenCalled();
       expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
     });

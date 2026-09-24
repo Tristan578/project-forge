@@ -209,16 +209,17 @@ let _abortController: AbortController | null = null;
  * Resolves to the reservation id, or `null` when the plan has nothing to
  * reserve. Throws with a user-facing message when the server refuses.
  */
-async function reserveBuildBudget(
-  estimatedTotal: number,
-  signal: AbortSignal,
-): Promise<string | null> {
+async function reserveBuildBudget(estimatedTotal: number): Promise<string | null> {
   if (estimatedTotal <= 0) return null;
+  // Deliberately NO abort signal. Aborting a fetch only stops the browser
+  // reading the reply: the route still runs `deductTokens` to completion, and
+  // the client would throw away the one thing that can refund it, the
+  // reservation id. The caller lets this settle and releases it if the user
+  // cancelled in the meantime (#6831 review).
   const reserveRes = await fetch('/api/game/pipeline', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'reserve', estimatedTotal }),
-    signal,
   });
 
   if (!reserveRes.ok) {
@@ -537,11 +538,11 @@ export const createOrchestratorSlice: StateCreator<
     // the scene exactly as it was.
     let reservationId: string | null;
     try {
-      reservationId = await reserveBuildBudget(currentPlan.tokenEstimate.totalVarianceHigh, signal);
+      reservationId = await reserveBuildBudget(currentPlan.tokenEstimate.totalVarianceHigh);
     } catch (err) {
       settle();
-      // Cancelled while reserving: `cancelPipeline` already set the status.
-      if (err instanceof DOMException && err.name === 'AbortError') return;
+      // A cancel while reserving already set 'cancelled'; do not repaint it.
+      if (signal.aborted) return;
       if (get().currentPlan === currentPlan) {
         set({
           orchestratorStatus: 'failed',
@@ -550,7 +551,8 @@ export const createOrchestratorSlice: StateCreator<
       }
       return;
     }
-    // Cancelled or reset while the reservation was in flight. `cancelPipeline`
+    // Cancelled or reset while the reservation was in flight. The request ran
+    // to completion (no signal, above), so its id is in hand: `cancelPipeline`
     // could not release a reservation it had not seen yet, so release it here.
     if (signal.aborted || get().currentPlan !== currentPlan) {
       if (reservationId) releaseReservation(reservationId, 0, 'orchestrator.releaseTokens.cancelledWhileReserving');
@@ -558,51 +560,6 @@ export const createOrchestratorSlice: StateCreator<
       return;
     }
     set({ reservationId });
-
-    // Read user tier from userStore
-    const { useUserStore } = await import('@/stores/userStore');
-    const { tier } = useUserStore.getState();
-
-    // Get fresh editorStore state
-    const { useEditorStore } = await import('@/stores/editorStore');
-
-    // The engine's `ProjectType` resource defaults to `ThreeD` and its ONLY
-    // writer is the `set_project_type` command. Nothing on this pipeline
-    // dispatched it — every executor merely read `ctx.projectType` — so a
-    // generated 2D game ran the whole engine in 3D mode: the character
-    // controller steered the player along the depth axis an orthographic camera
-    // cannot show, and no Camera2d was created. Setting it through the store
-    // (which dispatches) keeps store and engine in step, and it has to happen
-    // before the first step rather than inside one, because scene, camera and
-    // character steps all depend on it.
-    useEditorStore.getState().setProjectType(currentPlan.gdd.projectType);
-
-    // A fresh run must not read a spawn/transform observation left in the cache
-    // by an earlier run (or an earlier cancelled operation on the same id) —
-    // that would let stale engine state satisfy a new observation (#9899).
-    clearEntityObservations();
-
-    const ctx: ExecutorContext = {
-      dispatchCommand: dispatcher,
-      dispatchCommandBatch: getCommandBatchDispatcher() ?? undefined,
-      getStore: () => useEditorStore.getState(),
-      projectType: currentPlan.gdd.projectType,
-      userTier: tier as UserTier,
-      signal: _abortController.signal,
-      resolveStepOutput: () => undefined, // overridden by runPipeline
-      resolveStepOutputs: () => [], // overridden by runPipeline
-      // Confirmed-effect query (#9899). Each call FIRES a fresh
-      // `get_entity_details` and RETURNS the latest cached answer: the engine
-      // answers asynchronously on `QUERY_ENTITY_DETAILS` a frame later, so the
-      // observation adapter's next poll reads the state this poll requested.
-      // A miss (`undefined`) means no answer is cached. The engine emits
-      // nothing for an absent entity, but a present entity's reply may also
-      // still be in flight; a miss must not authorize another spawn.
-      observeEntity: (entityId: string) => {
-        dispatcher('get_entity_details', { entityId });
-        return readEntityObservation(entityId);
-      },
-    };
 
     let completedSteps = 0;
     const totalSteps = currentPlan.steps.length;
@@ -631,93 +588,142 @@ export const createOrchestratorSlice: StateCreator<
      */
     const isCurrentRun = () => get().currentPlan === currentPlan;
 
-    const callbacks: PipelineCallbacks = {
-      onStepComplete: (stepId, result) => {
-        if (!isCurrentRun()) return;
-
-        const status = result.success ? 'completed' : 'failed';
-        get().updateStepStatus(stepId, status);
-
-        // Update currentStepIndex
-        const plan = get().currentPlan;
-        const idx = plan ? findStepIndex(plan, stepId) : -1;
-        if (idx >= 0) {
-          set({ currentStepIndex: idx });
-        }
-
-        // A partially-applied step reports itself on its output rather than
-        // failing, so this is the only place those notes can reach the user —
-        // and until now the whole `output` was discarded here.
-        const messages = collectStepWarnings(result.output);
-        if (messages.length > 0) {
-          const executor = plan?.steps[idx]?.executor ?? stepId;
-          set(s => ({
-            orchestratorWarnings: [
-              ...s.orchestratorWarnings,
-              ...messages.map(message => ({ stepId, executor, message })),
-            ],
-          }));
-        }
-
-        if (result.success) {
-          completedSteps += 1;
-        }
-      },
-
-      onGateReached: (gate) => {
-        // A superseded run must not repaint an approval gate over the live
-        // store — but it still has to be UNPARKED, or its `await` never
-        // returns, `runPipeline` never reaches its `finally`, and the token
-        // reservation leaks for the rest of the session. `pipelineRunner`
-        // checks `ctx.signal` only at the top of each step iteration, so a
-        // step that settles just before a reset still reaches this gate with
-        // no abort check in between, and `planBuilder` gives every plan
-        // gates. Resolve with the VALUE 'rejected' rather than rejecting the
-        // promise: the runner reads that as a decision, cancels the abandoned
-        // plan, skips its remaining steps and returns normally
-        // (PF-1229 finding #1).
-        //
-        // This check comes BEFORE the auto-approve one below: a superseded run
-        // must be cancelled whether or not its gate was pre-approved, and
-        // answering 'approved' here would let a dead run keep executing steps
-        // against the store that replaced it.
-        if (!isCurrentRun()) {
-          return Promise.resolve<'approved' | 'rejected'>('rejected');
-        }
-
-        // Auto-approved gates never become a `pendingGate`, so the status stays
-        // 'executing' and no UI is asked to render a confirmation the user has
-        // already given. Resolving synchronously also means no `_gateResolver`
-        // is left dangling for `cancelPipeline` to reject.
-        if (get().autoApproveGateIds.includes(gate.id)) {
-          return Promise.resolve<'approved' | 'rejected'>('approved');
-        }
-
-        return new Promise<'approved' | 'rejected'>((resolve) => {
-          _gateResolver = resolve;
-          set({
-            pendingGate: gate,
-            orchestratorStatus: 'awaiting_approval',
-          });
-        });
-      },
-
-      onPlanStatusChange: (planStatus) => {
-        // Map plan status to orchestrator status
-        const statusMap: Record<string, OrchestratorStatus> = {
-          executing: 'executing',
-          completed: 'completed',
-          failed: 'failed',
-          cancelled: 'cancelled',
-        };
-        const mapped = statusMap[planStatus];
-        if (mapped && isCurrentRun()) {
-          set({ orchestratorStatus: mapped });
-        }
-      },
-    };
-
+    // From here the reservation is held, so every path, a throw included,
+    // must reach the `finally` below: it releases the unused tokens and
+    // settles the in-flight guard. Nothing between the reservation and the
+    // run may sit outside it (#6831 review).
     try {
+      // Read user tier from userStore
+      const { useUserStore } = await import('@/stores/userStore');
+      const { tier } = useUserStore.getState();
+
+      // Get fresh editorStore state
+      const { useEditorStore } = await import('@/stores/editorStore');
+
+      // The engine's `ProjectType` resource defaults to `ThreeD` and its ONLY
+      // writer is the `set_project_type` command. Nothing on this pipeline
+      // dispatched it — every executor merely read `ctx.projectType` — so a
+      // generated 2D game ran the whole engine in 3D mode: the character
+      // controller steered the player along the depth axis an orthographic camera
+      // cannot show, and no Camera2d was created. Setting it through the store
+      // (which dispatches) keeps store and engine in step, and it has to happen
+      // before the first step rather than inside one, because scene, camera and
+      // character steps all depend on it.
+      useEditorStore.getState().setProjectType(currentPlan.gdd.projectType);
+
+      // A fresh run must not read a spawn/transform observation left in the cache
+      // by an earlier run (or an earlier cancelled operation on the same id) —
+      // that would let stale engine state satisfy a new observation (#9899).
+      clearEntityObservations();
+
+      const ctx: ExecutorContext = {
+        dispatchCommand: dispatcher,
+        dispatchCommandBatch: getCommandBatchDispatcher() ?? undefined,
+        getStore: () => useEditorStore.getState(),
+        projectType: currentPlan.gdd.projectType,
+        userTier: tier as UserTier,
+        signal,
+        resolveStepOutput: () => undefined, // overridden by runPipeline
+        resolveStepOutputs: () => [], // overridden by runPipeline
+        // Confirmed-effect query (#9899). Each call FIRES a fresh
+        // `get_entity_details` and RETURNS the latest cached answer: the engine
+        // answers asynchronously on `QUERY_ENTITY_DETAILS` a frame later, so the
+        // observation adapter's next poll reads the state this poll requested.
+        // A miss (`undefined`) means no answer is cached. The engine emits
+        // nothing for an absent entity, but a present entity's reply may also
+        // still be in flight; a miss must not authorize another spawn.
+        observeEntity: (entityId: string) => {
+          dispatcher('get_entity_details', { entityId });
+          return readEntityObservation(entityId);
+        },
+      };
+
+      const callbacks: PipelineCallbacks = {
+        onStepComplete: (stepId, result) => {
+          if (!isCurrentRun()) return;
+
+          const status = result.success ? 'completed' : 'failed';
+          get().updateStepStatus(stepId, status);
+
+          // Update currentStepIndex
+          const plan = get().currentPlan;
+          const idx = plan ? findStepIndex(plan, stepId) : -1;
+          if (idx >= 0) {
+            set({ currentStepIndex: idx });
+          }
+
+          // A partially-applied step reports itself on its output rather than
+          // failing, so this is the only place those notes can reach the user —
+          // and until now the whole `output` was discarded here.
+          const messages = collectStepWarnings(result.output);
+          if (messages.length > 0) {
+            const executor = plan?.steps[idx]?.executor ?? stepId;
+            set(s => ({
+              orchestratorWarnings: [
+                ...s.orchestratorWarnings,
+                ...messages.map(message => ({ stepId, executor, message })),
+              ],
+            }));
+          }
+
+          if (result.success) {
+            completedSteps += 1;
+          }
+        },
+
+        onGateReached: (gate) => {
+          // A superseded run must not repaint an approval gate over the live
+          // store — but it still has to be UNPARKED, or its `await` never
+          // returns, `runPipeline` never reaches its `finally`, and the token
+          // reservation leaks for the rest of the session. `pipelineRunner`
+          // checks `ctx.signal` only at the top of each step iteration, so a
+          // step that settles just before a reset still reaches this gate with
+          // no abort check in between, and `planBuilder` gives every plan
+          // gates. Resolve with the VALUE 'rejected' rather than rejecting the
+          // promise: the runner reads that as a decision, cancels the abandoned
+          // plan, skips its remaining steps and returns normally
+          // (PF-1229 finding #1).
+          //
+          // This check comes BEFORE the auto-approve one below: a superseded run
+          // must be cancelled whether or not its gate was pre-approved, and
+          // answering 'approved' here would let a dead run keep executing steps
+          // against the store that replaced it.
+          if (!isCurrentRun()) {
+            return Promise.resolve<'approved' | 'rejected'>('rejected');
+          }
+
+          // Auto-approved gates never become a `pendingGate`, so the status stays
+          // 'executing' and no UI is asked to render a confirmation the user has
+          // already given. Resolving synchronously also means no `_gateResolver`
+          // is left dangling for `cancelPipeline` to reject.
+          if (get().autoApproveGateIds.includes(gate.id)) {
+            return Promise.resolve<'approved' | 'rejected'>('approved');
+          }
+
+          return new Promise<'approved' | 'rejected'>((resolve) => {
+            _gateResolver = resolve;
+            set({
+              pendingGate: gate,
+              orchestratorStatus: 'awaiting_approval',
+            });
+          });
+        },
+
+        onPlanStatusChange: (planStatus) => {
+          // Map plan status to orchestrator status
+          const statusMap: Record<string, OrchestratorStatus> = {
+            executing: 'executing',
+            completed: 'completed',
+            failed: 'failed',
+            cancelled: 'cancelled',
+          };
+          const mapped = statusMap[planStatus];
+          if (mapped && isCurrentRun()) {
+            set({ orchestratorStatus: mapped });
+          }
+        },
+      };
+
       await runPipeline(currentPlan, EXECUTOR_REGISTRY, ctx, callbacks);
 
       // Final status is set by onPlanStatusChange callback
