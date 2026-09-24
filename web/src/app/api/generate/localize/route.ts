@@ -13,6 +13,7 @@ import {
 } from '@/lib/i18n/gameLocalization';
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
@@ -121,7 +122,9 @@ const POST_impl = createGenerationHandler<
     targetLocales: params.targetLocales,
   }),
   execute: async (params, apiKey, { userId, usageId, abortSignal }) => {
-    const anthropicProvider = createAnthropic({ apiKey });
+    // A platform key can be a federated Bearer token (#8858); passing it as
+    // `apiKey` would send it as `x-api-key`, which Anthropic rejects.
+    const anthropicProvider = createAnthropic(anthropicClientAuthForKey(apiKey));
     const result: Record<string, LocaleBundle> = {};
 
     // Resolve consent + a single trace id once for the whole localize op — every
