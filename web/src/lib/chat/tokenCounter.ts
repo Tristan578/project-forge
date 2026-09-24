@@ -32,11 +32,18 @@ export function estimateMessageTokens(message: { role: string; content: unknown 
         if (b.type === 'text' && typeof b.text === 'string') {
           tokens += estimateTokenCount(b.text);
         } else if (b.type === 'tool_use') {
-          // tool_use blocks: name + JSON input
-          tokens += estimateTokenCount(JSON.stringify(b.input ?? {}));
-          tokens += estimateTokenCount(String(b.name ?? ''));
+          // tool_use blocks: name + JSON input. `content` is `unknown`, so each
+          // field is type-checked like `text` above rather than defaulted with
+          // `??` / `||` (#9565 review round 3).
+          const input = typeof b.input === 'object' && b.input !== null ? b.input : {};
+          tokens += estimateTokenCount(JSON.stringify(input));
+          tokens += estimateTokenCount(typeof b.name === 'string' ? b.name : '');
         } else if (b.type === 'tool_result') {
-          tokens += estimateTokenCount(String(b.content ?? ''));
+          // A tool_result body is a string or an array of content blocks.
+          const body = typeof b.content === 'string'
+            ? b.content
+            : typeof b.content === 'object' && b.content !== null ? JSON.stringify(b.content) : '';
+          tokens += estimateTokenCount(body);
         } else if (b.type === 'image') {
           // Images are ~1600 tokens for typical size
           tokens += 1600;
