@@ -97,7 +97,8 @@ that mistake recurring.
 
 | Variable | Source | Description |
 |----------|--------|-------------|
-| `OPENROUTER_API_KEY`, `GITHUB_MODELS_PAT`, `GOOGLE_AI_API_KEY` | Respective dashboards | Alternative chat backends, tried after the Vercel AI Gateway and before `ANTHROPIC_API_KEY`. (`AI_GATEWAY_API_KEY` is not optional for `image`/`embedding` — see the platform generation keys section.) |
+| `OPENROUTER_API_KEY`, `GITHUB_MODELS_PAT` | Respective dashboards | The two alternative chat backends in `CHAT_BACKENDS`, tried after the Vercel AI Gateway and before `ANTHROPIC_API_KEY`. (`AI_GATEWAY_API_KEY` is not optional for `image`/`embedding` — see the platform generation keys section.) |
+| `GOOGLE_AI_API_KEY` | — | Reserved: present in `web/.env.example` but read by nothing in `web/src`. Setting it changes nothing; it is not a chat backend. |
 | `NEXT_PUBLIC_ENGINE_CDN_URL` | Set manually | Base URL for the WASM engine CDN. Production: `https://engine.spawnforge.ai`. Without this, the engine loads from `/engine-pkg-*` in `web/public/`. |
 | `NEXT_PUBLIC_ENGINE_VERSION` | Set by CI to the engine build SHA | Cache-busting suffix on engine asset URLs and the preload hint. Unset means no suffix. |
 | `CDN_URL` | Set manually | Public base URL marketplace asset keys are served from. **Distinct from `NEXT_PUBLIC_ENGINE_CDN_URL`** — that one is the WASM engine. Signed download URLs and the download route's host check both derive from this. |
