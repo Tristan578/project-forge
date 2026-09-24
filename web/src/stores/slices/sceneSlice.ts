@@ -379,6 +379,16 @@ let dispatchCommand: ((command: string, payload: unknown) => DispatchResult) | n
 let deferredSceneLoad: { json: string; replay: () => void } | null = null;
 
 /**
+ * True only while `setSceneDispatcher` replays a deferred load. The page that
+ * deferred it hydrated the music arrangement from the same scene data at
+ * once (the arrangement store is JS-only, so it is editable while the engine
+ * is still loading), so the replay must leave the arrangement store alone —
+ * re-hydrating it here would silently drop whatever the user changed while
+ * waiting for the engine (Sentry review on #10210).
+ */
+let replayingDeferredSceneLoad = false;
+
+/**
  * Attach the engine command dispatcher and matching scene validator.
  *
  * Attaching replays the load deferred while no engine was present, exactly
@@ -445,7 +455,10 @@ export interface LoadSceneOptions {
    * finished loading would replace the project scene a moment after the
    * toolbar said it was not loaded. The caller that defers owns the held
    * load and cancels it with {@link cancelDeferredSceneLoad} when it goes
-   * away, so it cannot replay into a different editor.
+   * away, so it cannot replay into a different editor. It also hydrates the
+   * music arrangement from the same scene data itself: the replay leaves the
+   * arrangement store alone, so edits made while the engine was loading
+   * survive it.
    */
   deferUntilEngineAttaches?: boolean;
 }
@@ -829,7 +842,17 @@ export const createSceneSlice: StateCreator<
     // contradicted by a load that lands later.
     if (!dispatchCommand) {
       if (opts?.deferUntilEngineAttaches) {
-        deferredSceneLoad = { json, replay: () => { get().loadScene(json, opts); } };
+        deferredSceneLoad = {
+          json,
+          replay: () => {
+            replayingDeferredSceneLoad = true;
+            try {
+              get().loadScene(json, opts);
+            } finally {
+              replayingDeferredSceneLoad = false;
+            }
+          },
+        };
       }
       return false;
     }
@@ -880,8 +903,10 @@ export const createSceneSlice: StateCreator<
     // once again describing the project rather than overwriting it.
     set((state) => ({ sceneOperationRevision: state.sceneOperationRevision + 1, sceneLoadError: null }));
     // Swap in this scene's own arrangement (or clear it) — see
-    // `syncArrangementFromLoadedScene` (#10058).
-    syncArrangementFromLoadedScene(json);
+    // `syncArrangementFromLoadedScene` (#10058). A deferred replay is the one
+    // exception: its caller hydrated from this same data when it deferred,
+    // and the user may have edited the arrangement since.
+    if (!replayingDeferredSceneLoad) syncArrangementFromLoadedScene(json);
     return true;
   },
   newScene: () => {

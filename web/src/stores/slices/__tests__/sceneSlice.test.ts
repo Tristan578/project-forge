@@ -5,7 +5,7 @@ import { setSceneDispatcher, hasDeferredSceneLoad, cancelDeferredSceneLoad } fro
 import { loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
 import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
-import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
+import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage, savePrefab, getPrefab } from '@/lib/prefabs/prefabStore';
 import * as prefabStoreModule from '@/lib/prefabs/prefabStore';
 import * as toastModule from '@/lib/toast';
@@ -642,6 +642,35 @@ describe('sceneSlice', () => {
       const engine = createMockDispatch();
       setSceneDispatcher(engine);
       expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toEqual([]);
+    });
+
+    it('leaves the music arrangement alone on replay, so edits made while the engine loaded survive', () => {
+      // The editor page hydrates the arrangement from the project data the
+      // moment it defers the load; the arrangement store is JS-only, so the
+      // user can edit it before WASM attaches. The replay must not reset it.
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const scene = {
+        entities: [],
+        musicArrangement: {
+          version: 1,
+          tracks: [{ id: 'track_saved', name: 'From the project', muted: false }],
+          clips: [],
+          tempoBpm: 120,
+        },
+      };
+      store.getState().loadScene(JSON.stringify(scene), { deferUntilEngineAttaches: true });
+      useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(scene));
+      useMusicArrangementStore.getState().addTrack('Added while loading');
+      expect(useMusicArrangementStore.getState().arrangement.tracks).toHaveLength(2);
+
+      setSceneDispatcher(createMockDispatch());
+
+      const tracks = useMusicArrangementStore.getState().arrangement.tracks;
+      expect(tracks.map((t) => t.name)).toEqual(['From the project', 'Added while loading']);
+
+      // A LIVE load of the same scene still resets the arrangement to the scene's own (#10058).
+      expect(store.getState().loadScene(JSON.stringify(scene))).toBe(true);
+      expect(useMusicArrangementStore.getState().arrangement.tracks.map((t) => t.name)).toEqual(['From the project']);
     });
 
     it('holds nothing when the load was dispatched live', () => {
