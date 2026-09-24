@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Check, X, Loader2, ChevronDown, ChevronRight, Undo2, RotateCcw, Eye, XCircle, ShieldAlert, Ban } from 'lucide-react';
+import { InlineAlert } from '@spawnforge/ui';
 import type { ToolCallStatus } from '@/stores/chatStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { describeToolAction } from '@/lib/chat/approvalSummary';
+import { describeCorrection, readCorrections } from '@/lib/engine/gameComponentCorrections';
 
 interface ToolCallCardProps {
   toolCall: ToolCallStatus;
@@ -368,6 +370,7 @@ export function ToolCallCard({
   gatedDecision,
 }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const adjustmentsHeadingId = useId();
   const undo = useEditorStore((s) => s.undo);
   const sceneNodes = useEditorStore((s) => s.sceneGraph.nodes);
 
@@ -399,6 +402,12 @@ export function ToolCallCard({
         return <Ban size={14} className="text-red-400/60" />;
     }
   })();
+
+  // Values the tool did not apply as asked (PF-1148). Only on a call that ran
+  // and still stands: an undone call's adjusted value is gone, and an error
+  // applied nothing. `readCorrections` drops anything malformed, so a result
+  // from a stale bundle cannot render a note the wire layer never wrote.
+  const adjustments = toolCall.status === 'success' ? readCorrections(toolCall.result) : [];
 
   const isPreview = toolCall.status === 'preview';
   const isRejected = toolCall.status === 'rejected';
@@ -474,6 +483,27 @@ export function ToolCallCard({
           {expanded ? <ChevronDown size={12} className="text-zinc-400" /> : <ChevronRight size={12} className="text-zinc-400" />}
         </span>
       </button>
+
+      {/* Outside the expand chevron on purpose: a card that reads "Add Game
+          Component ✓" while the platform runs at a tenth of the requested speed
+          is the silent success this note exists to end. */}
+      {adjustments.length > 0 && (
+        <InlineAlert variant="warning" aria-labelledby={adjustmentsHeadingId} className="mx-2 mb-1.5">
+          <p id={adjustmentsHeadingId} className="font-medium">Adjusted to fit the engine’s limits</p>
+          <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+            {adjustments.map((c) => (
+              <li key={`${c.entityId ?? ''}.${c.component}.${c.field}`}>
+                {describeCorrection(
+                  c,
+                  // A compound tool tags each record with its entity; the name
+                  // is read live, like the header's, so a rename shows here too.
+                  c.entityId === undefined ? undefined : (lookupEntityName(c.entityId) ?? c.entityId),
+                )}
+              </li>
+            ))}
+          </ul>
+        </InlineAlert>
+      )}
 
       {/* Server-side approval gate (PF-8860).
 
