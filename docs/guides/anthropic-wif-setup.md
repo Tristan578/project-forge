@@ -133,9 +133,10 @@ These steps are for project `spawnforge`, Vercel scope `tnolan`, team
   (`authentication_error`, `Authentication failed`), and that the deny reason
   is recorded on the attempt's entry in the authentication history instead,
   for example `match_subject_prefix`, `workspace_id_required` or `jti_reused`.
-  That entry is the authoritative signal. This guide was written without
-  Console access, so it does not name the menu path to that page; find it from
-  the federation rule you created in step 3.
+  That entry is the authoritative signal. The reference links the page as
+  https://platform.claude.com/settings/workload-identity-federation?tab=history.
+  Reading this deployment's own attempts there needs a Console login, which is
+  the [HUMAN] part.
 - **Sentry.** A failed exchange is captured once, followed by 60 seconds of
   backoff during which the static key is used without retrying. The captured
   error is one of these fixed messages:
