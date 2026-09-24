@@ -1400,18 +1400,62 @@ describe('orchestratorSlice', () => {
       mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
     }
 
-    it('runs the pipeline without a "Start Building" click', async () => {
+    /**
+     * Owner decision on #6831: confirm the cost first. A quick start designs the
+     * game and STOPS with the plan and its estimate on the store; nothing that
+     * spends build tokens runs until the dialog's "Build it" calls
+     * `runPipelineFromPlan`.
+     */
+    it('stops at awaiting_approval with the plan and its cost, running nothing', async () => {
       mockDecomposeOk();
       const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
       (runPipeline as ReturnType<typeof vi.fn>).mockClear();
 
       await store.getState().startQuickStart('Platformer: a jungle level', '3d');
 
-      // The whole point: decomposition produced a plan AND the plan ran, with no
-      // second user action in between.
-      expect(store.getState().currentPlan).not.toBeNull();
+      const after = store.getState();
+      expect(after.orchestratorStatus).toBe('awaiting_approval');
+      expect(after.currentPlan).not.toBeNull();
+      expect(after.tokenEstimate).toEqual(after.currentPlan?.tokenEstimate);
+      expect(after.pendingGate).toBeNull();
+      // The reservation is a HOLD taken during design; it is released by
+      // `cancelPipeline` if the user backs out, and is not a charge.
+      expect(after.reservationId).toBe('res-qs');
+      expect(runPipeline).not.toHaveBeenCalled();
+    });
+
+    it('treats the confirmed build as the answer to gate_plan: the run asks nothing more', async () => {
+      mockDecomposeOk();
+      await store.getState().startQuickStart('Platformer: a jungle level', '3d');
+      const plan = store.getState().currentPlan;
+      if (!plan) throw new Error('startQuickStart produced no plan');
+      const planGate = plan.approvalGates.find((g) => g.id === 'gate_plan');
+      if (!planGate) throw new Error('planBuilder planned no gate_plan');
+
+      const { runPipeline } = await import('@/lib/game-creation/pipelineRunner');
+      let decision: 'approved' | 'rejected' | undefined;
+      (runPipeline as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (
+          _plan: unknown,
+          _registry: unknown,
+          _ctx: unknown,
+          callbacks: PipelineCallbacks,
+        ) => {
+          const onGateReached = callbacks.onGateReached;
+          if (!onGateReached) {
+            throw new Error('runPipeline was given no onGateReached callback');
+          }
+          decision = await onGateReached(planGate);
+          return plan;
+        },
+      );
+
+      await store.getState().runPipelineFromPlan();
+
       expect(runPipeline).toHaveBeenCalledOnce();
-      expect(store.getState().orchestratorStatus).not.toBe('awaiting_approval');
+      expect(decision).toBe('approved');
+      // Auto-approved gates never become a pending gate the user must answer.
+      expect(store.getState().pendingGate).toBeNull();
     });
 
     it('opts the run into auto-approving gate_plan and nothing else', async () => {

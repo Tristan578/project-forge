@@ -15,7 +15,7 @@
  * only appeared on 6 of the 7 themes.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Button, cn } from '@spawnforge/ui';
 import type { ApprovalGate } from '@/lib/game-creation/types';
 
@@ -26,6 +26,9 @@ export function ApprovalGateDialog({
   onApprove,
   onCancel,
   autoFocus = false,
+  approveLabel = 'Approve',
+  approveDisabled = false,
+  children,
 }: {
   gate: ApprovalGate;
   onApprove: () => void;
@@ -38,6 +41,19 @@ export function ApprovalGateDialog({
    * beside other content there and stealing focus would be a hijack.
    */
   autoFocus?: boolean;
+  /**
+   * Label for the approve button. The quick-start plan review says "Build it":
+   * that click is what starts spending tokens, so it names the action (#6831).
+   */
+  approveLabel?: string;
+  /** Disables approve, e.g. while the confirmed action is already starting. */
+  approveDisabled?: boolean;
+  /**
+   * Extra content between the scrollable summary and the buttons — the plan
+   * review's token cost. Outside the scroll region on purpose: a cost the user
+   * has to scroll to find is not a cost they confirmed.
+   */
+  children?: ReactNode;
 }) {
   const { displayData } = gate;
   const approveRef = useRef<HTMLButtonElement>(null);
@@ -129,9 +145,18 @@ export function ApprovalGateDialog({
         )}
       </div>
 
+      {children && <div className="mb-3">{children}</div>}
+
       <div className="flex gap-2">
-        <Button ref={approveRef} type="button" size="sm" onClick={onApprove} className="flex-1">
-          Approve
+        <Button
+          ref={approveRef}
+          type="button"
+          size="sm"
+          onClick={onApprove}
+          disabled={approveDisabled}
+          className="flex-1"
+        >
+          {approveLabel}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel} className="flex-1">
           Cancel

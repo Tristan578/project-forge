@@ -129,12 +129,14 @@ export interface OrchestratorSlice {
     opts?: { autoApproveGateIds?: readonly string[] },
   ) => Promise<void>;
   /**
-   * Quick-start entry point: decompose, then run, with no "Start Building" click.
+   * Quick-start entry point: decompose, auto-approving `gate_plan`, and stop at
+   * 'awaiting_approval'. The caller shows the plan and its cost and runs it with
+   * `runPipelineFromPlan` only on the user's explicit confirmation (#6831).
    *
    * Resolves `false` — having changed nothing at all — when a run is already
-   * live (`isOrchestratorRunLive`). `true` means this call owned the run and
-   * drove it to completion; it is NOT a claim the run succeeded, which callers
-   * read off `orchestratorStatus` / `orchestratorError` as before.
+   * live (`isOrchestratorRunLive`). `true` means this call owned the
+   * decomposition; it is NOT a claim a plan was produced, which callers read
+   * off `orchestratorStatus` ('awaiting_approval' vs 'failed'/'cancelled').
    */
   startQuickStart: (prompt: string, projectType: ProjectType) => Promise<boolean>;
   setPlan: (plan: OrchestratorPlan) => void;
@@ -354,21 +356,19 @@ export const createOrchestratorSlice: StateCreator<
     // too; this one is what makes the invariant hold for every caller.
     if (isOrchestratorRunLive(get().orchestratorStatus)) return false;
 
-    // The quick-start entry point: decompose, then run, with no "Start Building"
-    // click in between. `gate_plan` exists so a chat user can review the plan
-    // before spending tokens — a user who clicked "Make me a game" and typed a
-    // prompt has already said yes to exactly that, and re-asking twice (once for
-    // the plan, once at the gate) is the break this closes.
+    // The quick-start entry point decomposes and STOPS at 'awaiting_approval'.
+    // Nothing that spends tokens runs until the user confirms the plan and its
+    // estimated cost in the quick-start dialog, which then calls
+    // `runPipelineFromPlan` (owner decision on #6831: confirm cost first). That
+    // one confirmation is the user's answer to `gate_plan`, so the gate stays
+    // auto-approved — asking again at the gate would be a second "are you
+    // sure" for the same plan.
+    //
+    // Decomposition itself reserves the plan's high-variance total as a HOLD,
+    // not a charge: `cancelPipeline` releases it if the user backs out here.
     await get().startDecomposition(prompt, projectType, {
       autoApproveGateIds: QUICK_START_AUTO_GATES,
     });
-
-    // Read status fresh: `startDecomposition` swallows its own errors into
-    // 'failed'/'cancelled', so the only way to know it produced a plan is to
-    // look at the state it left behind.
-    if (get().orchestratorStatus !== 'awaiting_approval') return true;
-
-    await get().runPipelineFromPlan();
     return true;
   },
 

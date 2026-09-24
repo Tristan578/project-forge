@@ -8,10 +8,15 @@
  * the product's headline capability had no control anywhere in the UI.
  *
  * Three states, in order: pick a game type -> describe it -> watch it build.
- * The run is started with `startQuickStart`, which auto-approves `gate_plan`
- * only — `gate_assets` / `gate_final` still stop the pipeline, so this dialog
- * renders the very same `ApprovalGateDialog` the orchestrator panel uses rather
- * than leaving a quick-start user stranded behind a gate they cannot see.
+ * "Build it" on the describe step calls `startQuickStart`, which only DESIGNS
+ * the game and stops at 'awaiting_approval'. The running view then shows the
+ * plan and its estimated token cost, and nothing that spends build tokens runs
+ * until the user presses "Build it" there (owner decision on #6831: confirm the
+ * cost first). That confirmation is the user's answer to `gate_plan`, which the
+ * slice therefore auto-approves; `gate_assets` / `gate_final` still stop the
+ * pipeline, so this dialog renders the very same `ApprovalGateDialog` the
+ * orchestrator panel uses rather than leaving a quick-start user stranded
+ * behind a gate they cannot see.
  *
  * Once the build completes the dialog offers "Play now": the status line
  * tells the user to press Play, and the only Play control lived in the
@@ -37,7 +42,9 @@ import {
   quickStartPromptMaxLength,
   type QuickStartGameType,
 } from '@/lib/game-creation/quickStart';
+import type { ApprovalGate } from '@/lib/game-creation/types';
 import { ApprovalGateDialog } from '@/components/editor/ApprovalGateDialog';
+import { TokenCostBar } from '@/components/editor/TokenCostBar';
 import { claimQuickStartGate } from '@/components/editor/quickStartGateOwner';
 
 /**
@@ -64,6 +71,23 @@ const STATUS_MESSAGES: Record<OrchestratorStatus, string> = {
 };
 
 const GENERIC_FAILURE = 'Could not start building your game. Please try again.';
+
+/** Status line while the designed plan waits for the user's "Build it". */
+const PLAN_READY = 'Your game plan is ready. Review it, then build.';
+
+/**
+ * Stand-in for a plan with no `gate_plan`. `planBuilder` always adds one, but
+ * the plan is caller-supplied data (`setPlan` is public), and a missing gate
+ * must not leave a designed plan with no "Build it" control at all.
+ */
+const FALLBACK_PLAN_GATE: ApprovalGate = {
+  id: 'gate_plan',
+  label: 'Review your game plan',
+  description: 'Check the plan and its cost before building starts.',
+  afterStepId: '',
+  status: 'pending',
+  displayData: {},
+};
 
 /**
  * Shown when "Build it" is pressed while a run is already live. The slice
@@ -92,6 +116,11 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  // "Build it" on the plan review was pressed and `runPipelineFromPlan` has not
+  // yet moved the status on. It awaits dynamic imports before setting
+  // 'executing', so without this a second click in that window starts a second
+  // run of the same plan.
+  const [confirming, setConfirming] = useState(false);
 
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const statusRef = useRef<HTMLDivElement>(null);
@@ -103,9 +132,18 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const pendingGate = useEditorStore((s) => s.pendingGate);
   const resolveGate = useEditorStore((s) => s.resolveGate);
   const cancelPipeline = useEditorStore((s) => s.cancelPipeline);
+  const currentPlan = useEditorStore((s) => s.currentPlan);
+  const tokenEstimate = useEditorStore((s) => s.tokenEstimate);
+  const runPipelineFromPlan = useEditorStore((s) => s.runPipelineFromPlan);
   const play = useEditorStore((s) => s.play);
 
   const runIsLive = isOrchestratorRunLive(status);
+  // 'awaiting_approval' with no pending gate is the moment between design and
+  // build: mid-run gates always set `pendingGate` (see `onGateReached`).
+  const planGate =
+    status === 'awaiting_approval' && !pendingGate && currentPlan
+      ? currentPlan.approvalGates.find((g) => g.id === 'gate_plan') ?? FALLBACK_PLAN_GATE
+      : null;
 
   // While this dialog is open it is the only place the user can reach a gate
   // (it is modal and covers the orchestrator panel), so it owns the gate UI.
@@ -133,6 +171,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     if (open) {
       setError(null);
       setStarting(false);
+      setConfirming(false);
       if (isOrchestratorRunLive(useEditorStore.getState().orchestratorStatus)) {
         setPhase('running');
       } else {
@@ -203,7 +242,8 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       }
 
       // `startDecomposition` records its failures on the store rather than
-      // throwing, and a step that fails mid-run does the same:
+      // throwing. (A step that fails mid-run does the same, which is why
+      // `handleConfirmBuild` below repeats this check after the build:
       // `runPipelineFromPlan`'s `onPlanStatusChange` callback sets
       // `orchestratorStatus: 'failed'` without ever touching
       // `orchestratorError` -- that field is reserved for a genuine throw
@@ -213,7 +253,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       // so neither "Try again" nor "Stop" rendered and only "Close" was
       // left, with no way back into the flow short of closing and reopening
       // the dialog. Read `status` instead, and fall back to a generic
-      // message when the store has no more specific one.
+      // message when the store has no more specific one.)
       const state = useEditorStore.getState();
       if (state.orchestratorStatus === 'failed') {
         const message = state.orchestratorError ?? GENERIC_FAILURE;
@@ -228,6 +268,29 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       setStarting(false);
     }
   }, [prompt, selectedId]);
+
+  // The plan review's "Build it": the first point at which build tokens are
+  // spent. Failures land on the store, not as throws (same contract as
+  // `handleSubmit` above), so read the status the run left behind.
+  const handleConfirmBuild = useCallback(async () => {
+    setError(null);
+    setConfirming(true);
+    try {
+      await runPipelineFromPlan();
+      const state = useEditorStore.getState();
+      if (state.orchestratorStatus === 'failed') {
+        const message = state.orchestratorError ?? GENERIC_FAILURE;
+        setError(message);
+        toast.error(message);
+      }
+    } catch (err) {
+      const message = err instanceof Error && err.message ? err.message : GENERIC_FAILURE;
+      setError(message);
+      toast.error(message);
+    } finally {
+      setConfirming(false);
+    }
+  }, [runPipelineFromPlan]);
 
   const handleRetry = useCallback(() => {
     setError(null);
@@ -271,7 +334,9 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         {/* Only while there is something to stop: cancelPipeline after a run
             has completed or failed flips the status to 'cancelled' and re-POSTs
             the token release. Mirrors OrchestratorPanel's footer guard. */}
-        {runIsLive && (
+        {/* The plan review carries its own Cancel, which does the same thing;
+            a second one beside it would be two controls for one action. */}
+        {runIsLive && !planGate && (
           <Button variant="ghost" size="sm" onClick={handleCancelRun}>
             Stop
           </Button>
@@ -306,7 +371,9 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
           ? 'Pick a kind of game. We build a playable scene from there.'
           : phase === 'describe'
             ? 'Describe it in your own words, or leave it blank for our take.'
-            : 'Building. You can keep working while this runs.'
+            : planGate
+              ? 'Nothing is built until you press Build it.'
+              : 'Building. You can keep working while this runs.'
       }
       className="max-w-lg"
       actions={actions}
@@ -382,10 +449,10 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             aria-live="polite"
             className="flex items-center gap-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
           >
-            {(starting || status === 'decomposing' || status === 'planning' || status === 'executing') && (
+            {(starting || confirming || status === 'decomposing' || status === 'planning' || status === 'executing') && (
               <Loader2 className="h-4 w-4 animate-spin text-[var(--sf-accent)]" aria-hidden="true" />
             )}
-            <span>{STATUS_MESSAGES[status]}</span>
+            <span>{planGate ? PLAN_READY : STATUS_MESSAGES[status]}</span>
           </div>
 
           {/* A gate_assets list is as long as the plan makes it. ApprovalGateDialog
@@ -397,6 +464,24 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               outer scrollbar always engaged first, the inner max-h-[50vh] region
               could never reach its own limit, and the buttons scrolled out of
               view again inside the outer box (round 2 review, 4/5 agreement). */}
+          {/* Plan review. The server has already reserved the estimate's upper
+              bound as a hold, so a successful reservation IS the balance check;
+              "Build it" is not disabled on the client-side `sufficientBalance`,
+              which reads a cached balance (the orchestrator panel's Start
+              Building makes the same choice). The bar still shows its warning. */}
+          {planGate && (
+            <ApprovalGateDialog
+              gate={planGate}
+              approveLabel="Build it"
+              approveDisabled={confirming}
+              onApprove={() => void handleConfirmBuild()}
+              onCancel={handleCancelRun}
+              autoFocus
+            >
+              {tokenEstimate && <TokenCostBar estimate={tokenEstimate} />}
+            </ApprovalGateDialog>
+          )}
+
           {pendingGate && (
             <ApprovalGateDialog
               gate={pendingGate}

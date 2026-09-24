@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, lazy, Suspense, useSyncExternalStore } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
@@ -29,7 +29,6 @@ const ShaderEditorPanel = lazy(() => import('./ShaderEditorPanel').then(m => ({ 
 const ChatPanel = lazy(() => import('../chat/ChatPanel').then(m => ({ default: m.ChatPanel })));
 const ModifyPanel = lazy(() => import('./ModifyPanel').then(m => ({ default: m.ModifyPanel })));
 const GDDPanel = lazy(() => import('./GDDPanel').then(m => ({ default: m.GDDPanel })));
-const WelcomeModal = lazy(() => import('./WelcomeModal').then(m => ({ default: m.WelcomeModal })));
 const KeyboardShortcutsPanel = lazy(() => import('./KeyboardShortcutsPanel').then(m => ({ default: m.KeyboardShortcutsPanel })));
 const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => ({ default: m.ShortcutCheatSheet })));
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
@@ -37,13 +36,13 @@ const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ defaul
 // executor all hang off this import, so an ordinary tab never loads them.
 const McpBridgeIndicator = lazy(() => import('./McpBridgeIndicator').then(m => ({ default: m.McpBridgeIndicator })));
 const BehaviorTreePanel = lazy(() => import('./BehaviorTreePanel').then(m => ({ default: m.BehaviorTreePanel })));
-const OnboardingWizard = lazy(() => import('../onboarding/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })));
 const QuickStartDialog = lazy(() => import('../onboarding/QuickStartDialog').then(m => ({ default: m.QuickStartDialog })));
 
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
 import { DialogueOverlay } from '../game/DialogueOverlay';
 import { TutorialOverlay } from './TutorialOverlay';
+import { OnboardingGate } from '../onboarding/OnboardingGate';
 import { OnboardingChecklist } from './OnboardingChecklist';
 import { PerformanceProfiler } from './PerformanceProfiler';
 import { GenerationStatus } from './GenerationStatus';
@@ -61,7 +60,6 @@ import { useEditorStore, getCommandDispatcher, setCommandDispatcher } from '@/st
 import type { CommandResponse } from '@/hooks/useEngine';
 import { recordEntityObservation, readEntityObservation } from '@/lib/game-creation/engineObservation';
 import { useGenerationStore } from '@/stores/generationStore';
-import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useUserStore } from '@/stores/userStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
@@ -339,71 +337,6 @@ function ChatOverlay() {
       </div>
     </>
   );
-}
-
-// ---- Onboarding gate ----
-// No-op subscribe — localStorage doesn't fire events in the same tab
-const noopSubscribe = () => () => {};
-
-const LEGACY_QUICKSTART_KEY = 'forge-quickstart-completed';
-const LEGACY_WELCOME_KEY = 'forge-welcomed';
-const ONBOARDING_COMPLETED_KEY = 'forge-onboarding-completed';
-
-/**
- * Shows the new OnboardingWizard for brand-new users.
- * Falls back to WelcomeModal for users who completed the legacy quickstart/welcome flow.
- * Users with any legacy key (forge-quickstart-completed, forge-welcomed) are treated as
- * returning users and never shown the new wizard.
- */
-function OnboardingGate({ onRequestQuickStart }: { onRequestQuickStart: () => void }) {
-  const onboardingCompleted = useOnboardingStore((s) => s.onboardingCompleted);
-  const isNewUser = useOnboardingStore((s) => s.isNewUser);
-  const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
-
-  // Check legacy localStorage keys (old quickstart/welcome flows)
-  const legacyDone = useSyncExternalStore(
-    noopSubscribe,
-    () =>
-      !!safeGetItem(LEGACY_QUICKSTART_KEY) ||
-      !!safeGetItem(LEGACY_WELCOME_KEY),
-    () => true, // SSR: treat as done to avoid hydration mismatch
-  );
-
-  // Check if new onboarding was completed (separate from legacy)
-  const onboardingDone = useSyncExternalStore(
-    noopSubscribe,
-    () => !!safeGetItem(ONBOARDING_COMPLETED_KEY),
-    () => false,
-  );
-
-  const [wizardDismissed, setWizardDismissed] = useState(false);
-
-  const handleWizardComplete = useCallback(() => {
-    safeSetItem(ONBOARDING_COMPLETED_KEY, '1');
-    completeOnboarding();
-    setWizardDismissed(true);
-  }, [completeOnboarding]);
-
-  // New onboarding completed — no modals needed
-  if (onboardingDone || onboardingCompleted || wizardDismissed) {
-    return null;
-  }
-
-  // Legacy users who already completed the old welcome flow — no overlay needed.
-  // WelcomeModal's internal useSyncExternalStore checks !forge-welcomed, so
-  // rendering it here (when forge-welcomed IS set) would always be a no-op anyway.
-  if (legacyDone) {
-    return null;
-  }
-
-  // True first-time users (isNewUser=true in persisted Zustand store) → wizard
-  if (isNewUser) {
-    return <OnboardingWizard onComplete={handleWizardComplete} onStartAi={onRequestQuickStart} />;
-  }
-
-  // Returning users who don't have any legacy key (cleared storage after the wizard
-  // or bypassed it) → WelcomeModal as the lightweight fallback welcome experience
-  return <WelcomeModal />;
 }
 
 // ---- Main EditorLayout ----
@@ -743,7 +676,7 @@ export function EditorLayout() {
         <OnboardingChecklist />
         <TokenDepletedModal />
         <Suspense fallback={null}>
-          <OnboardingGate onRequestQuickStart={openQuickStart} />
+          <OnboardingGate onRequestQuickStart={openQuickStart} quickStartOpen={quickStartOpen} />
           <QuickStartDialog open={quickStartOpen} onClose={closeQuickStart} />
           <ShaderEditorPanel />
           <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
@@ -811,7 +744,7 @@ export function EditorLayout() {
       <OnboardingChecklist />
       <TokenDepletedModal />
       <Suspense fallback={null}>
-        <OnboardingGate onRequestQuickStart={openQuickStart} />
+        <OnboardingGate onRequestQuickStart={openQuickStart} quickStartOpen={quickStartOpen} />
         <QuickStartDialog open={quickStartOpen} onClose={closeQuickStart} />
         <ShaderEditorPanel />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
