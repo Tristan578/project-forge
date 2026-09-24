@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useMemo } from 'react';
 import { MessageSquare, Trash2, Wrench, Sparkles, RotateCcw } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useUserStore } from '@/stores/userStore';
+import { TRIAL_GRANT_TOKENS } from '@/lib/tokens/pricing';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { SuggestionChips } from './SuggestionChips';
@@ -124,7 +125,11 @@ export function ChatPanel() {
               <>
                 <Sparkles size={28} className="text-zinc-700" />
                 <p className="text-xs text-zinc-400">
-                  AI features require a paid plan.
+                  {/* `canUseAI` is false only for a starter account here, and every
+                      starter account's only path to AI is the one-time signup
+                      trial (#7715) — so this empty state is always "the trial
+                      is spent", never "no plan was ever offered" (review round 2). */}
+                  You&apos;ve used your {TRIAL_GRANT_TOKENS} free trial AI tokens — upgrade for ongoing access.
                 </p>
                 <a
                   href="/pricing"

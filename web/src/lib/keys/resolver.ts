@@ -15,7 +15,7 @@ import {
 } from '../config/providers';
 import { TIER_DISPLAY_NAMES } from '../billing/tierPlans';
 import { effectiveTier, spendableTokensOf } from '../ai/tierAccess';
-import type { Tier } from '@/stores/userStore';
+import type { Tier } from '@/lib/db/schema';
 
 export interface ResolvedKey {
   type: 'byok' | 'platform';

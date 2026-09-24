@@ -23,6 +23,10 @@ describe('userStore deep tests', () => {
       isLoading: false,
       error: null,
       billingStatus: null,
+      // `true` here (unlike the real store's `false` default) so every
+      // existing test exercises the POST-first-paint gate unless it opts
+      // into the loading state explicitly (#7715 review round 2).
+      profileLoaded: true,
     });
   });
 

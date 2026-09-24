@@ -247,6 +247,21 @@ describe('public pricing copy stays in step with what the code enforces', () => 
       expect(read(rel), rel).toMatch(/isExclusionFeature/);
     }
   });
+
+  // #7715 review round 2 (ux) — the FAQ's "Is SpawnForge free?" answer used to
+  // say the free tier gets "everything except the AI features" and that "AI
+  // starts on" the paid plan, which stopped being true the moment signup
+  // began granting a one-time trial balance the free tier CAN spend on AI.
+  it('describes the free tier trial grant with the constant the code grants, not a hardcoded number', () => {
+    const source = read('app/faq/page.tsx');
+    // A literal digit here (e.g. "50 trial AI tokens") would silently drift
+    // the moment TRIAL_GRANT_TOKENS is repriced — the interpolation is what
+    // keeps this test able to catch that.
+    expect(source).toMatch(/from '@\/lib\/tokens\/pricing'/);
+    expect(source).toMatch(/\$\{TRIAL_GRANT_TOKENS\}/);
+    // And the wrong claim must actually be gone, not just superseded.
+    expect(source).not.toMatch(/everything except the AI features/);
+  });
 });
 
 describe('TIER_PLANS quotes the limits the server enforces', () => {

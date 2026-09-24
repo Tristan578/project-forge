@@ -89,6 +89,7 @@ export const AssetPanel = memo(function AssetPanel() {
 
   const rawTier = useUserStore((s) => s.tier);
   const spendableTokens = useUserStore((s) => s.spendableTokens);
+  const profileLoaded = useUserStore((s) => s.profileLoaded);
   // A starter account with trial tokens reads as hobbyist here (#7715).
   const tier = effectiveTier(rawTier, spendableTokens);
   // #9117: every AI-menu item is gated by its own capability (a fixed set, so
@@ -308,7 +309,14 @@ export const AssetPanel = memo(function AssetPanel() {
                           // known, so the item must not paint as ready and then flip
                           // to a disabled amber badge when the answer arrives
                           // (#9725 p8).
-                          const allowed = canAccessPanel(id, tier) && !gated && !gate.loading;
+                          // `!profileLoaded` reads as access-unknown, not
+                          // locked — before /api/user/profile resolves,
+                          // `tier`/`spendableTokens` are still defaults, and
+                          // showing the lock badge here would flash it in
+                          // front of a trial-eligible starter account for the
+                          // one render before the real balance lands (#7715
+                          // review round 2).
+                          const allowed = (!profileLoaded || canAccessPanel(id, tier)) && !gated && !gate.loading;
                           const required = getRequiredTier(id);
                           return (
                             <button

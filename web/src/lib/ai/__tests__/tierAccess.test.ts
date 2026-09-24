@@ -10,7 +10,7 @@ import {
   effectiveTier,
   spendableTokensOf,
 } from '../tierAccess';
-import type { Tier } from '@/stores/userStore';
+import type { Tier } from '@/lib/db/schema';
 
 // ---------------------------------------------------------------------------
 // tierAtLeast

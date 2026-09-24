@@ -25,7 +25,13 @@ vi.mock('@/lib/keys/resolver', () => ({
   resolveApiKey: vi.fn(),
   ApiKeyError: class ApiKeyError extends Error {},
 }));
-vi.mock('@/lib/tokens/pricing', () => ({ getTokenCost: vi.fn().mockReturnValue(10) }));
+// Spread the actual module: `createGenerationHandler` now imports
+// `@/lib/ai/tierAccess` for the panel tier gate (#7715), which reaches
+// `TRIAL_GRANT_TOKENS` off this module at import time — a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return { ...actual, getTokenCost: vi.fn().mockReturnValue(10) };
+});
 vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
 vi.mock('@/lib/rateLimit', () => ({
   rateLimitResponse: vi.fn().mockReturnValue(new Response('{}', { status: 429 })),
@@ -84,6 +90,7 @@ function makeAsyncHandler(over: Partial<{
 }> = {}) {
   return createGenerationHandler<{ prompt: string }, ModelResult>({
     route: '/api/generate/model',
+    panel: 'generate-model',
     provider: 'elevenlabs',
     operation: 'model_generation',
     rateLimitKey: 'gen-model',
@@ -103,6 +110,7 @@ function makeAsyncHandler(over: Partial<{
 function makeCachedAsyncHandler() {
   return createGenerationHandler<{ prompt: string }, ModelResult>({
     route: '/api/generate/model',
+    panel: 'generate-model',
     provider: 'elevenlabs',
     operation: 'model_generation',
     rateLimitKey: 'gen-model',
@@ -214,6 +222,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
   it('does not publish for a handler with no asyncJob config', async () => {
     const plain = createGenerationHandler<{ prompt: string }, ModelResult>({
       route: '/api/generate/sfx',
+      panel: 'generate-sound',
       provider: 'elevenlabs',
       operation: 'sfx_generation',
       rateLimitKey: 'gen-sfx',

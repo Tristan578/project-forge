@@ -31,6 +31,7 @@ const POST_impl = createGenerationHandler<
   { locales: Record<string, LocaleBundle> }
 >({
   route: '/api/generate/localize',
+  panel: 'ai-chat',
   // Batch route: matches `export const maxDuration` above so the generation
   // agent derives its step-timeout cap against the real 120s budget.
   maxDurationSeconds: 120,

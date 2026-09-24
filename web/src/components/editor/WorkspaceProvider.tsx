@@ -177,9 +177,16 @@ function withTierGate(
   return function TierGatedPanel(_props: IDockviewPanelProps) {
     const rawTier = useUserStore((s) => s.tier);
     const spendableTokens = useUserStore((s) => s.spendableTokens);
+    const profileLoaded = useUserStore((s) => s.profileLoaded);
     // A starter account with trial tokens reads as hobbyist here (#7715).
     const tier = effectiveTier(rawTier, spendableTokens);
-    const hasAccess = canAccessPanel(panelId, tier);
+    // Before /api/user/profile resolves, `tier`/`spendableTokens` read their
+    // defaults ('starter'/0), which is indistinguishable from "no trial
+    // access" — showing the lock here would flash it in front of a
+    // trial-eligible account for the one render before the real balance
+    // lands. `!profileLoaded` reads as access-unknown, not locked, mirroring
+    // `ChatInput.tsx`'s `!profileLoaded || ...` (#7715 review round 2).
+    const hasAccess = !profileLoaded || canAccessPanel(panelId, tier);
 
     // Track feature flag evaluation once on mount (non-critical analytics)
     useEffect(() => {

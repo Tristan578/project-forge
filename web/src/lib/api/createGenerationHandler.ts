@@ -19,7 +19,8 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import type { Provider } from '@/lib/db/schema';
+import type { Provider, Tier } from '@/lib/db/schema';
+import { canAccessPanel, effectiveTier, getRequiredTier, spendableTokensOf, TIER_LABELS } from '@/lib/ai/tierAccess';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 import { checkBotIdGate } from '@/lib/security/botId';
@@ -118,6 +119,24 @@ export interface GenerationHandlerConfig<TParams, TResult> {
 
   /** Provider name for API key resolution. Static or computed from validated params. */
   provider: Provider | ((params: TParams) => Provider);
+
+  /**
+   * The editor panel that fronts this route, as spelled in
+   * `PANEL_TIER_REQUIREMENTS` (`@/lib/ai/tierAccess`) — e.g. `'generate-model'`,
+   * `'generate-sound'`. Required, deliberately: before this field existed the
+   * only server-side tier check on a generation route was the resolver's
+   * starter-balance check, so a real hobbyist account (balance aside) could
+   * call a creator-gated route like `/api/generate/skybox` directly — a gap
+   * `effectiveTier`'s trial mapping widened to any $0 starter signup (#7715
+   * review round 2). Checked right after auth resolves the user, using
+   * `effectiveTier(user.tier, spendableTokensOf(user))` — the same rule
+   * `canAccessPanel` applies in the editor — and BEFORE the capability/kill
+   * switch checks, the response cache, and any token deduction, so a locked
+   * caller never spends rate-limit budget or a token on a request that was
+   * always going to be refused. Making the field required means `tsc` names
+   * any route that forgets it, rather than a gate that silently defaults open.
+   */
+  panel: string;
 
   /**
    * The capability this route serves (#9117). When it appears in
@@ -275,6 +294,7 @@ export function createGenerationHandler<TParams, TResult>(
   const {
     route,
     provider,
+    panel,
     capability,
     operation,
     rateLimitKey,
@@ -405,7 +425,33 @@ export function createGenerationHandler<TParams, TResult>(
     const tier = authResult.ctx.user.tier;
     mctx.tier = tier;
 
-    // 1a. Declared-unavailable capability (#9117). Static config, checked as
+    // 1a. Per-route panel tier gate (#7715 review round 2). The resolver's
+    // starter-balance check was the only server-side tier enforcement a
+    // generation route had, so a real hobbyist account (balance aside) could
+    // call a creator-gated route directly, and `effectiveTier`'s trial mapping
+    // widened that to a fresh $0 starter signup. `effectiveTier` applies the
+    // SAME rule the editor's `canAccessPanel` uses, so a caller is refused here
+    // exactly when its own panel would render `LockedPanelOverlay`. Checked
+    // right after auth resolves the user and BEFORE the capability/kill-switch
+    // checks, the response cache, and any token deduction, so a locked caller
+    // never spends rate-limit budget or a token on a request that was always
+    // going to be refused.
+    const accessTier = effectiveTier(tier as Tier, spendableTokensOf(authResult.ctx.user));
+    if (!canAccessPanel(panel, accessTier)) {
+      mctx.outcome = 'tier_required';
+      const requiredTier = getRequiredTier(panel);
+      return NextResponse.json(
+        {
+          error: 'TIER_REQUIRED',
+          message: `This feature requires the ${requiredTier ? TIER_LABELS[requiredTier] : 'a higher'} plan`,
+          currentTier: tier,
+          requiredTier,
+        },
+        { status: 403 },
+      );
+    }
+
+    // 1b. Declared-unavailable capability (#9117). Static config, checked as
     // soon as the caller is known and BEFORE BotID, both rate limits, body
     // parsing and content safety: a capability with no provisionable provider
     // can never succeed, so a refusal must not spend the user's aggregate
@@ -425,7 +471,7 @@ export function createGenerationHandler<TParams, TResult>(
       );
     }
 
-    // 1b. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
+    // 1c. BotID gate (PF-975 / #8948) — before ANY rate-limit consumption or
     // token deduction, so a blocked bot never spends either budget.
     const botIdResponse = await checkBotIdGate();
     if (botIdResponse) {

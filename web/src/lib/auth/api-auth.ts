@@ -5,7 +5,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
 import type { User } from '../db/schema';
 import { effectiveTier, spendableTokensOf } from '@/lib/ai/tierAccess';
-import type { Tier } from '@/stores/userStore';
+import type { Tier } from '@/lib/db/schema';
 
 export interface AuthContext {
   user: User;

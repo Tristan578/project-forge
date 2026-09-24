@@ -109,7 +109,14 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   canUseAI: () => {
-    const { activeFeatures } = get();
+    const { activeFeatures, profileLoaded } = get();
+    // Before /api/user/profile resolves, `tier`/`spendableTokens` are still
+    // their defaults ('starter'/0), indistinguishable from "no trial
+    // access". Reporting `false` here for that one render locks a
+    // trial-eligible account out of AI onboarding it will have a moment
+    // later — read as access-unknown instead, never as locked (#7715 review
+    // round 2).
+    if (!profileLoaded) return true;
     // The trial grant is a platform allocation, not a Stripe entitlement, so
     // the tier fallback carries it: a starter account with tokens can use AI.
     return hasCapability('canUseAI', activeFeatures, get().effectiveTier() !== 'starter');

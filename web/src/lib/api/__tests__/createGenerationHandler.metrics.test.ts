@@ -49,7 +49,13 @@ vi.mock('@/lib/keys/resolver', () => ({
     }
   },
 }));
-vi.mock('@/lib/tokens/pricing', () => ({ getTokenCost: vi.fn().mockReturnValue(40) }));
+// Spread the actual module: `createGenerationHandler` now imports
+// `@/lib/ai/tierAccess` for the panel tier gate (#7715), which reaches
+// `TRIAL_GRANT_TOKENS` off this module at import time — a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return { ...actual, getTokenCost: vi.fn().mockReturnValue(40) };
+});
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
   sentryLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -125,6 +131,7 @@ function makeRequest(): NextRequest {
 
 const baseConfig = {
   route: '/api/generate/test',
+  panel: 'generate-sound',
   provider: 'elevenlabs' as const,
   operation: 'test_generation',
   rateLimitKey: 'gen-test',

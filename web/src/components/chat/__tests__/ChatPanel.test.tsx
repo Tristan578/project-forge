@@ -147,7 +147,11 @@ describe('ChatPanel', () => {
   it('shows upgrade prompt when canUseAI is false', () => {
     mockCanUseAI.mockReturnValue(false);
     render(<ChatPanel />);
-    expect(screen.getByText('AI features require a paid plan.')).toBeDefined();
+    // #7715 review round 2 — `canUseAI` is false only for a starter account,
+    // whose only path to AI is the one-time signup trial, so the empty state
+    // must say the trial is spent rather than imply no free AI was ever
+    // offered.
+    expect(screen.getByText(/free trial AI tokens/)).toBeDefined();
     const link = screen.getByText('View plans');
     expect(link).toBeDefined();
     expect(link.getAttribute('href')).toBe('/pricing');

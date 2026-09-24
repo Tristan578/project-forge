@@ -19,6 +19,7 @@ const POST_impl = createGenerationHandler<
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/sprite-sheet',
+  panel: 'generate-sprite',
   provider: DB_PROVIDER.sprite,
   operation: 'sprite_sheet_generation',
   rateLimitKey: 'gen-spritesheet',

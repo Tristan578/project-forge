@@ -136,6 +136,7 @@ export function AudioInspector() {
 
   const rawTier = useUserStore((s) => s.tier);
   const spendableTokens = useUserStore((s) => s.spendableTokens);
+  const profileLoaded = useUserStore((s) => s.profileLoaded);
   // A starter account with trial tokens reads as hobbyist here (#7715).
   const tier = effectiveTier(rawTier, spendableTokens);
   // #9117: a capability NO key can enable (`unprovisionable`) is disabled here,
@@ -153,8 +154,13 @@ export function AudioInspector() {
     useGenerationGate('voice-generation'),
   ]);
   const musicGate = useGenerationGate('music-generation');
-  const soundTierOk = canAccessPanel('generate-sound', tier);
-  const musicTierOk = canAccessPanel('generate-music', tier);
+  // `!profileLoaded` reads as access-unknown, not locked — before
+  // /api/user/profile resolves, `tier`/`spendableTokens` are still defaults,
+  // and locking here would flash the tier clause in front of a
+  // trial-eligible starter account for the one render before the real
+  // balance lands (#7715 review round 2).
+  const soundTierOk = !profileLoaded || canAccessPanel('generate-sound', tier);
+  const musicTierOk = !profileLoaded || canAccessPanel('generate-music', tier);
   // While the first /api/capabilities body is in flight nothing is known yet,
   // so the button must not paint as ready and then contradict itself when the
   // answer lands. Held closed for that window rather than opening a dialog

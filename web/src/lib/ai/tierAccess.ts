@@ -12,7 +12,7 @@
  *   - Pro gets all panels including the most powerful ones (auto-iteration, playtest).
  */
 
-import type { Tier } from '@/stores/userStore';
+import type { Tier } from '@/lib/db/schema';
 
 // ---------------------------------------------------------------------------
 // Tier ordering
@@ -63,9 +63,11 @@ export function spendableTokensOf(user: {
  * The tier to use for an ACCESS decision. A `starter` account with spendable
  * tokens is treated as `TRIAL_ACCESS_TIER`; every other account is its own
  * tier. This is the single rule behind `canAccessPanel` in the editor,
- * `assertAiAccess` on `/api/chat` and the platform-key resolver: the three
- * gates that had kept a trial grant unusable when they each checked the raw
- * tier alone.
+ * `assertAiAccess` on `/api/chat` and `/api/game/decompose`, the platform-key
+ * resolver, and `createGenerationHandler`'s per-route `panel` gate (#7715
+ * review round 2) — the gates that had kept a trial grant unusable, or left a
+ * generation route reachable past its own panel's tier, when they each
+ * checked the raw tier alone.
  */
 export function effectiveTier(tier: Tier, spendableTokens: number): Tier {
   return tier === 'starter' && spendableTokens > 0 ? TRIAL_ACCESS_TIER : tier;

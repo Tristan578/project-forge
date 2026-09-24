@@ -82,9 +82,11 @@ export function countLabel(limit: number, singular: string, plural: string): str
  *
  * - `starter` has no monthly AI allocation. Signup grants `TRIAL_GRANT_TOKENS`
  *   once (#7715), and while a starter account holds spendable tokens
- *   `effectiveTier` treats it as `hobbyist` on the three AI gates (`/api/chat`
- *   via `assertAiAccess`, the key resolver, `PANEL_TIER_REQUIREMENTS` through
- *   `canAccessPanel`). With the tokens spent it can open none of them.
+ *   `effectiveTier` treats it as `hobbyist` on the four AI gates (`/api/chat`
+ *   and `/api/game/decompose` via `assertAiAccess`, the key resolver,
+ *   `createGenerationHandler`'s per-route `panel` check, and
+ *   `PANEL_TIER_REQUIREMENTS` through `canAccessPanel` in the editor). With
+ *   the tokens spent it can open none of them.
  * - `hobbyist` unlocks AI chat, the generation panels, and BYOK (`/api/keys`).
  *   Chat is rate limited to 10 requests/minute, so it is never "unlimited".
  * - `creator` adds the platform MCP key (`/api/keys/api-key`) and the
