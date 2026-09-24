@@ -76,8 +76,8 @@
 # `debug`) and `shopt -s extdebug` in command position are reported the
 # same way: a self-defense suite has no use for either. A trap on EXIT, ERR,
 # RETURN or 0 (any numeric spelling of 0: bash reads a signal number as a
-# signed decimal after leading blanks, so 00, +0, -0 and ' 00' are all 0,
-# the twenty-first and twenty-second rounds) whose action exits or execs
+# signed decimal between blanks, so 00, +0, -0, ' 00' and '0 ' are all 0,
+# the twenty-first to twenty-third rounds; see sig_word) whose action exits or execs
 # overrides the exit status the script
 # itself chose — `trap 'exit 0' EXIT` turns a suite that reached `exit 1`
 # with FAILED=1 into a green one (the ninth board round) — so such an
@@ -290,9 +290,21 @@ derive_file() {
       }
       bx[++nbx] = s
     }
+    # bash parses a trap signal number with its legal_number(): any whitespace
+    # before it (space, tab, newline, vertical tab, form feed, carriage
+    # return), an optional sign, decimal digits, then only spaces or tabs.
+    # Checked in bash 5.2 for every class (twenty-third board round). A name
+    # is matched as written, case aside, so only a number is normalised,
+    # and the regex alone decides which blanks and signs a number may carry
+    # (the digit run is then taken whole, so no second strip can widen it); a
+    # blank inside any other word makes it a name bash rejects, so it is
+    # replaced and can never read as a separate signal in trap_sigs.
     function sig_word(s) {
-      s = toupper(s); sub(/^[ \t]+/, "", s)
-      if (s ~ /^[-+]?[0-9]+$/) { sub(/^[-+]/, "", s); sub(/^0+/, "", s); if (s == "") s = "0" }
+      s = toupper(s)
+      if (s ~ /^[ \t\n\v\f\r]*[-+]?[0-9]+[ \t]*$/) {
+        match(s, /[0-9]+/); s = substr(s, RSTART, RLENGTH)
+        sub(/^0+/, "", s); if (s == "") s = "0"
+      } else gsub(/[ \t\n\v\f\r]/, "_", s)
       return s
     }
     function has(t,   k) { for (k = 1; k <= nbx; k++) if (bx[k] == t) return 1; return 0 }
@@ -376,10 +388,10 @@ derive_file() {
         printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap ... " w, NR, NR
       # The first non-flag argument of trap is its action; every later word
       # is a signal. The pair is judged when the statement ends. bash reads
-      # a numeric signal as an optionally signed decimal after leading
-      # blanks, so 00, +0, -0 and a quoted leading blank are all signal 0
-      # (twenty-first and twenty-second board rounds); sig_word stores each
-      # as its value. A negative non-zero signal is rejected by bash, so
+      # a numeric signal as an optionally signed decimal between blanks, so
+      # 00, +0, -0 and a zero with a quoted blank on either side are all
+      # signal 0 (twenty-first to twenty-third board rounds); sig_word
+      # stores each as its value. A negative non-zero signal is rejected by bash, so
       # dropping the sign cannot turn a real signal into 0.
       if (in_trap) {
         if (!trap_has_action) { if (w !~ /^-/) { trap_action = w; trap_has_action = 1 } }
@@ -915,7 +927,7 @@ if [ -n "$violations" ]; then
         unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
         stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, a freeze inside a quoted string or fixture is text, not a statement, and a freeze naming a function this file never defines is left over from a rename or a deletion: move this line to directly after the closing brace of $name(), or delete it" ;;
         alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion — delete this line" ;;
-        trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 (or any numeric spelling of 0, such as 00, +0 or -0) that exits or execs, directly or through a function of this file, replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — delete this trap or extdebug line, or make its action return without exiting" ;;
+        trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 (or any numeric spelling of 0, such as 00, +0, -0 or a quoted '0 ') that exits or execs, directly or through a function of this file, replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — delete this trap or extdebug line, or make its action return without exiting" ;;
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable — rename this function, or delete the enable call" ;;
         shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command or a closing brace, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
         brace)    echo "  - $file:$def: '$name' — this brace expansion produces more words than the gate enumerates (64, nested 8 deep), in a command name or an alias, shopt or trap statement, so a guarded word could sit past the cut where the gate cannot see it — list the words it needs explicitly, or split the statement" ;;

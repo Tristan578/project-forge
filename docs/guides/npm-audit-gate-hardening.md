@@ -903,7 +903,11 @@ by construction rather than by measurement.
   The twenty-first found that bash reads a numeric trap signal as an
   optionally signed decimal after leading blanks, so `00`, `+0`, `-0` and
   `' 00'` are all signal 0 (EXIT); the gate now stores each numeric signal
-  as its value (the twenty-second round added the minus sign).
+  as its value (the twenty-second round added the minus sign). The
+  twenty-third found the trailing side: bash's legal_number() takes any
+  whitespace before the number but also a space or tab after it, so
+  `'0 '` is 0 too. sig_word now models that parser exactly, checked in
+  bash for every whitespace class on each side.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
