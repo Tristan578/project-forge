@@ -288,3 +288,49 @@ describe('GameDetailModal', () => {
     await userEvent.setup().keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledExactlyOnceWith();
   });});
+
+// ---------------------------------------------------------------------------
+// Fork attribution (#7858)
+// ---------------------------------------------------------------------------
+describe('GameDetailModal fork attribution', () => {
+  const baseGame = {
+    id: 'game-2', title: 'Fork Of Something', description: null,
+    authorName: 'Forker', authorId: 'user-2', playCount: 1, likeCount: 0,
+    avgRating: 0, ratingCount: 0, ratingBreakdown: [], tags: [], cdnUrl: null,
+    createdAt: '2025-01-03T00:00:00.000Z', comments: [], forkCount: 3, forkedFrom: null,
+  };
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('credits the original with a link to its play page and shows the fork count', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ game: {
+      ...baseGame,
+      forkedFrom: { gameId: 'game-1', title: 'The Original', slug: 'the-original', authorClerkId: 'user_clerkOriginal', authorName: 'Origin Author' },
+    } }) });
+    render(<GameDetailModal gameId="game-2" onClose={() => {}} />);
+    const link = await screen.findByRole('link', { name: 'The Original' });
+    expect(link).toHaveAttribute('href', '/play/user_clerkOriginal/the-original');
+    expect(screen.getByText(/Remixed from/)).toHaveTextContent('Remixed from The Original by Origin Author');
+    expect(screen.getByText('Forks').nextElementSibling).toHaveTextContent('3');
+  });
+
+  it('renders no attribution line when the game is not a fork', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ game: baseGame }) });
+    render(<GameDetailModal gameId="game-2" onClose={() => {}} />);
+    await screen.findByText('Fork Of Something');
+    expect(screen.queryByText(/Remixed from/)).toBeNull();
+  });
+
+  it('says the source is no longer available, with no title, author or link, when the original was taken down', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ game: {
+      ...baseGame,
+      forkedFrom: { gameId: null, title: null, slug: null, authorClerkId: null, authorName: null, unavailable: true },
+    } }) });
+    render(<GameDetailModal gameId="game-2" onClose={() => {}} />);
+    expect(await screen.findByText('Remixed from a game that is no longer available')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Original/ })).toBeNull();
+    expect(screen.queryByText(/by Origin Author/)).toBeNull();
+  });
+});

@@ -443,6 +443,9 @@ export const gameForks = pgTable(
   },
   (table) => [
     index('idx_game_forks_original').on(table.originalGameId),
+    // Attribution lookup: "was THIS project created by a fork?" (#7858).
+    // Each fork creates a fresh project row, so the match is effectively unique.
+    index('idx_game_forks_forked_project').on(table.forkedProjectId),
   ]
 );
 
