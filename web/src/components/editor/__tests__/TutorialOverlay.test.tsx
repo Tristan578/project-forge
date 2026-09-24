@@ -230,6 +230,54 @@ describe('TutorialOverlay', () => {
     expect(mockRetreatTutorial).toHaveBeenCalledOnce();
   });
 
+  // Action steps ask the user to type. Their keys move the caret or close the
+  // field's own popup; they must not also step or end the tour.
+  it.each([
+    ['an input', () => Object.assign(document.createElement('input'), { type: 'text' })],
+    ['a textarea', () => document.createElement('textarea')],
+    ['a contenteditable', () => {
+      const el = document.createElement('div');
+      el.contentEditable = 'true';
+      // jsdom does not derive isContentEditable from the attribute.
+      Object.defineProperty(el, 'isContentEditable', { value: true });
+      return el;
+    }],
+  ])('ignores its keys while the user types in %s', (_case, make) => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    const field = make();
+    document.body.appendChild(field);
+    try {
+      for (const key of ['ArrowLeft', 'ArrowRight', 'Escape']) fireEvent.keyDown(field, { key });
+    } finally {
+      field.remove();
+    }
+    expect(mockRetreatTutorial).not.toHaveBeenCalled();
+    expect(mockCompleteTutorial).not.toHaveBeenCalled();
+    expect(mockSkipTutorial).not.toHaveBeenCalled();
+  });
+
+  it('still steps with the arrows from a button, and ignores modified or consumed keys', () => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    try {
+      fireEvent.keyDown(button, { key: 'ArrowLeft', altKey: true });
+      fireEvent.keyDown(button, { key: 'ArrowLeft', ctrlKey: true });
+      const consumed = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      consumed.preventDefault();
+      button.dispatchEvent(consumed);
+      expect(mockRetreatTutorial).not.toHaveBeenCalled();
+      expect(mockSkipTutorial).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(button, { key: 'ArrowLeft' });
+      expect(mockRetreatTutorial).toHaveBeenCalledOnce();
+    } finally {
+      button.remove();
+    }
+  });
+
   it('does not retreat on ArrowLeft when on first step', () => {
     setupStore({ tutorialStep: 0 });
     render(<TutorialOverlay />);

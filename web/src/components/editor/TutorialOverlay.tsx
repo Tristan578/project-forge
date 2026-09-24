@@ -94,6 +94,13 @@ export function TutorialOverlay() {
     if (!activeTutorialId) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // The listener is window-wide, and action steps ask the user to type
+      // (a chat prompt, an entity name). Arrow keys there move the caret and
+      // Escape belongs to that field or its popup; neither may also step or
+      // end the tour. Modified keys and keys another handler consumed are
+      // left alone for the same reason.
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (isEditableTarget(e.target)) return;
       const s = keyHandlerState.current;
       switch (e.key) {
         case 'Escape':
@@ -352,6 +359,20 @@ export function placeBubble(
       return { left, width, top, maxHeight: Math.max(0, viewportH - EDGE - top) };
     }
   }
+}
+
+/** A field the user types into: its keys are theirs, not the tour's. */
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
+  if (target instanceof HTMLInputElement) {
+    // Buttons, checkboxes and the like take no text, so arrows are free there.
+    return !['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file', 'image'].includes(
+      target.type,
+    );
+  }
+  return false;
 }
 
 function subscribeToViewport(onChange: () => void) {
