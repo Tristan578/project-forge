@@ -181,3 +181,19 @@ describe('both exporters embed the same handler', () => {
     expect(get().match(/function\(event\) \{/g)).toHaveLength(1);
   });
 });
+
+describe('SCENE_LOADED -> perf harness (#10013)', () => {
+  it('tells an armed harness the engine applied the scene', () => {
+    const { call, win } = loadHandler();
+    const applied: string[] = [];
+    win['__forgePerfHooks'] = { sceneApplied: (name: string) => applied.push(name) };
+    call({ type: 'SCENE_LOADED', payload: { name: 'Perf fixture 3D v1' } });
+    expect(applied).toEqual(['Perf fixture 3D v1']);
+  });
+
+  it('is a no-op without the harness, and writes no global', () => {
+    const { call, win } = loadHandler();
+    call({ type: 'SCENE_LOADED', payload: { name: 'Scene' } });
+    expect(Object.keys(win)).toEqual([]);
+  });
+});

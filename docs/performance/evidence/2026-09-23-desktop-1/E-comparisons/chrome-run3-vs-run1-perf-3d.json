@@ -1,0 +1,34 @@
+{
+  "currentReportId": "perf-13123f08-e906-489e-9ad1-52b49d0b1e16",
+  "baselineReportId": "perf-ade17f2c-ea00-440f-9c79-7889f3ab3d4b",
+  "compatible": true,
+  "claim": "unchanged",
+  "incompatibilities": [],
+  "advisories": [],
+  "metrics": [
+    {
+      "metric": "frameTimeP50Ms",
+      "current": 15.300000000745058,
+      "baseline": 15.400000002235174,
+      "deltaMs": -0.1
+    },
+    {
+      "metric": "frameTimeP95Ms",
+      "current": 17.700000002980232,
+      "baseline": 17.5,
+      "deltaMs": 0.2
+    },
+    {
+      "metric": "frameTimeP99Ms",
+      "current": 21.124999999068677,
+      "baseline": 21.300000000745058,
+      "deltaMs": -0.175
+    },
+    {
+      "metric": "firstInteractiveMs",
+      "current": 3026,
+      "baseline": 2849.6,
+      "deltaMs": 176.4
+    }
+  ]
+}

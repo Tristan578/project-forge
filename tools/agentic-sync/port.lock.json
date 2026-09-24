@@ -80,7 +80,7 @@
     ".agents/skills/pr-green-machine/scripts/pr-status.sh": "e1fe411b6d1d7896612c11258686f683baaaca0646edc64b613e3deb5b7c2c48",
     ".agents/skills/resolve-all-pr-comments/SKILL.md": "e984c3b4bfa5438f04981a49c34a63c35a04a845d98e79bd9a7c98669de55bde",
     ".agents/skills/resolve-pr-comments/SKILL.md": "d2dfcefee525444ecb82a689a1d725be00a01aa30cc9892bb9a81789c253f1d1",
-    ".agents/skills/review-protocol/SKILL.md": "6bbd8c6eeab0007a3fc5bc48e50600e9ae6c309238d39b642a0f70a700fa2bbe",
+    ".agents/skills/review-protocol/SKILL.md": "228b9028e70996ce87eae3f08de2c588a04df6f1d0495a89cc5bc77362f8acdc",
     ".agents/skills/rust-engine/SKILL.md": "cd64dba8c9abf91f4f0407fab110eb74de9603b5f68110fb29f97064fcee219f",
     ".agents/skills/rust-engine/references/bevy-api.md": "9969380e5ebd7e5a19c25d5b1022963e0eb1201559dda1e2c4710cf3ec3f17ac",
     ".agents/skills/rust-engine/references/bridge-isolation-rules.md": "eb605439063c17a42128e683c70d85ee6a872e05d76502fc5a5aeb95d956a56a",

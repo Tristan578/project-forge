@@ -318,7 +318,7 @@ else
 fi
 
 echo ""
-echo "=== create: still full AFTER an eviction -> exit 5 with the audit hint ==="
+echo "=== create: still full AFTER an eviction with no other candidate -> exit 5, and the message says a concurrent job may have taken the slot ==="
 stub_reset; gh_reset; gh_pr 1 open
 LIST_ONE='{"branches":[{"id":"br-a","name":"preview-pr-000001","created_at":"2026-01-01T00:00:00Z"}]}'
 printf '%s' "$EMPTY_LIST" | stub_body 1
@@ -326,12 +326,87 @@ stub_status 2 422; printf '%s' "$LIMIT_FULL" | stub_body 2
 printf '%s' "$LIST_ONE" | stub_body 3
 stub_status 4 422; printf '%s' "$LIMIT_FULL" | stub_body 4
 printf '%s' "$LIST_ONE" | stub_body 5
-# call 6 = DELETE br-a (default 200); call 7 = POST still refused
+# call 6 = DELETE br-a (default 200); call 7 = POST still refused; call 8 = the
+# re-list no longer carries br-a and offers nothing else
 stub_status 7 422; printf '%s' "$LIMIT_FULL" | stub_body 7
+printf '%s' "$EMPTY_LIST" | stub_body 8
 res="$(run_script create 42 --uri-out "$TMPDIR_T/f.uri")"; rc="${res%%|*}"; out="${res#*|}"
-if [ "$rc" = "5" ]; then pass "still-full after eviction exits 5"; else fail "expected exit 5, got $rc"; fi
-if grep -qF 'outside this pipeline' <<<"$out"; then pass "the error points at branches this pipeline does not own"; else fail "audit hint missing: $out"; fi
-if [ "$(posts)" = "3" ]; then pass "no fourth attempt: one eviction per run"; else fail "expected 3 create attempts, saw $(posts)"; fi
+if [ "$rc" = "5" ]; then pass "still-full after eviction with nothing else to reclaim exits 5"; else fail "expected exit 5, got $rc"; fi
+if grep -qF 'concurrent preview job' <<<"$out" && grep -qF 'nothing else is safe to reclaim' <<<"$out"; then pass "the error names the race, not a foreign branch"; else fail "race message missing: $out"; fi
+if grep -qF 'outside this pipeline' <<<"$out"; then fail "a single eviction with no other candidate is not evidence of a foreign branch"; else pass "the foreign-branch audit hint is not raised for one eviction"; fi
+if [ "$(posts)" = "3" ]; then pass "no fourth attempt without a reclaimed slot"; else fail "expected 3 create attempts, saw $(posts)"; fi
+if [ "$(deletes)" = "br-a" ]; then pass "the one candidate was evicted once"; else fail "deletes were: $(deletes | tr '\n' ' ')"; fi
+
+echo ""
+echo "=== create: a concurrent job took the freed slot -> evict the next oldest and retry (#10245) ==="
+# What happened on #10223 and #10243 at 04:33Z: both evicted #10214's branch,
+# one create landed, the other was told a foreign branch was to blame.
+# Defined here, not borrowed from a later case: under set -u an unbound name
+# inside a pipeline takes the stub directory with it and every case after
+# reads "status 'none'".
+LIST_AB='{"branches":[{"id":"br-a","name":"preview-pr-000001","created_at":"2026-01-01T00:00:00Z"},{"id":"br-b","name":"preview-pr-000002","created_at":"2026-06-01T00:00:00Z"}]}'
+LIST_ONLY_B='{"branches":[{"id":"br-b","name":"preview-pr-000002","created_at":"2026-06-01T00:00:00Z"}]}'
+stub_reset; gh_reset; gh_pr 1 open; gh_pr 2 open
+printf '%s' "$EMPTY_LIST" | stub_body 1
+stub_status 2 422; printf '%s' "$LIMIT_FULL" | stub_body 2
+printf '%s' "$LIST_AB" | stub_body 3
+stub_status 4 422; printf '%s' "$LIMIT_FULL" | stub_body 4
+printf '%s' "$LIST_AB" | stub_body 5
+# call 6 = DELETE br-a; call 7 = POST refused (the other job took the slot);
+# call 8 = re-list: br-a is gone; call 9 = DELETE br-b; call 10 = POST -> ok
+stub_status 7 422; printf '%s' "$LIMIT_FULL" | stub_body 7
+printf '%s' "$LIST_ONLY_B" | stub_body 8
+stub_status 10 201; printf '%s' "$CREATE_OK" | stub_body 10
+res="$(run_script create 42 --uri-out "$TMPDIR_T/g.uri")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "the loser of the race recovers by evicting the next oldest (exit 0)"; else fail "expected exit 0, got $rc ($out)"; fi
+if [ "$(deletes | tr '\n' ' ')" = "br-a br-b " ]; then pass "oldest first, then the next oldest — each chosen from a fresh list"; else fail "deletes were: $(deletes | tr '\n' ' ')"; fi
+if grep -qxF 'evicted_pr=1' <<<"$out" && grep -qxF 'evicted_pr=2' <<<"$out" \
+  && grep -qxF 'evicted_branch=br-a' <<<"$out" && grep -qxF 'evicted_branch=br-b' <<<"$out"; then
+  pass "BOTH evicted PRs are named for the caller, each with its branch"
+else
+  fail "evicted_* lines for both PRs missing: $out"
+fi
+if grep -qxF 'branch_id=br-new-1' <<<"$out"; then pass "the create after the second eviction succeeded"; else fail "no branch_id after the second eviction"; fi
+if [ "$(posts)" = "4" ]; then pass "one attempt per stage: initial, after sweep, after each eviction"; else fail "expected 4 create attempts, saw $(posts)"; fi
+if grep -qF 'concurrent preview job may have taken the slot' <<<"$out"; then pass "the retry is announced as the race it is"; else fail "retry notice missing: $out"; fi
+
+echo ""
+echo "=== create: the eviction bound -> after PREVIEW_DB_MAX_EVICTIONS the audit hint, and the knob is read ==="
+LIST_THREE_OLD='{"branches":[{"id":"br-a","name":"preview-pr-000001","created_at":"2026-01-01T00:00:00Z"},{"id":"br-b","name":"preview-pr-000002","created_at":"2026-02-01T00:00:00Z"},{"id":"br-c","name":"preview-pr-000004","created_at":"2026-03-01T00:00:00Z"}]}'
+LIST_BC='{"branches":[{"id":"br-b","name":"preview-pr-000002","created_at":"2026-02-01T00:00:00Z"},{"id":"br-c","name":"preview-pr-000004","created_at":"2026-03-01T00:00:00Z"}]}'
+LIST_C='{"branches":[{"id":"br-c","name":"preview-pr-000004","created_at":"2026-03-01T00:00:00Z"}]}'
+stub_reset; gh_reset; gh_pr 1 open; gh_pr 2 open; gh_pr 4 open
+printf '%s' "$EMPTY_LIST" | stub_body 1
+stub_status 2 422; printf '%s' "$LIMIT_FULL" | stub_body 2
+printf '%s' "$LIST_THREE_OLD" | stub_body 3
+stub_status 4 422; printf '%s' "$LIMIT_FULL" | stub_body 4
+printf '%s' "$LIST_THREE_OLD" | stub_body 5
+stub_status 7 422; printf '%s' "$LIMIT_FULL" | stub_body 7     # after DELETE br-a
+printf '%s' "$LIST_BC" | stub_body 8
+stub_status 10 422; printf '%s' "$LIMIT_FULL" | stub_body 10   # after DELETE br-b
+printf '%s' "$LIST_C" | stub_body 11
+stub_status 13 422; printf '%s' "$LIMIT_FULL" | stub_body 13   # after DELETE br-c
+res="$(run_script create 42 --uri-out "$TMPDIR_T/h.uri")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "5" ]; then pass "still full after the maximum number of evictions exits 5"; else fail "expected exit 5, got $rc ($out)"; fi
+if grep -qF 'outside this pipeline' <<<"$out" && grep -qF 'reclaiming 3 branch(es)' <<<"$out"; then pass "past the bound the error points at branches this pipeline does not own, and says how many it reclaimed"; else fail "audit hint missing or wrong count: $out"; fi
+if [ "$(deletes | tr '\n' ' ')" = "br-a br-b br-c " ]; then pass "exactly the bound's worth of evictions, oldest first"; else fail "deletes were: $(deletes | tr '\n' ' ')"; fi
+if [ "$(posts)" = "5" ]; then pass "one attempt per eviction, none past the bound"; else fail "expected 5 create attempts, saw $(posts)"; fi
+
+# The knob: PREVIEW_DB_MAX_EVICTIONS=1 is the pre-#10245 behaviour, one eviction per run.
+stub_reset; gh_reset; gh_pr 1 open; gh_pr 2 open; gh_pr 4 open
+printf '%s' "$EMPTY_LIST" | stub_body 1
+stub_status 2 422; printf '%s' "$LIMIT_FULL" | stub_body 2
+printf '%s' "$LIST_THREE_OLD" | stub_body 3
+stub_status 4 422; printf '%s' "$LIMIT_FULL" | stub_body 4
+printf '%s' "$LIST_THREE_OLD" | stub_body 5
+stub_status 7 422; printf '%s' "$LIMIT_FULL" | stub_body 7
+printf '%s' "$LIST_BC" | stub_body 8
+res="$(run_script PREVIEW_DB_MAX_EVICTIONS=1 create 42 --uri-out "$TMPDIR_T/i.uri")"; rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "5" ] && [ "$(deletes)" = "br-a" ] && [ "$(posts)" = "3" ] && grep -qF 'outside this pipeline' <<<"$out"; then
+  pass "PREVIEW_DB_MAX_EVICTIONS=1 stops after one eviction"
+else
+  fail "max-evictions override not honoured: rc=$rc deletes=$(deletes | tr '\n' ' ') posts=$(posts) out=$out"
+fi
 
 echo ""
 echo "=== create: any OTHER create failure is not a capacity problem -> exit 3, no reclaim ==="
@@ -451,6 +526,7 @@ printf '%s' "$LIST_ONE" | stub_body 3
 stub_status 4 422; printf '%s' "$LIMIT_FULL" | stub_body 4
 printf '%s' "$LIST_ONE" | stub_body 5
 stub_status 7 422; printf '%s' "$LIMIT_FULL" | stub_body 7
+printf '%s' "$EMPTY_LIST" | stub_body 8                  # re-list after the eviction: nothing else
 res="$(run_script_split create 42 --uri-out "$TMPDIR_T/l.uri")"; rc="${res%%|*}"; out="${res#*|}"
 err="$(stderr_log)"
 if [ "$rc" = "5" ]; then pass "(shape reproduced: exit 5 after an eviction)"; else fail "expected exit 5, got $rc"; fi
@@ -464,7 +540,7 @@ if grep -qE '^::(error|warning|notice)::' <<<"$out"; then
 else
   pass "no ::error::/::warning::/::notice:: on stdout"
 fi
-if grep -qF 'outside this pipeline' <<<"$err"; then
+if grep -qF 'nothing else is safe to reclaim' <<<"$err"; then
   pass "the ::error:: is on STDERR, so it reaches the job log whatever the caller does with stdout"
 else
   fail "the ::error:: did not reach stderr: $err"
@@ -604,6 +680,23 @@ if grep -qE "^[[:space:]]+if: always\(\) && steps\.neon-branch\.outputs\.evicted
   pass "the evicted-PR comment runs even when this PR's own create then failed (always())"
 else
   fail "the evicted-PR comment step is not gated on always(): an eviction followed by a failed create tells nobody"
+fi
+# A run can evict more than one PR (#10245). The capture must keep EVERY
+# evicted_pr= line — a `head -1` after that sed drops the rest — and the
+# notice step must loop over them, or the second evicted PR is never told.
+# shellcheck disable=SC2016
+# Literal "$EVICTED_PR" / "$evicted_pr" in the workflow's run: blocks.
+if grep -qE "sed -n 's/\^evicted_pr=//p' \| head -1" <<<"$ci_exec"; then
+  fail "ci.yml keeps only the first evicted_pr= line; a second evicted PR gets no notice"
+else
+  pass "preview-deploy keeps every evicted_pr= line"
+fi
+# shellcheck disable=SC2016
+# Literal "$EVICTED_PR", "$pr" and "$REPO" in the workflow's run: block.
+if grep -qE '^[[:space:]]+for pr in \$EVICTED_PR; do' <<<"$ci_exec" && grep -qE 'gh pr comment "\$pr" --repo "\$REPO"' <<<"$ci_exec"; then
+  pass "the reclaimed-database notice is posted to every evicted PR"
+else
+  fail "ci.yml comments on a single evicted PR only"
 fi
 # The sweep job's event gate, derived from the job block rather than restated:
 # a run: line that exists but sits under a false if: is not wiring.

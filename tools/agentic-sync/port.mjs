@@ -92,7 +92,7 @@ import {
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { dirname, join, posix, resolve, sep } from 'node:path';
+import { dirname, join, posix, resolve, sep, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -766,30 +766,227 @@ function ownedByGenerator(m, rel) {
 
 // Codex never reads `.mcp.json`, so a server added there is simply absent for
 // Codex users until it is restated in `.codex/config.toml` — and nothing else
-// would notice. NAMES only: command/args are not compared, because Codex
-// forwards secrets by name through `env_vars` where `.mcp.json` interpolates
-// `${VAR}`, so the two are never byte-identical by design.
+// would notice.
 //
-// config.toml is hand-authored (and guarded by a deny rule in
-// .claude/settings.json), so this is a check the generator cannot fix.
+// NAMES, COMMAND, ARGS AND THE SECRET NAMES ARE ALL COMPARED. Names alone was the
+// first cut, on the reasoning that the two files are never byte-identical because
+// Codex forwards secrets by name through `env_vars` where `.mcp.json` interpolates
+// `${VAR}`. True of the ENV, and not a reason to skip the rest: a review found that
+// a server could be restated with the wrong package, the wrong args or a dropped
+// credential name and this check would still call it parity. So the env is compared
+// STRUCTURALLY — a `${VAR}` value must appear in `env_vars`, a literal value must
+// appear verbatim in the `[…env]` sub-table — and command/args are compared exactly.
+// One key with no `.mcp.json` counterpart is checked too: every server must set
+// `default_tools_approval_mode = "prompt"` (see the approval loop in mcpParity).
+// And every server's launch must work from any directory in the checkout: no
+// command, arg or `cwd` may be a path Codex resolves against the directory the
+// session started in (the launch-path loop at the end of mcpParity).
+//
+// config.toml is hand-authored, so this is a check the generator cannot fix; it
+// reports and a person edits. It runs in CI, AFTER an edit is on disk; the
+// edit-time control is the `permissions.ask` rule on the file in
+// .claude/settings.json (a hard `deny` until #10134), which makes a Claude Code
+// Edit/Write stop for a human in every permission mode. .claude/SANDBOX.md lists
+// what guards the file and what does not.
+//
+// `[mcp_servers.<name>]` blocks out of a config.toml, as { command, args, envVars,
+// env, approvalMode, cwd }. Deliberately NOT a TOML parser — it reads the shapes this
+// file is allowed to use, and anything else it cannot read becomes a `parseError` that
+// is REPORTED rather than silently treated as parity (the failure mode that matters
+// here is a wrong comparison reading as a right one). Returns { blocks, unreadable }:
+// `unreadable` is the first line OUTSIDE every server table that it cannot read, and
+// since a multi-line string there could hold lines that look like server tables,
+// nothing it read can be trusted once that is set.
+function codexServerBlocks(text) {
+  const lines = String(text).split(/\r?\n/);
+  const blocks = new Map();
+  let unreadable = '';
+  let name = null;
+  let isEnv = false;
+  const ensure = (n) => {
+    if (!blocks.has(n)) blocks.set(n, { command: undefined, args: [], envVars: [], env: Object.create(null), approvalMode: undefined, cwd: undefined, parseError: '' });
+    return blocks.get(n);
+  };
+  const fail = (block, msg) => { if (!block.parseError) block.parseError = msg; };
+  // TOML 1.0's basic-string escapes (toml.io/en/v1.0.0#string). A literal string
+  // ('…') has none. Anything else after a backslash is an error in TOML 1.0, so it
+  // is reported rather than guessed at: a spelling a later TOML accepts reads as
+  // unreadable here, never as a wrong value.
+  const SHORT_ESCAPES = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\' };
+  // ONE PASS PER LINE, string-aware. Counting brackets over the raw text let a
+  // trailing comment containing a stray `]` close the array early: the elements
+  // after it were dropped, no parseError was raised, and mcpParity() then reported
+  // PARITY on a config that really differed — a server silently carrying an extra
+  // argument. A `#` inside a quoted value is not a comment either, and a bracket
+  // inside one is not a delimiter, so quotes have to be tracked to get any of it
+  // right. Returns the DECODED quoted scalars — what Codex reads, which is what
+  // .mcp.json's JSON-decoded values are compared with — and the bracket depth
+  // change, comment excluded; or an `error` for a string it cannot decode. Taking the
+  // raw text between the quotes, as the first cut did, read "C:\\x" as C:\\x (so a
+  // Windows path failed parity), ended a string at an escaped quote, read an
+  // unclosed string as closed, and read the body of a multi-line string as keys.
+  const readLine = (s) => {
+    const values = [];
+    let tokens = '';
+    let depth = 0;
+    let i = 0;
+    const error = (msg) => ({ values, tokens, depth, error: msg });
+    while (i < s.length) {
+      const c = s[i];
+      if (c === '"' || c === "'") {
+        if (s.startsWith(c.repeat(3), i)) {
+          return error(`a multi-line string (""" or ''') cannot be read here, and its body would be read as keys; write the value on one line`);
+        }
+        let v = '';
+        let j = i + 1;
+        while (j < s.length && s[j] !== c) {
+          if (c === "'" || s[j] !== '\\') { v += s[j]; j += 1; continue; }
+          const e = s[j + 1];
+          if (e !== undefined && Object.hasOwn(SHORT_ESCAPES, e)) { v += SHORT_ESCAPES[e]; j += 2; continue; }
+          const width = e === 'u' ? 4 : e === 'U' ? 8 : 0;
+          const hex = width ? /^[0-9A-Fa-f]*/.exec(s.slice(j + 2, j + 2 + width))[0] : '';
+          const cp = hex.length === width && width ? parseInt(hex, 16) : NaN;
+          if (cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff)) { v += String.fromCodePoint(cp); j += 2 + width; continue; }
+          return error(`invalid escape \\${e ?? ''}${hex} in a basic string; write a backslash as \\\\, or use a 'literal string'`);
+        }
+        if (j >= s.length) return error('a string is not closed');
+        values.push(v);
+        tokens += 's';
+        i = j + 1;
+        continue;
+      }
+      if (c === '#') break; // unquoted: the rest of the line is a comment
+      if (!/\s/.test(c)) tokens += '[],'.includes(c) ? c : '?';
+      if (c === '[') depth += 1;
+      if (c === ']') depth -= 1;
+      i += 1;
+    }
+    return { values, tokens, depth, error: '' };
+  };
+  // Decode dotted key components once for both tables and properties.
+  const readKey = (s) => {
+    const parts = [];
+    let rest = s.trimStart();
+    while (true) {
+      const token = /^(?:[A-Za-z0-9_-]+|"(?:\\.|[^"\\])*"|'[^']*')/.exec(rest);
+      if (!token) return { parts, rest, error: 'unsupported or malformed TOML key' };
+      const decoded = readLine(token[0]);
+      if (decoded.error) return { parts, rest, error: decoded.error };
+      parts.push(decoded.values.length ? decoded.values[0] : token[0]);
+      rest = rest.slice(token[0].length).trimStart();
+      if (!rest.startsWith('.')) return { parts, rest, error: '' };
+      rest = rest.slice(1).trimStart();
+    }
+  };
+  let table = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trimStart();
+    if (!line.trim() || line.startsWith('#')) continue;
+    const unread = (msg) => { if (!unreadable) unreadable = 'line ' + (i + 1) + ': ' + msg; };
+    if (line.startsWith('[')) {
+      const arrayTable = line.startsWith('[[');
+      const header = readKey(line.slice(arrayTable ? 2 : 1));
+      const ending = arrayTable ? /^\]\]\s*(#.*)?$/ : /^\]\s*(#.*)?$/;
+      name = null;
+      isEnv = false;
+      table = header.parts;
+      if (header.error || !ending.test(header.rest)) {
+        unread(header.error || 'unsupported or malformed TOML table');
+        continue;
+      }
+      if (table[0] !== 'mcp_servers') continue;
+      if (arrayTable || table.length > 3 || (table.length === 3 && table[2] !== 'env')) {
+        unread('unsupported MCP table; use [mcp_servers.<name>] and its .env sub-table');
+        continue;
+      }
+      if (table.length === 1) continue;
+      name = table[1];
+      isEnv = table.length === 3;
+      ensure(name);
+      continue;
+    }
+    const parsed = readKey(line);
+    const kv = !parsed.error && parsed.rest.startsWith('=') ? parsed : null;
+    const first = readLine(kv ? kv.rest.slice(1).trimStart() : line);
+    if (name === null) {
+      if (first.error) unread(first.error);
+      // Inline/dotted declarations can create servers without a server header.
+      if (table[0] === 'mcp_servers' || (table.length === 0 && parsed.parts[0] === 'mcp_servers')) {
+        unread('unsupported MCP declaration; use [mcp_servers.<name>] tables');
+      }
+      continue;
+    }
+    const block = ensure(name);
+    const key = kv ? kv.parts.join('.') : 'line ' + (i + 1);
+    if (first.error) { fail(block, key + ': ' + first.error); continue; }
+    if (!kv || kv.parts.length !== 1 || (!isEnv && key === 'env')) {
+      fail(block, key + ': unsupported MCP property; use simple keys and an .env sub-table');
+      continue;
+    }
+    // Consume arrays even for options parity does not compare (enabled_tools,
+    // for example). Their continuation lines are values, never new properties.
+    let v = first.values;
+    let tokens = first.tokens;
+    let depth = first.depth;
+    let contError = '';
+    let guard = 0;
+    while (depth > 0 && i + 1 < lines.length) {
+      i += 1;
+      const cont = readLine(lines[i]);
+      if (cont.error) { contError = cont.error; break; }
+      v = v.concat(cont.values);
+      tokens += cont.tokens;
+      depth += cont.depth;
+      if ((guard += 1) > 500) break;
+    }
+    if (contError) { fail(block, key + ': ' + contError); continue; }
+    if (depth > 0) { fail(block, key + ' array is not closed'); continue; }
+    const arrayProperty = !isEnv && (key === 'args' || key === 'env_vars');
+    const scalarProperty = isEnv || ['command', 'cwd', 'default_tools_approval_mode'].includes(key);
+    if ((arrayProperty && !/^\[(?:s(?:,s)*,?)?\]$/.test(tokens)) || (scalarProperty && tokens !== 's')) {
+      fail(block, key + ': expected ' + (arrayProperty ? 'an array of strings' : 'a string'));
+      continue;
+    }
+    if (isEnv) {
+      if (v.length) block.env[key] = v[0];
+    } else if (key === 'command') {
+      if (v.length) block.command = v[0];
+    } else if (key === 'default_tools_approval_mode') {
+      if (v.length) block.approvalMode = v[0];
+    } else if (key === 'cwd') {
+      if (v.length) block.cwd = v[0];
+    } else if (key === 'args') block.args = v;
+    else if (key === 'env_vars') block.envVars = v;
+  }
+  return { blocks, unreadable };
+}
+
 function mcpParity() {
   const out = { problems: [], note: '' };
-  if (!existsExact('.mcp.json') || !existsExact('.codex/config.toml')) {
-    out.note = 'MCP parity skipped — .mcp.json or .codex/config.toml is absent.';
+  const hasManifest = existsExact('.mcp.json');
+  const hasConfig = existsExact('.codex/config.toml');
+  if (!hasManifest && !hasConfig) {
+    out.note = 'MCP parity skipped — neither MCP configuration file is present.';
     return out;
   }
-  let want;
+  if (!hasManifest || !hasConfig) {
+    out.problems.push('mcp:      both .mcp.json and .codex/config.toml must be present to check parity');
+    return out;
+  }
+  let wantServers;
   try {
-    want = Object.keys(JSON.parse(readFileSync(abs('.mcp.json'), 'utf8')).mcpServers || {}).sort();
+    wantServers = JSON.parse(readFileSync(abs('.mcp.json'), 'utf8')).mcpServers || {};
   } catch (e) {
     die(`.mcp.json is not valid JSON: ${e.message}`);
   }
+  const want = Object.keys(wantServers).sort();
   // The COMMITTED blob when git can supply it, exactly as
   // scripts/check-codex-config-safety.sh does and for the same reason: a
   // contributor may have an uncommitted `[mcp_servers.*]` edit in the working
   // tree, and that must not turn a local --check red. It is tolerated, NOT
-  // recommended: docs/guides/taskboard-sync.md sends personal servers to the
-  // user-level ~/.codex/config.toml, because in a linked worktree
+  // recommended: personal servers belong in the user-level
+  // ~/.codex/config.toml (docs/guides/codex-cli-support-matrix.md, "MCP
+  // servers"), because in a linked worktree
   // worktree-safety-commit.sh commits whatever is in the tree when a session
   // stops — after which the block IS committed and this check goes red. In CI
   // the checkout IS the ref under test: "what does the repository declare?".
@@ -802,22 +999,106 @@ function mcpParity() {
   } catch {
     config = readFileSync(abs('.codex/config.toml'), 'utf8'); // no git, or not yet committed
   }
-  const have = [];
-  for (const line of config.split(/\r?\n/)) {
-    // The table header of a server itself, not of a sub-table (`…sentry.env`).
-    const hit = /^\s*\[mcp_servers\.("[^"]+"|[A-Za-z0-9_-]+)\]\s*(#.*)?$/.exec(line);
-    if (hit) have.push(hit[1].replace(/^"|"$/g, ''));
-  }
-  if (have.length === 0) {
-    // Not an error: a profile with no MCP block is a legitimate state, and
-    // failing here would make this gate red on the tree it was introduced in.
-    // It is said out loud so "nothing declared" never reads as "in parity".
-    out.note = `::warning::.codex/config.toml declares no [mcp_servers.*] — Codex users have none of the ${want.length} servers in .mcp.json. Parity is enforced from the first declaration (#8767).`;
+  // A string the reader cannot decode OUTSIDE every server table stops the check
+  // before anything is compared: a multi-line string there could hold lines that
+  // look like `[mcp_servers.…]` tables, so the server list itself is in doubt.
+  const { blocks, unreadable } = codexServerBlocks(config);
+  if (unreadable) {
+    out.problems.push(`mcp:      .codex/config.toml cannot be read at ${unreadable} — no server was compared; fix that line, then re-run`);
     return out;
   }
+  const have = [...blocks.keys()];
   for (const n of want) if (!have.includes(n)) out.problems.push(`mcp:      ${n} is in .mcp.json but not in .codex/config.toml`);
   for (const n of have) if (!want.includes(n)) out.problems.push(`mcp:      ${n} is in .codex/config.toml but not in .mcp.json`);
-  if (out.problems.length === 0) out.note = `${have.length} MCP servers declared for Codex, matching .mcp.json.`;
+
+  // SHAPE, not just presence. Each server's own table is cut out by its header and
+  // the next one; a `[name.env]` sub-table is collected separately. Both the inline
+  // (`args = ["-y", "x"]`) and the multi-line array forms are accepted, because the
+  // Codex app itself rewrites this file into the multi-line form and that is the
+  // same TOML — a formatting difference must not read as drift. `blocks` was read
+  // above, before the names, so an unreadable file is refused before either.
+  for (const n of want) {
+    if (!have.includes(n)) continue; // already reported as missing
+    const got = blocks.get(n);
+    const wanted = wantServers[n] || {};
+    if (!got) continue;
+    if (got.parseError) {
+      out.problems.push(`mcp:      ${n} could not be read from .codex/config.toml (${got.parseError}) — compare it by hand`);
+      continue;
+    }
+    if (typeof wanted.command === 'string' && got.command !== wanted.command) {
+      out.problems.push(`mcp:      ${n} command is ${JSON.stringify(got.command)} in .codex/config.toml but ${JSON.stringify(wanted.command)} in .mcp.json`);
+    }
+    const wantArgs = Array.isArray(wanted.args) ? wanted.args : [];
+    if (JSON.stringify(wantArgs) !== JSON.stringify(got.args)) {
+      out.problems.push(`mcp:      ${n} args are ${JSON.stringify(got.args)} in .codex/config.toml but ${JSON.stringify(wantArgs)} in .mcp.json`);
+    }
+    // The env is compared by MEANING, since the two files express it differently.
+    for (const [k, v] of Object.entries(wanted.env || {})) {
+      const interpolated = /^\$\{([A-Za-z0-9_]+)\}$/.exec(String(v));
+      if (interpolated) {
+        if (Object.keys(got.env).some((key) => key.toLowerCase() === k.toLowerCase())) {
+          out.problems.push(`mcp:      ${n} overrides forwarded secret ${k} with a literal env value in .codex/config.toml`);
+        }
+        if (interpolated[1] !== k) out.problems.push(`mcp:      ${n} aliases ${interpolated[1]} to ${k} in .mcp.json — Codex env_vars cannot rename a secret; use matching variable names`);
+        if (!got.envVars.includes(k)) {
+          out.problems.push(`mcp:      ${n} forwards ${k} in .mcp.json but it is not in env_vars in .codex/config.toml — Codex has no \${VAR} interpolation, so that secret never reaches the server`);
+        }
+      } else if (got.env[k] !== String(v)) {
+        out.problems.push(`mcp:      ${n} sets ${k}=${JSON.stringify(String(v))} in .mcp.json but ${got.env[k] === undefined ? 'it is absent from' : `${JSON.stringify(got.env[k])} in`} .codex/config.toml`);
+      }
+    }
+  }
+  // APPROVAL MODE, on every server Codex would run. `.mcp.json` has no counterpart,
+  // so parity alone never looks at it — and board round 1 on #10135 found the one
+  // server of eight without it (taskboard, whose tools include delete_ticket and
+  // move_ticket) with nothing noticing. docs/guides/codex-cli-support-matrix.md
+  // ("MCP servers") says why it is pinned rather than left to Codex's default.
+  // A `default_tools_approval_mode` written in the `[…env]` sub-table is an
+  // environment variable, not this setting, and codexServerBlocks keeps the two apart.
+  for (const n of have) {
+    const got = blocks.get(n);
+    if (!got || got.parseError) continue; // a parse error is reported above, or the server is already an extra
+    if (got.approvalMode !== 'prompt') {
+      const what = got.approvalMode === undefined
+        ? 'does not set default_tools_approval_mode = "prompt"'
+        : `sets default_tools_approval_mode = ${JSON.stringify(got.approvalMode)}, not "prompt",`;
+      out.problems.push(`mcp:      ${n} ${what} in .codex/config.toml — every server needs "prompt" so its tools stay human-gated if Codex's default approval changes`);
+    }
+  }
+  // LAUNCH PATHS, on every server Codex would run. Codex starts a stdio server in
+  // the directory the SESSION started in, and resolves a relative `cwd` against
+  // that same directory — not against .codex/ and not against the repository root
+  // (observed with codex-cli 0.144.1; docs/guides/codex-cli-support-matrix.md,
+  // "MCP servers"). So a path written relative to the repository root launches
+  // only when the session starts at the root: board round 2 on #10135 found
+  // taskboard committed as `node .claude/hooks/taskboard-launch.mjs`, which fails
+  // its handshake in a session started in web/. taskboard now goes through a git
+  // `!` alias, which git runs from the repository's top-level directory
+  // (git-config(1), alias.*); there the path sits INSIDE one argument rather than
+  // being one, and is not flagged. A value counts as start-directory-relative when
+  // it is not absolute and is either explicitly relative (`.`, `..`, `./…`, `../…`)
+  // or names something that exists relative to the repository root. A bare word
+  // that names nothing here (`npx`, `-y`, `mcp`, a package spec) is not a path.
+  const isAbs = (v) => posix.isAbsolute(v) || win32.isAbsolute(v);
+  const startDirPath = (v) => {
+    if (typeof v !== 'string' || v === '' || isAbs(v)) return false;
+    if (/^\.\.?([/\\]|$)/.test(v)) return true;
+    return existsSync(join(ROOT, ...v.split(/[/\\]/)));
+  };
+  for (const n of have) {
+    const got = blocks.get(n);
+    if (!got || got.parseError) continue;
+    for (const v of [got.command, ...got.args]) {
+      if (startDirPath(v)) {
+        out.problems.push(`mcp:      ${n} runs ${JSON.stringify(v)}, a path relative to the repository root — Codex resolves it against the directory the session started in, so a session started anywhere else cannot launch this server`);
+      }
+    }
+    if (typeof got.cwd === 'string' && !isAbs(got.cwd)) {
+      out.problems.push(`mcp:      ${n} sets cwd = ${JSON.stringify(got.cwd)}, a relative path — Codex resolves it against the directory the session started in, not against .codex/ or the repository root`);
+    }
+  }
+  if (out.problems.length === 0) out.note = `${have.length} MCP servers declared for Codex, matching .mcp.json (name, command, args, secret names, approval mode and launch paths).`;
   return out;
 }
 
@@ -1038,7 +1319,7 @@ function main() {
       console.error('Fix `extra`/`modified`: --write never deletes a file it cannot prove it wrote; each line above says what to do with that file.');
     }
     if (has(/^ref:/)) console.error('Fix `ref`: correct the path in the SOURCE under .claude/ (or the hand-authored .codex/ file) — the generator copies text, it does not invent paths.');
-    if (has(/^mcp:/)) console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files. If the COMMITTED .codex/config.toml carries a personal server block that was swept into a commit by accident (a `git add -A`, a safety commit), take it back out of the commit — personal servers belong in ~/.codex/config.toml.');
+    if (has(/^mcp:/)) console.error('Fix `mcp`: restate the server in .codex/config.toml, or remove it from both files; an approval-mode line is fixed by adding default_tools_approval_mode = "prompt" to that server\'s own table; a launch-path line is fixed, in BOTH files, by launching it through a git alias, which git runs from the repository\'s top-level directory (taskboard does this) — never with a relative cwd. If the COMMITTED .codex/config.toml carries a personal server block that was swept into a commit by accident (a `git add -A`, a safety commit), take it back out of the commit — personal servers belong in ~/.codex/config.toml.');
     process.exit(1);
   }
   console.log('codex-port: generated Codex surface is in sync with .claude/.');

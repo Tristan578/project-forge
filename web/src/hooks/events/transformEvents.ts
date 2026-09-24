@@ -1,3 +1,4 @@
+import { notifyCaptureWorkloadChange, observeCaptureGraph } from '@/lib/perf/captureStability';
 /**
  * Event handlers for transform/scene graph/selection/history/snap/mode.
  */
@@ -37,6 +38,15 @@ export function handleTransformEvent(
   _set: SetFn,
   _get: GetFn
 ): boolean {
+  // Native gizmos and keyboard undo bypass the authoring command dispatcher.
+  // Observe occurrences, not history labels: repeated edits can share labels.
+  // Runtime transforms are part of the measured game, not authoring changes.
+  if (useEditorStore.getState().engineMode === 'edit' && [
+        'HISTORY_CHANGED', 'SELECTION_CHANGED', 'TRANSFORM_CHANGED',
+        'SCENE_NODE_ADDED', 'SCENE_NODE_REMOVED', 'SCENE_NODE_UPDATED',
+      ].includes(type)) {
+    notifyCaptureWorkloadChange();
+  }
   switch (type) {
     case 'SELECTION_CHANGED': {
       const payload = castPayload<{ selectedIds: string[]; primaryId: string | null; primaryName: string | null }>(data);
@@ -58,6 +68,9 @@ export function handleTransformEvent(
 
     case 'SCENE_GRAPH_UPDATE': {
       const payload = castPayload<SceneGraph>(data);
+      if (useEditorStore.getState().engineMode === 'edit') {
+        observeCaptureGraph(useEditorStore.getState().sceneGraph, payload);
+      }
       useEditorStore.getState().setFullGraph(payload);
       useEditorStore.getState().recomputeLightState(payload);
       // Mark scene as modified and trigger debounced auto-save
@@ -269,6 +282,13 @@ export function handleTransformEvent(
         // default) until the persisted-mode write path (child of #9901) has
         // something to set.
         sceneGraph: { ...useEditorStore.getState().sceneGraph, completionMode: undefined },
+        // `gameComponentAdjustments` (PF-1148) is deliberately NOT reset here.
+        // This event lands a frame after the command, and by then a caller may
+        // already have marked the INCOMING scene's components
+        // (`create_scene_from_description` adds them in the same task as its
+        // `newScene()`). The outgoing scene's markers were dropped when the
+        // engine accepted the command — `forgetOutgoingSceneAdjustments` in
+        // editorStore.ts.
       });
       resetEntityAudioGraphForScene();
       invalidateSceneCache(); // PF-319: new scene = completely new context

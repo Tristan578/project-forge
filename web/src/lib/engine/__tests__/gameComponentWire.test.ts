@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
+  mergeStoreComponentProps,
+  mergeStoreComponentPropsWithReport,
+  buildStoreComponentWithReport,
   toWireComponent,
   parseGameComponentWire,
   parseEmittedGameComponent,
@@ -1309,6 +1312,73 @@ describe('parseGameComponentWire properties handling', () => {
     expect(parseGameComponentWire({ componentType: 'dialogue_trigger', properties })).toEqual({
       type: 'dialogueTrigger',
       dialogueTrigger: { treeId: '', triggerRadius: 3, requireInteract: true, interactKey: 'use', oneShot: true },
+    });
+  });
+});
+
+describe('mergeStoreComponentProps (#10144)', () => {
+  const platform: GameComponentData = {
+    type: 'movingPlatform',
+    movingPlatform: { waypoints: [[0, 0, 0], [2, 0, 0], [4, 1, 0], [6, 1, 0], [8, 2, 0], [10, 2, 0]], speed: 2, loopMode: 'once', pauseDuration: 3 },
+  };
+
+  it('keeps every unnamed field and changes the named one', () => {
+    expect(mergeStoreComponentProps(platform, { speed: 5 })).toEqual({
+      type: 'movingPlatform',
+      movingPlatform: { ...platform.movingPlatform, speed: 5 },
+    });
+  });
+
+  it('runs the named value through the same clamp a fresh build gets', () => {
+    const merged = mergeStoreComponentProps(platform, { speed: 1e9 });
+    expect(merged?.type).toBe('movingPlatform');
+    // Whatever the engine's ceiling is, a merge cannot exceed it — pinned by
+    // comparing with a fresh build of the same value, not a hand-copied bound.
+    const fresh = buildStoreComponent('movingPlatform', { speed: 1e9 });
+    expect(merged).toEqual({
+      type: 'movingPlatform',
+      movingPlatform: { ...platform.movingPlatform, speed: (fresh as { movingPlatform: { speed: number } }).movingPlatform.speed },
+    });
+  });
+
+  it('ignores an explicit undefined rather than resetting the field', () => {
+    expect(mergeStoreComponentProps(platform, { loopMode: undefined, speed: 4 })).toEqual({
+      type: 'movingPlatform',
+      movingPlatform: { ...platform.movingPlatform, speed: 4 },
+    });
+  });
+
+  it('reads only own enumerable keys of the patch', () => {
+    const patch = Object.create({ speed: 9 }) as Record<string, unknown>;
+    expect(mergeStoreComponentProps(platform, patch)).toEqual(platform);
+  });
+
+  it('is the identity for an empty patch', () => {
+    expect(mergeStoreComponentProps(platform, {})).toEqual(platform);
+  });
+
+  // The write report (#9237) over a merge: what the engine's limits did to the
+  // NAMED fields, and only those fields as supplied. The carried fields are read
+  // back from the stored component, not written, so reporting them as supplied
+  // would clear a stale adjustment marker the caller never touched.
+  describe('mergeStoreComponentPropsWithReport', () => {
+    it('reports the clamp on the named field, against a fresh build of the same value', () => {
+      const merged = mergeStoreComponentPropsWithReport(platform, { speed: 1e9 });
+      const fresh = buildStoreComponentWithReport('movingPlatform', { speed: 1e9 });
+      expect(merged?.corrections).toEqual(fresh?.corrections);
+      expect(merged?.corrections.map((c) => c.field)).toEqual(['speed']);
+      expect(merged?.component).toEqual(mergeStoreComponentProps(platform, { speed: 1e9 }));
+    });
+
+    it('lists only the fields the caller named as supplied, never the carried ones', () => {
+      expect(mergeStoreComponentPropsWithReport(platform, { speed: 5 })?.supplied).toEqual(['speed']);
+      expect([...(mergeStoreComponentPropsWithReport(platform, { speed: 5, loopMode: 'pingPong' })?.supplied ?? [])].sort()).toEqual(['loopMode', 'speed']);
+      expect(mergeStoreComponentPropsWithReport(platform, {})?.supplied).toEqual([]);
+      expect(mergeStoreComponentPropsWithReport(platform, { speed: undefined })?.supplied).toEqual([]);
+    });
+
+    it('reports nothing for a patch that is in range', () => {
+      expect(mergeStoreComponentPropsWithReport(platform, { speed: 5 })?.corrections).toEqual([]);
     });
   });
 });

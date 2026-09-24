@@ -118,6 +118,7 @@ export function TilesetPanel() {
 
         {/* Tileset selector */}
         <select
+          aria-label="Active tileset"
           value={activeTilesetId ?? ''}
           onChange={(e) => setActiveTileset(e.target.value || null)}
           className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300"

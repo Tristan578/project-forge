@@ -80,6 +80,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
       bgColor: options.bgColor,
       includeDebug: options.includeDebug,
       orientationLock: options.orientationLock,
+      projectType: store.projectType,
       signal,
     };
 
@@ -110,6 +111,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
     mobileTouchConfig: mobileTouchConfigJson,
     embeddedWasm,
     orientationLock: options.orientationLock,
+    projectType: store.projectType,
   });
 
   return new Blob([html], { type: 'text/html' });

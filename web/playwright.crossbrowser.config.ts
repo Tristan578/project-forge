@@ -99,12 +99,15 @@ export default defineConfig({
     // (playwright.ci.config.ts) and on this config's firefox and webkit
     // projects, all at desktop width where their assertions are meaningful.
     //
-    // Two of the 21 were NOT layout artefacts: accessibility-audit.spec.ts:73
-    // and :157 surfaced real WCAG-critical violations (aria-required-children,
-    // unlabelled type="color"/type="range" inputs, select-name). They are
-    // invisible on desktop only because buildAxe() excludes '.dv-dockview',
-    // which exempts SpawnForge's own inspector markup rather than just
-    // Dockview's chrome. Tracked at #9677 — deliberately NOT silenced here.
+    // Two of the 21 were NOT layout artefacts: accessibility-audit.spec.ts's
+    // editor-page and settings-dialog audits surfaced real WCAG-critical
+    // violations (aria-required-children, unlabelled type="color"/
+    // type="range" inputs, select-name). Desktop only hid them because
+    // buildAxe() excluded '.dv-dockview' and, later, the Scene Settings panel.
+    // #9677 fixed the markup and removed both exemptions, so the spec now
+    // audits that markup at desktop width wherever it runs (chromium via
+    // playwright.ci.config.ts, and this config's firefox and webkit
+    // projects); nothing was silenced here.
     {
       name: 'mobile-iphone',
       testMatch: MOBILE_TEST_MATCH,

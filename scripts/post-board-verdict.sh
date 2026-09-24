@@ -14,11 +14,19 @@
 # overall verdict and then runs this; a human running the board by hand runs it
 # the same way.
 #
-#     scripts/post-board-verdict.sh <pr> <PASS|FAIL> <40-hex sha> [summary]
+#     scripts/post-board-verdict.sh <pr> <PASS|FAIL> <40-hex sha> <reported>/<total> [summary]
 #
 # The marker line is the contract, and nothing else in the comment is parsed:
 #
-#     <!-- board-verdict: PASS sha=<40-hex> -->
+#     <!-- board-verdict: PASS sha=<40-hex> seats=5/5 -->
+#
+# THE SEAT COUNT IS PART OF THE VERDICT (#10141). The protocol is five seats,
+# any finding is a FAIL, and a PASS means "all five looked and none found
+# anything". A marker without the count let a three-seat run publish PASS and
+# `board-verdict.sh` render it `success` — adjacent to the property that
+# matters (lessons-learned #1). So a PASS is refused here unless every seat
+# reported, and the consumer treats a PASS that carries no count, or a partial
+# one, as `pending`.
 #
 # The sha is the head the board actually reviewed, NOT "the current head" —
 # those differ the moment a push lands mid-review, and recording the wrong one
@@ -32,10 +40,16 @@ set -uo pipefail
 PR="${1:-}"
 VERDICT="${2:-}"
 SHA="${3:-}"
-SUMMARY="${4:-}"
+SEATS="${4:-}"
+SUMMARY="${5:-}"
+
+# The size of the board. Mirrors `REVIEWERS.length` in
+# `.claude/workflows/review-board.js`; the suite derives that count from the
+# workflow source and fails if the two drift.
+BOARD_SEATS=5
 
 usage() {
-  echo "usage: post-board-verdict.sh <pr> <PASS|FAIL> <40-hex sha> [summary]" >&2
+  echo "usage: post-board-verdict.sh <pr> <PASS|FAIL> <40-hex sha> <reported>/<total> [summary]" >&2
   exit 2
 }
 
@@ -71,15 +85,43 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fi
 fi
 
+# <reported>/<total>: two integers, the total is the board's size, and a PASS
+# needs every seat. Refused, not defaulted — a missing count is how a partial
+# board published PASS in the first place.
+case "$SEATS" in
+  */*) ;;
+  *) echo "::error::seats must be <reported>/<total>, got '${SEATS}'" >&2; usage ;;
+esac
+reported="${SEATS%%/*}"
+total="${SEATS##*/}"
+case "$reported" in
+  ''|*[!0-9]*) echo "::error::seats must be <reported>/<total> with two integers, got '${SEATS}'" >&2; usage ;;
+esac
+case "$total" in
+  ''|*[!0-9]*) echo "::error::seats must be <reported>/<total> with two integers, got '${SEATS}'" >&2; usage ;;
+esac
+if [ "$total" -ne "$BOARD_SEATS" ]; then
+  echo "::error::the review board has ${BOARD_SEATS} seats; a verdict over ${total} is not a board verdict" >&2
+  exit 2
+fi
+if [ "$reported" -gt "$total" ]; then
+  echo "::error::${reported} seats cannot report on a ${total}-seat board" >&2
+  exit 2
+fi
+if [ "$VERDICT" = "PASS" ] && [ "$reported" -ne "$total" ]; then
+  echo "::error::a PASS needs every seat: only ${reported}/${total} reported — a partial board is not a pass; run the missing seats or post FAIL" >&2
+  exit 2
+fi
+
 REPO="${GH_REPO:-Tristan578/project-forge}"
 # TEST-ONLY seam, never set in CI — the suite asserts no workflow sets it, since
 # pointing it at `true` would make this report success while posting nothing.
 GH_CMD="${BOARD_VERDICT_GH_CMD:-gh}"
 
 if [ "$VERDICT" = "PASS" ]; then
-  headline="Review board: **PASS** at \`${SHA:0:8}\`"
+  headline="Review board: **PASS** at \`${SHA:0:8}\` (${reported}/${total} seats)"
 else
-  headline="Review board: **FAIL** at \`${SHA:0:8}\`"
+  headline="Review board: **FAIL** at \`${SHA:0:8}\` (${reported}/${total} seats)"
 fi
 
 body="${headline}"
@@ -90,7 +132,7 @@ ${SUMMARY}"
 fi
 body="${body}
 
-<!-- board-verdict: ${VERDICT} sha=${SHA} -->"
+<!-- board-verdict: ${VERDICT} sha=${SHA} seats=${reported}/${total} -->"
 
 "$GH_CMD" api -X POST "repos/${REPO}/issues/${PR}/comments" \
   -f body="$body" >/dev/null || {
@@ -98,5 +140,5 @@ body="${body}
     exit 2
   }
 
-echo "posted board verdict ${VERDICT} for ${SHA:0:8} on PR ${PR}"
+echo "posted board verdict ${VERDICT} (${reported}/${total} seats) for ${SHA:0:8} on PR ${PR}"
 exit 0
