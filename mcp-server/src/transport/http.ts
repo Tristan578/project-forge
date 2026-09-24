@@ -289,7 +289,9 @@ export async function startHttpTransport(
     // SDK type-variance: StreamableHTTPServerTransport.onclose is
     // `(() => void) | undefined` but the Transport interface declares
     // `onclose?: () => void`, which exactOptionalPropertyTypes reads as
-    // non-undefined. Neither type is ours to widen; the objects are identical.
+    // non-undefined. Both declarations are the SDK's (1.30.0), so neither is
+    // ours to widen; the objects are identical. Drop the cast when the SDK
+    // agrees with itself: #10278.
     await sharedServer.connect(sharedTransport as Transport);
   }
 
@@ -366,7 +368,7 @@ export async function startHttpTransport(
             mcpServer?.close().catch(() => {});
           };
           res.on('close', cleanup);
-          // Same SDK type-variance as the shared transport above.
+          // Same SDK type-variance as the shared transport above (#10278).
           await mcpServer.connect(transport as Transport);
         } else {
           transport = sharedTransport!;
