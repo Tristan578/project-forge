@@ -190,8 +190,8 @@ describe('gameTemplate', () => {
       expect(html).toContain('if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt)');
       expect(html).toContain('requestAnimationFrame(gameLoop)');
       expect(html).toContain('var cmds = window.__forgeFlushCommands()');
-      expect(html).toContain('handle_command(cmds[ci].cmd, JSON.stringify(cmds[ci]))');
-      expect(html).not.toContain('wasm.handle_command(cmds[ci]');
+      expect(html).toContain('handle_command(cmdName, cmdPayload)');
+      expect(html).not.toContain('wasm.handle_command(cmdName');
     });
 
     it('includes event callback setup', () => {

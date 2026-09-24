@@ -43,7 +43,22 @@ export async function injectStore(
     return false;
   }
 
-  await page.evaluate(callback);
+  // A callback that throws inside the page is a real failure and stays one:
+  // it means the store's API moved under the spec (a renamed action, a new
+  // required argument), which is exactly what the caller's assertions exist
+  // to catch. It is NOT a missing store, so it must not become `false` —
+  // that would send the reader to the hooks build for a cause that is in
+  // the store. It is rethrown with the store named so the failure reads as
+  // an injection failure rather than a bare TypeError out of page.evaluate.
+  try {
+    await page.evaluate(callback);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Store injection into ${storeName} threw inside the page (the store's API no longer matches the spec?): ${message}`,
+      { cause: error },
+    );
+  }
   return true;
 }
 
