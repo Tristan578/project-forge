@@ -262,28 +262,68 @@ derive_file() {
     # holds a blank can spell a whole statement (${x:-alias fail=:} runs
     # alias); that reshapes the statement, which no word rule can place, so
     # pexp sets px_split and end_word reports it in a guarded position.
-    function pexp(s,   out, i, n, dep, j, ch) {
+    # lit is set for the TEXT of an operand: a brace or comma there is a
+    # literal character of the value, never brace syntax (bash does not
+    # brace-expand an expansion result), and no guarded word holds one, so it
+    # becomes ? rather than reshaping the alternation it is placed in.
+    function pexp(s, lit,   out, i, n, j, ch) {
       out = ""; n = length(s); i = 1
       while (i <= n) {
-        if (substr(s, i, 2) != "${") { out = out substr(s, i, 1); i++; continue }
-        dep = 1; j = i + 2
-        while (j <= n && dep > 0) { ch = substr(s, j, 1); if (ch == "{") dep++; else if (ch == "}") dep--; j++ }
+        ch = substr(s, i, 1)
+        if (lit && ch == "\\") { ch = substr(s, i + 1, 1); if (ch == "{" || ch == "}" || ch == ",") ch = "?"; out = out ch; i += 2; continue }
+        if (substr(s, i, 2) != "${") { if (lit && (ch == "{" || ch == "}" || ch == ",")) ch = "?"; out = out ch; i++; continue }
+        j = brace_close(s, i + 2, n)
         out = out pexp_group(substr(s, i + 2, j - i - 3))
         i = j
       }
       return out
     }
-    function pexp_group(b,   t) {
+    # The index just past the brace that closes a group whose body starts at
+    # j. Braces inside a single-quoted, ANSI-C or double-quoted string, or
+    # after a backslash, are text to bash (twenty-seventh board round:
+    # ${x:-"}"} closed one brace early, and the stray quote then swallowed a
+    # real statement), so they are not counted.
+    function brace_close(s, j, n,   bd, qs, cj) {
+      bd = 1; qs = ""
+      while (j <= n && bd > 0) {
+        cj = substr(s, j, 1)
+        if (qs == "s") { if (cj == "\047") qs = ""; j++; continue }
+        if (cj == "\\") { j += 2; continue }
+        if (qs == "a") { if (cj == "\047") qs = ""; j++; continue }
+        if (qs == "d") { if (cj == "\"") qs = ""; j++; continue }
+        if (cj == "$" && substr(s, j + 1, 1) == "\047") { qs = "a"; j += 2; continue }
+        if (cj == "\047") qs = "s"
+        else if (cj == "\"") qs = "d"
+        else if (cj == "{") bd++
+        else if (cj == "}") bd--
+        j++
+      }
+      return j
+    }
+    function pexp_group(b,   t, c) {
       sub(/^[!#]?([A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])/, "", b)
       if (b ~ /^\[/) sub(/^\[[^]]*\]/, "", b)
       t = ""
-      if (b ~ /^:?[-=+]/) { sub(/^:?[-=+]/, "", b); t = b }
-      else if (b ~ /^\//) { sub(/^\/[\/#%]?/, "", b); if (match(b, /\//)) t = substr(b, RSTART + 1) }
-      if (t ~ /[ \t\n]/) px_split = 1
-      gsub(/["\047\\]/, "", t)
-      t = pexp(t)
-      if (t == "") return ""
+      if (b ~ /^:?[-=+]/) { sub(/^:?[-=+]/, "", b); t = pexp_text(b) }
+      else if (b ~ /^\//) {
+        # The pattern ends at the first slash bash does not treat as quoted or
+        # escaped (${x/a\/b/alias} and ${x/"a/b"/alias} both bind), so every
+        # text after a slash is a candidate rather than the text after the
+        # first one: a superset no spelling of the pattern can dodge. Each is
+        # normalised alone, so the commas joining them stay alternation.
+        sub(/^\/[\/#%]?/, "", b)
+        while (match(b, /\//)) { b = substr(b, RSTART + 1); c = pexp_text(b); t = (t == "" ? c : t "," c) }
+      }
+      if (t == "" || t ~ /^,*$/) return ""
       return "{," t "}"
+    }
+    # One operand TEXT as the words it can yield: blanks noted for the split
+    # rule, nested groups rewritten, then quotes and backslashes removed.
+    function pexp_text(t) {
+      if (t ~ /[ \t\n]/) px_split = 1
+      t = pexp(t, 1)
+      gsub(/["\047\\]/, "", t)
+      return t
     }
     # Brace expansion is static: bash expands `al{i,}as` to `alias alas` and
     # `{a..a}lias` to `alias` before any command is looked up (eighteenth
@@ -585,7 +625,7 @@ derive_file() {
       # word), so the pending word is carried across it, not ended here.
       if (dol) { d++; st_w[d] = w; w = ""; wq = 0 }
       else { end_word(); d++ }
-      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_at[d] = arr_txt; st_an[d] = arr_nm; st_arith[d] = arith; st_dbl[d] = dbl
+      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_at[d] = arr_txt; st_an[d] = arr_nm; st_al[d] = arr_line; st_arith[d] = arith; st_dbl[d] = dbl
       st_pat[d] = pat; st_dol[d] = dol
       st_cs[d] = cmd_seen; st_cw[d] = cmd_word; st_nw[d] = nwords
       st_ia[d] = in_alias; st_ish[d] = in_shopt; st_it[d] = in_trap; st_sf[d] = sflag
@@ -599,7 +639,7 @@ derive_file() {
     function close_sub() {
       end_command()
       if (d > 0) {
-        q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; arr_txt = st_at[d]; arr_nm = st_an[d]; arith = st_arith[d]
+        q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; arr_txt = st_at[d]; arr_nm = st_an[d]; arr_line = st_al[d]; arith = st_arith[d]
         pat = st_pat[d]
         if (st_dol[d]) {
           cmd_seen = st_cs[d]; cmd_word = st_cw[d]; nwords = st_nw[d]
@@ -715,9 +755,10 @@ derive_file() {
               # expansion, an arithmetic subscript), so the literal text and
               # its quoted parts (collected in w) are judged for the name.
               # The two are collected apart, so the report names the array
-              # as written (NAME=(...)) rather than rebuilding its text.
+              # as written (NAME=(...)) rather than rebuilding its text, on
+              # the line where it opens, where that name is written.
               if (arr_txt ~ /(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)/ || w ~ /(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)/)
-                printf "%s\t%s\t%d\t%d\talias\n", file, arr_nm "(...)", NR, NR
+                printf "%s\t%s\t%d\t%d\talias\n", file, arr_nm "(...)", arr_line, arr_line
               arr = 0; w = ""
             }
           }
@@ -739,8 +780,7 @@ derive_file() {
         # A `${...}` is one part of the current word up to its matching brace,
         # so `ali${x:+ Q}as` is one word, as it is to bash (sixteenth round).
         if (c2 == "${") {
-          j = i + 2; bd = 1
-          while (j <= n && bd > 0) { cj = substr(line, j, 1); if (cj == "{") bd++; else if (cj == "}") bd--; j++ }
+          j = brace_close(line, i + 2, n)
           w = w substr(line, i, j - i); i = j; continue
         }
         # A `$NAME` is kept as `${NAME}`, so the name still ends where bash
@@ -794,7 +834,7 @@ derive_file() {
         # here, where the word is consumed without reaching end_word.
         if (c == "(" && w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=$/) {
           if (w ~ /^POSIXLY_CORRECT\+?=$/) printf "%s\t%s\t%d\t%d\talias\n", file, w "(", NR, NR
-          arr = 1; arr_d = 1; arr_txt = ""; arr_nm = w; w = ""; i++; continue
+          arr = 1; arr_d = 1; arr_txt = ""; arr_nm = w; arr_line = NR; w = ""; i++; continue
         }
         if (c2 == "((" && w == "") { open_sub("", 1, 1, 0); i += 2; continue }
         if (c == "(") { open_sub("", arith, 0, 0); i++; continue }

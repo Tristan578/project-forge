@@ -932,6 +932,14 @@ by construction rather than by measurement.
   the group as a brace alternation), in words and in trap actions; text
   holding a blank, which bash splits into several words, is a `split`
   violation in a guarded position.
+  The twenty-seventh found the brace matching itself was not quote-aware:
+  `: ${x:-"}"}; shopt -s expand_aliases` closed the group at the quoted
+  brace, and the stray quote then swallowed the real statement. One
+  matcher (brace_close) now skips single, double and ANSI-C quoted text and
+  escaped characters, for the lexer and pexp alike. It also found a
+  replacement pattern can hide its boundary (`${x/a\/b/alias}`,
+  `${x/"a/b"/alias}`), so every text after a slash is now a candidate; and
+  an array report now names the line where the array opens.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

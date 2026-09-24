@@ -1581,7 +1581,20 @@ fi
 # and none is reported. Line 24 calls a function that exits through a trap
 # action whose candidates repeat the call, and is reported once; line 25 is
 # a trap action with more alternatives than the gate enumerates (a brace
-# violation).
+# violation). Round twenty-seven: lines 26 to 28 escape or quote a slash in
+# a replacement pattern (all three bind in bash), which the first-slash
+# split read as part of the text; line 29 opens a multi-line array whose
+# element names the posix-mode variable on line 30, and the report is on
+# line 29, where the array is named. Lines 32 to 35 put a quoted or escaped
+# closing brace in the operand (the lexer counted it and closed the group
+# early, and the stray quote swallowed the real alias); the decoy quote in
+# each comment is what let the file still parse. Line 36 uses a brace and a
+# comma in the operand, which must stay literal so the default after it is
+# still judged. Lines 37 and 38 escape a quote outside quotes and inside an
+# ANSI-C string, where miscounting would open a string that swallows the
+# alias; line 39 is replacement text that is only the word after its
+# quotes are removed. Line 40 escapes the dollar, so its braces are text,
+# and bash runs a command literally named ${y:-alias}: not reported (30o-e).
 d_pexp="$(mkfixture param-expansion <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -1608,10 +1621,25 @@ finish() { exit 0; }
 readonly -f finish
 trap 'finish ${x:-y}' EXIT
 trap '${a:-x}${b:-x}${c:-x}${d:-x}${e:-x}${f:-x}${g:-x} 0' EXIT
+${x/a\/b/alias} fail=:
+${x/"a/b"/alias} fail=:
+${x//a\/b/alias} fail=:
+y=(
+  ${POSIXLY_CORRECT:=1}
+)
+: ${x:-"}"}; shopt -s expand_aliases # decoy: "
+: ${x:-'}'}; alias fail=: # decoy: '
+: ${x:-\}}; alias fail=: # decoy: "
+: ${x:-$'}'}; alias fail=: # decoy: '
+${x:-"}"}${y:-alias} fail=:
+: ${x:-\"}; alias fail=: # decoy: "
+: ${x:-$'\''}; alias fail=: # decoy: '
+${x/a/"alias"} fail=:
+${x:-\${y:-alias}} fail=:
 FIX
 )"
 out_pexp="$(run_gate "$d_pexp")"
-expect_rc "30o. a default, alternate or replacement that can spell a guarded word is judged as that word" 1 "$out_pexp" "17 violation(s)" \
+expect_rc "30o. a default, alternate or replacement that can spell a guarded word is judged as that word" 1 "$out_pexp" "29 violation(s)" \
   "fixture.test.sh:3: 'shopt -s \${n:-expand_aliases}'" "fixture.test.sh:4: 'alias fail=:'" \
   "fixture.test.sh:5: 'shopt -s \${HOME:+expand_aliases}'" "fixture.test.sh:6: 'alias fail=:'" \
   "fixture.test.sh:7: 'trap exit 0 ... EXIT'" "fixture.test.sh:8: 'trap exit 0 ... EXIT'" \
@@ -1619,11 +1647,21 @@ expect_rc "30o. a default, alternate or replacement that can spell a guarded wor
   "fixture.test.sh:12: 'alias fail=:'" "fixture.test.sh:13: 'shopt -s \${x:-\"expand_aliases\"}'" \
   "fixture.test.sh:14: 'shopt -s \${x//a/extdebug}'" "fixture.test.sh:15: 'trap ... \${n-DEBUG}'" \
   "fixture.test.sh:16: '\${x:- alias}' — this parameter expansion" "fixture.test.sh:17: '{z0,z1," \
-  "fixture.test.sh:24: 'trap finish" "fixture.test.sh:25: '\${a:-x}\${b:-x}"
+  "fixture.test.sh:24: 'trap finish" "fixture.test.sh:25: '\${a:-x}\${b:-x}" \
+  "fixture.test.sh:26: 'alias fail=:'" "fixture.test.sh:27: 'alias fail=:'" "fixture.test.sh:28: 'alias fail=:'" \
+  "fixture.test.sh:29: 'y=(...)'" "fixture.test.sh:32: 'shopt -s expand_aliases'" \
+  "fixture.test.sh:33: 'alias fail=:'" "fixture.test.sh:34: 'alias fail=:'" "fixture.test.sh:35: 'alias fail=:'" \
+  "fixture.test.sh:36: 'alias fail=:'" "fixture.test.sh:37: 'alias fail=:'" "fixture.test.sh:38: 'alias fail=:'" \
+  "fixture.test.sh:39: 'alias fail=:'"
 if grep -Eq 'fixture.test.sh:(18|19|20|21):' <<<"$out_pexp"; then
   fail "30o-c. an argument, an assignment, a trap action and a quoted argument with expansion text are not reported" "$out_pexp"
 else
   pass "30o-c. an argument, an assignment, a trap action and a quoted argument with expansion text are not reported"
+fi
+if grep -q 'fixture.test.sh:40: ' <<<"$out_pexp"; then
+  fail "30o-e. an escaped dollar in an operand is text, not a nested expansion" "$out_pexp"
+else
+  pass "30o-e. an escaped dollar in an operand is text, not a nested expansion"
 fi
 if [ "$(grep -c 'fixture.test.sh:24: ' <<<"$out_pexp")" -eq 1 ]; then
   pass "30o-d. a trap whose action candidates repeat a call reports that call once"
@@ -1635,10 +1673,12 @@ pexp_alias="$(bash -c 'fail() { echo REAL; }; readonly -f fail; shopt -s ${n:-ex
 pexp_split="$(bash -c 'fail() { echo REAL; }; readonly -f fail; shopt -s expand_aliases; ${x:- alias} fail="echo ALIASED"; eval fail' 2>&1)"
 bash -c 'trap "exit 0" ${n:-EXIT}; exit 3' >/dev/null 2>&1; pexp_trap=$?
 pexp_posix="$(bash -c 'set -o ${n:=posix}; shopt -p expand_aliases' 2>&1)"
-if [ "$pexp_alias" = "ALIASED" ] && [ "$pexp_split" = "ALIASED" ] && [ "$pexp_trap" -eq 0 ] && [ "$pexp_posix" = "shopt -s expand_aliases" ]; then
+pexp_quote="$(bash -c 'fail() { echo REAL; }; readonly -f fail; : ${x:-"}"}; shopt -s expand_aliases; alias fail="echo ALIASED"
+eval fail' 2>&1)"
+if [ "$pexp_alias" = "ALIASED" ] && [ "$pexp_split" = "ALIASED" ] && [ "$pexp_trap" -eq 0 ] && [ "$pexp_posix" = "shopt -s expand_aliases" ] && [ "$pexp_quote" = "ALIASED" ]; then
   pass "30o-b. a default, an alternate and a split default bind an alias, trap EXIT and enter posix mode in this bash"
 else
-  fail "30o-b. a probe did not reproduce (alias '$pexp_alias', split '$pexp_split', trap rc $pexp_trap, posix '$pexp_posix')"
+  fail "30o-b. a probe did not reproduce (alias '$pexp_alias', split '$pexp_split', trap rc $pexp_trap, posix '$pexp_posix', quoted brace '$pexp_quote')"
 fi
 
 # ---- 30k. an ANSI-C quoted string is decoded before the word is judged -------
