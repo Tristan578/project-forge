@@ -14,6 +14,40 @@ import { isDestructiveCommand } from '@/lib/chat/destructiveCommands';
  */
 const GAME_CREATION_CONFIDENCE_THRESHOLD = 0.7;
 
+/**
+ * Every lifecycle state a tool invocation can be in, as ONE runtime list
+ * (PF-950 / #8931). The `status` field below is typed from it, so adding a
+ * state here is the only way to add one — and `ToolCallCard.test.tsx` and
+ * `chatStore.toolStates.test.ts` iterate it, so a new state without a
+ * rendering branch or a wire transition fails a test instead of falling
+ * through a `default`.
+ *
+ * How each state is reached (chunk names are the AI SDK v6 `UIMessageChunk`
+ * types `streamOneTurn` switches on; the fixtures in
+ * `test/utils/streamingTestUtils.ts` are the canonical bytes):
+ *   pending            `tool-input-start`
+ *   success | error    local execution after `finish` drains the buffered
+ *                      `tool-input-available`; or `tool-input-error` /
+ *                      `tool-output-error` from the wire (→ error, errorText)
+ *   preview | rejected the client-only `approvalMode` toggle: held for the
+ *                      user, then approveToolCalls / rejectToolCalls
+ *   undone             the user reverted a successful call
+ *   approval-required  `tool-approval-request` (server gate, PF-8860)
+ *   denied             `tool-output-denied` on the resumed stream
+ */
+export const TOOL_CALL_STATUSES = [
+  'pending',
+  'success',
+  'error',
+  'preview',
+  'rejected',
+  'undone',
+  'approval-required',
+  'denied',
+] as const;
+
+export type ToolCallStatusName = (typeof TOOL_CALL_STATUSES)[number];
+
 export interface ToolCallStatus {
   id: string;
   name: string;
@@ -26,16 +60,9 @@ export interface ToolCallStatus {
    * and the model is never told about it; an `'approval-required'` call is
    * blocked by the SDK server-side and can only be resolved by resuming the
    * turn with an approval-response — which is what `resumeAfterApproval` does.
+   * The full list, with how each state is reached, is `TOOL_CALL_STATUSES`.
    */
-  status:
-    | 'pending'
-    | 'success'
-    | 'error'
-    | 'preview'
-    | 'rejected'
-    | 'undone'
-    | 'approval-required'
-    | 'denied';
+  status: ToolCallStatusName;
   result?: unknown;
   error?: string;
   undoable: boolean;

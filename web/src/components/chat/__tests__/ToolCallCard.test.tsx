@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, within } from '@/test/utils/componentTestUtils';
 import { ToolCallCard } from '../ToolCallCard';
+import { TOOL_CALL_STATUSES, type ToolCallStatus, type ToolCallStatusName } from '@/stores/chatStore';
 
 vi.mock('lucide-react', () => ({
   Check: (props: Record<string, unknown>) => <span data-testid="check-icon" {...props} />,
@@ -13,6 +14,7 @@ vi.mock('lucide-react', () => ({
   Eye: (props: Record<string, unknown>) => <span data-testid="eye-icon" {...props} />,
   XCircle: (props: Record<string, unknown>) => <span data-testid="x-circle-icon" {...props} />,
   ShieldAlert: (props: Record<string, unknown>) => <span data-testid="shield-alert-icon" {...props} />,
+  Ban: (props: Record<string, unknown>) => <span data-testid="ban-icon" {...props} />,
 }));
 
 const sceneNodes: Record<string, { entityId: string; name: string }> = {
@@ -216,6 +218,69 @@ describe('ToolCallCard', () => {
 
       expect(onApprove).not.toHaveBeenCalled();
       expect(onReject).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---- PF-950 / #8931: one rendering contract per lifecycle state ---------
+  // Typed as Record<ToolCallStatusName, …>, so a state added to
+  // TOOL_CALL_STATUSES without a row here is a type error, and the loop below
+  // runs every row against the real component.
+  describe('renders every tool-invocation state distinctly', () => {
+    const expectations: Record<
+      ToolCallStatusName,
+      { icon: string; badge?: string; struck: boolean; gate?: boolean; undo?: boolean }
+    > = {
+      pending: { icon: 'loader-icon', struck: false },
+      success: { icon: 'check-icon', struck: false, undo: true },
+      error: { icon: 'x-icon', struck: false },
+      preview: { icon: 'eye-icon', badge: 'Preview', struck: false },
+      rejected: { icon: 'x-circle-icon', badge: 'Rejected', struck: true },
+      undone: { icon: 'rotate-ccw', badge: 'Undone', struck: true },
+      'approval-required': { icon: 'shield-alert-icon', struck: false, gate: true },
+      denied: { icon: 'ban-icon', badge: 'Denied', struck: true },
+    };
+
+    it('lists an expectation for every state and nothing else', () => {
+      expect(Object.keys(expectations).sort()).toEqual([...TOOL_CALL_STATUSES].sort());
+    });
+
+    it.each(TOOL_CALL_STATUSES)('%s', (status) => {
+      const want = expectations[status];
+      const toolCall: ToolCallStatus = {
+        id: `tc-${status}`,
+        name: 'rename_entity',
+        input: { entityId: 'e-1', name: 'Renamed' },
+        status,
+        undoable: true,
+        ...(status === 'error' ? { error: 'boom' } : {}),
+        ...(status === 'approval-required' ? { approvalId: 'ap-1' } : {}),
+      };
+      render(<ToolCallCard toolCall={toolCall} />);
+
+      // The header row carries exactly this state's status icon and no other
+      // state's. (Approve/Deny action rows below the header carry their own
+      // check/x icons, and the approval band repeats the shield, so the
+      // assertion is scoped to the header, not the whole card.)
+      const label = screen.getByText('Rename');
+      const header = within(label.closest('button') as HTMLElement);
+      expect(header.getByTestId(want.icon)).toBeDefined();
+      for (const other of Object.values(expectations)) {
+        if (other.icon !== want.icon) expect(header.queryByTestId(other.icon)).toBeNull();
+      }
+      // The badge text, and only this state's badge.
+      for (const badge of ['Preview', 'Rejected', 'Undone', 'Denied']) {
+        if (want.badge === badge) expect(screen.getByText(badge)).toBeDefined();
+        else expect(screen.queryByText(badge)).toBeNull();
+      }
+      // Struck-through label for the three "did not happen" states.
+      expect(label.className.includes('line-through')).toBe(want.struck);
+      // The server gate band exists for approval-required alone.
+      if (want.gate) expect(screen.getByTestId('server-approval-gate')).toBeDefined();
+      else expect(screen.queryByTestId('server-approval-gate')).toBeNull();
+      // Undo is offered only for a successful, undoable call.
+      if (want.undo) expect(screen.getByLabelText('Undo this action')).toBeDefined();
+      else expect(screen.queryByLabelText('Undo this action')).toBeNull();
+      cleanup();
     });
   });
 });
