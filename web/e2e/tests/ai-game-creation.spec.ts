@@ -230,21 +230,26 @@ test.describe('AI Game Creation Flow @ui @dev', () => {
   }, async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
-    await injectStore(page, '__CHAT_STORE', `
-      window.__CHAT_STORE?.getState?.()?.setApprovalMode?.(true);
+    // Direct calls, no optional chaining: a renamed or removed action must
+    // throw at the injection, not leave the store untouched and the read
+    // below explaining it away.
+    const enabled = await injectStore(page, '__CHAT_STORE', `
+      window.__CHAT_STORE.getState().setApprovalMode(true);
     `);
+    expect(enabled, 'store injection requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
 
     const approvalEnabled = await readStore<boolean>(page, '__CHAT_STORE',
-      `window.__CHAT_STORE?.getState?.()?.approvalMode ?? null`);
+      `window.__CHAT_STORE.getState().approvalMode`);
 
     expect(approvalEnabled, 'store read requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
 
-    await injectStore(page, '__CHAT_STORE', `
-      window.__CHAT_STORE?.getState?.()?.setApprovalMode?.(false);
+    const disabled = await injectStore(page, '__CHAT_STORE', `
+      window.__CHAT_STORE.getState().setApprovalMode(false);
     `);
+    expect(disabled, 'store injection requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(true);
 
     const approvalDisabled = await readStore<boolean>(page, '__CHAT_STORE',
-      `window.__CHAT_STORE?.getState?.()?.approvalMode ?? null`);
+      `window.__CHAT_STORE.getState().approvalMode`);
 
     expect(approvalDisabled, 'store read requires the hooks build (NEXT_PUBLIC_E2E_HOOKS)').toBe(false);
   });
