@@ -4,6 +4,10 @@ import {
   createOrchestratorSlice,
   INSUFFICIENT_TOKENS_MESSAGE,
   RESERVATION_UNCONFIRMED_MESSAGE,
+  SIGNED_OUT_MESSAGE,
+  PLAN_REJECTED_MESSAGE,
+  RATE_LIMITED_MESSAGE,
+  ACCOUNT_BLOCKED_MESSAGE,
   isOrchestratorRunLive,
   _setAbortController,
   _getGateResolver,
@@ -26,6 +30,7 @@ import {
   clearEntityObservations,
 } from '@/lib/game-creation/engineObservation';
 import { getCommandDispatcher } from '@/stores/editorStore';
+import { captureException } from '@/lib/monitoring/sentry-client';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -1464,22 +1469,54 @@ describe('orchestratorSlice', () => {
       expect(runPipeline).not.toHaveBeenCalled();
     });
 
-    it('returns the plan to the review with the route\'s own reason when it refuses for something else', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: 'Invalid estimatedTotal' }) });
+    // Each documented refusal, with the body its producer really sends
+    // (lesson #14: a mock body the server never sends pins a wrong contract).
+    // The machine codes in `error` must never reach the user.
+    const BANNED = 'This account has been suspended. If you believe this is a mistake, contact support@spawnforge.ai to appeal.';
+    const NOT_SYNCABLE =
+      'Your account is missing information we need (usually an email address). Add a verified email to your account and sign in again.';
+    it.each([
+      // api/game/pipeline/route.ts, the schema branch.
+      ['400 validation_error', 400, { error: 'validation_error', details: ['estimatedTotal: Number must be greater than 0'] }, PLAN_REJECTED_MESSAGE],
+      // The same route's JSON-parse branch.
+      ['400 unparseable body', 400, { error: 'validation_error', details: ['Invalid JSON body'] }, PLAN_REJECTED_MESSAGE],
+      // lib/auth/api-auth.ts unauthorized().
+      ['401 Unauthorized', 401, { error: 'Unauthorized', reason: 'no_session' }, SIGNED_OUT_MESSAGE],
+      // api-auth.ts bannedResponse(): the readable message carries the appeal contact.
+      ['403 ACCOUNT_BANNED', 403, { error: 'ACCOUNT_BANNED', message: BANNED }, BANNED],
+      ['403 with no message', 403, { error: 'Forbidden' }, ACCOUNT_BLOCKED_MESSAGE],
+      // api-auth.ts, a Clerk user with no email: pre-deduction, and retrying never clears it.
+      ['422 ACCOUNT_NOT_SYNCABLE', 422, { error: 'ACCOUNT_NOT_SYNCABLE', message: NOT_SYNCABLE }, NOT_SYNCABLE],
+      // lib/rateLimit.ts rateLimitResponse(): the wait is in the sentence.
+      ['429 with its wait', 429, { error: 'Too many requests. Try again in 42 seconds.' }, 'Too many requests. Try again in 42 seconds.'],
+      ['429 with an unreadable body', 429, null, RATE_LIMITED_MESSAGE],
+    ])('returns the plan to the review with a readable reason for a %s refusal', async (_case, status, body, shown) => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status,
+        json: async () => {
+          if (body === null) throw new SyntaxError('Unexpected token <');
+          return body;
+        },
+      });
       store.getState().setPlan(makeMockPlan());
 
       await store.getState().runPipelineFromPlan();
 
       expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
-      expect(store.getState().orchestratorError).toBe('Invalid estimatedTotal');
+      expect(store.getState().orchestratorError).toBe(shown);
       expect(Object.values(store.getState().stepStatuses).every((st) => st === 'pending')).toBe(true);
+      expect(store.getState().reservationId).toBeNull();
       expect(runPipeline).not.toHaveBeenCalled();
+      // A refusal is an answer, not an incident.
+      expect(captureException).not.toHaveBeenCalled();
     });
 
     // A build with an undefined reservation would run and never be refunded.
-    // Only a non-2xx reply proves nothing was deducted. A 2xx the client cannot
-    // use, or no reply at all, leaves the hold's fate unknown: the run must not
-    // claim nothing was spent, nor sit on the review inviting a second hold.
+    // Only a documented refusal (400/401/402/403/422/429) proves nothing was
+    // deducted. A 5xx, any other status, an unreadable 2xx, or no reply leaves
+    // the hold's fate unknown: the run must not claim nothing was spent, nor
+    // sit on the review inviting a second hold.
     it.each([
       ['a 2xx reply with no id', () => mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ reservationId: '' }) })],
       ['a 2xx reply that is not JSON', () =>
@@ -1491,6 +1528,18 @@ describe('orchestratorSlice', () => {
         mockFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: 'Internal server error' }) })],
       ['a 504 with an HTML body', () =>
         mockFetch.mockResolvedValueOnce({ ok: false, status: 504, json: async () => { throw new SyntaxError('Unexpected token <'); } })],
+      // Pre-deduction, but it shares its status with a gateway 503 that is not.
+      ['a 503 SERVICE_DEGRADED', () =>
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          json: async () => ({ error: 'SERVICE_DEGRADED', message: 'User sync temporarily unavailable. Please retry.' }),
+        })],
+      // 4xx statuses nobody documented for this route: not a proven refusal.
+      ['an unlisted 404', () =>
+        mockFetch.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ error: 'Not found' }) })],
+      ['an unlisted 413', () =>
+        mockFetch.mockResolvedValueOnce({ ok: false, status: 413, json: async () => ({ error: 'Payload too large' }) })],
     ])('reports an unconfirmed outcome, not a clean refusal, for %s', async (_case, arrange) => {
       arrange();
       store.getState().setPlan(makeMockPlan());
@@ -1499,6 +1548,11 @@ describe('orchestratorSlice', () => {
 
       expect(store.getState().orchestratorStatus).toBe('failed');
       expect(store.getState().orchestratorError).toBe(RESERVATION_UNCONFIRMED_MESSAGE);
+      // Only the server's ledger can say whether tokens moved, so it is reported.
+      expect(captureException).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ extra: expect.objectContaining({ context: 'orchestrator.reserveUnconfirmed' }) }),
+      );
       expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
       expect(runPipeline).not.toHaveBeenCalled();
     });

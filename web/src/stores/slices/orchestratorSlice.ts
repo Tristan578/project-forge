@@ -199,31 +199,90 @@ function findStepIndex(plan: OrchestratorPlan, stepId: string): number {
 let _abortController: AbortController | null = null;
 
 /**
- * What a refused build reservation reports when the balance is short. Exported
- * so the quick-start dialog can offer "Buy tokens" beside exactly this error.
+ * What a refused build reservation reports when the balance is short (402).
+ * Every surface that shows it offers "Buy tokens" beside it, through
+ * `OrchestratorErrorNotice`.
  */
 export const INSUFFICIENT_TOKENS_MESSAGE = 'Insufficient tokens — add tokens or upgrade your plan';
 
 /**
- * Shown when the reserve request's outcome is unknown: the request never got a
- * reply (network), or the reply was a 2xx the client could not read. The route
- * may already have deducted the hold, so this must NOT claim nothing was spent.
+ * Shown when the reserve request's outcome is unknown, so the hold may or may
+ * not have been taken. Three paths lead here: the request never got a reply
+ * (network); the reply was a 2xx the client could not read; or the status was
+ * not one of `RESERVE_REFUSAL_STATUSES` -- every 5xx, where `deductTokens` may
+ * already have committed, and any other status. It must NOT claim nothing was
+ * spent.
  */
 export const RESERVATION_UNCONFIRMED_MESSAGE =
   'We could not confirm the build started. Check your token balance before trying again.';
 
+/** A 401 on reserve: the session ended. Building again cannot succeed until they sign in. */
+export const SIGNED_OUT_MESSAGE = 'Your session has ended. Sign in again to build this plan.';
+
+/**
+ * A 400 on reserve: the route rejected the plan's cost estimate
+ * (`validation_error`). Pressing Build it again sends the same estimate, so the
+ * way forward is a new plan.
+ */
+export const PLAN_REJECTED_MESSAGE =
+  'This plan could not be priced for a build. Discard it and plan your game again.';
+
+/** A 429 whose body carried no readable wait. */
+export const RATE_LIMITED_MESSAGE = 'Too many build requests. Wait a minute, then build it again.';
+
+/** A 403 or 422 whose body carried no readable `message`. */
+export const ACCOUNT_BLOCKED_MESSAGE =
+  'Your account cannot start builds right now. Contact support@spawnforge.ai if this is unexpected.';
+
 /**
  * The statuses `POST /api/game/pipeline` refuses a reserve with BEFORE
- * `deductTokens` runs: 400 (validation), 402 (insufficient_tokens), and the
- * middleware's 401/403 (auth) and 429 (rate limit). Only these prove nothing
- * was taken. A 5xx proves nothing: `deductTokens` commits and then reads the
- * balance, so a failure there, the egress guard, or a gateway timeout can all
- * answer 5xx after the hold exists.
+ * `deductTokens` runs, so they prove nothing was taken:
+ * - 400 `validation_error` (the route's JSON and schema checks)
+ * - 402 `insufficient_tokens` (the route; `deductTokens` refused)
+ * - 401 `Unauthorized`, 403 `ACCOUNT_BANNED`, 422 `ACCOUNT_NOT_SYNCABLE`
+ *   (`authenticateRequest`, via `withApiMiddleware`)
+ * - 429 (`withApiMiddleware`'s rate limit, `rateLimitResponse`)
+ *
+ * Every other status is treated as unconfirmed. A 5xx proves nothing:
+ * `deductTokens` commits and then reads the balance, so a failure there, the
+ * egress guard, or a gateway timeout can all answer 5xx after the hold exists.
+ * That includes `authenticateRequest`'s 503 `SERVICE_DEGRADED`, which is
+ * pre-deduction but shares its status with a post-deduction gateway 503; it is
+ * deliberately left unconfirmed rather than trusted on its body.
  */
-const RESERVE_REFUSAL_STATUSES = new Set([400, 401, 402, 403, 429]);
+const RESERVE_REFUSAL_STATUSES = new Set([400, 401, 402, 403, 422, 429]);
 
-/** The route refused the reserve with one of `RESERVE_REFUSAL_STATUSES`. */
+/**
+ * The route refused the reserve with one of `RESERVE_REFUSAL_STATUSES`. Its
+ * message is the user-facing sentence for that refusal, next step included.
+ */
 class ReservationRefusedError extends Error {}
+
+/**
+ * The user-facing sentence for a documented refusal. The route and middleware
+ * send machine codes in `error` ('validation_error', 'Unauthorized',
+ * 'ACCOUNT_BANNED'), so those are never shown; a readable `message` (the 403
+ * and 422 bodies carry one, with the support contact or the missing field) is.
+ */
+function refusalMessage(status: number, body: { error?: unknown; message?: unknown }): string {
+  const readable = typeof body.message === 'string' && body.message.trim() !== '' ? body.message : null;
+  switch (status) {
+    case 402:
+      return INSUFFICIENT_TOKENS_MESSAGE;
+    case 401:
+      return SIGNED_OUT_MESSAGE;
+    case 403:
+    case 422:
+      return readable ?? ACCOUNT_BLOCKED_MESSAGE;
+    case 429:
+      // `rateLimitResponse` puts the wait in `error` as a sentence.
+      return typeof body.error === 'string' && body.error.startsWith('Too many requests')
+        ? body.error
+        : RATE_LIMITED_MESSAGE;
+    default:
+      return PLAN_REJECTED_MESSAGE;
+  }
+}
 
 /**
  * Reserve the plan's high-variance token total for a build that is starting.
@@ -252,13 +311,15 @@ async function reserveBuildBudget(estimatedTotal: number): Promise<string | null
   });
 
   if (!reserveRes.ok) {
-    const reserveBody = await reserveRes.json().catch(() => ({ error: 'Token reservation failed' }));
-    const message = reserveBody.error === 'insufficient_tokens'
-      ? INSUFFICIENT_TOKENS_MESSAGE
-      : reserveBody.error ?? 'Token reservation failed';
-    // Anything but a documented refusal leaves the hold's fate unknown.
-    if (!RESERVE_REFUSAL_STATUSES.has(reserveRes.status)) throw new Error(message);
-    throw new ReservationRefusedError(message);
+    // Anything but a documented refusal leaves the hold's fate unknown; the
+    // caller shows RESERVATION_UNCONFIRMED_MESSAGE, so this text is for Sentry.
+    if (!RESERVE_REFUSAL_STATUSES.has(reserveRes.status)) {
+      throw new Error(`Token reservation failed (${reserveRes.status})`);
+    }
+    const reserveBody: unknown = await reserveRes.json().catch(() => ({}));
+    throw new ReservationRefusedError(
+      refusalMessage(reserveRes.status, typeof reserveBody === 'object' && reserveBody !== null ? reserveBody : {}),
+    );
   }
 
   const reserveData = await reserveRes.json();
@@ -587,15 +648,22 @@ export const createOrchestratorSlice: StateCreator<
       if (get().currentPlan === currentPlan) {
         if (err instanceof ReservationRefusedError) {
           // The route refused with a documented status: nothing was taken and
-          // the plan is intact, so it
-          // goes back to the review with the reason. As store state it outlives
-          // the dialog and in-app navigation; a full page load (Stripe checkout
-          // returns to the site root) still drops it, like all editor state.
+          // the plan is intact, so it goes back to the review with the reason.
+          // As store state it outlives the dialog and in-app navigation; a full
+          // page load (Stripe checkout returns to the site root) still drops
+          // it, like all editor state.
           set({ orchestratorStatus: 'awaiting_approval', orchestratorError: err.message });
         } else {
           // No reply, a 5xx, or a 2xx we could not read: the hold may already
           // have been taken, with no id to release it by. Say so, and do not
-          // offer a one-click retry that could take a second hold.
+          // offer a one-click retry that could take a second hold. Reported,
+          // because only the server's ledger can say whether tokens moved.
+          captureException(err instanceof Error ? err : new Error(String(err)), {
+            extra: {
+              context: 'orchestrator.reserveUnconfirmed',
+              estimatedTotal: currentPlan.tokenEstimate.totalVarianceHigh,
+            },
+          });
           set({ orchestratorStatus: 'failed', orchestratorError: RESERVATION_UNCONFIRMED_MESSAGE });
         }
       }
