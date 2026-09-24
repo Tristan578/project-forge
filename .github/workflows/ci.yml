@@ -575,7 +575,11 @@ jobs:
             .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
             .claude/hooks/__tests__/block-main-commits.test.sh \
             .claude/hooks/__tests__/inject-lessons-learned.test.sh \
-            .claude/hooks/__tests__/settings-permissions.test.sh
+            .claude/hooks/__tests__/settings-permissions.test.sh \
+            .claude/hooks/__tests__/on-stop.test.sh \
+            .claude/hooks/__tests__/on-prompt-submit.test.sh \
+            .claude/hooks/__tests__/on-session-start.test.sh \
+            .claude/hooks/__tests__/post-edit-lint.test.sh
 
   # ---- Skills Lint ----
   # Runs when any skill file (.claude/skills/**) or the linter/baseline changed.
