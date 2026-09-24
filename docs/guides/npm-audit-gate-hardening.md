@@ -889,7 +889,14 @@ by construction rather than by measurement.
   seventeenth found that an ANSI-C quoted string was copied escape by escape
   instead of decoded, so `$'\141lias'` read as `141lias`; its octal, hex,
   `\u`, `\U`, named and control escapes are now decoded as bash does, and a
-  NUL ends its value. No files,
+  NUL ends its value. The eighteenth found three more static spellings, each
+  reproduced in bash 5.2: a control escape is the operand's upper case AND
+  31 for ANY operand, so `\c ` and a control backtick are NUL as `\c@` is
+  (the decoder knew only the letters and `@[\]^_`); a `$"..."` locale string
+  was read as a variable; and brace expansion runs before a command is looked
+  up, so `al{i,}as`, `{a..a}lias` and `alias {x,fail=:}` define an alias.
+  A word is now judged as every word its brace groups expand to (at most
+  64). No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state

@@ -59,7 +59,9 @@
 # `command`, `time -p`, `X="1"`, `!`, `if`) are all the same word, and so
 # is a word spelled around an expansion that can be empty (`ali$()as`,
 # `ali${x:+Q}as`, `DEBU$1G`): every command name and argument is also judged
-# with its expansions removed (see end_word). A word whose spelling needs an
+# with its expansions removed (see end_word), an ANSI-C string decoded, a
+# locale string read as its text, and every word a brace group expands to
+# (`al{i,}as`) checked. A word whose spelling needs an
 # expansion to CONTRIBUTE text (`al$(echo i)as`), `eval`, a `source` of a
 # file written by the suite, and `declare -n` (a variable, not a function)
 # remain outside this gate (the Honest bound of the Sweep section in
@@ -226,12 +228,67 @@ derive_file() {
       gsub(/\$[A-Za-z_][A-Za-z0-9_]*/, "", s); gsub(/\$[0-9@*#?$!-]/, "", s)
       return s
     }
-    function end_word(   rq, wk) {
+    # Brace expansion is static: bash expands `al{i,}as` to `alias alas` and
+    # `{a..a}lias` to `alias` before any command is looked up (eighteenth
+    # board round). brace_exp fills bx[1..nbx] with every word a word can
+    # expand to (capped at 64, nesting at 8); a word with no brace group is
+    # its own only candidate. has(t) is true when any candidate equals t and
+    # anym(re) when any matches re. Checking every candidate, not only the
+    # first, is deliberately conservative: a guarded word anywhere in the
+    # expansion is reported.
+    function brace_exp(s) { delete bx; nbx = 0; bexp(s, 0); return nbx }
+    function bexp(s, depth,   n, i, j, c, lvl, en, comma, body, pre, post, parts, np, k, lo, hi, st, al, v) {
+      n = length(s)
+      if (nbx >= 64) return
+      if (depth <= 8) for (i = 1; i <= n; i++) {
+        if (substr(s, i, 1) != "{") continue
+        lvl = 0; comma = 0; en = 0
+        for (j = i; j <= n; j++) {
+          c = substr(s, j, 1)
+          if (c == "{") lvl++
+          else if (c == "}") { lvl--; if (lvl == 0) { en = j; break } }
+          else if (c == "," && lvl == 1) comma = 1
+        }
+        if (!en) break
+        body = substr(s, i + 1, en - i - 1); pre = substr(s, 1, i - 1); post = substr(s, en + 1)
+        if (comma) {
+          np = 0; lvl = 0; st = 1
+          for (j = 1; j <= length(body); j++) {
+            c = substr(body, j, 1)
+            if (c == "{") lvl++
+            else if (c == "}") lvl--
+            else if (c == "," && lvl == 0) { parts[++np] = substr(body, st, j - st); st = j + 1 }
+          }
+          parts[++np] = substr(body, st)
+          for (k = 1; k <= np; k++) bexp(pre parts[k] post, depth + 1)
+          return
+        }
+        if (body ~ /^-?[0-9]+\.\.-?[0-9]+(\.\.-?[0-9]+)?$/) {
+          split(body, parts, /\.\./); lo = parts[1] + 0; hi = parts[2] + 0
+          st = (parts[3] == "" || parts[3] + 0 == 0) ? 1 : parts[3] + 0; if (st < 0) st = -st
+          if (lo <= hi) { for (v = lo; v <= hi && nbx < 64; v += st) bexp(pre v post, depth + 1) }
+          else { for (v = lo; v >= hi && nbx < 64; v -= st) bexp(pre v post, depth + 1) }
+          return
+        }
+        if (body ~ /^[A-Za-z]\.\.[A-Za-z](\.\.-?[0-9]+)?$/) {
+          al = "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz"
+          split(body, parts, /\.\./); lo = index(al, parts[1]); hi = index(al, parts[2])
+          st = (parts[3] == "" || parts[3] + 0 == 0) ? 1 : parts[3] + 0; if (st < 0) st = -st
+          if (lo <= hi) { for (v = lo; v <= hi && nbx < 64; v += st) bexp(pre substr(al, v, 1) post, depth + 1) }
+          else { for (v = lo; v >= hi && nbx < 64; v -= st) bexp(pre substr(al, v, 1) post, depth + 1) }
+          return
+        }
+      }
+      bx[++nbx] = s
+    }
+    function has(t,   k) { for (k = 1; k <= nbx; k++) if (bx[k] == t) return 1; return 0 }
+    function anym(re,   k) { for (k = 1; k <= nbx; k++) if (bx[k] ~ re) return 1; return 0 }
+    function end_word(   rq, wk, k) {
       # rq: a quote or a backslash went into this word, so it is never a
       # reserved word (bash recognises those before quote removal).
       rq = wq; wq = 0
       if (w == "") return
-      wk = no_exp(w)
+      wk = no_exp(w); brace_exp(wk)
       # A case pattern is text. Only an unquoted `esac` where a pattern would
       # start ends the case (after the last `;;`).
       if (pat) {
@@ -264,14 +321,14 @@ derive_file() {
         # marks the function as one that ends the shell, anything else is a
         # call the trap rule may have to follow (see resolve_traps).
         if (def_name != "") {
-          if (wk == "exit" || wk == "exec") fexits[def_name] = 1
-          else if (wk != def_name) fcalls[def_name] = fcalls[def_name] " " wk
+          if (has("exit") || has("exec")) fexits[def_name] = 1
+          else for (k = 1; k <= nbx; k++) if (bx[k] != def_name) fcalls[def_name] = fcalls[def_name] " " bx[k]
         }
-        if (wk == "alias") in_alias = 1
-        if (wk == "shopt") in_shopt = 1
-        if (wk == "trap") in_trap = 1
+        if (has("alias")) in_alias = 1
+        if (has("shopt")) in_shopt = 1
+        if (has("trap")) in_trap = 1
         if (!rq && w == "function") in_function = 1
-        if (wk == "enable") printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "enable", NR, NR
+        if (has("enable")) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "enable", NR, NR
         w = ""; return
       }
       nwords++
@@ -287,21 +344,21 @@ derive_file() {
         shape_check("function " w, w)
         in_function = 0
       }
-      if (in_alias && wk ~ /^[A-Za-z_][A-Za-z0-9_]*=/)
+      if (in_alias && anym("^[A-Za-z_][A-Za-z0-9_]*="))
         printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
-      if (in_shopt && sflag != "" && wk == "expand_aliases")
+      if (in_shopt && sflag != "" && has("expand_aliases"))
         printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " sflag " " w, NR, NR
-      if (in_shopt && sflag != "" && wk == "extdebug")
+      if (in_shopt && sflag != "" && has("extdebug"))
         printf "%s\t%s\t%d\t%d\ttrap\n", file, "shopt " sflag " " w, NR, NR
-      if (in_trap && toupper(wk) == "DEBUG")
+      if (in_trap && anym("^[Dd][Ee][Bb][Uu][Gg]$"))
         printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap ... " w, NR, NR
       # The first non-flag argument of trap is its action; every later word
       # is a signal. The pair is judged when the statement ends.
       if (in_trap) {
         if (!trap_has_action) { if (w !~ /^-/) { trap_action = w; trap_has_action = 1 } }
-        else trap_sigs = trap_sigs " " toupper(wk)
+        else for (k = 1; k <= nbx; k++) trap_sigs = trap_sigs " " toupper(bx[k])
       }
-      if (in_shopt && wk ~ /^-[a-z]*s[a-z]*$/) sflag = w
+      if (in_shopt && anym("^-[a-z]*s[a-z]*$")) sflag = w
       w = ""
     }
     # An EXIT, ERR or RETURN trap (or 0, the EXIT alias) whose action holds
@@ -453,12 +510,20 @@ derive_file() {
         if (k == 2) return "\\" nx
         ac_len = k; return ansi_code(v)
       }
+      # The control escape is toupper(operand) AND 31 for any operand, so a
+      # space and a backtick are NUL exactly as @ is, and a doubled backslash
+      # operand is consumed whole (eighteenth board round, checked against
+      # bash 5.2). With no operand left on this line the operand is the
+      # newline that ends it, and the result is that newline.
       if (nx == "c") {
-        ch = substr(line, i + 2, 1); ac_len = 3
+        ch = substr(line, i + 2, 1)
+        if (ch == "") return sprintf("%c", 10)
+        ac_len = 3
+        if (ch == "\\" && substr(line, i + 3, 1) == "\\") ac_len = 4
         if (ch == "?") return ansi_code(127)
-        v = index("@abcdefghijklmnopqrstuvwxyz[\\]^_", tolower(ch)) - 1
-        if (v < 0) return "?"
-        return ansi_code(v)
+        v = index(" !\"#$%&\047()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~", toupper(ch))
+        if (v == 0) return "?"
+        return ansi_code((v + 31) % 32)
       }
       return "\\" nx
     }
@@ -524,6 +589,11 @@ derive_file() {
           w = w substr(line, i + 1, 1); wq = 1; i += 2; continue
         }
         if (c2 == "$\047") { q = "a"; wq = 1; i += 2; continue }
+        # A dollar-double-quoted string is a locale-translated string; with no
+        # translation catalog, and in every self-defense suite, it is its own
+        # text, so it opens the same state as a plain double quote (eighteenth
+        # board round: the dollar was kept, so the word read as a variable).
+        if (c2 == "$\"") { q = "d"; wq = 1; i += 2; continue }
         if (c == "\047") { q = "s"; wq = 1; i++; continue }
         if (c == "\"") { q = "d"; wq = 1; i++; continue }
         # A `${...}` is one part of the current word up to its matching brace,

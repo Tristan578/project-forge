@@ -1397,6 +1397,16 @@ expect_rc "30j. every expansion that can be empty, in every guarded position, is
 # line 10 is NOT a guarded word and must not be reported. Line 11 pins the
 # single-quote removal in a trap action (test round seventeen); line 12
 # pins that the control escape for @ is NUL, which also ends the value.
+# Eighteenth round (test, architect), each checked against bash 5.2: the
+# control escape is toupper AND 31 for any operand, so a space (line 13)
+# and a backtick (line 14) are NUL too; an escape after a NUL is dropped
+# with the rest of the value (line 15: decoding it would give aliaslzz);
+# a doubled backslash operand is consumed whole, so the quote on line 16
+# closes and line 17 is read as code. Lines 18 to 21 are NOT guarded words
+# and must not be reported: a named escape is a control character, and a
+# code point past ASCII is not the letter it equals modulo 128. Line 22
+# ends in a control escape whose operand is the newline, which bash turns
+# into a newline, not a NUL, so the value is alias plus a newline.
 d_ansic="$(mkfixture ansi-c <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -1410,19 +1420,72 @@ $'alias\0zz' fail=:
 $'\ca'lias fail=:
 trap "e'x'it 0" EXIT
 $'alias\c@zz' fail=:
+$'alias\c zz' fail=:
+$'alias\c`zz' fail=:
+$'alias\0\154zz' fail=:
+x=$'\c\\'
+alias fail=:
+$'alias\azz' fail=:
+$'alias\tzz' fail=:
+$'\xE1lias' fail=:
+$'\u00E1lias' fail=:
+$'alias\c
+' fail=:
 FIX
 )"
 out_ansic="$(run_gate "$d_ansic")"
 expect_rc "30k. octal, hex, \\u, \\U and NUL-terminated ANSI-C spellings are the guarded word" 1 \
-  "$out_ansic" "9 violation(s)" "fixture.test.sh:3: 'alias fail=:'" "fixture.test.sh:4: 'alias fail=:'" \
+  "$out_ansic" "13 violation(s)" "fixture.test.sh:13: 'alias fail=:'" "fixture.test.sh:14: 'alias fail=:'" \
+  "fixture.test.sh:15: 'alias fail=:'" "fixture.test.sh:17: 'alias fail=:'" "fixture.test.sh:3: 'alias fail=:'" "fixture.test.sh:4: 'alias fail=:'" \
   "fixture.test.sh:5: 'alias fail=:'" "fixture.test.sh:6: 'alias fail=:'" "fixture.test.sh:7: 'shopt -s expand_aliases'" \
   "fixture.test.sh:8: 'trap exit 0 ... EXIT'" "fixture.test.sh:9: 'alias fail=:'" "fixture.test.sh:11: 'trap exit 0 ... EXIT'" \
   "fixture.test.sh:12: 'alias fail=:'"
-if grep -q 'fixture.test.sh:10:' <<<"$out_ansic"; then
-  fail "30k-b. a control-A escape is not the letter a" "line 10 was reported: $out_ansic"
+if grep -Eq 'fixture.test.sh:(10|18|19|20|21|22|23):' <<<"$out_ansic"; then
+  fail "30k-b. control, named and non-ASCII escapes are not letters" "a line that is not a guarded word was reported: $out_ansic"
 else
-  pass "30k-b. a control-A escape is not the letter a"
+  pass "30k-b. control, named and non-ASCII escapes are not letters"
 fi
+
+# ---- 30l. locale strings and brace expansion are static spellings ------------
+# Eighteenth board round (security): a dollar-double-quoted string is its own
+# text to bash, and brace expansion happens before a command is looked up, so
+# each line below enables aliases or defines one in real bash (each was
+# reproduced silencing a frozen `fail`). Line 9 expands to `shopt -s
+# expand_aliases expand` and line 10 to `alias fail=: x`. Lines 11 to 14
+# put the guarded word in a LATER expansion (`trap 'exit 0' INT EXIT`,
+# `alias x fail=:`, `trap : INT DEBUG`, `shopt -p -s expand_aliases`), so
+# a check that judged only the first expansion would miss each of them.
+d_static="$(mkfixture static-spellings <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+$"alias" fail=:
+shopt -s $"expand_aliases"
+al{i,}as fail=:
+{a..a}lias fail=:
+{a..e..4}lias fail=:
+{x,alias} fail=:
+shopt -s expand{_aliases,}
+alias {fail=:,x}
+trap 'exit 0' {INT,EXIT}
+alias {x,fail=:}
+trap : {INT,DEBUG}
+shopt {-p,-s} expand_aliases
+FIX
+)"
+expect_rc "30l. locale strings and brace expansions that produce a guarded word are that word" 1 \
+  "$(run_gate "$d_static")" "12 violation(s)" "fixture.test.sh:3: 'alias fail=:'" "fixture.test.sh:4: 'shopt -s expand_aliases'" \
+  "fixture.test.sh:5: 'alias fail=:'" "fixture.test.sh:6: 'alias fail=:'" "fixture.test.sh:7: 'alias fail=:'" \
+  "fixture.test.sh:8: 'alias fail=:'" "fixture.test.sh:9: 'shopt -s expand{_aliases,}'" "fixture.test.sh:10: 'alias {fail=:,x}'" \
+  "fixture.test.sh:11: 'trap exit 0 ..." "fixture.test.sh:12: 'alias {x,fail=:}'" "fixture.test.sh:13: 'trap ... {INT,DEBUG}'" \
+  "fixture.test.sh:14: 'shopt {-p,-s} expand_aliases'"
+d_nobrace="$(mkfixture plain-braces <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+echo {alias,x} fail=:
+echo {a..c}
+FIX
+)"
+expect_rc "30l-b. brace expansion in an argument position is still text" 0 "$(run_gate "$d_nobrace")" "frozen"
 
 # ---- 12c. a file whose only definition is malformed gets that report --------------
 # Fourteenth board round (ux): the vacuity guard counted only frozen and
