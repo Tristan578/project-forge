@@ -8,7 +8,8 @@
  * `GamePlayer` calls this and tests replace it wholesale.
  *
  * Keep this a leaf: `/play` is the public, unauthenticated bundle and must not
- * pull in the editor's engine graph.
+ * pull in the editor's engine graph. That is why the CDN resolution below is a
+ * copy of `useEngine.getWasmBasePaths`, not an import of it.
  */
 
 import { withTimeout } from '@/lib/async/withTimeout';
@@ -19,6 +20,38 @@ export interface PlayEngineRuntime {
   init_engine: (canvasId: string) => void;
   handle_command: (command: string, payload: unknown) => unknown;
   set_event_callback: (callback: (event: unknown) => void) => void;
+}
+
+/**
+ * Where the engine is served from, in the order to try (#7580).
+ *
+ * Until this existed, `/play` hardcoded the same-origin `/engine-pkg-*` path
+ * and never consulted the engine CDN — only the editor did — so every player
+ * pulled several megabytes of WASM through the Vercel origin while the CDN
+ * that exists for exactly that sat unused. The play CSP already allowed the
+ * CDN origin (`playCspOptionsFromEnv` → `engineCdn`); the loader just never
+ * asked for it.
+ *
+ * Both variables MUST be read as literal `process.env.NEXT_PUBLIC_*` member
+ * expressions: Next.js inlines only the fully-qualified form into the browser
+ * bundle, so an aliased or destructured read is `undefined` in production and
+ * the CDN path silently disappears (same rule as `mcpBridgeEnabled()`).
+ *
+ * The versioned prefix (`<cdn>/<sha>/`) carries immutable Cache-Control from
+ * the upload step; `/latest/` is a short-TTL alias for builds with no version.
+ * The same-origin path is always last: it is what serves local dev and a
+ * self-hosted deploy, and it is the fallback when the CDN load fails.
+ */
+export function getPlayEngineBasePaths(backend: 'webgpu' | 'webgl2'): string[] {
+  const cdnBase = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
+  const version = (process.env.NEXT_PUBLIC_ENGINE_VERSION || '').trim();
+  const paths: string[] = [];
+  if (cdnBase) {
+    const root = version ? `${cdnBase}/${version}` : `${cdnBase}/latest`;
+    paths.push(`${root}/engine-pkg-${backend}/`);
+  }
+  paths.push(`/engine-pkg-${backend}/`);
+  return paths;
 }
 
 /**
@@ -46,16 +79,45 @@ export async function selectPlayEngineBackend(): Promise<'webgpu' | 'webgl2'> {
   }
 }
 
+/** The wasm-bindgen glue module: `default()` instantiates the binary. */
+interface GlueModule {
+  default: (wasmUrl: string) => Promise<unknown>;
+}
+
+/** Loads the glue module at `specifier`; the default is the real dynamic import. */
+export type GlueImporter = (specifier: string) => Promise<GlueModule>;
+
+const importGlue: GlueImporter = (specifier) =>
+  import(/* webpackIgnore: true */ specifier) as Promise<GlueModule>;
+
+/**
+ * Try each base path in order and return the first runtime that instantiates.
+ *
+ * A failure on one origin (CDN unreachable, blocked, or a stale alias) falls
+ * through to the next; only the LAST origin's failure is what the caller sees.
+ * Exported with an injectable importer so the ordering and the fallback can be
+ * tested without a resolvable engine bundle.
+ */
+export async function instantiateFromPaths(
+  paths: readonly string[],
+  load: GlueImporter = importGlue,
+): Promise<PlayEngineRuntime> {
+  let lastErr: unknown = new Error('No engine base path to load from');
+  for (const basePath of paths) {
+    try {
+      const wasm = await load(`${basePath}forge_engine.js`);
+      await wasm.default(`${basePath}forge_engine_bg.wasm`);
+      return wasm as unknown as PlayEngineRuntime;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
 async function instantiate(): Promise<PlayEngineRuntime> {
   const backend = await selectPlayEngineBackend();
-  const basePath = `/engine-pkg-${backend}/`;
-
-  const wasm = await import(
-    /* webpackIgnore: true */ `${basePath}forge_engine.js`
-  );
-  await wasm.default(`${basePath}forge_engine_bg.wasm`);
-
-  return wasm as unknown as PlayEngineRuntime;
+  return instantiateFromPaths(getPlayEngineBasePaths(backend));
 }
 
 /**

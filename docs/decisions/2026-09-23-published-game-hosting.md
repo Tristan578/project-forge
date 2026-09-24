@@ -23,7 +23,10 @@ the **immutable publication snapshot** that `POST /api/publish` commits:
    `published_games.cdn_bundle_key` (`web/src/lib/storage/publishedGameStorage.ts`).
 3. The play route checks `status = 'published'` on every request, reads the
    mirror through the authenticated S3 API, falls back to the Postgres snapshot,
-   and answers `Cache-Control: private, no-store`.
+   and answers `Cache-Control: private, no-store`. A row published before
+   #10053 and not republished since has no snapshot in either place; for those
+   legacy rows play, remix and fork still read the live `projects.sceneData`
+   until the creator republishes (`CLAUDE.md`, `PUBLISH_TO_R2`).
 
 This repository adds **no public binding, no CORS rule, no Worker route and no
 public-URL minting** for those objects, and none will be added under this
@@ -51,7 +54,7 @@ judged against the condition as written rather than a softened one.
 | Publish uploads the game's data to object storage | Done by #10053: `writePublishedGameBundle` on every publish when `PUBLISH_TO_R2` is on; the Postgres snapshot is written unconditionally. |
 | Objects are stored with correct content types | Done: `application/json`, validated on read against a schema-v1 manifest (owner, slug, version). |
 | Published data is reachable at a public CDN URL with CORS and long-lived caching | **Not done, by this decision.** |
-| Republishing does not leak unpublished edits (the defect behind the "urgent" priority) | Done by #10053: play, remix and fork read the committed snapshot, never the live project. |
+| Republishing does not leak unpublished edits (the defect behind the "urgent" priority) | Done by #10053 for every publication committed since it merged: play, remix and fork read the committed snapshot. A legacy row with no snapshot keeps serving the live project until its creator republishes once. |
 
 ## Why not a public CDN read path
 
@@ -89,14 +92,24 @@ snapshots publicly would mean either a public binding on the bucket that also
 holds marketplace files, or a second bucket with its own credentials, lifecycle
 sweep and orphan-key script — for a payload that is one JSON document per play.
 
-### 3. The bytes that matter are already on a CDN
+### 3. The bytes that matter belong on the engine CDN, and now are
 
-What makes a play slow to start is the engine: four WASM variants of several
-megabytes each, served by the `engine-cdn` Worker at `engine.spawnforge.ai`
-from the `spawnforge-engine` bucket, cache-busted per build. The scene snapshot
-is a single JSON document fetched once per session. Moving it to a CDN would
-not change what a player waits for; it would only move where the moderation
-check can no longer run.
+What makes a play slow to start is the engine: several megabytes of WASM plus
+its JS glue per backend, which the `engine-cdn` Worker at
+`engine.spawnforge.ai` serves from the `spawnforge-engine` bucket under a
+per-build prefix with immutable cache headers. The editor has loaded from
+there since #8247 (`useEngine.getWasmBasePaths`, CDN first, same-origin
+fallback). **The `/play` loader never did**: `loadPlayEngine.ts` hardcoded the
+same-origin `/engine-pkg-*` path, so every player pulled the engine through
+the Vercel origin even though the play CSP already allowed the CDN
+(`playCspOptionsFromEnv` → `engineCdn`). This decision's PR fixes that:
+`getPlayEngineBasePaths` mirrors the editor's resolution (versioned CDN prefix
+when `NEXT_PUBLIC_ENGINE_VERSION` is set, `/latest/` otherwise, then
+same-origin), and `instantiateFromPaths` falls through to the next origin when
+one fails. That is the CDN win the issue was after, and it is delivered on the
+artifact that is actually large. The scene snapshot is one JSON document per
+session; moving it to a CDN would not change what a player waits for, only
+where the moderation check can no longer run.
 
 ### 4. Published scripts run in players' browsers
 
@@ -138,15 +151,17 @@ here, and the object that *is* in storage has its own column, `cdn_bundle_key`.
   requirement in front of it.
 - The `spawnforge-games` bucket and the `ASSET_STORAGE_TYPE` variable from the
   issue body are not to be provisioned: nothing reads them. The variables the
-  snapshot path reads are the four `ASSET_R2_*`/`ASSET_BUCKET_NAME` values and
-  `PUBLISH_TO_R2` (see `CLAUDE.md`, "Optional feature flags"). `CDN_URL` and
+  snapshot path reads are the four `ASSET_R2_*`/`ASSET_BUCKET_NAME` values
+  (`ASSET_STORAGE_ENV` in `web/src/lib/config/assetStorage.ts`) and
+  `PUBLISH_TO_R2` (`CLAUDE.md`, "Optional feature flags"). `CDN_URL` and
   `ASSET_CDN_HOSTS` also exist, but for the marketplace — `CDN_URL` is the host
   `uploadToR2` mints asset URLs on and `resolveOwnedAssetKey` matches them
   against, and `ASSET_CDN_HOSTS` is the redirect allowlist of the marketplace
   download route — and this decision neither requires nor removes them.
 - Standalone exported-game hosting (a self-contained runtime a creator can put
-  on their own host) is a different feature, owned by story #9884 under epic
-  #9800, not by this decision.
+  on their own host) is a different feature, owned by story #9883 ("Make export
+  dependency-complete and independently playable", FR-1 of epic #9800), not by
+  this decision.
 
 ## What would reopen this
 
