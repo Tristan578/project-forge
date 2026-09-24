@@ -17,6 +17,12 @@
 # CONTENT of the failure (the exact path, the exact event), not merely a
 # non-zero exit, so a gate that fails for the wrong reason does not pass here.
 #
+# One case at the end is NOT part of that contract: it pins the committed
+# .mcp.json's `alwaysLoad` allowlist (#8695). That key is Claude Code only and
+# the port gate deliberately ignores it, but this is the suite that already
+# parses the real .mcp.json and runs in CI, so the pin lives here rather than
+# in a one-case suite of its own. Search for "alwaysLoad" to find it.
+#
 # Fixture hooks avoid jq on purpose: the suite must run where jq is absent.
 #
 # Assertions use explicit if/then/else (NOT `A && ok || bad`) so the suite has
