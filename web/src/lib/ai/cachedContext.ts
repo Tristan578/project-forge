@@ -14,6 +14,7 @@
  *   const sys = getCachedSystemPrompt();    // static per session
  */
 
+import type { ModelMessage, SystemModelMessage } from 'ai';
 import { promptCache } from './promptCache';
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,58 @@ export function buildAnthropicCacheControl(tier: CacheTtlTier): {
           : { type: 'ephemeral' },
     },
   };
+}
+
+/**
+ * The engine scene context as a TRAILING `role: "system"` message (#8859).
+ *
+ * WHY TRAILING. Anthropic's prompt cache is a prefix cache: changing any byte
+ * invalidates every cache segment after it. The scene context is the one
+ * block that changes on every entity edit, and it used to sit in the leading
+ * system prefix BEFORE the append-only conversation history — so each scene
+ * edit re-paid the whole history as a cache write. Appended after the latest
+ * user turn instead, it caches on its own and the history's breakpoints stay
+ * intact. The provider emits a mid-conversation `role: "system"` entry for
+ * every system message after the first (`@ai-sdk/anthropic` adds the
+ * `mid-conversation-system` beta itself); the models that honour it are the
+ * Claude 5 / Opus 4.8 family, which is why the caller gates this on the
+ * premium model and the direct backend.
+ *
+ * Same sanitisation as the leading-prefix embed it replaces: control
+ * characters stripped, NO 10k system-prompt cap (scene context for a complex
+ * scene is legitimately 50k+), and the per-user `<!-- session:… -->` nonce
+ * kept verbatim — the cache is keyed on the org's shared platform key, so two
+ * users with byte-identical scenes would otherwise share an entry.
+ *
+ * Returns null for a missing, empty or non-string scene context.
+ */
+export function buildTrailingSceneContextMessage(
+  sceneContext: string | undefined | null,
+  userId: string,
+): SystemModelMessage | null {
+  if (!sceneContext || typeof sceneContext !== 'string' || sceneContext.length === 0) return null;
+  const sanitizedContext = sceneContext.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  const userScopedContext = `<!-- session:${userId} -->\n${sanitizedContext}`;
+  return {
+    role: 'system',
+    content: userScopedContext,
+    providerOptions: buildAnthropicCacheControl('long'),
+  };
+}
+
+/**
+ * Append the trailing scene-context system message to the conversation (#8859).
+ *
+ * Returns the SAME array reference when there is nothing to append, so a
+ * caller can tell "unchanged" from "copied" and nothing downstream re-runs on
+ * a new identity for no reason.
+ */
+export function appendSceneContextMessage<T extends ModelMessage>(
+  messages: T[],
+  sceneMessage: SystemModelMessage | null,
+): ModelMessage[] {
+  if (!sceneMessage) return messages;
+  return [...messages, sceneMessage];
 }
 
 // ---------------------------------------------------------------------------

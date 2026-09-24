@@ -38,6 +38,7 @@ import {
 } from '@/lib/ai/toolApprovalSignature';
 import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 import { isPremiumModel, AI_MODEL_DEEP, AI_MODEL_PRIMARY } from '@/lib/ai/models';
+import { appendSceneContextMessage, buildTrailingSceneContextMessage } from '@/lib/ai/cachedContext';
 import { isDeepTierEnabled } from '@/lib/ai/deepTier';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
 import { isCommandAvailable } from '@/lib/config/providers';
@@ -656,6 +657,14 @@ async function POST_impl(request: NextRequest) {
   // Only deduct tokens / check tier when using the direct (platform key) path.
   const chatRoute = resolveChatRoute(model);
   const usingDirectBackend = !chatRoute || chatRoute.backendId === 'direct';
+  // Mid-conversation system messages (#8859): on the direct backend with the
+  // premium model, the scene context goes AFTER the history as a trailing
+  // `role: "system"` entry so an entity edit no longer invalidates the cached
+  // history. The gateway path flattens instruction blocks to a plain string
+  // (no cache controls at all), and the non-premium models are not documented
+  // for mid-conversation system messages, so both keep the leading embed.
+  const canUseMidConversationSystem =
+    usingDirectBackend && isPremiumModel(chatRoute?.modelId ?? model);
 
   if (usingDirectBackend) {
     try {
@@ -765,7 +774,11 @@ async function POST_impl(request: NextRequest) {
     { text: effectiveSystemPrompt, tier: 'long' },
   ];
 
-  if (sceneContext && typeof sceneContext === 'string') {
+  if (sceneContext && typeof sceneContext === 'string' && !canUseMidConversationSystem) {
+    // Leading-prefix embed, kept for every path that cannot use a trailing
+    // system message (gateway backend, non-premium models). On the premium
+    // direct path the same block is appended after the history instead —
+    // see `messagesForAgent` below.
     // sceneContext is client-supplied structured data (engine scene state).
     // Strip control characters (security) but do NOT apply the 10k system
     // prompt length cap — scene context for complex scenes can legitimately
@@ -835,6 +848,13 @@ async function POST_impl(request: NextRequest) {
 
   // 8. Convert messages
   const modelMessages = buildModelMessages(messages);
+  // 8a. Trailing scene context (#8859). Built from the same sanitise + nonce
+  // rules as the leading embed; null (and `messagesForAgent === modelMessages`)
+  // whenever the leading embed is the one in effect.
+  const sceneMessage = canUseMidConversationSystem
+    ? buildTrailingSceneContextMessage(sceneContext, auth.ctx.user.id)
+    : null;
+  const messagesForAgent = appendSceneContextMessage(modelMessages, sceneMessage);
 
   // 8b. Bind every approved approval to the input the user actually approved.
   //
@@ -879,7 +899,7 @@ async function POST_impl(request: NextRequest) {
   let resumeProducedToolCalls = false;
   try {
     const result = await agent.stream({
-      messages: modelMessages,
+      messages: messagesForAgent,
       onStepFinish: async ({ usage, toolCalls }) => {
         // Tracks whether the turn did any real work, for the paused-turn
         // refund below. A denial resume that only narrates "I didn't do that"

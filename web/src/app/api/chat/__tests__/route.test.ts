@@ -851,6 +851,46 @@ describe('POST /api/chat', () => {
       expect(userTwoScene?.text).not.toBe(userOneScene?.text);
     });
 
+    it('moves the scene context to a trailing system message on the premium direct path (#8859)', async () => {
+      const res = await POST(makeRequest({ ...validBody(), model: AI_MODEL_PREMIUM }));
+      await res.text(); // drain stream
+      // Not in the leading prefix any more...
+      const call = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
+      const blocks = (call?.instructions ?? []) as Array<{ text: string; tier?: string }>;
+      expect(blocks.some((b) => b.text.includes('<!-- session:'))).toBe(false);
+      expect(blocks[0]?.tier).toBe('long');
+      // ...but after the history, as the LAST message, with the nonce and the
+      // 1h tier the leading embed used to carry.
+      const streamArgs = mockStream.mock.calls.at(-1)?.[0] as { messages: Array<Record<string, unknown>> };
+      const last = streamArgs.messages.at(-1);
+      expect(last?.role).toBe('system');
+      expect(last?.content).toBe('<!-- session:user-1 -->\n## Scene\nEmpty');
+      expect(last?.providerOptions).toEqual({ anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } } });
+      expect(streamArgs.messages.slice(0, -1)).toEqual([{ role: 'user', content: 'Hello' }]);
+    });
+
+    it('keeps the leading embed, and sends the history untouched, on a non-premium model', async () => {
+      const res = await POST(makeRequest(validBody()));
+      await res.text(); // drain stream
+      const call = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
+      const blocks = (call?.instructions ?? []) as Array<{ text: string; tier?: string }>;
+      expect(blocks.some((b) => b.text.includes('<!-- session:user-1 -->'))).toBe(true);
+      const streamArgs = mockStream.mock.calls.at(-1)?.[0] as { messages: Array<Record<string, unknown>> };
+      expect(streamArgs.messages.every((m) => m.role !== 'system')).toBe(true);
+    });
+
+    it('keeps the leading embed on the gateway backend even for the premium model', async () => {
+      const { resolveChatRoute } = await import('@/lib/providers/resolveChat');
+      vi.mocked(resolveChatRoute).mockReturnValueOnce({ backendId: 'gateway', modelId: GATEWAY_MODEL_PREMIUM, apiKey: '', metered: false } as never);
+      const res = await POST(makeRequest({ ...validBody(), model: AI_MODEL_PREMIUM }));
+      await res.text(); // drain stream
+      const call = vi.mocked(createSpawnforgeAgent).mock.calls.at(-1)?.[0];
+      const blocks = (call?.instructions ?? []) as Array<{ text: string; tier?: string }>;
+      expect(blocks.some((b) => b.text.includes('<!-- session:user-1 -->'))).toBe(true);
+      const streamArgs = mockStream.mock.calls.at(-1)?.[0] as { messages: Array<Record<string, unknown>> };
+      expect(streamArgs.messages.every((m) => m.role !== 'system')).toBe(true);
+    });
+
     it('orders instruction blocks as [base prompt, scene context]', async () => {
       // Anthropic caches up to the LAST cache_control marker, so the order
       // of long-tier blocks matters: stable base prompt first, then scene

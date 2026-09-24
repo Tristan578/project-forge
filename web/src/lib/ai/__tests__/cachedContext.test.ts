@@ -7,6 +7,7 @@ import {
   invalidateCompoundAnalysis,
   invalidateAllCaches,
   buildAnthropicCacheControl,
+  buildTrailingSceneContextMessage,
 } from '../cachedContext';
 import { promptCache } from '../promptCache';
 
@@ -241,5 +242,67 @@ describe('buildAnthropicCacheControl', () => {
   it('does not leak ttl into short tier output', () => {
     const result = buildAnthropicCacheControl('short');
     expect(result.anthropic.cacheControl).not.toHaveProperty('ttl');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTrailingSceneContextMessage (#8859)
+// ---------------------------------------------------------------------------
+
+describe('buildTrailingSceneContextMessage', () => {
+  it('builds a system message carrying the per-user nonce and the long cache tier', () => {
+    const msg = buildTrailingSceneContextMessage('## Scene\nCube', 'user-1');
+    expect(msg?.role).toBe('system');
+    expect(msg?.content).toBe('<!-- session:user-1 -->\n## Scene\nCube');
+    // Imported and compared, not hand-rolled: the tier object is the one
+    // buildAgentInstructions puts on the leading blocks.
+    expect(msg?.providerOptions).toEqual(buildAnthropicCacheControl('long'));
+  });
+
+  it('scopes the nonce to the user so two users never share a cached entry', () => {
+    const a = buildTrailingSceneContextMessage('## Scene\nCube', 'user-1');
+    const b = buildTrailingSceneContextMessage('## Scene\nCube', 'user-2');
+    expect(a?.content).not.toBe(b?.content);
+    expect(b?.content).toContain('<!-- session:user-2 -->');
+  });
+
+  it('strips control characters but applies no length cap', () => {
+    const big = 'x'.repeat(60_000);
+    const msg = buildTrailingSceneContextMessage(`a\u0000b\u001Fc\u007Fd\n${big}`, 'u');
+    expect(msg?.content).toBe(`<!-- session:u -->\nabcd\n${big}`);
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['empty string', ''],
+  ])('returns null for %s scene context', (_label, value) => {
+    expect(buildTrailingSceneContextMessage(value, 'user-1')).toBeNull();
+  });
+});
+// ---------------------------------------------------------------------------
+// appendSceneContextMessage (#8859)
+// ---------------------------------------------------------------------------
+
+describe('appendSceneContextMessage', () => {
+  it('adds exactly one trailing system entry and leaves the prefix byte-identical', async () => {
+    const { appendSceneContextMessage } = await import('../cachedContext');
+    const history = [
+      { role: 'user' as const, content: 'hi' },
+      { role: 'assistant' as const, content: 'hello' },
+    ];
+    const scene = { role: 'system' as const, content: '<!-- session:u -->\n## Scene' };
+    const out = appendSceneContextMessage(history, scene);
+    expect(out).toHaveLength(3);
+    expect(out.slice(0, 2)).toEqual(history);
+    expect(out[2]).toBe(scene);
+    // The input is not mutated.
+    expect(history).toHaveLength(2);
+  });
+
+  it('returns the same array reference when there is no scene message', async () => {
+    const { appendSceneContextMessage } = await import('../cachedContext');
+    const history = [{ role: 'user' as const, content: 'hi' }];
+    expect(appendSceneContextMessage(history, null)).toBe(history);
   });
 });
