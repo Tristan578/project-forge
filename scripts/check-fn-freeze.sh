@@ -32,11 +32,18 @@
 # For every top-level function definition in a scanned file (`name() {`,
 # `function name() {` or `function name {`, at column 0, outside heredocs and
 # comments), the line IMMEDIATELY after the definition's closing brace must be
-# exactly `readonly -f name`. A one-line definition closes on its own line; a
-# multi-line definition closes at the first later line that starts with `}` at
-# column 0. Any other `readonly -f X` line is a stray: it either names a
-# function this file never defines, or sits somewhere other than directly after
-# X's definition (a pre-declaration, or a freeze with a window before it).
+# exactly `readonly -f name`. The body must be a brace group, opened on the
+# definition line or on the next non-blank, non-comment line; a one-line
+# definition closes where its own line ends (a trailing comment is not part of
+# it), and a multi-line definition closes at the first later line that starts
+# with `}` at column 0. A definition whose body is anything else — a subshell
+# `( )`, a bare `if`/`while`/`case` — is reported as `unsupported` and fails
+# the gate, so a helper the derivation cannot follow is never a helper it
+# silently forgot (the sixth board round found `name()` with the brace on
+# the next line, and a one-liner with a trailing comment, both invisible).
+# Any other `readonly -f X` line is a stray: it either names a function this
+# file never defines, or sits somewhere other than directly after X's
+# definition (a pre-declaration, or a freeze with a window before it).
 #
 # The freeze protects the FUNCTION binding and nothing else. A bash alias of
 # the same name is resolved before functions once `shopt -s expand_aliases`
@@ -99,7 +106,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|unsupported
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -113,6 +120,22 @@ derive_file() {
     function flush_def() {
       pending_name = def_name; pending_def = def_line; pending_end = NR
       def_name = ""
+    }
+    # The text of a line before its trailing comment, with the quoting of the
+    # line respected (a `#` inside quotes is text). Used to decide whether
+    # a definition line closes its own brace group.
+    function code_part(s,   n, i, c, qq) {
+      n = length(s); qq = ""
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (qq == "s") { if (c == "\047") qq = ""; continue }
+        if (qq == "d") { if (c == "\\") { i++; continue } if (c == "\"") qq = ""; continue }
+        if (c == "\\") { i++; continue }
+        if (c == "\047") { qq = "s"; continue }
+        if (c == "\"") { qq = "d"; continue }
+        if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[[:space:];(&|{]/)) return substr(s, 1, i - 1)
+      }
+      return s
     }
     # Advance the lexer over one line, updating the quote state (q), the
     # context stack (d, st_q[]) and the heredoc queue (hd_n, hd_term[]).
@@ -156,6 +179,21 @@ derive_file() {
       w = ""
     }
     function end_command() { end_word(); cmd_seen = 0; in_alias = 0; in_shopt = 0; sflag = "" }
+    # Entering `$( ... )` or `( ... )` starts a new context: the enclosing
+    # quote state and the enclosing array-literal state are both pushed and
+    # both cleared, and the matching `)` restores them. Array-literal skipping
+    # must be cleared here, not only quoting: `arr=($(alias fail=:))` stores
+    # the OUTPUT of a command that runs, so its text is code (the sixth board
+    # round found a single global array flag swallowing it as literal words).
+    function open_sub(saved_q) {
+      end_command(); d++
+      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d
+      q = ""; arr = 0; arr_d = 0
+    }
+    function close_sub() {
+      end_command()
+      if (d > 0) { q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; d-- }
+    }
     function lex_line(line,   n, i, c, c2, c3, rest, tok, carry) {
       n = length(line); i = 1
       # A trailing unquoted backslash joins this line to the next one, so the
@@ -174,7 +212,7 @@ derive_file() {
         if (q == "d") {
           if (c == "\\") { w = w substr(line, i + 1, 1); i += 2; continue }
           if (c == "\"") { q = ""; i++; continue }
-          if (c2 == "$(") { end_command(); d++; st_q[d] = q; q = ""; i += 2; continue }
+          if (c2 == "$(") { open_sub(q); i += 2; continue }
           w = w c; i++; continue
         }
         if (arr) {
@@ -182,6 +220,7 @@ derive_file() {
           if (c2 == "$\047") { q = "a"; i += 2; continue }
           if (c == "\047") { q = "s"; i++; continue }
           if (c == "\"") { q = "d"; i++; continue }
+          if (c2 == "$(") { open_sub(""); i += 2; continue }
           if (c == "(") arr_d++
           if (c == ")") { arr_d--; if (arr_d == 0) { arr = 0; w = "" } }
           i++; continue
@@ -197,14 +236,15 @@ derive_file() {
           if (i == 1 || substr(line, i - 1, 1) ~ /[[:space:];(&|]/) { end_word(); break }
           w = w c; i++; continue
         }
-        if (c2 == "$(") { end_command(); d++; st_q[d] = ""; i += 2; continue }
+        if (c2 == "$(") { open_sub(""); i += 2; continue }
         # `NAME=(` / `NAME+=(` opens an ARRAY LITERAL: its elements are words
         # that are stored, never run, so none of them can be a command word.
         # The group is skipped to its closing paren (quotes inside it are
-        # still tracked so a `)` in a string does not end it early).
+        # still tracked so a `)` in a string does not end it early), except
+        # that a `$( )` inside it is a command that runs and is lexed as one.
         if (c == "(" && w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=$/) { arr = 1; arr_d = 1; w = ""; i++; continue }
-        if (c == "(") { end_command(); d++; st_q[d] = ""; i++; continue }
-        if (c == ")") { end_command(); if (d > 0) { q = st_q[d]; d-- } i++; continue }
+        if (c == "(") { open_sub(""); i++; continue }
+        if (c == ")") { close_sub(); i++; continue }
         if (c3 == "<<<") { end_word(); i += 3; continue }
         if (c2 == "<<") {
           end_word()
@@ -264,6 +304,22 @@ derive_file() {
         pending_name = ""
       }
 
+      # A definition whose brace group opens on a later line: skip blank and
+      # comment lines, accept a line whose first token is `{` (closing on that
+      # same line if it ends the group), and report anything else as an
+      # unsupported body rather than losing the definition.
+      if (def_name != "" && brace_pending) {
+        if (line ~ /^[[:space:]]*$/ || line ~ /^[[:space:]]*#/) next
+        if (line ~ /^[[:space:]]*\{/) {
+          brace_pending = 0
+          body = code_part(line); sub(/[[:space:]]+$/, "", body)
+          if (body ~ /\}$/ && body !~ /^[[:space:]]*\{[[:space:]]*$/) flush_def()
+          lex_line(line); next
+        }
+        printf "%s\t%s\t%d\t%d\tunsupported\n", file, def_name, def_line, NR
+        brace_pending = 0; def_name = ""
+      }
+
       # Inside a multi-line definition: the column-0 closing brace ends it.
       if (def_name != "") {
         if (line ~ /^\}/) { flush_def(); next }
@@ -273,25 +329,33 @@ derive_file() {
 
       if (line ~ /^[[:space:]]*#/) next
 
-      # A top-level definition. Three spellings, column 0 only. Bash accepts
-      # whitespace between the parens (`fail ( ) {` is a real, freezable
-      # function), so the parens are matched with optional space inside; the
-      # fifth board round found the adjacent-only pattern left such a helper
-      # invisible to the derivation, and therefore unfrozen and unreported.
-      name = ""
-      if (match(line, /^(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([[:space:]]*\)[[:space:]]*\{/)) {
-        name = substr(line, RSTART, RLENGTH)
-        sub(/^function[[:space:]]+/, "", name); sub(/[[:space:]]*\([[:space:]]*\)[[:space:]]*\{$/, "", name)
-      } else if (match(line, /^function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\{/)) {
-        name = substr(line, RSTART, RLENGTH)
-        sub(/^function[[:space:]]+/, "", name); sub(/[[:space:]]*\{$/, "", name)
+      # A top-level definition opener, column 0 only: `name()`, `function
+      # name()` or `function name`, with the optional bash whitespace inside the
+      # parens (`fail ( ) {` is a real, freezable function — the fifth board
+      # round found the adjacent-only pattern left such a helper invisible).
+      # What follows the opener on the line decides the body: nothing (after
+      # the comment is removed) means the brace group opens on a later line;
+      # `{` means it opens here and closes here if the code part ends in `}`;
+      # anything else is a body this derivation does not follow, reported.
+      name = ""; rest = ""
+      if (match(line, /^(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([[:space:]]*\)/)) {
+        name = substr(line, RSTART, RLENGTH); rest = substr(line, RLENGTH + 1)
+        sub(/^function[[:space:]]+/, "", name); sub(/[[:space:]]*\([[:space:]]*\)$/, "", name)
+      } else if (match(line, /^function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*/)) {
+        name = substr(line, RSTART, RLENGTH); rest = substr(line, RLENGTH + 1)
+        sub(/^function[[:space:]]+/, "", name)
       }
       if (name != "") {
-        trimmed = line; sub(/[[:space:]]+$/, "", trimmed)
+        body = code_part(rest); sub(/^[[:space:]]+/, "", body); sub(/[[:space:]]+$/, "", body)
         def_name = name; def_line = NR
-        if (trimmed ~ /\}$/) flush_def()
-        lex_line(line)
-        next
+        if (body == "") { brace_pending = 1; next }
+        if (body ~ /^\{/) {
+          if (body ~ /\}$/) flush_def()
+          lex_line(line); next
+        }
+        printf "%s\t%s\t%d\t%d\tunsupported\n", file, name, NR, NR
+        def_name = ""
+        lex_line(line); next
       }
 
       # A freeze that is not the resolution of a pending definition is a stray.
@@ -306,7 +370,9 @@ derive_file() {
     END {
       if (pending_name != "")
         printf "%s\t%s\t%d\t%d\tunfrozen\n", file, pending_name, pending_def, pending_end
-      if (def_name != "")
+      if (def_name != "" && brace_pending)
+        printf "%s\t%s\t%d\t%d\tunsupported\n", file, def_name, def_line, NR
+      else if (def_name != "")
         printf "%s\t%s\t%d\t%d\tunfrozen\n", file, def_name, def_line, NR
       # A lexer that ends the file inside a heredoc or a quoted string has
       # skipped everything after the opener; that is a parse failure, not a
@@ -371,7 +437,7 @@ if [ "${total:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray|alias)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias|unsupported)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
   # The report is the block reason, so it goes to stderr like every other
@@ -384,6 +450,7 @@ if [ -n "$violations" ]; then
         unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
         stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, and a freeze inside a quoted string or fixture is text, not a statement" ;;
         alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion" ;;
+        unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as '$name() {' ... '}' with the closing brace at column 0, then freeze it on the next line" ;;
       esac
     done <<<"$violations"
   } >&2

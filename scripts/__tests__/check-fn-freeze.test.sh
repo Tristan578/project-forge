@@ -607,6 +607,24 @@ FIX
 expect_rc "19h. words inside an array literal (NAME=( ), NAME+=( ), with quoted parens inside) are not violations" 0 \
   "$(run_gate "$d_array")" "2 function(s) across 1 file(s) are frozen"
 
+# ---- 19i. a command substitution inside an array element still runs -----------
+# `arr=($(alias fail=:))` stores the output of a command that executes; the
+# sixth board round found the array-literal skip swallowing it (and a quoted
+# `"$( )"` element corrupting the quote stack into a parse error).
+d_array_sub="$(mkfixture array-substitution <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+build() {
+  local -a arr=($(alias fail=:))
+  local -a quoted=("$(alias pass=:)" "x)" 'y)')
+  echo "${arr[@]}" "${quoted[@]}"
+}
+readonly -f build
+FIX
+)"
+expect_rc "19i. an alias inside a \$( ) array element, bare or double-quoted, is reported and the array still closes" 1 \
+  "$(run_gate "$d_array_sub")" "2 violation(s)" "'alias fail=:'" "'alias pass=:'"
+
 # ---- 20. whitespace inside the parens is still a definition ---------------------
 # `fail ( ) {` is a real, freezable function; a derivation that only matched
 # `()` left it invisible, and an invisible helper is an unfrozen one the gate
@@ -630,6 +648,64 @@ if [ "$spaced_list" = "pass frozen bad frozen fail unfrozen " ]; then
   pass "20b. --list derives all three spaced spellings with their names"
 else
   fail "20b. --list derived: '$spaced_list'"
+fi
+
+# ---- 21. the brace group may open on the next line ----------------------------
+# `fail()` newline `{` is a real definition (sixth board round: it was invisible,
+# so an unfrozen helper written that way passed). Blank and comment lines may
+# sit between the opener and the brace; a one-line `{ ...; }` closes at once.
+d_brace_next="$(mkfixture brace-next-line <<'FIX'
+pass()
+{
+  echo "  PASS: $1"
+}
+readonly -f pass
+helper() # the brace follows a comment and a blank line
+
+{ :; }
+readonly -f helper
+function bad
+{
+  echo "  FAIL: $1"
+}
+FIX
+)"
+expect_rc "21. a definition whose brace opens on a later line is derived; the unfrozen one is reported with its real lines" 1 \
+  "$(run_gate "$d_brace_next")" "1 violation(s)" "fixture.test.sh:10: bad() is not frozen — add 'readonly -f bad' on line 14"
+
+# ---- 22. a trailing comment does not keep a one-line definition open ----------
+# `fail() { ...; } # note` closes on its own line. When the comment text was
+# taken as the line's end the definition stayed open, and every real
+# definition after it was swallowed into a phantom body (sixth board round).
+d_trailing="$(mkfixture trailing-comment <<'FIX'
+pass() { echo "  PASS: $1"; } # counts; the "}" in this string is text
+readonly -f pass
+helper() {
+  :
+}
+FIX
+)"
+expect_rc "22. a one-liner with a trailing comment closes on its line, so the helper after it is derived and reported" 1 \
+  "$(run_gate "$d_trailing")" "1 violation(s)" "fixture.test.sh:3: helper() is not frozen"
+
+# ---- 23. a body that is not a brace group is reported, never skipped ----------
+# Bash accepts any compound command as a function body. The derivation follows
+# brace groups only; a subshell body or a bare `if` is a definition it cannot
+# see the end of, and a definition it cannot see is one it must report.
+d_unsupported="$(mkfixture unsupported-body <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+fail() ( echo "  FAIL: $1" )
+function guard if true; then :; fi
+FIX
+)"
+expect_rc "23. a subshell body and a bare compound body are reported as unsupported, not lost" 1 \
+  "$(run_gate "$d_unsupported")" "2 violation(s)" "fixture.test.sh:3: fail() has a body this gate cannot follow" "fixture.test.sh:4: guard() has a body this gate cannot follow"
+unsupported_list="$(FN_FREEZE_DIRS="$d_unsupported" bash "$GATE" --list 2>&1 | cut -f2,5 | tr '\t\n' '  ')"
+if [ "$unsupported_list" = "pass frozen fail unsupported guard unsupported " ]; then
+  pass "23b. --list carries the unsupported rows"
+else
+  fail "23b. --list derived: '$unsupported_list'"
 fi
 
 # ---- 18. the test-only seam must not be wired from any workflow ----------------

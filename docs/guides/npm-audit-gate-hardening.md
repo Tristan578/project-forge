@@ -831,8 +831,13 @@ by construction rather than by measurement.
   The rule is shape, not text: the very next line must be `readonly -f <name>`,
   and the shapes are bash's — `name ( ) {` with space inside the parens is a
   definition too (the fifth board round found an adjacent-only `()` left such
-  a helper invisible, so unfrozen and unreported), and an array literal
-  `NAME=( ... )` holds words that never run.
+  a helper invisible, so unfrozen and unreported), the brace may open on the
+  next line, a one-liner's trailing comment is not part of its body (both from
+  the sixth round, both invisible before), and an array literal `NAME=( ... )`
+  holds words that never run — but a `$( )` inside one runs, and is read as
+  code (also the sixth round). A body the derivation cannot follow (a subshell,
+  a bare compound command) is reported as `unsupported`: the gate fails on a
+  definition it cannot see the end of rather than forgetting it.
   A freeze anywhere else is a stray (before its definition it cannot bind; after
   a blank line it leaves a window; inside a quoted program or a heredoc fixture
   it is text, not a statement). Only a `<<-` heredoc has its leading tabs

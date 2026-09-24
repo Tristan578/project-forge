@@ -184,6 +184,11 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   `alias nothing fail=:` and anything in front of the word are all caught,
   while the word as an argument (`echo alias fail=:`), inside a quoted string
   that holds more than the word, in a heredoc fixture or in a comment is text.
+- The body is a brace group, opened on the definition line or the next
+  non-blank, non-comment line, closed by `}` at column 0 (or on the same line
+  for a one-liner; a trailing comment is not part of it). A subshell body or a
+  bare compound body is reported as `unsupported` — the gate never skips a
+  definition it cannot follow.
 - Heredocs follow bash: only `<<-` strips leading tabs before the terminator;
   a plain `<<` body runs to the column-0 delimiter, tab-indented lookalikes
   included.
