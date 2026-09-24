@@ -42,7 +42,7 @@ We are actively investigating. Next update in **{15 / 30} minutes** or when we h
 
 ### Who should I contact?
 
-Updates will be posted here as they happen. SpawnForge is run by a single owner, so there is no one else to contact directly; https://spawnforge.ai/health shows live service status.
+Updates will be posted here as they happen. If you have extra impact to report, or a billing or data question, email support@spawnforge.ai; replies may be slower while the incident is being worked on.
 
 Live service status (updates automatically from the health checks): https://spawnforge.ai/health
 
