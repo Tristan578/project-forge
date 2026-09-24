@@ -71,6 +71,6 @@ Status page: https://status.spawnforge.ai
 ### Actions taken
 
 - [ ] {action}
-- [ ] Alert on-call engineer
+- [ ] Notify the project owner (no on-call/paging service — see `docs/operations/incident-response.md`)
 - [ ] Post status page update
 - [ ] Open incident bridge channel

@@ -131,7 +131,7 @@ Vercel Edge (CDN, routing, headers)
 
 ### 5.1 Complete Outage (Site Unreachable)
 
-**Detection:** External synthetic monitor fires after 2 consecutive failures (~3 min). PagerDuty alert: "SpawnForge Unreachable".
+**Detection:** External synthetic monitor fires after 2 consecutive failures (~3 min).
 
 **Verification:**
 ```bash
@@ -171,8 +171,8 @@ vercel rollback <last-good-deployment-url> --yes --scope=<team> --token=$VERCEL_
 ```
 
 **Communication:**
-- Page on-call engineer via PagerDuty (when PF-608 is implemented)
-- Post in #incidents Slack channel
+- No paging service is configured — see `docs/operations/incident-response.md` for how the owner is notified
+- Post in #incidents Slack channel, if one is configured in Sentry
 - If user-facing for > 15 min, update status page
 
 **Resolution Verification:**
@@ -722,7 +722,7 @@ now opens (or comments on) a GitHub issue, so this is the list to watch:
 Watch `label:ci-failure` — every one of these carries it.
 
 All four go through `scripts/notify-workflow-failure.sh`. Two properties matter
-on-call:
+when responding:
 
 - **Deduped by key.** A recurring failure (the daily cron especially) comments on
   the issue it already opened rather than filing a new one each time, so the
@@ -740,7 +740,7 @@ entirely green.
 
 ### Gaps (Addressed by PF-607 through PF-617)
 - No external synthetic monitoring (PF-607)
-- No on-call rotation or paging (PF-608)
+- No on-call rotation or paging, by decision — see `docs/decisions/2026-09-24-no-paging-or-on-call.md` and `docs/operations/incident-response.md` (PF-608, GH #7710)
 - Health endpoint not rate-limited (PF-609)
 - Rate limiting is per-instance, not distributed (PF-610)
 - No client Web Vitals reporting (PF-611)
@@ -763,9 +763,9 @@ entirely green.
 
 | Alert Name | Condition | Severity | Action |
 |-----------|-----------|----------|--------|
-| DB Connection Failure | `Database (Neon)` health check returns "down" 2x in 5 min | P0 | Page on-call |
-| Auth Failure Spike | Clerk health check "down" for 5 min | P0 | Page on-call |
-| 5xx Error Rate | > 2% of requests return 5xx for 5 min | P1 | Page on-call |
+| DB Connection Failure | `Database (Neon)` health check returns "down" 2x in 5 min | P0 | Notify #incidents (no page) |
+| Auth Failure Spike | Clerk health check "down" for 5 min | P0 | Notify #incidents (no page) |
+| 5xx Error Rate | > 2% of requests return 5xx for 5 min | P1 | Notify #incidents (no page) |
 | AI Gen Failure Spike | AI provider errors > 10% for 15 min | P1 | Notify #engineering-alerts |
 | WASM Load Failure | Custom measurement `wasm_init_time` errors > 5% | P1 | Notify #engineering-alerts |
 | High LCP | p75 LCP > 4s for 30 min | P2 | Notify #engineering-alerts |
@@ -890,11 +890,13 @@ See also `apps/docs/README.md` → Environment Variables.
 
 ---
 
-## 15. On-Call Checklist
+## 15. Incident Response Checklist
 
-When paged, follow this sequence:
+There is no on-call rotation or paging — see
+`docs/operations/incident-response.md`. When you notice or are notified of an
+incident, follow this sequence:
 
-1. **Acknowledge** the page within 5 minutes
+1. **Acknowledge** — note that you are looking into it
 2. **Assess** severity:
    - Check `https://spawnforge.ai/api/health`
    - Check Sentry for error spikes

@@ -78,7 +78,7 @@ Deployed via: {PR link / deployment link}
 - [ ] Error rates returned to baseline
 - [ ] Latency p99 returned to baseline
 - [ ] Manual smoke test passed
-- [ ] On-call engineer signed off on recovery
+- [ ] Owner signed off on recovery
 
 ### Timeline (complete)
 

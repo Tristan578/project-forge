@@ -6,63 +6,63 @@
 
 Configure these alert rules in Sentry (Settings > Alerts > Create Alert Rule) for the `spawnforge-ai` project.
 
-### P1 -- Critical Alerts (Immediate Notification)
+### P0 -- Critical Alerts (Immediate Notification)
 
 #### 1. High Error Rate
 - **Type:** Metric Alert
 - **Metric:** Number of errors
 - **Threshold:** > 50 errors in 5 minutes
-- **Action:** Slack #incidents + PagerDuty (when configured)
+- **Action:** Notify the owner via `#incidents`, if configured in Sentry. No paging service exists — see `docs/operations/incident-response.md`.
 - **Resolve:** < 10 errors in 5 minutes
 
 #### 2. Transaction Failure Spike
 - **Type:** Metric Alert
 - **Metric:** Transaction failure rate
 - **Threshold:** > 10% failure rate over 5 minutes
-- **Action:** Slack #incidents
+- **Action:** Notify the owner via `#incidents`, if configured in Sentry
 - **Resolve:** < 2% failure rate over 5 minutes
 
 #### 3. Unhandled Exception (New Issue)
 - **Type:** Issue Alert
 - **Condition:** First seen, level = error or fatal
 - **Filter:** Event occurs 5+ times in 10 minutes (avoids noise from one-off errors)
-- **Action:** Slack #incidents
+- **Action:** Notify the owner via `#incidents`, if configured in Sentry
 
-### P2 -- Degraded Service Alerts
+### P1 -- Degraded Service Alerts
 
 #### 4. Slow API Response
 - **Type:** Metric Alert
 - **Metric:** Transaction duration (p95)
 - **Threshold:** > 5 seconds over 10 minutes
-- **Action:** Slack #engineering
+- **Action:** Notify the owner via `#engineering-alerts`, if configured in Sentry
 - **Resolve:** < 2 seconds over 10 minutes
 
 #### 5. Database Circuit Breaker Open
 - **Type:** Issue Alert
 - **Condition:** Message contains "CircuitBreakerOpenError"
-- **Action:** Slack #incidents
+- **Action:** Notify the owner via `#incidents`, if configured in Sentry
 - **Note:** The circuit breaker (`web/src/lib/db/circuitBreaker.ts`) opens after repeated DB failures
 
 #### 6. Payment Processing Errors
 - **Type:** Issue Alert
 - **Condition:** Transaction matches `/api/webhooks/stripe`, level = error
 - **Frequency:** Alert once per hour (Stripe retries automatically)
-- **Action:** Slack #engineering
+- **Action:** Notify the owner via `#engineering-alerts`, if configured in Sentry
 
-### P3 -- Monitoring Alerts
+### P2 -- Monitoring Alerts
 
 #### 7. Elevated Warning Rate
 - **Type:** Metric Alert
 - **Metric:** Number of warnings
 - **Threshold:** > 200 in 1 hour
-- **Action:** Slack #engineering (daily digest)
+- **Action:** Notify the owner via `#engineering-alerts` (daily digest), if configured in Sentry
 - **Resolve:** < 50 in 1 hour
 
 #### 8. Weekly Error Summary
 - **Type:** Scheduled report
 - **Frequency:** Weekly, Monday 9:00 AM
 - **Content:** New issues, regression count, top errors by frequency
-- **Action:** Slack #engineering
+- **Action:** Notify the owner via `#engineering-alerts`, if configured in Sentry
 
 ## Performance Monitoring
 
@@ -87,7 +87,7 @@ Configure Sentry Browser SDK to track:
 
 ### Vercel
 - **Deployment notifications:** Slack #deployments
-- **Build failure alerts:** Slack #engineering
+- **Build failure alerts:** `#engineering-alerts`, if configured in Sentry
 - **Usage alerts:** Set spending limit in Vercel dashboard
 
 ### Cloudflare (R2 + Workers)
@@ -104,9 +104,10 @@ Configure Sentry Browser SDK to track:
 
 1. Go to Sentry > Settings > Integrations > Slack
 2. Install the Sentry Slack app
-3. Configure channels:
-   - `#incidents` -- P1 and P2 alerts
-   - `#engineering` -- P3 alerts and daily digests
+3. Configure channels (there is no paging service — Slack notification is the
+   whole "action" for every tier; see `docs/operations/incident-response.md`):
+   - `#incidents` -- P0 and P1 alerts
+   - `#engineering-alerts` -- P2 alerts and daily digests
    - `#deployments` -- Vercel deployment notifications
 
 ## Uptime Monitoring (Recommended)
