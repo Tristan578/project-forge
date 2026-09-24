@@ -468,6 +468,27 @@ describe('GamePlayer', () => {
       expect(screen.queryByText('Starting engine...')).toBeNull();
     });
 
+    it('lets initEngine finish when the player unmounts during the settle delay: no play, no error, no hang', async () => {
+      global.fetch = okFetch();
+      const runtime = stubRuntime();
+      runtime.handle_command.mockReturnValue({ success: true });
+      vi.mocked(loadPlayEngine).mockResolvedValue(runtime);
+
+      const { unmount } = render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+      await advance();
+      fireEvent.click(screen.getByText('Click to play'));
+      // The scene is accepted at once; we are now inside the settle delay.
+      await advance(PLAY_ENGINE_SETTLE_MS / 2);
+      expect(runtime.handle_command).toHaveBeenCalledWith('load_scene', expect.anything());
+      expect(runtime.handle_command).not.toHaveBeenCalledWith('play', expect.anything());
+
+      unmount();
+      await advance(PLAY_ENGINE_SETTLE_MS * 2);
+
+      expect(runtime.handle_command).not.toHaveBeenCalledWith('play', expect.anything());
+      expect(captureException).not.toHaveBeenCalled();
+    });
+
     it('stops sending load_scene the moment the player unmounts mid-boot', async () => {
       global.fetch = okFetch();
       const runtime = stubRuntime();

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { loadSceneWhenReady, refusalOf } from '../playSceneLoad';
+import { loadSceneWhenReady, refusalOf, settleDelay } from '../playSceneLoad';
 import { PLAY_SCENE_LOAD_RETRY_MS, PLAY_SCENE_LOAD_TIMEOUT_MS } from '@/lib/config/timeouts';
 
 const NOT_READY = { success: false, error: 'PendingCommands resource not initialized' };
@@ -114,6 +114,34 @@ describe('loadSceneWhenReady', () => {
       // And nothing fires later either.
       await vi.advanceTimersByTimeAsync(1_000);
       expect(send).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settleDelay resolves after the delay, and at once on abort — never left pending', async () => {
+    vi.useFakeTimers();
+    try {
+      let plain = false;
+      void settleDelay(500).then(() => { plain = true; });
+      await vi.advanceTimersByTimeAsync(499);
+      expect(plain).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(plain).toBe(true);
+
+      const abort = new AbortController();
+      let aborted = false;
+      void settleDelay(500, abort.signal).then(() => { aborted = true; });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(aborted).toBe(false);
+      abort.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(aborted).toBe(true);
+
+      let already = false;
+      void settleDelay(500, abort.signal).then(() => { already = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(already).toBe(true);
     } finally {
       vi.useRealTimers();
     }

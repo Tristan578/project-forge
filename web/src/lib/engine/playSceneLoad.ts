@@ -66,6 +66,36 @@ export interface LoadSceneOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Wait `ms`, or until `signal` aborts, whichever comes first. Never rejects.
+ *
+ * An abort RESOLVES the wait rather than leaving it pending: a delay whose
+ * timer is merely cleared leaves the `await` behind it suspended forever, and
+ * with it every closure the calling async function holds (for `/play`, the
+ * engine runtime and the game data). The caller checks its own cancellation
+ * flag after the wait, exactly as it does after the scene load.
+ * @param ms Delay in milliseconds.
+ * @param signal Optional abort signal that ends the wait early.
+ * @returns Resolves after the delay or on abort.
+ */
+export function settleDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      resolve();
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 /** Thrown by {@link loadSceneWhenReady} when its `signal` aborts. */
 export class SceneLoadCancelled extends Error {
   constructor() {
@@ -105,16 +135,6 @@ export async function loadSceneWhenReady(
     if (Date.now() >= deadline) {
       throw new Error(`Scene failed to load: the engine did not accept commands within ${timeoutMs}ms`);
     }
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      }, retryMs);
-      function onAbort() {
-        clearTimeout(timer);
-        resolve();
-      }
-      signal?.addEventListener('abort', onAbort, { once: true });
-    });
+    await settleDelay(retryMs, signal);
   }
 }

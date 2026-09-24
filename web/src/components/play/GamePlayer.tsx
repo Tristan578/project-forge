@@ -8,7 +8,7 @@ import { RemixButton } from './RemixButton';
 import { ReportGameDialog } from './ReportGameDialog';
 import { withTimeout } from '@/lib/async/withTimeout';
 import { loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
-import { loadSceneWhenReady, refusalOf, SceneLoadCancelled } from '@/lib/engine/playSceneLoad';
+import { loadSceneWhenReady, refusalOf, settleDelay, SceneLoadCancelled } from '@/lib/engine/playSceneLoad';
 import { captureException } from '@/lib/monitoring/sentry-client';
 import {
   ENGINE_GLOBAL_TIMEOUT_MS,
@@ -75,11 +75,13 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   // app owns it and a retry would double-initialize.
   const engineOwnsCanvasRef = useRef(false);
   const cancelledRef = useRef(false);
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Aborts the scene-load wait on unmount: `loadSceneWhenReady` retries an
-  // engine that is still initialising every 50 ms for up to ten seconds, and
-  // `cancelledRef` alone was only read once that wait had ended, so a visitor
-  // who left mid-boot kept a dead component dispatching `load_scene`.
+  // Aborts every wait inside initEngine on unmount: `loadSceneWhenReady`
+  // retries an engine that is still initialising every 50 ms for up to ten
+  // seconds, and `cancelledRef` alone was only read once that wait had ended,
+  // so a visitor who left mid-boot kept a dead component dispatching
+  // `load_scene`. The settle delay before `play` rides the same signal, so an
+  // unmount during it RESOLVES the wait (and `cancelledRef` then returns)
+  // instead of leaving initEngine suspended with the runtime in its closure.
   const initAbortRef = useRef<AbortController | null>(null);
 
   // Reset on mount, not just on unmount: StrictMode double-mounts in dev, and a
@@ -90,10 +92,6 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
     return () => {
       cancelledRef.current = true;
       initAbortRef.current?.abort();
-      if (settleTimerRef.current !== null) {
-        clearTimeout(settleTimerRef.current);
-        settleTimerRef.current = null;
-      }
     };
   }, []);
 
@@ -230,13 +228,9 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         sendReported('set_quality', { preset: 'low' });
       }
 
-      // Start play mode after a short delay for the engine to settle.
-      await new Promise<void>((resolve) => {
-        settleTimerRef.current = setTimeout(() => {
-          settleTimerRef.current = null;
-          resolve();
-        }, PLAY_ENGINE_SETTLE_MS);
-      });
+      // Start play mode after a short delay for the engine to settle. An
+      // unmount aborts the delay so this function finishes instead of hanging.
+      await settleDelay(PLAY_ENGINE_SETTLE_MS, abort.signal);
       if (cancelledRef.current) return;
 
       // `play` is the game starting, not a tune-up like `set_quality`: the
