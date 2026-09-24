@@ -25,10 +25,10 @@ the **immutable publication snapshot** that `POST /api/publish` commits:
    mirror through the authenticated S3 API, falls back to the Postgres snapshot,
    and answers `Cache-Control: private, no-store`.
 
-There is **no public bucket, no bucket custom domain, no CORS rule, and no
-Worker route** for published games, and none will be added under this issue.
-The assets bucket stays private, as `infra/engine-cdn/wrangler.toml` already
-requires for the marketplace objects it also holds.
+This repository adds **no public binding, no CORS rule, no Worker route and no
+public-URL minting** for those objects, and none will be added under this
+issue. Snapshot objects are written with `Cache-Control: private, no-store` and
+`If-None-Match: *` and are read only through the authenticated S3 API.
 
 `published_games.cdn_url` keeps its name. See "Why `cdn_url` is not renamed".
 
@@ -36,9 +36,15 @@ requires for the marketplace objects it also holds.
 
 The issue's user story is "published games hosted on reliable CDN-backed
 storage so that players can load my games quickly". Its reopen note
-(2026-07-20, re-verified 2026-08-30) allowed two closures: implement
-bucket + upload-on-publish + CDN read path, **or** record that API-served
-`/play` is the design and address the misleading `cdn_url`.
+(2026-07-20, re-verified 2026-08-30) allowed two closures, quoted as written:
+"either implement real R2-backed hosting for published games (bucket + upload
+on publish + CDN read path), or write an ADR stating that Postgres-served
+`/play` **is** the design and rename/remove the misleading `cdnUrl` column."
+
+This record takes the second closure and departs from its second half: the
+column is documented, not renamed or removed. The departure and its reasons
+are argued in "Why `cdn_url` is not renamed" below, so the closure can be
+judged against the condition as written rather than a softened one.
 
 | Acceptance criterion in #7580 | State on `main` |
 |---|---|
@@ -53,8 +59,10 @@ bucket + upload-on-publish + CDN read path, **or** record that API-served
 
 The moderation model (#8354) is that a game leaves the public surface the
 moment it is unpublished, flagged past the report threshold, or taken down by
-an admin, and comes back only when an admin approves it or the creator wins an
-appeal. `POST /api/publish` refuses to republish while `flagged_at` is set. All
+an admin. A game the creator unpublished comes back when they republish it; a
+*held* game (`flagged_at` set) comes back only when an admin approves it or the
+creator wins an appeal, and only if it was auto-hidden rather than taken down,
+because `POST /api/publish` refuses to republish while `flagged_at` is set. All
 of that is a Postgres predicate evaluated per request, which is why the play
 route is `no-store`.
 
@@ -68,12 +76,18 @@ holds. The play route today has one place to get this right, and it does.
 
 ### 2. The bucket that holds the snapshots must stay private
 
-The snapshot mirror lives in the assets bucket next to marketplace files, which
-are sold and delivered by signed URL only (`getSignedDownloadUrl` in
-`web/src/lib/storage/r2.ts`). The engine CDN Worker binds a *different* bucket
-for exactly this reason and says so in its config. Public delivery would need a
-second bucket, second credentials, second lifecycle sweep and a second
-orphan-key script — for a payload that is one JSON document per play.
+The snapshot mirror lives in the same bucket as marketplace uploads
+(`ASSET_BUCKET_NAME`). What the code establishes: snapshot objects are written
+`private, no-store` and read only via authenticated S3
+(`putPrivateObjectToR2` / `getObjectFromR2` in `web/src/lib/storage/r2.ts`),
+marketplace downloads go through a signed-URL route, and the engine CDN Worker
+binds a *different* bucket, saying in its config that the assets bucket is
+deliberately not reachable through that edge. Whether the assets bucket is
+reachable through any public host is an operating-environment fact this
+repository does not verify, and this decision does not depend on it: serving
+snapshots publicly would mean either a public binding on the bucket that also
+holds marketplace files, or a second bucket with its own credentials, lifecycle
+sweep and orphan-key script — for a payload that is one JSON document per play.
 
 ### 3. The bytes that matter are already on a CDN
 
@@ -108,22 +122,31 @@ here, and the object that *is* in storage has its own column, `cdn_bundle_key`.
 
 ## Consequences
 
-- Every play is one function invocation that reads the snapshot. With the
-  mirror on, that is an S3 `GetObject` **and** the full `published_games` row
-  (which includes `published_scene_data`), because the route selects `*` before
-  deciding which copy to serve. The mirror is redundancy for a Postgres outage,
-  not a performance path; `docs/operations/publication-snapshots.md` says the
-  same. If play volume ever makes function egress the cost that matters, the
-  first change is to select the jsonb column only on the fallback branch, and
-  the second is to reconsider the edge design below — with the takedown
+- Every play is one function invocation that reads the snapshot. The play
+  route resolves the user and the full `published_games` row (which includes
+  `published_scene_data`, because it selects `*`) from Postgres and checks the
+  status **before** it touches R2; with the mirror on, it then prefers the R2
+  copy and falls back to the Postgres column when the read fails or exceeds its
+  three-second deadline. So the fallback runs one way only: R2 failure falls
+  back to Postgres, and a Postgres outage makes play unavailable regardless of
+  `PUBLISH_TO_R2`. The mirror is an immutable private copy, not an availability
+  or performance path (`docs/operations/publication-snapshots.md`: "Reads use
+  the authenticated S3 API and do not establish an edge-cache performance
+  benefit"). If play volume ever makes function egress the cost that matters,
+  the first change is to select the jsonb column only on the fallback branch,
+  and the second is to reconsider the edge design below — with the takedown
   requirement in front of it.
-- The `spawnforge-games` bucket, `cdn.spawnforge.ai`, `ASSET_CDN_HOSTS` and
-  `ASSET_STORAGE_TYPE` from the issue body are not to be provisioned. The
-  variables that exist are the four `ASSET_R2_*`/`ASSET_BUCKET_NAME` values and
-  `PUBLISH_TO_R2` (see `CLAUDE.md`, "Optional feature flags").
+- The `spawnforge-games` bucket and the `ASSET_STORAGE_TYPE` variable from the
+  issue body are not to be provisioned: nothing reads them. The variables the
+  snapshot path reads are the four `ASSET_R2_*`/`ASSET_BUCKET_NAME` values and
+  `PUBLISH_TO_R2` (see `CLAUDE.md`, "Optional feature flags"). `CDN_URL` and
+  `ASSET_CDN_HOSTS` also exist, but for the marketplace — `CDN_URL` is the host
+  `uploadToR2` mints asset URLs on and `resolveOwnedAssetKey` matches them
+  against, and `ASSET_CDN_HOSTS` is the redirect allowlist of the marketplace
+  download route — and this decision neither requires nor removes them.
 - Standalone exported-game hosting (a self-contained runtime a creator can put
-  on their own host) is a different feature and is tracked by the publishing
-  epic #9884, not by this decision.
+  on their own host) is a different feature, owned by story #9884 under epic
+  #9800, not by this decision.
 
 ## What would reopen this
 
