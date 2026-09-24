@@ -11,7 +11,7 @@
     ".agents/skills/autonomous-sprint/SKILL.md": "12f3515d753fcfc8308a1ca18d507fa7a807c769c2cfc26014186f3fcaf777d5",
     ".agents/skills/babysit-prs/SKILL.md": "78e4df8d1f30c5d7c28a8de8895097e5a64369cce1b8019fbe8cb7782a5499a8",
     ".agents/skills/babysit-prs/references/common-ci-failures.md": "01754df5dc80e50352661b179d86846dd08c540c3ab6dad2e311ad9eaf1dca4b",
-    ".agents/skills/babysit-prs/scripts/check-all-prs.sh": "32e41ad0b9c42a58341a4d02a11c33bb5dd7246c52219d86d1fad36c06b490ad",
+    ".agents/skills/babysit-prs/scripts/check-all-prs.sh": "71c2d5b666f745257f1d48318d0693976f72b27446536a70e0ee6ab6685ae08e",
     ".agents/skills/babysit-prs/scripts/get-failure-logs.sh": "d8e97143e31f4dc030b80321940c9bf7a7ee5c35a52b2acd31b51e67ff66d938",
     ".agents/skills/build/SKILL.md": "01fc9f8361e638b34db973b529dcc4db851e1e103abe63f6328733125c2f5292",
     ".agents/skills/build/references/build-troubleshooting.md": "3c4767d18683db4e2eb266a54ffaedcc6cf8690f775f08d2504b8980cda047db",
