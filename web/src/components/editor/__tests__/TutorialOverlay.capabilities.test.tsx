@@ -17,15 +17,37 @@ import { TUTORIAL_CAPABILITIES } from '@/data/tutorials';
 
 const TITLES = TUTORIAL_CAPABILITIES.steps.map((s) => s.title);
 
-/** The three controls the tour points at, as the editor renders them. */
+/** Distinct rects per control, so a highlight on the wrong one is visible. */
+const RECTS: Record<string, { left: number; top: number; width: number; height: number }> = {
+  'quick-start-trigger': { left: 100, top: 20, width: 120, height: 32 },
+  'play-controls-play': { left: 400, top: 24, width: 24, height: 24 },
+  'scene-toolbar-export': { left: 700, top: 24, width: 24, height: 24 },
+};
+
+function rectOf(id: string): DOMRect {
+  const r = RECTS[id]!;
+  return {
+    ...r,
+    x: r.left,
+    y: r.top,
+    right: r.left + r.width,
+    bottom: r.top + r.height,
+    toJSON: () => r,
+  } as DOMRect;
+}
+
+/** The three controls the tour points at, each with its own position. */
 function Targets() {
+  const place = (id: string) => (el: HTMLElement | null) => {
+    if (el) el.getBoundingClientRect = () => rectOf(id);
+  };
   return (
     <>
-      <button type="button" data-testid="quick-start-trigger">
+      <button type="button" data-testid="quick-start-trigger" ref={place('quick-start-trigger')}>
         Make me a game
       </button>
-      <button type="button" aria-label="Play" />
-      <button type="button" aria-label="Export game" />
+      <button type="button" data-testid="play-controls-play" ref={place('play-controls-play')} />
+      <button type="button" data-testid="scene-toolbar-export" ref={place('scene-toolbar-export')} />
     </>
   );
 }
@@ -83,7 +105,7 @@ describe('capabilities tour (#10171)', () => {
     expect(useEditorStore.getState().sceneGraph).toBe(sceneBefore);
   });
 
-  it('highlights each control it points at while it is on screen', () => {
+  it('highlights exactly the control each step points at', () => {
     render(
       <>
         <Targets />
@@ -95,9 +117,54 @@ describe('capabilities tour (#10171)', () => {
     // Intro card: nothing to point at.
     expect(screen.queryByTestId('tutorial-highlight')).toBeNull();
     next();
-    for (let i = 1; i < TITLES.length; i += 1) {
-      expect(screen.getByTestId('tutorial-highlight')).toBeInTheDocument();
+    for (const id of ['quick-start-trigger', 'play-controls-play', 'scene-toolbar-export']) {
+      const r = RECTS[id]!;
+      const highlight = screen.getByTestId('tutorial-highlight');
+      // The ring is drawn 8px outside the control.
+      expect(highlight.style.left).toBe(`${r.left - 8}px`);
+      expect(highlight.style.top).toBe(`${r.top - 8}px`);
       next();
+    }
+  });
+
+  // Compact docks the quick-start trigger at the bottom. A bubble placed below
+  // it and clamped back up covered the very control it pointed at.
+  it('puts the bubble above a target docked at the bottom, not over it', () => {
+    const viewportH = window.innerHeight;
+    RECTS['quick-start-trigger'] = { left: 100, top: viewportH - 46, width: 44, height: 44 };
+    try {
+      render(
+        <>
+          <Targets />
+          <TutorialOverlay />
+        </>,
+      );
+      startTour();
+      next();
+
+      const bubble = screen.getByTestId('tutorial-bubble');
+      const bubbleTop = parseFloat(bubble.style.top);
+      // Its reserved 216px ends above the button.
+      expect(bubbleTop + 216).toBeLessThanOrEqual(viewportH - 46);
+    } finally {
+      RECTS['quick-start-trigger'] = { left: 100, top: 20, width: 120, height: 32 };
+    }
+  });
+
+  it('fits a 320px-wide screen', () => {
+    const original = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+    try {
+      render(<TutorialOverlay />);
+      startTour();
+
+      const bubble = screen.getByTestId('tutorial-bubble');
+      const left = parseFloat(bubble.style.left);
+      const width = parseFloat(bubble.style.width);
+      expect(left).toBeGreaterThanOrEqual(16);
+      expect(left + width).toBeLessThanOrEqual(320 - 16);
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: original });
     }
   });
 

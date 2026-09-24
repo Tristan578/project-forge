@@ -110,11 +110,11 @@ describe('SceneToolbar', () => {
     expect(screen.getByRole('button', { name: /export/i })).toBeInTheDocument();
   });
 
-  // The capabilities tour (#10171) highlights `[aria-label="Export game"]`.
-  it('exposes exactly one [aria-label="Export game"] for the capabilities tour', () => {
+  // The capabilities tour (#10171) highlights `[data-testid="scene-toolbar-export"]`.
+  it('renders the tour\'s export target exactly once', () => {
     mockEditorStore();
     render(<SceneToolbar />);
-    expect(document.querySelectorAll('[aria-label="Export game"]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-testid="scene-toolbar-export"]')).toHaveLength(1);
   });
 
   it('shows modification indicator when scene is modified', () => {

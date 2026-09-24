@@ -328,9 +328,11 @@ export const TUTORIAL_PHYSICS: TutorialFlow = {
 // and presses Next. That is the whole contract: a curious creator can see
 // where AI building, playing and exporting live before spending tokens.
 //
-// Targets are the controls' own stable hooks. In the compact layout the
-// export control does not render, and the overlay then shows the step as an
-// untargeted card that Next still advances.
+// Targets are dedicated data-testids, not labels: `aria-label="Play"` also
+// matches the Adaptive Music inspector's preview button, and a paused editor
+// shows Resume instead of Play. In the compact layout there is no Export
+// control, so that step renders as an untargeted card and says how to export
+// from there (the AI chat's export_game).
 export const TUTORIAL_CAPABILITIES: TutorialFlow = {
   id: 'capabilities',
   name: 'What can SpawnForge do?',
@@ -359,15 +361,15 @@ export const TUTORIAL_CAPABILITIES: TutorialFlow = {
       id: 'play',
       title: 'Play it',
       description: 'Run your game right here in the editor. Press Stop to go back to editing.',
-      target: '[aria-label="Play"]',
+      target: '[data-testid="play-controls-play"]',
       targetPosition: 'bottom',
     },
     {
       id: 'export',
       title: 'Share it',
       description:
-        'Export your game as a single HTML file or a zip you can host, or copy embed code for your site.',
-      target: '[aria-label="Export game"]',
+        'Export your game as a single HTML file or a zip you can host, or copy embed code for your site. On a small screen, ask the AI chat to export it.',
+      target: '[data-testid="scene-toolbar-export"]',
       targetPosition: 'bottom',
     },
   ],

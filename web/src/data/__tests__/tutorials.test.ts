@@ -13,8 +13,8 @@ import {
 
 const TARGETS = [
   '[data-testid="quick-start-trigger"]',
-  '[aria-label="Play"]',
-  '[aria-label="Export game"]',
+  '[data-testid="play-controls-play"]',
+  '[data-testid="scene-toolbar-export"]',
 ];
 
 describe('TUTORIAL_CAPABILITIES', () => {
@@ -48,6 +48,8 @@ describe('TUTORIAL_CAPABILITIES', () => {
   });
 });
 
-// That each selector matches exactly ONE rendered control is pinned where the
-// control renders: PlayControls.test.tsx and SceneToolbar.test.tsx, and
+// Each target is a dedicated data-testid, so no other control can match it.
+// That the owning component renders it exactly once is pinned where it
+// renders: PlayControls.test.tsx (edit AND paused), SceneToolbar.test.tsx, and
 // EditorLayout.quickStart.test.tsx for the quick-start trigger on both layouts.
+// No test here proves uniqueness across the whole editor tree.

@@ -261,6 +261,13 @@ export function TutorialOverlay() {
   );
 }
 
+/** Widest the bubble gets; narrower on small screens. */
+const BUBBLE_MAX_WIDTH = 400;
+/** Height the placement reserves for the bubble (title, 3-line body, buttons). */
+const BUBBLE_HEIGHT = 216;
+/** Minimum gap between the bubble and the viewport edge. */
+const EDGE = 16;
+
 interface TutorialBubbleProps {
   step: TutorialStep;
   stepNumber: number;
@@ -282,53 +289,67 @@ function TutorialBubble({
   onNext,
   onSkip,
 }: TutorialBubbleProps) {
-  // Use useMemo to compute position (render-time calculation)
+  // Computed at render time. The bubble is at most 400px wide and never wider
+  // than the viewport less a 16px margin each side, so it fits a 320px phone.
+  // A step placed below (or above) its target flips to the other side when
+  // there is no room: the compact layout docks the quick-start trigger at the
+  // bottom of the screen, and a bubble clamped onto it hid the very control it
+  // was pointing at (#10171).
   const position = useMemo(() => {
+    const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    const viewportH = typeof window !== 'undefined' ? window.innerHeight : 768;
+    const width = Math.min(BUBBLE_MAX_WIDTH, viewportW - 2 * EDGE);
+    const clampLeft = (left: number) => Math.max(EDGE, Math.min(left, viewportW - width - EDGE));
+    const clampTop = (top: number) =>
+      Math.max(EDGE, Math.min(top, viewportH - BUBBLE_HEIGHT - EDGE));
+
     if (!highlightRect || !step.targetPosition) {
       return {
-        top: typeof window !== 'undefined' ? window.innerHeight / 2 - 150 : 300,
-        left: typeof window !== 'undefined' ? window.innerWidth / 2 - 200 : 200,
+        top: clampTop(viewportH / 2 - BUBBLE_HEIGHT / 2),
+        left: clampLeft((viewportW - width) / 2),
+        width,
       };
     }
 
-    const padding = 16;
-    let top = 0;
-    let left = 0;
+    const gap = 16;
+    const above = highlightRect.top - BUBBLE_HEIGHT - gap;
+    const below = highlightRect.bottom + gap;
+    const fitsAbove = above >= EDGE;
+    const fitsBelow = below + BUBBLE_HEIGHT <= viewportH - EDGE;
+    const centredLeft = highlightRect.left + highlightRect.width / 2 - width / 2;
+    let top: number;
+    let left: number;
 
     switch (step.targetPosition) {
       case 'top':
-        top = highlightRect.top - 200 - padding;
-        left = highlightRect.left + highlightRect.width / 2 - 200;
+        top = fitsAbove || !fitsBelow ? above : below;
+        left = centredLeft;
         break;
       case 'bottom':
-        top = highlightRect.bottom + padding;
-        left = highlightRect.left + highlightRect.width / 2 - 200;
+        top = fitsBelow || !fitsAbove ? below : above;
+        left = centredLeft;
         break;
       case 'left':
-        top = highlightRect.top + highlightRect.height / 2 - 100;
-        left = highlightRect.left - 400 - padding;
+        top = highlightRect.top + highlightRect.height / 2 - BUBBLE_HEIGHT / 2;
+        left = highlightRect.left - width - gap;
         break;
       case 'right':
-        top = highlightRect.top + highlightRect.height / 2 - 100;
-        left = highlightRect.right + padding;
+        top = highlightRect.top + highlightRect.height / 2 - BUBBLE_HEIGHT / 2;
+        left = highlightRect.right + gap;
         break;
     }
 
-    // Clamp to viewport
-    if (typeof window !== 'undefined') {
-      top = Math.max(16, Math.min(top, window.innerHeight - 216));
-      left = Math.max(16, Math.min(left, window.innerWidth - 416));
-    }
-
-    return { top, left };
+    return { top: clampTop(top), left: clampLeft(left), width };
   }, [highlightRect, step.targetPosition]);
 
   return (
     <div
-      className="fixed z-[102] w-[400px] rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-2xl pointer-events-auto"
+      data-testid="tutorial-bubble"
+      className="fixed z-[102] rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-2xl pointer-events-auto"
       style={{
         top: `${position.top}px`,
         left: `${position.left}px`,
+        width: `${position.width}px`,
       }}
     >
       {/* Header */}
@@ -359,14 +380,14 @@ function TutorialBubble({
         <div className="flex gap-2">
           <button
             onClick={onSkip}
-            className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
+            className="min-h-11 rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
           >
             Skip Tutorial
           </button>
           <button
             onClick={onNext}
             disabled={!actionCompleted && !!step.actionRequired}
-            className="flex items-center gap-1 rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex min-h-11 items-center gap-1 rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isLastStep ? (
               <>

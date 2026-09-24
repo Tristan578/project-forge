@@ -342,6 +342,7 @@ export function SceneToolbar() {
         className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-200 disabled:opacity-30"
         title="Export Game"
         aria-label="Export game"
+        data-testid="scene-toolbar-export"
       >
         <Download size={13} />
       </button>
