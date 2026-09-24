@@ -69,6 +69,16 @@
 # `debug`) and `shopt -s extdebug` in command position are reported the
 # same way: a self-defense suite has no use for either.
 #
+# A function named after a bash BUILTIN shadows that builtin for the rest
+# of the script, at any nesting depth once the enclosing code runs: a
+# `readonly() { return 0; }` makes every later `readonly -f` a no-op, an
+# `exit() { return 0; }` or a `test() { :; }` makes the final verdict a
+# no-op, and `enable -n readonly` switches the builtin off outright (the
+# eighth board round). The set of names is DERIVED from the running bash
+# (`compgen -b`), never listed by hand, and a definition of any of them —
+# `name()`, `name ( )` or `function name`, in any position — or an `enable`
+# command word is reported with the `builtin` status.
+#
 # Indented definitions are deliberately out of scope: they are nested inside
 # another function, an `if` arm, or a subshell, and a function defined inside a
 # body that runs more than once cannot be frozen on its first run without
@@ -114,7 +124,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|unsupported
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|unsupported
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -123,35 +133,21 @@ readonly -f resolve
 # a fixture written from a heredoc, from reading as a bash definition — the
 # sweep that introduced this gate broke a suite by freezing exactly such a
 # line inside a quoted awk program.
+# The bash builtins, derived from the interpreter that runs the gate. A gate
+# that compares against an empty set would report nothing, so an empty
+# derivation is an error, not a pass.
+BUILTINS="$(compgen -b | tr '\n' ' ')"
+if [ -z "$BUILTINS" ]; then
+  echo "::error::check-fn-freeze: compgen -b returned no builtins — the builtin-shadowing rule would be vacuous" >&2
+  exit 2
+fi
+readonly BUILTINS
+
 derive_file() {
-  awk -v file="$2" '
+  awk -v file="$2" -v builtins=" $BUILTINS " '
     function flush_def() {
       pending_name = def_name; pending_def = def_line; pending_end = NR
       def_name = ""
-    }
-    # The text of a line before its trailing comment, with the quoting of the
-    # line respected (a `#` inside quotes is text). Used to decide whether
-    # a definition line closes its own brace group. The quote kinds are the
-    # same four lex_line() knows: a plain single-quoted string has no
-    # escapes at all, an ANSI-C dollar-quoted string escapes with a backslash
-    # (a backslash-escaped quote inside one does not end it; the seventh
-    # board round found this scan ending there, which turned a later hash
-    # into a comment and a closed one-liner into an open body), and a
-    # double-quoted string escapes with a backslash too.
-    function code_part(s,   n, i, c, qq) {
-      n = length(s); qq = ""
-      for (i = 1; i <= n; i++) {
-        c = substr(s, i, 1)
-        if (qq == "s") { if (c == "\047") qq = ""; continue }
-        if (qq == "a") { if (c == "\\") { i++; continue } if (c == "\047") qq = ""; continue }
-        if (qq == "d") { if (c == "\\") { i++; continue } if (c == "\"") qq = ""; continue }
-        if (c == "\\") { i++; continue }
-        if (substr(s, i, 2) == "$\047") { qq = "a"; i++; continue }
-        if (c == "\047") { qq = "s"; continue }
-        if (c == "\"") { qq = "d"; continue }
-        if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[[:space:];(&|{]/)) return substr(s, 1, i - 1)
-      }
-      return s
     }
     # Advance the lexer over one line, updating the quote state (q), the
     # context stack (d, st_q[]) and the heredoc queue (hd_n, hd_term[]).
@@ -182,11 +178,19 @@ derive_file() {
         # Still looking for the command word of this statement.
         if (w ~ /^(builtin|command|time|-p|!|if|then|elif|else|do|while|until|coproc|\{|\})$/ ||
             w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { w = ""; return }
-        cmd_seen = 1
+        cmd_seen = 1; cmd_word = w; nwords = 1
         if (w == "alias") in_alias = 1
         if (w == "shopt") in_shopt = 1
         if (w == "trap") in_trap = 1
+        if (w == "function") in_function = 1
+        if (w == "enable") printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "enable", NR, NR
         w = ""; return
+      }
+      nwords++
+      # The word after `function` is a definition name whatever follows it.
+      if (in_function) {
+        if (index(builtins, " " w " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "function " w, NR, NR
+        in_function = 0
       }
       if (in_alias && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/)
         printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
@@ -199,21 +203,26 @@ derive_file() {
       if (in_shopt && w ~ /^-[a-z]*s[a-z]*$/) sflag = w
       w = ""
     }
-    function end_command() { end_word(); cmd_seen = 0; in_alias = 0; in_shopt = 0; in_trap = 0; sflag = "" }
+    function end_command() { end_word(); cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = "" }
     # Entering `$( ... )` or `( ... )` starts a new context: the enclosing
     # quote state and the enclosing array-literal state are both pushed and
     # both cleared, and the matching `)` restores them. Array-literal skipping
     # must be cleared here, not only quoting: `arr=($(alias fail=:))` stores
     # the OUTPUT of a command that runs, so its text is code (the sixth board
     # round found a single global array flag swallowing it as literal words).
-    function open_sub(saved_q) {
+    # `(( ... ))` and `$(( ... ))` open an ARITHMETIC context, where `<<`,
+    # `<<=` and `>>` are shift operators, never a heredoc (the eighth board
+    # round found `if (( 1 << 2 == 4 ))` swallowing the rest of the file as
+    # a heredoc body). A plain `(` nested inside one inherits the context;
+    # a context opened by `((` closes on `))`.
+    function open_sub(saved_q, new_arith, dbl) {
       end_command(); d++
-      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d
-      q = ""; arr = 0; arr_d = 0
+      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_arith[d] = arith; st_dbl[d] = dbl
+      q = ""; arr = 0; arr_d = 0; arith = new_arith
     }
     function close_sub() {
       end_command()
-      if (d > 0) { q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; d-- }
+      if (d > 0) { q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; arith = st_arith[d]; d-- }
     }
     function lex_line(line,   n, i, c, c2, c3, rest, tok, carry) {
       n = length(line); i = 1
@@ -221,7 +230,14 @@ derive_file() {
       # word and the two words before it carry over (`alias \` + `fail=:`,
       # or `al\` + `ias`, are one statement to bash).
       carry = cont; cont = 0
-      if (q == "" && !carry) { cmd_seen = 0; in_alias = 0; in_shopt = 0; in_trap = 0; sflag = ""; w = "" }
+      if (q == "" && !carry) { cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; w = "" }
+      # Where the code of this line ends: at its trailing comment, or at the
+      # end of the line. The definition rules read the body of a definition
+      # line off this ONE lexer, so a comment inside any quote kind or inside
+      # a `$( )` nested in a double-quoted string is text to both (the eighth
+      # board round found a second, narrower scanner disagreeing with this
+      # one on exactly that, and a helper after the disagreement was lost).
+      code_end = n + 1
       while (i <= n) {
         c = substr(line, i, 1); c2 = substr(line, i, 2); c3 = substr(line, i, 3)
         if (q == "s") { if (c == "\047") q = ""; else w = w c; i++; continue }
@@ -233,7 +249,8 @@ derive_file() {
         if (q == "d") {
           if (c == "\\") { w = w substr(line, i + 1, 1); i += 2; continue }
           if (c == "\"") { q = ""; i++; continue }
-          if (c2 == "$(") { open_sub(q); i += 2; continue }
+          if (c3 == "$((") { open_sub(q, 1, 1); i += 3; continue }
+          if (c2 == "$(") { open_sub(q, 0, 0); i += 2; continue }
           w = w c; i++; continue
         }
         if (arr) {
@@ -241,7 +258,8 @@ derive_file() {
           if (c2 == "$\047") { q = "a"; i += 2; continue }
           if (c == "\047") { q = "s"; i++; continue }
           if (c == "\"") { q = "d"; i++; continue }
-          if (c2 == "$(") { open_sub(""); i += 2; continue }
+          if (c3 == "$((") { open_sub("", 1, 1); i += 3; continue }
+          if (c2 == "$(") { open_sub("", 0, 0); i += 2; continue }
           if (c == "(") arr_d++
           if (c == ")") { arr_d--; if (arr_d == 0) { arr = 0; w = "" } }
           i++; continue
@@ -254,20 +272,34 @@ derive_file() {
         if (c == "\047") { q = "s"; i++; continue }
         if (c == "\"") { q = "d"; i++; continue }
         if (c == "#") {
-          if (i == 1 || substr(line, i - 1, 1) ~ /[[:space:];(&|]/) { end_word(); break }
+          if (i == 1 || substr(line, i - 1, 1) ~ /[[:space:];(&|]/) { end_word(); code_end = i; break }
           w = w c; i++; continue
         }
-        if (c2 == "$(") { open_sub(""); i += 2; continue }
+        if (c3 == "$((") { open_sub("", 1, 1); i += 3; continue }
+        if (c2 == "$(") { open_sub("", 0, 0); i += 2; continue }
         # `NAME=(` / `NAME+=(` opens an ARRAY LITERAL: its elements are words
         # that are stored, never run, so none of them can be a command word.
         # The group is skipped to its closing paren (quotes inside it are
         # still tracked so a `)` in a string does not end it early), except
         # that a `$( )` inside it is a command that runs and is lexed as one.
+        # `WORD(` or `WORD (` followed by `)` at the start of a statement is
+        # a function definition of WORD (the only word so far), at whatever
+        # depth; one named after a builtin is reported (see the header).
+        if (c == "(" && substr(line, i) ~ /^\([[:space:]]*\)/) {
+          dn = ""
+          if (!cmd_seen && w != "") dn = w
+          else if (cmd_seen && w == "" && nwords == 1) dn = cmd_word
+          if (dn != "" && index(builtins, " " dn " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, dn "()", NR, NR
+        }
         if (c == "(" && w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=$/) { arr = 1; arr_d = 1; w = ""; i++; continue }
-        if (c == "(") { open_sub(""); i++; continue }
-        if (c == ")") { close_sub(); i++; continue }
+        if (c2 == "((" && w == "") { open_sub("", 1, 1); i += 2; continue }
+        if (c == "(") { open_sub("", arith, 0); i++; continue }
+        if (c == ")") {
+          if (d > 0 && st_dbl[d] && c2 == "))") { close_sub(); i += 2; continue }
+          close_sub(); i++; continue
+        }
         if (c3 == "<<<") { end_word(); i += 3; continue }
-        if (c2 == "<<") {
+        if (c2 == "<<" && !arith) {
           end_word()
           rest = substr(line, i + 2)
           strip = (substr(rest, 1, 1) == "-")
@@ -343,9 +375,10 @@ derive_file() {
         if (line ~ /^[[:space:]]*$/ || line ~ /^[[:space:]]*#/) next
         if (line ~ /^[[:space:]]*\{/) {
           brace_pending = 0
-          body = code_part(line); sub(/[[:space:]]+$/, "", body)
+          lex_line(line)
+          body = substr(line, 1, code_end - 1); sub(/[[:space:]]+$/, "", body)
           if (body ~ /\}$/ && body !~ /^[[:space:]]*\{[[:space:]]*$/) flush_def()
-          lex_line(line); next
+          next
         }
         printf "%s\t%s\t%d\t%d\tunsupported\n", file, def_name, def_line, NR
         brace_pending = 0; def_name = ""
@@ -377,16 +410,19 @@ derive_file() {
         sub(/^function[[:space:]]+/, "", name)
       }
       if (name != "") {
-        body = code_part(rest); sub(/^[[:space:]]+/, "", body); sub(/[[:space:]]+$/, "", body)
+        opener = length(line) - length(rest)
+        lex_line(line)
+        body = (code_end > opener + 1) ? substr(line, opener + 1, code_end - opener - 1) : ""
+        sub(/^[[:space:]]+/, "", body); sub(/[[:space:]]+$/, "", body)
         def_name = name; def_line = NR
         if (body == "") { brace_pending = 1; next }
         if (body ~ /^\{/) {
           if (body ~ /\}$/) flush_def()
-          lex_line(line); next
+          next
         }
         printf "%s\t%s\t%d\t%d\tunsupported\n", file, name, NR, NR
         def_name = ""
-        lex_line(line); next
+        next
       }
 
       # A freeze that is not the resolution of a pending definition is a stray.
@@ -468,7 +504,7 @@ if [ "${total:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray|alias|trap|unsupported)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|unsupported)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
   # The report is the block reason, so it goes to stderr like every other
@@ -479,9 +515,10 @@ if [ -n "$violations" ]; then
       [ -n "$file" ] || continue
       case "$status" in
         unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
-        stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, and a freeze inside a quoted string or fixture is text, not a statement" ;;
+        stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, a freeze inside a quoted string or fixture is text, not a statement, and a freeze naming a function this file never defines is left over from a rename or a deletion: move this line to directly after the closing brace of $name(), or delete it" ;;
         alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion" ;;
-        trap)     echo "  - $file:$def: '$name' — with extdebug on, a DEBUG trap that returns non-zero makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding; a self-defense suite may not set a DEBUG trap or enable extdebug" ;;
+        trap)     echo "  - $file:$def: '$name' — with extdebug on, a DEBUG trap that returns non-zero makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, so a self-defense suite may not set a DEBUG trap or enable extdebug" ;;
+        builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable" ;;
         unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as a one-liner '$name() { ...; }', or multi-line with the closing '}' at column 0, then freeze it on the next line" ;;
       esac
     done <<<"$violations"

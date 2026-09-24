@@ -832,6 +832,97 @@ FIX
 expect_rc "25. definitions at column 0 inside a multi-line \$( ) or ( ) block are subshell-local and not derived; the real helpers around them are" 0 \
   "$(run_gate "$d_subshell")" "2 function(s) across 1 file(s) are frozen"
 
+# ---- 24b. a $( ) nested in a double-quoted string is one string to the body rule --
+# `decoy() { echo "a $(echo "b #c") d"; }` closes on its line. A second,
+# narrower scanner read the nested quote as the end of the outer string, took
+# the # as a comment, and left the one-liner open; the helper after it was
+# never derived (eighth board round, architect seat). The body rule now reads
+# the same lexer the rest of the gate uses.
+d_nested_dq="$(mkfixture nested-dq <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+decoy() { echo "a $(echo "b #c") d"; }
+readonly -f decoy
+real_helper() {
+  :
+}
+FIX
+)"
+expect_rc "24b. a one-liner holding \"\$( )\" with a nested quote and a # closes on its line, and the unfrozen helper after it is reported" 1 \
+  "$(run_gate "$d_nested_dq")" "1 violation(s)" "fixture.test.sh:5: real_helper() is not frozen"
+nested_dq_list="$(FN_FREEZE_DIRS="$d_nested_dq" bash "$GATE" --list 2>&1 | cut -f2,5 | tr '\t\n' '  ')"
+if [ "$nested_dq_list" = "pass frozen decoy frozen real_helper unfrozen " ]; then
+  pass "24c. --list derives all three definitions around the nested-quote one-liner"
+else
+  fail "24c. --list derived: '$nested_dq_list'"
+fi
+
+# ---- 26. a function named after a builtin shadows it; enable switches it off --
+# `readonly() { return 0; }` makes every later freeze a no-op and `exit() {
+# return 0; }` makes the final verdict a no-op (eighth board round, security
+# seat). Prove both in this bash, then that the gate reports every spelling
+# at any depth, and never the names as arguments.
+readonly_probe="$(bash -c 'readonly() { return 0; }; f() { echo REAL; }; readonly -f f; f() { echo FAKE; }; f' 2>&1)"
+if [ "$readonly_probe" = "FAKE" ]; then
+  pass "26-probe-a. in this bash a readonly() function makes a later 'readonly -f' a no-op (the gate must refuse it)"
+else
+  fail "26-probe-a. the readonly() shadow probe did not neuter the freeze (got '$readonly_probe')"
+fi
+exit_probe="$(bash -c 'exit() { return 0; }; exit 3; echo "still-here rc=$?"' 2>&1)"
+if [ "$exit_probe" = "still-here rc=0" ]; then
+  pass "26-probe-b. in this bash an exit() function makes 'exit 3' a no-op (the gate must refuse it)"
+else
+  fail "26-probe-b. the exit() shadow probe did not neuter exit (got '$exit_probe')"
+fi
+d_builtin="$(mkfixture builtin-shadow <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+readonly() { return 0; }
+readonly -f readonly
+function exit { return 0; }
+readonly -f exit
+wrap() {
+  test ( ) { :; }
+  [() { :; }
+  enable -n readonly
+  \enable exit
+}
+readonly -f wrap
+FIX
+)"
+expect_rc "26. a definition named after a builtin — name(), name ( ), function name, at column 0 or nested — and an enable command are violations" 1 \
+  "$(run_gate "$d_builtin")" "6 violation(s)" "fixture.test.sh:3: 'readonly()'" "fixture.test.sh:5: 'function exit'" "fixture.test.sh:8: 'test()'" "fixture.test.sh:9: '[()'" "fixture.test.sh:10: 'enable'" "fixture.test.sh:11: 'enable'"
+d_builtin_words="$(mkfixture builtin-words <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+helper_exit() { :; }
+readonly -f helper_exit
+echo enable readonly exit "test()" 'readonly() { :; }'
+readonly -a NAMES=(enable exit)
+FIX
+)"
+expect_rc "26b. builtin names as arguments, in strings, in an array literal, or as a prefix of a longer name are not violations" 0 \
+  "$(run_gate "$d_builtin_words")" "2 function(s) across 1 file(s) are frozen"
+
+# ---- 27. << inside (( )) and $(( )) is a shift, not a heredoc --------------------
+# `if (( 1 << 2 == 4 ))` read the 2 as a heredoc delimiter and swallowed the
+# rest of the file, so the frozen helper was reported unfrozen and the run
+# ended in a bogus parse error (eighth board round, infra seat).
+d_arith="$(mkfixture arithmetic-shift <<'FIX'
+fail() {
+  if (( 1 << 2 == 4 )); then :; fi
+  local x=1; (( x <<= 1 )); (( x >>= 1 ))
+  y=$(( (x >> 1) << 2 ))
+  echo "$(( 1 << 3 ))" "$1"
+}
+readonly -f fail
+decoy5() { echo bad; }
+fail "boom"
+FIX
+)"
+expect_rc "27. shift operators inside (( )), \$(( )) and a nested ( ) are not heredocs, so the frozen helper stays frozen and the decoy after it is reported" 1 \
+  "$(run_gate "$d_arith")" "1 violation(s)" "fixture.test.sh:8: decoy5() is not frozen"
+
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
 # Same posture as check-suite-wiring.test.sh: comment-stripped scan of every
 # workflow and composite action, fail closed on a missing dir or a grep error.

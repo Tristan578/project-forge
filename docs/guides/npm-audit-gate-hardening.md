@@ -850,7 +850,10 @@ by construction rather than by measurement.
   violation in its own right (below), and so are `trap ... DEBUG` and
   `shopt -s extdebug`: with extdebug on, a DEBUG trap that returns non-zero
   makes bash skip the next command, so a two-line literal neuters every
-  `fail` call without touching its binding (seventh board round). No files, no definitions, or a file the
+  `fail` call without touching its binding (seventh board round), and so is a
+  function named after a bash builtin (`compgen -b`, derived at run time) or an
+  `enable` command: `readonly() { return 0; }` makes every later freeze a no-op
+  and `exit() { return 0; }` makes the final verdict one (eighth board round). No files, no definitions, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state
   from a fixture, runs the gate on the real tree behind a 300-function floor

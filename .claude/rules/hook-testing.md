@@ -162,7 +162,8 @@ bash refuses the rebind and the real helper keeps running.
 `scripts/check-fn-freeze.sh` (run by `lockfile-sync-tests` in `ci.yml`, after
 its own suite) derives every column-0 definition and fails on one whose next
 line is not its freeze, on a stray freeze (before the definition, after a blank
-line, or inside a quoted program or heredoc fixture), and fail-closed on a file
+line, inside a quoted program or heredoc fixture, or naming a function the file
+never defines), and fail-closed on a file
 it cannot lex to EOF. Rules that follow from `readonly -f` itself:
 
 - It cannot pre-declare, so no freeze block at the end of the file — each freeze
@@ -190,11 +191,18 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   tokeniser, same rule (the word `DEBUG` in any case after a `trap` command
   word; `extdebug` after `shopt` plus an `s` flag); `trap ... EXIT`, `trap - ERR`
   and `shopt -u extdebug` are not violations.
+- No function named after a bash builtin, at any depth, and no `enable`: a
+  `readonly() { return 0; }` makes every later freeze a no-op, an `exit()` or
+  `test()` that returns 0 makes the final verdict a no-op, and `enable -n
+  readonly` switches the builtin off. The name set is derived from
+  `compgen -b` in the bash that runs the gate, never listed by hand; the
+  names as arguments or in strings are text.
 - The body is a brace group, opened on the definition line or the next
   non-blank, non-comment line, closed by `}` at column 0 (or on the same line
   for a one-liner; a trailing comment is not part of it). A subshell body or a
   bare compound body is reported as `unsupported` — the gate never skips a
   definition it cannot follow.
+- `<<` inside `(( ))` or `$(( ))` is a shift operator, not a heredoc.
 - A heredoc delimiter is any word (`<<1EOF`, `<<-ZEOF`, `<<'.EOF'`), and a
   column-0 definition inside a multi-line `( )` or `$( )` is subshell-local,
   not a top-level helper.
