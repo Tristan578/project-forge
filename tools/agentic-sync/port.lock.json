@@ -44,7 +44,7 @@
     ".agents/skills/dispatch-builder/SKILL.md": "9150a062b11de81993793252ac70984922278f9a45d7d8e4ffaa80e2a9b70054",
     ".agents/skills/docs/SKILL.md": "78f0bc276b7aadaa53ca52a41935dffa912aa118f98a34941a103c59f80a8e16",
     ".agents/skills/env-health-check/SKILL.md": "c0ae2f0390beeb8fb6d8829cf6c3011a3451c5f02a14b5d043990a42cc395edc",
-    ".agents/skills/env-health-check/references/required-env-vars.md": "e3b87d215a28272200687742b0638d8d2c4fd1d9d494dfe6be2bce08534368ba",
+    ".agents/skills/env-health-check/references/required-env-vars.md": "f4f8dff7f1435777305598e024106f105f41d0eadac4da378eebe4e841f4c530",
     ".agents/skills/env-health-check/scripts/run-health-check.sh": "d6cfd16c681f365c1b9ecc7c6963fafb3335a4ce320f12dd8f1367c0f336fc89",
     ".agents/skills/frontend/SKILL.md": "f0521328309fe82ed778f38a61e49cafd0f4b404f891bc2f0f08fc139cba4e4a",
     ".agents/skills/frontend/references/nextjs-conventions.md": "0872f5a5eef972fb8c5198dea251b15b7e7adf78427243a872f487081e9dc5a2",
