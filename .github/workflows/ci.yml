@@ -925,6 +925,60 @@ jobs:
       - name: Reject a committed permissive Codex config profile
         run: bash scripts/check-codex-config-safety.sh
 
+  # ---- actionlint ----
+  # Lints ci.yml, cd.yml and quality-gates.yml for shellcheck findings in embedded
+  # `run:` blocks and for GitHub Actions expression errors (#8719). A ratchet:
+  # the pre-existing findings were cleaned in the PR that added this job, so any
+  # NEW finding in these files fails the PR. Gated on needs-ci (which already
+  # fires on ^\.github/workflows/) and wired into the required ci-success
+  # aggregate, so it is required when it runs and skips cleanly otherwise.
+  #
+  # Scoped to the three named files on purpose, NOT `.github/workflows/*.yml`:
+  # that glob also matches the gh-aw `*.lock.yml` files (compiler-generated,
+  # un-editable, guarded by gh-aw Lock Sync) and the other workflows still carry
+  # out-of-scope findings. Widening the gate is its own change.
+  #
+  # actionlint is NOT on the runner image (unlike jq and shellcheck), so it is
+  # installed pinned to a fixed version — an unpinned install could surface new
+  # checks from a future release and break the ratchet on a PR that changed
+  # nothing. actionlint uses the runner's preinstalled shellcheck for SCxxxx.
+  #
+  # `jobs.<id>.result` inside a workflow_call `outputs.<name>.value`
+  # (quality-gates.yml) is valid, documented reusable-workflow syntax that
+  # actionlint's expression checker does not model. It is suppressed by the
+  # EXACT message via -ignore so a genuine typo elsewhere (whose message names a
+  # different property) still fails.
+  actionlint:
+    name: actionlint
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Install actionlint (pinned)
+        env:
+          ACTIONLINT_VERSION: "1.7.11"
+        run: |
+          curl -fsSL -o "${RUNNER_TEMP}/download-actionlint.bash" \
+            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
+          bash "${RUNNER_TEMP}/download-actionlint.bash" "${ACTIONLINT_VERSION}" "${RUNNER_TEMP}"
+          "${RUNNER_TEMP}/actionlint" -version
+          shellcheck --version
+
+      - name: Lint workflow files
+        run: |
+          "${RUNNER_TEMP}/actionlint" \
+            -ignore 'property "result" is not defined' \
+            .github/workflows/ci.yml \
+            .github/workflows/cd.yml \
+            .github/workflows/quality-gates.yml
+
   # ---- gh-aw Lock Sync ----
   # Fails the PR when a GitHub Agentic Workflow source (.github/workflows/*.md) or
   # an injected action pin (.github/aw/) changed without recompiling its generated
@@ -2481,6 +2535,7 @@ jobs:
       - taskboard-onboarding-guard
       - codex-config-guard
       - ghaw-lock-sync
+      - actionlint
       - openapi-route-sync
       - actions-pin-check
       # Unconditional jobs, asserted by `check_unconditional` rather than mapped

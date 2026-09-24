@@ -2637,6 +2637,7 @@ STEPS_EOF
   agentic-sync:
   taskboard-onboarding-guard:
   codex-config-guard:
+  actionlint:
   ghaw-lock-sync:
   actions-pin-check:
   lockfile-sync-tests:
