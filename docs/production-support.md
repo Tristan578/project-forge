@@ -434,6 +434,60 @@ gh run view <run-id>
 gh workflow run cd.yml
 ```
 
+### 5.9 Trial Token Grant Failure
+
+**Detection:** New users report 0 tokens or every AI panel locked right after
+signup. Sentry issues on `/api/auth/webhook` (alert rule 3 in
+`docs/sentry-alert-rules.md`), with `extra.context = trial-token-grant-failure`
+on the event.
+
+**Background:** the Clerk `user.created` webhook (`web/src/app/api/auth/webhook/route.ts`)
+calls `grantTrialTokens(user.id)` (`web/src/lib/billing/trial-grant.ts`,
+#7715) after `syncUserFromClerk`. One statement inserts a `credit_transactions`
+row with `source = 'trial_grant'` and `reference_id = users.id`, and sets
+`users.monthly_tokens = TRIAL_GRANT_TOKENS` only when that insert produced a
+row. A grant failure is captured and rethrown; a transient error goes to the
+route's in-memory retry queue, a permanent one answers 500 to Clerk.
+
+**Verification:**
+```sql
+-- Very recent signups with no tokens at all: a non-zero count while the grant
+-- is meant to be running is the symptom.
+SELECT count(*) FROM users
+WHERE monthly_tokens = 0 AND created_at > now() - interval '1 day';
+
+-- Whether the audit row exists for one user (the arbiter of "already granted").
+SELECT id, amount, created_at FROM credit_transactions
+WHERE user_id = '<users.id>' AND source = 'trial_grant';
+```
+
+**Mitigation:**
+```bash
+# 1. Re-deliver the user.created event from the Clerk dashboard
+#    (Webhooks -> endpoint -> the event -> Resend). Safe to replay: the grant
+#    is idempotent at the database — the NOT EXISTS guard plus the partial
+#    unique index idx_credit_txn_idempotent (drizzle/0002) insert at most one
+#    trial_grant row per user, so a replay to an already-granted user is a no-op.
+
+# 2. Or grant directly with a one-off script (internal users.id, never the Clerk id):
+cd web && npx tsx -e "import('./src/lib/billing/trial-grant').then(m => m.grantTrialTokens('<users.id>'))"
+
+# 3. If the failures are transient (Neon connection errors), the route's retry
+#    queue replays the event on the next webhook delivery; check that recent
+#    signups recover before granting by hand.
+```
+
+**Abuse boundary (known, accepted):** the grant is exactly-once **per
+account**. `users.email` is `NOT NULL UNIQUE` and `users.clerk_id` is unique
+(`web/src/lib/db/schema.ts`), so one email address receives at most one trial
+grant, enforced at the database. Nothing ties two accounts to one person: the
+Clerk payload carries no IP or device signal and the repository captures none
+(`sentryConfig.ts`'s `fingerprint` is Sentry error grouping, unrelated). A
+determined abuser using disposable or multiple email addresses can collect one
+grant per address. The blast radius is `TRIAL_GRANT_TOKENS` per fake account.
+Detection of that pattern is tracked in #10235 and is deliberately not built
+here.
+
 ---
 
 ## 6. Capacity Planning
