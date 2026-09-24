@@ -416,9 +416,10 @@ For the Right to Erasure (`DELETE /api/user/delete`), confirm the cascading dele
 ## 8. Related Documents
 
 - [Backup & Recovery Strategy](./operations/backup-recovery.md) — high-level strategy and asset backup
-- [Production Support Runbook](./production-support.md) — incident response, service runbooks, escalation
+- [Incident Response](./operations/incident-response.md) — the response process: severity, first response, resolution
+- [Production Support Runbook](./production-support.md) — service runbooks, alert thresholds, security incident playbook
 - [Monitoring Setup](./operations/monitoring-setup.md) — health checks, alerting configuration
-- [Incident Runbook](./operations/incident-runbook.md) — P0/P1 response process
+- [Incident Runbook](./operations/incident-runbook.md) — recovery and rollback procedures
 
 ---
 

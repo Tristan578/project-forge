@@ -87,7 +87,7 @@ Configure Sentry Browser SDK to track:
 
 ### Vercel
 - **Deployment notifications:** Slack #deployments
-- **Build failure alerts:** `#engineering-alerts`, if configured in Sentry
+- **Build failure alerts:** `#engineering-alerts`, if configured in Vercel's Slack integration (build events never reach Sentry)
 - **Usage alerts:** Set spending limit in Vercel dashboard
 
 ### Cloudflare (R2 + Workers)

@@ -76,6 +76,10 @@ this repository:
   `docs/operations/deploy-migration-rollback.md`.
 - **Data loss suspected:** `docs/operations/backup-recovery.md` (Neon
   point-in-time recovery).
+- **A credential or key leaked, or an auth bypass found:**
+  `docs/production-support.md` § 8 (Security Incident Playbook) — rotation
+  steps for the Clerk, database and provider keys. Rotate first; do not wait
+  for the rest of this process.
 
 ## Resolution
 
