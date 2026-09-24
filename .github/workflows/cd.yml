@@ -516,42 +516,56 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # Every web deployment needs a current-run artifact for its same-origin
-    # fallback. Exact all4 cache hits skip compilation; misses rebuild visibly.
+    # fallback. An exact all4 cache hit, or a PR CI artifact whose key matches
+    # this tree exactly, skips compilation; anything else rebuilds visibly.
     needs: [check-changes]
     if: ${{ needs.check-changes.outputs.engine-changed == 'true' || needs.check-changes.outputs.web-changed == 'true' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
+      # Read the merged PR, and list and download ANOTHER run's artifacts (the
+      # PR's CI run). download-artifact with run-id fails without actions: read.
+      pull-requests: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # CONTENT-ADDRESSED REUSE OF ALL FOUR VARIANTS (#9525).
+      # TWO CONTENT-ADDRESSED WAYS TO SKIP THE BUILD (#9525), tried in order.
+      #
+      # 1. The all4 cache: this workflow's own four variants, saved under a key
+      #    over engine/ + .transform-gizmo-fork/ + the wasm-bindgen version +
+      #    this CD workflow recipe. It hits on a CD re-run, a dispatch, a
+      #    web-only merge, or a return to an engine tree already built on main.
+      #    It cannot hit on the first CD run after an ENGINE merge: that tree is
+      #    new to main, and a cache saved from a PR branch is invisible here.
+      #
+      # 2. The PR's own CI artifact, which covers exactly that first run. The
+      #    merged PR's CI run built the same four variants on its merge ref and
+      #    uploaded them, BEFORE wasm-opt, as `wasm-binaries-cd-reuse` together
+      #    with their ci-reuse key. The resolver finds that run from the "(#N)"
+      #    squash subject, once the PR's own record shows it merged AS this
+      #    commit, downloads the artifact from it, and adopts it only when the
+      #    recorded key equals the ci-reuse key recomputed here.
+      #
+      # Both are CONTENT-ADDRESSED, never SHA-addressed: the repo is squash-only,
+      # so main's SHA is new to every CI run, and the squashed tree matches what
+      # the PR built only if nothing that feeds the build landed on main in
+      # between. When something did, the keys differ and this job builds. Keys
+      # come from the SAME scripts/engine-wasm-cache-key.sh that ci.yml and
+      # publish-engine-cache use.
       #
       # This replaces a `download-artifact` step named "Try downloading WASM
       # from CI (same SHA)" that passed no run-id and no github-token, so it
-      # could only ever see the CURRENT run's artifacts — of which build-wasm,
+      # could only ever see the CURRENT run's artifacts, of which build-wasm,
       # the first job to build, has none. It failed on every run and
-      # `continue-on-error: true` reported that failure as success, so the build
-      # steps gated on `outcome != success` always ran and the reuse never
-      # happened (owner's diagnosis, #9525 comment thread).
-      #
-      # Reuse is CONTENT-ADDRESSED, not SHA-addressed: the key is a hash over
-      # engine/ + .transform-gizmo-fork/ + the wasm-bindgen version + this CD
-      # workflow recipe, from the
-      # SAME scripts/engine-wasm-cache-key.sh that ci.yml and publish-engine-cache
-      # use. SHA reuse is unsafe on this squash-only repo — the merged main SHA
-      # is new and its squashed tree only equals the PR head tree if main did not
-      # move between that PR's CI run and the merge, which is frequently false and
-      # would publish a binary built from different sources than main.
+      # `continue-on-error: true` reported that failure as success, so the reuse
+      # never happened (owner's diagnosis, #9525 comment thread). Nothing below
+      # carries continue-on-error: a restore or download that throws fails the
+      # job, and every ordinary "no reuse" answer is a ::notice:: naming why.
       #
       # `all4` gives a distinct key prefix so this four-path entry cannot collide
       # with the single-path webgl2 entry engine-smoke restores: actions/cache
       # segments a cache by (key, hash(paths)), so mixing path lists under one
       # key makes the other caller's restore silently miss.
-      #
-      # Ordinary misses, and service errors handled internally by the cache SDK,
-      # leave cache-hit unset and follow the visible rebuild path. An exception
-      # escaping the SDK fails the restore action and stops default-guarded
-      # subsequent steps. There is no continue-on-error to mask that failure.
       - name: Resolve the 4-variant engine cache key
         id: engine-key-all4
         run: |
@@ -570,32 +584,76 @@ jobs:
             engine/pkg-webgpu-runtime
           key: ${{ steps.engine-key-all4.outputs.key }}
 
-      # A successful restore action with no exact hit rebuilds. This notice
-      # names the miss; a failed restore action stops the job before this step.
-      - name: Note engine WASM reuse miss
+      # Tier 2, only on an all4 miss. The resolver answers `run-id=` (with a
+      # ::notice:: naming why) for a direct push, a fork, a PR that did not
+      # merge as this commit, a lookup error, a PR whose WASM Build did not
+      # succeed, or an expired artifact.
+      - name: Find the PR CI run that built this engine tree
+        id: ci-artifact
         if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         env:
-          KEY: ${{ steps.engine-key-all4.outputs.key }}
-        run: echo "::notice::engine WASM reuse MISS for key ${KEY} -- rebuilding all four variants"
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/resolve-ci-wasm-artifact.sh find
 
-      # The Rust toolchain and cargo target cache are only needed to BUILD. On an
-      # all4 cache hit every build step below is skipped, so gate these on the
-      # miss too — otherwise a hit still pays ~30s installing a toolchain it never
-      # uses, eating into the very time this reuse buys (mirrors
-      # publish-engine-cache).
+      # Into runner.temp, never engine/: an artifact that fails the key check
+      # below must not leave a single byte where the build writes.
+      - name: Download the PR's pre-optimisation WASM
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true' && steps.ci-artifact.outputs.run-id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: wasm-binaries-cd-reuse
+          path: ${{ runner.temp }}/ci-wasm
+          run-id: ${{ steps.ci-artifact.outputs.run-id }}
+          github-token: ${{ github.token }}
+
+      # Adopts only on an EXACT ci-reuse key match and after all four packages
+      # validate; otherwise reused=false with a ::notice:: naming the reason.
+      - name: Adopt the PR's WASM only on an exact key match
+        id: ci-reuse
+        if: steps.engine-cache-all4.outputs.cache-hit != 'true' && steps.ci-artifact.outputs.run-id != ''
+        run: bash scripts/resolve-ci-wasm-artifact.sh adopt "$RUNNER_TEMP/ci-wasm"
+
+      # ONE decision gates every build step below. Build only when neither tier
+      # produced the four variants. Every outcome is named in the log, and a
+      # rebuild is a ::notice::, so a reuse that silently stops working shows up
+      # as a notice on every engine merge rather than as a slower job.
+      - name: Decide whether to build all four variants
+        id: wasm-plan
+        env:
+          CACHE_HIT: ${{ steps.engine-cache-all4.outputs.cache-hit }}
+          CI_REUSED: ${{ steps.ci-reuse.outputs.reused }}
+          CI_RUN_ID: ${{ steps.ci-artifact.outputs.run-id }}
+          KEY: ${{ steps.engine-key-all4.outputs.key }}
+        run: |
+          if [ "$CACHE_HIT" = 'true' ]; then
+            echo "Engine WASM reuse HIT: all four variants restored from the all4 cache (${KEY}); no cargo build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          elif [ "$CI_REUSED" = 'true' ]; then
+            echo "::notice::engine WASM reused from PR CI run ${CI_RUN_ID}: its ci-reuse key matched this tree exactly; no cargo build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::engine WASM reuse MISS for key ${KEY} -- no all4 cache entry and no verified PR CI artifact; rebuilding all four variants"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The Rust toolchain and cargo target cache are only needed to BUILD. When
+      # either tier reused the four variants every build step below is skipped,
+      # so gate these on the same decision -- otherwise a reuse still pays ~30s
+      # installing a toolchain it never uses, eating into the very time the
+      # reuse buys (mirrors publish-engine-cache).
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        if: steps.wasm-plan.outputs.build == 'true'
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        if: steps.wasm-plan.outputs.build == 'true'
         with:
           workspaces: engine -> target
 
       - name: Install wasm-bindgen-cli
-        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        if: steps.wasm-plan.outputs.build == 'true'
         run: cargo install wasm-bindgen-cli --version 0.2.127
 
       # BUILD AND BINDGEN TOGETHER, ONE VARIANT AT A TIME (#9579).
@@ -613,39 +671,42 @@ jobs:
       # already interleaved, and its two CDN ETags differing while the editor
       # pair's matched is what identified this.
       #
-      # quality-gates.yml:339-349 has always done it this way. Keep all three
-      # workflows in the same shape.
+      # quality-gates.yml's build-wasm has always done it this way, and its six
+      # build/bindgen steps must stay BYTE-IDENTICAL to these: CD adopts the
+      # bytes that recipe produced on the PR (#9525), so any difference is a
+      # binary CD's own recipe would not have built.
+      # scripts/__tests__/resolve-ci-wasm-artifact.test.sh compares them.
       - name: Build WebGL2 + wasm-bindgen
-        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: |
           cargo build --target wasm32-unknown-unknown --release --features webgl2
           wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGPU + wasm-bindgen
-        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: |
           cargo build --target wasm32-unknown-unknown --release --features webgpu
           wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGL2 Runtime (stripped editor)
-        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgl2,runtime
 
       - name: Run wasm-bindgen (WebGL2 Runtime)
-        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgl2-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGPU Runtime (stripped editor)
-        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgpu,runtime
 
       - name: Run wasm-bindgen (WebGPU Runtime)
-        if: steps.engine-cache-all4.outputs.cache-hit != 'true'
+        if: steps.wasm-plan.outputs.build == 'true'
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
@@ -658,10 +719,11 @@ jobs:
       # reached the single-path webgl2 key, and engine-smoke on every PR whose
       # engine tree hashes to that key then restored the corrupt binary and went
       # red with no self-heal -- a cache/save cannot overwrite an existing key.
-      # This runs whether the four variants were just built or restored, so a
-      # stale/partial reuse cannot dress itself up as a full set either.
-      # build-wasm always runs on a fresh runner with a fresh checkout, so
-      # nothing but this run's build/restore output can be present.
+      # This runs whether the four variants were just built, restored from the
+      # all4 cache or adopted from the PR's CI run, so a stale/partial reuse
+      # cannot dress itself up as a full set either. build-wasm always runs on a
+      # fresh runner with a fresh checkout, so nothing but this run's
+      # build/restore/adopt output can be present.
       - name: Verify all 4 WASM variants are present and non-empty
         run: node scripts/verify-engine-wasm.mjs engine
 
@@ -670,9 +732,10 @@ jobs:
       # web-only PR (#9574).
       #
       # This has to be saved HERE rather than in ci.yml. A cache written from a
-      # PR branch is visible only to that PR, and ci.yml never runs on a push to
-      # main — so main's entry can only come from this workflow, which does. Once
-      # written, every branch can restore it.
+      # PR branch is visible only to that PR, and ci.yml's engine-smoke only
+      # restores -- it saves nothing, including in the push-to-main run ci.yml
+      # has had since #9596 -- so main's entry can only come from this workflow.
+      # Once written, every branch can restore it.
       #
       # The key is derived by the same script the restore side uses. If these two
       # ever computed it differently nothing would break loudly: every restore
@@ -680,9 +743,9 @@ jobs:
       # build. scripts/__tests__/engine-wasm-cache-key.test.sh asserts both
       # workflows call the shared script.
       #
-      # Unconditional on purpose: pkg-webgl2 exists whether it was built above or
-      # restored from the content-addressed all-4 cache, and both are the same
-      # artifact.
+      # Unconditional on purpose: pkg-webgl2 exists whether it was built above,
+      # restored from the content-addressed all-4 cache or adopted from the PR's
+      # CI run, and all three are the same artifact.
       - name: Resolve the engine build key
         id: engine-key
         run: |
@@ -699,8 +762,10 @@ jobs:
       # Persist the whole four-variant set under the content-addressed all4 key
       # so a later run on the same engine tree (a CD re-run, a workflow_dispatch,
       # or an engine revert to a prior tree) reuses it instead of rebuilding.
-      # Only on a miss: re-saving an existing key warns and no-ops, and on a hit
-      # the set came from this same cache.
+      # Only on an all4 miss: re-saving an existing key warns and no-ops, and on
+      # a hit the set came from this same cache. A set adopted from the PR's CI
+      # run is persisted too; its ci-reuse key extends this all4 key and the two
+      # recipes are pinned identical, so it is the set this key describes.
       - name: Persist all 4 WASM variants for reuse
         if: steps.engine-cache-all4.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

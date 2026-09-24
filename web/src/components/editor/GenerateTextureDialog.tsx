@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { X, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
@@ -20,6 +20,10 @@ type Resolution = '1024' | '2048';
 type TextureStyle = 'realistic' | 'stylized' | 'cartoon';
 
 export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTextureDialogProps) {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const [prompt, setPrompt] = useState('');
   const [resolution, setResolution] = useState<Resolution>('1024');
   const [style, setStyle] = useState<TextureStyle>('realistic');
@@ -138,8 +142,9 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
 
           {/* Resolution */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-300">Resolution</label>
+            <label htmlFor={fieldId('resolution')} className="mb-1 block text-xs font-medium text-zinc-300">Resolution</label>
             <select
+              id={fieldId('resolution')}
               value={resolution}
               onChange={(e) => setResolution(e.target.value as Resolution)}
               disabled={isSubmitting || gate.blocked}
@@ -152,8 +157,9 @@ export function GenerateTextureDialog({ isOpen, onClose, entityId }: GenerateTex
 
           {/* Style */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
+            <label htmlFor={fieldId('style')} className="mb-1 block text-xs font-medium text-zinc-300">Style</label>
             <select
+              id={fieldId('style')}
               value={style}
               onChange={(e) => setStyle(e.target.value as TextureStyle)}
               disabled={isSubmitting || gate.blocked}

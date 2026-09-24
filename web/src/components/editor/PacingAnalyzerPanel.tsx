@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useId } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import {
   analyzePacing,
@@ -269,6 +269,10 @@ export function selectPacingKey(s: { sceneGraph: { nodes: Record<string, { name:
 }
 
 export function PacingAnalyzerPanel() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   // Subscribe only to the pacing-relevant identity key (PF-873).
   // This avoids re-running full analysis on transform or visibility changes.
   const pacingKey = useEditorStore(selectPacingKey);
@@ -323,11 +327,11 @@ export function PacingAnalyzerPanel() {
       <div className="flex-1 space-y-3 p-3">
         {/* Template selector */}
         <div>
-          <label htmlFor="pacing-template" className="mb-1 block text-xs text-zinc-400">
+          <label htmlFor={fieldId('pacing-template')} className="mb-1 block text-xs text-zinc-400">
             Compare with template
           </label>
           <select
-            id="pacing-template"
+            id={fieldId('pacing-template')}
             value={selectedTemplate}
             onChange={handleTemplateChange}
             className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 focus:border-purple-500 focus:outline-none"

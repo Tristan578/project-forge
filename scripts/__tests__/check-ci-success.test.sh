@@ -89,7 +89,7 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 # rather than parameterised — they are constant for essentially every fixture, and
 # mk's positional list is already 26 long. Flip them with a jq post-filter (see the
 # docs-internal-gate and quality-gates cases) instead of adding a 27th arg.
-# `command-parity`, `build-nextjs`, `test-e2e-ui` and `test-e2e-api` are hardcoded to success for
+# `command-parity`, `build-nextjs`, `test-e2e-ui`, `test-e2e-api` and `test-e2e-auth` are hardcoded to success for
 # the same reason and overridden with jq in the #9437 cases at the end.
 mk() {
   local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}" bvt="${27:-success}" pp="${28:-success}"
@@ -123,6 +123,7 @@ mk() {
       "actions-pin-check":    { result: $apc },
       "test-e2e-ui":          { result: "success" },
       "test-e2e-api":         { result: "success" },
+      "test-e2e-auth":        { result: "success" },
       "test-e2e-journey":     { result: $te2ej },
       "test-e2e-engine-smoke": { result: $te2es },
       # Unconditional jobs. They have no ci-gate trigger, so every fixture
@@ -479,6 +480,32 @@ if echo "$out" | grep -q "test-e2e-api ("; then pass "the unwired API gate is na
 res="$(run_verify "$(mk true true success success | jq -c '."test-e2e-api".result = "skipped"')")"
 rc="${res%%|*}"
 if [ "$rc" = "0" ]; then pass "API gate legit-skip (needs-web=false) passes (exit 0)"; else fail "API gate legit skip should exit 0, got $rc"; fi
+
+# --- 34d. TAMPER: test-e2e-auth skipped while needs-web=true → exit 1 ----------
+# The Clerk-keyed auth journey (#8632) is the ONLY per-PR run of sign-in against
+# a real Clerk instance; the @ui shard deliberately has no keys. A web-touching
+# PR sets needs-web=true, so an `if: false` skip must not certify green. Every
+# other gate runs+succeeds here, so the skipped auth job is the SOLE tamper.
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c '."test-e2e-auth".result = "skipped"')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "auth journey skipped while needs-web=true fails (exit 1)"; else fail "tamper (auth journey) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-auth ("; then pass "the unwired auth journey gate is named"; else fail "unwired auth journey gate not named"; fi
+
+# --- 34e. auth journey legit-skips (needs-web=false) → exit 0 -------------------
+res="$(run_verify "$(mk true true success success | jq -c '."test-e2e-auth".result = "skipped"')")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "auth journey legit-skip (needs-web=false) passes (exit 0)"; else fail "auth journey legit skip should exit 0, got $rc"; fi
+
+# --- 34f. auth journey dropped from ci-success needs: while triggered → exit 1 --
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c 'del(."test-e2e-auth")')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "auth journey absent from needs while needs-web=true fails (exit 1)"; else fail "absent auth journey should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-auth (trigger needs-web=true but result=absent)"; then pass "the absent auth journey reports result=absent"; else fail "auth journey result=absent missing"; fi
+
+# --- 34g. auth journey FAILED → exit 1 (hard-failure path) ----------------------
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success true | jq -c '."test-e2e-auth".result = "failure"')")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ] && echo "$out" | grep -q "test-e2e-auth"; then pass "a failed auth journey fails the aggregate, by name"; else fail "failed auth journey should exit 1 naming the job, got $rc"; fi
 
 # --- 35. TAMPER: skills-lint skipped while needs-skills=true → exit 1 ----------
 # skills-lint is self-defending: a PR editing .claude/skills/** sets
@@ -1350,12 +1377,17 @@ RUNS
   else
     fail "verifier anti-tamper map lost its test-e2e-api/needs-web entry — billing and token-guard API coverage stops being observed"
   fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "test-e2e-auth"[[:space:]]+"needs-web"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers test-e2e-auth <-> needs-web"
+  else
+    fail "verifier anti-tamper map lost its test-e2e-auth/needs-web entry — the only per-PR sign-in against a real Clerk instance stops being observed"
+  fi
   # And pin the real `if:` each new entry is paired with, matching the
   # quality-gates caller pin below: a map entry paired with a trigger that no
   # longer gates the job is decorative. Whole expression, on the `if:` line only,
   # comments stripped — so `!= 'true'` inversion and trailing-comment survival
   # both fail (the three vectors documented at the quality-gates pin).
-  for pair in "observatory-tests:needs-observatory:needs-ci:needs-deps" "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web" "test-e2e-api:needs-web"; do
+  for pair in "observatory-tests:needs-observatory:needs-ci:needs-deps" "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web" "test-e2e-api:needs-web" "test-e2e-auth:needs-web"; do
     pj="${pair%%:*}"; ptrigs="${pair#*:}"
     pblk="$(awk -v j="  $pj:" '$0==j{f=1} f{print} f && /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:/ && $0!=j{exit}' "$CI_YML")"
     pif="$(grep -v '^[[:space:]]*#' <<<"$pblk" | sed 's/#.*$//' | grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:')"

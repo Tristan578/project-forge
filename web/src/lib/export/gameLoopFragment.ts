@@ -48,6 +48,10 @@ function gameLoop() {
   var dt = (now - lastTime) / 1000;
   lastTime = now;
 
+  // Performance harness (perfHarnessFragment.ts): records this frame's
+  // timestamp when the page was opened with ?forgePerf=1; absent otherwise.
+  if (window.__forgePerfHooks) window.__forgePerfHooks.frame(now);
+
   // Merge touch input BEFORE the frame's script update. PLAY_TICK overwrites
   // __forgeInputState wholesale every engine frame with keyboard/gamepad state
   // only (the engine has no knowledge of JS touch input), so the touch layer

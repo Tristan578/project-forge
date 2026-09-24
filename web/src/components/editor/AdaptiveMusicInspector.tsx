@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useId } from 'react';
 import { Play, Pause, Save, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEditorStore } from '@/stores/editorStore';
@@ -35,6 +35,10 @@ interface AudioSnapshot {
 }
 
 export default function AdaptiveMusicInspector() {
+  // useId, not literal ids: the panel can mount more than once, and a
+  // repeated id sends the second <label for> to the first panel's control.
+  const baseId = useId();
+  const fieldId = (key: string) => `${baseId}-${key}`;
   const intensity = useEditorStore((s) => s.adaptiveMusicIntensity);
   const setAdaptiveMusicIntensity = useEditorStore((s) => s.setAdaptiveMusicIntensity);
   const currentSegment = useEditorStore((s) => s.currentMusicSegment);
@@ -195,10 +199,11 @@ export default function AdaptiveMusicInspector() {
       {/* Intensity Slider */}
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs">
-          <label className="text-zinc-400">Intensity</label>
+          <label htmlFor={fieldId('intensity')} className="text-zinc-400">Intensity</label>
           <span className="text-zinc-300">{(intensity * 100).toFixed(0)}%</span>
         </div>
         <input
+          id={fieldId('intensity')}
           type="range"
           min="0"
           max="1"

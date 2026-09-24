@@ -1,12 +1,33 @@
 /**
  * Performance and LOD handlers — quality presets, LOD configuration,
- * performance budget, and scene-wide mesh optimization.
+ * performance budget, scene-wide mesh optimization, and the manifest-pinned
+ * performance report (capture / query / baseline / compare / cancel).
  */
 
 import { z } from 'zod';
-import type { ToolHandler } from './types';
+import type { ExecutionResult, ToolHandler } from './types';
 import { zEntityId, parseArgs } from './types';
 import { usePerformanceStore } from '@/stores/performanceStore';
+import {
+  cancelPerformanceCapture,
+  comparePerformanceReports,
+  getPerformanceReport,
+  setPerformanceBaseline,
+  startPerformanceCapture,
+} from '@/lib/perf/editorCapture';
+
+/**
+ * Adapt an `editorCapture` result to a tool result. The error text is passed
+ * through verbatim: the profiler's manual control shows the same string for the
+ * same input, which is the parity #9904 asks for (performance.FR-3.OP-01).
+ */
+function fromCapture<T extends { ok: true }>(
+  result: T | { ok: false; error: string },
+  shape: (data: T) => Record<string, unknown>,
+): ExecutionResult {
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, result: shape(result) };
+}
 
 export const performanceHandlers: Record<string, ToolHandler> = {
   set_entity_lod: async (args, ctx) => {
@@ -116,4 +137,30 @@ export const performanceHandlers: Record<string, ToolHandler> = {
       result: { message: 'Simplification backend set to ' + p.data.backend },
     };
   },
+
+  // --- Manifest-pinned performance report (performance.FR-3.OP-01, #9904 / #10013) ---
+  // Each handler delegates to the lib/perf/editorCapture function the
+  // profiler's manual control calls, with the same argument schema.
+
+  capture_performance_report: async (args) =>
+    fromCapture(startPerformanceCapture(args), ({ captureId, profileKey, protocol, expectedDurationMs, message }) => ({
+      status: 'pending',
+      captureId,
+      profileKey,
+      protocol,
+      expectedDurationMs,
+      message,
+    })),
+
+  get_performance_report: async (args) =>
+    fromCapture(getPerformanceReport(args), ({ capture, report, baselineReportId }) => ({ capture, report, baselineReportId })),
+
+  compare_performance_reports: async (args) =>
+    fromCapture(comparePerformanceReports(args), ({ comparison }) => ({ comparison })),
+
+  set_performance_baseline: async (args) =>
+    fromCapture(setPerformanceBaseline(args), ({ baselineReportId, message }) => ({ baselineReportId, message })),
+
+  cancel_performance_capture: async (args) =>
+    fromCapture(cancelPerformanceCapture(args), ({ message }) => ({ message })),
 };

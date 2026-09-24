@@ -17,7 +17,7 @@ handlers/
 ├── securityHandlers.ts         # Content validation, injection detection
 ├── exportHandlers.ts           # Game export (ZIP, PWA, embed), cloud publishing
 ├── shaderHandlers.ts           # Shader effects, custom WGSL, shader graph
-├── performanceHandlers.ts      # LOD, quality presets, performance budget
+├── performanceHandlers.ts      # LOD, quality presets, performance budget, performance reports (capture/query/compare/baseline)
 ├── generationHandlers.ts       # AI asset generation (3D models, textures, audio, music)
 ├── handlers2d.ts               # Sprites, sprite animation, tilemaps, 2D physics, skeleton 2D
 ├── entityHandlers.ts           # Entity metadata, custom properties, prefabs
