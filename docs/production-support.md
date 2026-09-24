@@ -766,8 +766,8 @@ entirely green.
 | DB Connection Failure | `Database (Neon)` health check returns "down" 2x in 5 min | P0 | Notify #incidents (no page) |
 | Auth Failure Spike | Clerk health check "down" for 5 min | P0 | Notify #incidents (no page) |
 | 5xx Error Rate | > 2% of requests return 5xx for 5 min | P1 | Notify #incidents (no page) |
-| AI Gen Failure Spike | AI provider errors > 10% for 15 min | P1 | Notify #engineering-alerts |
-| WASM Load Failure | Custom measurement `wasm_init_time` errors > 5% | P1 | Notify #engineering-alerts |
+| AI Gen Failure Spike | AI provider errors > 10% for 15 min | P1 | Notify #incidents (no page) |
+| WASM Load Failure | Custom measurement `wasm_init_time` errors > 5% | P1 | Notify #incidents (no page) |
 | High LCP | p75 LCP > 4s for 30 min | P2 | Notify #engineering-alerts |
 | Rate Limit Exhaustion | 429 responses > 20/min for 10 min | P2 | Investigate DDoS |
 | Cost Anomaly | Hourly AI spend > 2x rolling 7-day avg | P2 | Notify + review |
@@ -892,24 +892,8 @@ See also `apps/docs/README.md` → Environment Variables.
 
 ## 15. Incident Response Checklist
 
-There is no on-call rotation or paging — see
-`docs/operations/incident-response.md`. When you notice or are notified of an
-incident, follow this sequence:
-
-1. **Acknowledge** — note that you are looking into it
-2. **Assess** severity:
-   - Check `https://spawnforge.ai/api/health`
-   - Check Sentry for error spikes
-   - Check Vercel deployment status
-   - Check open `label:ci-failure` issues — automated rollbacks, a red
-     security-alerts cron, and post-deploy smoke failures all land there
-     (§11, "Where automated failures land")
-3. **Classify**: P0 (site down), P1 (major feature broken), P2 (degraded performance)
-4. **Mitigate** using the appropriate runbook above
-5. **Communicate** in #incidents with:
-   - What is happening
-   - What is affected
-   - What you are doing
-   - ETA for resolution (or "investigating")
-6. **Resolve** and verify with health checks + smoke tests
-7. **Post-mortem** within 24 hours for P0/P1 incidents
+The incident-response process (severity model, first response, mitigation,
+resolution) is defined once, in `docs/operations/incident-response.md`. Use the
+runbooks in § 5 of this document for service-specific recovery. There is no
+on-call rotation or paging — see
+`docs/decisions/2026-09-24-no-paging-or-on-call.md`.

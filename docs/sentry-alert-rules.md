@@ -57,7 +57,7 @@ revenue loss and double-charges.
 
 ## P1 — Notify (No Page)
 
-### 5. AI generation failure rate spike
+### 3. AI generation failure rate spike
 **Trigger:** Issue count for fingerprint `generation-failure` > 10 in a
 10-minute window.
 **Why P1:** Generation routes call external providers (Meshy, ElevenLabs,
@@ -75,7 +75,7 @@ content safety is triggering too aggressively.
 
 ## P2 — Notify / Daily Digest
 
-### 3. AI provider down (timeout rate spike)
+### 4. AI provider down (timeout rate spike)
 **Trigger:** Issue count for fingerprint `ai-provider-timeout` > 5 in any
 5-minute window AND the last occurrence is within the past 5 minutes.
 **Why P2:** Sustained timeouts mean the AI chat is broken for all users on the
@@ -89,7 +89,7 @@ affected provider. Failover should be considered immediately.
 | Action | Notify the owner via `#engineering-alerts`, if configured in Sentry — include `ai_provider` tag in message |
 | Note | Create one rule per provider by filtering `tags[ai_provider]` for finer routing |
 
-### 4. WASM panic rate
+### 5. WASM panic rate
 **Trigger:** Issue count for fingerprint `wasm-command-failure` > 1 per minute.
 **Why P2:** WASM panics crash the editor for affected users and require a
 session reload. A rate above 1/min suggests a systematic regression, not a

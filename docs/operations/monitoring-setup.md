@@ -1,6 +1,6 @@
 # Monitoring & Alerting Setup
 
-> **Last updated:** 2026-03-16
+> **Last updated:** 2026-09-24
 
 ## Sentry Alert Rules
 
@@ -28,26 +28,26 @@ Configure these alert rules in Sentry (Settings > Alerts > Create Alert Rule) fo
 - **Filter:** Event occurs 5+ times in 10 minutes (avoids noise from one-off errors)
 - **Action:** Notify the owner via `#incidents`, if configured in Sentry
 
+#### 4. Payment Processing Errors
+- **Type:** Issue Alert
+- **Condition:** Transaction matches `/api/webhooks/stripe`, level = error
+- **Frequency:** Alert once per hour (Stripe retries automatically)
+- **Action:** Notify the owner via `#incidents`, if configured in Sentry
+
 ### P1 -- Degraded Service Alerts
 
-#### 4. Slow API Response
+#### 5. Slow API Response
 - **Type:** Metric Alert
 - **Metric:** Transaction duration (p95)
 - **Threshold:** > 5 seconds over 10 minutes
-- **Action:** Notify the owner via `#engineering-alerts`, if configured in Sentry
+- **Action:** Notify the owner via `#incidents`, if configured in Sentry
 - **Resolve:** < 2 seconds over 10 minutes
 
-#### 5. Database Circuit Breaker Open
+#### 6. Database Circuit Breaker Open
 - **Type:** Issue Alert
 - **Condition:** Message contains "CircuitBreakerOpenError"
 - **Action:** Notify the owner via `#incidents`, if configured in Sentry
 - **Note:** The circuit breaker (`web/src/lib/db/circuitBreaker.ts`) opens after repeated DB failures
-
-#### 6. Payment Processing Errors
-- **Type:** Issue Alert
-- **Condition:** Transaction matches `/api/webhooks/stripe`, level = error
-- **Frequency:** Alert once per hour (Stripe retries automatically)
-- **Action:** Notify the owner via `#engineering-alerts`, if configured in Sentry
 
 ### P2 -- Monitoring Alerts
 

@@ -1,38 +1,13 @@
 # Incident Runbook
 
-> **Last updated:** 2026-03-16
+> **Last updated:** 2026-09-24
 
-## SLA Targets
+## Response Process
 
-| Priority | Description | Response Time | Resolution Time | Examples |
-|----------|-------------|---------------|-----------------|----------|
-| P0 — Critical | Site down, data loss, security breach | 30 minutes | 4 hours | Production outage, DB corruption, auth bypass |
-| P1 — Degraded | Major feature broken, significant perf degradation | 4 hours | 24 hours | WASM CDN failure, payment processing down, AI generation broken |
-| P2 — Minor | Non-critical bug, cosmetic issue, minor perf regression | 24 hours | 72 hours | UI glitch, tooltip wrong, non-blocking error in logs |
-
-There is no on-call rotation or paging service — see
-`docs/operations/incident-response.md` for the current (single-owner) response
-process and `docs/decisions/2026-09-24-no-paging-or-on-call.md` for why.
-
-## Incident Response Process
-
-### 1. Acknowledge
-- Respond in Slack #incidents with "Investigating" and your name
-- Set Sentry issue status to "In Progress"
-
-### 2. Assess
-- Determine priority (P0/P1/P2) based on impact scope
-- Identify affected systems (DB, CDN, auth, payments, engine)
-- Check: Is this a new deploy? If yes, consider immediate rollback
-
-### 3. Mitigate
-- Apply the relevant recovery procedure below
-- Communicate status updates every 15 minutes for P0, every hour for P1
-
-### 4. Resolve
-- Confirm service restored
-- Write postmortem for P0/P1 within 48 hours
-- Create follow-up tickets for root cause fixes
+This file holds recovery and rollback procedures only. The severity model
+(P0/P1/P2), the first-response steps and what "resolved" means are defined
+once, in `docs/operations/incident-response.md`. There is no on-call rotation
+or paging service — see `docs/decisions/2026-09-24-no-paging-or-on-call.md`.
 
 ## Recovery Procedures
 
