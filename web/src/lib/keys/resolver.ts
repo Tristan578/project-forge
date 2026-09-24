@@ -165,7 +165,9 @@ export async function resolveApiKey(
   // and it neither deducts nor records usage. The only tier control left for
   // polls is the per-route poll gate (`panelTierGateResponseForPoll` in
   // `@/lib/api/panelTierGate`), which still refuses a $0 account on a
-  // creator-or-above panel. BYOK was already preferred above, and
+  // creator-or-above panel and a starter that never held tokens on every
+  // hobbyist panel. It is NOT a job-ownership check: the status routes do not
+  // bind jobId to the caller (pre-existing, tracked in #10262). BYOK was already preferred above, and
   // `getPlatformKey` still throws when the platform key is not configured.
   // BOTH halves are required: a charged call named `status_check`, or a free
   // call named anything else, still goes through every check.

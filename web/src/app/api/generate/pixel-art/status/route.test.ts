@@ -211,8 +211,14 @@ describe('GET /api/generate/pixel-art/status', () => {
   // platform key itself rather than going through `createGenerationHandler`,
   // so it runs `panelTierGateResponseForPoll('generate-pixel-art', …)`. A poll reads
   // a job already paid for, so the live balance does not decide it: a
-  // starter counts as the trial tier (hobbyist) whether or not it has tokens
-  // left. The creator-only status suites (model, skybox) pin the refusal.
+  // starter that has HELD tokens (monthlyTokens > 0 or addonTokens > 0) counts
+  // as the trial tier (hobbyist) whether or not it has tokens left. A starter
+  // that never held any (a never-granted signup) is refused before any key is
+  // resolved — the status route does not bind jobId to the caller, so that
+  // refusal is what keeps a $0 account from polling arbitrary job ids with the
+  // platform key. The creator-only status suites (model, skybox) pin that a
+  // starter at any balance is refused there and that each of those routes
+  // calls the POLL variant, not the create one.
   describe('panel tier gate (generate-pixel-art, hobbyist)', () => {
     function authAs(overrides: Partial<User>) {
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser(overrides) } });
@@ -244,6 +250,18 @@ describe('GET /api/generate/pixel-art/status', () => {
       expect(res.status).toBe(200);
       expect((await res.json()).status).toBe('processing');
       expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a never-granted starter (no tokens ever held) with 403 TIER_REQUIRED before any key is resolved', async () => {
+      // A signup the trial grant never reached: every token column 0. The
+      // poll rule reads HELD tokens, not the live balance, and this account
+      // has held none, so it is judged as a plain starter.
+      authAs({ tier: 'starter', monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: 'TIER_REQUIRED', currentTier: 'starter', requiredTier: 'hobbyist' });
+      expect(resolveApiKey).not.toHaveBeenCalled();
     });
 
     it('lets a hobbyist account through to resolveApiKey', async () => {

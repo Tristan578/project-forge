@@ -72,7 +72,7 @@
     ".agents/skills/game-engine/references/web-apis.md": "cf433d542ad983aeae8c26a1d8e913e57e4a22d62d6283ffaebf6ba2e69f1eb3",
     ".agents/skills/game-engine/scripts/check-engine-binaries.sh": "6c971515be9fa6a712c21c73fda720df488ca68f2c68aa4ed464c26781008837",
     ".agents/skills/game-engine/templates/component-checklist.md": "4a3649b74861183a6acaae87e5adb34cac2f6fe0230222c0bac631db8e5a9864",
-    ".agents/skills/generate-route/SKILL.md": "85664306768521db6a9e123f2f8d0c4ede70fd7b76459838b513dafbb671a2b5",
+    ".agents/skills/generate-route/SKILL.md": "47fc4fdb806595093fdb8be81d6b85a22f46baa1d27c4e52eff823b803ec402d",
     ".agents/skills/infra-services/SKILL.md": "df401dd75403256f217d6e8ec8178b9d484a6e0308da0a0d2c9d4194240d92f6",
     ".agents/skills/infra-services/references/runbook.md": "136a8a724fad500d524090a663560c7e91d9592cf81a9531cd6998bd9f7f1571",
     ".agents/skills/infra-services/references/service-accounts.md": "4feba7983a266f5971e4b74fa9302fd47971b4799d3637be06e20fbf90d6b78c",

@@ -187,16 +187,23 @@ const resolved = await resolveApiKey(mid.userId!, DB_PROVIDER.<x>, 0, STATUS_CHE
 ```
 
 A poll reads a job the caller already paid for, so neither half reads the
-balance. The poll gate judges a `starter` at the trial tier (`hobbyist`)
-whatever it holds, and the resolver skips its tier and balance checks for
+live balance. The poll gate judges a `starter` at the trial tier (`hobbyist`)
+only when it has HELD tokens (`monthlyTokens > 0 || addonTokens > 0` — a spent
+trial still has `monthlyTokens` set), and a never-granted `starter` as plain
+`starter`; the resolver skips its tier and balance checks for
 exactly that pair (cost 0 AND the constant, never the literal). Do NOT use the
 create variant `panelTierGateResponse` here: one generation can spend the whole
 trial grant, and the balance-aware rule would then refuse every poll of the job
 the user just paid for. Without the gate at all, a caller whose panel is locked
-could poll a creator-tier provider with the platform key. Add route tests: an
-account below the panel's tier (for a creator panel, a starter with or without
-tokens) gets 403 `TIER_REQUIRED` and `resolveApiKey` is never called; for a
-hobbyist panel, a starter with a spent trial balance is admitted.
+could poll a creator-tier provider with the platform key. The gate is NOT a
+job-ownership check: status routes do not bind `jobId` to the caller
+(pre-existing, tracked in #10262). Add route tests: an account below the
+panel's tier (for a creator panel, a starter with or without tokens) gets 403
+`TIER_REQUIRED` and `resolveApiKey` is never called; for a hobbyist panel, a
+starter with a spent trial balance is admitted and a never-granted starter
+(every token column 0) is refused. For a creator panel, where both variants
+refuse the same accounts, spy on `@/lib/api/panelTierGate` and assert the
+route calls `panelTierGateResponseForPoll` and not `panelTierGateResponse`.
 
 ## Step 5: Update Sentry Regression Test (if async)
 

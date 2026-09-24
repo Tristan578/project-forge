@@ -7,6 +7,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 import { MeshyClient } from '@/lib/generate/meshyClient';
+import { panelTierGateResponse, panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
@@ -14,6 +15,17 @@ vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/keys/resolver')>();
   return { ...mod, resolveApiKey: vi.fn() };
+});
+// Both gate variants refuse every starter and hobbyist on a creator panel, so
+// no response can tell them apart here. Spy on the module (real behaviour
+// passed through) so a test can pin WHICH variant the route calls (#7715).
+vi.mock('@/lib/api/panelTierGate', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/api/panelTierGate')>();
+  return {
+    ...mod,
+    panelTierGateResponse: vi.fn(mod.panelTierGateResponse),
+    panelTierGateResponseForPoll: vi.fn(mod.panelTierGateResponseForPoll),
+  };
 });
 vi.mock('@/lib/generate/meshyClient', () => ({
   MeshyClient: vi.fn(() => ({
@@ -245,6 +257,23 @@ describe('GET /api/generate/skybox/status', () => {
       // A zero-cost status poll: the pair the resolver requires before it
       // skips its own tier and balance checks (#7715).
       expect(vi.mocked(resolveApiKey).mock.calls[0].slice(2)).toEqual([0, STATUS_CHECK_OPERATION]);
+    });
+
+    it('runs the POLL variant of the panel gate, never the create variant', async () => {
+      // Every refusal above is the same 403 from either variant, so they
+      // cannot see a route that calls the create variant by mistake. This can.
+      authAs({ tier: 'creator', monthlyTokens: 1000, monthlyTokensUsed: 1000, addonTokens: 0 });
+      vi.mocked(MeshyClient).mockImplementation(
+        function (this: InstanceType<typeof MeshyClient>) {
+          this.getTextureStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 40 });
+        } as unknown as typeof MeshyClient
+      );
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(200);
+      expect(panelTierGateResponseForPoll).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(panelTierGateResponseForPoll).mock.calls[0][0]).toBe('generate-skybox');
+      expect(panelTierGateResponse).not.toHaveBeenCalled();
     });
   });
 });

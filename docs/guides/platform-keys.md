@@ -21,11 +21,16 @@ procedure for that day, not a request to act now.
 Every generate route runs through `createGenerationHandler`, which resolves
 the key **before** deducting tokens (`web/src/lib/keys/resolver.ts`,
 `getPlatformKey`). A missing key throws server-side, the user gets a generic
-500, and nothing is charged. The status pollers (`/api/generate/*/status`) and
-the QStash `generation-complete` callback call the resolver directly as a
-zero-cost `STATUS_CHECK_OPERATION`. That call skips the tier and balance checks
-(the job was paid for at creation, and the route's `panelTierGateResponseForPoll`
-is its tier control), but a missing platform key still throws there too. For a capability that can never be provisioned,
+500, and nothing is charged. Every status poller that resolves a key
+(`/api/generate/*/status`, except `music/status`, which never calls the
+resolver and returns a static terminal `failed` response) and the QStash
+`generation-complete` callback call the resolver directly as a zero-cost
+`STATUS_CHECK_OPERATION`. That call skips the tier and balance checks (the job
+was paid for at creation, and the route's `panelTierGateResponseForPoll` is its
+tier control: it admits a `starter` at `hobbyist` only when the account has
+held tokens, `monthlyTokens > 0 || addonTokens > 0`, and it does not check that
+the `jobId` belongs to the caller), but a missing platform key still throws
+there too. For a capability that can never be provisioned,
 three more layers keep it from reaching that point:
 
 | Layer | Where | Effect |

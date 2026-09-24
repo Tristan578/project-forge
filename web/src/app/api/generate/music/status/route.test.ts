@@ -69,7 +69,9 @@ describe('GET /api/generate/music/status', () => {
   // Per-panel tier gate, POLL variant (#7715). 'generate-music' is
   // hobbyist-gated. The terminal `failed` state is what makes the client
   // refund, so a trial starter whose one music generation spent the grant must
-  // still get it, not a 403 that leaves the job hanging until timeout.
+  // still get it, not a 403 that leaves the job hanging until timeout. A
+  // starter that never held tokens could not have created a music job, so it
+  // is refused like any other hobbyist status route.
   describe('panel tier gate (generate-music, hobbyist)', () => {
     function authAs(user: Record<string, unknown>) {
       vi.mocked(authenticateRequest).mockResolvedValue({
@@ -84,6 +86,14 @@ describe('GET /api/generate/music/status', () => {
       const res = await GET(makeRequest('job-123'));
       expect(res.status).toBe(200);
       expect((await res.json()).error).toBe(MUSIC_SYNC_TERMINAL_MESSAGE);
+    });
+
+    it('refuses a never-granted starter (no tokens ever held) with 403 TIER_REQUIRED', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: 'TIER_REQUIRED', currentTier: 'starter', requiredTier: 'hobbyist' });
     });
   });
 });

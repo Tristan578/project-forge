@@ -71,9 +71,11 @@ export function spendableTokensOf(user: {
  * checked the raw tier alone.
  *
  * Status polls do NOT use this rule: `panelTierGateResponseForPoll` judges a
- * `starter` at `TRIAL_ACCESS_TIER` whatever its balance, and the resolver
- * skips its checks for a zero-cost `STATUS_CHECK_OPERATION`. A poll reads a job
- * that was already paid for, and one generation can spend the whole grant.
+ * `starter` that has HELD tokens (`monthlyTokens > 0 || addonTokens > 0`) at
+ * `TRIAL_ACCESS_TIER` whatever its live balance, and a never-granted starter
+ * as `starter`; the resolver then skips its checks for a zero-cost
+ * `STATUS_CHECK_OPERATION`. A poll reads a job that was already paid for, and
+ * one generation can spend the whole grant.
  */
 export function effectiveTier(tier: Tier, spendableTokens: number): Tier {
   return tier === 'starter' && spendableTokens > 0 ? TRIAL_ACCESS_TIER : tier;

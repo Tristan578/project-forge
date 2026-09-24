@@ -489,9 +489,16 @@ before resolving a key), and by the editor's panel gate (the profile route ships
 `spendableTokens` so the editor knows on first paint).
 
 **Status polls are the exception, on purpose.** Every `*/status` poller runs
-`panelTierGateResponseForPoll` instead, which does not read the balance: a
-`starter` counts as `hobbyist` whatever it holds, so creator-tier status routes
-stay refused. The resolver, likewise, skips its tier and balance checks for a
+`panelTierGateResponseForPoll` instead, which does not read the live balance:
+a `starter` that has HELD tokens (`monthlyTokens > 0 || addonTokens > 0`)
+counts as `hobbyist` however many it has left, so creator-tier status routes
+stay refused. A spent trial still qualifies, because the grant sets
+`monthly_tokens` and spending only raises `monthly_tokens_used`. A `starter`
+that never held tokens (a signup the grant never reached, every column 0) is
+judged as `starter` and refused on hobbyist status routes too, as it was before
+#7715. The status routes do **not** check that the `jobId` belongs to the
+caller (pre-existing on `main` for every paid tier, tracked in #10262), so the
+poll gate narrows who can reach them; it is not an ownership check. The resolver, likewise, skips its tier and balance checks for a
 zero-cost `STATUS_CHECK_OPERATION` call (the pollers and the QStash
 `generation-complete` callback). The polled job was paid for when it was
 created, and one generation can spend the whole grant (a tileset costs 50), so

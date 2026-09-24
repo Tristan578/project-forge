@@ -25,8 +25,10 @@ async function GET_impl(request: NextRequest) {
 
   // Per-panel tier gate, POLL variant (#7715): the panel POST /api/generate/music declares
   // ('generate-music'), kept so every status route is gated alike. A poll reads
-  // a job already paid for, so a starter is judged at the trial access tier
-  // whatever its live balance — see `src/lib/api/panelTierGate.ts`.
+  // a job already paid for, so a starter that has HELD tokens is judged at the
+  // trial access tier whatever its live balance, and a never-granted starter
+  // as a plain starter. Not a jobId ownership check — see
+  // `src/lib/api/panelTierGate.ts`.
   const tierDenied = panelTierGateResponseForPoll('generate-music', mid.authContext!.user);
   if (tierDenied) return tierDenied;
 
