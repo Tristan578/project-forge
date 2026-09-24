@@ -589,6 +589,49 @@ else
   fail "19d. alias probe did not shadow the frozen function (got '$alias_probe') — re-examine whether the alias rule is still needed"
 fi
 
+# ---- 19h. an array literal holds words, it does not run them ------------------
+# `arr=(alias fail=1)` stores two strings; nothing is aliased (the fifth board
+# round's architect seat measured the word rule flagging exactly this).
+d_array="$(mkfixture array-literal <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+build() {
+  local -a arr=(alias fail=1 "x)" 'y)')
+  arr+=(shopt -s expand_aliases)
+  declare -a nested=( (alias) fail=: )
+  echo "${arr[@]}" "${nested[@]}"
+}
+readonly -f build
+FIX
+)"
+expect_rc "19h. words inside an array literal (NAME=( ), NAME+=( ), with quoted parens inside) are not violations" 0 \
+  "$(run_gate "$d_array")" "2 function(s) across 1 file(s) are frozen"
+
+# ---- 20. whitespace inside the parens is still a definition ---------------------
+# `fail ( ) {` is a real, freezable function; a derivation that only matched
+# `()` left it invisible, and an invisible helper is an unfrozen one the gate
+# reports as fine (fifth board round, security seat).
+d_spaced="$(mkfixture spaced-parens <<'FIX'
+pass ( ) { echo "  PASS: $1"; }
+readonly -f pass
+function bad ( ) {
+  echo "  FAIL: $1"
+}
+readonly -f bad
+fail (	) {
+  echo "  FAIL: $1"
+}
+FIX
+)"
+expect_rc "20. 'name ( ) {' and 'function name ( ) {' are derived like 'name() {' — the unfrozen one is reported" 1 \
+  "$(run_gate "$d_spaced")" "1 violation(s)" "fixture.test.sh:7: fail() is not frozen"
+spaced_list="$(FN_FREEZE_DIRS="$d_spaced" bash "$GATE" --list 2>&1 | cut -f2,5 | tr '\t\n' '  ')"
+if [ "$spaced_list" = "pass frozen bad frozen fail unfrozen " ]; then
+  pass "20b. --list derives all three spaced spellings with their names"
+else
+  fail "20b. --list derived: '$spaced_list'"
+fi
+
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
 # Same posture as check-suite-wiring.test.sh: comment-stripped scan of every
 # workflow and composite action, fail closed on a missing dir or a grep error.

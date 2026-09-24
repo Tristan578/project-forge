@@ -130,7 +130,7 @@ derive_file() {
     # `shopt` and an s flag cluster follows, a later `expand_aliases` is one
     # (`shopt -s nocasematch expand_aliases` still turns it on). A statement
     # ends at `;`, `&`, `|`, `(`, `)` or a line end that is not a
-    # continuation. That is what makes `\alias`, `builtin alias`, `time -p
+    # continuation. That is what makes `\alias`, `builtin alias`, `command
     # alias`, `X="1" alias`, `"alias" fail=:` and `\a\l\i\a\s fail=:` all one
     # case — each spells the same command word — instead of a list of
     # prefixes that the review board extended twice and could always extend
@@ -177,6 +177,15 @@ derive_file() {
           if (c2 == "$(") { end_command(); d++; st_q[d] = q; q = ""; i += 2; continue }
           w = w c; i++; continue
         }
+        if (arr) {
+          if (c == "\\") { i += 2; continue }
+          if (c2 == "$\047") { q = "a"; i += 2; continue }
+          if (c == "\047") { q = "s"; i++; continue }
+          if (c == "\"") { q = "d"; i++; continue }
+          if (c == "(") arr_d++
+          if (c == ")") { arr_d--; if (arr_d == 0) { arr = 0; w = "" } }
+          i++; continue
+        }
         if (c == "\\") {
           if (i == n) { cont = 1; i++; continue }
           w = w substr(line, i + 1, 1); i += 2; continue
@@ -189,6 +198,11 @@ derive_file() {
           w = w c; i++; continue
         }
         if (c2 == "$(") { end_command(); d++; st_q[d] = ""; i += 2; continue }
+        # `NAME=(` / `NAME+=(` opens an ARRAY LITERAL: its elements are words
+        # that are stored, never run, so none of them can be a command word.
+        # The group is skipped to its closing paren (quotes inside it are
+        # still tracked so a `)` in a string does not end it early).
+        if (c == "(" && w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=$/) { arr = 1; arr_d = 1; w = ""; i++; continue }
         if (c == "(") { end_command(); d++; st_q[d] = ""; i++; continue }
         if (c == ")") { end_command(); if (d > 0) { q = st_q[d]; d-- } i++; continue }
         if (c3 == "<<<") { end_word(); i += 3; continue }
@@ -259,11 +273,15 @@ derive_file() {
 
       if (line ~ /^[[:space:]]*#/) next
 
-      # A top-level definition. Three spellings, column 0 only.
+      # A top-level definition. Three spellings, column 0 only. Bash accepts
+      # whitespace between the parens (`fail ( ) {` is a real, freezable
+      # function), so the parens are matched with optional space inside; the
+      # fifth board round found the adjacent-only pattern left such a helper
+      # invisible to the derivation, and therefore unfrozen and unreported.
       name = ""
-      if (match(line, /^(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/)) {
+      if (match(line, /^(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([[:space:]]*\)[[:space:]]*\{/)) {
         name = substr(line, RSTART, RLENGTH)
-        sub(/^function[[:space:]]+/, "", name); sub(/[[:space:]]*\(\)[[:space:]]*\{$/, "", name)
+        sub(/^function[[:space:]]+/, "", name); sub(/[[:space:]]*\([[:space:]]*\)[[:space:]]*\{$/, "", name)
       } else if (match(line, /^function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\{/)) {
         name = substr(line, RSTART, RLENGTH)
         sub(/^function[[:space:]]+/, "", name); sub(/[[:space:]]*\{$/, "", name)

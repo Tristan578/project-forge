@@ -828,7 +828,11 @@ by construction rather than by measurement.
   file — single, double and `$'` quotes, backslashes, `$( )` contexts (a `$(`
   inside double quotes opens a fresh quoting context, as bash does), comments,
   heredoc bodies — and emits every column-0 definition with its closing line.
-  The rule is shape, not text: the very next line must be `readonly -f <name>`.
+  The rule is shape, not text: the very next line must be `readonly -f <name>`,
+  and the shapes are bash's — `name ( ) {` with space inside the parens is a
+  definition too (the fifth board round found an adjacent-only `()` left such
+  a helper invisible, so unfrozen and unreported), and an array literal
+  `NAME=( ... )` holds words that never run.
   A freeze anywhere else is a stray (before its definition it cannot bind; after
   a blank line it leaves a window; inside a quoted program or a heredoc fixture
   it is text, not a statement). Only a `<<-` heredoc has its leading tabs
