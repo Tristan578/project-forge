@@ -207,7 +207,8 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   loop, `if`/`case` arm or brace group, counted by command word, not
   indentation) is defined at column 0, at the start of its own line, with a
   plain identifier name. Anything else at top level — indented, after another
-  command, second on a line, a dashed name — is reported as `shape`, because
+  command or a closing brace, second on a line (even under the same name), a
+  dashed name — is reported as `shape`, because
   the freeze rule cannot tie it to a freeze line.
 - `<<` inside `(( ))`, `$(( ))` or the deprecated `$[ ]` is a shift operator,
   not a heredoc.

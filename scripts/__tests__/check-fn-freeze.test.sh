@@ -1120,6 +1120,43 @@ FIX
 expect_rc "28d. after same-line blocks, keywords as arguments, a one-line body and a multi-line body, an indented top-level definition is still reported" 1 \
   "$(run_gate "$d_depth")" "1 violation(s)" "fixture.test.sh:16: 'hidden()'"
 
+# ---- 29. text after a closing brace, and a same-name second definition ------
+# Twelfth board round, security seat: the rest of a column-0 closing-brace
+# line was never lexed, so `}; alias fail=:` and `}; decoy() { ...; }` were
+# invisible; and a second `fail()` on the line of a one-line `fail()` shared
+# its name with the derived definition, so it was excused as that one. Prove
+# the redefinition takes the name in this bash first, so the case cannot pass
+# against a shape bash would not honour.
+redef_probe="$(bash -c 'fail() { echo REAL; }; fail() { echo FAKE; }; readonly -f fail; fail' 2>&1)"
+if [ "$redef_probe" = "FAKE" ]; then
+  pass "29-probe. in this bash a same-line second definition takes the name before the freeze"
+else
+  fail "29-probe. the same-line redefinition probe did not rebind (got '$redef_probe')"
+fi
+d_after="$(mkfixture after-brace <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+fail() {
+  echo "  FAIL: $1"
+}; shopt -s expand_aliases; alias fail=:
+readonly -f fail
+ok() {
+  :
+}; decoy() { :; }
+readonly -f ok
+bad() { echo "  BAD: $1"; }; bad() { :; }
+readonly -f bad
+FIX
+)"
+expect_rc "29. an alias and a definition after a closing brace, and a same-name second definition on one line, are reported" 1 \
+  "$(run_gate "$d_after")" "4 violation(s)" "fixture.test.sh:5: 'shopt -s expand_aliases'" "fixture.test.sh:5: 'alias fail=:'" "fixture.test.sh:9: 'decoy()'" "fixture.test.sh:11: 'bad()'"
+after_list="$(FN_FREEZE_DIRS="$d_after" bash "$GATE" --list 2>&1 | awk -F'\t' '$5 == "frozen" { printf "%s ", $2 }')"
+if [ "$after_list" = "pass fail ok bad " ]; then
+  pass "29b. the four column-0 definitions are still derived and frozen around them"
+else
+  fail "29b. --list frozen rows: '$after_list'"
+fi
+
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
 # Same posture as check-suite-wiring.test.sh: comment-stripped scan of every
 # workflow and composite action, fail closed on a missing dir or a grep error.

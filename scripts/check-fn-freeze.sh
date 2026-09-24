@@ -294,8 +294,14 @@ derive_file() {
     # command (bs back at the depth it had outside any definition). If the
     # column-0 rule did not derive it on this line, the freeze rule cannot see
     # it, so it is reported rather than left unfrozen and unmentioned.
+    # The column-0 rule derives exactly one definition per line, the first one
+    # on it, so only the first statement-start occurrence of that name is
+    # excused. A second definition of the same name later on the line is a
+    # redefinition the freeze on the next line would protect instead (twelfth
+    # board round: `fail() { ...; }; fail() { :; }` was reported frozen).
     function shape_check(label, n) {
-      if (d == 0 && bs == def_bs && (def_name == "" || def_name == line_def) && n != line_def)
+      if (n == line_def && !line_def_hit) { line_def_hit = 1; return }
+      if (d == 0 && bs == def_bs && (def_name == "" || def_name == line_def))
         printf "%s\t%s\t%d\t%d\tshape\n", file, label, NR, NR
     }
     function end_command() { end_word(); if (in_trap) check_trap(); cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = "" }
@@ -431,7 +437,7 @@ derive_file() {
       if (q == "" && !cont) { end_word(); if (in_trap) check_trap() }
     }
     {
-      line = $0; line_def = ""
+      line = $0; line_def = ""; line_def_hit = 0
 
       # Inside a heredoc body: only its terminator matters.
       # Only a `<<-` heredoc lets bash strip leading tabs before matching
@@ -491,8 +497,11 @@ derive_file() {
       }
 
       # Inside a multi-line definition: the column-0 closing brace ends it.
+      # Whatever follows that brace on the same line runs at top level, so it
+      # is lexed like any other top-level text once the body is closed (the
+      # twelfth board round hid `alias fail=:` after `};` on that line).
       if (def_name != "") {
-        if (line ~ /^\}/) { flush_def(); next }
+        if (line ~ /^\}/) { flush_def(); lex_line(substr(line, 2)); next }
         lex_line(line)
         next
       }
@@ -625,9 +634,9 @@ if [ -n "$violations" ]; then
       case "$status" in
         unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
         stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, a freeze inside a quoted string or fixture is text, not a statement, and a freeze naming a function this file never defines is left over from a rename or a deletion: move this line to directly after the closing brace of $name(), or delete it" ;;
-        alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion" ;;
-        trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 that exits or execs, directly or through a function of this file, replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may)" ;;
-        builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable" ;;
+        alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion — delete this line" ;;
+        trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 that exits or execs, directly or through a function of this file, replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — delete this trap or extdebug line, or make its action return without exiting" ;;
+        builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable — rename this function, or delete the enable call" ;;
         shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
         unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as a one-liner '$name() { ...; }', or multi-line with the closing '}' at column 0, then freeze it on the next line" ;;
       esac

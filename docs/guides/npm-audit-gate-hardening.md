@@ -862,8 +862,10 @@ by construction rather than by measurement.
   `cleanup() { exit 0; }` + `trap cleanup EXIT` (tenth round); signal traps
   and cleanup traps whose functions never exit are fine. A top-level
   definition the freeze rule cannot see — indented with nothing enclosing it,
-  after another command, a dashed name — is reported as `shape` (eleventh
-  round: one space of indentation made a neutering redefinition invisible);
+  after another command or a closing brace, second on a line (even with the
+  same name as the first), a dashed name — is reported as `shape` (eleventh
+  round: one space of indentation made a neutering redefinition invisible;
+  twelfth: the text after a closing brace was never read);
   nesting is counted by command word, so a helper inside an `if` arm stays out
   of scope as before. No files, no definitions, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
@@ -931,8 +933,11 @@ reproduction are what prove a surviving freeze is in force.
 `lockfile-sync-tests` gained a shellcheck entry and two steps (suite, then
 gate), mirrored in this suite's step-block and shellcheck pins;
 `SELF_EXEC_EXPECTED_DROP` moved 658 → 663 with the heredoc payload. Shellcheck
-clean on every touched file. All 67 suites under the four scanned directories
-(54 in `scripts/__tests__`, 12 in `.claude/hooks/__tests__`, 1 in
-`.claude/tools/__tests__`) exit 0 on the frozen tree. No
+clean on every touched file. At the time of the sweep, all 67 suites under the
+scanned directories (54 in `scripts/__tests__`, 12 in `.claude/hooks/__tests__`,
+1 in `.claude/tools/__tests__`; `scripts/__tests__/lib` holds a sourced helper,
+not a suite) exited 0 on the frozen tree. Later merges from main added suites,
+so the live figure differs; `bash scripts/check-fn-freeze.sh --list` derives the
+current one. No
 workflow was degated for the measurement; the neuter-plus-forced-failure stand-in
 replaced per-gate degating.
