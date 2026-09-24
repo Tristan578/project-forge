@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@/test/utils/componentTestUtils';
 import { TutorialOverlay } from '../TutorialOverlay';
+import { HelpMenu } from '../HelpMenu';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore, setCommandDispatcher } from '@/stores/editorStore';
 import { TUTORIAL_CAPABILITIES } from '@/data/tutorials';
@@ -128,10 +129,13 @@ describe('capabilities tour (#10171)', () => {
   });
 
   // Compact docks the quick-start trigger at the bottom. A bubble placed below
-  // it and clamped back up covered the very control it pointed at.
-  it('puts the bubble above a target docked at the bottom, not over it', () => {
+  // it and clamped back up covered the very control it pointed at. Above it,
+  // the bubble is anchored by its BOTTOM edge 16px over the target, so no
+  // bubble height, guessed or real, can reach the button.
+  it('anchors the bubble above a target docked at the bottom, by its bottom edge', () => {
     const viewportH = window.innerHeight;
-    RECTS['quick-start-trigger'] = { left: 100, top: viewportH - 46, width: 44, height: 44 };
+    const targetTop = viewportH - 46;
+    RECTS['quick-start-trigger'] = { left: 100, top: targetTop, width: 44, height: 44 };
     try {
       render(
         <>
@@ -143,9 +147,10 @@ describe('capabilities tour (#10171)', () => {
       next();
 
       const bubble = screen.getByTestId('tutorial-bubble');
-      const bubbleTop = parseFloat(bubble.style.top);
-      // Its reserved 216px ends above the button.
-      expect(bubbleTop + 216).toBeLessThanOrEqual(viewportH - 46);
+      expect(bubble.style.bottom).toBe(`${viewportH - targetTop + 16}px`);
+      expect(bubble.style.top).toBe('');
+      // Capped to the room above, so it cannot run off the top either.
+      expect(bubble.style.maxHeight).toBe(`${targetTop - 16 - 16}px`);
     } finally {
       RECTS['quick-start-trigger'] = { left: 100, top: 20, width: 120, height: 32 };
     }
@@ -163,6 +168,29 @@ describe('capabilities tour (#10171)', () => {
       const width = parseFloat(bubble.style.width);
       expect(left).toBeGreaterThanOrEqual(16);
       expect(left + width).toBeLessThanOrEqual(320 - 16);
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: original });
+    }
+  });
+
+  // The intro card has no target, so nothing else re-renders it on resize: a
+  // rotation to portrait must still re-fit it or Next and Skip end up off-screen.
+  it('re-fits the untargeted intro card when the window is resized', () => {
+    const original = window.innerWidth;
+    try {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+      render(<TutorialOverlay />);
+      startTour();
+      const bubble = screen.getByTestId('tutorial-bubble');
+      expect(bubble.style.width).toBe('400px');
+
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
+      act(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
+
+      expect(bubble.style.width).toBe(`${320 - 32}px`);
+      expect(bubble.style.left).toBe('16px');
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: original });
     }
@@ -203,5 +231,93 @@ describe('capabilities tour (#10171)', () => {
 
     startTour();
     expect(screen.getByText(TITLES[0] ?? '', { selector: 'h3' })).toBeInTheDocument();
+  });
+});
+
+describe('capabilities tour accessibility (#10171)', () => {
+  function nextButton() {
+    return screen.getByRole('button', { name: /^(Next|Complete)$/ });
+  }
+
+  it('is a non-modal dialog named by the step title and described by its text and keys', () => {
+    render(
+      <>
+        <Targets />
+        <TutorialOverlay />
+      </>,
+    );
+    startTour();
+
+    const dialog = screen.getByRole('dialog', { name: TITLES[0] });
+    expect(dialog.getAttribute('aria-modal')).toBeNull();
+    expect(dialog).toHaveAccessibleDescription(
+      expect.stringContaining(TUTORIAL_CAPABILITIES.steps[0]!.description),
+    );
+    // The keyboard shortcuts are visible and part of the description.
+    const hint = screen.getByTestId('tutorial-key-hint');
+    expect(hint).toBeVisible();
+    expect(hint.textContent).toMatch(/Right arrow.*Left arrow.*Esc/);
+    expect(dialog).toHaveAccessibleDescription(expect.stringContaining(hint.textContent ?? '---'));
+
+    next();
+    expect(screen.getByRole('dialog', { name: TITLES[1] })).toBeInTheDocument();
+  });
+
+  it('moves focus to Next when the tour starts and again on every step', () => {
+    render(
+      <>
+        <Targets />
+        <TutorialOverlay />
+      </>,
+    );
+    startTour();
+    expect(document.activeElement).toBe(nextButton());
+
+    // The user clicks into the editor mid-tour; the next step takes focus back.
+    screen.getByTestId('play-controls-play').focus();
+    expect(document.activeElement).not.toBe(nextButton());
+    next();
+    expect(screen.getByText(TITLES[1] ?? '', { selector: 'h3' })).toBeInTheDocument();
+    expect(document.activeElement).toBe(nextButton());
+  });
+
+  it('announces each new step in a polite status region', () => {
+    render(
+      <>
+        <Targets />
+        <TutorialOverlay />
+      </>,
+    );
+    startTour();
+    next();
+
+    const live = screen.getByTestId('tutorial-live');
+    expect(live.getAttribute('role')).toBe('status');
+    expect(live.textContent).toBe(
+      `Step 2 of ${TITLES.length}: ${TITLES[1]}. ${TUTORIAL_CAPABILITIES.steps[1]!.description}`,
+    );
+  });
+
+  // The real launch path: HelpMenu's close() puts focus back on the Help button
+  // and only then starts the tour. The tour must take focus from there, and
+  // hand it back when it ends.
+  it('takes focus from the Help menu and returns it to the Help button on Escape', () => {
+    render(
+      <>
+        <HelpMenu onOpenShortcuts={() => {}} onOpenFeedback={() => {}} />
+        <Targets />
+        <TutorialOverlay />
+      </>,
+    );
+    const help = screen.getByRole('button', { name: 'Help menu' });
+    fireEvent.click(help);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'What can SpawnForge do?' }));
+
+    expect(useOnboardingStore.getState().activeTutorial).toBe('capabilities');
+    expect(document.activeElement).toBe(nextButton());
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(help);
   });
 });
