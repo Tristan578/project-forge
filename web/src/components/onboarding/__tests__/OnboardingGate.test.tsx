@@ -331,10 +331,12 @@ describe('OnboardingGate', () => {
       await waitFor(() => expect(completeOnboarding).toHaveBeenCalledTimes(1));
     });
 
-    // The real "Buy tokens" round trip leaves the editor entirely: the whole
-    // tree unmounts, the dialog's open state with it, and the user comes back
-    // to a closed dialog. A refused build leaves the plan at 'awaiting_approval'
-    // (live), so the attempt must still be pending and the wizard hidden.
+    // An in-app visit away from the editor (e.g. the review's "Buy tokens" link
+    // to settings) unmounts the whole tree, the dialog's open state with it,
+    // and the user comes back to a closed dialog. A refused build leaves the
+    // plan at 'awaiting_approval' (live), so the attempt must still be pending
+    // and the wizard hidden. A completed Stripe purchase is a full page load
+    // and is NOT covered: that drops all in-memory state (#10270).
     it('keeps the attempt across leaving the editor and coming back with the dialog closed', async () => {
       const first = await startAiPath();
       setStatus('awaiting_approval');

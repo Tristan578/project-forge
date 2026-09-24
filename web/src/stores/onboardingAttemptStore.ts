@@ -9,13 +9,15 @@
  * - EditorLayout renders the gate in two layout trees (desktop and compact),
  *   so crossing the responsive breakpoint unmounts one gate and mounts
  *   another mid-attempt;
- * - the plan review's "Buy tokens" link navigates away from the editor and
- *   back, which remounts it too.
+ * - an in-app visit elsewhere (the review's "Buy tokens" link opens the
+ *   settings page) and back remounts it too.
  *
  * Component state reset on either, stacking the wizard over the open dialog
  * and never crediting a build that then succeeded. This module store survives
  * both, because the JS module does, and it is deliberately NOT persisted: a
- * reload drops the orchestrator run with it, so the attempt is over.
+ * full page load drops the orchestrator run with it, so the attempt is over.
+ * That includes completing a purchase, which goes through Stripe and returns
+ * to the site root; keeping a plan across checkout is #10270.
  */
 import { create } from 'zustand';
 

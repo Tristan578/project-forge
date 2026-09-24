@@ -205,6 +205,20 @@ let _abortController: AbortController | null = null;
 export const INSUFFICIENT_TOKENS_MESSAGE = 'Insufficient tokens — add tokens or upgrade your plan';
 
 /**
+ * Shown when the reserve request's outcome is unknown: the request never got a
+ * reply (network), or the reply was a 2xx the client could not read. The route
+ * may already have deducted the hold, so this must NOT claim nothing was spent.
+ */
+export const RESERVATION_UNCONFIRMED_MESSAGE =
+  'We could not confirm the build started. Check your token balance before trying again.';
+
+/**
+ * The route answered the reserve request with a non-2xx status. Only this
+ * proves nothing was deducted: the route refuses before `deductTokens` runs.
+ */
+class ReservationRefusedError extends Error {}
+
+/**
  * Reserve the plan's high-variance token total for a build that is starting.
  *
  * Server-side this is `reserveTokenBudget` -> `deductTokens('pipeline_reserve')`:
@@ -232,7 +246,7 @@ async function reserveBuildBudget(estimatedTotal: number): Promise<string | null
 
   if (!reserveRes.ok) {
     const reserveBody = await reserveRes.json().catch(() => ({ error: 'Token reservation failed' }));
-    throw new Error(reserveBody.error === 'insufficient_tokens'
+    throw new ReservationRefusedError(reserveBody.error === 'insufficient_tokens'
       ? INSUFFICIENT_TOKENS_MESSAGE
       : reserveBody.error ?? 'Token reservation failed');
   }
@@ -534,7 +548,11 @@ export const createOrchestratorSlice: StateCreator<
       // Nothing ran and nothing was reserved: the plan is intact, so it goes
       // back to waiting for "build" with the reason attached, rather than to
       // 'failed', whose only way on is designing (and paying for) it again.
-      set({ orchestratorStatus: 'awaiting_approval', orchestratorError: 'Engine not loaded' });
+      // Same run-identity gate as every other writer here: a reset during the
+      // import above must not get a live status painted over its idle store.
+      if (get().currentPlan === currentPlan) {
+        set({ orchestratorStatus: 'awaiting_approval', orchestratorError: 'Engine not loaded' });
+      }
       settle();
       return;
     }
@@ -556,14 +574,19 @@ export const createOrchestratorSlice: StateCreator<
       settle();
       // A cancel while reserving already set 'cancelled'; do not repaint it.
       if (signal.aborted) return;
-      // Refused before any step ran: nothing was spent and the plan is intact,
-      // so it goes back to the review with the reason, and survives the user
-      // leaving the editor to buy tokens (a store status, not dialog state).
       if (get().currentPlan === currentPlan) {
-        set({
-          orchestratorStatus: 'awaiting_approval',
-          orchestratorError: err instanceof Error ? err.message : String(err),
-        });
+        if (err instanceof ReservationRefusedError) {
+          // The route said no: nothing was spent and the plan is intact, so it
+          // goes back to the review with the reason. As store state it outlives
+          // the dialog and in-app navigation; a full page load (Stripe checkout
+          // returns to the site root) still drops it, like all editor state.
+          set({ orchestratorStatus: 'awaiting_approval', orchestratorError: err.message });
+        } else {
+          // No reply, or a 2xx we could not read: the hold may already have
+          // been taken, with no id to release it by. Say so, and do not offer
+          // a one-click retry that could take a second hold.
+          set({ orchestratorStatus: 'failed', orchestratorError: RESERVATION_UNCONFIRMED_MESSAGE });
+        }
       }
       return;
     }

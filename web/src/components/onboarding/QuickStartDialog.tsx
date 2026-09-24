@@ -40,7 +40,7 @@ import {
   isOrchestratorRunLive,
   type OrchestratorStatus,
 } from '@/stores/slices/orchestratorSlice';
-import { SETTINGS_BILLING_HREF } from '@/lib/navigation/settingsRoutes';
+import { SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
 import {
   QUICK_START_GAME_TYPES,
   buildQuickStartPrompt,
@@ -168,7 +168,9 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // A build refused before any step ran (its reservation was declined, or the
   // engine was not ready) returns the plan to the review with the reason on
   // the store. It is shown ON the review, so it survives the dialog closing,
-  // a reload of this component, and a trip to billing and back (#6831).
+  // this component remounting, and in-app navigation (#6831). A full page load
+  // (Stripe checkout returns to the site root) drops it with the rest of the
+  // editor's in-memory state; keeping it across checkout is #10270.
   const reviewError = planGate ? orchestratorError : null;
 
   // While this dialog is open it is the only place the user can reach a gate
@@ -334,10 +336,10 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         const message = state.orchestratorError ?? GENERIC_FAILURE;
         setError(message);
         toast.error(message);
-      } else if (state.orchestratorStatus === 'awaiting_approval' && state.orchestratorError) {
-        // Refused before it started: the review shows the reason itself.
-        toast.error(state.orchestratorError);
       }
+      // A refusal before any step ran returns to the review, which shows the
+      // reason in its own alert and status line; a toast as well would announce
+      // the same event three times.
     } catch (err) {
       const message = err instanceof Error && err.message ? err.message : GENERIC_FAILURE;
       setError(message);
@@ -549,14 +551,19 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
                   {reviewError === INSUFFICIENT_TOKENS_MESSAGE && (
                     <>
                       {' '}
-                      <Link href={SETTINGS_BILLING_HREF} className="underline underline-offset-2">
+                      <Link href={SETTINGS_TOKENS_HREF} className="underline underline-offset-2">
                         Buy tokens
                       </Link>
                     </>
                   )}
                 </div>
               )}
-              {tokenEstimate && <TokenCostBar estimate={tokenEstimate} />}
+              {tokenEstimate && (
+                // The refusal above already says the balance was short, with
+                // its own Buy tokens link; the bar's "this MAY cost more"
+                // warning would contradict it with a second link.
+                <TokenCostBar estimate={tokenEstimate} hideBalanceWarning={reviewError !== null} />
+              )}
             </ApprovalGateDialog>
           )}
 

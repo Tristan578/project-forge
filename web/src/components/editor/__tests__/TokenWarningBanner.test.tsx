@@ -61,12 +61,13 @@ describe('TokenWarningBanner', () => {
     expect(screen.getByText(/10,000/)).toBeInTheDocument();
   });
 
-  it('shows Buy Tokens link pointing to billing', () => {
+  it('shows Buy Tokens link pointing to the Tokens tab, where the packs are', () => {
     mockState.tokenBalance = { monthlyRemaining: 100, monthlyTotal: 10000, addon: 0, total: 100, nextRefillDate: null };
     render(<TokenWarningBanner />);
     const link = screen.getByText('Buy Tokens');
-    // Was '/settings/billing', a route that has never existed (#9046).
-    expect(link.getAttribute('href')).toBe('/settings?tab=billing');
+    // Was '/settings/billing', a route that has never existed (#9046), then the
+    // Billing tab, which sells no token packs (#6831).
+    expect(link.getAttribute('href')).toBe('/settings?tab=tokens');
   });
 
   it('dismisses token warning when X is clicked', () => {

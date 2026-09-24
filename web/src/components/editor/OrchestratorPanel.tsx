@@ -494,13 +494,23 @@ export function OrchestratorPanel() {
       {/* Footer actions */}
       <div className="border-t border-[var(--sf-border)] px-3 py-2">
         {status === 'awaiting_approval' && !pendingGate && (
-          <button
-            onClick={handleStartPipeline}
-            className="flex w-full items-center justify-center gap-2 rounded bg-[var(--sf-accent-hover)] px-3 py-2 text-sm font-medium text-[var(--sf-on-accent)] transition-colors hover:bg-[var(--sf-accent-active)]"
-          >
-            <Play className="h-3.5 w-3.5" />
-            Start Building
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleStartPipeline}
+              className="flex flex-1 items-center justify-center gap-2 rounded bg-[var(--sf-accent-hover)] px-3 py-2 text-sm font-medium text-[var(--sf-on-accent)] transition-colors hover:bg-[var(--sf-accent-active)]"
+            >
+              <Play className="h-3.5 w-3.5" aria-hidden="true" />
+              Start Building
+            </button>
+            {/* A plan waiting here (including one whose build was refused) is a
+                live run, so without this the panel had no way to drop it. */}
+            <button
+              onClick={handleCancel}
+              className="rounded bg-[var(--sf-bg-elevated)] px-3 py-2 text-sm font-medium text-[var(--sf-text)] transition-colors hover:bg-[var(--sf-bg-overlay)]"
+            >
+              Discard plan
+            </button>
+          </div>
         )}
 
         {(status === 'executing' || status === 'decomposing' || status === 'planning') && (

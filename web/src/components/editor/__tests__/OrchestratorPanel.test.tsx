@@ -271,7 +271,7 @@ describe('OrchestratorPanel', () => {
     // it is short (the build stops before spending) and where to get more.
     expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Buy tokens' }).getAttribute('href')).toBe(
-      '/settings?tab=billing',
+      '/settings?tab=tokens',
     );
   });
 
@@ -296,6 +296,22 @@ describe('OrchestratorPanel', () => {
     expect(rowClasses.some((c) => /^(bg|text)-red-/.test(c))).toBe(false);
     expect(rowClasses).toContain('bg-[var(--sf-destructive)]/10');
     expect(rowClasses).toContain('text-[var(--sf-text)]');
+  });
+
+  // #6831: a refused build returns the plan to 'awaiting_approval' (a live
+  // status), so the panel must be able to drop it as well as build it.
+  it('offers Discard plan beside Start Building for a waiting plan', () => {
+    mockStore({
+      orchestratorStatus: 'awaiting_approval',
+      currentPlan: MOCK_PLAN,
+      stepStatuses: {},
+      orchestratorError: 'Insufficient tokens — add tokens or upgrade your plan',
+    });
+    render(<OrchestratorPanel />);
+
+    expect(screen.getByRole('button', { name: /Start Building/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+    expect(mockCancelPipeline).toHaveBeenCalledTimes(1);
   });
 
   it('renders approval gate dialog', () => {

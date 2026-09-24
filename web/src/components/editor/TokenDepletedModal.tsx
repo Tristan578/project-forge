@@ -6,7 +6,7 @@ import { AlertCircle, ArrowUpCircle, CreditCard, Key } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useUserStore } from '@/stores/userStore';
 import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
-import { SETTINGS_BILLING_HREF, SETTINGS_KEYS_HREF } from '@/lib/navigation/settingsRoutes';
+import { SETTINGS_KEYS_HREF, SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
 
 /**
  * Modal shown when the user has 0 tokens and attempts to send an AI message.
@@ -36,7 +36,7 @@ export function TokenDepletedModal() {
   // non-dismissible, so a dead link here strands a paying user with no exit.
   const handleBuyTokens = useCallback(() => {
     setShowModal(false);
-    router.push(SETTINGS_BILLING_HREF);
+    router.push(SETTINGS_TOKENS_HREF);
   }, [setShowModal, router]);
 
   // The tab id is `keys`, NOT `api-keys` (SettingsPage TABS). This one matters

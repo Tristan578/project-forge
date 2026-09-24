@@ -3,6 +3,7 @@ import { createSliceStore } from './sliceTestTemplate';
 import {
   createOrchestratorSlice,
   INSUFFICIENT_TOKENS_MESSAGE,
+  RESERVATION_UNCONFIRMED_MESSAGE,
   isOrchestratorRunLive,
   _setAbortController,
   _getGateResolver,
@@ -512,6 +513,22 @@ describe('orchestratorSlice', () => {
     // Nothing ran and nothing was reserved, so the plan goes back to waiting
     // for "build" with the reason, not to 'failed' (whose way on is a paid
     // re-design). The same plan builds once the engine is there.
+    it('does not paint a live status over a store reset while it checked for the engine', async () => {
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
+      const editorStore = await import('@/stores/editorStore');
+      (editorStore.getCommandDispatcher as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        // The user resets while the run looks for the engine.
+        store.getState().resetOrchestrator();
+        return null;
+      });
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(store.getState().orchestratorStatus).toBe('idle');
+      expect(store.getState().orchestratorError).toBeNull();
+    });
+
     it('returns the plan to the review when the engine is not loaded, and builds it on retry', async () => {
       const plan = makeMockPlan();
       store.getState().setPlan(plan);
@@ -1447,7 +1464,7 @@ describe('orchestratorSlice', () => {
       expect(runPipeline).not.toHaveBeenCalled();
     });
 
-    it('fails with the route\'s own reason when it refuses for something else', async () => {
+    it('returns the plan to the review with the route\'s own reason when it refuses for something else', async () => {
       mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Pipeline budget unavailable' }) });
       store.getState().setPlan(makeMockPlan());
 
@@ -1460,15 +1477,22 @@ describe('orchestratorSlice', () => {
     });
 
     // A build with an undefined reservation would run and never be refunded.
-    it('refuses to build on a reservation reply with no id', async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ reservationId: '' }) });
+    // Only a non-2xx reply proves nothing was deducted. A 2xx the client cannot
+    // use, or no reply at all, leaves the hold's fate unknown: the run must not
+    // claim nothing was spent, nor sit on the review inviting a second hold.
+    it.each([
+      ['a 2xx reply with no id', () => mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ reservationId: '' }) })],
+      ['a 2xx reply that is not JSON', () =>
+        mockFetch.mockResolvedValueOnce({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } })],
+      ['no reply (network)', () => mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'))],
+    ])('reports an unconfirmed outcome, not a clean refusal, for %s', async (_case, arrange) => {
+      arrange();
       store.getState().setPlan(makeMockPlan());
 
       await store.getState().runPipelineFromPlan();
 
-      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
-      expect(store.getState().orchestratorError).toContain('invalid ID');
-      expect(Object.values(store.getState().stepStatuses).every((st) => st === 'pending')).toBe(true);
+      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorError).toBe(RESERVATION_UNCONFIRMED_MESSAGE);
       expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
       expect(runPipeline).not.toHaveBeenCalled();
     });

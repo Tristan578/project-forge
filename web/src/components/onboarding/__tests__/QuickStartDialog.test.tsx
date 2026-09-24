@@ -13,7 +13,10 @@ import {
 } from '@/test/utils/componentTestUtils';
 import { toast } from 'sonner';
 import { QuickStartDialog } from '../QuickStartDialog';
-import { INSUFFICIENT_TOKENS_MESSAGE } from '@/stores/slices/orchestratorSlice';
+import {
+  INSUFFICIENT_TOKENS_MESSAGE,
+  RESERVATION_UNCONFIRMED_MESSAGE,
+} from '@/stores/slices/orchestratorSlice';
 import {
   QUICK_START_GAME_TYPES,
   QUICK_START_PROMPT_MAX,
@@ -622,7 +625,8 @@ describe('QuickStartDialog', () => {
     // #6831 review: a refused build returns the plan to the review with the
     // reason on the STORE (status 'awaiting_approval', `orchestratorError`), so
     // "Build it" is right there again and nothing is re-designed. Because it is
-    // store state, it also survives the dialog closing and a trip to billing.
+    // store state, it also survives the dialog closing and in-app navigation
+    // (not a full page load such as a Stripe checkout; see #10270).
     it('keeps the review up with the reason and a Buy tokens link when the reservation is refused', async () => {
       runPipelineFromPlan.mockImplementationOnce(async () => {
         hoisted.state.orchestratorStatus = 'awaiting_approval';
@@ -634,9 +638,10 @@ describe('QuickStartDialog', () => {
       const alert = await screen.findByRole('alert');
       expect(alert.textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
       expect(screen.getByRole('link', { name: 'Buy tokens' }).getAttribute('href')).toBe(
-        '/settings?tab=billing',
+        '/settings?tab=tokens',
       );
-      expect(toast.error).toHaveBeenCalledWith(INSUFFICIENT_TOKENS_MESSAGE);
+      // One announcement: the alert and the status line, not also a toast.
+      expect(toast.error).not.toHaveBeenCalled();
       // Says what happened, not "building" or "stopped early".
       expect(screen.getByRole('status').textContent).toContain('The build did not start');
       expect(screen.getByText(/Nothing was spent/)).toBeTruthy();
@@ -646,7 +651,7 @@ describe('QuickStartDialog', () => {
       expect(startQuickStart).toHaveBeenCalledTimes(1);
     });
 
-    it('shows the refusal again when the dialog is reopened, e.g. after buying tokens', () => {
+    it('shows the refusal again when the dialog is reopened, e.g. after visiting settings', () => {
       setState({
         orchestratorStatus: 'awaiting_approval',
         orchestratorError: INSUFFICIENT_TOKENS_MESSAGE,
@@ -661,7 +666,40 @@ describe('QuickStartDialog', () => {
       expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
     });
 
-    it('keeps the review up when the engine is not ready, with no billing link', async () => {
+    // The cached estimate is usually short too when the server refuses for
+    // balance. Its "this MAY cost more" row, with a second Buy tokens link,
+    // would contradict the refusal right above it.
+    it('shows one Buy tokens link, not the cost bar\'s speculative warning too, on a balance refusal', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'awaiting_approval';
+        hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
+      });
+      await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
+      expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      await screen.findByText(/The build did not start/);
+      expect(screen.getAllByRole('link', { name: 'Buy tokens' })).toHaveLength(1);
+      expect(screen.queryByText(/may cost more than your token balance/)).toBeNull();
+    });
+
+    // No reply, or a 2xx the client could not read: the hold may already have
+    // been taken. The dialog must not say nothing was spent.
+    it('does not claim nothing was spent when the reservation outcome is unknown', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'failed';
+        hoisted.state.orchestratorError = RESERVATION_UNCONFIRMED_MESSAGE;
+      });
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      expect((await screen.findByRole('alert')).textContent).toContain(RESERVATION_UNCONFIRMED_MESSAGE);
+      expect(screen.queryByText(/Nothing was spent/)).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+    });
+
+    it('keeps the review up when the engine is not ready, with no Buy tokens link', async () => {
       runPipelineFromPlan.mockImplementationOnce(async () => {
         hoisted.state.orchestratorStatus = 'awaiting_approval';
         hoisted.state.orchestratorError = 'Engine not loaded';
@@ -845,6 +883,26 @@ describe('QuickStartDialog', () => {
       expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
     });
+  });
+
+  // The dialog's description must follow the run: "Building. You can keep
+  // working" under a finished, failed or cancelled run misstates what is
+  // happening.
+  it.each([
+    ['completed', 'Your game is built.'],
+    ['cancelled', 'Nothing is running now.'],
+    ['failed', 'Nothing is running now.'],
+  ] as const)('describes a %s run without saying it is still building', async (status, copy) => {
+    startQuickStart.mockImplementationOnce(async () => {
+      hoisted.state.orchestratorStatus = status;
+      return true;
+    });
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
+
+    expect(await screen.findByText(copy)).toBeTruthy();
+    expect(screen.queryByText(/Building\. You can keep working/)).toBeNull();
   });
 
   describe('Play now (#10166)', () => {
