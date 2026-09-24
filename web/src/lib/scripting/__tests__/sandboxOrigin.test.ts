@@ -519,7 +519,11 @@ describe('failure reporting', () => {
     vi.advanceTimersByTime(999);
     expect(stuck).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(stuck).toHaveBeenCalledWith('Script sandbox did not start within 1000 ms.', 'boot', 'timeout');
+    // The source never arrived, so that is what the report names: the boot
+    // budget covers the load (it must stay under the play watchdog), but a
+    // load that has not finished is a source-load failure, not a frame that
+    // failed to come up (Sentry review, round seven).
+    expect(stuck).toHaveBeenCalledWith('Script sandbox worker source did not load within 1000 ms.', 'boot', 'source-load');
 
     const healthy = vi.fn();
     const { host } = await startHost({ onError: healthy, bootTimeoutMs: 1000 });

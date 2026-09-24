@@ -411,13 +411,19 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
     }
   };
 
+  // The budget covers the source load as well as the frame: the whole boot
+  // has to finish inside it so it stays under the play watchdog. A load that
+  // has not finished when it runs out is reported as what it is.
+  let sourceLoaded = false;
   bootTimer = setTimeout(() => {
     bootTimer = null;
-    failBoot(`Script sandbox did not start within ${bootTimeoutMs} ms.`, 'timeout');
+    if (sourceLoaded) failBoot(`Script sandbox did not start within ${bootTimeoutMs} ms.`, 'timeout');
+    else failBoot(`Script sandbox worker source did not load within ${bootTimeoutMs} ms.`, 'source-load');
   }, bootTimeoutMs);
 
   loadWorkerSource().then(
     (source) => {
+      sourceLoaded = true;
       if (terminated) return;
       const el = createSandboxFrameElement();
       el.addEventListener(
