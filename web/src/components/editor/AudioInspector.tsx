@@ -157,7 +157,7 @@ export function AudioInspector() {
   // Before /api/user/profile resolves, `tier`/`spendableTokens` are still
   // defaults. The same rule every editor gate uses decides the loading
   // window: a panel the trial can open (hobbyist tier) reads as unlocked,
-  // anything above stays locked (#7715 review rounds 2 and 4).
+  // anything above stays locked (#7715 review round 3).
   const soundTierOk = profileLoaded ? canAccessPanel('generate-sound', tier) : canAccessPanelBeforeProfileLoad('generate-sound');
   const musicTierOk = profileLoaded ? canAccessPanel('generate-music', tier) : canAccessPanelBeforeProfileLoad('generate-music');
   // While the first /api/capabilities body is in flight nothing is known yet,

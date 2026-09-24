@@ -181,4 +181,58 @@ describe('GET /api/generate/sprite-sheet/status', () => {
     expect(data.error).not.toContain('Connection reset');
     expect(data.error).toBe('Could not read the Sprite Sheet generation status. Please try again.');
   });
+
+  // Per-panel tier gate (#7715). This route resolves the platform key itself
+  // rather than going through `createGenerationHandler`, so without its own
+  // `panelTierGateResponse('generate-sprite', …)` call a free account with no
+  // trial balance left could poll Replicate with the platform key.
+  describe('panel tier gate (generate-sprite, hobbyist)', () => {
+    function authAs(user: Record<string, unknown>) {
+      vi.mocked(authenticateRequest).mockResolvedValue({
+        ok: true as const,
+        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', ...user } as unknown as User },
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(SpriteClient).mockImplementation(
+        function (this: InstanceType<typeof SpriteClient>) {
+          this.getReplicateStatus = vi.fn().mockResolvedValue({ status: 'processing' });
+        } as unknown as typeof SpriteClient
+      );
+    });
+
+    it('refuses a starter whose trial balance is spent with 403 TIER_REQUIRED and never resolves a key', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+
+      const res = await GET(makeRequest('replicate-pred-123'));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        error: 'TIER_REQUIRED',
+        message: 'This feature requires the Starter plan',
+        currentTier: 'starter',
+        requiredTier: 'hobbyist',
+      });
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(SpriteClient).not.toHaveBeenCalled();
+    });
+
+    it('lets a starter holding spendable trial tokens through to resolveApiKey', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await GET(makeRequest('replicate-pred-123'));
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets a hobbyist account through to resolveApiKey', async () => {
+      authAs({ tier: 'hobbyist', monthlyTokens: 300, monthlyTokensUsed: 300, addonTokens: 0 });
+
+      const res = await GET(makeRequest('replicate-pred-123'));
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    });
+  });
 });

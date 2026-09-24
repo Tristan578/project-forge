@@ -612,7 +612,7 @@ export function createGenerationHandler<TParams, TResult>(
             // Pass the resolved capability (#9523) so gateway-routed capabilities
             // (image/embedding) resolve AI_GATEWAY_API_KEY instead of the
             // provider's PLATFORM_* var. `effectiveCapability` is the same value
-            // the unavailability gate computed above (step 1a); `?? undefined`
+            // the unavailability gate computed above (step 1b); `?? undefined`
             // keeps the direct 5-arg route for a route with no declared capability.
             const resolved = await resolveApiKey(
               userId,

@@ -6,6 +6,7 @@ import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
 const mockGetReplicateStatus = vi.hoisted(() => vi.fn());
@@ -233,4 +234,51 @@ describe('GET /api/generate/sprite/status', () => {
     expect(mockGetReplicateStatus).not.toHaveBeenCalled();
   });
 
+  // Per-panel tier gate (#7715). This route resolves the platform key itself
+  // rather than going through `createGenerationHandler`, so without its own
+  // `panelTierGateResponse('generate-sprite', …)` call a free account with no
+  // trial balance left could poll Replicate with the platform key.
+  describe('panel tier gate (generate-sprite, hobbyist)', () => {
+    function authAs(overrides: Partial<User>) {
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser(overrides) } });
+    }
+
+    beforeEach(() => {
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+      mockGetReplicateStatus.mockResolvedValue({ status: 'processing', output: undefined });
+    });
+
+    it('refuses a starter whose trial balance is spent with 403 TIER_REQUIRED and never resolves a key', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+
+      const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        error: 'TIER_REQUIRED',
+        message: 'This feature requires the Starter plan',
+        currentTier: 'starter',
+        requiredTier: 'hobbyist',
+      });
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(mockGetReplicateStatus).not.toHaveBeenCalled();
+    });
+
+    it('lets a starter holding spendable trial tokens through to resolveApiKey', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets a hobbyist account through to resolveApiKey', async () => {
+      authAs({ tier: 'hobbyist', monthlyTokens: 300, monthlyTokensUsed: 300, addonTokens: 0 });
+
+      const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    });
+  });
 });

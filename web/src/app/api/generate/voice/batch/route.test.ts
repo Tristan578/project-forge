@@ -8,6 +8,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { rateLimit } from '@/lib/rateLimit';
 import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+import type { User } from '@/lib/db/schema';
 
 const mockGenerateVoice = vi.hoisted(() => vi.fn());
 
@@ -378,5 +379,53 @@ describe('POST /api/generate/voice/batch', () => {
     expect(res.status).toBe(422);
     expect(typeof data.error).toBe('string');
     expect(data.error.length).toBeGreaterThan(0);
+  });
+
+  // Per-panel tier gate (#7715). This route resolves the platform key itself
+  // rather than going through `createGenerationHandler`, so without its own
+  // `panelTierGateResponse('generate-sound', …)` call a free account with no
+  // trial balance left could drive ElevenLabs with the platform key.
+  describe('panel tier gate (generate-sound, hobbyist)', () => {
+    function authAs(overrides: Partial<User>) {
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser(overrides) } });
+    }
+
+    beforeEach(() => {
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true });
+      mockGenerateVoice.mockResolvedValue({ audioBase64: 'abc123==', durationSeconds: 1.2 });
+    });
+
+    it('refuses a starter whose trial balance is spent with 403 TIER_REQUIRED and never resolves a key', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+
+      const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({
+        error: 'TIER_REQUIRED',
+        message: 'This feature requires the Starter plan',
+        currentTier: 'starter',
+        requiredTier: 'hobbyist',
+      });
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(mockGenerateVoice).not.toHaveBeenCalled();
+    });
+
+    it('lets a starter holding spendable trial tokens through to resolveApiKey', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
+      expect(res.status).toBe(200);
+      expect((await res.json()).totalGenerated).toBe(2);
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets a hobbyist account through to resolveApiKey', async () => {
+      authAs({ tier: 'hobbyist', monthlyTokens: 300, monthlyTokensUsed: 300, addonTokens: 0 });
+
+      const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
+      expect(res.status).toBe(200);
+      expect((await res.json()).totalGenerated).toBe(2);
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    });
   });
 });
