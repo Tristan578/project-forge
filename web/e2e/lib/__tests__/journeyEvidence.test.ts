@@ -14,10 +14,15 @@
  *   - not-run   the journey could not run (a required secret is absent), with
  *               the reason, excluded from any count of proven journeys.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { Tier } from '../../../src/lib/db/schema';
 import {
   JOURNEY_ANNOTATION_TYPE,
+  authenticatedCaptureProblem,
+  journeyCaptureOptions,
+  zJourneyTier,
   JOURNEY_TAG,
   JourneyRecorder,
   JourneyStepMismatchError,
@@ -383,6 +388,56 @@ describe('journeyRecordingProblem', () => {
       /trace: on-first-retry, video: retain-on-failure.*describeJourney\(\) at the top level/,
     );
     expect(journeyRecordingProblem('on', { mode: 'off' })).toMatch(/video: off/);
+  });
+});
+
+describe('authenticated journeys never get full trace/video capture (#10266)', () => {
+  // A trace records request/response headers (cookies, Authorization) and DOM
+  // snapshots; a video records every frame. journey-evidence/ is a 30-day CI
+  // artifact with no redaction, so until #10266 lands only the unauthenticated
+  // `none` tier may capture.
+  const AUTHENTICATED: JourneyTier[] = zJourneyTier.options.filter((t) => t !== 'none');
+
+  it('covers every non-none tier the schema accepts', () => {
+    expect(AUTHENTICATED).toEqual(['starter', 'hobbyist', 'creator', 'pro']);
+  });
+
+  it('turns trace and video on for the unauthenticated tier', () => {
+    expect(authenticatedCaptureProblem('none')).toBeNull();
+    expect(journeyCaptureOptions('none')).toEqual({ trace: 'on', video: 'on' });
+  });
+
+  it.each(AUTHENTICATED)('refuses to capture the %s tier, naming the redaction follow-up', (tier) => {
+    expect(authenticatedCaptureProblem(tier)).toMatch(new RegExp(`tier "${tier}".*redaction.*#10266`));
+    expect(() => journeyCaptureOptions(tier)).toThrow(/#10266/);
+  });
+
+  it('never returns trace or video "on" for an authenticated tier', () => {
+    for (const tier of AUTHENTICATED) {
+      let options: unknown = null;
+      try {
+        options = journeyCaptureOptions(tier);
+      } catch {
+        // refused: the property holds
+      }
+      expect(options, `tier ${tier}`).toBeNull();
+    }
+  });
+
+  it('describeJourney takes its trace/video options only from journeyCaptureOptions', () => {
+    // Source pin (lessons-learned #16): executable lines only, so a
+    // commented-out call does not satisfy it and a literal `trace: 'on'`
+    // bypassing the guard turns it red.
+    const source = fs.readFileSync(path.resolve(__dirname, '../../fixtures/journey.fixture.ts'), 'utf8');
+    const code = source
+      .split(/\r?\n/)
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join('\n');
+    expect(code).not.toMatch(/trace:\s*['"]on['"]/);
+    expect(code).not.toMatch(/video:\s*['"]on['"]/);
+    expect(code.match(/^\s*test\.use\(journeyCaptureOptions\(tier\)\);$/gm)).toHaveLength(1);
+    // The fixture re-checks the tier it runs as: the journeyTier option and setTier().
+    expect(code.match(/authenticatedCaptureProblem\(/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 });
 

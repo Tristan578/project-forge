@@ -43,6 +43,16 @@
  * video is not `on`, and the reporter fails a spec file that mixes journey and
  * non-journey tests.
  *
+ * AUTHENTICATED TIERS ARE REFUSED (#10266). A trace keeps request/response
+ * headers (cookies, `Authorization`) and DOM snapshots, a video keeps every
+ * frame, and `journey-evidence/` is a 30-day CI artifact with no redaction. So
+ * the schema accepts the billing tiers but a journey may only RUN as `none`:
+ * `describeJourney` takes trace/video from `journeyCaptureOptions(tier)`, which
+ * throws for any other tier, and the fixture refuses an authenticated
+ * `journeyTier` option or `journey.setTier()` the same way
+ * (`authenticatedCaptureProblem`). Lift that per tier only once #10266 adds
+ * trace/video redaction — the #9723 account journeys wait on it.
+ *
  * ENVIRONMENT. `GITHUB_SHA` is set by Actions; the engine-smoke step also sets
  * `JOURNEY_PR_HEAD_SHA` from `github.event.pull_request.head.sha` and starts the
  * server with `VERCEL_GIT_COMMIT_SHA` = `github.sha`, which is what
@@ -56,6 +66,8 @@ import {
   JOURNEY_EVIDENCE_ATTACHMENT,
   JOURNEY_TAG,
   JourneyRecorder,
+  authenticatedCaptureProblem,
+  journeyCaptureOptions,
   journeyRecordingProblem,
   normalizeSha,
   readJourneyId,
@@ -80,7 +92,7 @@ export interface Journey {
   step(name: string, expected: unknown, observe: () => unknown): Promise<unknown>;
   /** Record why this journey cannot run (e.g. a required secret is absent) and skip it. */
   notRun(reason: string): never;
-  /** Override the declared tier once the journey knows the account's real tier. */
+  /** Override the declared tier once the journey knows the account's real tier. Throws for an authenticated tier (#10266). */
   setTier(tier: JourneyTier): void;
   recordTokenBalance(when: 'before' | 'after', balance: TokenBalance): void;
   recordCost(cost: ProviderCost): void;
@@ -121,6 +133,10 @@ export const test = editorTest.extend<{ journeyTier: JourneyTier; journey: Journ
     }
     const recordingProblem = journeyRecordingProblem(trace, video);
     if (recordingProblem !== null) throw new Error(`journey ${journeyId}: ${recordingProblem}`);
+    // describeJourney already refused an authenticated declared tier; this
+    // catches a `test.use({ journeyTier })` override that bypassed it (#10266).
+    const tierProblem = authenticatedCaptureProblem(journeyTier);
+    if (tierProblem !== null) throw new Error(`journey ${journeyId}: ${tierProblem}`);
     // Same base the reporter uses, so the record's `file` matches its index.
     const baseDir = testInfo.config.configFile ? path.dirname(testInfo.config.configFile) : testInfo.config.rootDir;
     const recorder = new JourneyRecorder({
@@ -149,7 +165,13 @@ export const test = editorTest.extend<{ journeyTier: JourneyTier; journey: Journ
         // test.skip(true) throws; this line is unreachable at runtime.
         throw new Error(`journey not run: ${reason}`);
       },
-      setTier: (tier) => recorder.setTier(tier),
+      setTier: (tier) => {
+        // The trace/video are already recording, so an authenticated tier
+        // learned mid-journey must fail the test, not be written down (#10266).
+        const problem = authenticatedCaptureProblem(tier);
+        if (problem !== null) throw new Error(`journey ${journeyId}: ${problem}`);
+        recorder.setTier(tier);
+      },
       recordTokenBalance: (when, balance) => recorder.recordTokenBalance(when, balance),
       recordCost: (cost) => recorder.recordCost(cost),
       healthCommit: sha.health,
@@ -186,7 +208,7 @@ export interface JourneyDeclaration {
   /** `jrn:<slug>@<version>` — the version is part of the id. */
   id: string;
   title: string;
-  /** Account tier the journey runs as; `none` on `/dev`. */
+  /** Account tier the journey runs as; `none` on `/dev`. Only `none` is accepted until #10266. */
   tier: JourneyTier;
   /** Extra tags, e.g. `@engine-smoke` so a job's config grep selects the journey. */
   tag?: string | string[];
@@ -204,6 +226,9 @@ export interface JourneyDeclaration {
  * the file. Two guards keep that scoped to journey tests: the journey fixture
  * fails a journey whose trace or video is not `on`, and the evidence reporter
  * fails a spec file that mixes journey and non-journey tests.
+ *
+ * Throws for any `tier` other than `none`: trace/video capture of an
+ * authenticated session is refused until #10266 adds redaction.
  */
 export function describeJourney(declaration: JourneyDeclaration, body: () => void): void {
   if (!zJourneyId.safeParse(declaration.id).success) {
@@ -212,7 +237,8 @@ export function describeJourney(declaration: JourneyDeclaration, body: () => voi
   const tier = zJourneyTier.parse(declaration.tier);
   const extraTags = declaration.tag === undefined ? [] : [declaration.tag].flat();
   const extraAnnotations = declaration.annotation === undefined ? [] : [declaration.annotation].flat();
-  test.use({ trace: 'on', video: 'on' });
+  // Throws for an authenticated tier before anything is set to record (#10266).
+  test.use(journeyCaptureOptions(tier));
   test.describe(
     declaration.title,
     {

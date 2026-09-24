@@ -68,7 +68,8 @@ export const JOURNEY_EVIDENCE_SCHEMA_VERSION = 1;
 // ---------------------------------------------------------------------------
 
 /** Account tiers. `none` is the unauthenticated `/dev` route. The non-`none`
- *  members are pinned to the billing `Tier` type by the unit suite. */
+ *  members are pinned to the billing `Tier` type by the unit suite; a journey
+ *  may not yet RUN as one — see {@link authenticatedCaptureProblem} (#10266). */
 export const zJourneyTier = z.enum(['none', 'starter', 'hobbyist', 'creator', 'pro']);
 export type JourneyTier = z.infer<typeof zJourneyTier>;
 
@@ -231,6 +232,38 @@ export function readSubstitutions(annotations: readonly AnnotationLike[]): strin
 
 /** Playwright's `trace` / `video` option: a mode string or `{ mode, ... }`. */
 export type RecordingOption = string | { mode: string };
+
+/** Follow-up that must land before an authenticated journey may record. */
+export const JOURNEY_REDACTION_ISSUE = '#10266';
+
+/**
+ * Why a journey running as `tier` may NOT record a full trace and video, or
+ * null when it may. FAILS CLOSED for every tier except the unauthenticated
+ * `none`: a Playwright trace keeps request/response headers (cookies,
+ * `Authorization`) and DOM snapshots, a video keeps every frame, and
+ * `journey-evidence/` is uploaded as a 30-day CI artifact with no masking or
+ * redaction anywhere in the harness. Lift this per tier only once
+ * {@link JOURNEY_REDACTION_ISSUE} provides that redaction.
+ */
+export function authenticatedCaptureProblem(tier: JourneyTier): string | null {
+  if (zJourneyTier.parse(tier) === 'none') return null;
+  return (
+    `journey tier "${tier}" is authenticated, and journey evidence records a full trace (request headers ` +
+    'including cookies and Authorization, DOM snapshots) and a video, uploaded as a CI artifact with no ' +
+    `redaction. Authenticated journeys are refused until ${JOURNEY_REDACTION_ISSUE} adds trace/video redaction.`
+  );
+}
+
+/**
+ * The file-level `trace` / `video` options for a journey declared as `tier`.
+ * The ONLY source of `'on'` for them: throws {@link authenticatedCaptureProblem}
+ * for an authenticated tier instead of returning options that would capture it.
+ */
+export function journeyCaptureOptions(tier: JourneyTier): { trace: 'on'; video: 'on' } {
+  const problem = authenticatedCaptureProblem(tier);
+  if (problem !== null) throw new Error(problem);
+  return { trace: 'on', video: 'on' };
+}
 
 /**
  * Why a journey attempt would NOT keep a trace and a video, or null when it

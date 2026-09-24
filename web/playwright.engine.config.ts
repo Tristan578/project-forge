@@ -62,9 +62,10 @@ export default defineConfig({
   // selected here still has to carry @engine-smoke or @engine-ui, so an
   // untagged slow spec elsewhere cannot wander into this job's budget.
   //
-  // @engine-ui marks the 37 tests that assert on #game-canvas (counted with
-  // `npx playwright test --list` against this config on 9261e23f, where this
-  // comment still said 36 across nine files). The editor holds that canvas
+  // @engine-ui marks the 38 tests, across ten files, that assert on
+  // #game-canvas (counted with `npx playwright test --list` against this config
+  // on 1693d6d2: 42 tests in 13 files in all; this comment said 36 across nine
+  // files before 9261e23f and 37 before 1693d6d2). The editor holds that canvas
   // `invisible` until the Bevy/wgpu renderer starts, so they can
   // only pass where there is a real engine and a software GL context — which is
   // this job and nowhere else. They were previously excluded from the @ui job
@@ -74,7 +75,9 @@ export default defineConfig({
   // a /dev release journey that exists to prove the evidence pipeline on every
   // PR. @release-journey is deliberately NOT in this grep — the account
   // journeys planned under #9723 need a database and must not wander into this
-  // job; a journey lands here only by also carrying @engine-smoke.
+  // job; a journey lands here only by also carrying @engine-smoke. (Those
+  // account journeys are also refused by describeJourney() until #10266 adds
+  // trace/video redaction.)
   testMatch: '**/*.spec.ts',
   grep: /@engine-smoke|@engine-ui/,
   fullyParallel: true,
