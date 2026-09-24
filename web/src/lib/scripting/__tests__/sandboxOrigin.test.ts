@@ -79,8 +79,18 @@ interface FakeFrame {
 
 const openPorts: MessagePort[] = [];
 
+/**
+ * A frame-side data port whose outgoing messages are held until release(), so
+ * a test can make the control port's message reach the host first. Two
+ * MessagePorts have no ordering guarantee between them, so the host must not
+ * depend on one; this forces the order the spec allows.
+ */
+interface HeldDataPort {
+  release: () => void;
+}
+
 /** Run SANDBOX_BOOTSTRAP in its own realm, as the srcdoc frame would. */
-function bootFakeFrame(): FakeFrame {
+function bootFakeFrame(frameOptions: { holdData?: HeldDataPort } = {}): FakeFrame {
   const listeners: Array<(event: unknown) => void> = [];
   const parentWindow = {};
   const blobs = new Map<string, Blob>();
@@ -107,7 +117,23 @@ function bootFakeFrame(): FakeFrame {
   expect(listeners).toHaveLength(1);
   const deliver = (event: { source: unknown; data: unknown; ports: unknown[] }) => {
     for (const port of event.ports) openPorts.push(port as MessagePort);
-    for (const listener of listeners) listener(event);
+    let ports = event.ports;
+    if (frameOptions.holdData && ports.length === 2) {
+      const real = ports[0] as MessagePort;
+      const held: unknown[] = [];
+      const proxy = {
+        postMessage: (message: unknown) => held.push(message),
+        close: () => real.close(),
+        set onmessage(fn: ((e: MessageEvent) => void) | null) {
+          real.onmessage = fn;
+        },
+      };
+      frameOptions.holdData.release = () => {
+        for (const message of held.splice(0)) real.postMessage(message);
+      };
+      ports = [proxy, ports[1]];
+    }
+    for (const listener of listeners) listener({ ...event, ports });
   };
   const contentWindow = {
     postMessage: vi.fn((data: unknown, _targetOrigin: string, transfer: unknown[] = []) => {
@@ -130,8 +156,11 @@ const unexpectedReport: SandboxedScriptHostOptions['onError'] = (...report) => {
 };
 
 /** Start a host whose frame is the fake realm above. */
-async function startHost(options: Partial<SandboxedScriptHostOptions> = {}) {
-  const frame = bootFakeFrame();
+async function startHost(
+  options: Partial<SandboxedScriptHostOptions> = {},
+  frameOptions: { holdData?: HeldDataPort } = {},
+) {
+  const frame = bootFakeFrame(frameOptions);
   vi.spyOn(HTMLIFrameElement.prototype, 'contentWindow', 'get').mockReturnValue(
     frame.contentWindow as unknown as Window,
   );
@@ -416,6 +445,32 @@ describe('failure reporting', () => {
     FakeWorker.created[0].onerror?.({ message: 'TypeError: late' });
     await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
     expect(onError).toHaveBeenCalledWith(expect.stringMatching(/worker-error: TypeError: late/), 'runtime');
+  });
+
+  it('an error that overtakes the started worker\'s first message is still a runtime failure', async () => {
+    // The frame relays worker messages on the data port and worker errors on
+    // the control port, and two ports have no ordering guarantee: a worker
+    // that posts, then throws from a later task (a setTimeout in onStart), can
+    // have its error reach the host first. Whether the worker had started is
+    // the frame's to say, since it sees both events from one Worker object.
+    const hold: HeldDataPort = { release: () => {} };
+    const onError = vi.fn();
+    const { host } = await startHost({ onError }, { holdData: hold });
+    hosts.push(host);
+    const received: unknown[] = [];
+    host.onmessage = (event) => received.push(event.data);
+    await vi.waitFor(() => expect(FakeWorker.created).toHaveLength(1));
+    FakeWorker.created[0].emit({ type: 'commands', commands: [] });
+    FakeWorker.created[0].onerror?.({ message: 'TypeError: from a timer' });
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(received).toEqual([]);
+    expect(onError).toHaveBeenCalledWith(expect.stringMatching(/worker-error: TypeError: from a timer/), 'runtime');
+    expect(host.frame).not.toBeNull();
+
+    hold.release();
+    await vi.waitFor(() => expect(received).toEqual([{ type: 'commands', commands: [] }]));
+    expect(onError).toHaveBeenCalledTimes(1);
   });
 
   it('reports a boot failure ONCE: the boot timer does not report the same frame again', async () => {

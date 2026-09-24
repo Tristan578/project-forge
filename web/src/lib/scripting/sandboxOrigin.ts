@@ -134,6 +134,7 @@ export const SANDBOX_BOOTSTRAP = [
   '    var data = ev.ports[0];',
   '    var control = ev.ports[1];',
   '    var worker;',
+  '    var started = false;',
   '    try {',
   "      var url = URL.createObjectURL(new Blob([d.source], { type: 'text/javascript' }));",
   '      worker = new Worker(url);',
@@ -142,9 +143,9 @@ export const SANDBOX_BOOTSTRAP = [
   "      control.postMessage({ type: 'boot-error', message: String((err && err.message) || err) });",
   '      return;',
   '    }',
-  '    worker.onmessage = function (e) { data.postMessage(e.data); };',
+  '    worker.onmessage = function (e) { started = true; data.postMessage(e.data); };',
   '    worker.onerror = function (e) {',
-  "      control.postMessage({ type: 'worker-error', message: String((e && e.message) || 'worker error') });",
+  "      control.postMessage({ type: 'worker-error', started: started, message: String((e && e.message) || 'worker error') });",
   '    };',
   '    data.onmessage = function (e) { worker.postMessage(e.data); };',
   '    control.onmessage = function (e) {',
@@ -162,7 +163,7 @@ export const SANDBOX_BOOTSTRAP = [
  * an edit to one without the other fails there instead of shipping a frame
  * whose only script its own policy refuses.
  */
-export const SANDBOX_BOOTSTRAP_SHA256 = 'VRk54nRLOZan0qlEJAhyPTP20hyyCeXM+FtlOVgc/64=';
+export const SANDBOX_BOOTSTRAP_SHA256 = '8Ivzu52QrCh1VZbiDHUnBzJlL6N2OpYAgnPpk6PQovQ=';
 
 /** The complete srcdoc: the policy FIRST (a meta CSP governs only what follows it), then the bootstrap. */
 export function buildSandboxFrameSrcdoc(): string {
@@ -389,7 +390,7 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
     host.onmessage?.(event);
   };
   control.port1.onmessage = (event: MessageEvent) => {
-    const msg = event.data as { type?: unknown; message?: unknown } | null;
+    const msg = event.data as { type?: unknown; message?: unknown; started?: unknown } | null;
     if (!msg || typeof msg.type !== 'string') return;
     if (msg.type === 'ready') {
       if (bootTimer) clearTimeout(bootTimer);
@@ -402,8 +403,11 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
       // not parse, a throw at module init, a browser that will not run it)
       // means the scripts never started — and, unlike a timeout, will not
       // start on a retry, so it carries the `worker-error` reason. So does a
-      // worker the frame could not construct at all.
-      if (msg.type === 'worker-error' && started) report(detail, 'runtime');
+      // worker the frame could not construct at all. Whether the worker had
+      // spoken is the FRAME's to say: it sees both events from one Worker
+      // object, while here they arrive on two ports with no ordering between
+      // them, so an error can overtake the message that preceded it.
+      if (msg.type === 'worker-error' && (started || msg.started === true)) report(detail, 'runtime');
       else failBoot(detail, 'worker-error');
     }
   };
