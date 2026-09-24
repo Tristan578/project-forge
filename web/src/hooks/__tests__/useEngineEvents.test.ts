@@ -87,7 +87,9 @@ describe('useEngineEvents', () => {
 
     const dispatcher = vi.mocked(setCommandDispatcher).mock.calls[0][0];
 
-    expect(dispatcher('crash_command', {})).toEqual({ success: false, error: 'WASM crash' });
+    // `threw`: the engine may have acted before the throw, so this is not a
+    // refusal, and the store must be able to tell the two apart.
+    expect(dispatcher('crash_command', {})).toEqual({ success: false, error: 'WASM crash', threw: true });
   });
 
   it('reports failure when the engine exposes no handle_command', () => {
@@ -191,7 +193,9 @@ describe('useEngineEvents', () => {
 
     const batchDispatcher = vi.mocked(setCommandBatchDispatcher).mock.calls[0][0]!;
     const result = batchDispatcher([{ command: 'crash' }]);
-    expect(result).toEqual({ success: false, results: [] });
+    // `threw` separates this from the oversized refusal above, which has the
+    // same empty `results` and was never sent to the engine at all.
+    expect(result).toEqual({ success: false, results: [], threw: true });
     expect(console.error).toHaveBeenCalledWith('Error dispatching command batch:', expect.any(Error));
   });
 
