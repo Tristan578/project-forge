@@ -327,6 +327,7 @@ command_needs_bindings() {
   fi
   return 1
 }
+readonly -f command_needs_bindings
 
 # $1 = workspace dir, $2 = package.json script name, $3 = depth. A workspace
 # with no package.json, or a script it does not declare, is UNRESOLVABLE (2),
@@ -340,6 +341,7 @@ script_needs_bindings() {
   text="$(node -e 'const s=(JSON.parse(require("fs").readFileSync(0,"utf8")).scripts||{})[process.argv[1]];if(s===undefined)process.exit(3);process.stdout.write(String(s))' "$script" <"$pkg")" || return 2
   command_needs_bindings "$text" "$dir" "$depth"
 }
+readonly -f script_needs_bindings
 
 # $1 = workspace dir, $2 = --config path (empty → playwright.config.*), $3 =
 # depth. Reads every `command: '...'` string in the config (the webServer
@@ -375,6 +377,7 @@ config_needs_bindings() {
   done <<<"$cmds"
   return "$verdict"
 }
+readonly -f config_needs_bindings
 
 # Reads workflow text on stdin; prints each job that loads a native binding
 # once, sorted. A W or P row that cannot be resolved prints
@@ -398,7 +401,7 @@ native_binding_jobs() {
     esac
   done <<<"$rows" | sort -u
 }
-readonly -f next_build_jobs
+readonly -f native_binding_jobs
 
 # Reads workflow text on stdin; prints one line per way <job> fails to run the
 # gate, and nothing when it is wired. Job blocks are extracted individually so
@@ -491,6 +494,7 @@ assert_gate_wired() {
     fi
   done <<<"$derived_jobs"
 }
+readonly -f assert_gate_wired
 
 # 14a. Negative control: replace <job>'s gate invocation in the text on stdin
 #      with `echo skipped` and assert the pin goes red. Each mutates the REAL
@@ -515,6 +519,7 @@ assert_unwiring_caught() {
     pass "negative control: unwiring $label ${job}'s gate is caught"
   fi
 }
+readonly -f assert_unwiring_caught
 
 if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   ci="$(cat "$CI_YML")"

@@ -817,7 +817,7 @@ by construction rather than by measurement.
 
 - `readonly -f <name>` directly after every top-level definition: 349 new
   freezes, 369 in total, 68 files scanned at the time of the sweep (later
-  merges from main brought the live derivation to 376 across 69; `--list`
+  merges from main brought the live derivation to 399 across 73; `--list`
   gives the current figure) (64 of them define something; the 20
   from round 40 included). Those are the GATE's numbers — `bash
   scripts/check-fn-freeze.sh --list | wc -l` — and the only ones this guide
