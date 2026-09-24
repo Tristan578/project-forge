@@ -49,6 +49,13 @@ describe('TreeView', () => {
     expect(screen.getByText('Root').closest('[role="treeitem"]')).toHaveAttribute('aria-selected', 'false');
   });
 
+  it('threads onSelect down to nested items (the recursive TreeItem render)', () => {
+    const onSelect = vi.fn();
+    render(<TreeView nodes={NODES} expandedIds={['root']} onSelect={onSelect} />);
+    fireEvent.click(screen.getByText('Child 1'));
+    expect(onSelect).toHaveBeenCalledWith('child-1');
+  });
+
   it('calls onSelect when a node is clicked', () => {
     const onSelect = vi.fn();
     render(<TreeView nodes={NODES} onSelect={onSelect} />);

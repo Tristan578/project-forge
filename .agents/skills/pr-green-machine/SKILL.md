@@ -74,7 +74,7 @@ cd web && npx eslint --max-warnings 0 .
 cd web && npx vitest run <changed-test-dirs>
 
 # MCP tests
-cd mcp-server && npx vitest run
+cd mcp-server && npx tsc --noEmit && npx vitest run
 ```
 
 Record which checks pass and which fail BEFORE making changes. This is the baseline.
@@ -101,7 +101,7 @@ Re-run ALL checks from Phase 4. Every check that was green before must still be 
 cd web && npx tsc --noEmit
 cd web && npx eslint --max-warnings 0 .
 cd web && npx vitest run
-cd mcp-server && npx vitest run
+cd mcp-server && npx tsc --noEmit && npx vitest run
 ```
 
 If ANY check regresses, go back to Phase 5. Do not push until local validation is fully green.
