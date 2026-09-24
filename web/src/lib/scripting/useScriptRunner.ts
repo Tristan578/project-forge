@@ -56,6 +56,12 @@ function tickScaleY(entities: unknown, entityId: string): number {
  * (`SANDBOX_BOOT_TIMEOUT_MS`, which must be shorter) is tested against it.
  */
 export const WATCHDOG_TIMEOUT_MS = 5000;
+
+/**
+ * How many sandbox `runtime` failure details one Play session writes to the
+ * devtools before a single "suppressed" line. See `reportSandboxRuntimeFailure`.
+ */
+export const SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT = 5;
 const OCCLUSION_RAYCAST_INTERVAL_MS = 250; // Check occlusion 4x per second
 
 // Module-level collision callback (replaces window.__scriptCollisionCallback)
@@ -103,6 +109,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   // runs inside the per-frame command drain, so a bad call in `onUpdate` would
   // otherwise log at 60Hz and bury every other line in the script console.
   const reportedFailuresRef = useRef<Set<string>>(new Set());
+  // Sandbox `runtime` failures seen this play session. A script can throw
+  // uncaught errors for as long as Play runs (`setInterval(() => { throw … }, 0)`),
+  // and the host relays every one, so reporting them 1:1 is an unbounded console
+  // and store-update loop. Reset with `reportedFailuresRef`, at session start.
+  const sandboxRuntimeFailuresRef = useRef(0);
 
   /**
    * Surface an engine refusal instead of swallowing it.
@@ -135,6 +146,32 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       message,
       timestamp: Date.now(),
     });
+  }, [addScriptLog]);
+
+  /**
+   * An uncaught error in a sandboxed worker that had already started. Play keeps
+   * running — the scripts may well still be working — so this neither stops Play
+   * nor touches the watchdog; it only reports, and reports boundedly:
+   *
+   * - The script console gets the fixed creator message ONCE per session. It is
+   *   the same words every time, so a second copy tells the creator nothing and
+   *   costs a store update (and a panel re-render) per error.
+   * - The devtools get the first {@link SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT}
+   *   raw details, then one "suppressed" line, then nothing. Not once: `detail`
+   *   differs per error and is the developer's only account of it, so the first
+   *   few show whether this is one error repeating or several distinct ones.
+   *   Not unbounded: past that, more lines add nothing and would bury the rest.
+   */
+  const reportSandboxRuntimeFailure = useCallback((detail: string) => {
+    const seen = ++sandboxRuntimeFailuresRef.current;
+    if (seen <= SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT) {
+      console.error(`[ScriptRunner] Script sandbox runtime failure: ${detail}`);
+    } else if (seen === SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT + 1) {
+      console.error('[ScriptRunner] Further script sandbox runtime failures this Play session are suppressed.');
+    }
+    if (seen === 1) {
+      addScriptLog({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE, timestamp: Date.now() });
+    }
   }, [addScriptLog]);
 
   const dispatchCommand = useCallback(
@@ -179,6 +216,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       // Fresh session, fresh dedupe: a name refused during the last run must be
       // reported again if the author hits Play without having fixed it.
       reportedFailuresRef.current.clear();
+      sandboxRuntimeFailuresRef.current = 0;
       // Transport only (#8700). Both branches run the same scriptWorker.ts and
       // receive/emit the same messages; everything below this line is shared.
       // NEXT_PUBLIC_SCRIPT_ISOLATION is read inside getScriptIsolationMode() as a
@@ -190,11 +228,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
               // The script console is read by game creators: it gets plain
               // words, and the raw error / bundling hint goes to the devtools.
               onError: (detail, phase) => {
-                console.error(`[ScriptRunner] Script sandbox ${phase} failure: ${detail}`);
                 if (phase === 'runtime') {
-                  addScriptLog({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE, timestamp: Date.now() });
+                  reportSandboxRuntimeFailure(detail);
                   return;
                 }
+                console.error(`[ScriptRunner] Script sandbox ${phase} failure: ${detail}`);
                 // The scripts never started and never will this session. Say so
                 // ONCE and stop Play now: left running, the ticks keep arming
                 // the watchdog, and 5 s later it would tell the creator their
@@ -785,7 +823,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       workerRef.current = null;
       useEditorStore.getState().setHudElements([]);
     }
-  }, [engineMode, wasmModule, dispatchCommand, addScriptLog]);
+  }, [engineMode, wasmModule, dispatchCommand, addScriptLog, reportSandboxRuntimeFailure]);
 
   // Export collision callback via module-level variable (not window global)
   useEffect(() => {
