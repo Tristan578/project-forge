@@ -576,33 +576,19 @@ jobs:
           done
           exit "$rc"
 
-      - name: Shellcheck the hooks owned by this change
+      - name: Shellcheck all hooks
         run: |
-          # Scope shellcheck to the hooks this gate owns + their tests: the
-          # hardened review-loop hooks and the auto-approve permission gate.
-          # The wider .claude/hooks/ tree carries pre-existing findings tracked
-          # separately (see .claude/rules/agent-operations.md §12) — linting all
-          # of it here would fail this gate on unrelated, untouched debt. Newly
-          # added or edited hooks MUST be shellcheck-clean, so they go here.
+          # The whole .claude/hooks/ tree is shellcheck-clean as of #8676, so
+          # this lints ALL of it: the glob is the ratchet that stops hook debt
+          # from re-accumulating silently, and a new or edited hook that is not
+          # clean fails here. It used to name seven hooks and eight suites by
+          # hand while the rest of the tree carried ten known findings.
           # -x follows `.`-sourced files (scripts/__tests__/lib/platform.sh);
           # without it every sourcing suite reports SC1091 and the library's own
-          # definitions stay invisible to the analysis.
-          shellcheck -x \
-            .claude/hooks/reject-incomplete-review.sh \
-            .claude/hooks/review-quality-gate.sh \
-            .claude/hooks/auto-approve-safe-commands.sh \
-            .claude/hooks/block-main-commits.sh \
-            .claude/hooks/inject-lessons-learned.sh \
-            .claude/hooks/check-panel-registry.sh \
-            .claude/hooks/inject-post-compact.sh \
-            .claude/hooks/__tests__/inject-post-compact.test.sh \
-            .claude/hooks/__tests__/check-panel-registry.test.sh \
-            .claude/hooks/__tests__/reject-incomplete-review.test.sh \
-            .claude/hooks/__tests__/review-quality-gate.test.sh \
-            .claude/hooks/__tests__/auto-approve-safe-commands.test.sh \
-            .claude/hooks/__tests__/block-main-commits.test.sh \
-            .claude/hooks/__tests__/inject-lessons-learned.test.sh \
-            .claude/hooks/__tests__/settings-permissions.test.sh
+          # definitions stay invisible to the analysis. The tree is also clean
+          # under plain shellcheck (every dynamic `source` carries a line-level
+          # SC1091 disable), so a local run without -x agrees with this gate.
+          shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 
   # ---- Skills Lint ----
   # Runs when any skill file (.claude/skills/**) or the linter/baseline changed.
@@ -1476,10 +1462,16 @@ jobs:
           out="$(bash scripts/preview-db-branch.sh create "$PR_NUMBER" --uri-out "$uri_file")" || rc=$?
           echo "$out"
 
-          evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | head -1)"
+          # EVERY evicted PR, space-separated: a run can reclaim more than one
+          # when a concurrent preview job took the first freed slot (#10245),
+          # and each of them is owed the notice below.
+          evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | tr '\n' ' ' | sed 's/ *$//')"
           if [ -n "$evicted_pr" ]; then
             echo "evicted_pr=${evicted_pr}" >> "$GITHUB_OUTPUT"
-            echo "Reclaimed the preview database of #${evicted_pr} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
+            # shellcheck disable=SC2086 -- a space-separated list, split on purpose
+            for p in $evicted_pr; do
+              echo "Reclaimed the preview database of #${p} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
+            done
           fi
           if [ "$rc" -ne 0 ]; then
             echo "::error::preview-db-branch.sh create exited ${rc}; the lines above say why."
@@ -1513,8 +1505,12 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          gh pr comment "$EVICTED_PR" --repo "$REPO" \
-            --body "**Preview database reclaimed** — the Neon branch allowance was full, so this PR's preview branch (the least recently built) was deleted to make room for #${PR_NUMBER}. The existing preview URL will fail on database access until the next push to this PR rebuilds it."
+          # One notice per evicted PR (the output is space-separated).
+          # shellcheck disable=SC2086 -- a space-separated list, split on purpose
+          for pr in $EVICTED_PR; do
+            gh pr comment "$pr" --repo "$REPO" \
+              --body "**Preview database reclaimed** — the Neon branch allowance was full, so this PR's preview branch (the least recently built) was deleted to make room for #${PR_NUMBER}. The existing preview URL will fail on database access until the next push to this PR rebuilds it."
+          done
 
       - name: Apply migrations to the preview branch
         # THE WHOLE POINT. A migration that cannot apply must fail the PR here,

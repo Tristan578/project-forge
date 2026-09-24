@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useEditorStore, setCommandDispatcher } from './editorStore';
 import { setWinnabilityStateReader } from './slices/gameSlice';
+import { setSceneDispatcher } from './slices/sceneSlice';
 import {
   createMockDispatch,
   makeSceneGraph,
@@ -131,6 +132,23 @@ describe('editorStore', () => {
     // setCommandDispatcher wires the cross-slice winnability reader at the
     // editorStore singleton; clear it so the gate can't leak across tests.
     setWinnabilityStateReader(null);
+  });
+
+  describe('Deferred scene load (#10192)', () => {
+    it('replays a scene load deferred before the engine attached through the tracked dispatcher', () => {
+      // The editor page calls `loadScene` inside its project fetch, before
+      // `EditorLayout` mounts `useEngineEvents` and installs the dispatcher.
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const scene = JSON.stringify({ entities: [] });
+      expect(useEditorStore.getState().loadScene(scene, { deferUntilEngineAttaches: true })).toBe(false);
+      expect(mockDispatch).not.toHaveBeenCalledWith('load_scene', expect.anything());
+
+      const engine = createMockDispatch();
+      setCommandDispatcher(engine as (command: string, payload: unknown) => void);
+
+      const loads = engine.mock.calls.filter(([command]) => command === 'load_scene');
+      expect(loads).toEqual([['load_scene', { json: scene }]]);
+    });
   });
 
   describe('Selection', () => {
