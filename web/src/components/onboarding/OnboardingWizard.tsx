@@ -89,6 +89,19 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
   const [loadingTemplate, setLoadingTemplate] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  // A template load is asynchronous and the store does not cancel it, so a
+  // result can land after the user has left this screen. Two guards: every
+  // exit (Back, Escape, the X) is inert while a load is pending, and a result
+  // that arrives after unmount is dropped rather than completing onboarding a
+  // second time on top of whatever path replaced it.
+  const templateLoading = loadingTemplate !== null;
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Focus trap: focus the dialog on mount
   useEffect(() => {
@@ -104,11 +117,12 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
     (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        if (templateLoading) return;
         completeOnboarding();
         onComplete();
       }
     },
-    [completeOnboarding, onComplete]
+    [completeOnboarding, onComplete, templateLoading]
   );
 
   useEffect(() => {
@@ -168,6 +182,7 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
       } catch {
         result = { success: false, error: GENERIC_TEMPLATE_ERROR };
       }
+      if (!mountedRef.current) return;
       setLoadingTemplate(null);
       if (!result.success) {
         setTemplateError(result.error);
@@ -208,7 +223,8 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
               completeOnboarding();
               onComplete();
             }}
-            className="flex h-7 w-7 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+            disabled={templateLoading}
+            className="flex h-7 w-7 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-wait disabled:opacity-50 disabled:hover:bg-transparent"
             aria-label="Dismiss and start with blank canvas"
           >
             <X className="h-4 w-4" />
@@ -381,7 +397,8 @@ function TemplateSelector({ onSelect, onBack, loadingId, error }: TemplateSelect
       <div className="mb-4 flex items-center gap-3">
         <button
           onClick={onBack}
-          className="text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+          disabled={loadingId !== null}
+          className="text-sm text-zinc-400 transition-colors hover:text-zinc-200 disabled:cursor-wait disabled:opacity-50"
           aria-label="Back to path selection"
         >
           Back

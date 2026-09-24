@@ -317,6 +317,62 @@ describe('OnboardingWizard', () => {
     });
   });
 
+  it('keeps Back, Escape and Dismiss inert while a load is pending, so the load cannot land on top of another path', async () => {
+    let settle!: (result: TemplateLoadResult) => void;
+    loadTemplate.mockReturnValueOnce(new Promise<TemplateLoadResult>((resolve) => { settle = resolve; }));
+    render(<OnboardingWizard onComplete={onComplete} />);
+    fireEvent.click(screen.getByTestId('path-card-template'));
+    fireEvent.click(screen.getByTestId('template-card-platformer'));
+
+    // Back: the selector stays up, so "Blank Canvas" cannot be chosen underneath.
+    const back = screen.getByRole('button', { name: 'Back to path selection' });
+    expect(back).toHaveProperty('disabled', true);
+    fireEvent.click(back);
+    expect(screen.getByTestId('template-card-platformer')).toBeDefined();
+    expect(screen.queryByTestId('path-card-blank')).toBeNull();
+
+    // Escape and the X: neither completes onboarding around the pending load.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    const dismiss = screen.getByLabelText('Dismiss and start with blank canvas');
+    expect(dismiss).toHaveProperty('disabled', true);
+    fireEvent.click(dismiss);
+    expect(mockCompleteOnboarding).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
+
+    await act(async () => {
+      settle(LOADED_OK);
+    });
+    // Exactly once, from the load itself.
+    expect(mockCompleteOnboarding).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledTimes(1);
+
+    // And the exits work again after a failed load re-enables the selector.
+    loadTemplate.mockResolvedValueOnce({ success: false, error: 'nope' });
+    cleanup();
+    render(<OnboardingWizard onComplete={onComplete} />);
+    fireEvent.click(screen.getByTestId('path-card-template'));
+    fireEvent.click(screen.getByTestId('template-card-runner'));
+    await screen.findByRole('alert');
+    expect(screen.getByRole('button', { name: 'Back to path selection' })).toHaveProperty('disabled', false);
+    expect(screen.getByLabelText('Dismiss and start with blank canvas')).toHaveProperty('disabled', false);
+  });
+
+  it('drops a load result that lands after the wizard has unmounted', async () => {
+    let settle!: (result: TemplateLoadResult) => void;
+    loadTemplate.mockReturnValueOnce(new Promise<TemplateLoadResult>((resolve) => { settle = resolve; }));
+    const { unmount } = render(<OnboardingWizard onComplete={onComplete} />);
+    fireEvent.click(screen.getByTestId('path-card-template'));
+    fireEvent.click(screen.getByTestId('template-card-platformer'));
+    unmount();
+
+    await act(async () => {
+      settle(LOADED_OK);
+    });
+    expect(mockCompleteOnboarding).not.toHaveBeenCalled();
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(trackEvent).not.toHaveBeenCalled();
+  });
+
   it('stays mounted, shows the load error as an alert and re-enables the cards when the load fails', async () => {
     const error = 'The engine is not ready yet — try again in a moment.';
     loadTemplate.mockResolvedValueOnce({ success: false, error });
