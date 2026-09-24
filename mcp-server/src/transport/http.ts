@@ -34,6 +34,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
 export interface HttpTransportOptions {
   port: number;
@@ -285,7 +286,11 @@ export async function startHttpTransport(
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: false,
     });
-    await sharedServer.connect(sharedTransport);
+    // SDK type-variance: StreamableHTTPServerTransport.onclose is
+    // `(() => void) | undefined` but the Transport interface declares
+    // `onclose?: () => void`, which exactOptionalPropertyTypes reads as
+    // non-undefined. Neither type is ours to widen; the objects are identical.
+    await sharedServer.connect(sharedTransport as Transport);
   }
 
   const server = createServer((req, res) => {
@@ -344,8 +349,11 @@ export async function startHttpTransport(
         let mcpServer: McpServer | null = null;
         if (options.stateless) {
           mcpServer = buildServer();
+          // No sessionIdGenerator = stateless mode. The SDK gates on the
+          // option being falsy, so omitting the key is the same as the
+          // `sessionIdGenerator: undefined` its docs show, and it is the only
+          // spelling exactOptionalPropertyTypes accepts.
           transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: undefined,
             enableJsonResponse: true,
           });
           // Register cleanup BEFORE connect(). If connect() throws, the
@@ -358,7 +366,8 @@ export async function startHttpTransport(
             mcpServer?.close().catch(() => {});
           };
           res.on('close', cleanup);
-          await mcpServer.connect(transport);
+          // Same SDK type-variance as the shared transport above.
+          await mcpServer.connect(transport as Transport);
         } else {
           transport = sharedTransport!;
         }

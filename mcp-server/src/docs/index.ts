@@ -41,7 +41,7 @@ export function registerDocs(server: McpServer): void {
         topics.push({
           path,
           title: doc.title,
-          tags: meta?.tags,
+          ...(meta?.tags !== undefined && { tags: meta.tags }),
         });
       }
 
