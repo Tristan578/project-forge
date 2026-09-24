@@ -299,6 +299,18 @@ const eslintConfig = defineConfig([
       // existing test suite already pinned that blank buildId must fall back
       // to wasmHash. Those two stayed `||`, with the test name cited in the
       // disable reason -- see useEngine.test.ts.
+      //
+      // The review board found the same class twice more. A chat tool argument
+      // typed `z.string().optional()` (no `.min(1)`) is model output, and the
+      // model can send `''` for "not given": `graphId` in three shader handlers
+      // and `entityId` in save_material_to_library fell through to a "nothing
+      // selected" error under `??`, so they stay `||` (shaderHandlers.ts,
+      // gameplayHandlers.ts, with blank-argument tests). And a field of an
+      // untyped `JSON.parse` (an imported file) can be any type at all:
+      // `data.tags ?? []` stored a string that the next search called `.some`
+      // on, so importScript validates the type instead (scriptLibraryStore.ts).
+      // Before converting a `||` on a tool argument, a parsed file or any
+      // other external input, check what its schema actually allows.
       '@typescript-eslint/prefer-nullish-coalescing': ['error', {
         ignoreConditionalTests: true,
       }],
