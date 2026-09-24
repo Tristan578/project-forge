@@ -9,7 +9,7 @@ import { GenerateSoundDialog } from './GenerateSoundDialog';
 import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { useUserStore } from '@/stores/userStore';
-import { canAccessPanel, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { canAccessPanel, canAccessPanelBeforeProfileLoad, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { resolveAudioAssetId } from '@/lib/audio/entityAudioGraph';
 
@@ -154,13 +154,12 @@ export function AudioInspector() {
     useGenerationGate('voice-generation'),
   ]);
   const musicGate = useGenerationGate('music-generation');
-  // `!profileLoaded` reads as access-unknown, not locked — before
-  // /api/user/profile resolves, `tier`/`spendableTokens` are still defaults,
-  // and locking here would flash the tier clause in front of a
-  // trial-eligible starter account for the one render before the real
-  // balance lands (#7715 review round 2).
-  const soundTierOk = !profileLoaded || canAccessPanel('generate-sound', tier);
-  const musicTierOk = !profileLoaded || canAccessPanel('generate-music', tier);
+  // Before /api/user/profile resolves, `tier`/`spendableTokens` are still
+  // defaults. The same rule every editor gate uses decides the loading
+  // window: a panel the trial can open (hobbyist tier) reads as unlocked,
+  // anything above stays locked (#7715 review rounds 2 and 4).
+  const soundTierOk = profileLoaded ? canAccessPanel('generate-sound', tier) : canAccessPanelBeforeProfileLoad('generate-sound');
+  const musicTierOk = profileLoaded ? canAccessPanel('generate-music', tier) : canAccessPanelBeforeProfileLoad('generate-music');
   // While the first /api/capabilities body is in flight nothing is known yet,
   // so the button must not paint as ready and then contradict itself when the
   // answer lands. Held closed for that window rather than opening a dialog
