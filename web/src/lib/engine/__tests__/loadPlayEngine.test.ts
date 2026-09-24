@@ -445,6 +445,31 @@ describe('isCdnOrigin / describeOrigin', () => {
     expect(describeOrigin('https://engine.example.test/abc1234/engine-pkg-webgpu/')).toBe('engine.example.test');
     expect(describeOrigin('/engine-pkg-webgpu/')).toBe('same-origin');
   });
+
+  it('labels a CDN base that is not a parseable URL as "cdn" instead of throwing', async () => {
+    const { describeOrigin } = await import('../loadPlayEngine');
+    // Passes isCdnOrigin (starts with https://) but `new URL()` rejects the space.
+    expect(describeOrigin('https://engine cdn.test/latest/engine-pkg-webgpu/')).toBe('cdn');
+  });
+
+  it('still falls through to same-origin when the configured CDN base is malformed', async () => {
+    const { instantiateFromPaths } = await import('../loadPlayEngine');
+    const bad = 'https://engine cdn.test/latest/engine-pkg-webgpu/';
+    const load = vi.fn(async (specifier: string) => {
+      if (specifier.startsWith('https://')) throw new Error('unresolvable host');
+      return {
+        default: vi.fn(async () => {}),
+        init_engine: vi.fn(),
+        handle_command: vi.fn(),
+        set_event_callback: vi.fn(),
+      };
+    });
+    const onOriginSkipped = vi.fn();
+    // describeOrigin runs outside the per-origin try; a throw there would
+    // escape the loop before same-origin was ever tried.
+    await expect(instantiateFromPaths([bad, '/engine-pkg-webgpu/'], { load, onOriginSkipped })).resolves.toBeDefined();
+    expect(onOriginSkipped).toHaveBeenCalledWith(bad, expect.objectContaining({ message: 'unresolvable host' }));
+  });
 });
 
 describe('resolveAndInstantiate (env → origins → loader)', () => {
