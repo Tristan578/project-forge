@@ -921,6 +921,17 @@ by construction rather than by measurement.
   inside a set statement (`set -o $() posix`) dropped the set state, which
   the substitution stack saved for shopt, alias and trap but not for set.
   Both are now judged, and both are fixture lines of the bash-parity case.
+  The twenty-sixth found the array state itself was not carried across a
+  substitution: `x=(${POSIXLY_CORRECT:=1} $(y=(b)))` reset the outer
+  literal's text at the inner one. It is now saved with the rest, and an
+  array report names the array as written (`x=(...)`) rather than
+  rebuilding its text out of order. It also found that text written inside
+  a parameter expansion was discarded as if it were a value: `${n:-alias}`,
+  `${HOME:+alias}`, `${x/*/alias}` and `trap '${n:-exit} 0' EXIT` all bind
+  in bash. Such text is now judged both with and without it (pexp rewrites
+  the group as a brace alternation), in words and in trap actions; text
+  holding a blank, which bash splits into several words, is a `split`
+  violation in a guarded position.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
@@ -976,8 +987,10 @@ then `alias nothing fail=:` and `shopt -s nocasematch expand_aliases`), where
 the two prefix lists and the next-word rule that preceded it were each defeated
 by the next spelling (the same treadmill round 39 documents for assignment
 keywords) — while `echo alias fail=:`, the word as an argument, stays text. What stays open
-is a word assembled at run time — an expansion (`$x`, `$(...)`) whose
-output must contribute text to spell the word, `eval`, a `source` of a file
+is a word assembled at run time — a variable value or a command output
+(`$x`, `$(...)`) that must contribute text to spell the word (text written
+inside a parameter expansion, a default, alternate or replacement, is
+judged both ways since round twenty-six), `eval`, a `source` of a file
 the suite wrote — and `declare -n`, which aliases a variable, not a
 function. Posix mode is the same violation as `shopt -s expand_aliases`,
 because it turns that option on (measured in bash 5.2: `set -o posix`, then

@@ -62,10 +62,15 @@
 # with its expansions removed (see end_word), an ANSI-C string decoded, a
 # locale string read as its text, and every word a brace group expands to
 # (`al{i,}as`) checked; an expansion too long to enumerate, in a guarded
-# position, is reported as `brace` rather than judged on a prefix. A word whose spelling needs an
-# expansion to CONTRIBUTE text (`al$(echo i)as`), `eval`, a `source` of a
-# file written by the suite, and `declare -n` (a variable, not a function)
-# remain outside this gate (the Honest bound of the Sweep section in
+# position, is reported as `brace` rather than judged on a prefix. Text
+# written inside a parameter expansion (a default, alternate or replacement:
+# `${n:-alias}`, `${HOME:+alias}`, `${x/*/alias}`) is literal, so the word is
+# judged both with and without it, and such text holding a blank, which bash
+# splits into words, is a `split` violation in a guarded position (the
+# twenty-sixth round). A word whose spelling needs a variable VALUE or a
+# command OUTPUT (`al${x}as` with x=i, `al$(echo i)as`), `eval`, a `source`
+# of a file written by the suite, and `declare -n` (a variable, not a
+# function) remain outside this gate (the Honest bound of the Sweep section in
 # docs/guides/npm-audit-gate-hardening.md).
 #
 # posix mode turns expand_aliases on as a side effect, so entering it is the
@@ -174,7 +179,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|parse-error
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|parse-error
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -229,8 +234,9 @@ derive_file() {
     # `expand$(true)_aliases`, `-$()s` and `DEBU$1G` are the guarded words to
     # bash (fifteenth and sixteenth board rounds). wk is that form, made by
     # no_exp; it is used for command names and arguments, never for reserved
-    # words, which bash recognises before any expansion. Only an expansion
-    # that must CONTRIBUTE text to spell the word stays outside the scan.
+    # words, which bash recognises before any expansion. Text written inside
+    # a parameter expansion is judged as well (see pexp); only a value or an
+    # output that must CONTRIBUTE text to spell the word stays outside.
     # The lexer leaves a `$( )` as the placeholder `$()` and keeps `${...}`,
     # backticks and `$NAME` as written, so no_exp removes all four forms; a
     # trap action is raw text, so there the whole `$(...)` goes, a comment
@@ -242,6 +248,42 @@ derive_file() {
       } while (s != p)
       gsub(/\$[A-Za-z_][A-Za-z0-9_]*/, "", s); gsub(/\$[0-9@*#?$!-]/, "", s)
       return s
+    }
+    # A parameter expansion can contribute text written inside it: a default
+    # (:- - := =), an alternate (:+ +) or a replacement (/pat/TEXT) yields
+    # either nothing or that literal TEXT, depending on state the scan cannot
+    # see (twenty-sixth board round: shopt -s ${n:-expand_aliases} and
+    # ${HOME:+alias} both bind). pexp rewrites each such group as the brace
+    # alternation {,TEXT}, so brace_exp judges the word both ways, with the
+    # same cap; any other group yields only a value the scan cannot see, and
+    # becomes empty as no_exp would make it. Nested groups are rewritten from
+    # the inside out. The TEXT is judged after quote and backslash removal.
+    # An unquoted expansion is also split into fields at blanks, so TEXT that
+    # holds a blank can spell a whole statement (${x:-alias fail=:} runs
+    # alias); that reshapes the statement, which no word rule can place, so
+    # pexp sets px_split and end_word reports it in a guarded position.
+    function pexp(s,   out, i, n, dep, j, ch) {
+      out = ""; n = length(s); i = 1
+      while (i <= n) {
+        if (substr(s, i, 2) != "${") { out = out substr(s, i, 1); i++; continue }
+        dep = 1; j = i + 2
+        while (j <= n && dep > 0) { ch = substr(s, j, 1); if (ch == "{") dep++; else if (ch == "}") dep--; j++ }
+        out = out pexp_group(substr(s, i + 2, j - i - 3))
+        i = j
+      }
+      return out
+    }
+    function pexp_group(b,   t) {
+      sub(/^[!#]?([A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-])/, "", b)
+      if (b ~ /^\[/) sub(/^\[[^]]*\]/, "", b)
+      t = ""
+      if (b ~ /^:?[-=+]/) { sub(/^:?[-=+]/, "", b); t = b }
+      else if (b ~ /^\//) { sub(/^\/[\/#%]?/, "", b); if (match(b, /\//)) t = substr(b, RSTART + 1) }
+      if (t ~ /[ \t\n]/) px_split = 1
+      gsub(/["\047\\]/, "", t)
+      t = pexp(t)
+      if (t == "") return ""
+      return "{," t "}"
     }
     # Brace expansion is static: bash expands `al{i,}as` to `alias alas` and
     # `{a..a}lias` to `alias` before any command is looked up (eighteenth
@@ -325,7 +367,7 @@ derive_file() {
       # reserved word (bash recognises those before quote removal).
       rq = wq; wq = 0
       if (w == "") return
-      wk = no_exp(w); brace_exp(wk)
+      px_split = 0; wk = no_exp(pexp(w)); brace_exp(wk)
       # A case pattern is text. Only an unquoted `esac` where a pattern would
       # start ends the case (after the last `;;`).
       if (pat) {
@@ -349,8 +391,12 @@ derive_file() {
       # trap statement) that is not a verdict, so it is a violation. An
       # assignment word before the command name is not brace-expanded by
       # bash at all, so its value is never judged.
-      if (bx_trunc && (!cmd_seen || in_alias || in_shopt || in_trap) && !(!cmd_seen && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/))
+      if (bx_trunc && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/))
         printf "%s\t%s\t%d\t%d\tbrace\n", file, w, NR, NR
+      # The same positions, for a parameter expansion whose TEXT bash splits
+      # into fields (see pexp); a trap action is text, judged by check_trap.
+      if (px_split && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) && !(in_trap && !trap_has_action && w !~ /^-/))
+        printf "%s\t%s\t%d\t%d\tsplit\n", file, w, NR, NR
       if (!cmd_seen) {
         # `case WORD` ended its line without `in`: the first word of a later
         # line is that `in` (only blank and comment lines may come between).
@@ -421,7 +467,7 @@ derive_file() {
       # dropping the sign cannot turn a real signal into 0.
       if (in_trap) {
         if (!trap_has_action) { if (w !~ /^-/) { trap_action = w; trap_has_action = 1 } }
-        else for (k = 1; k <= nbx; k++) trap_sigs = trap_sigs " " sig_word(bx[k])
+        else for (k = 1; k <= nbx; k++) if (bx[k] != "") trap_sigs = trap_sigs " " sig_word(bx[k])
       }
       if (in_shopt && anym("^-[a-z]*s[a-z]*$")) sflag = w
       # set takes options until -- or a lone -, after which every word is a
@@ -432,23 +478,34 @@ derive_file() {
     # An EXIT, ERR or RETURN trap (or 0, the EXIT alias) whose action holds
     # the word exit or exec, after the backslashes bash would drop, replaces
     # the exit status the script chose.
-    function check_trap(   a) {
-      a = trap_action; gsub(/\\/, "", a); a = no_exp(a); gsub(/"/, "", a); gsub(sprintf("%c", 39), "", a)
-      if (a ~ /(^|[^A-Za-z0-9_])(exit|exec)([^A-Za-z0-9_]|$)/ && trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/)
-        printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " a " ..." trap_sigs, NR, NR
-      else if (trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/) {
-        # The command word of every segment of the action is a function the
-        # trap may call; which of them this file defines is only known at
-        # END, since a trap is often set before its handler is written.
-        ns = split(a, segs, /[;&|]+/)
-        for (k = 1; k <= ns; k++) {
-          seg = segs[k]; sub(/^[[:space:]]+/, "", seg)
-          while (seg ~ /^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/)
-            sub(/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/, "", seg)
-          nw = split(seg, tw, /[[:space:]]+/)
-          cw = tw[1]
-          if ((cw == "command" || cw == "builtin") && nw > 1) cw = tw[2]
-          if (cw != "") { nt++; t_word[nt] = cw; t_line[nt] = NR; t_sigs[nt] = trap_sigs }
+    # The action is judged as every text its parameter expansions can leave
+    # (see pexp), each with the other expansions removed. An action with more
+    # alternatives than brace_exp enumerates is already a brace violation:
+    # the action is a word of a trap statement (see end_word).
+    function check_trap(   a, a0, na, ka, acand, cws) {
+      a0 = trap_action; gsub(/\\/, "", a0)
+      na = brace_exp(no_exp(pexp(a0)))
+      for (ka = 1; ka <= na; ka++) { acand[ka] = bx[ka]; gsub(/"/, "", acand[ka]); gsub(sprintf("%c", 39), "", acand[ka]) }
+      for (ka = 1; ka <= na; ka++) {
+        a = acand[ka]
+        if (a ~ /(^|[^A-Za-z0-9_])(exit|exec)([^A-Za-z0-9_]|$)/ && trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/) {
+          printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " a " ..." trap_sigs, NR, NR
+          break
+        }
+        if (trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/) {
+          # The command word of every segment of the action is a function the
+          # trap may call; which of them this file defines is only known at
+          # END, since a trap is often set before its handler is written.
+          ns = split(a, segs, /[;&|]+/)
+          for (k = 1; k <= ns; k++) {
+            seg = segs[k]; sub(/^[[:space:]]+/, "", seg)
+            while (seg ~ /^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/)
+              sub(/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/, "", seg)
+            nw = split(seg, tw, /[[:space:]]+/)
+            cw = tw[1]
+            if ((cw == "command" || cw == "builtin") && nw > 1) cw = tw[2]
+            if (cw != "" && index(cws, " " cw " ") == 0) { cws = cws " " cw " "; nt++; t_word[nt] = cw; t_line[nt] = NR; t_sigs[nt] = trap_sigs }
+          }
         }
       }
       trap_action = ""; trap_sigs = ""; trap_has_action = 0
@@ -528,7 +585,7 @@ derive_file() {
       # word), so the pending word is carried across it, not ended here.
       if (dol) { d++; st_w[d] = w; w = ""; wq = 0 }
       else { end_word(); d++ }
-      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_arith[d] = arith; st_dbl[d] = dbl
+      st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_at[d] = arr_txt; st_an[d] = arr_nm; st_arith[d] = arith; st_dbl[d] = dbl
       st_pat[d] = pat; st_dol[d] = dol
       st_cs[d] = cmd_seen; st_cw[d] = cmd_word; st_nw[d] = nwords
       st_ia[d] = in_alias; st_ish[d] = in_shopt; st_it[d] = in_trap; st_sf[d] = sflag
@@ -542,7 +599,7 @@ derive_file() {
     function close_sub() {
       end_command()
       if (d > 0) {
-        q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; arith = st_arith[d]
+        q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; arr_txt = st_at[d]; arr_nm = st_an[d]; arith = st_arith[d]
         pat = st_pat[d]
         if (st_dol[d]) {
           cmd_seen = st_cs[d]; cmd_word = st_cw[d]; nwords = st_nw[d]
@@ -657,8 +714,10 @@ derive_file() {
               # An element can assign the posix-mode variable (a default
               # expansion, an arithmetic subscript), so the literal text and
               # its quoted parts (collected in w) are judged for the name.
+              # The two are collected apart, so the report names the array
+              # as written (NAME=(...)) rather than rebuilding its text.
               if (arr_txt ~ /(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)/ || w ~ /(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)/)
-                printf "%s\t%s\t%d\t%d\talias\n", file, "(" arr_txt w ")", NR, NR
+                printf "%s\t%s\t%d\t%d\talias\n", file, arr_nm "(...)", NR, NR
               arr = 0; w = ""
             }
           }
@@ -735,7 +794,7 @@ derive_file() {
         # here, where the word is consumed without reaching end_word.
         if (c == "(" && w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=$/) {
           if (w ~ /^POSIXLY_CORRECT\+?=$/) printf "%s\t%s\t%d\t%d\talias\n", file, w "(", NR, NR
-          arr = 1; arr_d = 1; arr_txt = ""; w = ""; i++; continue
+          arr = 1; arr_d = 1; arr_txt = ""; arr_nm = w; w = ""; i++; continue
         }
         if (c2 == "((" && w == "") { open_sub("", 1, 1, 0); i += 2; continue }
         if (c == "(") { open_sub("", arith, 0, 0); i++; continue }
@@ -962,7 +1021,7 @@ if [ "${derived:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported|brace)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
   # The report is the block reason, so it goes to stderr like every other
@@ -979,6 +1038,7 @@ if [ -n "$violations" ]; then
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable — rename this function, or delete the enable call" ;;
         shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command or a closing brace, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
         brace)    echo "  - $file:$def: '$name' — this brace expansion produces more words than the gate enumerates (64, nested 8 deep), in a command name or an alias, shopt or trap statement, so a guarded word could sit past the cut where the gate cannot see it — list the words it needs explicitly, or split the statement" ;;
+        split)    echo "  - $file:$def: '$name' — this parameter expansion's default, alternate or replacement text holds a blank, and bash splits an unquoted expansion into separate words there, so in a command name or an alias, shopt, set or trap statement it can spell a guarded command the gate cannot place — write the words out literally" ;;
         unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as a one-liner '$name() { ...; }', or multi-line with the closing '}' at column 0, then freeze it on the next line" ;;
       esac
     done <<<"$violations"

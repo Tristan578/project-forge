@@ -649,7 +649,9 @@ fi
 # arithmetic subscript), which the literal's fast path skipped; lines 29 to
 # 31 interrupt a set statement with an empty substitution, which did not
 # carry the set state across it; line 32 is line 27 in double quotes. All
-# are reported; line 33, a plain array, is not.
+# are reported; line 33, a plain array, is not. Round twenty-six: line 34
+# nests an array literal inside a substitution inside another literal, which
+# reset the outer literal's text; it is reported against the outer name.
 # The variable rule is deliberately broad (any word naming it, text
 # included), because bash can assign a variable from more positions than a
 # list would stay complete for; so this file spells the name at run time
@@ -691,20 +693,21 @@ set $() -eo posix
 set -o `` posix
 x=("${POSIXLY_CORRECT:=1}")
 x=(a b)
+x=(${POSIXLY_CORRECT:=1} $(y=(b)))
 FIX
 )"
 out_posix="$(run_gate "$d_posix")"
 expect_rc "19l. set -o posix in every flag spelling, shopt -s -o posix and any word naming the posix-mode variable are violations" 1 \
-  "$out_posix" "23 violation(s)" \
+  "$out_posix" "24 violation(s)" \
   "fixture.test.sh:3: 'set -o posix'" "fixture.test.sh:4: 'set -eo posix'" "fixture.test.sh:5: 'set -o posix'" \
   "fixture.test.sh:6: 'set -o posix'" "fixture.test.sh:7: 'shopt -s posix'" "fixture.test.sh:8: '$px=1'" \
   "fixture.test.sh:9: '$px=y'" "fixture.test.sh:10: '$px='" \
   "fixture.test.sh:11: '\${$px:=1}'" "fixture.test.sh:12: '$px'" "fixture.test.sh:13: '${px_head%LY}\$()LY_CORRECT=1'" \
   "fixture.test.sh:14: '$px=1'" "fixture.test.sh:15: '$px'" "fixture.test.sh:23: 'set -o posix'" \
   "fixture.test.sh:24: '$px=('" "fixture.test.sh:25: '$px+=('" "fixture.test.sh:26: '$px=('" \
-  "fixture.test.sh:27: '(\${$px:=1})'" "fixture.test.sh:28: '([$px=1]=a)'" \
+  "fixture.test.sh:27: 'x=(...)'" "fixture.test.sh:28: 'x=(...)'" \
   "fixture.test.sh:29: 'set -o posix'" "fixture.test.sh:30: 'set -eo posix'" "fixture.test.sh:31: 'set -o posix'" \
-  "fixture.test.sh:32: '(\${$px:=1})'"
+  "fixture.test.sh:32: 'x=(...)'" "fixture.test.sh:34: 'x=(...)'"
 # The fixture's own lines are the subject: each is run in this bash and must
 # be reported exactly when it turns expand_aliases on, so a spelling added
 # to the fixture is checked against bash rather than against this comment.
@@ -718,8 +721,8 @@ for n in $(seq 3 "$(wc -l < "$d_posix/fixture.test.sh")"); do
   [ "$reported" = "$enables" ] || posix_mismatch="$posix_mismatch line $n ($line: bash $state, reported $reported);"
   posix_checked=$((posix_checked + 1))
 done
-if [ "$posix_checked" -ne 31 ]; then
-  fail "19m. expected to check 31 fixture lines against bash, checked $posix_checked" "$out_posix"
+if [ "$posix_checked" -ne 32 ]; then
+  fail "19m. expected to check 32 fixture lines against bash, checked $posix_checked" "$out_posix"
 elif [ -n "$posix_mismatch" ]; then
   fail "19m. the gate and bash disagree on which lines enter posix mode:$posix_mismatch" "$out_posix"
 else
@@ -1447,6 +1450,9 @@ expect_rc "30i. a word spelled around an empty substitution is still the guarded
 # quotes are removed then too. The round also found four positions no case
 # exercised: the `-s` flag, the trap signal, the body of a function a trap
 # calls, and an empty backtick pair in a trap action.
+# Twenty-sixth round: line 4 is also a split violation, because its
+# alternate text holds a blank and bash splits it into two words when x is
+# set, which no word rule can place (see 30o).
 d_expansions="$(mkfixture expansions <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -1475,7 +1481,8 @@ trap 'ex$1it 0' EXIT
 FIX
 )"
 expect_rc "30j. every expansion that can be empty, in every guarded position, is still the guarded word" 1 \
-  "$(run_gate "$d_expansions")" "15 violation(s)" "fixture.test.sh:3: 'alias fail=:'" "fixture.test.sh:4: 'alias fail=:'" \
+  "$(run_gate "$d_expansions")" "16 violation(s)" "fixture.test.sh:3: 'alias fail=:'" "fixture.test.sh:4: 'alias fail=:'" \
+  "fixture.test.sh:4: 'ali\${x:+ Q}as'" \
   "fixture.test.sh:5: 'shopt -s expand\${x:+Q}_aliases'" "fixture.test.sh:6: 'shopt -\$()s expand_aliases'" \
   "fixture.test.sh:7: 'trap exit 0 ... EXIT'" "fixture.test.sh:9: 'trap exit 0 ... EXIT'" "fixture.test.sh:10: 'trap exit 0 ... EXIT'" \
   "fixture.test.sh:11: 'trap exit 0 ... EXIT'" "fixture.test.sh:12: 'alias fail\${1}=:'" "fixture.test.sh:15: 'trap cleanup ... EXIT (cleanup() exits)'" \
@@ -1559,6 +1566,79 @@ elif [ -n "$numsig_mismatch" ]; then
   fail "30n-c. the gate and bash disagree on which traps replace the exit status:$numsig_mismatch" "$out_numsig"
 else
   pass "30n-c. every fixture line is reported exactly when its trap replaces the exit status in this bash"
+fi
+
+# ---- 30o. text a parameter expansion carries is judged ------------------------
+# Twenty-sixth board round (security): a default (:- - := =), an alternate
+# (:+ +) or a replacement (/pat/TEXT) yields its literal TEXT in some state
+# the gate cannot see, so it is judged both ways, empty and TEXT (30o-b
+# proves in bash that the shapes bind). Lines 3 to 15 spell a guarded word
+# that way, nested (11), after a subscript (12), quoted inside (13) or as a
+# replacement (6, 14). Line 16 holds a blank, which bash splits into words
+# (a split violation), and line 17 is a set statement whose brace group
+# passes the enumeration cap (a brace violation). Lines 18 to 21 are an
+# argument, an assignment, a trap action with a blank and a quoted argument,
+# and none is reported. Line 24 calls a function that exits through a trap
+# action whose candidates repeat the call, and is reported once; line 25 is
+# a trap action with more alternatives than the gate enumerates (a brace
+# violation).
+d_pexp="$(mkfixture param-expansion <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+shopt -s ${n:-expand_aliases}
+${n:-alias} fail=:
+shopt -s ${HOME:+expand_aliases}
+${x/*/alias} fail=:
+trap 'exit 0' ${n:-EXIT}
+trap '${n:-exit} 0' EXIT
+set -o ${n:=posix}
+${a:-al}${b:+ias} fail=:
+al${a:-${b:-i}}as fail=:
+${a[0]:-alias} fail=:
+shopt -s ${x:-"expand_aliases"}
+shopt -s ${x//a/extdebug}
+trap : ${n-DEBUG}
+${x:- alias} fail=:
+set -o {z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,z10,z11,z12,z13,z14,z15,z16,z17,z18,z19,z20,z21,z22,z23,z24,z25,z26,z27,z28,z29,z30,z31,z32,z33,z34,z35,z36,z37,z38,z39,z40,z41,z42,z43,z44,z45,z46,z47,z48,z49,z50,z51,z52,z53,z54,z55,z56,z57,z58,z59,z60,z61,z62,z63,posix}
+echo ${1:-alias} fail=:
+x=${n:-alias}
+trap 'rm -f "${TMP:-/tmp/a b}"' EXIT
+cp "${src:-a b}" x
+finish() { exit 0; }
+readonly -f finish
+trap 'finish ${x:-y}' EXIT
+trap '${a:-x}${b:-x}${c:-x}${d:-x}${e:-x}${f:-x}${g:-x} 0' EXIT
+FIX
+)"
+out_pexp="$(run_gate "$d_pexp")"
+expect_rc "30o. a default, alternate or replacement that can spell a guarded word is judged as that word" 1 "$out_pexp" "17 violation(s)" \
+  "fixture.test.sh:3: 'shopt -s \${n:-expand_aliases}'" "fixture.test.sh:4: 'alias fail=:'" \
+  "fixture.test.sh:5: 'shopt -s \${HOME:+expand_aliases}'" "fixture.test.sh:6: 'alias fail=:'" \
+  "fixture.test.sh:7: 'trap exit 0 ... EXIT'" "fixture.test.sh:8: 'trap exit 0 ... EXIT'" \
+  "fixture.test.sh:9: 'set -o \${n:=posix}'" "fixture.test.sh:10: 'alias fail=:'" "fixture.test.sh:11: 'alias fail=:'" \
+  "fixture.test.sh:12: 'alias fail=:'" "fixture.test.sh:13: 'shopt -s \${x:-\"expand_aliases\"}'" \
+  "fixture.test.sh:14: 'shopt -s \${x//a/extdebug}'" "fixture.test.sh:15: 'trap ... \${n-DEBUG}'" \
+  "fixture.test.sh:16: '\${x:- alias}' — this parameter expansion" "fixture.test.sh:17: '{z0,z1," \
+  "fixture.test.sh:24: 'trap finish" "fixture.test.sh:25: '\${a:-x}\${b:-x}"
+if grep -Eq 'fixture.test.sh:(18|19|20|21):' <<<"$out_pexp"; then
+  fail "30o-c. an argument, an assignment, a trap action and a quoted argument with expansion text are not reported" "$out_pexp"
+else
+  pass "30o-c. an argument, an assignment, a trap action and a quoted argument with expansion text are not reported"
+fi
+if [ "$(grep -c 'fixture.test.sh:24: ' <<<"$out_pexp")" -eq 1 ]; then
+  pass "30o-d. a trap whose action candidates repeat a call reports that call once"
+else
+  fail "30o-d. a trap whose action candidates repeat a call reports that call once" "$out_pexp"
+fi
+# The shapes bind for real in this bash, so the rule guards measured bypasses.
+pexp_alias="$(bash -c 'fail() { echo REAL; }; readonly -f fail; shopt -s ${n:-expand_aliases}; ${HOME:+alias} fail="echo ALIASED"; eval fail' 2>&1)"
+pexp_split="$(bash -c 'fail() { echo REAL; }; readonly -f fail; shopt -s expand_aliases; ${x:- alias} fail="echo ALIASED"; eval fail' 2>&1)"
+bash -c 'trap "exit 0" ${n:-EXIT}; exit 3' >/dev/null 2>&1; pexp_trap=$?
+pexp_posix="$(bash -c 'set -o ${n:=posix}; shopt -p expand_aliases' 2>&1)"
+if [ "$pexp_alias" = "ALIASED" ] && [ "$pexp_split" = "ALIASED" ] && [ "$pexp_trap" -eq 0 ] && [ "$pexp_posix" = "shopt -s expand_aliases" ]; then
+  pass "30o-b. a default, an alternate and a split default bind an alias, trap EXIT and enter posix mode in this bash"
+else
+  fail "30o-b. a probe did not reproduce (alias '$pexp_alias', split '$pexp_split', trap rc $pexp_trap, posix '$pexp_posix')"
 fi
 
 # ---- 30k. an ANSI-C quoted string is decoded before the word is judged -------
