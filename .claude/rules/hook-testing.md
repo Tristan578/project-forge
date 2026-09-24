@@ -197,7 +197,8 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   and ANY word naming `POSIXLY_CORRECT`, text included: assigning it enters
   posix mode from more positions than a list would stay complete for
   (`POSIXLY_CORRECT=1 :`, `export`, `declare`, `printf -v`, `read`,
-  `${POSIXLY_CORRECT:=1}`). A suite that must print the name builds it from
+  `${POSIXLY_CORRECT:=1}`, an array `POSIXLY_CORRECT=(1)` or a name inside
+  any array literal). A `$( )` inside a `set` statement does not hide it. A suite that must print the name builds it from
   an expansion (`"${head}_CORRECT"`), as `check-fn-freeze.test.sh` does.
 - No `trap ... DEBUG` and no `shopt -s extdebug` either: with extdebug on, a
   DEBUG trap that returns non-zero makes bash skip the next command, so every

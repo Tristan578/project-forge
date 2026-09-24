@@ -914,7 +914,13 @@ by construction rather than by measurement.
   form feed or carriage return as the blank before a zero, so dropping any
   of them from sig_word passed the suite. Both fixtures are now also run
   line by line in bash, and each line must be reported exactly when bash
-  says it has the effect.
+  says it has the effect. The twenty-fifth found two lexer paths that
+  bypassed the new rules. An array literal (`POSIXLY_CORRECT=(1)`, or a name
+  inside an element such as `x=(${POSIXLY_CORRECT:=1})`) was skipped to its
+  closing paren without reaching the word checks. And a command substitution
+  inside a set statement (`set -o $() posix`) dropped the set state, which
+  the substitution stack saved for shopt, alias and trap but not for set.
+  Both are now judged, and both are fixture lines of the bash-parity case.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

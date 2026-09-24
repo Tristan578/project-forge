@@ -644,7 +644,12 @@ fi
 # line 19 turns the mode off, and lines 20 to 22 put posix in a statement
 # after a set statement, which ends it; none of those is. Line 23 repeats
 # line 3 after all of them, so no state they set survives into the next
-# statement.
+# statement. Round twenty-five: lines 24 to 28 assign the variable as an
+# array, or name it inside an array literal (a default expansion, an
+# arithmetic subscript), which the literal's fast path skipped; lines 29 to
+# 31 interrupt a set statement with an empty substitution, which did not
+# carry the set state across it; line 32 is line 27 in double quotes. All
+# are reported; line 33, a plain array, is not.
 # The variable rule is deliberately broad (any word naming it, text
 # included), because bash can assign a variable from more positions than a
 # list would stay complete for; so this file spells the name at run time
@@ -676,16 +681,30 @@ set -o errexit; echo posix
 set -o nounset
 echo posix
 set -o posix
+POSIXLY_CORRECT=(1)
+POSIXLY_CORRECT+=(1)
+declare -a POSIXLY_CORRECT=(1)
+x=(${POSIXLY_CORRECT:=1})
+x=([POSIXLY_CORRECT=1]=a)
+set -o $() posix
+set $() -eo posix
+set -o `` posix
+x=("${POSIXLY_CORRECT:=1}")
+x=(a b)
 FIX
 )"
 out_posix="$(run_gate "$d_posix")"
 expect_rc "19l. set -o posix in every flag spelling, shopt -s -o posix and any word naming the posix-mode variable are violations" 1 \
-  "$out_posix" "14 violation(s)" \
+  "$out_posix" "23 violation(s)" \
   "fixture.test.sh:3: 'set -o posix'" "fixture.test.sh:4: 'set -eo posix'" "fixture.test.sh:5: 'set -o posix'" \
   "fixture.test.sh:6: 'set -o posix'" "fixture.test.sh:7: 'shopt -s posix'" "fixture.test.sh:8: '$px=1'" \
   "fixture.test.sh:9: '$px=y'" "fixture.test.sh:10: '$px='" \
   "fixture.test.sh:11: '\${$px:=1}'" "fixture.test.sh:12: '$px'" "fixture.test.sh:13: '${px_head%LY}\$()LY_CORRECT=1'" \
-  "fixture.test.sh:14: '$px=1'" "fixture.test.sh:15: '$px'" "fixture.test.sh:23: 'set -o posix'"
+  "fixture.test.sh:14: '$px=1'" "fixture.test.sh:15: '$px'" "fixture.test.sh:23: 'set -o posix'" \
+  "fixture.test.sh:24: '$px=('" "fixture.test.sh:25: '$px+=('" "fixture.test.sh:26: '$px=('" \
+  "fixture.test.sh:27: '(\${$px:=1})'" "fixture.test.sh:28: '([$px=1]=a)'" \
+  "fixture.test.sh:29: 'set -o posix'" "fixture.test.sh:30: 'set -eo posix'" "fixture.test.sh:31: 'set -o posix'" \
+  "fixture.test.sh:32: '(\${$px:=1})'"
 # The fixture's own lines are the subject: each is run in this bash and must
 # be reported exactly when it turns expand_aliases on, so a spelling added
 # to the fixture is checked against bash rather than against this comment.
@@ -699,8 +718,8 @@ for n in $(seq 3 "$(wc -l < "$d_posix/fixture.test.sh")"); do
   [ "$reported" = "$enables" ] || posix_mismatch="$posix_mismatch line $n ($line: bash $state, reported $reported);"
   posix_checked=$((posix_checked + 1))
 done
-if [ "$posix_checked" -ne 21 ]; then
-  fail "19m. expected to check 21 fixture lines against bash, checked $posix_checked" "$out_posix"
+if [ "$posix_checked" -ne 31 ]; then
+  fail "19m. expected to check 31 fixture lines against bash, checked $posix_checked" "$out_posix"
 elif [ -n "$posix_mismatch" ]; then
   fail "19m. the gate and bash disagree on which lines enter posix mode:$posix_mismatch" "$out_posix"
 else

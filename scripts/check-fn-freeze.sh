@@ -76,7 +76,8 @@
 # statement with an s flag cluster before `posix` (`shopt -s -o posix`), and
 # any word that names POSIXLY_CORRECT, since assigning it enters posix mode
 # from every position bash allows (`POSIXLY_CORRECT=1`, `export`, `declare`,
-# `printf -v`, `read`, `${POSIXLY_CORRECT:=1}`, even as a prefix of `:`).
+# `printf -v`, `read`, `${POSIXLY_CORRECT:=1}`, even as a prefix of `:`, and
+# as an array or inside any array literal: twenty-fifth round).
 #
 # A DEBUG trap under `shopt -s extdebug` is the other binding-independent
 # neuter: bash skips the NEXT command whenever a command run by the DEBUG
@@ -531,6 +532,7 @@ derive_file() {
       st_pat[d] = pat; st_dol[d] = dol
       st_cs[d] = cmd_seen; st_cw[d] = cmd_word; st_nw[d] = nwords
       st_ia[d] = in_alias; st_ish[d] = in_shopt; st_it[d] = in_trap; st_sf[d] = sflag
+      st_is[d] = in_set; st_of[d] = oflag; st_se[d] = set_end
       st_ta[d] = trap_action; st_ts[d] = trap_sigs; st_th[d] = trap_has_action
       # A trap statement is judged once, when it really ends, not here too.
       if (dol) in_trap = 0
@@ -545,6 +547,7 @@ derive_file() {
         if (st_dol[d]) {
           cmd_seen = st_cs[d]; cmd_word = st_cw[d]; nwords = st_nw[d]
           in_alias = st_ia[d]; in_shopt = st_ish[d]; in_trap = st_it[d]; sflag = st_sf[d]
+          in_set = st_is[d]; oflag = st_of[d]; set_end = st_se[d]
           trap_action = st_ta[d]; trap_sigs = st_ts[d]; trap_has_action = st_th[d]
           w = st_w[d] "$()"; wq = 1
         }
@@ -648,7 +651,18 @@ derive_file() {
           if (c3 == "$((") { open_sub("", 1, 1, 1); i += 3; continue }
           if (c2 == "$(") { open_sub("", 0, 0, 1); i += 2; continue }
           if (c == "(") arr_d++
-          if (c == ")") { arr_d--; if (arr_d == 0) { arr = 0; w = "" } }
+          if (c == ")") {
+            arr_d--
+            if (arr_d == 0) {
+              # An element can assign the posix-mode variable (a default
+              # expansion, an arithmetic subscript), so the literal text and
+              # its quoted parts (collected in w) are judged for the name.
+              if (arr_txt ~ /(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)/ || w ~ /(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)/)
+                printf "%s\t%s\t%d\t%d\talias\n", file, "(" arr_txt w ")", NR, NR
+              arr = 0; w = ""
+            }
+          }
+          arr_txt = arr_txt c
           i++; continue
         }
         if (c == "\\") {
@@ -716,7 +730,13 @@ derive_file() {
           if (dn != "" && index(builtins, " " dn " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, dn "()", NR, NR
           if (dn != "" && dn !~ /[=$]/) shape_check(dn "()", dn)
         }
-        if (c == "(" && w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=$/) { arr = 1; arr_d = 1; w = ""; i++; continue }
+        # Assigning an array to the posix-mode variable enters posix mode as
+        # a scalar does (twenty-fifth board round), so the name is judged
+        # here, where the word is consumed without reaching end_word.
+        if (c == "(" && w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=$/) {
+          if (w ~ /^POSIXLY_CORRECT\+?=$/) printf "%s\t%s\t%d\t%d\talias\n", file, w "(", NR, NR
+          arr = 1; arr_d = 1; arr_txt = ""; w = ""; i++; continue
+        }
         if (c2 == "((" && w == "") { open_sub("", 1, 1, 0); i += 2; continue }
         if (c == "(") { open_sub("", arith, 0, 0); i++; continue }
         if (c == ")") {
