@@ -13,13 +13,35 @@ import {
   toWireComponent,
   toEngineComponentType,
   toStoreComponentType,
-  normalizeGameComponent,
+  normalizeGameComponentWithReport,
+  gameComponentFields,
 } from '@/lib/engine/gameComponentWire';
+import {
+  componentAdjustmentsOf,
+  nextComponentAdjustments,
+  withComponentAdjustments,
+  type GameComponentAdjustments,
+  type GameComponentFieldCorrection,
+  type GameComponentWriteReport,
+} from '@/lib/engine/gameComponentCorrections';
 import { buildSetGameCameraPayload } from '@/lib/game/gameCameraPayload';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
   primaryGameComponents: GameComponentData[] | null;
+  /**
+   * Which game-component fields hold a different value than the one asked for,
+   * and what was asked for (PF-1148). entityId -> component type -> field.
+   *
+   * Ephemeral editor state: it records how a value came to be during this
+   * session, which is not part of the game. It is never written into a
+   * component, a wire payload or a scene file — the components in
+   * `allGameComponents` stay exactly the shape the engine and the export read.
+   * Set by `addGameComponent` / `updateGameComponent`, cleared per field when
+   * that field is next written without a correction, and pruned against the
+   * engine's own report in `gameEvents.ts`.
+   */
+  gameComponentAdjustments: GameComponentAdjustments;
   allGameCameras: Record<string, GameCameraData>;
   activeGameCameraId: string | null;
   mobileTouchConfig: MobileTouchConfig;
@@ -33,8 +55,14 @@ export interface GameSlice {
   /** Current player score for the active play session, surfaced to the HUD. */
   gameScore: number;
 
-  addGameComponent: (entityId: string, component: GameComponentData) => void;
-  updateGameComponent: (entityId: string, component: GameComponentData) => void;
+  /**
+   * `report` is what building `component` did to the caller's request — pass
+   * the result of `buildStoreComponentWithReport` when the values came from a
+   * tool call. The store adds whatever its own normalization changes on top, so
+   * a raw inspector value is covered without one.
+   */
+  addGameComponent: (entityId: string, component: GameComponentData, report?: GameComponentWriteReport) => void;
+  updateGameComponent: (entityId: string, component: GameComponentData, report?: GameComponentWriteReport) => void;
   removeGameComponent: (entityId: string, componentName: string) => void;
   setGameCamera: (entityId: string, data: GameCameraData) => void;
   removeGameCamera: (entityId: string) => void;
@@ -86,6 +114,27 @@ export function setWinnabilityStateReader(reader: (() => WinnabilityState) | nul
   readWinnabilityState = reader;
 }
 
+/**
+ * The caller's corrections and the store's own, as one list.
+ *
+ * A caller's record describes the ORIGINAL request, so it is kept whenever the
+ * store's normalization agrees with what it says was applied. For a component
+ * built by `buildStoreComponentWithReport` that is always, because normalizing
+ * a valid component changes nothing. If the store did move the value further,
+ * its own record is the true one. Records for a different component type are
+ * someone else's report and are ignored.
+ */
+function mergeCorrections(
+  type: GameComponentData['type'],
+  fromCaller: readonly GameComponentFieldCorrection[],
+  fromStore: readonly GameComponentFieldCorrection[],
+): GameComponentFieldCorrection[] {
+  const byField = new Map<string, GameComponentFieldCorrection>();
+  for (const c of fromCaller) if (c.component === type) byField.set(c.field, c);
+  for (const c of fromStore) byField.set(c.field, c);
+  return [...byField.values()];
+}
+
 /** Best-effort unique id; `crypto.randomUUID` is unavailable in non-secure contexts. */
 function messageId(): string {
   try {
@@ -134,6 +183,7 @@ function surfaceWinnabilityMessage(message: string): void {
 export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set, get) => ({
   allGameComponents: {},
   primaryGameComponents: null,
+  gameComponentAdjustments: {},
   allGameCameras: {},
   activeGameCameraId: null,
   mobileTouchConfig: {
@@ -153,11 +203,13 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   gameWon: false,
   gameScore: 0,
 
-  addGameComponent: (entityId, raw) => {
+  addGameComponent: (entityId, raw, report) => {
     // Normalize BEFORE the store write so the store and the engine hold the same
     // numbers — the engine rounds and clamps its `u32` fields, and a divergence
     // there is silent (see gameComponentWire.ts).
-    const component = normalizeGameComponent(raw);
+    const normalized = normalizeGameComponentWithReport(raw);
+    const component = normalized.component;
+    const corrections = mergeCorrections(component.type, report?.corrections ?? [], normalized.corrections);
     set(state => {
       // Replace any existing component of the same type rather than appending.
       // `build_game_component` keys on `componentType` and OVERWRITES, so the
@@ -167,11 +219,26 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
       // divergence because `dispatchCommand` returns void. This matches
       // `updateGameComponent`, which already keys on `type`.
       const existing = state.allGameComponents[entityId] || [];
+      // A whole new component, so the old markers go with the old component:
+      // only what THIS write corrected is marked.
+      const adjustments = nextComponentAdjustments({
+        previous: undefined,
+        previousFields: undefined,
+        nextFields: gameComponentFields(component),
+        corrections,
+        supplied: report?.supplied ?? [],
+      });
       return {
         allGameComponents: {
           ...state.allGameComponents,
           [entityId]: [...existing.filter(c => c.type !== component.type), component],
         },
+        gameComponentAdjustments: withComponentAdjustments(
+          state.gameComponentAdjustments,
+          entityId,
+          component.type,
+          adjustments,
+        ),
       };
     });
     // The engine wants `{ entityId, componentType, properties }`, not the store's
@@ -181,14 +248,36 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
     // would keep a component the engine never received.
     if (dispatchCommand) dispatchCommand('add_game_component', { entityId, ...toWireComponent(component) });
   },
-  updateGameComponent: (entityId, raw) => {
-    const component = normalizeGameComponent(raw);
-    set(state => ({
-      allGameComponents: {
-        ...state.allGameComponents,
-        [entityId]: (state.allGameComponents[entityId] || []).map(c => c.type === component.type ? component : c),
-      },
-    }));
+  updateGameComponent: (entityId, raw, report) => {
+    const normalized = normalizeGameComponentWithReport(raw);
+    const component = normalized.component;
+    const corrections = mergeCorrections(component.type, report?.corrections ?? [], normalized.corrections);
+    set(state => {
+      const list = state.allGameComponents[entityId] || [];
+      const previous = list.find(c => c.type === component.type);
+      // Per field: a marker survives only while its field is neither written
+      // explicitly nor changed. The inspector sends the whole component on every
+      // edit, so "changed" is what tells the Pause edit apart from the Speed one.
+      const adjustments = nextComponentAdjustments({
+        previous: componentAdjustmentsOf(state.gameComponentAdjustments, entityId, component.type),
+        previousFields: previous ? gameComponentFields(previous) : undefined,
+        nextFields: gameComponentFields(component),
+        corrections,
+        supplied: report?.supplied ?? [],
+      });
+      return {
+        allGameComponents: {
+          ...state.allGameComponents,
+          [entityId]: list.map(c => c.type === component.type ? component : c),
+        },
+        gameComponentAdjustments: withComponentAdjustments(
+          state.gameComponentAdjustments,
+          entityId,
+          component.type,
+          adjustments,
+        ),
+      };
+    });
     if (dispatchCommand) dispatchCommand('update_game_component', { entityId, ...toWireComponent(component) });
   },
   removeGameComponent: (entityId, componentName) => {
@@ -203,6 +292,12 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
           ...state.allGameComponents,
           [entityId]: (state.allGameComponents[entityId] || []).filter(c => c.type !== storeType),
         },
+        gameComponentAdjustments: withComponentAdjustments(
+          state.gameComponentAdjustments,
+          entityId,
+          storeType,
+          undefined,
+        ),
       }));
     }
     // An unrecognized name is still forwarded so the engine sees exactly what the
