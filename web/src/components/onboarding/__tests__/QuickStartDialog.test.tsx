@@ -64,6 +64,10 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 const startQuickStart = vi.fn().mockResolvedValue(true);
 const resolveGate = vi.fn();
 const cancelPipeline = vi.fn();
+// `play` reports whether it dispatched: false when the winnability gate
+// refused or no engine is attached (gameSlice.ts, #10166).
+const play = vi.fn().mockReturnValue(true);
+const setEngineMode = vi.fn();
 
 function setState(overrides: Record<string, unknown> = {}) {
   Object.keys(hoisted.state).forEach((k) => delete hoisted.state[k]);
@@ -75,6 +79,8 @@ function setState(overrides: Record<string, unknown> = {}) {
     startQuickStart,
     resolveGate,
     cancelPipeline,
+    play,
+    setEngineMode,
     ...overrides,
   });
 }
@@ -82,6 +88,7 @@ function setState(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   startQuickStart.mockResolvedValue(true);
+  play.mockReturnValue(true);
   setState();
 });
 
@@ -485,6 +492,62 @@ describe('QuickStartDialog', () => {
   // The real UI can never leave `selectedId` pointing at a card that isn't in
   // `QUICK_START_GAME_TYPES` -- `handlePick` only ever sets it from that same
   // list. This forces the one lookup miss `handleSubmit` defends against.
+  describe('Play now (#10166)', () => {
+    /** Builds through to the running view with the orchestrator in `status`. */
+    async function buildToStatus(status: string, onClose = vi.fn()) {
+      startQuickStart.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = status;
+        return true;
+      });
+      render(<QuickStartDialog open onClose={onClose} />);
+      await pickPlatformer();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      await screen.findByRole('status');
+      return onClose;
+    }
+
+    it('offers Play now once the build completes, and focuses it', async () => {
+      await buildToStatus('completed');
+
+      const playNow = screen.getByTestId('quick-start-play-now');
+      expect(playNow.textContent).toContain('Play now');
+      await waitFor(() => expect(document.activeElement).toBe(playNow));
+    });
+
+    it.each(['executing', 'failed', 'cancelled'])(
+      'offers no Play now while the status is %s',
+      async (status) => {
+        await buildToStatus(status);
+        expect(screen.queryByTestId('quick-start-play-now')).toBeNull();
+      },
+    );
+
+    it('plays once and closes when play() reports it dispatched', async () => {
+      const onClose = await buildToStatus('completed');
+      play.mockReturnValueOnce(true);
+
+      await userEvent.click(screen.getByTestId('quick-start-play-now'));
+
+      expect(play).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledTimes(1);
+      // engineMode follows ENGINE_MODE_CHANGED from the engine, never a guess
+      // made here right after play().
+      expect(setEngineMode).not.toHaveBeenCalled();
+    });
+
+    it('closes without an alert of its own when play() was refused: the chat overlay explains', async () => {
+      const onClose = await buildToStatus('completed');
+      play.mockReturnValueOnce(false);
+
+      await userEvent.click(screen.getByTestId('quick-start-play-now'));
+
+      expect(play).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(setEngineMode).not.toHaveBeenCalled();
+    });
+  });
+
   it('refuses to submit and returns to pick when the selected card cannot be found', async () => {
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
