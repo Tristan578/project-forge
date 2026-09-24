@@ -56,6 +56,15 @@ vi.mock('@/lib/tokens/service', () => ({
   deductTokens: vi.fn(),
 }));
 
+// Real implementation behind a spy (#8858): the provider-guard tests need to
+// prove it is NEVER called for non-Anthropic providers, and the Anthropic tests
+// run the real exchange against a stubbed `fetch`.
+const actualWif = await vi.importActual<typeof import('@/lib/ai/wifCredential')>('@/lib/ai/wifCredential');
+vi.mock('@/lib/ai/wifCredential', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ai/wifCredential')>();
+  return { ...actual, resolveAnthropicClientAuth: vi.fn(actual.resolveAnthropicClientAuth) };
+});
+
 // ---------------------------------------------------------------------------
 // Subject + imported mocks for assertion
 // ---------------------------------------------------------------------------
@@ -64,12 +73,15 @@ import { resolveApiKey, resolveByokOrPlatformKey, storeProviderKey, deleteProvid
 import * as dbClient from '@/lib/db/client';
 import * as encryption from '@/lib/keys/encryption';
 import * as tokenService from '@/lib/tokens/service';
+import * as wifCredential from '@/lib/ai/wifCredential';
+import { ANTHROPIC_WIF_REQUIRED_ENV } from '@/lib/config/anthropicWif';
 
 const mockDeductTokens = vi.mocked(tokenService.deductTokens);
 const mockGetDb = vi.mocked(dbClient.getDb);
 const mockQueryWithResilience = vi.mocked(dbClient.queryWithResilience);
 const mockDecryptProviderKey = vi.mocked(encryption.decryptProviderKey);
 const mockEncryptProviderKey = vi.mocked(encryption.encryptProviderKey);
+const mockResolveAnthropicClientAuth = vi.mocked(wifCredential.resolveAnthropicClientAuth);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -125,6 +137,9 @@ function resetMocks() {
   // object is a different contract, and this function is meant to RESTORE the
   // default rather than quietly redefine it.
   mockEncryptProviderKey.mockImplementation(() => ({ encrypted: 'enc-abc', iv: 'iv-abc' }));
+  // Restore the real WIF resolution (reset dropped it) and its module cache.
+  mockResolveAnthropicClientAuth.mockImplementation(actualWif.resolveAnthropicClientAuth);
+  wifCredential.resetAnthropicCredentialCache();
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +472,132 @@ describe('resolveApiKey - chat fallback and Vercel OIDC (#10074)', () => {
     await expect(
       resolveApiKey('user-1', 'openai', 20, 'image_generation', undefined, 'image'),
     ).rejects.toThrow('Platform key not configured: AI_GATEWAY_API_KEY');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveApiKey — Anthropic Workload Identity Federation (#8858)
+// ---------------------------------------------------------------------------
+
+describe('resolveApiKey - Anthropic WIF (#8858)', () => {
+  const remaining = { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null };
+  const MINTED = 'sk-ant-oat01-federated-for-resolver';
+
+  function stubWifEnv(): void {
+    vi.stubEnv(ANTHROPIC_WIF_REQUIRED_ENV.federationRuleId, 'fdrl_01RESOLVER');
+    vi.stubEnv(ANTHROPIC_WIF_REQUIRED_ENV.organizationId, '00000000-0000-4000-8000-000000000002');
+    vi.stubEnv(ANTHROPIC_WIF_REQUIRED_ENV.serviceAccountId, 'svac_01RESOLVER');
+    vi.stubEnv('VERCEL_OIDC_TOKEN', 'vercel-oidc-jwt');
+  }
+
+  function stubExchange(): ReturnType<typeof vi.fn> {
+    // Shape per https://platform.claude.com/docs/en/manage-claude/wif-reference#token-exchange-response
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ access_token: MINTED, token_type: 'Bearer', expires_in: 600, scope: 'workspace:inference' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  beforeEach(() => {
+    resetMocks();
+    vi.stubEnv('AI_GATEWAY_API_KEY', '');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-api03-static');
+    vi.stubEnv('PLATFORM_MESHY_KEY', '');
+    for (const name of Object.values(ANTHROPIC_WIF_REQUIRED_ENV)) vi.stubEnv(name, '');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('BYOK wins: returns the user key and never reaches WIF, the exchange, or deduction', async () => {
+    stubWifEnv();
+    const fetchMock = stubExchange();
+    wireDb([{ userId: 'user-1', provider: 'anthropic', encryptedKey: 'enc-anthropic', iv: 'iv-a' }]);
+
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
+
+    expect(result).toEqual({ type: 'byok', key: 'decrypted:enc-anthropic', metered: false });
+    expect(mockResolveAnthropicClientAuth).toHaveBeenCalledTimes(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('provider guard: a non-Anthropic provider with WIF configured still throws for its OWN missing key', async () => {
+    stubWifEnv();
+    const fetchMock = stubExchange();
+    wireDb([], [makeUser({ tier: 'pro' })]);
+
+    await expect(resolveApiKey('user-1', 'meshy', 10, 'texture_generation'))
+      .rejects.toThrow('Platform key not configured: PLATFORM_MESHY_KEY');
+    expect(mockResolveAnthropicClientAuth).toHaveBeenCalledTimes(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('provider guard: a configured non-Anthropic provider gets its own key, never the Anthropic credential', async () => {
+    stubWifEnv();
+    stubExchange();
+    vi.stubEnv('PLATFORM_MESHY_KEY', 'platform-meshy-secret');
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-meshy' });
+
+    const result = await resolveApiKey('user-1', 'meshy', 10, 'texture_generation');
+    expect(result.key).toBe('platform-meshy-secret');
+    expect(mockResolveAnthropicClientAuth).toHaveBeenCalledTimes(0);
+  });
+
+  it('anthropic with WIF configured resolves the federated token, BEFORE deducting', async () => {
+    stubWifEnv();
+    const fetchMock = stubExchange();
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-wif' });
+
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
+
+    expect(result).toEqual({ type: 'platform', key: MINTED, metered: true, usageId: 'u-wif' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockResolveAnthropicClientAuth).toHaveBeenCalledTimes(1);
+    // #8597 ordering: the credential is resolved before any balance change.
+    expect(mockResolveAnthropicClientAuth.mock.invocationCallOrder[0])
+      .toBeLessThan(mockDeductTokens.mock.invocationCallOrder[0]);
+    // …and it maps back to a Bearer client for the routes that build one.
+    expect(wifCredential.anthropicClientAuthForKey(result.key)).toEqual({ authToken: MINTED });
+  });
+
+  it('anthropic without WIF resolves the static ANTHROPIC_API_KEY with no network call', async () => {
+    const fetchMock = stubExchange();
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-static' });
+
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
+    expect(result.key).toBe('sk-ant-api03-static');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(wifCredential.anthropicClientAuthForKey(result.key)).toEqual({ apiKey: 'sk-ant-api03-static' });
+  });
+
+  it('anthropic with a FAILING exchange falls back to the static key', async () => {
+    stubWifEnv();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining, usageId: 'u-fallback' });
+
+    const result = await resolveApiKey('user-1', 'anthropic', 10, 'chat_message');
+    expect(result.key).toBe('sk-ant-api03-static');
+  });
+
+  it('anthropic with neither WIF nor a static key throws the same message as before, without deducting', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    stubExchange();
+    wireDb([], [makeUser({ tier: 'pro' })]);
+    mockDeductTokens.mockResolvedValue({ success: true, remaining, usageId: 'u-none' });
+
+    await expect(resolveApiKey('user-1', 'anthropic', 10, 'chat_message'))
+      .rejects.toThrow('Platform key not configured: ANTHROPIC_API_KEY');
     expect(mockDeductTokens).not.toHaveBeenCalled();
   });
 });
