@@ -1447,7 +1447,7 @@ describe('useScriptRunner — script isolation transport', () => {
       // boot failure (CI run 35997735154; reason 'worker-error', pinned with
       // the fake host below), so "no Worker" is what keeps its scripts off
       // the network rather than merely off the sandbox. This test reaches it
-      // through a 'source-load' failure (the unbundled placeholder).
+      // through a 'not-bundled' failure (the unbundled placeholder).
       expect(latestWorker).toBeNull();
       expect(vi.mocked(createSandboxedScriptHost)).toHaveBeenCalledTimes(1);
       unmount();
@@ -1602,6 +1602,14 @@ describe('useScriptRunner — sandbox runtime failures (fake sandboxed host)', (
       shown: SCRIPT_SANDBOX_START_FAILED_MESSAGE,
       notShown: SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
       detail: 'Script sandbox did not start within 4000 ms.',
+    },
+    {
+      // A worker source that failed to load, or had not loaded when the boot
+      // budget ran out: possibly transient, so the retry is offered.
+      reason: 'source-load' as const,
+      shown: SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+      notShown: SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE,
+      detail: 'Script sandbox worker source did not load within 4000 ms.',
     },
     {
       // A build that shipped without the bundled worker fails the same way on
