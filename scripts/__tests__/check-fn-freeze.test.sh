@@ -1219,6 +1219,48 @@ FIX
 expect_rc "30c. patterns after ;;, ;& and ;;& are text, and an arm body after its ) is code" 1 \
   "$(run_gate "$d_arms")" "2 violation(s)" "fixture.test.sh:8: 'alias fail=:'" "fixture.test.sh:10: 'hidden()'"
 
+# ---- 30d. extglob groups, a leading paren, and `in` on the next line ------------
+# Thirteenth board round (architect, infra, security): an extglob group's own
+# `)` ended the pattern early, and `in` on the line after `case WORD` never
+# opened the pattern state, so `do)` / `if)` raised the count and hid the
+# indented definition at the end. A pattern's optional leading `(` must not
+# be taken for a group either, or the arm body would be read as pattern text
+# and the alias in it missed.
+d_ext="$(mkfixture case-extglob <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+shopt -s extglob
+case "$1" in
+  @(foo|bar)|do) echo hit ;;
+  (if) alias fail=: ;;
+  !(x)) : ;;
+esac
+case "$1"
+in
+  if) : ;;
+  x) : ;;
+esac
+ hidden() { :; }
+FIX
+)"
+expect_rc "30d. extglob groups, a leading paren and a next-line in keep the pattern state right" 1 \
+  "$(run_gate "$d_ext")" "2 violation(s)" "fixture.test.sh:6: 'alias fail=:'" "fixture.test.sh:14: 'hidden()'"
+# A `$( )` inside a pattern returns to the pattern when it closes: `|if)`
+# after it is still pattern text (thirteenth round, test seat: no fixture
+# put pattern text after the subshell, so dropping the restore stayed green).
+d_subpat="$(mkfixture case-subshell-pattern <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+case "$1" in
+  $(true)|if) : ;;
+  *) : ;;
+esac
+ hidden() { :; }
+FIX
+)"
+expect_rc "30e. pattern text after a subshell inside a pattern is still pattern text" 1 \
+  "$(run_gate "$d_subpat")" "1 violation(s)" "fixture.test.sh:7: 'hidden()'"
+
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
 # Same posture as check-suite-wiring.test.sh: comment-stripped scan of every
 # workflow and composite action, fail closed on a missing dir or a grep error.

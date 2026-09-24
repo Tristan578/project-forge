@@ -205,7 +205,8 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   definition it cannot follow.
 - Every function at true top level (outside any function body, subshell,
   loop, `if`/`case` arm or brace group, counted by command word, not
-  indentation; a case pattern or a quoted `"{"` is not a command word) is
+  indentation; a case pattern, extglob groups included, or a quoted `"{"`
+  is not a command word) is
   defined at column 0, at the start of its own line, with a
   plain identifier name. Anything else at top level — indented, after another
   command or a closing brace, second on a line (even under the same name), a

@@ -99,11 +99,16 @@
 # `;;`, `;&` or `;;&`) is text, and so is a quoted `"{"` (the twelfth board
 # round found a `"}"` pattern closing the count early and a `"{"` pattern
 # leaving it one level high for the rest of the file, which hid every later
-# top-level definition from the `shape` rule).
+# top-level definition from the `shape` rule). The `in` may sit on a later
+# line than `case WORD`, a pattern may open with its optional `(`, and an
+# extglob group inside it (`@(a|b)`, `!(x)`) has parentheses of its own that
+# do not end the pattern (thirteenth round: each of those ended or skipped
+# the pattern state and left the count one level high).
 # Every definition at true top level must be where the freeze rule can see it:
 # at column 0, at the start of its own line, with a plain identifier for a
 # name. One anywhere else at top level — indented with nothing enclosing it,
-# after another command on the line, a second definition on one line, or a
+# after another command or a closing brace on the line, a second definition
+# on one line (even with the same name as the first), or a
 # name bash accepts but the rule does not (a dash, a dot) — is reported with
 # the `shape` status instead of being skipped (the eleventh board round found
 # ` fail() { :; }`, indented by one space with nothing enclosing it, invisible
@@ -212,6 +217,12 @@ derive_file() {
         w = ""; return
       }
       if (!cmd_seen) {
+        # `case WORD` ended its line without `in`: the first word of a later
+        # line is that `in` (only blank and comment lines may come between).
+        if (case_wait) {
+          case_wait = 0
+          if (!rq && w == "in") { pat = 1; pat_n = 0; pat_d = 0; w = ""; return }
+        }
         # Still looking for the command word of this statement.
         # Compound-command nesting, counted by command word so that layout
         # cannot fake it: `if`, `do` and `{` open, `fi`, `done` and `}` close
@@ -240,7 +251,11 @@ derive_file() {
       }
       nwords++
       # `case WORD in`: what follows is a pattern, up to its `)`.
-      if (cmd_word == "case" && nwords == 3 && !rq && w == "in") { pat = 1; pat_n = 0 }
+      if (cmd_word == "case" && nwords == 2) case_wait = 1
+      if (cmd_word == "case" && nwords == 3) {
+        case_wait = 0
+        if (!rq && w == "in") { pat = 1; pat_n = 0; pat_d = 0 }
+      }
       # The word after `function` is a definition name whatever follows it.
       if (in_function) {
         if (index(builtins, " " w " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "function " w, NR, NR
@@ -409,7 +424,15 @@ derive_file() {
         # none of them opens a subshell or ends a statement. The word before
         # them is ended first: if it was `esac`, the case is over and the
         # character is ordinary again.
-        if (pat && (c == ")" || c == "(" || c == "|")) {
+        # A `(` that opens the pattern is its optional leading paren; any
+        # other `(` opens an extglob group, whose `)` closes the group, not
+        # the pattern.
+        if (pat && c == "(") {
+          if (!(w == "" && pat_n == 0)) pat_d++
+          i++; continue
+        }
+        if (pat && c == ")" && pat_d > 0) { pat_d--; i++; continue }
+        if (pat && (c == ")" || c == "|")) {
           end_word()
           if (pat) {
             if (c == ")") { pat = 0; end_command() }
@@ -464,7 +487,7 @@ derive_file() {
         }
         # `;;`, `;&` and `;;&` end an arm, so a pattern follows (a trailing
         # `&` then ends an empty statement, which changes nothing).
-        if (c2 == ";;" || c2 == ";&") { end_command(); pat = 1; pat_n = 0; i += 2; continue }
+        if (c2 == ";;" || c2 == ";&") { end_command(); pat = 1; pat_n = 0; pat_d = 0; i += 2; continue }
         if (c ~ /[;&|]/) { end_command(); i++; continue }
         if (c ~ /[[:space:]<>]/) { end_word(); i++; continue }
         w = w c; i++
@@ -672,7 +695,7 @@ if [ -n "$violations" ]; then
         alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion — delete this line" ;;
         trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 that exits or execs, directly or through a function of this file, replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — delete this trap or extdebug line, or make its action return without exiting" ;;
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable — rename this function, or delete the enable call" ;;
-        shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
+        shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command or a closing brace, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
         unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as a one-liner '$name() { ...; }', or multi-line with the closing '}' at column 0, then freeze it on the next line" ;;
       esac
     done <<<"$violations"
