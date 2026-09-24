@@ -70,9 +70,33 @@ vi.mock('@/stores/userStore', () => ({
   },
 }));
 
-// Mock fetch for decompose endpoint
+// Mock fetch for the decompose endpoint and the pipeline token budget.
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
+
+/**
+ * The default answer for every fetch a test did not queue a response for.
+ * `runPipelineFromPlan` reserves the build's tokens before its first engine
+ * command and releases them in its `finally` (#6831), so every run makes these
+ * two calls; a reserve returns `res-default`.
+ */
+function defaultFetch(url: string, opts?: { body?: unknown }) {
+  const body = typeof opts?.body === 'string' ? (JSON.parse(opts.body) as { action?: string }) : {};
+  if (url === '/api/game/pipeline' && body.action === 'reserve') {
+    return Promise.resolve({
+      ok: true,
+      json: async () => ({ reservationId: 'res-default', remaining: { total: 9300 } }),
+    });
+  }
+  return Promise.resolve({ ok: true, json: async () => ({}) });
+}
+
+/** The bodies of every POST to the pipeline budget route, in call order. */
+function budgetCalls(): Array<{ action: string; reservationId?: string; actualUsed?: number; estimatedTotal?: number }> {
+  return mockFetch.mock.calls
+    .filter(([url]) => url === '/api/game/pipeline')
+    .map(([, opts]) => JSON.parse((opts as { body: string }).body));
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -150,6 +174,7 @@ describe('orchestratorSlice', () => {
   beforeEach(() => {
     store = createSliceStore(createOrchestratorSlice);
     mockFetch.mockReset();
+    mockFetch.mockImplementation(defaultFetch);
     // `runPipeline` is a bare `vi.fn()` from the module factory, and
     // `vi.restoreAllMocks()` does NOT clear a `vi.fn()`'s implementation in
     // vitest 4 — so a test that installs a persistent `mockImplementation`
@@ -184,15 +209,9 @@ describe('orchestratorSlice', () => {
 
   describe('startDecomposition', () => {
     it('sets status to decomposing and calls decompose endpoint', async () => {
-      // First call: decompose endpoint
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ gdd: makeMockGdd() }),
-      });
-      // Second call: token reservation
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ reservationId: 'res-123', remaining: { total: 9300 } }),
       });
 
       const promise = store.getState().startDecomposition('make a platformer', '3d');
@@ -206,23 +225,24 @@ describe('orchestratorSlice', () => {
       expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
       expect(store.getState().currentPlan).not.toBeNull();
       expect(store.getState().tokenEstimate).not.toBeNull();
-      expect(store.getState().reservationId).toBe('res-123');
     });
 
-    it('fails when token reservation returns insufficient', async () => {
+    // #6831 review: the reservation is a real deduction (`deductTokens`) that
+    // only an explicit release refunds. A plan waiting for the user's answer,
+    // a closed tab or a reload must not be holding the build's tokens.
+    it('reserves nothing: the plan waits for "build" with the balance untouched', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ gdd: makeMockGdd() }),
       });
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        json: async () => ({ error: 'insufficient_tokens' }),
-      });
 
-      await store.getState().startDecomposition('make a game', '3d');
+      await store.getState().startDecomposition('make a platformer', '3d');
 
-      expect(store.getState().orchestratorStatus).toBe('failed');
-      expect(store.getState().orchestratorError).toContain('Insufficient tokens');
+      expect(store.getState().orchestratorStatus).toBe('awaiting_approval');
+      expect(store.getState().reservationId).toBeNull();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch.mock.calls[0]?.[0]).toBe('/api/game/decompose');
+      expect(budgetCalls()).toEqual([]);
     });
 
     it('sets status to failed on fetch error', async () => {
@@ -278,15 +298,11 @@ describe('orchestratorSlice', () => {
         ok: true,
         json: async () => ({ gdd: makeMockGdd() }),
       });
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ reservationId: 'new-res', remaining: { total: 9000 } }),
-      });
 
       await store.getState().startDecomposition('new game', '2d');
 
       expect(store.getState().orchestratorError).toBeNull();
-      expect(store.getState().reservationId).toBe('new-res');
+      expect(store.getState().reservationId).toBeNull();
     });
 
     it('respects cancellation during decomposing phase', async () => {
@@ -1374,30 +1390,154 @@ describe('orchestratorSlice', () => {
   });
 
   /**
+   * #6831 review: the build's token reservation is `deductTokens`, a real
+   * deduction refunded only by an explicit release. It is taken when the
+   * build starts, never while a plan waits for the user's answer.
+   */
+  describe('build-time token reservation (#6831)', () => {
+    beforeEach(() => {
+      mockEditorState.setProjectType.mockClear();
+    });
+
+    it('reserves the plan\'s high-variance total before the first engine command', async () => {
+      const order: string[] = [];
+      mockFetch.mockImplementation((url: string, opts?: { body?: unknown }) => {
+        const body = typeof opts?.body === 'string' ? JSON.parse(opts.body) : {};
+        if (body.action === 'reserve') order.push('reserve');
+        return defaultFetch(url, opts);
+      });
+      mockEditorState.setProjectType.mockImplementationOnce(() => {
+        order.push('engine');
+      });
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(order.slice(0, 2)).toEqual(['reserve', 'engine']);
+      expect(budgetCalls()[0]).toEqual({ action: 'reserve', estimatedTotal: plan.tokenEstimate.totalVarianceHigh });
+      expect(store.getState().reservationId).toBe('res-default');
+    });
+
+    it('fails with the server\'s reason and touches nothing when the reservation is refused', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'insufficient_tokens' }) });
+      store.getState().setPlan(makeMockPlan());
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(store.getState().orchestratorStatus).toBe('failed');
+      expect(store.getState().orchestratorError).toContain('Insufficient tokens');
+      expect(store.getState().reservationId).toBeNull();
+      expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
+      expect(runPipeline).not.toHaveBeenCalled();
+    });
+
+    it('reserves nothing for a plan with nothing to reserve', async () => {
+      const plan = makeMockPlan();
+      plan.tokenEstimate.totalVarianceHigh = 0;
+      store.getState().setPlan(plan);
+
+      await store.getState().runPipelineFromPlan();
+
+      expect(budgetCalls().filter((c) => c.action === 'reserve')).toEqual([]);
+      expect(runPipeline).toHaveBeenCalledOnce();
+    });
+
+    it('stops without running when cancelled while the reservation is in flight', async () => {
+      mockFetch.mockImplementationOnce((_url: string, opts?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          opts?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+          });
+        }),
+      );
+      store.getState().setPlan(makeMockPlan());
+
+      const run = store.getState().runPipelineFromPlan();
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      store.getState().cancelPipeline();
+      await run;
+
+      expect(store.getState().orchestratorStatus).toBe('cancelled');
+      expect(runPipeline).not.toHaveBeenCalled();
+      expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
+    });
+
+    it('releases a reservation that lands after the user cancelled', async () => {
+      let answer!: () => void;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answer = () =>
+              resolve({ ok: true, json: async () => ({ reservationId: 'res-late', remaining: { total: 1 } }) });
+          }),
+      );
+      store.getState().setPlan(makeMockPlan());
+
+      const run = store.getState().runPipelineFromPlan();
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      store.getState().cancelPipeline();
+      answer();
+      await run;
+
+      expect(runPipeline).not.toHaveBeenCalled();
+      expect(budgetCalls()).toContainEqual({ action: 'release', reservationId: 'res-late', actualUsed: 0 });
+    });
+
+    it('starts one run when the build is started twice before the first gets going', async () => {
+      store.getState().setPlan(makeMockPlan());
+
+      await Promise.all([
+        store.getState().runPipelineFromPlan(),
+        store.getState().runPipelineFromPlan(),
+      ]);
+
+      expect(budgetCalls().filter((c) => c.action === 'reserve')).toHaveLength(1);
+      expect(runPipeline).toHaveBeenCalledOnce();
+    });
+
+    it('releases the reservation in full when the user cancels a running build', async () => {
+      let finish!: () => void;
+      vi.mocked(runPipeline).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(makeMockPlan());
+          }),
+      );
+      store.getState().setPlan(makeMockPlan());
+
+      const run = store.getState().runPipelineFromPlan();
+      await vi.waitFor(() => expect(runPipeline).toHaveBeenCalledOnce());
+      store.getState().cancelPipeline();
+
+      expect(budgetCalls()).toContainEqual({ action: 'release', reservationId: 'res-default', actualUsed: 0 });
+      expect(store.getState().reservationId).toBeNull();
+      finish();
+      await run;
+    });
+  });
+
+  /**
    * The quick-start entry point ("Make me a game").
    *
-   * Two manual confirmations used to sit between a prompt and a playable game:
-   * `startDecomposition` parks the run at 'awaiting_approval' waiting for the
-   * panel's "Start Building" button, and then `gate_plan` fires and parks it
-   * again. A user who clicked "Make me a game" and typed a prompt has already
-   * said yes to both, so the flow asked the same question twice and stranded
-   * anyone who did not know to look at the orchestrator panel (PF-1215).
+   * It designs the game and STOPS at 'awaiting_approval' (#6831, owner
+   * decision "confirm cost first"): the quick-start dialog shows the plan and
+   * its token estimate, and only its "Build it" calls `runPipelineFromPlan`.
+   * That one confirmation answers `gate_plan`, which stays auto-approved so the
+   * user is not asked twice (the original PF-1215 break). Do not "restore" an
+   * auto-run here: it would spend build tokens before the user saw the cost.
    */
   describe('startQuickStart', () => {
-    /** Answers the decompose call and the token reservation that follows it. */
+    /**
+     * Answers the decompose call. Designing is all a quick start does now; the
+     * build's reservation and release are answered by `defaultFetch` when a
+     * test goes on to run the plan.
+     */
     function mockDecomposeOk(): void {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ gdd: makeMockGdd() }),
       });
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ reservationId: 'res-qs', remaining: { total: 9300 } }),
-      });
-      // `runPipelineFromPlan` releases the unused reservation in its `finally`;
-      // without a default the queue runs dry and the fire-and-forget `.catch`
-      // throws on `undefined`.
-      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
     }
 
     /**
@@ -1418,9 +1558,9 @@ describe('orchestratorSlice', () => {
       expect(after.currentPlan).not.toBeNull();
       expect(after.tokenEstimate).toEqual(after.currentPlan?.tokenEstimate);
       expect(after.pendingGate).toBeNull();
-      // The reservation is a HOLD taken during design; it is released by
-      // `cancelPipeline` if the user backs out, and is not a charge.
-      expect(after.reservationId).toBe('res-qs');
+      // Nothing reserved: the build's tokens are taken only on "Build it".
+      expect(after.reservationId).toBeNull();
+      expect(budgetCalls()).toEqual([]);
       expect(runPipeline).not.toHaveBeenCalled();
     });
 
@@ -1664,10 +1804,6 @@ describe('orchestratorSlice', () => {
       store.setState({ autoApproveGateIds: ['gate_plan'] });
 
       mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ gdd: makeMockGdd() }) });
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ reservationId: 'res-chat', remaining: { total: 9300 } }),
-      });
 
       // No opts — chatStore calls startDecomposition with two arguments.
       await store.getState().startDecomposition('make a shooter', '3d');

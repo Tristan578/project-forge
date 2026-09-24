@@ -195,7 +195,69 @@ function findStepIndex(plan: OrchestratorPlan, stepId: string): number {
 // ---------------------------------------------------------------------------
 
 let _abortController: AbortController | null = null;
+
+/**
+ * Reserve the plan's high-variance token total for a build that is starting.
+ *
+ * Server-side this is `reserveTokenBudget` -> `deductTokens('pipeline_reserve')`:
+ * a real deduction from the balance, refunded only by an explicit `release`
+ * POST (the run's `finally`, or `cancelPipeline`). Nothing expires it. So it
+ * must be taken only when the user has said "build", never while a plan waits
+ * for that answer: a plan left on screen, a closed tab or a reload would
+ * otherwise keep the whole estimate forever (#6831 review).
+ *
+ * Resolves to the reservation id, or `null` when the plan has nothing to
+ * reserve. Throws with a user-facing message when the server refuses.
+ */
+async function reserveBuildBudget(
+  estimatedTotal: number,
+  signal: AbortSignal,
+): Promise<string | null> {
+  if (estimatedTotal <= 0) return null;
+  const reserveRes = await fetch('/api/game/pipeline', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'reserve', estimatedTotal }),
+    signal,
+  });
+
+  if (!reserveRes.ok) {
+    const reserveBody = await reserveRes.json().catch(() => ({ error: 'Token reservation failed' }));
+    throw new Error(reserveBody.error === 'insufficient_tokens'
+      ? 'Insufficient tokens — add tokens or upgrade your plan'
+      : reserveBody.error ?? 'Token reservation failed');
+  }
+
+  const reserveData = await reserveRes.json();
+  if (typeof reserveData.reservationId !== 'string' || reserveData.reservationId.length === 0) {
+    throw new Error('Token reservation returned invalid ID');
+  }
+  return reserveData.reservationId;
+}
+
+/** Fire-and-forget refund of a reservation; failures go to Sentry. */
+function releaseReservation(reservationId: string, actualUsed: number, context: string): void {
+  fetch('/api/game/pipeline', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'release', reservationId, actualUsed }),
+  }).catch((err) => {
+    captureException(err instanceof Error ? err : new Error(String(err)), {
+      extra: { context, reservationId, actualUsed },
+    });
+  });
+}
 let _gateResolver: ((decision: 'approved' | 'rejected') => void) | null = null;
+
+/**
+ * The plan a `runPipelineFromPlan` call is currently starting or running.
+ * A second call for the SAME plan while that one is in flight is refused: the
+ * reservation round trip made the window between "Build it" and 'executing'
+ * wide enough for a double click to reserve and run the plan twice. Keyed on
+ * the plan object, not the status, so a reset followed by a new plan (while
+ * the abandoned run unwinds) still starts, and a finished plan can be re-run.
+ */
+let _inFlightPlan: OrchestratorPlan | null = null;
 
 /** Exposed for testing — allows injection of a custom abort controller. */
 export function _setAbortController(ac: AbortController | null): void {
@@ -292,35 +354,11 @@ export const createOrchestratorSlice: StateCreator<
       // Initialize step statuses map
       const stepStatuses = deriveStepStatuses(plan);
 
-      // Reserve tokens for the pipeline (server-side via API)
-      let reservationId: string | null = null;
-      if (plan.tokenEstimate.totalVarianceHigh > 0) {
-        const reserveRes = await fetch('/api/game/pipeline', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'reserve',
-            estimatedTotal: plan.tokenEstimate.totalVarianceHigh,
-          }),
-          signal: _abortController?.signal,
-        });
-
-        if (!reserveRes.ok) {
-          const reserveBody = await reserveRes.json().catch(() => ({ error: 'Token reservation failed' }));
-          throw new Error(reserveBody.error === 'insufficient_tokens'
-            ? 'Insufficient tokens — add tokens or upgrade your plan'
-            : reserveBody.error ?? 'Token reservation failed');
-        }
-
-        const reserveData = await reserveRes.json();
-        if (typeof reserveData.reservationId !== 'string' || reserveData.reservationId.length === 0) {
-          throw new Error('Token reservation returned invalid ID');
-        }
-        reservationId = reserveData.reservationId;
-        // Persist reservationId immediately so cancelPipeline can release
-        // tokens even if the user cancels before the full set() below.
-        set({ reservationId });
-      }
+      // No token reservation here. The plan now waits for the user's "build"
+      // (the orchestrator panel's Start Building, or the quick-start dialog's
+      // Build it), and `runPipelineFromPlan` reserves at that moment. A
+      // reservation taken here was a real deduction that nothing refunded if
+      // the plan was never built.
 
       // If cancelled during decomposition, don't override status
       if (get().orchestratorStatus === 'cancelled') return;
@@ -328,7 +366,7 @@ export const createOrchestratorSlice: StateCreator<
       set({
         currentPlan: plan,
         tokenEstimate: plan.tokenEstimate,
-        reservationId,
+        reservationId: null,
         stepStatuses,
         orchestratorStatus: 'awaiting_approval',
         currentStepIndex: 0,
@@ -364,8 +402,10 @@ export const createOrchestratorSlice: StateCreator<
     // auto-approved — asking again at the gate would be a second "are you
     // sure" for the same plan.
     //
-    // Decomposition itself reserves the plan's high-variance total as a HOLD,
-    // not a charge: `cancelPipeline` releases it if the user backs out here.
+    // Designing the game is metered by /api/game/decompose itself. The build's
+    // token reservation is taken only when the build starts
+    // (`runPipelineFromPlan`), so a plan the user walks away from costs
+    // nothing more.
     await get().startDecomposition(prompt, projectType, {
       autoApproveGateIds: QUICK_START_AUTO_GATES,
     });
@@ -416,18 +456,11 @@ export const createOrchestratorSlice: StateCreator<
     // Release reserved tokens so they aren't leaked on cancel
     const { reservationId } = get();
     if (reservationId) {
-      fetch('/api/game/pipeline', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'release', reservationId, actualUsed: 0 }),
-      }).catch((err) => {
-        captureException(err instanceof Error ? err : new Error(String(err)), {
-          extra: { context: 'orchestrator.cancelPipeline.releaseTokens', reservationId },
-        });
-      });
+      releaseReservation(reservationId, 0, 'orchestrator.cancelPipeline.releaseTokens');
     }
     set({
       orchestratorStatus: 'cancelled',
+      reservationId: null,
       pendingGate: null,
       // A cancelled run must not leave the next one auto-approving: the next
       // run may be chat-initiated and never passes through an opt-in.
@@ -476,19 +509,55 @@ export const createOrchestratorSlice: StateCreator<
       return;
     }
 
+    // One run per plan at a time (see `_inFlightPlan`). Every return below
+    // goes through `settle()` so the guard never outlives this call.
+    if (_inFlightPlan === currentPlan) return;
+    _inFlightPlan = currentPlan;
+    const settle = () => {
+      if (_inFlightPlan === currentPlan) _inFlightPlan = null;
+    };
+
     // Dynamic imports break circular dependency (editorStore imports this slice)
     const { getCommandDispatcher, getCommandBatchDispatcher } = await import('@/stores/editorStore');
 
     const dispatcher = getCommandDispatcher();
     if (!dispatcher) {
       set({ orchestratorStatus: 'failed', orchestratorError: 'Engine not loaded' });
+      settle();
       return;
     }
 
     _abortController = new AbortController();
+    const signal = _abortController.signal;
     // Cleared per RUN, not per plan: re-running the same plan after a fix must
     // not show the notes the previous attempt produced.
     set({ orchestratorStatus: 'executing', orchestratorWarnings: [] });
+
+    // Reserve BEFORE the first engine command, so a refused reservation leaves
+    // the scene exactly as it was.
+    let reservationId: string | null;
+    try {
+      reservationId = await reserveBuildBudget(currentPlan.tokenEstimate.totalVarianceHigh, signal);
+    } catch (err) {
+      settle();
+      // Cancelled while reserving: `cancelPipeline` already set the status.
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (get().currentPlan === currentPlan) {
+        set({
+          orchestratorStatus: 'failed',
+          orchestratorError: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return;
+    }
+    // Cancelled or reset while the reservation was in flight. `cancelPipeline`
+    // could not release a reservation it had not seen yet, so release it here.
+    if (signal.aborted || get().currentPlan !== currentPlan) {
+      if (reservationId) releaseReservation(reservationId, 0, 'orchestrator.releaseTokens.cancelledWhileReserving');
+      settle();
+      return;
+    }
+    set({ reservationId });
 
     // Read user tier from userStore
     const { useUserStore } = await import('@/stores/userStore');
@@ -535,7 +604,6 @@ export const createOrchestratorSlice: StateCreator<
       },
     };
 
-    const { reservationId } = get();
     let completedSteps = 0;
     const totalSteps = currentPlan.steps.length;
 
@@ -664,6 +732,7 @@ export const createOrchestratorSlice: StateCreator<
         });
       }
     } finally {
+      settle();
       // Only the CURRENT run may drop the shared abort handle. A superseded
       // run settling after `startPipeline` assigned a fresh
       // `_abortController` would otherwise null out the LIVE run's handle,
@@ -716,15 +785,7 @@ export const createOrchestratorSlice: StateCreator<
         const actualUsed = totalSteps > 0
           ? Math.round(estimated * (completedSteps / totalSteps))
           : 0;
-        fetch('/api/game/pipeline', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'release', reservationId, actualUsed }),
-        }).catch((releaseErr) => {
-          captureException(releaseErr instanceof Error ? releaseErr : new Error(String(releaseErr)), {
-            extra: { context: 'orchestrator.releaseTokens', reservationId, actualUsed },
-          });
-        });
+        releaseReservation(reservationId, actualUsed, 'orchestrator.releaseTokens');
       }
     }
   },
