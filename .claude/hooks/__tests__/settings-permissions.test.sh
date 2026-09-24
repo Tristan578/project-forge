@@ -191,7 +191,7 @@ docs_name_governed_paths() {
 
 # indent_detail <text> — print <text> under a FAIL row, every line indented.
 # Parameter expansion, not `sed 's/^/<pad>/' <<<"$text"`: that form is SC2001, and
-# this file is in CI's "Shellcheck the hooks owned by this change" scope.
+# this file is in CI's "Shellcheck all hooks" scope.
 # Callers pass `$(...)` output, which has its trailing newlines stripped.
 indent_detail() { printf '       %s\n' "${1//$'\n'/$'\n'       }"; }
 

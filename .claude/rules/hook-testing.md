@@ -30,10 +30,12 @@ shellcheck \
   .claude/hooks/__tests__/reject-incomplete-review.test.sh \
   .claude/hooks/__tests__/review-quality-gate.test.sh
 
-# Linting the WHOLE tree still surfaces ~10 pre-existing findings across 8 older
-# hooks (tracked in #8676). Scope shellcheck to the files you touched until that
-# cleanup lands rather than treating the legacy debt as a regression:
-#   shellcheck .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
+# The whole tree is shellcheck-clean (#8676) and the CI `hook-tests` job lints
+# all of it with -x, so a red result on this command IS your regression:
+shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
+# Plain `shellcheck` (no -x) is clean too: every dynamic `source` line carries a
+# line-level `# shellcheck disable=SC1091` with its reason, because a
+# `# shellcheck source=` directive is honoured only under -x.
 ```
 
 Each suite is a self-contained bash script that exits non-zero if any case fails
