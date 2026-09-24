@@ -113,6 +113,7 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         );
         if (!res.ok) {
           const data = await res.json().catch(() => ({ error: 'Failed to load game' }));
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
           setError(data.error || 'Game not found');
           setLoading(false);
           return;

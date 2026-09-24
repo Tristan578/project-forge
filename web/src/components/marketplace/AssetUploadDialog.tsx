@@ -62,6 +62,7 @@ export function AssetUploadDialog({ onClose, onSuccess }: AssetUploadDialogProps
           typeof err?.details === 'object' && err.details !== null && typeof (err.details as { message?: unknown }).message === 'string'
             ? (err.details as { message: string }).message
             : null;
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank detail/error message falls through to the next candidate, same as an absent one
         throw new Error(detailMessage || err.error || 'Failed to create listing');
       }
 

@@ -243,6 +243,7 @@ async function streamOneTurn(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: response.statusText }));
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
     throw new Error(errorData.error || `Chat request failed: ${response.status}`);
   }
 
@@ -443,7 +444,7 @@ async function streamOneTurn(
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+    buffer = lines.pop() ?? '';
 
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
@@ -466,7 +467,7 @@ async function streamOneTurn(
           break;
 
         case 'reasoning-delta':
-          onUpdate((msg) => ({ ...msg, thinking: (msg.thinking || '') + str(event.delta) }));
+          onUpdate((msg) => ({ ...msg, thinking: (msg.thinking ?? '') + str(event.delta) }));
           break;
 
         case 'tool-input-start': {
@@ -663,6 +664,7 @@ function appendToolTurn(
     // is how a denied destructive action gets narrated as done.
     let output: { type: 'text' | 'error-text'; value: string };
     if (tc.status === 'error') {
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank tool-call error message falls back to a generic one, same as an absent one
       output = { type: 'error-text', value: `Error: ${tc.error || 'Unknown error'}` };
     } else if (tc.status === 'success' || tc.status === 'undone') {
       // Serialised, not `String()`-coerced: most handlers return an object
@@ -1380,6 +1382,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { messages, conversations, activeConversationId } = get();
     const now = Date.now();
     const id = `conv_${now}_${Math.random().toString(36).slice(2, 8)}`;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank requested chat name is unset; falls back to a generated name
     const newName = name || `Chat ${conversations.length + 1}`;
 
     // Save current messages to the active conversation before creating new one

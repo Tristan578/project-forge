@@ -110,7 +110,7 @@ export function importScript(json: string): LibraryScript | null {
   try {
     const data = JSON.parse(json);
     if (!data.name || !data.source) return null;
-    return saveScript(data.name, data.source, data.description || '', data.tags || []);
+    return saveScript(data.name, data.source, data.description ?? '', data.tags ?? []);
   } catch {
     return null;
   }

@@ -33,10 +33,10 @@ export function estimateMessageTokens(message: { role: string; content: unknown 
           tokens += estimateTokenCount(b.text);
         } else if (b.type === 'tool_use') {
           // tool_use blocks: name + JSON input
-          tokens += estimateTokenCount(JSON.stringify(b.input || {}));
-          tokens += estimateTokenCount(String(b.name || ''));
+          tokens += estimateTokenCount(JSON.stringify(b.input ?? {}));
+          tokens += estimateTokenCount(String(b.name ?? ''));
         } else if (b.type === 'tool_result') {
-          tokens += estimateTokenCount(String(b.content || ''));
+          tokens += estimateTokenCount(String(b.content ?? ''));
         } else if (b.type === 'image') {
           // Images are ~1600 tokens for typical size
           tokens += 1600;
