@@ -21,6 +21,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useOnboardingStore } from '@/stores/onboardingStore';
+import { useOnboardingAttemptStore } from '@/stores/onboardingAttemptStore';
 
 vi.mock('next/navigation', async (importOriginal) => ({
   ...(await importOriginal<typeof import('next/navigation')>()),
@@ -230,6 +231,7 @@ describe('EditorLayout wires the quick-start dialog into the onboarding gate (#6
     vi.clearAllMocks();
     localStorage.clear();
     useOnboardingStore.setState({ isNewUser: true, onboardingCompleted: false });
+    useOnboardingAttemptStore.getState().endAttempt();
   });
 
   afterEach(() => {

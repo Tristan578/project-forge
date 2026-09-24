@@ -10,6 +10,7 @@ import {
   LEGACY_WELCOME_KEY,
   ONBOARDING_COMPLETED_KEY,
 } from '../OnboardingGate';
+import { useOnboardingAttemptStore } from '@/stores/onboardingAttemptStore';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -92,12 +93,15 @@ function gate(quickStartOpen: boolean) {
  * gate's `onRequestQuickStart` flips it in the same event, and the dialog's
  * own close is modelled by a button.
  */
-function Harness() {
+function Harness({ layout = 'desktop' }: { layout?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Suspense fallback={null}>
         <OnboardingGate
+          // A different key is a different tree: switching it remounts the
+          // gate, as crossing EditorLayout's responsive breakpoint does.
+          key={layout}
           onRequestQuickStart={() => {
             onRequestQuickStart();
             setOpen(true);
@@ -122,6 +126,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   setStores();
+  // Module-level, so an attempt left pending by one test would leak.
+  useOnboardingAttemptStore.getState().endAttempt();
 });
 
 afterEach(() => {
@@ -135,7 +141,23 @@ async function startAiPath() {
   fireEvent.click(await screen.findByRole('button', { name: 'Build with AI' }));
   expect(onRequestQuickStart).toHaveBeenCalledTimes(1);
   expect(screen.getByRole('button', { name: 'Close quick start' })).toBeTruthy();
-  return { ...utils, update: () => utils.rerender(<Harness />) };
+  return {
+    ...utils,
+    update: (layout = 'desktop') => utils.rerender(<Harness layout={layout} />),
+  };
+}
+
+/**
+ * Resolve the gate's lazy wizard before a "shows nothing" assertion. The first
+ * render of a lazy component suspends into `fallback={null}`, so without this
+ * such an assertion passes whether or not the gate meant to show the wizard,
+ * and only passes for real when an earlier test happened to load the chunk.
+ * Once resolved, `React.lazy` renders synchronously for every later render.
+ */
+async function primeLazyWizard() {
+  const probe = render(gate(false));
+  await screen.findByRole('dialog', { name: 'Welcome wizard' });
+  probe.unmount();
 }
 
 function wizardShown(): boolean {
@@ -156,24 +178,26 @@ describe('OnboardingGate', () => {
     it.each([[LEGACY_QUICKSTART_KEY], [LEGACY_WELCOME_KEY]])(
       'shows nothing to a user who finished the legacy flow (%s)',
       async (key) => {
+        await primeLazyWizard();
         localStorage.setItem(key, '1');
         const { container } = render(gate(false));
-        await waitFor(() => expect(container.textContent).toBe(''));
+        expect(container.textContent).toBe('');
         expect(wizardShown()).toBe(false);
         expect(screen.queryByTestId('welcome-modal')).toBeNull();
       },
     );
 
     it('shows nothing once onboarding is complete, by either record', async () => {
+      await primeLazyWizard();
       localStorage.setItem(ONBOARDING_COMPLETED_KEY, '1');
       const first = render(gate(false));
-      await waitFor(() => expect(first.container.textContent).toBe(''));
+      expect(first.container.textContent).toBe('');
       first.unmount();
 
       localStorage.clear();
       setStores({ onboardingCompleted: true });
       const second = render(gate(false));
-      await waitFor(() => expect(second.container.textContent).toBe(''));
+      expect(second.container.textContent).toBe('');
     });
 
     it('falls back to the welcome modal for a returning user with no record', async () => {
@@ -284,6 +308,27 @@ describe('OnboardingGate', () => {
 
       expect(await screen.findByRole('dialog', { name: 'Welcome wizard' })).toBeTruthy();
       expect(completeOnboarding).not.toHaveBeenCalled();
+    });
+
+    // The attempt outlives the component: EditorLayout renders the gate in two
+    // layout trees, so a breakpoint change (a tablet rotating) remounts it
+    // mid-attempt, and so does leaving the editor for "Buy tokens" and back.
+    it('keeps waiting on the attempt when the gate remounts, and credits its success', async () => {
+      const { update } = await startAiPath();
+      setStatus('awaiting_approval');
+      update();
+
+      update('compact');
+
+      expect(wizardShown()).toBe(false);
+      expect(completeOnboarding).not.toHaveBeenCalled();
+
+      setStatus('executing');
+      update('compact');
+      setStatus('completed');
+      update('compact');
+
+      await waitFor(() => expect(completeOnboarding).toHaveBeenCalledTimes(1));
     });
 
     it('completes after a failed attempt is retried from the same dialog', async () => {

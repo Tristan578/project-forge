@@ -197,6 +197,12 @@ function findStepIndex(plan: OrchestratorPlan, stepId: string): number {
 let _abortController: AbortController | null = null;
 
 /**
+ * What a refused build reservation reports when the balance is short. Exported
+ * so the quick-start dialog can offer "Buy tokens" beside exactly this error.
+ */
+export const INSUFFICIENT_TOKENS_MESSAGE = 'Insufficient tokens — add tokens or upgrade your plan';
+
+/**
  * Reserve the plan's high-variance token total for a build that is starting.
  *
  * Server-side this is `reserveTokenBudget` -> `deductTokens('pipeline_reserve')`:
@@ -225,7 +231,7 @@ async function reserveBuildBudget(estimatedTotal: number): Promise<string | null
   if (!reserveRes.ok) {
     const reserveBody = await reserveRes.json().catch(() => ({ error: 'Token reservation failed' }));
     throw new Error(reserveBody.error === 'insufficient_tokens'
-      ? 'Insufficient tokens — add tokens or upgrade your plan'
+      ? INSUFFICIENT_TOKENS_MESSAGE
       : reserveBody.error ?? 'Token reservation failed');
   }
 
@@ -390,7 +396,7 @@ export const createOrchestratorSlice: StateCreator<
 
   startQuickStart: async (prompt, projectType) => {
     // Refuse rather than clobber. `startDecomposition` is unconditionally
-    // destructive on entry, so a second "Build it" over a live run orphans the
+    // destructive on entry, so a second "Plan my game" over a live run orphans the
     // first one — see `isOrchestratorRunLive`. The dialog keeps its own guard
     // too; this one is what makes the invariant hold for every caller.
     if (isOrchestratorRunLive(get().orchestratorStatus)) return false;

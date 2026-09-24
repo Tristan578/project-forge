@@ -13,6 +13,7 @@ import {
 } from '@/test/utils/componentTestUtils';
 import { toast } from 'sonner';
 import { QuickStartDialog } from '../QuickStartDialog';
+import { INSUFFICIENT_TOKENS_MESSAGE } from '@/stores/slices/orchestratorSlice';
 import {
   QUICK_START_GAME_TYPES,
   QUICK_START_PROMPT_MAX,
@@ -69,6 +70,9 @@ const cancelPipeline = vi.fn();
 const play = vi.fn().mockReturnValue(true);
 const setEngineMode = vi.fn();
 const runPipelineFromPlan = vi.fn().mockResolvedValue(undefined);
+const setOrchestratorStatus = vi.fn((status: string) => {
+  hoisted.state.orchestratorStatus = status;
+});
 
 function setState(overrides: Record<string, unknown> = {}) {
   Object.keys(hoisted.state).forEach((k) => delete hoisted.state[k]);
@@ -83,6 +87,7 @@ function setState(overrides: Record<string, unknown> = {}) {
     play,
     setEngineMode,
     runPipelineFromPlan,
+    setOrchestratorStatus,
     currentPlan: null,
     tokenEstimate: null,
     ...overrides,
@@ -549,6 +554,9 @@ describe('QuickStartDialog', () => {
       expect(screen.getByText('Jungle Canopy')).toBeTruthy();
       expect(screen.getByText('Estimated token cost')).toBeTruthy();
       expect(screen.getByText('340')).toBeTruthy();
+      // The number that actually leaves the balance: the reservation is the
+      // estimate's upper bound, refunded down to what the build uses.
+      expect(screen.getByText(/tokens are held while it builds/).textContent).toContain('Up to 400 tokens');
       expect(screen.getByText('Asset generation')).toBeTruthy();
       expect(screen.getByRole('status').textContent).toContain('Your game plan is ready');
       expect(runPipelineFromPlan).not.toHaveBeenCalled();
@@ -601,7 +609,9 @@ describe('QuickStartDialog', () => {
 
     it('surfaces a build that fails after confirmation, with Try again', async () => {
       runPipelineFromPlan.mockImplementationOnce(async () => {
+        // A step ran and failed: the plan is spent, so the way on is a new one.
         hoisted.state.orchestratorStatus = 'failed';
+        hoisted.state.stepStatuses = { step_0: 'completed', step_1: 'failed' };
       });
       await reachPlanReview();
       await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
@@ -612,6 +622,36 @@ describe('QuickStartDialog', () => {
         'Could not start building your game. Please try again.',
       );
       expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Back to the plan' })).toBeNull();
+    });
+
+    // #6831 review: a refused reservation left the user with only "Try again",
+    // which re-runs the metered design for a plan they already have, and it
+    // would be refused again at "Build it".
+    it('offers "Back to the plan" and "Buy tokens" when the reservation is refused', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'failed';
+        hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
+        hoisted.state.stepStatuses = { step_0: 'pending', step_1: 'pending' };
+      });
+      const { rerender } = await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
+      expect(screen.getByRole('link', { name: 'Buy tokens' }).getAttribute('href')).toBe(
+        '/settings?tab=billing',
+      );
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Back to the plan' }));
+      rerender(<QuickStartDialog open onClose={vi.fn()} />);
+
+      expect(setOrchestratorStatus).toHaveBeenCalledWith('awaiting_approval');
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
+      // Back to the review, not to the describe step: no second design.
+      expect(startQuickStart).toHaveBeenCalledTimes(1);
     });
 
     it('surfaces the failure message the store recorded', async () => {
@@ -676,6 +716,37 @@ describe('QuickStartDialog', () => {
       expect(screen.queryByRole('button', { name: /platformer/i })).toBeNull();
     });
 
+    // `confirming` guards the click until the whole run settles, so it must
+    // not own the status line: once the run reports 'executing', and at every
+    // mid-run gate, the live region has to say so.
+    it('drops "Starting the build" once the run is executing, and shows a mid-run gate\'s wait', async () => {
+      let finish!: () => void;
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const { rerender } = await reachPlanReview();
+      fireEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Starting the build'));
+
+      hoisted.state.orchestratorStatus = 'executing';
+      rerender(<QuickStartDialog open onClose={vi.fn()} />);
+      expect(screen.getByRole('status').textContent).toContain('Building your game');
+
+      hoisted.state.orchestratorStatus = 'awaiting_approval';
+      hoisted.state.pendingGate = {
+        id: 'gate_assets',
+        label: 'Generate assets?',
+        description: 'These cost tokens.',
+        displayData: {},
+      };
+      rerender(<QuickStartDialog open onClose={vi.fn()} />);
+      expect(screen.getByRole('status').textContent).toContain('Waiting on your approval');
+      finish();
+    });
+
     it('says the build is starting, not "review it", while Build it is in flight', async () => {
       let finish!: () => void;
       runPipelineFromPlan.mockImplementationOnce(
@@ -706,6 +777,30 @@ describe('QuickStartDialog', () => {
       await userEvent.click(build);
 
       await waitFor(() => expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull());
+      expect(document.activeElement).toBe(screen.getByRole('status'));
+    });
+
+    it('hands focus to the status line when an answered mid-run gate goes away', async () => {
+      setState({
+        orchestratorStatus: 'awaiting_approval',
+        currentPlan: PLAN,
+        tokenEstimate: ESTIMATE,
+        pendingGate: {
+          id: 'gate_assets',
+          label: 'Generate assets?',
+          description: 'These cost tokens.',
+          displayData: {},
+        },
+      });
+      const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
+      const approve = screen.getByRole('button', { name: 'Approve' });
+      await waitFor(() => expect(document.activeElement).toBe(approve));
+
+      hoisted.state.pendingGate = null;
+      hoisted.state.orchestratorStatus = 'executing';
+      rerender(<QuickStartDialog open onClose={vi.fn()} />);
+
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull());
       expect(document.activeElement).toBe(screen.getByRole('status'));
     });
 

@@ -25,12 +25,17 @@
  *
  * "That run" matters: `orchestratorStatus` can already read `completed` from an
  * earlier run, so completion requires having seen THIS attempt go live first.
+ *
+ * The attempt lives in `useOnboardingAttemptStore`, not component state: this
+ * gate is rendered in two layout trees and remounts on a breakpoint change or
+ * a navigation, and the attempt must survive both (see that store).
  */
 
 import { lazy, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { isOrchestratorRunLive } from '@/stores/slices/orchestratorSlice';
+import { useOnboardingAttemptStore } from '@/stores/onboardingAttemptStore';
 import { safeGetItem, safeSetItem } from '@/lib/storage/safeLocalStorage';
 
 const WelcomeModal = lazy(() =>
@@ -75,44 +80,28 @@ export function OnboardingGate({ onRequestQuickStart, quickStartOpen }: Onboardi
   );
 
   const [wizardDismissed, setWizardDismissed] = useState(false);
-  // The user took the AI path and its outcome is not known yet.
-  const [aiPending, setAiPending] = useState(false);
-  // THIS attempt has been observed live (decomposing / awaiting approval /
-  // executing), so a later `completed` belongs to it and not to an older run.
-  const [aiRunSeen, setAiRunSeen] = useState(false);
-  // THIS attempt's dialog has been observed open. The attempt can only have
-  // ENDED once its dialog or its run has actually been seen: EditorLayout opens
-  // the dialog in the same event batch today, but a parent that opened it a
-  // render later would otherwise read "closed, nothing running" on the very
-  // first render and bring the wizard straight back.
-  const [aiDialogSeen, setAiDialogSeen] = useState(false);
+  const aiPending = useOnboardingAttemptStore((st) => st.pending);
+  const aiRunSeen = useOnboardingAttemptStore((st) => st.runSeen);
+  const aiDialogSeen = useOnboardingAttemptStore((st) => st.dialogSeen);
 
   const runLive = isOrchestratorRunLive(orchestratorStatus);
   const aiSucceeded = aiPending && aiRunSeen && orchestratorStatus === 'completed';
-
-  // Adjusted DURING RENDER, not in an effect (same shape as QuickStartDialog's
-  // open/close reset): an effect would paint the wizard back over the dialog
-  // for a frame, and `set-state-in-effect` rejects the synchronous setState.
-  if (aiPending && runLive && !aiRunSeen) {
-    setAiRunSeen(true);
-  }
-  if (aiPending && quickStartOpen && !aiDialogSeen) {
-    setAiDialogSeen(true);
-  }
   // The dialog is gone and nothing is running or finished: the attempt ended
-  // without a game (never started, failed, cancelled, or closed before
+  // without a game (never started, failed, cancelled, or discarded before
   // "Build it"). Onboarding stays incomplete and the wizard comes back.
-  if (
-    aiPending &&
-    (aiDialogSeen || aiRunSeen) &&
-    !quickStartOpen &&
-    !runLive &&
-    !aiSucceeded
-  ) {
-    setAiPending(false);
-    setAiRunSeen(false);
-    setAiDialogSeen(false);
-  }
+  const aiAbandoned =
+    aiPending && (aiDialogSeen || aiRunSeen) && !quickStartOpen && !runLive && !aiSucceeded;
+
+  // Bookkeeping on the attempt store. These are writes to an external store,
+  // so they belong in an effect; none of them changes what is painted until
+  // `endAttempt`, and by then the dialog is already closed.
+  useEffect(() => {
+    const attempt = useOnboardingAttemptStore.getState();
+    if (!attempt.pending) return;
+    if (runLive && !attempt.runSeen) attempt.markRunSeen();
+    if (quickStartOpen && !attempt.dialogSeen) attempt.markDialogSeen();
+    if (aiAbandoned) attempt.endAttempt();
+  }, [runLive, quickStartOpen, aiAbandoned]);
 
   const markComplete = useCallback(() => {
     safeSetItem(ONBOARDING_COMPLETED_KEY, '1');
@@ -123,7 +112,9 @@ export function OnboardingGate({ onRequestQuickStart, quickStartOpen }: Onboardi
   // effect, not in render. No local setState here: `completeOnboarding` flips
   // `onboardingCompleted`, which is what makes this gate render nothing.
   useEffect(() => {
-    if (aiSucceeded) markComplete();
+    if (!aiSucceeded) return;
+    markComplete();
+    useOnboardingAttemptStore.getState().endAttempt();
   }, [aiSucceeded, markComplete]);
 
   const handleWizardComplete = useCallback(() => {
@@ -132,9 +123,7 @@ export function OnboardingGate({ onRequestQuickStart, quickStartOpen }: Onboardi
   }, [markComplete]);
 
   const handleStartAi = useCallback(() => {
-    setAiPending(true);
-    setAiRunSeen(false);
-    setAiDialogSeen(false);
+    useOnboardingAttemptStore.getState().startAttempt();
     onRequestQuickStart();
   }, [onRequestQuickStart]);
 

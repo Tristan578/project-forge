@@ -34,10 +34,13 @@ import { toast } from 'sonner';
 import { Button, Dialog, Label, Textarea } from '@spawnforge/ui';
 import { useEditorStore } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import Link from 'next/link';
 import {
+  INSUFFICIENT_TOKENS_MESSAGE,
   isOrchestratorRunLive,
   type OrchestratorStatus,
 } from '@/stores/slices/orchestratorSlice';
+import { SETTINGS_BILLING_HREF } from '@/lib/navigation/settingsRoutes';
 import {
   QUICK_START_GAME_TYPES,
   buildQuickStartPrompt,
@@ -112,7 +115,7 @@ export interface QuickStartDialogProps {
 export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // Lazily initialised rather than a bare 'pick': the dialog can mount already
   // open while a run from a previous mount is still live, and 'pick' would put
-  // "Build it" in front of a user whose second run the slice refuses.
+  // "Plan my game" in front of a user whose second run the slice refuses.
   const [phase, setPhase] = useState<Phase>(() =>
     open && isOrchestratorRunLive(useEditorStore.getState().orchestratorStatus)
       ? 'running'
@@ -127,6 +130,10 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // 'executing', so without this a second click in that window starts a second
   // run of the same plan.
   const [confirming, setConfirming] = useState(false);
+  // The build was refused before any step ran (its reservation was declined),
+  // so the plan is intact. "Back to the plan" returns to the review rather
+  // than making the user pay to design the same game again (#6831 review).
+  const [refusedBeforeStart, setRefusedBeforeStart] = useState(false);
 
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const statusRef = useRef<HTMLDivElement>(null);
@@ -142,6 +149,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const currentPlan = useEditorStore((s) => s.currentPlan);
   const tokenEstimate = useEditorStore((s) => s.tokenEstimate);
   const runPipelineFromPlan = useEditorStore((s) => s.runPipelineFromPlan);
+  const setOrchestratorStatus = useEditorStore((s) => s.setOrchestratorStatus);
   const play = useEditorStore((s) => s.play);
 
   const runIsLive = isOrchestratorRunLive(status);
@@ -151,6 +159,12 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     status === 'awaiting_approval' && !pendingGate && currentPlan
       ? currentPlan.approvalGates.find((g) => g.id === 'gate_plan') ?? FALLBACK_PLAN_GATE
       : null;
+  // "Starting the build…" covers only the gap between the click and the run
+  // reporting 'executing'. `confirming` itself stays true until the whole run
+  // settles (it guards the click), so it must not drive the status line:
+  // "Building your game…" and the mid-run gates' "Waiting on your approval…"
+  // have to show, and be announced, while the build goes on.
+  const startingBuild = confirming && planGate !== null;
 
   // While this dialog is open it is the only place the user can reach a gate
   // (it is modal and covers the orchestrator panel), so it owns the gate UI.
@@ -163,7 +177,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // screen would read as state belonging to whatever is happening now.
   //
   // Unless a run is still live: this dialog can be closed mid-run, and resetting
-  // to 'pick' put "Build it" back in front of the user, whose second run the
+  // to 'pick' put "Plan my game" back in front of the user, whose second run the
   // slice now refuses. Resume the running view instead, which is also where the
   // pending gate is rendered.
   //
@@ -179,6 +193,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       setError(null);
       setStarting(false);
       setConfirming(false);
+      setRefusedBeforeStart(false);
       if (isOrchestratorRunLive(useEditorStore.getState().orchestratorStatus)) {
         setPhase('running');
       } else {
@@ -190,7 +205,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   }
 
   // Every phase change unmounts the element that was focused (the card on
-  // pick->describe, "Build it" on describe->running), which drops focus to
+  // pick->describe, "Plan my game" on describe->running), which drops focus to
   // document.body inside an aria-modal region. Move it explicitly.
   //
   // Except when the build view already placed focus itself: a plan review or
@@ -307,6 +322,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // `handleSubmit` above), so read the status the run left behind.
   const handleConfirmBuild = useCallback(async () => {
     setError(null);
+    setRefusedBeforeStart(false);
     setConfirming(true);
     try {
       await runPipelineFromPlan();
@@ -315,6 +331,12 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         const message = state.orchestratorError ?? GENERIC_FAILURE;
         setError(message);
         toast.error(message);
+        // No step ran: the reservation (or the engine check before it) was
+        // refused, and the plan the user already paid to design is intact.
+        setRefusedBeforeStart(
+          state.currentPlan !== null &&
+            Object.values(state.stepStatuses ?? {}).every((st) => st === 'pending'),
+        );
       }
     } catch (err) {
       const message = err instanceof Error && err.message ? err.message : GENERIC_FAILURE;
@@ -329,6 +351,13 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     setError(null);
     setPhase('describe');
   }, []);
+
+  // Back to the review for a build that was refused before it started.
+  const handleBackToPlan = useCallback(() => {
+    setError(null);
+    setRefusedBeforeStart(false);
+    setOrchestratorStatus('awaiting_approval');
+  }, [setOrchestratorStatus]);
 
   const handleCancelRun = useCallback(() => {
     cancelPipeline();
@@ -359,7 +388,12 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       </>
     ) : phase === 'running' ? (
       <>
-        {error && (
+        {error && refusedBeforeStart && (
+          <Button variant="outline" size="sm" onClick={handleBackToPlan}>
+            Back to the plan
+          </Button>
+        )}
+        {error && !refusedBeforeStart && (
           <Button variant="outline" size="sm" onClick={handleRetry}>
             Try again
           </Button>
@@ -367,7 +401,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         {/* Only while there is something to stop: cancelPipeline after a run
             has completed or failed flips the status to 'cancelled' and re-POSTs
             the token release. Mirrors OrchestratorPanel's footer guard. */}
-        {/* The plan review carries its own Cancel, which does the same thing;
+        {/* The plan review carries its own "Discard plan", which does the same thing;
             a second one beside it would be two controls for one action. */}
         {runIsLive && !planGate && (
           <Button variant="ghost" size="sm" onClick={handleCancelRun}>
@@ -404,7 +438,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
           ? 'Pick a kind of game. We build a playable scene from there.'
           : phase === 'describe'
             ? 'Describe it in your own words, or leave it blank for our take.'
-            : planGate && !confirming
+            : planGate && !startingBuild
               ? 'The build starts, and its tokens are taken, only when you press Build it. Close keeps this plan for later.'
               : 'Building. You can keep working while this runs.'
       }
@@ -482,10 +516,10 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             aria-live="polite"
             className="flex items-center gap-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sf-accent)]"
           >
-            {(starting || confirming || status === 'decomposing' || status === 'planning' || status === 'executing') && (
+            {(starting || startingBuild || status === 'decomposing' || status === 'planning' || status === 'executing') && (
               <Loader2 className="h-4 w-4 animate-spin text-[var(--sf-accent)]" aria-hidden="true" />
             )}
-            <span>{confirming ? STARTING_BUILD : planGate ? PLAN_READY : STATUS_MESSAGES[status]}</span>
+            <span>{startingBuild ? STARTING_BUILD : planGate ? PLAN_READY : STATUS_MESSAGES[status]}</span>
           </div>
 
           {/* Plan review. "Build it" is where the build's tokens are reserved,
@@ -534,6 +568,14 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
           className="mt-3 rounded-[var(--sf-radius-md)] border border-[var(--sf-destructive)] bg-[color-mix(in_srgb,var(--sf-destructive)_12%,transparent)] px-3 py-2 text-xs text-[var(--sf-text)]"
         >
           {error}
+          {error === INSUFFICIENT_TOKENS_MESSAGE && (
+            <>
+              {' '}
+              <Link href={SETTINGS_BILLING_HREF} className="underline underline-offset-2">
+                Buy tokens
+              </Link>
+            </>
+          )}
         </div>
       )}
     </Dialog>

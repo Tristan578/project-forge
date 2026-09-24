@@ -947,7 +947,7 @@ describe('OrchestratorPanel', () => {
             'flex',
             'items-start',
             'gap-1.5',
-            'rounded',
+            'rounded-[var(--sf-radius-sm)]',
             `bg-[var(${token})]/10`,
             'px-2',
             'py-1',
