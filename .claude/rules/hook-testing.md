@@ -184,11 +184,20 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   `alias nothing fail=:` and anything in front of the word are all caught,
   while the word as an argument (`echo alias fail=:`), inside a quoted string
   that holds more than the word, in a heredoc fixture or in a comment is text.
+- No `trap ... DEBUG` and no `shopt -s extdebug` either: with extdebug on, a
+  DEBUG trap that returns non-zero makes bash skip the next command, so every
+  `fail "..."` call can be made to vanish with the function still frozen. Same
+  tokeniser, same rule (the word `DEBUG` in any case after a `trap` command
+  word; `extdebug` after `shopt` plus an `s` flag); `trap ... EXIT`, `trap - ERR`
+  and `shopt -u extdebug` are not violations.
 - The body is a brace group, opened on the definition line or the next
   non-blank, non-comment line, closed by `}` at column 0 (or on the same line
   for a one-liner; a trailing comment is not part of it). A subshell body or a
   bare compound body is reported as `unsupported` — the gate never skips a
   definition it cannot follow.
+- A heredoc delimiter is any word (`<<1EOF`, `<<-ZEOF`, `<<'.EOF'`), and a
+  column-0 definition inside a multi-line `( )` or `$( )` is subshell-local,
+  not a top-level helper.
 - Heredocs follow bash: only `<<-` strips leading tabs before the terminator;
   a plain `<<` body runs to the column-0 delimiter, tab-indented lookalikes
   included.

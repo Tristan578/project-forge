@@ -847,7 +847,10 @@ by construction rather than by measurement.
   tab-indented body line and reported a correct suite as two violations). And
   because `readonly -f` freezes the FUNCTION binding only, an `alias NAME=` or
   `shopt -s expand_aliases` in command position of executable text is a
-  violation in its own right (below). No files, no definitions, or a file the
+  violation in its own right (below), and so are `trap ... DEBUG` and
+  `shopt -s extdebug`: with extdebug on, a DEBUG trap that returns non-zero
+  makes bash skip the next command, so a two-line literal neuters every
+  `fail` call without touching its binding (seventh board round). No files, no definitions, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
 - `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state
   from a fixture, runs the gate on the real tree behind a 300-function floor

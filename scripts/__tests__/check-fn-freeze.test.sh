@@ -214,6 +214,49 @@ FIX
 expect_rc "8c. a tab-indented terminator ends a <<- heredoc, so the definition after it is real" 1 \
   "$(run_gate "$d_hd_dash")" "fixture.test.sh:6: bad() is not frozen"
 
+# ---- 8d. a heredoc delimiter is any word, not only an identifier ---------------
+# `<<1EOF`, `<<-ZEOF` and `<<.EOF` are real delimiters; when only identifiers
+# were recognised the body was lexed as code, a decoy `name() {` inside it
+# swallowed every later line, and a live `fail() { :; }` after the heredoc
+# passed (seventh board round, infra seat). The runtime probe proves the
+# neuter is real in this bash before the gate is asked to refuse it.
+heredoc_word_probe="$(cd "$(mktemp -d)" && printf 'cat <<1EOF >/dev/null\ndecoy() {\n1EOF\nfail() { :; }\ntype -t fail\n' > p.sh && bash p.sh 2>&1)"
+if [ "$heredoc_word_probe" = "function" ]; then
+  pass "8d-probe. in this bash a digit-leading heredoc delimiter is honoured and the fail() after it is live"
+else
+  fail "8d-probe. the digit-leading heredoc probe did not behave like bash (got '$heredoc_word_probe')"
+fi
+d_hd_word="$(mkfixture heredoc-word <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+cat <<1EOF >/dev/null
+decoy() {
+1EOF
+cat <<-ZEOF >/dev/null
+	decoy2() {
+	ZEOF
+cat <<'.EOF' >/dev/null
+decoy3() {
+.EOF
+cat <<"-EOF-" >/dev/null
+decoy4() {
+-EOF-
+fail() { :; }
+real_after() {
+  :
+}
+readonly -f real_after
+FIX
+)"
+expect_rc "8d. digit-, dash- and dot-leading heredoc delimiters (bare, <<-, single- and double-quoted) close their bodies, so the live fail() after them is reported" 1 \
+  "$(run_gate "$d_hd_word")" "1 violation(s)" "fixture.test.sh:15: fail() is not frozen"
+hd_word_list="$(FN_FREEZE_DIRS="$d_hd_word" bash "$GATE" --list 2>&1 | cut -f2,5 | tr '\t\n' '  ')"
+if [ "$hd_word_list" = "pass frozen fail unfrozen real_after frozen " ]; then
+  pass "8e. --list derives exactly the three real definitions and none of the four decoys"
+else
+  fail "8e. --list derived: '$hd_word_list'"
+fi
+
 # ---- 9. a commented-out definition is ignored ---------------------------------
 d_cdef="$(mkfixture commented-def <<'FIX'
 pass() { echo "  PASS: $1"; }
@@ -589,6 +632,44 @@ else
   fail "19d. alias probe did not shadow the frozen function (got '$alias_probe') — re-examine whether the alias rule is still needed"
 fi
 
+# ---- 19j. a DEBUG trap under extdebug skips the next command ------------------
+# Neither line redefines, aliases or unfreezes anything, and the suite prints
+# no FAIL (seventh board round, security seat). First prove in this bash that
+# the shape really silences a frozen helper, then that the gate reports both
+# words in every spelling and never as an argument of another command.
+debug_trap_probe="$(bash -c 'shopt -s extdebug; fail() { echo "FAIL: $1"; }; readonly -f fail; trap "[[ \$BASH_COMMAND != fail\\ * ]]" DEBUG; fail "silenced"; echo after' 2>&1)"
+if [ "$debug_trap_probe" = "after" ]; then
+  pass "19j-probe. in this bash a DEBUG trap under extdebug skips a call of a frozen helper (the gate must refuse it)"
+else
+  fail "19j-probe. the DEBUG-trap probe did not skip the frozen call (got '$debug_trap_probe')"
+fi
+d_debug_trap="$(mkfixture debug-trap <<'FIX'
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+shopt -s extdebug
+trap '[[ $BASH_COMMAND != fail\ * ]]' DEBUG
+\trap ':' debug
+X="1" builtin trap -- ':' Debug
+shopt -s nocasematch extdebug
+fail "never printed"
+FIX
+)"
+expect_rc "19j. 'trap ... DEBUG' in any case or spelling and 'shopt -s extdebug' in executable text are violations" 1 \
+  "$(run_gate "$d_debug_trap")" "5 violation(s)" "fixture.test.sh:3: 'shopt -s extdebug'" "fixture.test.sh:4: 'trap ... DEBUG'" "fixture.test.sh:5: 'trap ... debug'" "fixture.test.sh:6: 'trap ... Debug'" "fixture.test.sh:7: 'shopt -s extdebug'"
+d_debug_words="$(mkfixture debug-words <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+echo trap DEBUG extdebug
+printf '%s\n' "shopt -s extdebug"
+trap 'echo bye' EXIT
+trap - ERR
+shopt -u extdebug
+pass "the words as arguments, an EXIT trap and shopt -u are not violations"
+FIX
+)"
+expect_rc "19j-b. DEBUG/extdebug as arguments of another command, an EXIT or ERR trap and 'shopt -u extdebug' are not violations" 0 \
+  "$(run_gate "$d_debug_words")" "1 function(s) across 1 file(s) are frozen"
+
 # ---- 19h. an array literal holds words, it does not run them ------------------
 # `arr=(alias fail=1)` stores two strings; nothing is aliased (the fifth board
 # round's architect seat measured the word rule flagging exactly this).
@@ -707,6 +788,49 @@ if [ "$unsupported_list" = "pass frozen fail unsupported guard unsupported " ]; 
 else
   fail "23b. --list derived: '$unsupported_list'"
 fi
+
+# ---- 24. an escaped quote inside $'...' does not end the string ----------------
+# `$'it\'s a # test'` is one ANSI-C string; when the comment strip read the
+# `\'` as the closing quote, the later `#` became a comment, the one-liner
+# stayed open, and every definition after it was swallowed (seventh board
+# round, architect seat). The correctly frozen helper after it must be derived.
+d_ansi="$(mkfixture ansi-c-quote <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+weird() { echo $'it\'s a # test'; }
+readonly -f weird
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+plain() { echo 'no escapes here \' "#"; }
+readonly -f plain
+FIX
+)"
+expect_rc "24. a one-liner holding \$'...' with an escaped quote and a later # closes on its line, and the helpers after it are derived" 0 \
+  "$(run_gate "$d_ansi")" "4 function(s) across 1 file(s) are frozen"
+
+# ---- 25. a column-0 definition inside a multi-line ( ) or $( ) is not top-level --
+# It defines a subshell-local function nothing in the enclosing script can
+# freeze; reporting it as unfrozen was a false positive (seventh board round,
+# infra seat). The freeze after the block still resolves the real definition.
+d_subshell="$(mkfixture subshell-def <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+out="$(
+foo() {
+  echo hi
+}
+foo
+)"
+(
+bar() { echo "$out"; }
+bar
+)
+fail() { echo "  FAIL: $1"; }
+readonly -f fail
+FIX
+)"
+expect_rc "25. definitions at column 0 inside a multi-line \$( ) or ( ) block are subshell-local and not derived; the real helpers around them are" 0 \
+  "$(run_gate "$d_subshell")" "2 function(s) across 1 file(s) are frozen"
 
 # ---- 18. the test-only seam must not be wired from any workflow ----------------
 # Same posture as check-suite-wiring.test.sh: comment-stripped scan of every

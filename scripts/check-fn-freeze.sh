@@ -61,6 +61,14 @@
 # is a variable, not a function: those remain outside this gate (round 39
 # of the guide).
 #
+# A DEBUG trap under `shopt -s extdebug` is the other binding-independent
+# neuter: bash skips the NEXT command whenever a command run by the DEBUG
+# trap returns non-zero, so `trap '[[ $BASH_COMMAND != fail\ * ]]' DEBUG`
+# makes every `fail "..."` call vanish with the function still frozen (the
+# seventh board round). The words `trap ... DEBUG` (any case; bash accepts
+# `debug`) and `shopt -s extdebug` in command position are reported the
+# same way: a self-defense suite has no use for either.
+#
 # Indented definitions are deliberately out of scope: they are nested inside
 # another function, an `if` arm, or a subshell, and a function defined inside a
 # body that runs more than once cannot be frozen on its first run without
@@ -106,7 +114,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|unsupported
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|unsupported
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -123,14 +131,22 @@ derive_file() {
     }
     # The text of a line before its trailing comment, with the quoting of the
     # line respected (a `#` inside quotes is text). Used to decide whether
-    # a definition line closes its own brace group.
+    # a definition line closes its own brace group. The quote kinds are the
+    # same four lex_line() knows: a plain single-quoted string has no
+    # escapes at all, an ANSI-C dollar-quoted string escapes with a backslash
+    # (a backslash-escaped quote inside one does not end it; the seventh
+    # board round found this scan ending there, which turned a later hash
+    # into a comment and a closed one-liner into an open body), and a
+    # double-quoted string escapes with a backslash too.
     function code_part(s,   n, i, c, qq) {
       n = length(s); qq = ""
       for (i = 1; i <= n; i++) {
         c = substr(s, i, 1)
         if (qq == "s") { if (c == "\047") qq = ""; continue }
+        if (qq == "a") { if (c == "\\") { i++; continue } if (c == "\047") qq = ""; continue }
         if (qq == "d") { if (c == "\\") { i++; continue } if (c == "\"") qq = ""; continue }
         if (c == "\\") { i++; continue }
+        if (substr(s, i, 2) == "$\047") { qq = "a"; i++; continue }
         if (c == "\047") { qq = "s"; continue }
         if (c == "\"") { qq = "d"; continue }
         if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[[:space:];(&|{]/)) return substr(s, 1, i - 1)
@@ -169,16 +185,21 @@ derive_file() {
         cmd_seen = 1
         if (w == "alias") in_alias = 1
         if (w == "shopt") in_shopt = 1
+        if (w == "trap") in_trap = 1
         w = ""; return
       }
       if (in_alias && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/)
         printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
       if (in_shopt && sflag != "" && w == "expand_aliases")
         printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " sflag " " w, NR, NR
+      if (in_shopt && sflag != "" && w == "extdebug")
+        printf "%s\t%s\t%d\t%d\ttrap\n", file, "shopt " sflag " " w, NR, NR
+      if (in_trap && toupper(w) == "DEBUG")
+        printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap ... " w, NR, NR
       if (in_shopt && w ~ /^-[a-z]*s[a-z]*$/) sflag = w
       w = ""
     }
-    function end_command() { end_word(); cmd_seen = 0; in_alias = 0; in_shopt = 0; sflag = "" }
+    function end_command() { end_word(); cmd_seen = 0; in_alias = 0; in_shopt = 0; in_trap = 0; sflag = "" }
     # Entering `$( ... )` or `( ... )` starts a new context: the enclosing
     # quote state and the enclosing array-literal state are both pushed and
     # both cleared, and the matching `)` restores them. Array-literal skipping
@@ -200,7 +221,7 @@ derive_file() {
       # word and the two words before it carry over (`alias \` + `fail=:`,
       # or `al\` + `ias`, are one statement to bash).
       carry = cont; cont = 0
-      if (q == "" && !carry) { cmd_seen = 0; in_alias = 0; in_shopt = 0; sflag = ""; w = "" }
+      if (q == "" && !carry) { cmd_seen = 0; in_alias = 0; in_shopt = 0; in_trap = 0; sflag = ""; w = "" }
       while (i <= n) {
         c = substr(line, i, 1); c2 = substr(line, i, 2); c3 = substr(line, i, 3)
         if (q == "s") { if (c == "\047") q = ""; else w = w c; i++; continue }
@@ -251,7 +272,12 @@ derive_file() {
           rest = substr(line, i + 2)
           strip = (substr(rest, 1, 1) == "-")
           sub(/^-?[[:space:]]*/, "", rest)
-          if (match(rest, /^(\047[A-Za-z_][A-Za-z0-9_]*\047|"[A-Za-z_][A-Za-z0-9_]*"|\\?[A-Za-z_][A-Za-z0-9_]*)/)) {
+          # The delimiter is any WORD (POSIX io_here: DLESS here_end), not an
+          # identifier: `<<1EOF`, `<<-ZEOF`, `<<.EOF` are honoured by bash. An
+          # identifier-only match left such a body lexed as code, and a decoy
+          # `name() {` inside it swallowed every later definition (seventh
+          # board round; the same bug the npm-audit suite fixed in its round 30).
+          if (match(rest, /^(\047[^\047]+\047|"[^"]+"|(\\.|[^[:space:];&|<>()\047"\\])+)/)) {
             tok = substr(rest, RSTART, RLENGTH)
             gsub(/[\047"\\]/, "", tok)
             hd_n++; hd_term[hd_n] = tok; hd_strip[hd_n] = strip
@@ -283,8 +309,13 @@ derive_file() {
       }
 
       # Line-level classification applies only when the line STARTS outside
-      # a quoted region; otherwise the line is string content.
-      if (q != "") {
+      # a quoted region, outside an open `$( )` / `( )` context and outside
+      # an array literal; otherwise the line is string, subshell or literal
+      # content. A column-0 `name() {` inside a multi-line `( ... )` defines a
+      # subshell-local function that no freeze in the enclosing script can
+      # reach (seventh board round: it was reported as an unfrozen top-level
+      # helper, the same false positive the indentation rule already avoids).
+      if (q != "" || d > 0 || arr) {
         if (line ~ /^readonly -f [A-Za-z_][A-Za-z0-9_]*[[:space:]]*$/) {
           n2 = line; sub(/^readonly -f /, "", n2); sub(/[[:space:]]*$/, "", n2)
           printf "%s\t%s\t%d\t%d\tstray\n", file, n2, NR, NR
@@ -437,7 +468,7 @@ if [ "${total:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray|alias|unsupported)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias|trap|unsupported)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
   # The report is the block reason, so it goes to stderr like every other
@@ -450,7 +481,8 @@ if [ -n "$violations" ]; then
         unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
         stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, and a freeze inside a quoted string or fixture is text, not a statement" ;;
         alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion" ;;
-        unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as '$name() {' ... '}' with the closing brace at column 0, then freeze it on the next line" ;;
+        trap)     echo "  - $file:$def: '$name' — with extdebug on, a DEBUG trap that returns non-zero makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding; a self-defense suite may not set a DEBUG trap or enable extdebug" ;;
+        unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as a one-liner '$name() { ...; }', or multi-line with the closing '}' at column 0, then freeze it on the next line" ;;
       esac
     done <<<"$violations"
   } >&2
