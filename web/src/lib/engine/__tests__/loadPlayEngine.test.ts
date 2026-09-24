@@ -173,6 +173,16 @@ describe('instantiateFromPaths', () => {
   const CDN = 'https://cdn.test/v1/engine-pkg-webgpu/';
   const SAME = '/engine-pkg-webgpu/';
 
+  /** The rejection reason, typed; fails the test if the promise resolves. */
+  async function rejectionOf(pending: Promise<unknown>): Promise<Error> {
+    try {
+      await pending;
+    } catch (err) {
+      return err as Error;
+    }
+    throw new Error('expected the load to reject, and it resolved');
+  }
+
   function glue(calls: string[]) {
     return {
       default: vi.fn(async (wasmUrl: string) => {
@@ -348,7 +358,7 @@ describe('instantiateFromPaths', () => {
     });
     const onOriginSkipped = vi.fn();
 
-    const failure = await instantiateFromPaths([CDN, SAME], { load, onOriginSkipped }).catch((e: unknown) => e as Error);
+    const failure = await rejectionOf(instantiateFromPaths([CDN, SAME], { load, onOriginSkipped }));
     // GamePlayer renders this message to the player verbatim.
     expect(failure.message).toBe(PLAY_ENGINE_LOAD_FAILED_MESSAGE);
     expect((failure.cause as Error).message).toBe(`cannot load ${SAME}forge_engine.js`);
@@ -390,7 +400,7 @@ describe('instantiateFromPaths', () => {
 
   it('rejects rather than resolving to nothing when given no origins', async () => {
     const { instantiateFromPaths, PLAY_ENGINE_LOAD_FAILED_MESSAGE } = await import('../loadPlayEngine');
-    const failure = await instantiateFromPaths([], { load: vi.fn() }).catch((e: unknown) => e as Error);
+    const failure = await rejectionOf(instantiateFromPaths([], { load: vi.fn() }));
     expect(failure.message).toBe(PLAY_ENGINE_LOAD_FAILED_MESSAGE);
     expect((failure.cause as Error).message).toContain('No engine base path');
   });
