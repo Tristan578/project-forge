@@ -463,7 +463,8 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       entityId: z.string().optional(),
     }), args);
     if (p.error) return p.error;
-    const entityId = p.data.entityId ?? ctx.store.primaryId;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- entityId is a model-supplied tool argument (z.string().optional(), no min(1)); a blank one means "not given" and falls back to the selected entity
+    const entityId = p.data.entityId || ctx.store.primaryId;
     if (!entityId) return { success: false, error: 'No entity selected' };
     const mat = ctx.store.primaryMaterial;
     if (!mat) return { success: false, error: 'Selected entity has no material' };

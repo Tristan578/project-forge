@@ -62,7 +62,8 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     }
 
     const store = useShaderEditorStore.getState();
-    const targetGraphId = p.data.graphId ?? store.activeGraphId;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- graphId is a model-supplied tool argument (z.string().optional(), no min(1)); a blank one means "not given" and falls back to the active graph
+    const targetGraphId = p.data.graphId || store.activeGraphId;
 
     if (!targetGraphId) {
       return { success: false, error: 'No active shader graph. Create one first with create_shader_graph.' };
@@ -125,7 +126,8 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ graphId: z.string().optional() }), args);
     if (p.error) return p.error;
     const store = useShaderEditorStore.getState();
-    const targetGraphId = p.data.graphId ?? store.activeGraphId;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- graphId is a model-supplied tool argument (z.string().optional(), no min(1)); a blank one means "not given" and falls back to the active graph
+    const targetGraphId = p.data.graphId || store.activeGraphId;
 
     if (!targetGraphId) {
       return { success: false, error: 'No active shader graph' };
@@ -166,7 +168,8 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     }
 
     const store = useShaderEditorStore.getState();
-    const targetGraphId = p.data.graphId ?? store.activeGraphId;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- graphId is a model-supplied tool argument (z.string().optional(), no min(1)); a blank one means "not given" and falls back to the active graph
+    const targetGraphId = p.data.graphId || store.activeGraphId;
 
     if (!targetGraphId) {
       return { success: false, error: 'No shader graph specified' };
