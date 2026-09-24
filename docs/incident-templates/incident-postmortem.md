@@ -12,9 +12,8 @@
 **Severity:** {P0 / P1 / P2}
 **Date:** {YYYY-MM-DD}
 **Duration:** {N hours N minutes}
-**Author(s):** {NAME(S)}
-**Reviewers:** {NAME(S)}
-**Status:** {Draft / In Review / Final}
+**Author:** {NAME}
+**Status:** {Draft / Final}
 
 ---
 

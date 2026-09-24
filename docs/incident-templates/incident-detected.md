@@ -10,8 +10,7 @@
 **Status:** Investigating
 **Severity:** {P0 / P1 / P2}
 **Detected at:** {YYYY-MM-DD HH:MM UTC}
-**Incident Commander:** {NAME}
-**Bridge channel:** #{SLACK_INCIDENT_CHANNEL}
+**Owner:** {NAME} (the project owner, who handles the incident end to end)
 
 ---
 
@@ -53,7 +52,6 @@ Live service status (updates automatically from the health checks): https://spaw
 
 **Incident ID:** INC-{YYYYMMDD}-{N}
 **Alert triggered by:** {monitoring alert / user report / owner observation}
-**Responder:** {NAME} (the project owner; there is no one to escalate to)
 
 ### Timeline
 

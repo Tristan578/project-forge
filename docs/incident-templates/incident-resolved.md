@@ -10,7 +10,7 @@
 **Status:** Resolved
 **Resolved at:** {YYYY-MM-DD HH:MM UTC}
 **Duration:** {N hours N minutes} (detected {YYYY-MM-DD HH:MM UTC})
-**Incident Commander:** {NAME}
+**Owner:** {NAME} (the project owner, who handles the incident end to end)
 
 ---
 

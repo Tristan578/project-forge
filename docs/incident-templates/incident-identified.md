@@ -9,7 +9,7 @@
 
 **Status:** Fix In Progress
 **Last updated:** {YYYY-MM-DD HH:MM UTC}
-**Incident Commander:** {NAME}
+**Owner:** {NAME} (the project owner, who handles the incident end to end)
 **Time since detection:** {N hours N minutes}
 
 ---
