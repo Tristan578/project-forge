@@ -177,14 +177,22 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   and continuations resolved), finds each statement's command word, and when
   it is `alias` reports every later `NAME=` word, or `expand_aliases` after
   `shopt` plus an `s` flag — so `\alias`, `"alias"`, `\a\l\i\a\s`,
-  `alias nothing fail=:` and anything in front of the word are all caught,
-  while the word as an argument (`echo alias fail=:`), inside a quoted string
+  `alias nothing fail=:` and anything in front of the word are all caught.
+  Every command name and argument is also judged with its expansions
+  removed, because each can expand to nothing (`$()`, `$(true)`, `${x:+Q}`,
+  an unset `$1`), so `ali$()as`, `ali${x:+Q}as` and `shopt -$()s
+  expand_aliases` are caught too; only an expansion that must contribute
+  text to spell the word (`al$(echo i)as`) stays out of reach. The word
+  as an argument (`echo alias fail=:`), inside a quoted string
   that holds more than the word, in a heredoc fixture or in a comment is text.
 - No `trap ... DEBUG` and no `shopt -s extdebug` either: with extdebug on, a
   DEBUG trap that returns non-zero makes bash skip the next command, so every
   `fail "..."` call can be made to vanish with the function still frozen. Same
   tokeniser, same rule (the word `DEBUG` in any case after a `trap` command
-  word; `extdebug` after `shopt` plus an `s` flag). A trap on EXIT, ERR,
+  word; `extdebug` after `shopt` plus an `s` flag), with the same expansion
+  removal, which also applies to a trap's signal words and, since bash parses
+  it again when the trap fires, to its action (`trap 'ex$()it 0' EXI$()T`).
+  A trap on EXIT, ERR,
   RETURN or 0 whose action exits or execs is one too — `trap 'exit 0' EXIT`
   overrides the `exit 1` the suite reached — and so is one whose action calls
   a function of the same file that exits or execs, directly or through another

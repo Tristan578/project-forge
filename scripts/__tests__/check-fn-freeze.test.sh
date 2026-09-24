@@ -1347,6 +1347,48 @@ FIX
 expect_rc "30i. a word spelled around an empty substitution is still the guarded word" 1 \
   "$(run_gate "$d_emptysub")" "10 violation(s)" "fixture.test.sh:3: 'shopt -s expand\$()_aliases'" "fixture.test.sh:4: 'alias fail=:'" "fixture.test.sh:5: 'alias fail=:'" "fixture.test.sh:6: 'alias fail\$()=:'" "fixture.test.sh:7: 'shopt -s extdeb" "fixture.test.sh:8: 'trap ... DEBU\$()G'" "fixture.test.sh:9: 'trap ex" "fixture.test.sh:10: 'shopt -s expand_aliases'" "fixture.test.sh:11: 'trap ... DEBUG'" "fixture.test.sh:12: 'enable'"
 
+# ---- 30j. every kind of expansion, in every guarded position ----------------
+# Sixteenth board round (security, test): `${x:+Q}` and an unset `$1` expand
+# to nothing just as `$()` does, a comment inside a trap action's `$( )` is
+# still an empty substitution when the trap fires, and a trap action's own
+# quotes are removed then too. The round also found four positions no case
+# exercised: the `-s` flag, the trap signal, the body of a function a trap
+# calls, and an empty backtick pair in a trap action.
+d_expansions="$(mkfixture expansions <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+ali${x:+Q}as fail=:
+ali${x:+ Q}as fail=:
+shopt -s expand${x:+Q}_aliases
+shopt -$()s expand_aliases
+trap 'exit 0' EXI$()T
+trap 'ex$(#c
+)it 0' EXIT
+trap 'ex``it 0' EXIT
+trap 'e"x"it 0' EXIT
+alias fail$1=:
+cleanup() { ex$()it 0; }
+readonly -f cleanup
+trap cleanup EXIT
+ali$x"as" fail=:
+shopt -s "expand$x"_aliases
+trap 'ex$x"it" 0' EXIT
+helper() { exit 0; }
+readonly -f helper
+wrap() { hel$()per; }
+readonly -f wrap
+trap wrap EXIT
+trap 'ex$1it 0' EXIT
+FIX
+)"
+expect_rc "30j. every expansion that can be empty, in every guarded position, is still the guarded word" 1 \
+  "$(run_gate "$d_expansions")" "15 violation(s)" "fixture.test.sh:3: 'alias fail=:'" "fixture.test.sh:4: 'alias fail=:'" \
+  "fixture.test.sh:5: 'shopt -s expand\${x:+Q}_aliases'" "fixture.test.sh:6: 'shopt -\$()s expand_aliases'" \
+  "fixture.test.sh:7: 'trap exit 0 ... EXIT'" "fixture.test.sh:9: 'trap exit 0 ... EXIT'" "fixture.test.sh:10: 'trap exit 0 ... EXIT'" \
+  "fixture.test.sh:11: 'trap exit 0 ... EXIT'" "fixture.test.sh:12: 'alias fail\${1}=:'" "fixture.test.sh:15: 'trap cleanup ... EXIT (cleanup() exits)'" \
+  "fixture.test.sh:16: 'alias fail=:'" "fixture.test.sh:17: 'shopt -s expand\${x}_aliases'" "fixture.test.sh:18: 'trap exit 0 ... EXIT'" \
+  "fixture.test.sh:23: 'trap wrap ... EXIT (wrap() exits)'" "fixture.test.sh:24: 'trap exit 0 ... EXIT'"
+
 # ---- 12c. a file whose only definition is malformed gets that report --------------
 # Fourteenth board round (ux): the vacuity guard counted only frozen and
 # unfrozen rows, so a file holding just ` fail() { :; }` (the eleventh round's

@@ -55,11 +55,13 @@
 # itself performs before it looks a command up: `\alias`, `"alias"`,
 # `al"ias"`, `\a\l\i\a\s`, `$'alias'`, a backslash line continuation in the
 # middle of the statement, and anything in front of the word (`builtin`,
-# `command`, `time -p`, `X="1"`, `!`, `if`) are all the same word. A word
-# assembled at run time — `$x`, `$(...)`, `eval`, a `source` of a file
-# written by the suite — is not a word this scan can see, and `declare -n`
-# is a variable, not a function: those remain outside this gate (round 39
-# of the guide).
+# `command`, `time -p`, `X="1"`, `!`, `if`) are all the same word, and so
+# is a word spelled around an expansion that can be empty (`ali$()as`,
+# `ali${x:+Q}as`, `DEBU$1G`): every command name and argument is also judged
+# with its expansions removed (see end_word). A word whose spelling needs an
+# expansion to CONTRIBUTE text (`al$(echo i)as`), `eval`, a `source` of a
+# file written by the suite, and `declare -n` (a variable, not a function)
+# remain outside this gate (round 39 of the guide).
 #
 # A DEBUG trap under `shopt -s extdebug` is the other binding-independent
 # neuter: bash skips the NEXT command whenever a command run by the DEBUG
@@ -202,19 +204,32 @@ derive_file() {
     # again, while `echo alias fail=:` (the word as an ARGUMENT) is text. A
     # word assembled at run time (`$x`, `$(...)`, `eval`, a sourced file) is
     # not a word this scan can see; that is the documented bound.
-    # A substitution may expand to nothing (`$()` always does, `$(true)` does
-    # at run time), so a word is also judged with every substitution in it
-    # removed: `ali$()as`, `expand$(true)_aliases` and `DEBU$()G` are the
-    # guarded words to bash (fifteenth board round). wk is that form; it is
-    # used for command names and arguments, never for reserved words, which
-    # bash recognises before any expansion. Only a substitution that must
-    # CONTRIBUTE text to spell the word stays outside the scan.
+    # Any expansion may produce nothing (`$()` always does, `$(true)`,
+    # `${x:+Q}` and an unset `$1` do at run time), so a word is also judged
+    # with every expansion in it removed: `ali$()as`, `ali${x:+Q}as`,
+    # `expand$(true)_aliases`, `-$()s` and `DEBU$1G` are the guarded words to
+    # bash (fifteenth and sixteenth board rounds). wk is that form, made by
+    # no_exp; it is used for command names and arguments, never for reserved
+    # words, which bash recognises before any expansion. Only an expansion
+    # that must CONTRIBUTE text to spell the word stays outside the scan.
+    # The lexer leaves a `$( )` as the placeholder `$()` and keeps `${...}`,
+    # backticks and `$NAME` as written, so no_exp removes all four forms; a
+    # trap action is raw text, so there the whole `$(...)` goes, a comment
+    # inside it included.
+    function no_exp(s,   p) {
+      do {
+        p = s
+        gsub(/\$\([^()]*\)/, "", s); gsub(/\$\{[^{}]*\}/, "", s); gsub(/`[^`]*`/, "", s)
+      } while (s != p)
+      gsub(/\$[A-Za-z_][A-Za-z0-9_]*/, "", s); gsub(/\$[0-9@*#?$!-]/, "", s)
+      return s
+    }
     function end_word(   rq, wk) {
       # rq: a quote or a backslash went into this word, so it is never a
       # reserved word (bash recognises those before quote removal).
       rq = wq; wq = 0
       if (w == "") return
-      wk = w; gsub(/\$\(\)/, "", wk); gsub(/`[^`]*`/, "", wk)
+      wk = no_exp(w)
       # A case pattern is text. Only an unquoted `esac` where a pattern would
       # start ends the case (after the last `;;`).
       if (pat) {
@@ -284,14 +299,14 @@ derive_file() {
         if (!trap_has_action) { if (w !~ /^-/) { trap_action = w; trap_has_action = 1 } }
         else trap_sigs = trap_sigs " " toupper(wk)
       }
-      if (in_shopt && wk ~ /^-[a-z]*s[a-z]*$/) sflag = wk
+      if (in_shopt && wk ~ /^-[a-z]*s[a-z]*$/) sflag = w
       w = ""
     }
     # An EXIT, ERR or RETURN trap (or 0, the EXIT alias) whose action holds
     # the word exit or exec, after the backslashes bash would drop, replaces
     # the exit status the script chose.
     function check_trap(   a) {
-      a = trap_action; gsub(/\\/, "", a); gsub(/\$\([[:space:]]*\)/, "", a); gsub(/`[[:space:]]*`/, "", a)
+      a = trap_action; gsub(/\\/, "", a); a = no_exp(a); gsub(/"/, "", a); gsub(sprintf("%c", 39), "", a)
       if (a ~ /(^|[^A-Za-z0-9_])(exit|exec)([^A-Za-z0-9_]|$)/ && trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/)
         printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " a " ..." trap_sigs, NR, NR
       else if (trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/) {
@@ -410,7 +425,7 @@ derive_file() {
         d--
       }
     }
-    function lex_line(line,   n, i, c, c2, c3, rest, tok, carry) {
+    function lex_line(line,   n, i, c, c2, c3, rest, tok, carry, j, bd, cj) {
       n = length(line); i = 1
       # A trailing unquoted backslash joins this line to the next one, so the
       # word and the two words before it carry over (`alias \` + `fail=:`,
@@ -437,6 +452,7 @@ derive_file() {
           if (c == "\"") { q = ""; i++; continue }
           if (c3 == "$((") { open_sub(q, 1, 1, 1); i += 3; continue }
           if (c2 == "$(") { open_sub(q, 0, 0, 1); i += 2; continue }
+          if (c == "$" && match(substr(line, i + 1), /^([A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])/)) { w = w "${" substr(line, i + 1, RLENGTH) "}"; i += 1 + RLENGTH; continue }
           w = w c; i++; continue
         }
         if (arr) {
@@ -457,6 +473,17 @@ derive_file() {
         if (c2 == "$\047") { q = "a"; wq = 1; i += 2; continue }
         if (c == "\047") { q = "s"; wq = 1; i++; continue }
         if (c == "\"") { q = "d"; wq = 1; i++; continue }
+        # A `${...}` is one part of the current word up to its matching brace,
+        # so `ali${x:+ Q}as` is one word, as it is to bash (sixteenth round).
+        if (c2 == "${") {
+          j = i + 2; bd = 1
+          while (j <= n && bd > 0) { cj = substr(line, j, 1); if (cj == "{") bd++; else if (cj == "}") bd--; j++ }
+          w = w substr(line, i, j - i); i = j; continue
+        }
+        # A `$NAME` is kept as `${NAME}`, so the name still ends where bash
+        # ends it after quote removal joins the word: `ali$x"as"` is `alias`
+        # when x is empty, and must not read as the variable `xas`.
+        if (c == "$" && match(substr(line, i + 1), /^([A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])/)) { w = w "${" substr(line, i + 1, RLENGTH) "}"; i += 1 + RLENGTH; continue }
         if (c == "#") {
           if (i == 1 || substr(line, i - 1, 1) ~ /[[:space:];(&|]/) { end_word(); code_end = i; break }
           w = w c; i++; continue
