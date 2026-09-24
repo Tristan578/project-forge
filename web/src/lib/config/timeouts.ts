@@ -102,6 +102,20 @@ export const PLAY_GAME_FETCH_TIMEOUT_MS = 15_000;
 export const PLAY_ENGINE_SETTLE_MS = 500;
 
 /**
+ * Longest `/play` waits for the engine to accept `load_scene` after
+ * `init_engine` (#10196).
+ *
+ * The engine's command queue exists only after the Bevy app's first update,
+ * which measured ~1.3 s on the reference machine; a command sent before that
+ * answers "PendingCommands resource not initialized". Well under
+ * `ENGINE_GLOBAL_TIMEOUT_MS`, and long enough for a slow integrated GPU.
+ */
+export const PLAY_SCENE_LOAD_TIMEOUT_MS = 10_000;
+
+/** Poll interval while `/play` waits for the engine to accept commands. */
+export const PLAY_SCENE_LOAD_RETRY_MS = 50;
+
+/**
  * Longest an exported game waits for the engine to accept `load_scene`.
  *
  * The engine's command queue only exists after the Bevy app's first update

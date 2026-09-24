@@ -5,6 +5,10 @@ import { MessageSquare, LayoutGrid, Plus, Compass, Lock, X } from 'lucide-react'
 import { useOnboardingStore, type OnboardingPath } from '@/stores/onboardingStore';
 import { useUserStore } from '@/stores/userStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useEditorStore } from '@/stores/editorStore';
+import type { TemplateLoadResult } from '@/stores/slices/sceneSlice';
+import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
+import { TEMPLATE_REGISTRY } from '@/data/templates';
 
 export interface OnboardingWizardProps {
   onComplete: () => void;
@@ -63,16 +67,41 @@ const PATH_CARDS: PathCard[] = [
   },
 ];
 
+/** Shown when `loadTemplate` throws rather than reporting a failure. */
+const GENERIC_TEMPLATE_ERROR = 'Could not load that template. Please try again.';
+
 export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProps) {
   const selectPath = useOnboardingStore((s) => s.selectPath);
   const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
   const startTutorial = useOnboardingStore((s) => s.startTutorial);
-  const canUseAI = useUserStore((s) => s.canUseAI);
+  // Select the RESULT, not the function. `canUseAI` is a stable store action,
+  // so selecting it never re-rendered the wizard when `tier`, `activeFeatures`
+  // or `profileLoaded` changed; the profile arrives in an EditorLayout effect
+  // AFTER the render that mounts this wizard, so a paying user saw the locked
+  // "Upgrade to unlock AI" card until some unrelated re-render (#10156).
+  // Zustand compares the selected boolean, so this re-renders exactly when the
+  // verdict flips.
+  const isAIEnabled = useUserStore((s) => s.canUseAI());
+  const profileLoaded = useUserStore((s) => s.profileLoaded);
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
 
   const [showTemplates, setShowTemplates] = useState(false);
   const [loadingTemplate, setLoadingTemplate] = useState<string | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  // A template load is asynchronous and the store does not cancel it, so a
+  // result can land after the user has left this screen. Two guards: every
+  // exit (Back, Escape, the X) is inert while a load is pending, and a result
+  // that arrives after unmount is dropped rather than completing onboarding a
+  // second time on top of whatever path replaced it.
+  const templateLoading = loadingTemplate !== null;
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Focus trap: focus the dialog on mount
   useEffect(() => {
@@ -88,11 +117,12 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
     (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        if (templateLoading) return;
         completeOnboarding();
         onComplete();
       }
     },
-    [completeOnboarding, onComplete]
+    [completeOnboarding, onComplete, templateLoading]
   );
 
   useEffect(() => {
@@ -133,22 +163,38 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
     [selectPath, completeOnboarding, setRightPanelTab, startTutorial, onComplete, onStartAi]
   );
 
+  // Load the chosen template through the store, and complete onboarding only
+  // once it has landed. This used to be a no-op that completed onboarding and
+  // returned: a user who picked "Platformer" got a blank scene (#10156).
+  //
+  // Ordering matters: `completeOnboarding()` makes OnboardingGate unmount this
+  // wizard, so it must come AFTER the load settles or a failure has nowhere to
+  // show. On failure the wizard stays up, says what went wrong, and re-enables
+  // the cards. The analytics pair mirrors TemplateGallery, with this surface
+  // as the source.
   const handleTemplateChosen = useCallback(
     async (templateId: string) => {
       setLoadingTemplate(templateId);
+      setTemplateError(null);
+      let result: TemplateLoadResult;
       try {
-        // Templates are loaded via the editor store if available
-        // For now, complete onboarding and let the user proceed
-        completeOnboarding();
-        onComplete();
-      } finally {
-        setLoadingTemplate(null);
+        result = await useEditorStore.getState().loadTemplate(templateId);
+      } catch {
+        result = { success: false, error: GENERIC_TEMPLATE_ERROR };
       }
+      if (!mountedRef.current) return;
+      setLoadingTemplate(null);
+      if (!result.success) {
+        setTemplateError(result.error);
+        return;
+      }
+      trackEvent(AnalyticsEvent.TEMPLATE_USED, { templateId });
+      trackEvent(AnalyticsEvent.TEMPLATE_APPLIED, { templateId, source: 'onboarding' });
+      completeOnboarding();
+      onComplete();
     },
     [completeOnboarding, onComplete]
   );
-
-  const isAIEnabled = canUseAI();
 
   return (
     <div
@@ -177,7 +223,8 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
               completeOnboarding();
               onComplete();
             }}
-            className="flex h-7 w-7 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+            disabled={templateLoading}
+            className="flex h-7 w-7 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-wait disabled:opacity-50 disabled:hover:bg-transparent"
             aria-label="Dismiss and start with blank canvas"
           >
             <X className="h-4 w-4" />
@@ -190,6 +237,31 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {PATH_CARDS.map((card) => {
                 const Icon = card.icon;
+
+                // Until the profile has resolved the verdict is unknown: the
+                // store starts at tier 'starter', so rendering the locked card
+                // here would be a false upsell for a paying user, and an
+                // enabled button would be a false offer for a starter. Neither
+                // the link nor the button, until the answer is in.
+                if (card.requiresAI && !profileLoaded) {
+                  return (
+                    <div
+                      key={card.id}
+                      data-testid={`path-card-${card.id}`}
+                      className="relative flex flex-col rounded-lg border border-zinc-700 bg-zinc-800/50 p-5 opacity-60"
+                      aria-busy="true"
+                      aria-disabled="true"
+                    >
+                      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-zinc-700">
+                        <Icon className="h-6 w-6 text-zinc-400" />
+                      </div>
+                      <h3 className="mb-1 font-semibold text-zinc-300">{card.label}</h3>
+                      <p className="text-sm text-zinc-500">{card.description}</p>
+                      <p className="mt-3 text-xs text-zinc-500">Checking your plan…</p>
+                    </div>
+                  );
+                }
+
                 const locked = card.requiresAI && !isAIEnabled;
 
                 if (locked) {
@@ -244,8 +316,14 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
           ) : (
             <TemplateSelector
               onSelect={handleTemplateChosen}
-              onBack={() => setShowTemplates(false)}
+              onBack={() => {
+                setShowTemplates(false);
+                // A stale error must not greet the user when the selector is
+                // reopened; it described a load that is no longer on screen.
+                setTemplateError(null);
+              }}
               loadingId={loadingTemplate}
+              error={templateError}
             />
           )}
         </div>
@@ -260,13 +338,16 @@ interface TemplateSelectorProps {
   onSelect: (templateId: string) => Promise<void>;
   onBack: () => void;
   loadingId: string | null;
+  /** The last failed load's message; cleared when a new load starts. */
+  error: string | null;
 }
 
 interface TemplateOption {
   id: string;
   label: string;
   description: string;
-  tags: string[];
+  /** Difficulty only. The 2D/3D tag is read from the registry, see below. */
+  level: string;
 }
 
 const TEMPLATES: TemplateOption[] = [
@@ -274,41 +355,55 @@ const TEMPLATES: TemplateOption[] = [
     id: 'platformer',
     label: 'Platformer',
     description: 'Jump, run, collect coins — classic side-scrolling action',
-    tags: ['2D', 'beginner'],
+    level: 'beginner',
   },
   {
     id: 'runner',
     label: 'Runner',
     description: 'Endless runner with obstacles and power-ups',
-    tags: ['2D', 'beginner'],
+    level: 'beginner',
   },
   {
     id: 'shooter',
     label: 'Shooter',
     description: 'Arena shooter with enemies and projectiles',
-    tags: ['3D', 'intermediate'],
+    level: 'intermediate',
   },
   {
     id: 'puzzle',
     label: 'Puzzle',
     description: 'Push crates, flip switches, solve levels',
-    tags: ['3D', 'beginner'],
+    level: 'beginner',
   },
   {
     id: 'explorer',
     label: 'Explorer',
     description: 'Open-world adventure and discovery',
-    tags: ['3D', 'intermediate'],
+    level: 'intermediate',
   },
 ];
 
-function TemplateSelector({ onSelect, onBack, loadingId }: TemplateSelectorProps) {
+/**
+ * The dimension tag comes from the registry entry the id resolves to, never
+ * from a literal here: `platformer` and `runner` were hand-tagged '2D' while
+ * the registry lists them as 3D games (#10156). A template the registry does
+ * not know gets no dimension tag rather than a guessed one.
+ */
+export function templateDimension(templateId: string): '2D' | '3D' | null {
+  const tags = TEMPLATE_REGISTRY.find((entry) => entry.id === templateId)?.tags ?? [];
+  if (tags.includes('3d')) return '3D';
+  if (tags.includes('2d')) return '2D';
+  return null;
+}
+
+function TemplateSelector({ onSelect, onBack, loadingId, error }: TemplateSelectorProps) {
   return (
     <div>
       <div className="mb-4 flex items-center gap-3">
         <button
           onClick={onBack}
-          className="text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+          disabled={loadingId !== null}
+          className="text-sm text-zinc-400 transition-colors hover:text-zinc-200 disabled:cursor-wait disabled:opacity-50"
           aria-label="Back to path selection"
         >
           Back
@@ -316,34 +411,46 @@ function TemplateSelector({ onSelect, onBack, loadingId }: TemplateSelectorProps
         <h3 className="text-sm font-semibold text-zinc-200">Choose a starter template</h3>
       </div>
 
+      {error && (
+        <div
+          role="alert"
+          className="mb-3 rounded-lg border border-red-500/60 bg-red-500/10 px-3 py-2 text-xs text-red-200"
+        >
+          {error}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {TEMPLATES.map((tpl) => (
-          <button
-            key={tpl.id}
-            data-testid={`template-card-${tpl.id}`}
-            onClick={() => onSelect(tpl.id)}
-            disabled={loadingId !== null}
-            className="flex flex-col rounded-lg border border-zinc-700 bg-zinc-800 p-4 text-left transition-all duration-150 hover:border-blue-500 hover:bg-zinc-750 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-wait disabled:opacity-60"
-          >
-            <div className="mb-2 flex items-center justify-between">
-              <span className="font-semibold text-zinc-100">{tpl.label}</span>
-              <div className="flex gap-1">
-                {tpl.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full bg-zinc-700 px-2 py-0.5 text-[10px] font-medium text-zinc-300"
-                  >
-                    {tag}
-                  </span>
-                ))}
+        {TEMPLATES.map((tpl) => {
+          const tags = [templateDimension(tpl.id), tpl.level].filter((t): t is string => t !== null);
+          return (
+            <button
+              key={tpl.id}
+              data-testid={`template-card-${tpl.id}`}
+              onClick={() => onSelect(tpl.id)}
+              disabled={loadingId !== null}
+              className="flex flex-col rounded-lg border border-zinc-700 bg-zinc-800 p-4 text-left transition-all duration-150 hover:border-blue-500 hover:bg-zinc-750 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-wait disabled:opacity-60"
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <span className="font-semibold text-zinc-100">{tpl.label}</span>
+                <div className="flex gap-1">
+                  {tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-full bg-zinc-700 px-2 py-0.5 text-[10px] font-medium text-zinc-300"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
-            <p className="text-xs text-zinc-400">{tpl.description}</p>
-            {loadingId === tpl.id && (
-              <span className="mt-2 text-xs text-blue-400">Loading...</span>
-            )}
-          </button>
-        ))}
+              <p className="text-xs text-zinc-400">{tpl.description}</p>
+              {loadingId === tpl.id && (
+                <span className="mt-2 text-xs text-blue-400">Loading...</span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       <p className="mt-4 text-center text-xs text-zinc-500">

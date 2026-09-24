@@ -4,6 +4,7 @@ import { showError } from '@/lib/toast';
 import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODEL_PREMIUM } from '@/lib/ai/models';
 import { detectGameCreationIntent } from '@/lib/chat/intentDetector';
 import { isDestructiveCommand } from '@/lib/chat/destructiveCommands';
+import { formatToolResultOutput } from '@/lib/chat/toolResultOutput';
 
 /**
  * Confidence at or above which a message is routed to the game-creation
@@ -664,7 +665,10 @@ function appendToolTurn(
     if (tc.status === 'error') {
       output = { type: 'error-text', value: `Error: ${tc.error || 'Unknown error'}` };
     } else if (tc.status === 'success' || tc.status === 'undone') {
-      output = { type: 'text', value: String(tc.result ?? 'Success') };
+      // Serialised, not `String()`-coerced: most handlers return an object
+      // here, and `String({...})` handed the model "[object Object]" for every
+      // one of them, so query tools returned nothing (#10143).
+      output = { type: 'text', value: formatToolResultOutput(tc.result) };
     } else {
       output = { type: 'error-text', value: `Not executed (status: ${tc.status}).` };
     }

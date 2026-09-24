@@ -245,6 +245,87 @@ describe('add_game_component', () => {
     const data = result.result as { message: string };
     expect(data.message).toContain('health');
   });
+
+  // PF-1148: the chat turn (and the MCP reply, which carries the same result)
+  // reports what it changed from what was asked, in the author's terms.
+  describe('reporting adjusted values', () => {
+    const route = (n: number) => Array.from({ length: n }, (_, i) => [i, 0, 0]);
+
+    it('returns the structured corrections and says them in the message', async () => {
+      const { result } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'ent-1',
+        componentType: 'moving_platform',
+        properties: { speed: 99999, waypoints: route(300) },
+      });
+      expect(result.success).toBe(true);
+      const data = result.result as { message: string; corrections: unknown[] };
+      expect(data.corrections).toEqual([
+        { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' },
+        {
+          component: 'movingPlatform', field: 'waypoints', requested: 300, applied: 64, reason: 'truncated', unit: 'points',
+          appliedPoints: route(64),
+        },
+      ]);
+      expect(data.message).toBe(
+        'Added moving_platform. 2 values were adjusted to fit the engine’s limits: '
+        + 'Moving Platform speed: you asked for 99999, it was capped at 1000. '
+        + 'Moving Platform waypoints: you gave 300 points; only the first 64 points were kept, the most the engine supports.',
+      );
+    });
+
+    it('hands the store the report captured at the first coercion', async () => {
+      // The handler coerces BEFORE the store does, so a report taken at the store
+      // would see an already-valid component and nothing to report.
+      const { store } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'ent-1',
+        componentType: 'moving_platform',
+        properties: { speed: 99999 },
+      });
+      const [entityId, comp, report] = (store.addGameComponent as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(entityId).toBe('ent-1');
+      expect(comp).toEqual({
+        type: 'movingPlatform',
+        movingPlatform: { speed: 1000, waypoints: [[0, 0, 0], [0, 3, 0]], pauseDuration: 0.5, loopMode: 'pingPong' },
+      });
+      expect(report.corrections).toEqual([
+        { component: 'movingPlatform', field: 'speed', requested: 99999, applied: 1000, reason: 'clamped' },
+      ]);
+      expect(report.supplied).toEqual(['speed']);
+    });
+
+    it('reports nothing, and says nothing about adjusting, when every value was used as given', async () => {
+      const { result } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'ent-1',
+        componentType: 'moving_platform',
+        properties: { speed: 6, waypoints: route(3), loopMode: 'once' },
+      });
+      const data = result.result as { message: string; corrections: unknown[] };
+      expect(data.corrections).toEqual([]);
+      expect(data.message).toBe('Added moving_platform');
+    });
+
+    it('reports nothing for a component added with no properties at all', async () => {
+      const { result } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'ent-1',
+        componentType: 'health',
+      });
+      const data = result.result as { message: string; corrections: unknown[] };
+      expect(data.corrections).toEqual([]);
+      expect(data.message).toBe('Added health');
+    });
+
+    it('uses the singular for one adjusted value', async () => {
+      const { result } = await invokeHandler(gameplayHandlers, 'add_game_component', {
+        entityId: 'ent-1',
+        componentType: 'spawner',
+        properties: { maxCount: 2.6 },
+      });
+      expect((result.result as { message: string }).message).toBe(
+        'Added spawner. 1 value was adjusted to fit the engine’s limits: '
+        + 'Spawner max count: you asked for 2.6, it was rounded to the whole number 3.',
+      );
+    });
+  });
 });
 
 // ===========================================================================
@@ -272,6 +353,36 @@ describe('update_game_component', () => {
     const [entityId, comp] = (store.updateGameComponent as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { type: string }];
     expect(entityId).toBe('ent-1');
     expect(comp.type).toBe('health');
+  });
+
+  it('reports the values it adjusted and hands the store the same report', async () => {
+    const { result, store } = await invokeHandler(gameplayHandlers, 'update_game_component', {
+      entityId: 'ent-1',
+      componentType: 'projectile',
+      properties: { speed: 50_000, damage: 25 },
+    });
+    expect(result.success).toBe(true);
+    const data = result.result as { message: string; corrections: unknown[] };
+    const expected = [
+      { component: 'projectile', field: 'speed', requested: 50_000, applied: 10_000, reason: 'clamped' },
+    ];
+    expect(data.corrections).toEqual(expected);
+    expect(data.message).toBe(
+      'Updated projectile. 1 value was adjusted to fit the engine’s limits: '
+      + 'Projectile speed: you asked for 50000, it was capped at 10000.',
+    );
+    const [, , report] = (store.updateGameComponent as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(report.corrections).toEqual(expected);
+    expect([...report.supplied].sort()).toEqual(['damage', 'speed']);
+  });
+
+  it('reports nothing when the update is in range', async () => {
+    const { result } = await invokeHandler(gameplayHandlers, 'update_game_component', {
+      entityId: 'ent-1',
+      componentType: 'projectile',
+      properties: { speed: 40, damage: 25 },
+    });
+    expect(result.result).toEqual({ message: 'Updated projectile', corrections: [] });
   });
 });
 
