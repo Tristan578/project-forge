@@ -145,7 +145,8 @@ specific fingerprint rule.
    project, for every tier. There is no paging integration to configure; see
    `docs/decisions/2026-09-24-no-paging-or-on-call.md`.
 6. Set the **Environment** to `production` for all P0/P1 rules.
-7. Assign the rule to the **Engineering** team.
+7. Leave the rule's owner as the project owner. There is no team to assign
+   it to; see `docs/decisions/2026-09-24-no-paging-or-on-call.md`.
 
 ---
 

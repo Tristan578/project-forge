@@ -339,7 +339,7 @@ pg_dump "$DATABASE_URL" \
   --file="spawnforge-pre-$(date +%Y%m%d-%H%M%S).sql"
 ```
 
-Store in a team-accessible location (not developer laptops).
+Store it somewhere that survives the loss of the machine that made it (not only on a developer laptop).
 
 ---
 

@@ -150,7 +150,7 @@
 
 ## Lessons Learned
 
-<!-- What should every engineer on the team know after this incident? -->
+<!-- What should anyone working on SpawnForge later know after this incident? -->
 
 1. {lesson}
 2. {lesson}
