@@ -41,6 +41,14 @@ describe('PlayControls', () => {
     expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument();
   });
 
+  // The capabilities tour (#10171) highlights `[aria-label="Play"]`. It must
+  // match exactly one control, or the highlight lands on the wrong one.
+  it('exposes exactly one [aria-label="Play"] for the capabilities tour', () => {
+    mockEditorStore();
+    render(<PlayControls />);
+    expect(document.querySelectorAll('[aria-label="Play"]')).toHaveLength(1);
+  });
+
   it('shows Playing status indicator when in play mode', () => {
     mockEditorStore({ engineMode: 'play' });
     render(<PlayControls />);

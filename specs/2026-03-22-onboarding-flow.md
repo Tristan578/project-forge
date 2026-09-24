@@ -93,6 +93,12 @@ Sign-in / /dev page load
 3. After tutorial completion, show OnboardingChecklist
 4. Offer to continue with "Make It Move" or "Build with AI" tutorials
 
+**Capabilities tour: "What can SpawnForge do?"** (added 2026-09-24, #10171)
+1. Started any time from Help → "What can SpawnForge do?" via `startTutorial('capabilities')`.
+2. `TUTORIAL_CAPABILITIES` in `web/src/data/tutorials.ts` is highlight-only: an intro card, then the quick-start trigger (`[data-testid="quick-start-trigger"]`), Play (`[aria-label="Play"]`) and Export (`[aria-label="Export game"]`), in that order. No step has `actionRequired`, so the tour makes no request, dispatches no engine command and does not change the scene.
+3. A step whose target is not rendered (the compact layout has no Export control) shows as an untargeted card, and Next still advances.
+4. The tour sets `completesOnboarding: false`. `OnboardingChecklist` auto-dismisses only when a tutorial that counts as onboarding completes (`tutorialCompletesOnboarding`), so finishing this tour leaves the checklist visible. Escape skips the tour and records nothing, so it can be started again.
+
 ### Template Selection (within OnboardingWizard)
 
 The 5 existing starter system bundles (platformer, runner, shooter, puzzle, explorer -- genre labels are friendly shorthand for their system compositions) plus "Blank Project" are displayed inline in step 2B. The current `TemplateGallery` component is refactored to accept an `inline` prop that removes the fixed overlay positioning so it can render inside the wizard.

@@ -98,6 +98,44 @@ describe('OnboardingChecklist', () => {
     expect(screen.getByText('Write a Script')).toBeInTheDocument();
   });
 
+  // #10171: finishing a hands-on tutorial means the user has onboarded and the
+  // checklist dismisses itself for good. The highlight-only capabilities tour
+  // teaches nothing hands-on, so finishing it must leave the checklist alone.
+  describe('auto-dismiss when a tutorial completes', () => {
+    it('stays visible and writes nothing when the capabilities tour completes', () => {
+      setupStore({});
+      const { rerender } = render(<OnboardingChecklist />);
+
+      setupStore({ capabilities: true });
+      rerender(<OnboardingChecklist />);
+
+      expect(screen.getByText('Getting Started')).toBeInTheDocument();
+      expect(localStorage.getItem('forge-checklist-dismissed')).toBeNull();
+    });
+
+    it('still dismisses itself for good when first-scene completes', () => {
+      setupStore({});
+      const { rerender, container } = render(<OnboardingChecklist />);
+
+      setupStore({ 'first-scene': true });
+      rerender(<OnboardingChecklist />);
+
+      expect(container.firstChild).toBeNull();
+      expect(localStorage.getItem('forge-checklist-dismissed')).toBe('1');
+    });
+
+    it('dismisses when a hands-on tutorial completes after the tour already did', () => {
+      setupStore({ capabilities: true });
+      const { rerender, container } = render(<OnboardingChecklist />);
+      expect(screen.getByText('Getting Started')).toBeInTheDocument();
+
+      setupStore({ capabilities: true, 'physics-playground': true });
+      rerender(<OnboardingChecklist />);
+
+      expect(container.firstChild).toBeNull();
+    });
+  });
+
   it('dismisses checklist when X button is clicked', () => {
     setupStore();
     render(<OnboardingChecklist />);

@@ -234,6 +234,7 @@ export function TutorialOverlay() {
       {/* Highlight border */}
       {highlightRect && (
         <div
+          data-testid="tutorial-highlight"
           className="fixed z-[101] border-3 border-blue-500 rounded-lg pointer-events-none"
           style={{
             left: `${highlightRect.left - 8}px`,

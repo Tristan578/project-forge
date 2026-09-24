@@ -31,6 +31,13 @@ export interface TutorialFlow {
   persona: 'beginner' | 'hobbyist' | 'developer' | 'ai-first';
   steps: TutorialStep[];
   tags: string[];
+  /**
+   * Whether finishing this tutorial means the user has onboarded.
+   * `OnboardingChecklist` permanently dismisses itself when an onboarding
+   * tutorial completes. A highlight-only tour teaches nothing hands-on, so it
+   * sets this to false and leaves the checklist alone (#10171). Default: true.
+   */
+  completesOnboarding?: boolean;
 }
 
 // Tutorial 1: Your First Scene
@@ -314,10 +321,72 @@ export const TUTORIAL_PHYSICS: TutorialFlow = {
   ],
 };
 
+// Tour: What can SpawnForge do? (#10171)
+//
+// Highlight-only on purpose. No step has an `actionRequired`, so nothing
+// dispatches a command, calls AI or changes the scene; the user only reads
+// and presses Next. That is the whole contract: a curious creator can see
+// where AI building, playing and exporting live before spending tokens.
+//
+// Targets are the controls' own stable hooks. In the compact layout the
+// export control does not render, and the overlay then shows the step as an
+// untargeted card that Next still advances.
+export const TUTORIAL_CAPABILITIES: TutorialFlow = {
+  id: 'capabilities',
+  name: 'What can SpawnForge do?',
+  description: 'A one-minute look at where AI building, playing and exporting live',
+  difficulty: 'beginner',
+  estimatedMinutes: 1,
+  persona: 'beginner',
+  tags: ['Overview', 'Essential'],
+  completesOnboarding: false,
+  steps: [
+    {
+      id: 'intro',
+      title: 'What can SpawnForge do?',
+      description:
+        "Here's where the main tools live. This tour only points at things: it doesn't spend tokens or change your scene.",
+    },
+    {
+      id: 'build-with-ai',
+      title: 'Build a game with AI',
+      description:
+        'Describe the game you want and SpawnForge designs and builds a playable scene from it. AI building uses tokens from your balance.',
+      target: '[data-testid="quick-start-trigger"]',
+      targetPosition: 'bottom',
+    },
+    {
+      id: 'play',
+      title: 'Play it',
+      description: 'Run your game right here in the editor. Press Stop to go back to editing.',
+      target: '[aria-label="Play"]',
+      targetPosition: 'bottom',
+    },
+    {
+      id: 'export',
+      title: 'Share it',
+      description:
+        'Export your game as a single HTML file or a zip you can host, or copy embed code for your site.',
+      target: '[aria-label="Export game"]',
+      targetPosition: 'bottom',
+    },
+  ],
+};
+
 // Tutorial registry
 export const TUTORIALS: TutorialFlow[] = [
   TUTORIAL_FIRST_SCENE,
   TUTORIAL_MAKE_IT_MOVE,
   TUTORIAL_AI_CHAT,
   TUTORIAL_PHYSICS,
+  TUTORIAL_CAPABILITIES,
 ];
+
+/**
+ * Whether completing the tutorial with this id counts as onboarding. Ids not in
+ * the registry count, which keeps the checklist's historical behaviour for any
+ * completion record written by an older build.
+ */
+export function tutorialCompletesOnboarding(id: string): boolean {
+  return TUTORIALS.find((t) => t.id === id)?.completesOnboarding !== false;
+}
