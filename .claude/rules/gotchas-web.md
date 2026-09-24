@@ -47,7 +47,7 @@ paths:
   - **Verify by querying the value back, not by confirming the metric arrived.** `metric.name:X` returning samples proves nothing about the facet — group by the attribute (`fields: ["outcome", "count()"]`) and read the actual values.
 
 ## WASM / CDN
-- **WASM CDN same-origin fallback** — JS glue (`forge_engine.js`) and WASM binary (`forge_engine_bg.wasm`) are a coupled pair. Both MUST load from the same origin. Cannot load JS from CDN and WASM from same-origin. `getWasmBasePaths()` handles this.
+- **WASM CDN same-origin fallback** — JS glue (`forge_engine.js`) and WASM binary (`forge_engine_bg.wasm`) are a coupled pair. Both MUST load from the same origin. Cannot load JS from CDN and WASM from same-origin. `useEngine.getWasmBasePaths()` (editor) and `loadPlayEngine.getPlayEngineBasePaths()` (`/play`, a deliberate leaf copy — the public bundle must not import the editor graph) both handle this; `loadPlayEngine.test.ts` pins the two to identical output, so a CDN layout change must land in both.
 - **`fetchWithRetry` 4xx handling** — The throw on 4xx is inside the try-catch loop. Must rethrow permanent errors explicitly or they get caught and retried as transient failures.
 - **Same-origin WASM in production** — Requires CD pipeline to copy WASM artifacts to `web/public/` before `next build`. Already done in `cd.yml` lines 400-409.
 

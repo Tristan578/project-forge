@@ -122,7 +122,7 @@ Vercel Edge (CDN, routing, headers)
 
 ### CDN Down
 - New users cannot load WASM engine
-- Both loaders (`useEngine.getWasmBasePaths` for the editor, `loadPlayEngine.getPlayEngineBasePaths` for `/play`) fall through to the same-origin `/engine-pkg-*` copy served from `web/public/`, so a CDN outage degrades to a slower load rather than a broken page; `R2_CDN_ENABLED` is the GitHub variable that gates the CD upload only
+- Both loaders (`useEngine.getWasmBasePaths` for the editor, `loadPlayEngine.getPlayEngineBasePaths` for `/play`) fall through to the same-origin `/engine-pkg-*` copy served from `web/public/`, so a CDN outage degrades to a slower load rather than a broken page; `R2_CDN_ENABLED` is a GitHub repository variable that gates the CD upload AND selects which WASM URL `post-deploy-smoke.yml` probes (CDN when `true`, same-origin otherwise)
 - Users with browser-cached WASM are unaffected
 
 ---
@@ -294,7 +294,8 @@ curl -sI https://engine.spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm | g
 **Mitigation:**
 ```bash
 # 1. If CDN is down but Vercel fallback works:
-#    Temporarily unset NEXT_PUBLIC_ENGINE_CDN_URL in Vercel env vars and redeploy (the engine loads from /public/)
+#    Temporarily unset NEXT_PUBLIC_ENGINE_CDN_URL in Vercel env vars and redeploy (the engine loads from /public/).
+#    Set the GitHub variable R2_CDN_ENABLED=false for the same window, or post-deploy-smoke keeps probing the dead CDN and reports the deploy failed.
 
 # 2. If WASM is missing from both CDN and Vercel:
 #    Check last successful CD run for WASM build artifacts:

@@ -57,6 +57,14 @@ export function getPlayEngineBasePaths(backend: 'webgpu' | 'webgl2'): string[] {
   return paths;
 }
 
+/**
+ * What the player sees when no origin could load the engine. `GamePlayer`
+ * renders the final rejection's message verbatim, so the technical labels
+ * (host, deadline) stay on the `cause` for Sentry and this stays plain.
+ */
+export const PLAY_ENGINE_LOAD_FAILED_MESSAGE =
+  'The game engine could not be loaded. Check your connection and try again.';
+
 /** True for an absolute http(s) origin (the CDN); false for a same-origin path. */
 export function isCdnOrigin(basePath: string): boolean {
   return /^https?:\/\//.test(basePath);
@@ -177,7 +185,9 @@ export async function instantiateFromPaths(
       if (i < paths.length - 1) options.onOriginSkipped?.(basePath, err);
     }
   }
-  throw lastErr;
+  // Every origin failed. The last origin's error is the diagnosis and travels
+  // as `cause` (Sentry links it); the message is for the person on /play.
+  throw new Error(PLAY_ENGINE_LOAD_FAILED_MESSAGE, { cause: lastErr });
 }
 
 /**

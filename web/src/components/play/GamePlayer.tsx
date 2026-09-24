@@ -7,7 +7,7 @@ import { ShareButtons } from './ShareButtons';
 import { RemixButton } from './RemixButton';
 import { ReportGameDialog } from './ReportGameDialog';
 import { withTimeout } from '@/lib/async/withTimeout';
-import { isCdnOrigin, loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
+import { describeOrigin, isCdnOrigin, loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
 import { addBreadcrumb, captureException, captureMessage, setTag } from '@/lib/monitoring/sentry-client';
 import {
   ENGINE_GLOBAL_TIMEOUT_MS,
@@ -16,15 +16,6 @@ import {
 } from '@/lib/config/timeouts';
 
 const CANVAS_ID = 'play-canvas';
-
-/** Host only — never the path, which carries the build SHA. */
-function originHost(basePath: string): string {
-  try {
-    return new URL(basePath, window.location.origin).host;
-  } catch {
-    return 'unknown';
-  }
-}
 
 // The document URL never changes for the lifetime of this component (a play
 // page is a full navigation), so there is nothing to subscribe to.
@@ -180,7 +171,7 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
               .replace(/https?:\/\/\S+/g, '<url>');
             addBreadcrumb({
               category: 'wasm',
-              message: `Play engine load skipped ${originHost(basePath)}: ${reason}`,
+              message: `Play engine load skipped ${describeOrigin(basePath)}: ${reason}`,
               level: 'warning',
             });
             captureMessage('Play engine origin skipped, falling back', 'warning');

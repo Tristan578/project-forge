@@ -302,12 +302,19 @@ describe('instantiateFromPaths', () => {
 
   it('labels a deadline by host, never by the versioned path', async () => {
     vi.useFakeTimers();
-    const { instantiateFromPaths } = await import('../loadPlayEngine');
+    const { instantiateFromPaths, PLAY_ENGINE_LOAD_FAILED_MESSAGE } = await import('../loadPlayEngine');
     const load = vi.fn(() => new Promise<never>(() => {}));
-    const pending = instantiateFromPaths(['https://cdn.test/abc1234/engine-pkg-webgpu/'], { load, originTimeoutMs: 1_000 });
+    // Capture the rejection BEFORE the deadline fires: the timer tick is what
+    // rejects, and a promise that rejects with no handler attached is an
+    // unhandled rejection that fails the whole vitest run.
+    const outcome = instantiateFromPaths(['https://cdn.test/abc1234/engine-pkg-webgpu/'], { load, originTimeoutMs: 1_000 })
+      .then(() => null, (e: unknown) => e as Error);
     await vi.advanceTimersByTimeAsync(1_000);
-    await expect(pending).rejects.toThrow('Engine glue from cdn.test timed out');
-    await expect(pending).rejects.not.toThrow('abc1234');
+    const failure = await outcome;
+    expect(failure?.message).toBe(PLAY_ENGINE_LOAD_FAILED_MESSAGE);
+    const cause = failure?.cause as Error;
+    expect(cause.message).toContain('Engine glue from cdn.test timed out');
+    expect(cause.message).not.toContain('abc1234');
   });
 
   it('does not instantiate a CDN glue module that arrives after its deadline', async () => {
@@ -334,24 +341,98 @@ describe('instantiateFromPaths', () => {
     expect(lateCdnGlue.default).not.toHaveBeenCalled();
   });
 
-  it("surfaces the LAST origin's failure when every origin fails", async () => {
-    const { instantiateFromPaths } = await import('../loadPlayEngine');
+  it("rejects with plain copy carrying the LAST origin's failure as cause when every origin fails", async () => {
+    const { instantiateFromPaths, PLAY_ENGINE_LOAD_FAILED_MESSAGE } = await import('../loadPlayEngine');
     const load = vi.fn(async (specifier: string) => {
       throw new Error(`cannot load ${specifier}`);
     });
     const onOriginSkipped = vi.fn();
 
-    await expect(
-      instantiateFromPaths([CDN, SAME], { load, onOriginSkipped }),
-    ).rejects.toThrow(`cannot load ${SAME}forge_engine.js`);
+    const failure = await instantiateFromPaths([CDN, SAME], { load, onOriginSkipped }).catch((e: unknown) => e as Error);
+    // GamePlayer renders this message to the player verbatim.
+    expect(failure.message).toBe(PLAY_ENGINE_LOAD_FAILED_MESSAGE);
+    expect((failure.cause as Error).message).toBe(`cannot load ${SAME}forge_engine.js`);
     expect(load).toHaveBeenCalledTimes(2);
-    // Only origins with a successor are "skipped"; the last failure is the error.
+    // Only origins with a successor are "skipped"; the last failure is the cause.
     expect(onOriginSkipped).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects rather than resolving to nothing when given no origins', async () => {
+  it('does not leave an abandoned glue import that rejects late unhandled', async () => {
+    vi.useFakeTimers();
     const { instantiateFromPaths } = await import('../loadPlayEngine');
-    await expect(instantiateFromPaths([], { load: vi.fn() })).rejects.toThrow('No engine base path');
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const calls: string[] = [];
+      let rejectCdn: ((err: Error) => void) | undefined;
+      const load = vi.fn((specifier: string) => {
+        if (specifier.startsWith('https://')) {
+          return new Promise<never>((_resolve, reject) => { rejectCdn = reject; });
+        }
+        return Promise.resolve(glue(calls));
+      });
+
+      const pending = instantiateFromPaths([CDN, SAME], { load, originTimeoutMs: 1_000 });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(pending).resolves.toBeDefined();
+
+      // The abandoned CDN import fails after the loop moved on.
+      rejectCdn!(new Error('CDN gave up late'));
+      // Flush microtasks and any pending timers; setImmediate is faked here,
+      // so a real-timer wait would never settle.
+      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
+  it('rejects rather than resolving to nothing when given no origins', async () => {
+    const { instantiateFromPaths, PLAY_ENGINE_LOAD_FAILED_MESSAGE } = await import('../loadPlayEngine');
+    const failure = await instantiateFromPaths([], { load: vi.fn() }).catch((e: unknown) => e as Error);
+    expect(failure.message).toBe(PLAY_ENGINE_LOAD_FAILED_MESSAGE);
+    expect((failure.cause as Error).message).toContain('No engine base path');
+  });
+});
+
+describe('loadPlayEngine forwards options to the attempt it starts', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it('hands the callbacks to the loader, and a joiner gets the first attempt\'s callbacks, not its own', async () => {
+    vi.stubEnv('NEXT_PUBLIC_ENGINE_CDN_URL', 'https://engine.example.test');
+    vi.stubEnv('NEXT_PUBLIC_ENGINE_VERSION', 'abc1234');
+    vi.stubGlobal('navigator', {});
+    const { loadPlayEngine } = await import('../loadPlayEngine');
+    const load = vi.fn(async (specifier: string) => {
+      if (specifier.startsWith('https://')) throw new Error('cdn down');
+      return {
+        default: vi.fn(async () => {}),
+        init_engine: vi.fn(),
+        handle_command: vi.fn(),
+        set_event_callback: vi.fn(),
+      };
+    });
+    const onOriginSkipped = vi.fn();
+    const onOriginUsed = vi.fn();
+    const joinerOnOriginUsed = vi.fn();
+
+    const first = loadPlayEngine({ load, onOriginSkipped, onOriginUsed });
+    const second = loadPlayEngine({ load, onOriginUsed: joinerOnOriginUsed });
+    expect(second).toBe(first);
+    await first;
+
+    // Dropping `options` from the resolveAndInstantiate call would fail here.
+    expect(onOriginSkipped).toHaveBeenCalledWith(
+      'https://engine.example.test/abc1234/engine-pkg-webgl2/',
+      expect.objectContaining({ message: 'cdn down' }),
+    );
+    expect(onOriginUsed).toHaveBeenCalledWith('/engine-pkg-webgl2/');
+    expect(joinerOnOriginUsed).not.toHaveBeenCalled();
   });
 });
 
