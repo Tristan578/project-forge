@@ -20,6 +20,7 @@ import { withEgressGuard } from '@/lib/security/egressGuard';
 
 // --- Trusted configuration derived once at module load ---
 function parseTrustedSentryConfig(): { host: string; projectId: string } | null {
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an explicitly blank SENTRY_DSN and an unset one are operationally identical
   const dsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
   if (!dsn) return null;
   try {

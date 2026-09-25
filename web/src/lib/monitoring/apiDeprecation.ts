@@ -117,6 +117,7 @@ export function checkDeprecationHeaders(
   const warningHeader = response.headers.get('Warning');
 
   const warnings = extractDeprecationWarnings(warningHeader);
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is a deprecation signal present); ?? cannot substitute this OR
   const deprecated = !!(deprecationHeader || sunsetHeader || warnings.length > 0);
 
   if (!deprecated) {

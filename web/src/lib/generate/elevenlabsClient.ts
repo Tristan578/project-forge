@@ -80,6 +80,7 @@ export class ElevenLabsClient {
   }
 
   async generateVoice(params: GenerateVoiceParams): Promise<AudioResult> {
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank requested voice id is unset; falls back to the default voice
     const voiceId = params.voiceId || 'JBFqnCBsd6RMkjVDRZzb'; // Default: George
     validateResourceId(voiceId);
 

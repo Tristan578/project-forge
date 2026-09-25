@@ -64,6 +64,15 @@ export const GENERATION_OUTCOMES = [
    * upstream incident that is not happening.
    */
   'capability_unavailable',
+  /**
+   * The caller's effective tier (`effectiveTier`, folding in a starter
+   * account's spendable trial tokens) doesn't meet the route's declared
+   * `panel` requirement (#7715 review round 2). Its own bucket, not folded
+   * into `bot_blocked` — both are 403s through this handler, but one is an
+   * upsell signal and the other is abuse volume; conflating them hides
+   * whichever is smaller.
+   */
+  'tier_required',
   'degraded',
   'error',
 ] as const;

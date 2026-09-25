@@ -113,6 +113,7 @@ export async function withCronMonitor<T>(
   // Treat an empty string as "not set" so SENTRY_DSN="" still falls through to
   // the public DSN (and ultimately to the inert no-op path). `||` is correct
   // here precisely because empty/missing are equivalent for a DSN.
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an explicitly blank SENTRY_DSN and an unset one are operationally identical
   const dsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
   if (!dsn) return handler();
 

@@ -71,6 +71,28 @@ content safety is triggering too aggressively.
 | Threshold | > 10 per 10 minutes |
 | Action | Notify the owner (`#incidents`, if configured in Sentry; no page) — include `generation_type` tag |
 
+### 3. Trial token grant failure
+**Trigger:** Any error in the `/api/auth/webhook` route over the last 5 minutes.
+**Why P1:** A failing `user.created` trial grant (#7715, `grantTrialTokens` in
+`web/src/lib/billing/trial-grant.ts`) means every new signup gets zero tokens
+and cannot use any AI feature for the length of the outage. The same route
+surfaces `user.deleted` failures, which are equally page-worthy.
+
+| Field | Value |
+|-------|-------|
+| Metric | `issue.count` |
+| Filter | `url:*/api/auth/webhook*` |
+| Threshold | > 0 per 5 minutes |
+| Action | PagerDuty + Slack #incidents |
+
+Filter on the route URL, not on the capture context: the grant site calls
+`captureException(err, { context: 'trial-token-grant-failure', userId })`, and
+the shared helper (`web/src/lib/monitoring/sentry-server.ts`) forwards that
+object as Sentry **`extra`**, which issue-alert rules cannot filter on. Treat
+`extra.context = trial-token-grant-failure` as the triage breadcrumb once the
+issue is open. Making it filterable would mean setting a Sentry **tag** at the
+capture site, which the shared helper does not do today.
+
 ---
 
 ## P2 — Notify / Daily Digest
@@ -100,9 +122,27 @@ one-off user action.
 | Metric | `issue.count` |
 | Filter | `fingerprint:wasm-command-failure` |
 | Threshold | > 1 per minute |
-| Action | Notify the owner via `#engineering-alerts`, if configured in Sentry — include `wasm_command` tag in message |
+| Action | Slack #alerts — include `wasm_command` tag in message |
 
-### 6. Rate limit hits trending up (weekly)
+### 6. AI generation failure rate spike
+**Trigger:** Issue count for fingerprint `generation-failure` > 10 in a
+10-minute window.
+**Why P2:** Generation routes call external providers (Meshy, ElevenLabs,
+Suno, DALL-E). A spike means one provider is down, quota is exhausted, or
+content safety is triggering too aggressively.
+
+| Field | Value |
+|-------|-------|
+| Metric | `issue.count` |
+| Filter | `fingerprint:generation-failure` |
+| Threshold | > 10 per 10 minutes |
+| Action | Slack #alerts — include `generation_type` tag |
+
+---
+
+## P3 — Daily Digest
+
+### 7. Rate limit hits trending up (weekly)
 **Trigger:** 7-day volume for fingerprint `rate-limit-exceeded` increases by
 more than 25 % week-over-week.
 **Why P2:** A gradual increase in rate limit hits is expected as the product
@@ -116,7 +156,7 @@ poorly-tuned limit that needs to be raised for legitimate users.
 | Threshold | > 25 % WoW increase |
 | Action | Daily digest email + `#engineering-alerts`, if configured in Sentry |
 
-### 7. Error rate above baseline (catch-all)
+### 8. Error rate above baseline (catch-all)
 **Trigger:** Total unhandled error count exceeds a rolling 7-day average by
 > 50 % in a 1-hour window.
 **Why P2:** Acts as a backstop for any error class that does not match a

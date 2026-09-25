@@ -14,9 +14,19 @@ import {
   type RetiredByokProvider,
 } from '../config/providers';
 import { TIER_DISPLAY_NAMES } from '../billing/tierPlans';
+import { effectiveTier, spendableTokensOf } from '../ai/tierAccess';
+import type { Tier } from '@/lib/db/schema';
+import { STATUS_CHECK_OPERATION } from './statusCheckOperation';
+import { resolveAnthropicClientAuth } from '../ai/wifCredential';
 
 export interface ResolvedKey {
   type: 'byok' | 'platform';
+  /**
+   * For `anthropic` on the platform path this can be a short-lived federated
+   * Bearer token (#8858), not an API key. Build an Anthropic client from it with
+   * `anthropicClientAuthForKey()` from `@/lib/ai/wifCredential`, never
+   * `{ apiKey: key }`, which sends it as `x-api-key` and is rejected.
+   */
   key: string;
   metered: boolean;
   usageId?: string;
@@ -47,7 +57,7 @@ const _PLATFORM_KEY_ENV_COMPLETE = PLATFORM_KEY_ENV satisfies Record<
 >;
 void _PLATFORM_KEY_ENV_COMPLETE;
 
-function getPlatformKey(provider: Provider, capability?: ProviderCapability): string {
+async function getPlatformKey(provider: Provider, capability?: ProviderCapability): Promise<string> {
   // A resolver-gateway capability (image/embedding, #9523) resolves the single
   // AI_GATEWAY_API_KEY instead of the provider's PLATFORM_* var, and never
   // falls back to it: those capabilities have no direct platform path anymore,
@@ -73,6 +83,19 @@ function getPlatformKey(provider: Provider, capability?: ProviderCapability): st
     throw new Error(`Platform key not configured: ${GATEWAY_KEY_ENV.vercelGateway}`);
   }
 
+  // Anthropic ONLY (#8858): the federated short-lived token when Workload
+  // Identity Federation is configured, else the static ANTHROPIC_API_KEY. The
+  // guard is on the provider, not on WIF being configured, so no other
+  // provider can ever receive the Anthropic credential or have its own
+  // missing-key throw suppressed by it. The throw below keeps the exact message
+  // the generic path produced for Anthropic.
+  if (provider === 'anthropic') {
+    const auth = await resolveAnthropicClientAuth();
+    const key = auth.authToken ?? auth.apiKey;
+    if (key) return key;
+    throw new Error(`Platform key not configured: ${getPlatformKeyEnvVar(provider) ?? provider}`);
+  }
+
   // getPlatformKeyEnvVar returns null for a retired/keyless provider (Suno):
   // its platform path is gone, so resolving one throws the same "not
   // configured" error a genuinely-unset key would.
@@ -95,6 +118,11 @@ function getPlatformKey(provider: Provider, capability?: ProviderCapability): st
  *    charged for a call that can't run (#8597).
  * 3. No key available (starter tier, zero balance, or unconfigured platform
  *    key) → throw with guidance.
+ *
+ * Exception to 2-3: a status poll (`tokenCost` 0 AND `operation`
+ * `STATUS_CHECK_OPERATION`) gets the platform key with no tier or balance
+ * check and no deduction — the polled job was paid for at creation. Its tier
+ * control is the route's poll gate, `panelTierGateResponseForPoll`.
  *
  * `capability` is optional and affects only the platform path: when it is a
  * resolver-gateway capability (image/embedding, #9523 — NOT chat, see
@@ -147,9 +175,32 @@ export async function resolveApiKey(
   );
   if (!user) throw new Error(`User not found: ${userId}`);
 
-  // Pro tier always has platform key access
-  // Other paid tiers can use platform keys if they have addon tokens
-  if (user.tier === 'starter') {
+  // Status poll of an already-paid job (#7715). The job's tokens were
+  // deducted when it was CREATED, so the live balance says nothing about
+  // whether its result may be read. A trial starter whose one generation
+  // spent the whole grant, or a hobbyist left at exactly 0, would otherwise be
+  // refused here on every poll: the client never receives the result, and the
+  // durable webhook finalizes the paid job as failed and refunds it. So a
+  // zero-cost STATUS_CHECK_OPERATION skips the tier and balance checks below,
+  // and it neither deducts nor records usage. The only tier control left for
+  // polls is the per-route poll gate (`panelTierGateResponseForPoll` in
+  // `@/lib/api/panelTierGate`), which still refuses a $0 account on a
+  // creator-or-above panel and a starter that never held tokens on every
+  // hobbyist panel. It is NOT a job-ownership check: the status routes do not
+  // bind jobId to the caller (pre-existing, tracked in #10262). BYOK was already preferred above, and
+  // `getPlatformKey` still throws when the platform key is not configured.
+  // BOTH halves are required: a charged call named `status_check`, or a free
+  // call named anything else, still goes through every check.
+  if (tokenCost === 0 && operation === STATUS_CHECK_OPERATION) {
+    return { type: 'platform', key: await getPlatformKey(provider, capability), metered: true };
+  }
+
+  // Pro tier always has platform key access. Other paid tiers can use
+  // platform keys while they have tokens. A starter account with spendable
+  // tokens (the signup trial grant, #7715) is treated as hobbyist here, the
+  // same rule `/api/chat` and the editor's panel gate apply; once the tokens
+  // are spent it is a starter account again and the message below applies.
+  if (effectiveTier(user.tier as Tier, spendableTokensOf(user)) === 'starter') {
     throw new ApiKeyError(
       'TIER_NOT_ALLOWED',
       `The ${TIER_DISPLAY_NAMES.starter} tier cannot use AI generation. Upgrade to ${TIER_DISPLAY_NAMES.hobbyist} and add your own ${provider} API key, or upgrade to ${TIER_DISPLAY_NAMES.pro} for platform keys.`
@@ -173,7 +224,7 @@ export async function resolveApiKey(
   // happened after deductTokens, the user would be charged for a call that can
   // never run and never gets refunded — silent token loss (#8597). Validate the
   // key is present first so a missing key fails before any balance changes.
-  const platformKey = getPlatformKey(provider, capability);
+  const platformKey = await getPlatformKey(provider, capability);
 
   const deduction = await deductTokens(userId, operation, tokenCost, provider, metadata);
   if (!deduction.success) {

@@ -21,7 +21,16 @@ procedure for that day, not a request to act now.
 Every generate route runs through `createGenerationHandler`, which resolves
 the key **before** deducting tokens (`web/src/lib/keys/resolver.ts`,
 `getPlatformKey`). A missing key throws server-side, the user gets a generic
-500, and nothing is charged. For a capability that can never be provisioned,
+500, and nothing is charged. Every status poller that resolves a key
+(`/api/generate/*/status`, except `music/status`, which never calls the
+resolver and returns a static terminal `failed` response) and the QStash
+`generation-complete` callback call the resolver directly as a zero-cost
+`STATUS_CHECK_OPERATION`. That call skips the tier and balance checks (the job
+was paid for at creation, and the route's `panelTierGateResponseForPoll` is its
+tier control: it admits a `starter` at `hobbyist` only when the account has
+held tokens, `monthlyTokens > 0 || addonTokens > 0`, and it does not check that
+the `jobId` belongs to the caller), but a missing platform key still throws
+there too. For a capability that can never be provisioned,
 three more layers keep it from reaching that point:
 
 | Layer | Where | Effect |
@@ -29,7 +38,7 @@ three more layers keep it from reaching that point:
 | Declared unavailable | `UNAVAILABLE_CAPABILITIES` in `web/src/lib/config/providers.ts` | The capability is refused everywhere regardless of keys. Today: none — the map is empty. `music` was the last entry until #9522 moved it to ElevenLabs; the machinery stays wired for the next unprovisionable capability. |
 | `/api/capabilities` | `web/src/app/api/capabilities/route.ts` | Reports `available:false` per capability; `unprovisionable:true`, a user-facing `hint` and the tracking `issue` for declared ones. A signed-in user's BYOK key counts. Always `Cache-Control: private`. |
 | Entry points | `useGenerationGate` + `GenerationUnavailableNotice`; the Asset panel menu and Audio inspector button; a declared capability's chat tool and its `forge.ai` wrapper (until #9522 this was `music`'s `generate_music` / `forge.ai.generateMusic`) | Each shows the reason and refuses to submit. The dialog gate blocks on a successful per-user `available:false` response; loading and failed fetches stay enabled. Auth changes and successful BYOK saves/removals immediately refresh mounted consumers, bypassing the browser cache and discarding older in-flight responses. |
-| Route gate | `capability:` option on `createGenerationHandler` (step 1a) | 503 `SERVICE_UNAVAILABLE` right after authentication — before rate limits, validation, key resolution or any deduction. |
+| Route gate | `capability:` option on `createGenerationHandler` (step 1b, right after the panel tier gate) | 503 `SERVICE_UNAVAILABLE` right after authentication — before rate limits, validation, key resolution or any deduction. |
 
 The health probe (`/api/health` → AI Providers) grades the same table this
 document decides from: since #9719 it and `/api/capabilities` both read
