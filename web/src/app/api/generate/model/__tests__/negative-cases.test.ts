@@ -36,9 +36,13 @@ vi.mock('@/lib/keys/resolver', () => {
   return { resolveApiKey: vi.fn(), ApiKeyError };
 });
 
-vi.mock('@/lib/tokens/pricing', () => ({
-  getTokenCost: vi.fn(() => 100),
-}));
+// Spread the actual module: `createGenerationHandler` reaches
+// `TRIAL_GRANT_TOKENS` off this module at import time (#7715 review round 2)
+// via `@/lib/ai/tierAccess` / `@/lib/billing/tierPlans`, so a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return { ...actual, getTokenCost: vi.fn(() => 100) };
+});
 
 vi.mock('@/lib/rateLimit/distributed', () => ({
   distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 }),

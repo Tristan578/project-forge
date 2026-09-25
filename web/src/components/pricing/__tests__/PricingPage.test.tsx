@@ -170,7 +170,8 @@ describe('PricingPage', () => {
     it('marks the free tier\'s AI exclusion as an absence, not a feature', () => {
       render(<PricingPage />);
       const card = screen.getByTestId('pricing-card-starter');
-      expect(card.textContent).toContain('No AI features');
+      expect(card.textContent).toContain('No monthly AI tokens');
+      expect(card.textContent).toContain('trial AI tokens at signup');
       expect(card.querySelectorAll('[data-testid="x-icon"]')).toHaveLength(1);
     });
   });

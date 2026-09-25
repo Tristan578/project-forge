@@ -15,7 +15,7 @@ vi.mock('@/lib/initLog', () => {
   return {
     logInitEvent: vi.fn((phase: string, message?: string, error?: string) => {
       const now = Date.now();
-      if (startTime === null) startTime = now;
+      startTime ??= now;
       const event = { phase, timestamp: now - startTime, message, error };
       events.push(event);
       return event;

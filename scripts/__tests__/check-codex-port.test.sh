@@ -17,6 +17,12 @@
 # CONTENT of the failure (the exact path, the exact event), not merely a
 # non-zero exit, so a gate that fails for the wrong reason does not pass here.
 #
+# One case at the end is NOT part of that contract: it pins the committed
+# .mcp.json's `alwaysLoad` allowlist (#8695). That key is Claude Code only and
+# the port gate deliberately ignores it, but this is the suite that already
+# parses the real .mcp.json and runs in CI, so the pin lives here rather than
+# in a one-case suite of its own. Search for "alwaysLoad" to find it.
+#
 # Fixture hooks avoid jq on purpose: the suite must run where jq is absent.
 #
 # Assertions use explicit if/then/else (NOT `A && ok || bad`) so the suite has
@@ -72,6 +78,10 @@ mkfix() {
   mkdir -p "$d/tools/agentic-sync" "$d/.claude/skills/alpha/scripts" "$d/.claude/skills/kanban" \
            "$d/.claude/agents" "$d/.claude/hooks" "$d/.codex/hooks" "$d/.codex/agents"
   cp "$MANIFEST" "$d/tools/agentic-sync/port.json"
+  # The fixture declares its own independent skill (kanban, created below on
+  # both sides) rather than borrowing one from the real manifest, whose
+  # `skills.independent` is empty by design since #10131.
+  json_set "$d/tools/agentic-sync/port.json" skills.independent.kanban '"fixture: exists on both sides on purpose"'
   cp "$ADAPTER" "$d/.codex/hooks/run-claude-hook.mjs"
   # The real adapter's messages send readers to this file, and the reference
   # validator resolves every path a .codex/ file names — so the fixture has one.
@@ -3406,6 +3416,35 @@ if [ "$N" = "1" ]; then
 else
   bad "expected exactly 1 executable run of this suite in ci.yml, found $N — it would be linted but never executed"
 fi
+
+# -----------------------------------------------------------------------------
+# alwaysLoad stays on credential-free, read-only servers (#8695, board round 2).
+# `alwaysLoad` exempts a server from Tool Search deferral, so its tools are in
+# every context from session start, reviewer seats included, whose write block
+# covers Bash only. A server that reads credentials or can write to the
+# repository (github) must stay deferred. Codex never reads .mcp.json, so the
+# port gate above does not look at this key; this is the only pin on it.
+# The allowlist is exact: a server added to it needs the same argument made in
+# claude-platform-reference/SKILL.md. Any value other than false counts as set.
+ALWAYS_LOAD_ALLOWED="context7"
+ALWAYS_LOAD="$(node -e '
+const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).mcpServers || {};
+const names = Object.keys(m);
+if (names.length === 0) { console.log("!EMPTY"); process.exit(0); }
+for (const n of names) if (Object.prototype.hasOwnProperty.call(m[n], "alwaysLoad") && m[n].alwaysLoad !== false) console.log(n);
+' "$REPO_ROOT/.mcp.json")" || ALWAYS_LOAD="!PARSE"
+case "$ALWAYS_LOAD" in
+  '!PARSE'|'!EMPTY') bad ".mcp.json could not be read as a server map ($ALWAYS_LOAD), so the alwaysLoad pin checked nothing" ;;
+  *)
+    STRAY="$(grep -vxF "$ALWAYS_LOAD_ALLOWED" <<<"$ALWAYS_LOAD" | grep -v '^$' || true)"
+    if [ -n "$STRAY" ]; then
+      bad "alwaysLoad is set on a server outside the credential-free allowlist ($ALWAYS_LOAD_ALLOWED): $(tr '\n' ' ' <<<"$STRAY")"
+    elif [ "$ALWAYS_LOAD" != "$ALWAYS_LOAD_ALLOWED" ]; then
+      bad "the alwaysLoad allowlist names $ALWAYS_LOAD_ALLOWED but .mcp.json always-loads '$ALWAYS_LOAD' — update the allowlist and the skill together"
+    else
+      ok "only $ALWAYS_LOAD_ALLOWED sets alwaysLoad in .mcp.json (credentialed and write-capable servers stay deferred)"
+    fi ;;
+esac
 
 # =============================================================================
 echo ""

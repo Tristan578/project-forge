@@ -5,6 +5,7 @@ import { updateDisplayName } from '@/lib/auth/user-service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { internalError } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { spendableTokensOf } from '@/lib/ai/tierAccess';
 
 const profileUpdateSchema = z.object({
   displayName: z.string().trim().min(2).max(100),
@@ -33,6 +34,10 @@ async function GET_impl(req: NextRequest) {
     // until an entitlement summary has been synced; the client then falls back
     // to tier-derived capability defaults.
     activeFeatures: user.activeFeatures ?? null,
+    // Tokens the account can spend now. The client derives its access tier
+    // from this on first paint (#7715): a starter account holding trial tokens
+    // opens the hobbyist AI surfaces instead of the upgrade overlay.
+    spendableTokens: spendableTokensOf(user),
   });
 }
 

@@ -47,6 +47,7 @@ const POST_impl = createGenerationHandler<
   }
 >({
   route: '/api/generate/sprite',
+  panel: 'generate-sprite',
   enforceRequestDeadline: true,
   provider: (params) => params.serviceName,
   operation: 'sprite_generation',

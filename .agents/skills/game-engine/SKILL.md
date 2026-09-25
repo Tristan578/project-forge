@@ -1,6 +1,6 @@
 ---
 name: game-engine
-description: 'Expert skill for building web-based game engines and games using HTML5, Canvas, WebGL, and JavaScript. Use when asked to create games, build game engines, implement game physics, handle collision detection, set up game loops, manage sprites, add game controls, or work with 2D/3D rendering. Covers techniques for platformers, breakout-style games, maze games, tilemaps, audio, multiplayer via WebRTC, and publishing games.'
+description: Web game engine patterns — game loops, physics, collision, sprites, tilemaps, audio, 2D/3D rendering, WebGL, Canvas. Use when implementing game mechanics, SpawnForge engine features, or game system architecture (platformers, physics, input, camera).
 ---
 
 # Game Engine Skill
@@ -137,3 +137,13 @@ Detailed reference material is available in the `references/` folder. Consult th
 | Performance is poor | Profile with browser dev tools, reduce draw calls, use object pooling, and optimize asset sizes |
 | Touch controls are unresponsive | Prevent default touch behavior and handle touch events separately from mouse events |
 | WebGL context lost | Handle the `webglcontextlost` event and restore state on `webglcontextrestored` |
+
+## SpawnForge-Specific Scripts
+
+- `bash "${CLAUDE_SKILL_DIR}/scripts/check-engine-binaries.sh"` — Verify all 4 WASM engine binaries exist in `web/public/engine-pkg-*`, check file sizes, and report staleness
+
+## SpawnForge-Specific References
+
+- See [ecs-patterns.md](references/ecs-patterns.md) for the complete new-component checklist, entity lifecycle, and command dispatch chain
+- See [command-dispatch.md](references/command-dispatch.md) for how the JSON command system works and how to add new commands
+- See [templates/component-checklist.md](templates/component-checklist.md) for a fillable checklist to track new component implementation progress

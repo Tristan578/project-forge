@@ -75,7 +75,7 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 
 **Pinned versions:** Next.js 16.3.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.18 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 85 · branches 77 · functions 80 · lines 86
+**Coverage thresholds (CI-enforced):** statements 85 · branches 77 · functions 80 · lines 87
 
 **Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
 <!-- AGENTIC-SYNC:END -->
@@ -87,6 +87,32 @@ See `AGENTS.md` for full taskboard setup, workflow, and GitHub Project sync deta
 - `sync_repo` (SQLite column) controls which repo a ticket syncs to. Only `sync_repo = 'project-forge'` tickets are synced.
 - The JSON map file is a cache. SQLite columns are authoritative.
 - Tickets from other local projects are NEVER synced (they have `sync_repo = NULL`).
+
+## Plan Mode (Copilot CLI)
+
+This repository is spec-first. `.claude/CLAUDE.md` says "Spec-First: Never implement
+without an approved spec in `specs/`". In Copilot CLI, enter plan mode before you
+implement a subtask. Have Copilot write the implementation plan, check it against the
+ticket's acceptance criteria, and only then leave plan mode. The plan is not a spec. If
+the work needs a spec, it still goes in `specs/`.
+
+Ways to enter it, checked against `copilot --help` and `copilot help commands` for
+Copilot CLI 1.0.88:
+
+- `/plan` creates an implementation plan before coding.
+- `copilot --plan` (or `--mode plan`) starts a session in plan mode.
+- To start every new interactive session in plan mode, set the `defaultMode` setting to
+  `plan` with `/settings` at user scope. Do not use `/settings --repo`. That writes
+  `.github/copilot/settings.json` inside the repository, and a personal preference
+  must not be committed there.
+
+Do not combine `--plan` with `--mode autopilot` here. That combination approves the
+plan automatically and implements it, which skips the review step this section exists
+for.
+
+To trust this checkout so Copilot CLI stops asking on every start, follow
+`docs/guides/copilot-cli-trusted-folders.md`. The trust list is local state and is never
+committed.
 
 ## Security
 

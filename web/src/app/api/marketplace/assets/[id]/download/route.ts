@@ -105,6 +105,7 @@ async function GET_impl(
     }
 
     // Fallback: validate URL against allowed domains to prevent open redirect
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an ASSET_CDN_HOSTS env var explicitly set to blank is operationally the same as unset
     const allowedHosts = (process.env.ASSET_CDN_HOSTS || 'localhost').split(',').map(h => h.trim());
     try {
       const fileUrl = new URL(asset.assetFileUrl);
