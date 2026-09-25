@@ -70,6 +70,7 @@ vi.mock('@/lib/ai/wifCredential', async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import { resolveApiKey, resolveByokOrPlatformKey, storeProviderKey, deleteProviderKey, listConfiguredProviders, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 import * as dbClient from '@/lib/db/client';
 import * as encryption from '@/lib/keys/encryption';
 import * as tokenService from '@/lib/tokens/service';
@@ -213,13 +214,13 @@ describe('resolveApiKey - platform key', () => {
     delete process.env['PLATFORM_MESHY_KEY'];
   });
 
-  it('throws TIER_NOT_ALLOWED for starter tier', async () => {
-    wireDb([], [makeUser({ tier: 'starter' })]);
+  it('throws TIER_NOT_ALLOWED for a starter account with nothing to spend', async () => {
+    wireDb([], [makeUser({ tier: 'starter', monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 })]);
     await expect(resolveApiKey('user-1', 'meshy', 50, 'texture_generation')).rejects.toThrow(ApiKeyError);
   });
 
-  it('TIER_NOT_ALLOWED code is set on starter tier error', async () => {
-    wireDb([], [makeUser({ tier: 'starter' })]);
+  it('TIER_NOT_ALLOWED code is set on the starter tier error, including a spent trial', async () => {
+    wireDb([], [makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 })]);
     let caught: ApiKeyError | null = null;
     try {
       await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
@@ -227,6 +228,15 @@ describe('resolveApiKey - platform key', () => {
       caught = e as ApiKeyError;
     }
     expect(caught?.code).toBe('TIER_NOT_ALLOWED');
+  });
+
+  it('resolves the platform key and deducts for a starter account holding trial tokens (#7715)', async () => {
+    wireDb([], [makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 })]);
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 0, monthlyTotal: 50, addon: 0, total: 0, nextRefillDate: null }, usageId: 'u-trial' });
+    const result = await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
+    expect(result.type).toBe('platform');
+    expect(result.usageId).toBe('u-trial');
+    expect(mockDeductTokens).toHaveBeenCalledWith('user-1', 'texture_generation', 50, 'meshy', undefined);
   });
 
   it('throws NO_KEY_CONFIGURED for non-pro with zero balance', async () => {
@@ -315,6 +325,82 @@ describe('resolveApiKey - platform key', () => {
     const result = await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
     expect(result.type).toBe('platform');
     expect(result.usageId).toBe('u-4');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveApiKey — status poll of an already-paid job (#7715)
+// ---------------------------------------------------------------------------
+
+describe('resolveApiKey - status poll (tokenCost 0 AND STATUS_CHECK_OPERATION, #7715)', () => {
+  const SPENT_STARTER = { tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 };
+  const HOBBYIST_AT_ZERO = { tier: 'hobbyist', monthlyTokens: 100, monthlyTokensUsed: 100, addonTokens: 0 };
+
+  async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
+    try {
+      await p;
+    } catch (e) {
+      return (e as ApiKeyError).code;
+    }
+    return undefined;
+  }
+
+  beforeEach(() => {
+    resetMocks();
+    process.env['PLATFORM_MESHY_KEY'] = 'platform-meshy-secret';
+  });
+
+  afterEach(() => {
+    delete process.env['PLATFORM_MESHY_KEY'];
+  });
+
+  it('resolves the platform key for a starter whose trial grant is spent, with no deduction and no usage record', async () => {
+    wireDb([], [makeUser(SPENT_STARTER)]);
+    const result = await resolveApiKey('user-1', 'meshy', 0, STATUS_CHECK_OPERATION);
+    expect(result).toEqual({ type: 'platform', key: 'platform-meshy-secret', metered: true });
+    expect(result.usageId).toBeUndefined();
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('resolves the platform key for a hobbyist at exactly 0 (the lockout that predates the trial)', async () => {
+    wireDb([], [makeUser(HOBBYIST_AT_ZERO)]);
+    const result = await resolveApiKey('user-1', 'meshy', 0, STATUS_CHECK_OPERATION);
+    expect(result.type).toBe('platform');
+    expect(result.key).toBe('platform-meshy-secret');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('still prefers a BYOK key over the platform key', async () => {
+    wireDb([makeBYOKKey()], [makeUser(SPENT_STARTER)]);
+    const result = await resolveApiKey('user-1', 'meshy', 0, STATUS_CHECK_OPERATION);
+    expect(result).toEqual({ type: 'byok', key: 'decrypted:encrypted-meshy-key', metered: false });
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('still throws when the platform key is not configured, without deducting', async () => {
+    delete process.env['PLATFORM_MESHY_KEY'];
+    wireDb([], [makeUser(SPENT_STARTER)]);
+    await expect(resolveApiKey('user-1', 'meshy', 0, STATUS_CHECK_OPERATION)).rejects.toThrow('Platform key not configured');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  // Each half of the condition is required. These two cases are what make
+  // `tokenCost === 0` and `operation === STATUS_CHECK_OPERATION` each
+  // load-bearing: dropping either half from the resolver turns one of them red.
+  it('enforces BOTH checks for STATUS_CHECK_OPERATION with a non-zero cost', async () => {
+    wireDb([], [makeUser(SPENT_STARTER)]);
+    expect(await codeOf(resolveApiKey('user-1', 'meshy', 10, STATUS_CHECK_OPERATION))).toBe('TIER_NOT_ALLOWED');
+    wireDb([], [makeUser(HOBBYIST_AT_ZERO)]);
+    expect(await codeOf(resolveApiKey('user-1', 'meshy', 10, STATUS_CHECK_OPERATION))).toBe('NO_KEY_CONFIGURED');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
+  });
+
+  it('enforces BOTH checks for a zero-cost call under any other operation', async () => {
+    wireDb([], [makeUser(SPENT_STARTER)]);
+    expect(await codeOf(resolveApiKey('user-1', 'meshy', 0, 'texture_generation'))).toBe('TIER_NOT_ALLOWED');
+    wireDb([], [makeUser(HOBBYIST_AT_ZERO)]);
+    expect(await codeOf(resolveApiKey('user-1', 'meshy', 0, 'texture_generation'))).toBe('NO_KEY_CONFIGURED');
+    expect(mockDeductTokens).not.toHaveBeenCalled();
   });
 });
 

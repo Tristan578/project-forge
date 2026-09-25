@@ -838,6 +838,7 @@ export async function checkCloudflareR2(): Promise<ServiceHealth> {
   const bucketName = process.env[ASSET_STORAGE_ENV.bucketName];
 
   const allConfigured = !!(accountId && accessKeyId && secretAccessKey && bucketName);
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is R2 partially configured); ?? cannot substitute this OR
   const anyConfigured = !!(accountId || accessKeyId || secretAccessKey || bucketName);
 
   const details = {
@@ -937,6 +938,9 @@ async function checkGenerationFactory(): Promise<ServiceHealth> {
         const { createGenerationHandler } = await import('@/lib/api/createGenerationHandler');
         const handler = createGenerationHandler({
           route: '/api/health/factory-smoke',
+          // Never reached — the smoke test is unauthenticated and returns 401
+          // before the panel gate runs — but the field is required.
+          panel: 'ai-chat',
           provider: DB_PROVIDER.chat,
           operation: 'chat_short',
           rateLimitKey: 'health-smoke',

@@ -205,6 +205,7 @@ function processAsyncResponses(responses: Array<{
       pending.resolve(resp.data);
       pendingAsyncRequests.delete(resp.requestId);
     } else if (resp.status === 'error') {
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank async error message falls back to a generic one, same as an absent one
       pending.reject(new Error(resp.error || 'Unknown async error'));
       pendingAsyncRequests.delete(resp.requestId);
     } else if (resp.status === 'progress') {
@@ -1511,13 +1512,13 @@ self.onmessage = (e: MessageEvent) => {
       sharedState = {};
       spawnCounter = 0;
       clearPendingAsyncRequests('Script re-initialized');
-      entityStates = msg.entities || {};
-      entityInfos = msg.entityInfos || {};
-      currentInput = msg.inputState || { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
-      tilemapStates = msg.tilemapStates || {};
-      skeletonStates = msg.skeletonStates || {};
-      physics2dVelocities = msg.physics2dVelocities || {};
-      groundedStates = msg.groundedStates || {};
+      entityStates = msg.entities ?? {};
+      entityInfos = msg.entityInfos ?? {};
+      currentInput = msg.inputState ?? { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+      tilemapStates = msg.tilemapStates ?? {};
+      skeletonStates = msg.skeletonStates ?? {};
+      physics2dVelocities = msg.physics2dVelocities ?? {};
+      groundedStates = msg.groundedStates ?? {};
       prevEntityStates = {};
       // Main thread passes touch capability so the worker doesn't need navigator access
       isTouchDeviceFlag = typeof msg.isTouchDevice === 'boolean' ? msg.isTouchDevice : false;
@@ -1607,7 +1608,7 @@ self.onmessage = (e: MessageEvent) => {
           }
         }
       } else {
-        newEntities = msg.entities || {};
+        newEntities = msg.entities ?? {};
       }
 
       // Apply entityInfos delta if present
@@ -1665,7 +1666,7 @@ self.onmessage = (e: MessageEvent) => {
 
       entityStates = newEntities;
       // entityInfos already updated above (delta or full)
-      currentInput = msg.inputState || currentInput;
+      currentInput = msg.inputState ?? currentInput;
       if (msg.tilemapStates) tilemapStates = msg.tilemapStates;
       if (msg.groundedStates) groundedStates = msg.groundedStates;
       if (msg.skeletonStates) skeletonStates = msg.skeletonStates;

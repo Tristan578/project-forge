@@ -52,9 +52,7 @@ function createDb() {
 let _instance: ReturnType<typeof createDb> | null = null;
 
 function getInstance() {
-  if (!_instance) {
-    _instance = createDb();
-  }
+  _instance ??= createDb();
   return _instance;
 }
 

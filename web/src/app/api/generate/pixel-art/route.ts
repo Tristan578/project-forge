@@ -51,6 +51,7 @@ const POST_impl = createGenerationHandler<
   }
 >({
   route: '/api/generate/pixel-art',
+  panel: 'generate-pixel-art',
   provider: () => 'replicate',
   operation: 'pixel_art_generation',
   rateLimitKey: 'gen-pixel-art',

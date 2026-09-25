@@ -22,7 +22,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
-import { assertTier } from '@/lib/auth/api-auth';
+import { assertAiAccess } from '@/lib/auth/api-auth';
 import { decomposeIntoSystems, PromptRejectedError } from '@/lib/game-creation/decomposer';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { checkBotIdGate } from '@/lib/security/botId';
@@ -63,8 +63,9 @@ async function POST_impl(req: NextRequest) {
   if (mid.error) return mid.error;
   const auth = { ctx: mid.authContext! };
 
-  // Tier gate — starter tier has no AI access (parity with /api/chat).
-  const tierError = assertTier(auth.ctx.user, ['hobbyist', 'creator', 'pro']);
+  // Tier gate — parity with /api/chat: a starter account with spendable
+  // trial tokens passes as hobbyist (#7715); one with none is rejected.
+  const tierError = assertAiAccess(auth.ctx.user);
   if (tierError) return tierError;
 
   // Provider kill switch (PF-971 / #8952) — checked before token deduction

@@ -122,6 +122,7 @@ export const zEvidenceRef = z
   })
   // A metric must reference at least one subject, or it is anchored to nothing.
   .refine(
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (does the evidence reference any subject id); ?? cannot substitute this OR
     (e) => Boolean(e.capabilityId || e.artifactId || e.journeyId || e.dependencyId),
     { message: 'evidence must reference at least one subject id' },
   );

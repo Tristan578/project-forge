@@ -156,8 +156,9 @@ export function getAutoSave(): { json: string; name: string; time: string } | nu
   try {
     const json = localStorage.getItem(AUTOSAVE_KEY);
     if (!json) return null;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored autosave name is unset; falls back to a display placeholder
     const name = localStorage.getItem(AUTOSAVE_NAME_KEY) || 'Untitled';
-    const time = localStorage.getItem(AUTOSAVE_TIME_KEY) || '';
+    const time = localStorage.getItem(AUTOSAVE_TIME_KEY) ?? '';
     return { json, name, time };
   } catch {
     return null;

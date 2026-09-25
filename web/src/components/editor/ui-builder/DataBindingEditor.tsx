@@ -74,6 +74,7 @@ export function DataBindingEditor({ screenId, widgetId, property, binding }: Dat
           <label className="block">
             <span className="text-zinc-400 text-xs">Transform</span>
             <select
+              // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank transform type is not a member of the transform enum; treated as unset
               value={binding.transform?.type || 'none'}
               onChange={(e) => {
                 if (e.target.value === 'none') {

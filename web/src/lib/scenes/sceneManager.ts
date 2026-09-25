@@ -313,6 +313,7 @@ export function duplicateScene(project: ProjectScenes, sceneId: string, newName?
   const now = new Date().toISOString();
   const duplicate: SceneEntry = {
     id,
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank requested scene-copy name is unset; falls back to a generated name
     name: newName || `${source.name} Copy`,
     isStartScene: false,
     data: source.data ? JSON.parse(JSON.stringify(source.data)) : null,
@@ -393,6 +394,7 @@ export function importSingleScene(sceneData: SceneFileData): ProjectScenes {
     activeSceneId: id,
     scenes: [{
       id,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank imported scene name is unset; falls back to sceneName, then a generated default
       name: sceneData.metadata?.name || sceneData.sceneName || 'Main',
       isStartScene: true,
       data: sceneData,
@@ -568,6 +570,7 @@ export function createCheckpoint(
   const checkpoint: SceneCheckpoint = {
     id: generateCheckpointId(),
     projectId,
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a whitespace-only checkpoint label (after trim) is unset; falls back to a timestamped name
     label: label?.trim() || `Checkpoint ${new Date().toISOString()}`,
     createdAt: new Date().toISOString(),
     snapshot,
