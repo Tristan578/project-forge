@@ -94,8 +94,8 @@ Vercel Edge (CDN, routing, headers)
 | **Clerk (Auth)** | Login, signup, all authenticated API routes, user tier checks | Public pages, health check, already-loaded editor sessions (until token expires) |
 | **Stripe** | New subscriptions, plan changes, webhook processing | Existing users retain current tier, all editing features work |
 | **Anthropic API** | AI chat, scene generation, compound AI actions | Manual editing, all non-AI features, asset import/export |
-| **R2 (Assets)** | Asset upload/download, marketplace, published game hosting | Editor with local assets, WASM engine (separate CDN) |
-| **Engine CDN** | New WASM loads for new visitors | Returning visitors with cached WASM, Vercel fallback if R2_CDN_ENABLED=false |
+| **R2 (Assets)** | Asset upload/download, marketplace, private publication-snapshot mirror (play falls back to the Postgres snapshot) | Editor with local assets, WASM engine (separate CDN), playing published games |
+| **Engine CDN** | New WASM loads for new visitors | Returning visitors with cached WASM; Vercel serves WASM from `/public/` when `NEXT_PUBLIC_ENGINE_CDN_URL` is unset (CD uploads to R2 only while the repository variable `R2_CDN_ENABLED` is `true`) |
 | **Upstash Redis** | Distributed rate limiting (falls back to in-memory per-instance) | All features; rate limiting still works per-instance |
 | **Sentry** | Error tracking, tracing, replay capture | All features; errors just go untracked |
 
@@ -122,7 +122,7 @@ Vercel Edge (CDN, routing, headers)
 
 ### CDN Down
 - New users cannot load WASM engine
-- If `R2_CDN_ENABLED != 'true'`, Vercel serves WASM from `/public/` as fallback
+- Both loaders (`useEngine.getWasmBasePaths` for the editor, `loadPlayEngine.getPlayEngineBasePaths` for `/play`) fall through to the same-origin `/engine-pkg-*` copy served from `web/public/`, so a CDN outage degrades to a slower load rather than a broken page; `R2_CDN_ENABLED` is a GitHub repository variable that gates the CD upload AND selects which WASM URL `post-deploy-smoke.yml` probes (CDN when `true`, same-origin otherwise)
 - Users with browser-cached WASM are unaffected
 
 ---
@@ -294,7 +294,8 @@ curl -sI https://engine.spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm | g
 **Mitigation:**
 ```bash
 # 1. If CDN is down but Vercel fallback works:
-#    Temporarily set R2_CDN_ENABLED=false in Vercel env vars and redeploy
+#    Temporarily unset NEXT_PUBLIC_ENGINE_CDN_URL in Vercel env vars and redeploy (the engine loads from /public/).
+#    Set the GitHub variable R2_CDN_ENABLED=false for the same window, or post-deploy-smoke keeps probing the dead CDN and reports the deploy failed.
 
 # 2. If WASM is missing from both CDN and Vercel:
 #    Check last successful CD run for WASM build artifacts:
