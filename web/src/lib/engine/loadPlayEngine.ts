@@ -46,8 +46,8 @@ export interface PlayEngineRuntime {
  * self-hosted deploy, and it is the fallback when the CDN load fails.
  */
 export function getPlayEngineBasePaths(backend: 'webgpu' | 'webgl2'): string[] {
-  const cdnBase = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
-  const version = (process.env.NEXT_PUBLIC_ENGINE_VERSION || '').trim();
+  const cdnBase = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL ?? '').replace(/\/+$/, '');
+  const version = (process.env.NEXT_PUBLIC_ENGINE_VERSION ?? '').trim();
   const paths: string[] = [];
   if (cdnBase) {
     const root = version ? `${cdnBase}/${version}` : `${cdnBase}/latest`;
