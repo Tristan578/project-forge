@@ -54,14 +54,6 @@ interface StatusResponse {
   durationSeconds?: number;
 }
 
-/** The subset of GET /api/jobs/[id] the durable-completion path reads. */
-interface DurableJobRow {
-  status: string;
-  resultUrl: string | null;
-  resultMeta: unknown;
-  errorMessage: string | null;
-}
-
 /** A machine code such as `TIER_REQUIRED` or `SERVICE_DEGRADED`: never user-facing text. */
 const MACHINE_CODE = /^[A-Z0-9]+(?:_[A-Z0-9]+)*$/;
 
@@ -86,6 +78,14 @@ function statusErrorText(body: unknown): string | null {
     }
   }
   return null;
+}
+
+/** The subset of GET /api/jobs/[id] the durable-completion path reads. */
+interface DurableJobRow {
+  status: string;
+  resultUrl: string | null;
+  resultMeta: unknown;
+  errorMessage: string | null;
 }
 
 export function useGenerationPolling() {
