@@ -15,6 +15,7 @@ const POST_impl = createGenerationHandler<
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/skybox',
+  panel: 'generate-skybox',
   provider: DB_PROVIDER.texture,
   operation: 'skybox_generation',
   rateLimitKey: 'gen-skybox',

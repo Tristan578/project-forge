@@ -25,7 +25,7 @@ vi.mock('@/lib/auth/user-service', () => ({
 // ---------------------------------------------------------------------------
 // Import module under test AFTER mocks
 // ---------------------------------------------------------------------------
-import { authenticateRequest, authenticateClerkSession, assertAdmin, assertTier } from '../api-auth';
+import { authenticateRequest, authenticateClerkSession, assertAdmin, assertTier, assertAiAccess } from '../api-auth';
 import type { User } from '@/lib/db/schema';
 
 // ---------------------------------------------------------------------------
@@ -260,6 +260,39 @@ describe('assertTier', () => {
     const user = makeUser({ tier: 'starter' });
     const response = assertTier(user, ['creator', 'pro']);
     expect(response?.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assertAiAccess (#7715)
+// ---------------------------------------------------------------------------
+
+describe('assertAiAccess', () => {
+  it('rejects a starter account with nothing to spend', () => {
+    const user = makeUser({ tier: 'starter', monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 });
+    expect(assertAiAccess(user)?.status).toBe(403);
+  });
+
+  it('admits a starter account holding trial tokens', () => {
+    const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+    expect(assertAiAccess(user)).toBeNull();
+  });
+
+  it('rejects a starter account again once the trial is spent', () => {
+    const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+    expect(assertAiAccess(user)?.status).toBe(403);
+  });
+
+  it('admits every paid tier regardless of balance', () => {
+    for (const tier of ['hobbyist', 'creator', 'pro'] as const) {
+      expect(assertAiAccess(makeUser({ tier, monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 }))).toBeNull();
+    }
+  });
+
+  it('does not mutate the user it is given', () => {
+    const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+    assertAiAccess(user);
+    expect(user.tier).toBe('starter');
   });
 });
 

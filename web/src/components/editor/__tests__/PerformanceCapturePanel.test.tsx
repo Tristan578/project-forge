@@ -248,6 +248,7 @@ describe('PerformanceCapturePanel design system', () => {
     const { container, idle, running, alert } = renderEveryControlState();
 
     // Name each control so a failure says which one.
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- test helper: a blank aria-label falls back to element text content for naming a control
     const nameOf = (el: HTMLElement) => el.getAttribute('aria-label') || el.textContent?.trim() || el.tagName.toLowerCase();
     const primitiveOf = (el: HTMLElement) => `${nameOf(el)}: ${el.getAttribute(PRIMITIVE_ATTR)}`;
     const expected = (el: HTMLElement) => `${nameOf(el)}: ${expectedPrimitive(el)}`;

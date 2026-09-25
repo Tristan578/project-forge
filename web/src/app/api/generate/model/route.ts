@@ -30,6 +30,7 @@ const POST_impl = createGenerationHandler<
   }
 >({
   route: '/api/generate/model',
+  panel: 'generate-model',
   // Heavy route: matches `export const maxDuration` above so the generation
   // agent derives its step-timeout cap against the real 180s budget.
   maxDurationSeconds: 180,
