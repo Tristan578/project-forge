@@ -118,7 +118,10 @@ function readVercelOidcToken(): string {
     | { get?: () => { headers?: Record<string, string | undefined> } | undefined }
     | undefined;
   const fromHeader = store?.get?.()?.headers?.['x-vercel-oidc-token']?.trim();
-  const token = fromHeader ? fromHeader : process.env.VERCEL_OIDC_TOKEN?.trim();
+  let token = fromHeader;
+  if (!token) {
+    token = process.env.VERCEL_OIDC_TOKEN?.trim();
+  }
   if (!token) {
     throw new Error('Anthropic WIF: no Vercel OIDC token (x-vercel-oidc-token header or VERCEL_OIDC_TOKEN)');
   }
