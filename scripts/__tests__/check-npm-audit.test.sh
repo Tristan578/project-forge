@@ -3395,7 +3395,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=658
+readonly SELF_EXEC_EXPECTED_DROP=660
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3761,6 +3761,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: |
           bash scripts/__tests__/install-vercel-cli.test.sh
           node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs scripts/__tests__/exact-optional-property-types.test.mjs
+      - name: Verify scheduled hook-test contracts
+        run: node --test scripts/__tests__/hook-tests-scheduled.test.mjs
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
       - name: Run agentic-config gate test suite
@@ -3955,7 +3957,410 @@ IFS= read -r -d '' expected_steps_5 <<'STEPS_EOF' || true
           echo "$CHANGED" | grep -qE '^web/|^packages/ui/|(^|/)package\.json$|^package-lock\.json$|^\.node-version$' && web_build_inputs=true
           echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
-          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/|^(apps/docs|mcp-server|packages/ui)/tsconfig\.json$' && ci=true
+          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/|^(apps/docs|mcp-server|packages/ui)/tsconfig\.json
+          echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$|^docs/capability-matrix\.md$|^web/src/data/commandIndex\.json$' && docs=true
+          echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$|^\.codex/hooks/|^tools/agentic-sync/port\.(mjs|json)$' && hooks=true
+          echo "$CHANGED" | grep -qE '(^|/)package\.json$|^package-lock\.json$|^scripts/check-lockfile-sync\.sh$' && deps=true
+          echo "$CHANGED" | grep -qE '^tools/agentic-sync/|^AGENTS\.md$|^\.github/copilot-instructions\.md$|^\.codex/AGENTS\.md$|^\.cursorrules$|^scripts/check-agentic-sync\.sh$|^\.claude/tools/dx-audit\.sh$|^\.claude/tools/__tests__/dx-audit\.test\.sh$|^\.claude/skills/|^\.claude/agents/|^\.claude/settings\.json$|^\.claude/rules/|^\.claude/hooks/|^\.claude/tools/|^\.claude/CLAUDE\.md$|^\.github/|^\.agents/skills/|^\.codex/|^\.mcp\.json$|^scripts/check-codex-port\.sh$|^scripts/__tests__/check-codex-port\.test\.sh$' && agentic=true
+          echo "$CHANGED" | grep -qE '^README\.md$|^CONTRIBUTING\.md$|^AGENTS\.md$|^GEMINI\.md$|^\.cursorrules$|^\.claude/|^\.codex/|^\.gemini/|^\.github/|^\.windsurf/|^\.agent/|^\.agents/|^docs/|^tools/agentic-sync/|^scripts/check-taskboard-onboarding-hygiene\.sh$|^scripts/__tests__/check-taskboard-onboarding-hygiene\.test\.sh$' && onboarding=true
+          echo "$CHANGED" | grep -qE '^\.codex/config\.toml$|^scripts/check-codex-config-safety\.sh$|^scripts/__tests__/check-codex-config-safety\.test\.sh$' && codex=true
+          echo "$CHANGED" | grep -qE '^\.claude/skills/|^scripts/check-skills\.sh$|^scripts/check-skills-baseline\.txt$|^scripts/__tests__/check-skills\.test\.sh$|^scripts/audit-pr-readiness\.ps1$|^scripts/__tests__/audit-pr-readiness\.test\.ps1$' && skills=true
+          echo "$CHANGED" | grep -qE '^\.github/workflows/.*\.md$|^\.github/workflows/.*\.lock\.yml$|^\.github/aw/|^scripts/check-ghaw-lock-sync\.sh$|^scripts/get-ghaw-compiler-version\.sh$|^scripts/__tests__/check-ghaw-lock-sync\.test\.sh$' && ghaw=true
+          echo "$CHANGED" | grep -qE '^web/src/app/api/|^docs/api/openapi\.json$|^docs/api/openapi-internal-routes\.json$|^scripts/check-openapi-route-sync\.sh$|^scripts/__tests__/check-openapi-route-sync\.test\.sh$' && api=true
+          echo "$CHANGED" | grep -q '^tools/observatory/' && observatory=true
+          any_code=false
+          if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] || [ "$design" = "true" ]; then
+            any_code=true
+          fi
+          {
+            echo "web=$web"
+            echo "web-build-inputs=$web_build_inputs"
+            echo "engine=$engine"
+            echo "mcp=$mcp"
+            echo "ci=$ci"
+            echo "docs=$docs"
+            echo "design=$design"
+            echo "hooks=$hooks"
+            echo "deps=$deps"
+            echo "agentic=$agentic"
+            echo "onboarding=$onboarding"
+            echo "codex=$codex"
+            echo "ghaw=$ghaw"
+            echo "api=$api"
+            echo "skills=$skills"
+            echo "observatory=$observatory"
+            echo "any-code=$any_code"
+          } >> "$GITHUB_OUTPUT"
+          echo "Changed paths detected:"
+          echo "  web=$web engine=$engine mcp=$mcp ci=$ci docs=$docs design=$design hooks=$hooks deps=$deps agentic=$agentic onboarding=$onboarding codex=$codex ghaw=$ghaw api=$api skills=$skills observatory=$observatory any-code=$any_code"
+          if [ "$any_code" = "false" ] && [ "$hooks" = "false" ] && [ "$deps" = "false" ] && [ "$api" = "false" ] && [ "$skills" = "false" ] && [ "$observatory" = "false" ]; then
+            echo "No relevant changes — downstream jobs will be skipped"
+          fi
+STEPS_EOF
+readonly expected_steps_5
+assert_steps_block "${ci_gate_block:-}" "ci.yml ci-gate job steps:" "${expected_steps_5%$'\n'}"
+
+# ---------------------------------------------------------------------------
+# ROUND 34 (sec-r30 F2). Every pin above compares two values, and nothing
+# stopped a THIRD line from overwriting either side between the assignment and
+# the comparison. The variable holding the OBSERVED text and the variable
+# holding the EXPECTED text are equally good targets: set one to the other and
+# the pin compares a value to itself, passing on any input. Three one-line
+# neuters were measured against a clean replica of 0589e243, each taking the
+# suite from RED (with a real violation planted) to 198 PASS / 0 FAIL:
+#
+#   scenario                                            pre-fix        post-fix
+#   O1  extra real heredoc opener, NO neuter            197/1 RED      197/1 RED
+#   O2  same + $expected_openers -> $suite_openers       198/0 GREEN    197/1 RED
+#   O3  same + $suite_openers -> $expected_openers       198/0 GREEN    197/1 RED
+#   G1  ci-gate needs-any-code falsified, NO neuter     197/1 RED      197/1 RED
+#   G2  same + <expected> -> $ci_gate_outputs_blk        198/0 GREEN    197/1 RED
+#
+# O1/G1 are the controls that make the neuter the whole ingredient. G2 is the
+# severe one: it hardcodes ci-gate's needs-any-code output to 'false', which
+# makes the quality-gates caller's `if:` unsatisfiable on every PR, so the sole
+# PR-path execution site of all three npm audits never runs -- and one inserted
+# line puts the pin that catches it back to sleep.
+#
+# Fixed by marking every pin input `readonly`, which under `set -uo pipefail`
+# with no `-e` is fail-closed BY PRESERVATION rather than by detection: a later
+# assignment errors, does not abort, and THE ORIGINAL VALUE SURVIVES. Round 31
+# established that precedent for $SELF_EXEC_FILTER; this generalizes it to every
+# variable a pin reads on either side.
+#
+# `readonly` is then verified BY EFFECT, not by text. A pin on the spelling of
+# the declarations would be the byte-pattern treadmill rounds 29 and 31 both
+# measured their way off: a leading space or tab, `declare`, `typeset`, or a
+# `: ;` separator all defeat a column-0 anchor, and round 31 deleted exactly
+# such a pin rather than widen it a third time. Probing the effect in a
+# subshell covers every spelling by construction and is non-destructive -- the
+# assignment fails, so the real value is untouched, and a `readonly` line that
+# is DELETED fails the probe (round 30's lesson: evidence produced by the thing
+# under audit cannot fail when that thing is removed; this evidence is produced
+# by the probe). Verified portable on bash 3.2.57 and bash 5.
+# ---------------------------------------------------------------------------
+PIN_INPUTS='qg_exec
+expected_preamble_qg
+qg_sec
+cd_exec
+expected_preamble_cd
+cd_sec
+cd_wasm_ifblk
+cd_wasm_if_expect
+ci_exec
+expected_preamble_ci
+ci_gate_block
+ci_gate_outputs_blk
+expected_ci_gate_outputs
+ci_success_block
+lst_block
+expected_filter_body
+opener_shape_fixture
+opener_shape_read
+suite_openers
+expected_openers
+expected_steps_1
+expected_steps_2
+expected_steps_3
+expected_steps_4
+ci_pp_block
+expected_steps_pp
+ci_bvt_block
+expected_steps_bvt
+expected_steps_5
+SELF_EXEC_FILTER
+SELF_EXEC
+SELF_EXEC_DIAG
+SELF_EXEC_EXPECTED_DROP
+npm_argv
+PIN_INPUTS'
+readonly PIN_INPUTS
+
+# An unset name probes as MUTABLE and lands in the failure list, so a pin whose
+# workflow file was missing is reported here too rather than skipped -- there is
+# deliberately no "skip if unset" arm.
+pin_not_ro=""
+while IFS= read -r pin_v; do
+  [ -n "$pin_v" ] || continue
+  if ( eval "$pin_v=__probe__" ) 2>/dev/null; then
+    pin_not_ro="$pin_not_ro $pin_v"
+  fi
+done <<<"$PIN_INPUTS"
+if [ -n "$pin_not_ro" ]; then
+  fail "pin-input variable(s) are not readonly, so one inserted assignment makes their pin compare a value to itself (and any input pass):$pin_not_ro"
+else
+  pass "all $(grep -c '' <<<"$PIN_INPUTS") pin-input variables are readonly (a later assignment errors and the original value is preserved)"
+fi
+
+# ROUND 35. `readonly` freezes, but the freeze is a SECOND statement: every
+# declaration above sits on the line AFTER its assignment, so ONE line inserted
+# between the two rewrites the value before it is frozen. The variable is then
+# genuinely readonly (the effect probe passes, holding the wrong value) and the
+# declaration text is unchanged (the drift check passes), so both halves of the
+# round-34 guard report green while the pin compares a block to itself.
+# Measured: a bare write of $ci_gate_outputs_blk into
+# $expected_ci_gate_outputs before its `readonly` is 211 PASS / 0 FAIL,
+# byte-identical to clean, against a
+# violation that is 210/1 without it -- and that pin is the SOLE backstop on the
+# VALUE of `needs-any-code`, the single trigger degating all three npm audits on
+# the PR path.
+#
+# Collapsing the window (`readonly X="$(...)"`) is available only to the
+# command-substitution half; a heredoc pin cannot assign and freeze in one
+# statement, and routing it through a helper relocates the window into the
+# helper rather than removing it. So close it by COUNT. Every pin input is
+# written exactly once in this file, which makes a SECOND write -- wherever it
+# sits -- not a legitimate one by construction. That converts the attack from
+# "insert one subtle line" into "replace the real assignment", and for a
+# heredoc pin replacing it means writing the forged expected value into the
+# payload in plain sight.
+#
+# ROUND 39. The ROUND 35 block directly above is the hardening guide's round-36
+# entry: the in-file ROUND labels lag the guide's round log by one from there
+# on, and the guide is the authority on round numbers. That block implemented
+# the count by matching two assignment SPELLINGS with a regex -- the two this
+# file happens to use -- and the exploit is one line in a third.
+# `declare X=`, `typeset X=`, `local X=`, `export X=`,
+# `declare -r X=`, `printf -v X`, `mapfile`/`readarray X`, `X+=`, `let X=`,
+# `(( X = ))` and `eval "X=v"` all write the variable and none of them matched.
+# Measured against a clean replica of origin/main:
+# a `declare` write of $ci_gate_outputs_blk into $expected_ci_gate_outputs,
+# inserted before its `readonly`, scored 228 PASS / 0 FAIL, byte-identical to
+# the clean control,
+# against a hardcoded ci-gate needs-any-code that is 227/1 without it -- the
+# same neuter round 35 was added to stop, in a spelling its regex did not know.
+#
+# Widening the pattern a fourth time is the treadmill rounds 29, 31 and 34 each
+# measured their way off, and round 31's recorded lesson names the exit: stop
+# modelling a language construct with a convenient byte pattern, and assert on
+# something grammar-independent. Every DIRECT write, whatever keyword carries
+# it, spells the variable's BARE NAME -- so count MENTIONS of the name instead
+# of shapes of assignment. Occurrences behind `$` or `${` are reads, not
+# writes, and are excluded.
+#
+# Each pin is mentioned exactly three times: its entry in the $PIN_INPUTS list,
+# its assignment site, and its `readonly` line. The one exception is the
+# collapsed form (`readonly X=<value>`, available to a pin whose value is a
+# literal or a command substitution), which fuses the last two into one line
+# and so is mentioned twice -- detected here rather than listed, so converting
+# a pin to the collapsed form updates its own expectation and nothing else.
+#
+# The honest bound: this catches every direct spelling by construction, because
+# a write that never names the variable cannot be a direct write. It does not
+# catch an indirect one -- a `declare -n` alias, or `eval` on a name assembled
+# at runtime. Like every pin here it raises cost rather than proving
+# impossibility; what it does is make the cheap version red no matter which
+# keyword it is written with.
+#
+# Count over $SELF_EXEC -- the same corpus every other pin in this file uses --
+# rather than the raw file or a comment-stripped copy of it.
+#
+# Not the raw file, because the opener-set pin's own expected payload carries a
+# de-fanged copy of every `IFS= read` opener line, so a raw-file count
+# over-reports every heredoc pin and the check would fail on its own fixture.
+# The filter drops heredoc payload and is itself pinned by body and by volume
+# above.
+#
+# Not a comment-stripped copy, because a strip creates a region this count
+# cannot see, and "first non-blank byte is `#`" is bash's comment grammar only
+# in COMMAND position -- the same bytes inside an already-open quoted string are
+# data a later `eval` can execute. Measured: a two-line insertion that parks the
+# write on a `#`-leading continuation line and evals it back out scored a clean
+# 228 PASS / 0 FAIL against a hardcoded ci-gate needs-any-code, and shellcheck
+# had nothing to say about it. Counting the whole executable text has no such
+# region, at the price of one convention -- which is the convention this file
+# already keeps: a pin's name written in prose or inside a `fail`/`pass` string
+# carries its `$` sigil. A bare name anywhere outside the three sites below
+# inflates that name's count and reddens this check: a false FAIL, never a false
+# PASS, and the remedy is one keystroke.
+#
+# Neighbour bytes are inspected by index, not encoded in a regex bracket class.
+# The class is where the last two defects of this check lived. `\{` is not a
+# bash escape sequence, so writing the class as `[^A-Za-z0-9_\$\{]` leaves the
+# backslash inside the brackets where it is literal -- silently excluding `\`
+# from the legal-prefix set, so `declare \X=v`, which bash executes as a plain
+# assignment (verified on macOS bash 3.2.57), stopped being counted and scored a
+# clean 228/0 against a hardcoded ci-gate output. And `grep -o` consumes the
+# trailing delimiter it matched, so two mentions one byte apart collapse into a
+# single match -- an undercount, i.e. an error in the false-PASS direction.
+# Indexing has neither failure mode: it reads the two neighbour bytes directly
+# and advances one byte past each hit. Note the awk classes below carry no
+# backslashes at all, `$` and `{` being literal inside brackets -- that is the
+# whole lesson, restated in the fix.
+#
+# It is a function so its semantics are asserted directly, on a synthetic
+# corpus, immediately below. Both defects above were silent: each made the live
+# count too LOW, which is the direction that turns a red gate green, and neither
+# was visible in the suite's own output -- 228/0 either way. Exercising the
+# counter only through the live corpus can never catch that, because the live
+# corpus is the thing whose count is in question.
+# shellcheck disable=SC2016  # awk program text: $0 is awk's, not the shell's
+count_bare_mentions() {
+  awk -v n="$1" '
+    {
+      s = $0; p = 1
+      while ((i = index(substr(s, p), n)) > 0) {
+        a = p + i - 1; b = a + length(n)
+        before = (a > 1) ? substr(s, a - 1, 1) : ""
+        after  = (b <= length(s)) ? substr(s, b, 1) : ""
+        if (before !~ /[A-Za-z0-9_${]/ && after !~ /[A-Za-z0-9_]/) c++
+        p = a + 1
+      }
+    }
+    END { print c + 0 }'
+}
+readonly -f count_bare_mentions
+
+# Every case below is a regression probe, not an illustration: each corresponds
+# to a spelling that was, or would be, miscounted. `zz_probe` is deliberately
+# not a pin name, so these fixtures do not perturb the live count above.
+cm_bad=""
+cm_case() { # $1 label, $2 expected, $3 corpus
+  cm_got="$(count_bare_mentions zz_probe <<<"$3")"
+  [ "$cm_got" = "$2" ] || cm_bad="$cm_bad ${1}(want ${2} got ${cm_got})"
+}
+readonly -f cm_case
+# shellcheck disable=SC2016  # the corpora are literal source text, not expansions
+{
+cm_case bare-assign        1 'zz_probe=1'
+cm_case declare-assign     1 '  declare zz_probe=1'
+cm_case backslash-assign   1 '  declare \zz_probe=1'
+cm_case adjacent-mentions  2 '  declare zz_probe zz_probe=1'
+cm_case dollar-read        0 '  x="$zz_probe"'
+cm_case brace-read         0 '  x="${zz_probe}"'
+cm_case suffix-substring   0 '  zz_probely=1'
+cm_case prefix-substring   0 '  my_zz_probe=1'
+cm_case comment-line       1 '# zz_probe is named here'
+cm_case readonly-freeze    1 '  readonly zz_probe'
+cm_case printf-v           1 '  printf -v zz_probe "%s" "$x"'
+}
+if [ -n "$cm_bad" ]; then
+  fail "the pin-write counter miscounts a known spelling, so the assertion below is weaker than it reads (case(want got)):$cm_bad"
+else
+  pass "pin-write counter counts every direct spelling and no read: backslash-prefixed, adjacent, \$-read, \${}-read, substring, comment, printf -v"
+fi
+
+pin_multi=""
+while IFS= read -r pin_v; do
+  [ -n "$pin_v" ] || continue
+  n_mention="$(count_bare_mentions "$pin_v" <<<"$SELF_EXEC")"
+  pin_want=3
+  if grep -qE "^[[:space:]]*readonly[[:space:]]+${pin_v}=" <<<"$SELF_EXEC"; then
+    pin_want=2
+  fi
+  [ "$n_mention" = "$pin_want" ] || pin_multi="$pin_multi ${pin_v}=${n_mention}(want ${pin_want})"
+done <<<"$PIN_INPUTS"
+if [ -n "$pin_multi" ]; then
+  fail "pin-input variable(s) are named other than exactly once outside their list entry and readonly, so the value a pin reads is not the one this file shows at its assignment site. Budget is three bare mentions per name (list entry, assignment, readonly), two for the collapsed 'readonly X=' form; a mention in prose or in a message string must carry its sigil (name=found(want)):$pin_multi"
+else
+  pass "every pin-input variable is written exactly once, in any assignment spelling (no inserted line can rewrite one before its readonly freezes it)"
+fi
+
+# Cross-check the probed list against the declarations actually in the file.
+# This is a DRIFT check, NOT anti-tamper, and is labelled that way deliberately:
+# it keeps the list in step with the declarations as the suite grows (a new pin
+# variable given a `readonly` but no list entry, or the reverse, is reported),
+# but an edit that removes BOTH shrinks both sides and still matches. The effect
+# probe above is what proves the surviving declarations are in force. The
+# residual this cannot close: a NEW pin variable added later with neither a
+# `readonly` nor a list entry is unprotected -- no assertion can know about a
+# variable that does not exist yet.
+#
+# `readonly -f` freezes a FUNCTION, not a pin variable. Those lines get their own
+# drift check below, so they are dropped here rather than polluting this set with
+# a bare `-f` token and a function name.
+ro_var_lines="$(grep -vE '^[[:space:]]*readonly[[:space:]]+-f[[:space:]]' <<<"$SELF_EXEC" || true)"
+ro_decls="$(sed -n 's/^[[:space:]]*readonly[[:space:]]\{1,\}//p' <<<"$ro_var_lines")"
+ro_names="$(tr ' ' '\n' <<<"$ro_decls")"
+ro_bare=""
+while IFS= read -r ro_line; do
+  [ -n "$ro_line" ] || continue
+  ro_bare="${ro_bare}${ro_line%%=*}
+"
+done <<<"$ro_names"
+declared_ro="$(sort -u <<<"$ro_bare")"
+expected_ro="$(sort -u <<<"$PIN_INPUTS")"
+assert_block_lines_exact "$declared_ro" \
+  "the set of readonly-declared names (drift check against the probed list)" \
+  "$expected_ro" \
+  "the probed list and the declarations have drifted apart -- a pin variable carries one without the other, so either the probe silently covers nothing or a declared name is never probed"
+
+# Same treatment for CALLABLES. Every function this file defines is frozen with a
+# `readonly -f` on the line after its definition, because a function is a hop the
+# pins above do not cover: they prove what $SELF_EXEC contains, and a function is
+# resolved by NAME at call time. One inserted redefinition rebinds it. The
+# stealthiest target is a function the evidence flows through -- rebinding
+# count_bare_mentions between its own self-test and the loop that consumes it
+# makes every pin report the count it wants, so the suite scores byte-identical
+# to a clean run while the audit gate is fully degated. A rebound `fail` is the
+# cruder version of the same move. This is the file's own "pin every hop" lesson
+# applied to callables: a self-test proves a DEFINITION, not the binding the
+# consumer later resolves.
+# Honest bound, same as the variable drift check above: removing BOTH a
+# definition and its freeze shrinks both sides and still matches. The effect
+# probe below is what proves a surviving freeze is in force.
+defined_fns_raw="$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)()[[:space:]]*{.*$/\1/p' <<<"$SELF_EXEC")"
+frozen_fns_raw="$(sed -n 's/^[[:space:]]*readonly[[:space:]]\{1,\}-f[[:space:]]\{1,\}//p' <<<"$SELF_EXEC")"
+defined_fns="$(sort -u <<<"$defined_fns_raw")"
+frozen_fns="$(sort -u <<<"$frozen_fns_raw")"
+assert_block_lines_exact "$frozen_fns" \
+  "the set of readonly -f frozen functions (drift check against the functions defined)" \
+  "$defined_fns" \
+  "a function is defined without a matching 'readonly -f' freeze, or a freeze names a function that no longer exists -- an unfrozen function can be rebound by a single inserted line, which silently degates every assertion whose evidence passes through it"
+
+# Effect probe. The drift check above only compares two lists of file text; this
+# proves a freeze BINDS in the running shell. The fake prints a marker, so if the
+# freeze holds bash refuses the redefinition and the call reaches the real
+# function -- the marker can never appear. The positive half keeps the assertion
+# non-vacuous: the capture must ALSO show the refusal and the real function's own
+# output, so an empty capture from some unrelated breakage fails instead of
+# passing. Runs inside a command substitution, so the attempted redefinition
+# cannot escape into the rest of the suite either way.
+fn_freeze_probe="$( { pass() { echo "FN-FREEZE-FAKE-BOUND"; }; pass "fn-freeze effect probe"; } 2>&1 )"
+if [[ "$fn_freeze_probe" == *"FN-FREEZE-FAKE-BOUND"* ]]; then
+  fail "a 'readonly -f' freeze does not bind: redefining pass() inside the probe replaced it and the fake ran, so every function in this suite is rebindable by one inserted line despite the declarations"
+elif [[ "$fn_freeze_probe" == *"readonly function"* && "$fn_freeze_probe" == *"fn-freeze effect probe"* ]]; then
+  pass "'readonly -f' actually binds at runtime (a redefinition is refused and the real function still runs, not merely declared frozen in the file text)"
+else
+  fail "the 'readonly -f' effect probe was inconclusive -- expected both the shell's readonly-function refusal and the real pass() output, got: ${fn_freeze_probe}"
+fi
+# --- every unconditional job's step-block pin actually RAN --------------------
+#
+# `check_unconditional` in check-ci-success.sh promotes a job into the required
+# CI Success aggregate on the strength of "did it succeed", which a job whose
+# steps were removed still satisfies. The line-for-line pins above are what
+# close that, and check-ci-success.test.sh asserts one exists per such job — by
+# grepping this file, which a call wrapped in `if false` satisfies while never
+# executing (found in review). This is the half that measures execution.
+uncond_expected="$(grep -v '^[[:space:]]*#' "$REPO_ROOT/scripts/check-ci-success.sh" \
+  | grep -Eo '^check_unconditional[[:space:]]+"[^"]+"' \
+  | sed -E 's/^check_unconditional[[:space:]]+"([^"]+)"$/\1/')"
+if [ -z "$uncond_expected" ]; then
+  fail "no check_unconditional calls found in check-ci-success.sh — either the form was removed (and the jobs it protected are unguarded) or this cut broke; the per-job assertion below would pass having checked nothing"
+else
+  uncond_missing=""
+  while IFS= read -r ujob; do
+    [ -n "$ujob" ] || continue
+    grep -qxF "ci.yml ${ujob} job steps:" <<<"$STEPS_BLOCK_RAN" || uncond_missing="$uncond_missing $ujob"
+  done <<<"$uncond_expected"
+  if [ -n "$uncond_missing" ]; then
+    fail "step-block pin(s) did not RUN for unconditional job(s) —$uncond_missing. The call is present in this file but never executed (commented out, wrapped in a false branch, or unreached), so removing one of that job's steps is caught by nothing."
+  else
+    pass "every check_unconditional job's step-block pin actually ran ($(printf '%s\n' "$uncond_expected" | grep -c .) job(s))"
+  fi
+fi
+
+
+echo ""
+if [ "$FAILURES" -eq 0 ]; then
+  echo "All tests passed."
+  exit 0
+else
+  echo "$FAILURES test(s) failed."
+  exit 1
+fi
+ && ci=true
           echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/|^web/src/data/commands\.json$|^docs/capability-matrix\.md$|^web/src/data/commandIndex\.json$' && docs=true
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && design=true
           echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$|^\.codex/hooks/|^tools/agentic-sync/port\.(mjs|json)$' && hooks=true
