@@ -57,6 +57,7 @@ const POST_impl = createGenerationHandler<
   PacingReport
 >({
   route: '/api/generate/pacing',
+  panel: 'pacing-analyzer',
   provider: DB_PROVIDER.chat,
   operation: 'pacing_analysis',
   rateLimitKey: 'gen-pacing',
