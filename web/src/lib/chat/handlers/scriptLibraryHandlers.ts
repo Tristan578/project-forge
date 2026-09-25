@@ -225,7 +225,7 @@ export const scriptLibraryHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
     const { usePublishStore } = await import('@/stores/publishStore');
     const result = await usePublishStore.getState().publishGame(
-      ctx.store.projectId || '', p.data.title, p.data.slug, p.data.description
+      ctx.store.projectId ?? '', p.data.title, p.data.slug, p.data.description
     );
     return result ? { success: true, result: { message: `Published: ${result.url}`, url: result.url } } : { success: false, error: 'Publish failed' };
   },

@@ -548,7 +548,7 @@ export function buildPlan(
         owner = candidate;
         break;
       }
-      if (!owner) owner = candidate;
+      owner ??= candidate;
     }
 
     if (owner) {

@@ -247,6 +247,7 @@ export function useGenerationPolling() {
           // Same rule as the timeout fallback above: the provider reported a
           // terminal failure with no message of its own, so the bare sentence
           // gets the next step appended.
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank job error is unset; falls back to a generated retry message
           failJob(id, data.error || withRetryGuidance('Generation failed'));
 
           // Stop polling

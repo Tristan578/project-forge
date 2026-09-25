@@ -298,6 +298,7 @@ function RuntimeReplaySection() {
       )}
       <p className="text-xs text-zinc-400 mb-2">
         {primaryId
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank selected-entity name is unset; falls back to showing the raw id
           ? `Replay will observe ${selectedEntityName || primaryId}.`
           : 'Select the player entity before replaying recorded input.'}
       </p>

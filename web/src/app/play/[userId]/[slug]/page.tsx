@@ -41,6 +41,7 @@ export async function generateMetadata({
 
   return {
     title: `${game.title} - SpawnForge`,
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored game description is unset; falls back to generated SEO copy
     description: game.description || `Play ${game.title} on SpawnForge`,
     alternates: { canonical: `/play/${clerkId}/${slug}` },
   };
@@ -87,6 +88,7 @@ export default async function PlayPage({ params }: PlayPageProps) {
     '@context': 'https://schema.org',
     '@type': 'VideoGame',
     name: game.title,
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored game description is unset; falls back to generated SEO copy
     description: game.description || `Play ${game.title} on SpawnForge`,
     url: `${SITE_URL}/play/${userId}/${slug}`,
     gamePlatform: 'Web Browser',

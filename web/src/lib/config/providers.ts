@@ -537,6 +537,7 @@ export const CHAT_BACKEND_ENV_VARS: readonly string[] = CHAT_BACKENDS.flatMap((b
  * no fourth literal: import this.
  */
 export function isVercelRuntime(): boolean {
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness inside Boolean(); a blank env var and an absent one must read identically
   return Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
 }
 

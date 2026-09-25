@@ -156,6 +156,7 @@ async function GET_impl(
       description: game.description,
       slug: game.slug,
       authorId: game.authorId,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
       authorName: game.authorName || 'Unknown',
       playCount: game.playCount,
       likeCount: Number(game.likeCount),
@@ -180,6 +181,7 @@ async function GET_impl(
         content: c.content,
         parentId: c.parentId,
         authorId: c.authorId,
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
         authorName: c.authorName || 'Unknown',
         createdAt: c.createdAt.toISOString(),
       })),

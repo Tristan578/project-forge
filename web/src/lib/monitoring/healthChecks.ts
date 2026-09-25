@@ -838,6 +838,7 @@ export async function checkCloudflareR2(): Promise<ServiceHealth> {
   const bucketName = process.env[ASSET_STORAGE_ENV.bucketName];
 
   const allConfigured = !!(accountId && accessKeyId && secretAccessKey && bucketName);
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is R2 partially configured); ?? cannot substitute this OR
   const anyConfigured = !!(accountId || accessKeyId || secretAccessKey || bucketName);
 
   const details = {
