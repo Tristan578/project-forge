@@ -113,15 +113,19 @@ function configKeyOf(config: WifConfig): string {
  * `@vercel/oidc` is only a transitive dependency here; declaring it would add a
  * dependency for a two-line read.
  */
+function trimmedNonEmpty(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed;
+}
+
 function readVercelOidcToken(): string {
   const store = (globalThis as Record<symbol, unknown>)[Symbol.for('@vercel/request-context')] as
     | { get?: () => { headers?: Record<string, string | undefined> } | undefined }
     | undefined;
-  const fromHeader = store?.get?.()?.headers?.['x-vercel-oidc-token']?.trim();
-  let token = fromHeader;
-  if (!token) {
-    token = process.env.VERCEL_OIDC_TOKEN?.trim();
-  }
+  const fromHeader = trimmedNonEmpty(store?.get?.()?.headers?.['x-vercel-oidc-token']);
+  const token = fromHeader ?? trimmedNonEmpty(process.env.VERCEL_OIDC_TOKEN);
   if (!token) {
     throw new Error('Anthropic WIF: no Vercel OIDC token (x-vercel-oidc-token header or VERCEL_OIDC_TOKEN)');
   }
