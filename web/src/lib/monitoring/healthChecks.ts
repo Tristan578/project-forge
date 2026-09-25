@@ -937,6 +937,9 @@ async function checkGenerationFactory(): Promise<ServiceHealth> {
         const { createGenerationHandler } = await import('@/lib/api/createGenerationHandler');
         const handler = createGenerationHandler({
           route: '/api/health/factory-smoke',
+          // Never reached — the smoke test is unauthenticated and returns 401
+          // before the panel gate runs — but the field is required.
+          panel: 'ai-chat',
           provider: DB_PROVIDER.chat,
           operation: 'chat_short',
           rateLimitKey: 'health-smoke',

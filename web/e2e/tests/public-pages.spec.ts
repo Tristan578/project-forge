@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { TRIAL_GRANT_TOKENS } from '../../src/lib/tokens/pricing';
 
 /**
  * Public pages E2E tests — verifies all unauthenticated routes render correctly
@@ -67,7 +68,7 @@ test.describe('Public Pages @ui', () => {
       // asserted hand-written copy that the server never enforced: "1 project"
       // when the free tier gets 3, and "5,000 tokens" when Studio grants 3,000.
       await expect(page.getByText('3 cloud projects')).toBeVisible();
-      await expect(page.getByText('No AI features')).toBeVisible();
+      await expect(page.getByText(`${TRIAL_GRANT_TOKENS} trial AI tokens at signup`)).toBeVisible();
       await expect(page.getByText('Unlimited cloud projects')).toBeVisible();
       await expect(page.getByText(/3,000 AI tokens\/month/)).toBeVisible();
     });

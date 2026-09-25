@@ -398,7 +398,7 @@ export const COMMAND_CAPABILITY: Readonly<Record<string, ProviderCapability>> = 
 /**
  * The capability each generate route spends, keyed by the `route:` string its
  * `createGenerationHandler` config declares. The handler's refuse-before-charge
- * gate (step 1a) reads this table when a route does not declare `capability`
+ * gate (step 1b) reads this table when a route does not declare `capability`
  * itself, so a route cannot be left ungated by omission — a test walks every
  * `web/src/app/api/generate/*\/route.ts` and fails on a route missing here.
  * `localize` and `pacing` are LLM calls on the chat path.

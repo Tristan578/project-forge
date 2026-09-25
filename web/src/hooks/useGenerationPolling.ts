@@ -53,6 +53,32 @@ interface StatusResponse {
   durationSeconds?: number;
 }
 
+/** A machine code such as `TIER_REQUIRED` or `SERVICE_DEGRADED`: never user-facing text. */
+const MACHINE_CODE = /^[A-Z0-9]+(?:_[A-Z0-9]+)*$/;
+
+/**
+ * The user-facing sentence in a non-OK status-route body, or `null` when the
+ * body carries none. Status routes put two shapes on the wire: most write the
+ * sentence in `error` (`{ error: 'Could not read … Please try again.' }`,
+ * the 402 key errors, the 429 rate limit), while the tier gate and the auth
+ * layer put a CODE in `error` and the sentence in `message`
+ * (`{ error: 'TIER_REQUIRED', message: 'This feature requires … plan' }`,
+ * `SERVICE_DEGRADED`, `ACCOUNT_BANNED`). So `message` wins when it is a
+ * non-empty string, `error` is the fallback, and a bare code is never
+ * returned. Without the last rule, polling that gives up would leave a
+ * persistent toast reading "TIER_REQUIRED".
+ */
+function statusErrorText(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const { message, error } = body as { message?: unknown; error?: unknown };
+  for (const candidate of [message, error]) {
+    if (typeof candidate === 'string' && candidate.trim() !== '' && !MACHINE_CODE.test(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 export function useGenerationPolling() {
   const jobs = useGenerationStore((s) => s.jobs);
   const updateJob = useGenerationStore((s) => s.updateJob);
@@ -200,10 +226,7 @@ export function useGenerationPolling() {
           // Read the body BEFORE throwing. The route's message is written for
           // the user and is the only place that says what actually went wrong.
           const body: unknown = await response.json().catch(() => null);
-          const message =
-            body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
-              ? (body as { error: string }).error
-              : null;
+          const message = statusErrorText(body);
           if (message) lastStatusErrorRef.current[id] = message;
           throw new Error(`Status check failed: ${response.status}`);
         }

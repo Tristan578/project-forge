@@ -435,6 +435,94 @@ gh run view <run-id>
 gh workflow run cd.yml
 ```
 
+### 5.9 Trial Token Grant Failure
+
+**Detection:** New users report 0 tokens or every AI panel locked right after
+signup. Sentry issues on `/api/auth/webhook` (alert rule 3 in
+`docs/sentry-alert-rules.md`), with `extra.context = trial-token-grant-failure`
+on the event.
+
+**Background:** the Clerk `user.created` webhook (`web/src/app/api/auth/webhook/route.ts`)
+calls `grantTrialTokens(user.id)` (`web/src/lib/billing/trial-grant.ts`,
+#7715) after `syncUserFromClerk`. One statement inserts a `credit_transactions`
+row with `source = 'trial_grant'` and `reference_id = users.id`, and sets
+`users.monthly_tokens = TRIAL_GRANT_TOKENS` only when that insert produced a
+row. A grant failure is captured and rethrown; a transient error goes to the
+route's in-memory retry queue, a permanent one answers 500 to Clerk.
+
+**Verification:**
+```sql
+-- Very recent signups with no tokens at all: a non-zero count while the grant
+-- is meant to be running is the symptom.
+SELECT count(*) FROM users
+WHERE monthly_tokens = 0 AND created_at > now() - interval '1 day';
+
+-- Whether the audit row exists for one user (the arbiter of "already granted").
+SELECT id, amount, created_at FROM credit_transactions
+WHERE user_id = '<users.id>' AND source = 'trial_grant';
+```
+
+**Mitigation:**
+```bash
+# 1. Re-deliver the user.created event from the Clerk dashboard
+#    (Webhooks -> endpoint -> the event -> Resend). Safe to replay: the grant
+#    is idempotent at the database — the NOT EXISTS guard plus the partial
+#    unique index idx_credit_txn_idempotent (drizzle/0002) insert at most one
+#    trial_grant row per user, so a replay to an already-granted user is a no-op.
+
+# 2. Or grant directly with a one-off script (internal users.id, never the Clerk id):
+cd web && npx tsx -e "import('./src/lib/billing/trial-grant').then(m => m.grantTrialTokens('<users.id>'))"
+
+# 3. If the failures are transient (Neon connection errors), the route's retry
+#    queue replays the event on the next webhook delivery; check that recent
+#    signups recover before granting by hand.
+```
+
+**What the tokens open:** a `starter` account with spendable tokens is treated
+as `hobbyist` by the four AI gates — `effectiveTier` in
+`web/src/lib/ai/tierAccess.ts`, applied by `assertAiAccess` on `/api/chat` and
+`/api/game/decompose`, by the platform-key resolver, by
+`createGenerationHandler`'s per-route `panel` check (every `/api/generate/*`
+route, checked right after auth and before any token deduction — #7715 review
+round 2; `voice/batch`, which calls `resolveApiKey` directly, runs the same
+check through `panelTierGateResponse` in `web/src/lib/api/panelTierGate.ts`
+before resolving a key), and by the editor's panel gate (the profile route ships
+`spendableTokens` so the editor knows on first paint).
+
+**Status polls are the exception, on purpose.** Every `*/status` poller runs
+`panelTierGateResponseForPoll` instead, which does not read the live balance:
+a `starter` that has HELD tokens (`monthlyTokens > 0 || addonTokens > 0`)
+counts as `hobbyist` however many it has left, so creator-tier status routes
+stay refused. A spent trial still qualifies, because the grant sets
+`monthly_tokens` and spending only raises `monthly_tokens_used`. A `starter`
+that never held tokens (a signup the grant never reached, every column 0) is
+judged as `starter` and refused on hobbyist status routes too, as it was before
+#7715. The status routes do **not** check that the `jobId` belongs to the
+caller (pre-existing on `main` for every paid tier, tracked in #10262), so the
+poll gate narrows who can reach them; it is not an ownership check. The resolver, likewise, skips its tier and balance checks for a
+zero-cost `STATUS_CHECK_OPERATION` call (the pollers and the QStash
+`generation-complete` callback). The polled job was paid for when it was
+created, and one generation can spend the whole grant (a tileset costs 50), so
+the balance-aware rule would refuse every poll of it: the result would never
+arrive, and the durable callback would finalize it as failed and refund it. The
+same check had been locking out a paid hobbyist whose last generation took the
+balance to exactly 0. A user whose grant
+landed but who still sees every AI panel locked has a stale profile (reload) or
+a balance of zero; the SQL above distinguishes the two. The Token Dashboard
+labels a `starter` balance "Trial Remaining" with a one-time, does-not-renew
+note and never shows "Next refill" for it — nothing refills a starter account.
+
+**Abuse boundary (known, accepted):** the grant is exactly-once **per
+account**. `users.email` is `NOT NULL UNIQUE` and `users.clerk_id` is unique
+(`web/src/lib/db/schema.ts`), so one email address receives at most one trial
+grant, enforced at the database. Nothing ties two accounts to one person: the
+Clerk payload carries no IP or device signal and the repository captures none
+(`sentryConfig.ts`'s `fingerprint` is Sentry error grouping, unrelated). A
+determined abuser using disposable or multiple email addresses can collect one
+grant per address. The blast radius is `TRIAL_GRANT_TOKENS` per fake account.
+Detection of that pattern is tracked in #10235 and is deliberately not built
+here.
+
 ---
 
 ## 6. Capacity Planning
