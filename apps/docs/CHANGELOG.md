@@ -1,5 +1,23 @@
 # @spawnforge/docs
 
+## 0.2.4
+
+### Patch Changes
+
+- [#10201](https://github.com/Tristan578/project-forge/pull/10201) [`689ac8d`](https://github.com/Tristan578/project-forge/commit/689ac8d7fb12cafdbbcdd295b74e90dbc562a906) Thanks [@Tristan578](https://github.com/Tristan578)! - Choose how a game counts as complete: Win, Endless, Sandbox or Narrative. Set it from the new Completion mode picker in Scene Settings (keyboard-accessible, with its own Undo and Redo), ask the in-app AI (`set_completion_mode`), or describe a sandbox, endless or story game when generating one. Only Win requires a win condition before Play and generated-game verification pass. A win condition the scene does have is still checked in every mode. Generated games no longer get an invented goal when their brief is Endless, Sandbox or Narrative.
+  
+  The mode is saved with the scene: `.forge` download, auto-save, cloud save, scene switching and checkpoints all carry it, and reopening restores it. Scenes saved before this change have no mode and still open as Win, with the same Play check as before.
+  
+  Completion-mode controls follow the active theme and use shared native radio controls with full-option touch targets. AI undo/redo can target completion-mode history explicitly.
+
+- [#10232](https://github.com/Tristan578/project-forge/pull/10232) [`33116b2`](https://github.com/Tristan578/project-forge/commit/33116b25de2fe3f65b42720ffb278d2f10808b7d) Thanks [@Tristan578](https://github.com/Tristan578)! - Enable `exactOptionalPropertyTypes` in the three small TypeScript workspaces ([#7592](https://github.com/Tristan578/project-forge/issues/7592)).
+  
+  `apps/docs`, `mcp-server` and `packages/ui` now distinguish an omitted optional property from one set to `undefined`. The handful of sites that relied on the old equivalence build their objects and JSX props with conditional spread instead, so no serialized output gains a literal `undefined` key. The stateless MCP HTTP transport drops its explicit `sessionIdGenerator: undefined` (the SDK gates stateless mode on the option being falsy, so an absent key is identical). No runtime behaviour changes. `web` is not touched: it measures 320 errors across 165 files and is tracked separately.
+
+- [#10137](https://github.com/Tristan578/project-forge/pull/10137) [`7f4653b`](https://github.com/Tristan578/project-forge/commit/7f4653b46a0a10d16ec4b80095c7321a7c506540) Thanks [@dependabot](https://github.com/apps/dependabot)! - Update runtime dependencies for AI providers, authentication, storage, monitoring, validation, and documentation. Refresh related development and test tooling.
+
+- [#10110](https://github.com/Tristan578/project-forge/pull/10110) [`58037f4`](https://github.com/Tristan578/project-forge/commit/58037f439ec5365616e01e086f3569bdf7858be6) Thanks [@Tristan578](https://github.com/Tristan578)! - Deny protected docs requests during authentication failures without exposing provider errors; retain public documentation access.
+
 ## 0.2.3
 
 ### Patch Changes
