@@ -1921,6 +1921,39 @@ else
   pass "30t-b. a definition nested in a function body, an if or case arm or a loop is not reported"
 fi
 
+# ---- 30u. the brace and split messages name every statement their guard covers
+# Thirty-fourth board round (ux): the brace report said "an alias, shopt or
+# trap statement" while its guard also fires in a set statement (30o line 17
+# is one), so a contributor hit by it in set -o read an explanation that never
+# named set. Both lists are derived from the gate at run time: the in_ flags
+# on each guard line, and the statement list in each report line. Each flag
+# must be named in its message, and the walk must find at least one flag.
+for pair in "brace bx_trunc" "split px_split"; do
+  st="${pair%% *}"; fv="${pair#* }"
+  # A subshell, so each early exit ends only this pair's check.
+  res="$(
+    guard="$(grep -E "^[[:space:]]*if \\($fv && " "$GATE")"
+    msg="$(grep -E "^[[:space:]]*$st\\)[[:space:]]+echo " "$GATE")"
+    if [ "$(grep -c . <<<"$guard")" != 1 ] || [ "$(grep -c . <<<"$msg")" != 1 ]; then
+      echo "no unique guard or message for $st"; exit 0
+    fi
+    msg="$(sed -n 's/.*in a command name or an \([a-z, ]*\) statement.*/\1/p' <<<"$msg")"
+    [ -n "$msg" ] || { echo "no statement list in the $st message"; exit 0; }
+    n=0; missing=""
+    while read -r flag; do
+      n=$((n + 1))
+      grep -qw "$flag" <<<"$msg" || missing="$missing $flag"
+    done < <(grep -oE '\|\| in_[a-z]+' <<<"$guard" | sed 's/.*in_//')
+    [ "$n" -gt 0 ] || { echo "no in_ flag found on the $st guard"; exit 0; }
+    [ -z "$missing" ] || echo "$st message omits:$missing"
+  )"
+  if [ -z "$res" ]; then
+    pass "30u. the $st message names every statement its guard fires in"
+  else
+    fail "30u. the $st message names every statement its guard fires in" "$res"
+  fi
+done
+
 # ---- 30r. inside double quotes a backslash escapes only five characters -----
 # Thirty-second board round (architect): the lexer dropped every backslash in
 # a double-quoted word, while bash keeps one before anything but a dollar, a
@@ -2071,8 +2104,8 @@ expect_rc "30l-b. brace expansion in an argument position is still text" 0 "$(ru
 # ---- 30m. a brace expansion past the enumeration cap fails closed -----------
 # Nineteenth board round (security): the enumeration stopped at 64 words, so
 # `alias {z0,...,z63,fail=:}` defined an alias in bash and passed the gate.
-# A word cut short in a guarded position (command name, alias, shopt or trap
-# statement), or nested more than 8 expansions deep (line 7), is now a
+# A word cut short in a guarded position (command name, alias, shopt, set or
+# trap statement; set joined in the twenty-sixth round), or nested more than 8 expansions deep (line 7), is now a
 # `brace` violation; the same length in an argument of
 # any other command is text, as `printf 'a%.0s' {1..65}` in the real tree is,
 # and so is an assignment word before the command name (line 10), which bash

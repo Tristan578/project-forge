@@ -902,8 +902,8 @@ was replaced with this one (round twenty-nine).
   A word is now judged as every word its brace groups expand to. The
   nineteenth found that the 64-word enumeration cap passed a guarded word at
   position 65; an expansion cut short by the cap or by the 8-level nesting
-  bound, in a command name or an alias, shopt or trap statement, is now a
-  `brace` violation, and a numeric range (`trap 'exit 0' {0..0}`) is pinned.
+  bound, in a command name or an alias, shopt or trap statement (and, from
+  the twenty-sixth, a set statement), is now a `brace` violation, and a numeric range (`trap 'exit 0' {0..0}`) is pinned.
   The twenty-first found that bash reads a numeric trap signal as an
   optionally signed decimal after leading blanks, so `00`, `+0` and `' 00'`
   are all signal 0 (EXIT); the gate now stores each numeric signal as its
