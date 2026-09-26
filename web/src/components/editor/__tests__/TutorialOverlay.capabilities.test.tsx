@@ -14,7 +14,8 @@ import { TutorialOverlay } from '../TutorialOverlay';
 import { HelpMenu } from '../HelpMenu';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore, setCommandDispatcher } from '@/stores/editorStore';
-import { TUTORIAL_CAPABILITIES } from '@/data/tutorials';
+import { TUTORIAL_CAPABILITIES, TUTORIALS } from '@/data/tutorials';
+import userEvent from '@testing-library/user-event';
 
 const TITLES = TUTORIAL_CAPABILITIES.steps.map((s) => s.title);
 
@@ -234,12 +235,147 @@ describe('capabilities tour (#10171)', () => {
   });
 });
 
+// The intro promises "This tour only points at things". A highlight ring the
+// pointer passes straight through, or a Tab order that walks out of the bubble
+// onto the highlighted control, would let one stray click start a real Quick
+// Start flow, enter play mode or download an export.
+describe('capabilities tour blocks the controls it points at (#10171)', () => {
+  function SpiedTargets({ onActivate }: { onActivate: (id: string) => void }) {
+    const place = (id: string) => (el: HTMLElement | null) => {
+      if (el) el.getBoundingClientRect = () => rectOf(id);
+    };
+    return (
+      <>
+        {Object.keys(RECTS).map((id) => (
+          <button key={id} type="button" data-testid={id} ref={place(id)} onClick={() => onActivate(id)}>
+            {id}
+          </button>
+        ))}
+      </>
+    );
+  }
+
+  it('a click on each highlighted control does not reach it', async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn();
+    render(
+      <>
+        <SpiedTargets onActivate={onActivate} />
+        <TutorialOverlay />
+      </>,
+    );
+    startTour();
+    next();
+
+    for (const id of ['quick-start-trigger', 'play-controls-play', 'scene-toolbar-export']) {
+      const highlight = screen.getByTestId('tutorial-highlight');
+      expect(highlight.style.left).toBe(`${RECTS[id]!.left - 8}px`);
+      expect(screen.getByTestId('tutorial-backdrop').className).toContain('pointer-events-auto');
+      expect(highlight.className).toContain('pointer-events-auto');
+
+      await user.click(screen.getByTestId(id));
+      fireEvent.click(screen.getByTestId(id));
+      expect(onActivate).not.toHaveBeenCalled();
+      next();
+    }
+    expect(useOnboardingStore.getState().tutorialCompleted.capabilities).toBe(true);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('Tab and Shift+Tab stay inside the bubble and never land on the highlighted control', async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn();
+    render(
+      <>
+        <SpiedTargets onActivate={onActivate} />
+        <TutorialOverlay />
+      </>,
+    );
+    startTour();
+    next();
+    next(); // the Play step
+    expect(screen.getByText(TITLES[2] ?? '', { selector: 'h3' })).toBeInTheDocument();
+
+    const bubble = screen.getByTestId('tutorial-bubble');
+    const seen = new Set<Element | null>();
+    for (let i = 0; i < 6; i++) {
+      await user.tab();
+      seen.add(document.activeElement);
+      expect(bubble.contains(document.activeElement)).toBe(true);
+    }
+    for (let i = 0; i < 6; i++) {
+      await user.tab({ shift: true });
+      seen.add(document.activeElement);
+      expect(bubble.contains(document.activeElement)).toBe(true);
+    }
+    // It really cycles through the bubble's three buttons.
+    expect(seen.size).toBe(3);
+
+    // Even with focus forced onto the control, Enter does not activate it.
+    screen.getByTestId('play-controls-play').focus();
+    await user.keyboard('{Enter}');
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+
+  it('gives the page back once the tour ends', async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn();
+    render(
+      <>
+        <SpiedTargets onActivate={onActivate} />
+        <TutorialOverlay />
+      </>,
+    );
+    startTour();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('tutorial-backdrop')).toBeNull();
+
+    await user.click(screen.getByTestId('play-controls-play'));
+    expect(onActivate).toHaveBeenCalledWith('play-controls-play');
+  });
+
+  // The older tutorials ask the user to press the real control; those steps
+  // must still let the click through, exactly as before.
+  it('an action-required step in another tutorial still lets the click and Tab through', async () => {
+    const user = userEvent.setup();
+    const onPlay = vi.fn();
+    render(
+      <>
+        <button type="button" aria-label="Play" onClick={onPlay} />
+        <TutorialOverlay />
+      </>,
+    );
+    const steps = TUTORIALS.find((t) => t.id === 'first-scene')!.steps;
+    const pressPlay = steps.findIndex((s) => s.id === 'press-play');
+    expect(steps[pressPlay]!.actionRequired).toBeTruthy();
+    act(() => {
+      useOnboardingStore.setState({ activeTutorial: 'first-scene', tutorialStep: pressPlay });
+    });
+
+    expect(screen.getByTestId('tutorial-backdrop').className).toContain('pointer-events-none');
+    expect(screen.getByTestId('tutorial-highlight').className).toContain('pointer-events-none');
+    expect(screen.getByTestId('tutorial-bubble').getAttribute('aria-modal')).toBeNull();
+
+    const play = screen.getByRole('button', { name: 'Play' });
+    await user.click(play);
+    expect(onPlay).toHaveBeenCalledTimes(1);
+
+    let reached = false;
+    for (let i = 0; i < 6 && !reached; i++) {
+      await user.tab();
+      reached = document.activeElement === play;
+    }
+    expect(reached).toBe(true);
+  });
+});
+
 describe('capabilities tour accessibility (#10171)', () => {
   function nextButton() {
     return screen.getByRole('button', { name: /^(Next|Complete)$/ });
   }
 
-  it('is a non-modal dialog named by the step title and described by its text and keys', () => {
+  // Modal because it is: a highlight-only step blocks the page behind it.
+  it('is a modal dialog named by the step title and described by its text and keys', () => {
     render(
       <>
         <Targets />
@@ -249,7 +385,7 @@ describe('capabilities tour accessibility (#10171)', () => {
     startTour();
 
     const dialog = screen.getByRole('dialog', { name: TITLES[0] });
-    expect(dialog.getAttribute('aria-modal')).toBeNull();
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog).toHaveAccessibleDescription(
       expect.stringContaining(TUTORIAL_CAPABILITIES.steps[0]!.description),
     );

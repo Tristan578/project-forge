@@ -233,16 +233,29 @@ export function TutorialOverlay() {
   // Early return after all hooks
   if (!activeTutorialId || !tutorial || !currentStep) return null;
 
+  // A step that asks the user to DO something (actionRequired) lets the page
+  // through: the click on the highlighted control is the step. Every other
+  // step only points, so it blocks the page, or the "What can SpawnForge do?"
+  // tour's promise that it spends nothing would be one stray click on the
+  // highlighted Quick Start, Play or Export away from false (#10171).
+  const blocksPage = !currentStep.actionRequired;
+  const pointerEvents = blocksPage ? 'pointer-events-auto' : 'pointer-events-none';
+
   return (
     <>
       {/* Backdrop with spotlight */}
-      <div className="fixed inset-0 z-[100] bg-black/60 pointer-events-none" />
+      <div
+        data-testid="tutorial-backdrop"
+        aria-hidden="true"
+        className={`fixed inset-0 z-[100] bg-black/60 ${pointerEvents}`}
+      />
 
       {/* Highlight border */}
       {highlightRect && (
         <div
           data-testid="tutorial-highlight"
-          className="fixed z-[101] border-3 border-blue-500 rounded-lg pointer-events-none"
+          aria-hidden="true"
+          className={`fixed z-[101] border-3 border-blue-500 rounded-lg ${pointerEvents}`}
           style={{
             left: `${highlightRect.left - 8}px`,
             top: `${highlightRect.top - 8}px`,
@@ -262,6 +275,7 @@ export function TutorialOverlay() {
         actionCompleted={actionCompleted}
         isLastStep={isLastStep}
         highlightRect={highlightRect}
+        blocksPage={blocksPage}
         onNext={handleNext}
         onSkip={handleSkip}
       />
@@ -397,9 +411,26 @@ interface TutorialBubbleProps {
   actionCompleted: boolean;
   isLastStep: boolean;
   highlightRect: DOMRect | null;
+  /** Highlight-only step: the page behind is blocked and focus stays in the bubble. */
+  blocksPage: boolean;
   onNext: () => void;
   onSkip: () => void;
 }
+
+/** Pointer events stopped before the page sees them while a step blocks it. */
+const BLOCKED_POINTER_EVENTS = [
+  'pointerdown',
+  'pointerup',
+  'mousedown',
+  'mouseup',
+  'click',
+  'dblclick',
+  'auxclick',
+  'contextmenu',
+] as const;
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function TutorialBubble({
   stepKey,
@@ -409,6 +440,7 @@ function TutorialBubble({
   actionCompleted,
   isLastStep,
   highlightRect,
+  blocksPage,
   onNext,
   onSkip,
 }: TutorialBubbleProps) {
@@ -446,6 +478,51 @@ function TutorialBubble({
     else dialogRef.current?.focus();
   }, [stepKey]);
 
+  // A highlight-only step blocks the page. The backdrop and ring already take
+  // the pointer; this also covers a control stacked above them and the
+  // keyboard. Anything aimed outside the bubble is stopped in the capture
+  // phase, before React or the engine sees it: a click (including the one
+  // Enter or Space synthesises on a focused button), and Tab, which cycles
+  // through the bubble's own controls instead of walking onto the page.
+  // Listeners are removed when the step changes or the tour ends, so the
+  // opener-focus restore above is unaffected.
+  useEffect(() => {
+    if (!blocksPage) return;
+    const inBubble = (target: EventTarget | null) =>
+      target instanceof Node && !!dialogRef.current?.contains(target);
+
+    const stopPointer = (e: Event) => {
+      if (inBubble(e.target)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+
+    const trapTab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey) return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const items = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+      e.preventDefault();
+      if (items.length === 0) {
+        dialog.focus();
+        return;
+      }
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const nextIndex =
+        at === -1
+          ? e.shiftKey ? items.length - 1 : 0
+          : (at + (e.shiftKey ? -1 : 1) + items.length) % items.length;
+      items[nextIndex]!.focus();
+    };
+
+    for (const type of BLOCKED_POINTER_EVENTS) window.addEventListener(type, stopPointer, true);
+    window.addEventListener('keydown', trapTab, true);
+    return () => {
+      for (const type of BLOCKED_POINTER_EVENTS) window.removeEventListener(type, stopPointer, true);
+      window.removeEventListener('keydown', trapTab, true);
+    };
+  }, [blocksPage]);
+
   const anchor = placement.centred
     ? { top: '50%', transform: 'translateY(-50%)' }
     : placement.bottom !== undefined
@@ -457,6 +534,7 @@ function TutorialBubble({
       ref={dialogRef}
       data-testid="tutorial-bubble"
       role="dialog"
+      aria-modal={blocksPage ? true : undefined}
       aria-labelledby={titleId}
       aria-describedby={`${bodyId} ${hintId}`}
       tabIndex={-1}
