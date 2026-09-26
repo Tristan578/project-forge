@@ -1628,6 +1628,13 @@ fi
 # single-quoted and an escaped paren, line 54 an escaped backtick), which
 # ends nothing to bash: each operand holds a blank, so each
 # is a split violation named by the whole word, not cut at the inner brace.
+# Line 57 puts an ANSI-C string with an escaped quote and a paren inside a
+# substitution in an array subscript (round twenty-nine): read as a plain
+# single quote, the escaped quote closed it, the paren after it ended the
+# substitution early, and the stray quote swallowed the alias statement.
+# Lines 58 and 59 nest a substitution (then a backtick span) inside double
+# quotes inside it, holding one double quote: read as quote text rather
+# than as its own unit, that quote closed the string and swallowed the rest.
 d_pexp="$(mkfixture param-expansion <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -1685,10 +1692,13 @@ ${x:-$(echo ")}") alias}
 ${x:-`echo a\`b}` alias}
 ${x:-$(echo ')}') alias}
 ${x:-$(echo \)}) alias}
+: ${arr[$(echo $'a\'bc)de')]}; alias fail=:
+: ${arr[$(echo "$(echo '"')")]}; alias fail=:
+: ${arr[$(echo "`echo '"'`")]}; alias fail=:
 FIX
 )"
 out_pexp="$(run_gate "$d_pexp")"
-expect_rc "30o. a default, alternate or replacement that can spell a guarded word is judged as that word" 1 "$out_pexp" "38 violation(s)" \
+expect_rc "30o. a default, alternate or replacement that can spell a guarded word is judged as that word" 1 "$out_pexp" "41 violation(s)" \
   "fixture.test.sh:3: 'shopt -s \${n:-expand_aliases}'" "fixture.test.sh:4: 'alias fail=:'" \
   "fixture.test.sh:5: 'shopt -s \${HOME:+expand_aliases}'" "fixture.test.sh:6: 'alias fail=:'" \
   "fixture.test.sh:7: 'trap exit 0 ... EXIT'" "fixture.test.sh:8: 'trap exit 0 ... EXIT'" \
@@ -1704,7 +1714,8 @@ expect_rc "30o. a default, alternate or replacement that can spell a guarded wor
   "fixture.test.sh:39: 'alias fail=:'" "fixture.test.sh:42: '\${arr1[" "fixture.test.sh:43: '\${arr2[" "fixture.test.sh:45: 'x=(...)'" \
   "fixture.test.sh:51: '\${x:-\$(echo }) alias}'" "fixture.test.sh:52: '\${x:-\`echo }\` alias}'" \
   "fixture.test.sh:53: '\${x:-\$(echo \")}\") alias}'" "fixture.test.sh:54: '\${x:-\`echo a\\\`b}\` alias}'" \
-  "fixture.test.sh:55: '\${x:-\$(echo ')}') alias}'" "fixture.test.sh:56: '\${x:-\$(echo \\)}) alias}'"
+  "fixture.test.sh:55: '\${x:-\$(echo ')}') alias}'" "fixture.test.sh:56: '\${x:-\$(echo \\)}) alias}'" \
+  "fixture.test.sh:57: 'alias fail=:'" "fixture.test.sh:58: 'alias fail=:'" "fixture.test.sh:59: 'alias fail=:'"
 if grep -Eq 'fixture.test.sh:(18|19|20|21):' <<<"$out_pexp"; then
   fail "30o-c. an argument, an assignment, a trap action and a quoted argument with expansion text are not reported" "$out_pexp"
 else
@@ -1727,10 +1738,19 @@ bash -c 'trap "exit 0" ${n:-EXIT}; exit 3' >/dev/null 2>&1; pexp_trap=$?
 pexp_posix="$(bash -c 'set -o ${n:=posix}; shopt -p expand_aliases' 2>&1)"
 pexp_quote="$(bash -c 'fail() { echo REAL; }; readonly -f fail; : ${x:-"}"}; shopt -s expand_aliases; alias fail="echo ALIASED"
 eval fail' 2>&1)"
-if [ "$pexp_alias" = "ALIASED" ] && [ "$pexp_split" = "ALIASED" ] && [ "$pexp_trap" -eq 0 ] && [ "$pexp_posix" = "shopt -s expand_aliases" ] && [ "$pexp_quote" = "ALIASED" ]; then
+pexp_ansi="$(bash 2>&1 <<'PROBE'
+fail() { echo REAL; }
+readonly -f fail
+declare -A arr
+shopt -s expand_aliases
+: ${arr[$(echo $'a\'bc)de')]}; alias fail="echo ALIASED"
+eval fail
+PROBE
+)"
+if [ "$pexp_alias" = "ALIASED" ] && [ "$pexp_split" = "ALIASED" ] && [ "$pexp_trap" -eq 0 ] && [ "$pexp_posix" = "shopt -s expand_aliases" ] && [ "$pexp_quote" = "ALIASED" ] && [ "$pexp_ansi" = "ALIASED" ]; then
   pass "30o-b. a default, an alternate and a split default bind an alias, trap EXIT and enter posix mode in this bash"
 else
-  fail "30o-b. a probe did not reproduce (alias '$pexp_alias', split '$pexp_split', trap rc $pexp_trap, posix '$pexp_posix', quoted brace '$pexp_quote')"
+  fail "30o-b. a probe did not reproduce (alias '$pexp_alias', split '$pexp_split', trap rc $pexp_trap, posix '$pexp_posix', quoted brace '$pexp_quote', ANSI-C in a subscript '$pexp_ansi')"
 fi
 
 # ---- 30k. an ANSI-C quoted string is decoded before the word is judged -------

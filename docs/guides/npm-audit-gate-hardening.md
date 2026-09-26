@@ -797,21 +797,25 @@ bound closed.
 
 ### Measured before
 
-For every `scripts/__tests__/*.test.sh` and `.claude/hooks/__tests__/*.test.sh`
-that defines a `fail`/`bad` helper, the helper was neutered with `fail() { :; }`
-directly after its definition and a forced `fail "..."` was called on the next
-line — the generic stand-in for "a real failure after the rebind", which is what
-a degated gate produces. 46 suites define such a helper:
+For every scanned suite that defines a `fail`/`bad` helper (the gate's own
+`--list` derivation picks them), the helper was neutered with `fail() { :; }`
+directly after its definition, or after its freeze where one already existed,
+and a forced `fail "..."` was called on the next line: the generic stand-in
+for "a real failure after the rebind", which is what a degated gate produces.
+Measured on main at `a525ca4a`, where 52 of the 72 scanned files define such
+a helper, and on this branch, which adds the gate's own suite:
 
-| state | exit 0 (green while neutered) | exit non-zero |
+| tree | exit 0 (green while neutered) | exit non-zero |
 |---|---|---|
-| before the sweep | **45** | 1 (`check-npm-audit.test.sh`, round 40) |
-| after the sweep | 0 | **46** |
+| main at `a525ca4a` | **46** | 6, already frozen on main (`check-npm-audit.test.sh`, round 40, and five hook suites) |
+| this branch | 0 | **53** |
 
-The 19 suites without a `fail`/`bad` helper (`check`, `assert_*`, `ok`/`bad`
-in `.claude/tools/`, or no functions at all) were frozen by the same sweep;
-they were not individually neutered, because the derivation below covers them
-by construction rather than by measurement.
+The other 20 scanned files (helpers named `check`, `assert_*` or `ok`, or no
+functions at all) were frozen by the same sweep; they were not individually
+neutered, because the derivation below covers them by construction rather
+than by measurement. An earlier version of this table read 45 of 46 on the
+sweep's first base; that count could not be reproduced from the tree, so it
+was replaced with this one (round twenty-nine).
 
 ### What changed
 

@@ -151,7 +151,8 @@ readonly -f run_hook
 
 A bash function resolves by name at call time, so without the freeze one
 inserted `fail() { :; }` turns every FAIL into silence and the suite exits 0
-having checked nothing (measured on 45 of 46 suites before the sweep). With it,
+having checked nothing (measured on main at a525ca4a: 46 of the 52 suites with a
+`fail`/`bad` helper, all but the 6 already frozen). With it,
 bash refuses the rebind and the real helper keeps running.
 
 `scripts/check-fn-freeze.sh` (run by `lockfile-sync-tests` in `ci.yml`, after
@@ -190,9 +191,13 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   `${x/*/alias}`) is judged both with and without it, and such text holding
   a blank, which bash splits into words, is a `split` violation in a guarded
   position. A quoted or escaped brace inside the group does not end it
-  (`${x:-"}"}`), and a replacement is judged after every slash, so an
-  escaped or quoted slash in the pattern (`${x/a\/b/alias}`) cannot hide
-  the boundary. Only a variable value or a command output that must contribute
+  (`${x:-"}"}`), and neither does one inside a `$( )` or backtick span in
+  the operand (`${x:-$(echo }) alias}`). The operand itself is not parsed:
+  every text after a `-`, `=`, `+` or `/` in the group is a candidate, so
+  neither an escaped or quoted slash in a replacement pattern
+  (`${x/a\/b/alias}`) nor a bracket inside a nested expansion in an array
+  subscript (`${a[${y:-0]0}]:-alias fail=:}`) can hide the boundary
+  (rounds twenty-seven and twenty-eight). Only a variable value or a command output that must contribute
   text to spell the word (`al$(echo i)as`), `eval`, a `source` of a file the
   suite wrote, and `declare -n` stay out of reach. The word
   as an argument (`echo alias fail=:`), inside a quoted string

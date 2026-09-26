@@ -287,11 +287,19 @@ derive_file() {
     # body starts at j, skipping quoted text, escapes and nested ones.
     function paren_close(s, j, n,   pd, qs, cj) {
       pd = 1; qs = ""
+      # The same quote model as brace_close below: an ANSI-C string is its
+      # own state, entered on a dollar and a quote and read after the
+      # backslash skip, so an escaped quote inside it ends nothing
+      # (twenty-ninth board round); a nested substitution is its own unit.
       while (j <= n && pd > 0) {
         cj = substr(s, j, 1)
         if (qs == "s") { if (cj == "\047") qs = ""; j++; continue }
         if (cj == "\\") { j += 2; continue }
+        if (qs == "a") { if (cj == "\047") qs = ""; j++; continue }
+        if (cj == "$" && substr(s, j + 1, 1) == "(") { j = paren_close(s, j + 2, n); continue }
+        if (cj == "`") { j = tick_close(s, j + 1, n); continue }
         if (qs == "d") { if (cj == "\"") qs = ""; j++; continue }
+        if (cj == "$" && substr(s, j + 1, 1) == "\047") { qs = "a"; j += 2; continue }
         if (cj == "\047") qs = "s"
         else if (cj == "\"") qs = "d"
         else if (cj == "(") pd++
