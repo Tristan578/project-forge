@@ -510,19 +510,21 @@ jobs:
           #
           # Each threshold is the measured post-opt size rounded UP to the next
           # whole MiB; the job fails when a binary exceeds its threshold by more
-          # than 10%. Measured on main at wasm-bindgen 0.2.127 (runs 33255964959
-          # and 33255044708, ~30 min apart):
+          # than 10%. Raised for the Bevy 0.18.1 -> 0.19.1 migration (#8887,
+          # PR #10268, owner-approved 2026-09-26): 0.19 generates more per-type
+          # ECS code in bevy_ecs itself (resources became components), which no
+          # feature flag we control removes. Measured by this job on the PR at
+          # d85796cd (wasm-bindgen 0.2.127):
           #
-          #   pkg-webgl2          23,480,588 B  22.4 MiB  -> 23 MiB
-          #   pkg-webgpu          23,903,062 B  22.8 MiB  -> 23 MiB
-          #   pkg-webgl2-runtime                21.0 MiB  -> 22 MiB
-          #   pkg-webgpu-runtime                21.4 MiB  -> 22 MiB
+          #   pkg-webgl2          27,023,317 B  25.8 MiB  -> 26 MiB  (was 23)
+          #   pkg-webgpu          27,825,976 B  26.5 MiB  -> 27 MiB  (was 23)
+          #   pkg-webgl2-runtime  26,077,179 B  24.9 MiB  -> 25 MiB  (was 22)
+          #   pkg-webgpu-runtime  26,878,831 B  25.6 MiB  -> 26 MiB  (was 22)
           #
-          # (the runtime figures come from the wasm-opt log above, which prints
-          # at 0.1 MiB resolution — rounding the threshold up to the next whole
-          # MiB absorbs that uncertainty.) Build-to-build variance between those
-          # two runs was under 6 KB, i.e. 0.03%, so the 10% tolerance is slack
-          # for a real regression rather than for noise.
+          # The 0.18.1 baselines and the second-run agreement check are recorded
+          # in the doc below. Build-to-build variance on one commit has measured
+          # under 6 KB (0.03%), so the 10% tolerance is slack for a real
+          # regression rather than for noise.
           #
           # Raising any number here is a deliberate, reviewed change. The policy
           # and the procedure for re-measuring live in
@@ -559,10 +561,10 @@ jobs:
             return 0
           }
 
-          check_pkg pkg-webgl2 24117248            # 23 MiB
-          check_pkg pkg-webgpu 24117248            # 23 MiB
-          check_pkg pkg-webgl2-runtime 23068672    # 22 MiB
-          check_pkg pkg-webgpu-runtime 23068672    # 22 MiB
+          check_pkg pkg-webgl2 27262976            # 26 MiB
+          check_pkg pkg-webgpu 28311552            # 27 MiB
+          check_pkg pkg-webgl2-runtime 26214400    # 25 MiB
+          check_pkg pkg-webgpu-runtime 27262976    # 26 MiB
 
           echo "=========================================="
 

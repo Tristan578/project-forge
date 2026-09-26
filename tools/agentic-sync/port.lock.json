@@ -141,7 +141,7 @@
     ".codex/agents/dx-guardian.toml": "dcc1c570aa98cdf08b6cfee8fa99c8189130a71d38ad72fa0b00c2cc6b373838",
     ".codex/agents/infra-devops.toml": "24001b44c1bda1e5d2804f2c247f078350017cb6efcaf5c2fad6393ebb381ef6",
     ".codex/agents/planner.toml": "063cee73b8acdb54ffedda7a93c1b5d08ff3cb2fe20fac4f0b802aaec36f5753",
-    ".codex/agents/rust-engine.toml": "5410ff057363ef61dbdd468bd7b03f0c9675fdb5b17fecb95f0608eaf91741f4",
+    ".codex/agents/rust-engine.toml": "4d5f687801c9098c77473c1570ca457beb2d449005049475906449550040bbf6",
     ".codex/agents/security-reviewer.toml": "61d8ccdf9f94e9031244431c329c0f90d055f3617394ceb8449b0d439d8d5cea",
     ".codex/agents/test-reviewer.toml": "d8c6c1bda152148e007d76e865849910194273d052b6b27bcc3ae8b499c7735e",
     ".codex/agents/test-writer.toml": "fcd4b121769531042432cd66cf7cdd6c66560abb203686692241fa534d2a4d42",
