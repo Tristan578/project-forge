@@ -1035,6 +1035,33 @@ describe('useScriptRunner', () => {
     expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
   });
 
+  it('a watchdog stop runs the whole teardown itself, because the edit-mode branch will find no worker to tear down', () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    act(() => {
+      mockPlayTickCallback!({
+        entities: {},
+        entityInfos: {},
+        inputState: { pressed: {}, justPressed: {}, justReleased: {}, axes: {} },
+      });
+    });
+    expect(mockResetPlayTickBus).not.toHaveBeenCalled();
+    expect(mockSetHudElements).not.toHaveBeenCalledWith([]);
+
+    act(() => {
+      vi.advanceTimersByTime(WATCHDOG_TIMEOUT_MS + 1);
+    });
+
+    // `mockSetEngineMode` is a bare vi.fn, so no 'edit' render follows: what is
+    // asserted here is only what the watchdog did on its own. It nulls the
+    // worker ref, so the edit-mode branch (guarded on that ref) skips the rest
+    // of the teardown — the watchdog has to do all of it.
+    expect(workerTerminated).toBe(true);
+    expect(mockPlayTickCallback).toBeNull();
+    expect(mockResetPlayTickBus).toHaveBeenCalled();
+    expect(mockSetHudElements).toHaveBeenCalledWith([]);
+  });
+
   it('clears watchdog when worker responds', () => {
     mockEngineMode = 'play';
     renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
@@ -1691,6 +1718,72 @@ describe('useScriptRunner — sandbox runtime failures (fake sandboxed host)', (
     expect(scriptLogMessages()).toEqual([shown]);
     expect(latestWorker).toBeNull();
     expect(vi.mocked(createSandboxedScriptHost)).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  // Sentry review thread on #10256: the boot-failure branch used to call
+  // setEngineMode('edit') with the failed host still in `workerRef`, leaving
+  // it to the edit-mode branch to release. The play-mode branch is guarded on
+  // `!workerRef.current`, so a play-mode effect run landing before that
+  // teardown found the dead host "running" and started nothing.
+  //
+  // How the race is modelled: `mockSetEngineMode` is a bare vi.fn, so the
+  // store never re-renders with 'edit' and the edit-mode teardown does NOT
+  // run. The play-mode effect is then re-run with engineMode still 'play' by
+  // giving it a new `wasmModule` identity (one of its real dependencies). That
+  // is exactly the precondition the review names: the effect evaluates its
+  // play guard after a boot failure, before any edit-mode teardown.
+  it('a boot failure releases the host itself, so a Play before the edit-mode teardown builds a NEW host', () => {
+    const wasmA = { handle_command: vi.fn() };
+    const wasmB = { handle_command: vi.fn() };
+    const { rerender, unmount } = renderHook(
+      ({ mode, wasm }) => {
+        mockEngineMode = mode;
+        return useScriptRunner({ wasmModule: wasm });
+      },
+      { initialProps: { mode: 'play' as string, wasm: wasmA } },
+    );
+    expect(fakeHosts).toHaveLength(1);
+    const first = fakeHosts[0];
+    tick();
+
+    act(() => first.onError('Script sandbox did not start within 4000 ms.', 'boot', 'timeout'));
+    expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
+
+    rerender({ mode: 'play', wasm: wasmB });
+
+    // The new Play really starts: a second host, and a live tick callback.
+    expect(fakeHosts).toHaveLength(2);
+    expect(mockPlayTickCallback).not.toBeNull();
+    // The failed host was released by the boot-failure branch, once.
+    expect(first.host.terminate).toHaveBeenCalledTimes(1);
+
+    // The later edit-mode teardown ends the NEW session and does not touch the
+    // failed host again.
+    rerender({ mode: 'edit', wasm: wasmB });
+    expect(fakeHosts[1].host.terminate).toHaveBeenCalledTimes(1);
+    expect(first.host.terminate).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('after a boot failure, the ordinary edit-mode render tears nothing down twice, and the next Play starts', () => {
+    const { rerender, unmount } = renderHook(
+      ({ mode }) => {
+        mockEngineMode = mode;
+        return useScriptRunner({ wasmModule: mockWasmModule });
+      },
+      { initialProps: { mode: 'play' as string } },
+    );
+    const first = fakeHosts[0];
+    act(() => first.onError('Script sandbox did not start within 4000 ms.', 'boot', 'timeout'));
+
+    expect(() => rerender({ mode: 'edit' })).not.toThrow();
+    expect(first.host.terminate).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(first.host.postMessage).mock.calls.filter(([m]) => (m as { type?: string }).type === 'stop')).toHaveLength(1);
+
+    rerender({ mode: 'play' });
+    expect(fakeHosts).toHaveLength(2);
+    expect(mockPlayTickCallback).not.toBeNull();
     unmount();
   });
 

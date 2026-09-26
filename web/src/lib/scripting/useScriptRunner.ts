@@ -176,6 +176,57 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
     }
   }, [addScriptLog]);
 
+  /**
+   * End the current Play session's script side: release the worker/host and
+   * reset everything the session armed. Idempotent — a second call finds no
+   * worker and only re-resets already-empty state.
+   *
+   * Every path that stops Play from INSIDE the session (the watchdog, a sandbox
+   * boot failure) must call this before `setEngineMode('edit')`, not leave it to
+   * the edit-mode branch of the effect below. That branch is guarded on
+   * `workerRef.current`, and the play-mode branch on `!workerRef.current`: a
+   * ref left pointing at a dead host makes the next Play start nothing, and a
+   * ref nulled without the rest of this skips the rest of the teardown.
+   */
+  const endPlaySession = useCallback(() => {
+    setPlayTickCallback(null);
+    collisionEventCallbackRef.current = null;
+    gameEventCallbackRef.current = null;
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+    // Reset delta serializers
+    if (entityDeltaRef.current) {
+      entityDeltaRef.current.reset();
+      entityDeltaRef.current = null;
+    }
+    if (entityInfoDeltaRef.current) {
+      entityInfoDeltaRef.current.reset();
+      entityInfoDeltaRef.current = null;
+    }
+    // Reset async channel router
+    if (routerRef.current) {
+      routerRef.current.reset();
+      routerRef.current = null;
+    }
+    clearGroundedStates();
+    resetPlayTickBus();
+    // Any 2D raycast still awaiting an engine answer will never get one:
+    // the worker is being terminated. Dropping the slots rejects those
+    // promises now instead of leaving a restarted session inheriting the
+    // previous one's queue alignment (#9271).
+    resetRaycast2dQueue();
+    // Nulled BEFORE the worker is touched, so nothing below can leave it stale.
+    const worker = workerRef.current;
+    workerRef.current = null;
+    if (worker) {
+      worker.postMessage({ type: 'stop' });
+      worker.terminate();
+    }
+    useEditorStore.getState().setHudElements([]);
+  }, []);
+
   const dispatchCommand = useCallback(
     (command: string, payload: unknown): unknown => {
       // The one dispatch path that carries genuinely untrusted structure: a
@@ -253,12 +304,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
                 // the watchdog, and 5 s later it would tell the creator their
                 // script is a possible infinite loop — which it is not. The host
                 // reports nothing after terminate(), so this is always the live
-                // session; the edit-mode branch below does the full teardown.
-                if (watchdogRef.current) {
-                  clearTimeout(watchdogRef.current);
-                  watchdogRef.current = null;
-                }
-                setPlayTickCallback(null);
+                // session. It is torn down HERE, not left to the edit-mode
+                // branch: until that ran, `workerRef` held this dead host, and
+                // a play-mode effect run in between saw a worker "running" and
+                // started nothing (Sentry review on #10256).
+                endPlaySession();
                 addScriptLog({ entityId: '*', level: 'error', message: creatorMessage, timestamp: Date.now() });
                 showError(creatorMessage);
                 useEditorStore.getState().setEngineMode('edit');
@@ -668,10 +718,10 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
             message: 'Script execution timed out (possible infinite loop). Play mode stopped.',
             timestamp: Date.now(),
           });
-          workerRef.current?.terminate();
-          workerRef.current = null;
+          // The whole teardown, not just the worker: nulling `workerRef` makes
+          // the edit-mode branch below skip everything else it would reset.
           watchdogRef.current = null;
-          setPlayTickCallback(null);
+          endPlaySession();
           // Stop play mode via store action
           useEditorStore.getState().setEngineMode('edit');
         }, WATCHDOG_TIMEOUT_MS);
@@ -811,40 +861,9 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
 
     // Stop worker when leaving Play mode
     if (engineMode === 'edit' && workerRef.current) {
-      setPlayTickCallback(null);
-      collisionEventCallbackRef.current = null;
-      gameEventCallbackRef.current = null;
-      if (watchdogRef.current) {
-        clearTimeout(watchdogRef.current);
-        watchdogRef.current = null;
-      }
-      // Reset delta serializers
-      if (entityDeltaRef.current) {
-        entityDeltaRef.current.reset();
-        entityDeltaRef.current = null;
-      }
-      if (entityInfoDeltaRef.current) {
-        entityInfoDeltaRef.current.reset();
-        entityInfoDeltaRef.current = null;
-      }
-      // Reset async channel router
-      if (routerRef.current) {
-        routerRef.current.reset();
-        routerRef.current = null;
-      }
-      clearGroundedStates();
-      resetPlayTickBus();
-      // Any 2D raycast still awaiting an engine answer will never get one:
-      // the worker is being terminated. Dropping the slots rejects those
-      // promises now instead of leaving a restarted session inheriting the
-      // previous one's queue alignment (#9271).
-      resetRaycast2dQueue();
-      workerRef.current.postMessage({ type: 'stop' });
-      workerRef.current.terminate();
-      workerRef.current = null;
-      useEditorStore.getState().setHudElements([]);
+      endPlaySession();
     }
-  }, [engineMode, wasmModule, dispatchCommand, addScriptLog, reportSandboxRuntimeFailure]);
+  }, [engineMode, wasmModule, dispatchCommand, addScriptLog, reportSandboxRuntimeFailure, endPlaySession]);
 
   // Export collision callback via module-level variable (not window global)
   useEffect(() => {
