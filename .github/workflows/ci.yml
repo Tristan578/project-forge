@@ -620,11 +620,9 @@ jobs:
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
     runs-on: windows-latest
-    # Raised from 30 after review measured 26:52 on this branch — ~3 minutes
-    # of headroom on a job that is in ci-success's needs:, so a tip-over blocks
-    # every PR rather than one. The delta against main's ~22 minutes is mostly
-    # runner variance rather than any single suite, which is the argument for
-    # headroom rather than for hunting a culprit.
+    # The job is in ci-success's needs:, so a tip-over blocks every PR rather
+    # than one. Raised from 30 to 45 after review measured 26:52 on a branch,
+    # about 3 minutes of headroom; main then took about 22 minutes.
     # Raised from 45 to 60 (#10285): the job took 41:22 on 2026-09-26 (job
     # 108460157387), under 4 minutes short of 45; main measured 36:53, 36:54
     # and 39:04 on 2026-09-24, against about 22 on 2026-09-15. That growth is
