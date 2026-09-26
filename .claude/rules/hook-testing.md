@@ -38,6 +38,14 @@ pattern. CI runs every `*.test.sh` under `.claude/hooks/__tests__/` via the
 path-gated `hook-tests` job whenever `.claude/hooks/**` changes, so a regression
 in a hook's exit-code contract fails the PR instead of silently shipping.
 
+Because that job is path-gated, it can go many PRs without running. So
+`.github/workflows/hook-tests-scheduled.yml` also runs every suite, plus the same
+ShellCheck scope, at 09:00 UTC every Monday, and you can run it by hand with
+`workflow_dispatch`. A scheduled failure opens one tracking issue, or comments
+on the one already open, with the run URL. Treat that issue as a regression in
+`main`, not as noise. It exists because two real hook defects built up unseen
+over 25+ CI runs in which the gated job never ran (#9606).
+
 ## Writing a hook test
 
 - Drive the hook through its real contract: build the JSON payload (Edit/Write

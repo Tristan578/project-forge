@@ -973,6 +973,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
         ctx.store.updateMaterial(entityId, { ...mat, baseColor: color });
         results.push({
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank entity display name is unset; falls back to showing the raw entity id
           action: `apply palette to ${ownEntry(ctx.store.sceneGraph.nodes, entityId)?.name || entityId}`,
           success: true,
           entityId,
@@ -1001,6 +1002,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
           ctx.store.updateMaterial(entityId, updated);
           results.push({
+            // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank entity display name is unset; falls back to showing the raw entity id
             action: `apply material override to ${ownEntry(ctx.store.sceneGraph.nodes, entityId)?.name || entityId}`,
             success: true,
             entityId,

@@ -185,8 +185,10 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
           </button>
         </div>
 
+        {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is there an error banner to show); ?? cannot substitute this OR */}
         {(checkpointError || actionError) && (
           <p role="alert" className="mx-4 mt-3 rounded border border-[var(--sf-destructive)] bg-[var(--sf-bg-surface)] p-2 text-xs text-[var(--sf-text)]">
+            {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank checkpoint/action error falls through to the other candidate, same as an absent one */}
             {checkpointError || actionError}
           </p>
         )}

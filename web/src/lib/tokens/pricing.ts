@@ -74,6 +74,16 @@ export const TIER_MONTHLY_TOKENS = {
   pro: 3000,
 } as const;
 
+/**
+ * One-time token grant for brand-new (non-paying) accounts on signup (#7715).
+ *
+ * Deliberately a separate constant from `TIER_MONTHLY_TOKENS.starter`, which is
+ * the PAID starter tier's monthly allocation: a future price change to that
+ * tier must not silently change what a trial account receives. Granted once by
+ * `grantTrialTokens` (`web/src/lib/billing/trial-grant.ts`) on `user.created`.
+ */
+export const TRIAL_GRANT_TOKENS = 50;
+
 /** Add-on token packages */
 export const TOKEN_PACKAGES = {
   spark: { tokens: 1000, priceCents: 1200, label: 'Spark' },

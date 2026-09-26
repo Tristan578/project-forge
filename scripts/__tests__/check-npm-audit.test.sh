@@ -3396,7 +3396,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=663
+readonly SELF_EXEC_EXPECTED_DROP=665
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3763,6 +3763,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: |
           bash scripts/__tests__/install-vercel-cli.test.sh
           node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs
+      - name: Verify scheduled hook-test contracts
+        run: node --test scripts/__tests__/hook-tests-scheduled.test.mjs
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
       - name: Run agentic-config gate test suite

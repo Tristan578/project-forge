@@ -500,7 +500,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   <label className="mb-1 block text-xs font-medium text-zinc-300">Loading Title</label>
                   <input
                     type="text"
-                    value={loadingConfig.title || ''}
+                    value={loadingConfig.title ?? ''}
                     onChange={(e) => setLoadingConfig({ ...loadingConfig, title: e.target.value || undefined })}
                     disabled={isExporting}
                     placeholder="Optional"
@@ -512,7 +512,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   <label className="mb-1 block text-xs font-medium text-zinc-300">Loading Subtitle</label>
                   <input
                     type="text"
-                    value={loadingConfig.subtitle || ''}
+                    value={loadingConfig.subtitle ?? ''}
                     onChange={(e) => setLoadingConfig({ ...loadingConfig, subtitle: e.target.value || undefined })}
                     disabled={isExporting}
                     placeholder="Optional"

@@ -30,6 +30,7 @@ vi.mock('@/components/editor/SceneStatistics', () => ({
 
 vi.mock('@/components/ui/InfoTooltip', () => ({
   InfoTooltip: ({ term, text }: { term?: string; text?: string }) => (
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- test stub default for a missing tooltip term, used only to build a stable test id
     <span data-testid={`tooltip-${term || 'text'}`}>{text}</span>
   ),
 }));

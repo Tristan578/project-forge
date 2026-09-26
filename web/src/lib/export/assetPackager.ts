@@ -121,6 +121,7 @@ export async function packageAssets(
       continue;
     }
 
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank file extension (e.g. a trailing dot) is not a usable extension; treated as unset
     const ext = asset.name.split('.').pop() || 'bin';
     const originalMimeType = getMimeType(ext);
 
