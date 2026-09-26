@@ -8,7 +8,7 @@ import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import { waitFor, fireEvent, act } from '@testing-library/react';
 import { GamePlayer } from '../GamePlayer';
 import { loadPlayEngine } from '@/lib/engine/loadPlayEngine';
-import { captureException } from '@/lib/monitoring/sentry-client';
+import { addBreadcrumb, captureException, captureMessage, setTag } from '@/lib/monitoring/sentry-client';
 import {
   ENGINE_GLOBAL_TIMEOUT_MS,
   PLAY_GAME_FETCH_TIMEOUT_MS,
@@ -38,12 +38,18 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock('@/lib/engine/loadPlayEngine', () => ({
+vi.mock('@/lib/engine/loadPlayEngine', async (importOriginal) => ({
+  // Real isCdnOrigin/describeOrigin: the wasm.source tag assertions below must
+  // exercise the exported implementation, not a copy of its regex.
+  ...(await importOriginal<typeof import('@/lib/engine/loadPlayEngine')>()),
   loadPlayEngine: vi.fn(),
 }));
 
 vi.mock('@/lib/monitoring/sentry-client', () => ({
   captureException: vi.fn(),
+  captureMessage: vi.fn(),
+  addBreadcrumb: vi.fn(),
+  setTag: vi.fn(),
 }));
 
 const mockGame = {
@@ -332,6 +338,60 @@ describe('GamePlayer', () => {
       expect(captureException).toHaveBeenCalledTimes(1);
       // init_engine never ran, so restarting is safe and must be offered.
       expect(screen.getByText('Try again')).toBeDefined();
+    });
+
+    it('reports a skipped engine origin and tags the one that served', async () => {
+      global.fetch = okFetch();
+      const runtime = stubRuntime();
+      vi.mocked(loadPlayEngine).mockImplementation(async (options) => {
+        // Drive the loader's callbacks the way a stalled CDN would.
+        options?.onOriginSkipped?.(
+          'https://engine.example.test/abc1234/engine-pkg-webgl2/',
+          new Error('Engine load from https://engine.example.test/abc1234/engine-pkg-webgl2/ timed out after 12000ms'),
+        );
+        options?.onOriginUsed?.('/engine-pkg-webgl2/');
+        return runtime;
+      });
+
+      render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+      await advance();
+      fireEvent.click(screen.getByText('Click to play'));
+      await advance(PLAY_ENGINE_SETTLE_MS);
+
+      expect(addBreadcrumb).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: 'wasm',
+          level: 'warning',
+          message: expect.stringMatching(/^Play engine load skipped engine\.example\.test: .*timed out/),
+        }),
+      );
+      // Host only: the error fed in above quotes the full versioned URL, and
+      // neither the SHA nor the path may reach Sentry.
+      const breadcrumb = vi.mocked(addBreadcrumb).mock.calls[0][0] as { message?: string };
+      expect(breadcrumb.message).not.toContain('abc1234');
+      expect(breadcrumb.message).not.toContain('/engine-pkg-');
+      expect(captureMessage).toHaveBeenCalledWith('Play engine origin skipped, falling back', 'warning');
+      expect(setTag).toHaveBeenCalledWith('wasm.source', 'same-origin');
+      // A fallback that succeeded is not an error.
+      expect(captureException).not.toHaveBeenCalled();
+      expect(runtime.handle_command).toHaveBeenCalledWith('play', {});
+    });
+
+    it('tags the CDN as the source when it served the engine', async () => {
+      global.fetch = okFetch();
+      const runtime = stubRuntime();
+      vi.mocked(loadPlayEngine).mockImplementation(async (options) => {
+        options?.onOriginUsed?.('https://engine.example.test/abc1234/engine-pkg-webgpu/');
+        return runtime;
+      });
+
+      render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
+      await advance();
+      fireEvent.click(screen.getByText('Click to play'));
+      await advance(PLAY_ENGINE_SETTLE_MS);
+
+      expect(setTag).toHaveBeenCalledWith('wasm.source', 'cdn');
+      expect(addBreadcrumb).not.toHaveBeenCalled();
     });
 
     it('reports nothing to Sentry on the happy path', async () => {

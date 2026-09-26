@@ -184,6 +184,7 @@ export const TimelinePanel = memo(function TimelinePanel() {
     let yOffset = RULER_HEIGHT;
     for (const track of tracks) {
       const trackInfo = PROPERTY_TARGETS.find((t) => t.value === track.target);
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank track color is unset; falls back to the default swatch
       const trackColor = trackInfo?.color || '#9ca3af';
 
       // Draw track background
@@ -455,7 +456,9 @@ export const TimelinePanel = memo(function TimelinePanel() {
           <div className="overflow-y-auto" style={{ height: `calc(100% - ${RULER_HEIGHT}px)` }}>
             {tracks.map((track) => {
               const trackInfo = PROPERTY_TARGETS.find((t) => t.value === track.target);
+              // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank track label is unset; falls back to the raw target key
               const label = trackInfo?.label || track.target;
+              // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank track color is unset; falls back to the default swatch
               const color = trackInfo?.color || '#9ca3af';
 
               return (

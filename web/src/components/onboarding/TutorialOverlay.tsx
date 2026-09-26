@@ -33,6 +33,7 @@ export function TutorialOverlay() {
 
     if (cardRef.current) {
       const cardRect = cardRef.current.getBoundingClientRect();
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank target position is not a member of the position enum; treated as unset
       const position = currentStep.targetPosition || 'bottom';
 
       let top = 0;

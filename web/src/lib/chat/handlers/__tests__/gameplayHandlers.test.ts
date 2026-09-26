@@ -1261,6 +1261,19 @@ describe('save_material_to_library', () => {
     expect(data.name).toBe('Red Material');
     expect(mockSaveCustomMaterial).toHaveBeenCalledWith('Red Material', mat);
   });
+
+  it('treats a blank entityId from the model as not given and saves the selected entity (#9565)', async () => {
+    const mat = { baseColor: [0, 1, 0, 1] };
+    mockSaveCustomMaterial.mockReturnValue({ id: 'custom_green', name: 'Green' });
+    const { result } = await invokeHandler(
+      gameplayHandlers,
+      'save_material_to_library',
+      { name: 'Green', entityId: '' },
+      { primaryId: 'ent-1', primaryMaterial: mat },
+    );
+    expect(result.success).toBe(true);
+    expect(mockSaveCustomMaterial).toHaveBeenCalledWith('Green', mat);
+  });
 });
 
 // ===========================================================================

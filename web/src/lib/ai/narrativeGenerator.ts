@@ -590,7 +590,7 @@ export function narrativeToDialogueTree(arc: NarrativeArc): DialogueTree {
   // Set firstNodeId from the first scene
   for (const act of arc.acts) {
     for (const scene of act.scenes) {
-      if (!firstNodeId) firstNodeId = sceneEntryNodeMap.get(scene.id) ?? null;
+      firstNodeId ??= sceneEntryNodeMap.get(scene.id) ?? null;
     }
   }
 
