@@ -1569,6 +1569,14 @@ self.onmessage = (e: MessageEvent) => {
       }
 
       flushCommands();
+      // Always say that init finished, even when no script called forge.* and
+      // nothing above posted. In the sandboxed-origin transport the frame
+      // decides whether a later uncaught error is a BOOT failure ("this browser
+      // can't run scripts", Play stops) or a RUNTIME one by whether the worker
+      // has posted anything yet (`started` in SANDBOX_BOOTSTRAP). Without this,
+      // a quiet script that throws from a timer reads as a browser that refused
+      // the worker. The runner ignores the message; it is not a command.
+      (self as unknown as Worker).postMessage({ type: 'init_done' });
       break;
     }
 

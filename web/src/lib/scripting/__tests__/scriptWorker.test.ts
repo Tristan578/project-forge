@@ -81,6 +81,39 @@ describe('scriptWorker', () => {
     });
   });
 
+  // The sandboxed frame reads the worker's FIRST message as "the scripts
+  // started" (SANDBOX_BOOTSTRAP's `started`). A script that never calls
+  // forge.* posts nothing of its own, so init has to announce itself, or a
+  // later uncaught error in that script is misread as a boot failure (#8700).
+  it('posts exactly one init_done when init completes, even for a script that posts nothing', async () => {
+    const handler = await setupWorker();
+    await handler(initMsg([{ entityId: 'quiet', enabled: true, source: 'var n = 0; function onStart() { n = 1; }' }]));
+
+    const posted = mockPostMessage.mock.calls.map((c) => c[0] as { type: string });
+    expect(posted).toEqual([{ type: 'init_done' }]);
+  });
+
+  it('posts init_done once, AFTER the messages init itself produced', async () => {
+    const handler = await setupWorker();
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: 'function onStart() { forge.log("hi"); }' }]));
+
+    const types = mockPostMessage.mock.calls.map((c) => (c[0] as { type: string }).type);
+    expect(types.filter((t) => t === 'init_done')).toHaveLength(1);
+    expect(types[types.length - 1]).toBe('init_done');
+    expect(types).toContain('log');
+  });
+
+  it('does not post init_done for anything but init (a tick stays silent)', async () => {
+    const handler = await setupWorker();
+    await handler(initMsg([{ entityId: 'e1', enabled: true, source: 'function onUpdate() { forge.log("tick"); }' }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'tick', dt: 0.016 } });
+
+    // The tick ran (it logged) and said nothing else.
+    expect(mockPostMessage.mock.calls.map((c) => (c[0] as { type: string }).type)).toEqual(['log']);
+  });
+
   it('reports compilation errors for syntax issues during init', async () => {
     const handler = await setupWorker();
     const invalidCode = 'function onStart() { return { x: 1 ; }';

@@ -434,7 +434,9 @@ export function createSandboxedScriptHost(options: SandboxedScriptHostOptions): 
       // Worker object, while here they arrive on two ports with no ordering
       // between them, so a message can overtake an earlier error just as an
       // error can overtake an earlier message. No host-side observation is
-      // mixed in, in either direction.
+      // mixed in, in either direction. scriptWorker.ts posts `init_done` at
+      // the end of every init, so a worker that finished init has spoken even
+      // if no script ever calls forge.*.
       if (msg.type === 'worker-error' && msg.started === true) report(detail, 'runtime');
       else failBoot(detail, 'worker-error');
     }

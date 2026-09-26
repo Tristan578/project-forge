@@ -401,6 +401,29 @@ describe('useScriptRunner', () => {
     );
   });
 
+  it("ignores the worker's init_done: no command, no script-console entry, no warning", () => {
+    // scriptWorker posts { type: 'init_done' } at the end of every init (#8700,
+    // for the sandboxed frame's started flag). The same-origin transport sees
+    // it too, and it must stay invisible here.
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockAddScriptLog.mockClear();
+
+    act(() => {
+      latestWorker!.simulateMessage({ type: 'init_done' });
+    });
+
+    expect(mockWasmModule.handle_command).not.toHaveBeenCalled();
+    expect(mockAddScriptLog).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(mockSetEngineMode).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
   it('blocks unauthorized commands', () => {
     mockEngineMode = 'play';
     renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
@@ -1522,6 +1545,29 @@ describe('useScriptRunner — sandbox runtime failures (fake sandboxed host)', (
     errorSpy.mockRestore();
     vi.unstubAllEnvs();
     vi.useRealTimers();
+  });
+
+  it("ignores init_done from the sandboxed worker: no command, no script-console entry, no warning, no stop", () => {
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    expect(latestWorker).toBeNull();
+    expect(fakeHosts).toHaveLength(1);
+    const [{ host }] = fakeHosts;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockAddScriptLog.mockClear();
+
+    act(() => {
+      host.onmessage?.(new MessageEvent('message', { data: { type: 'init_done' } }));
+    });
+
+    expect(mockWasmModule.handle_command).not.toHaveBeenCalled();
+    expect(mockAddScriptLog).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(mockShowError).not.toHaveBeenCalled();
+    expect(mockSetEngineMode).not.toHaveBeenCalled();
+    expect(host.terminate).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+    unmount();
   });
 
   it('tells the creator in the RUNTIME words, and leaves Play, the tick callback and the watchdog alone', () => {

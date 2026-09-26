@@ -498,6 +498,12 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
             }
             break;
           }
+          case 'init_done':
+            // The worker finished `init`. It exists for the sandboxed frame,
+            // which reads the worker's first message as "the scripts started"
+            // (see scriptWorker.ts). Nothing to do here beyond the watchdog
+            // clear above: it is not a command, a log, or an error.
+            break;
         }
       };
 

@@ -368,6 +368,35 @@ describe('failure reporting', () => {
     await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringMatching(/was not bundled/), 'boot', 'not-bundled'));
   });
 
+  it('does not cache a failed worker-source load: the next Play imports again and gets the source', async () => {
+    // Drives the REAL cache in a fresh module instance. The test above always
+    // fails the same way (the empty placeholder), and the host tests pass
+    // their own loadWorkerSource, so neither would notice a failed load being
+    // cached — which would turn one transient chunk error into "scripts can't
+    // start" for every Play until a reload.
+    let imports = 0;
+    vi.resetModules();
+    vi.doMock('../scriptWorkerSource.bundle', () => {
+      imports += 1;
+      if (imports === 1) throw new Error('chunk load failed');
+      return { default: 'SELF_CONTAINED_WORKER_SOURCE' };
+    });
+    try {
+      const fresh = await import('../sandboxOrigin');
+      // Vitest wraps a throwing mock factory's error in its own "[vitest] There
+      // was an error when mocking a module" message; the rejection is the point.
+      await expect(fresh.loadSandboxWorkerSource()).rejects.toThrow();
+      await expect(fresh.loadSandboxWorkerSource()).resolves.toBe('SELF_CONTAINED_WORKER_SOURCE');
+      expect(imports).toBe(2);
+      // And a success IS cached: no third import.
+      await expect(fresh.loadSandboxWorkerSource()).resolves.toBe('SELF_CONTAINED_WORKER_SOURCE');
+      expect(imports).toBe(2);
+    } finally {
+      vi.doUnmock('../scriptWorkerSource.bundle');
+      vi.resetModules();
+    }
+  });
+
   it('reports a worker the frame could not construct, and an uncaught worker error', async () => {
     FakeWorker.throwOnConstruct = true;
     const onError = vi.fn();
@@ -474,6 +503,52 @@ describe('failure reporting', () => {
     hold.release();
     await vi.waitFor(() => expect(received).toEqual([{ type: 'commands', commands: [] }]));
     expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it("a script that never calls forge.* and throws later is a RUNTIME failure: the REAL worker's init announces itself", async () => {
+    // The two tests above make the fake worker speak by hand. This one lets
+    // the REAL scriptWorker.ts decide what it says: init travels host -> the
+    // shipped bootstrap -> the fake Worker's inbox -> scriptWorker's handler,
+    // whose postMessage feeds straight back into the bootstrap. The script
+    // makes no forge.* call, so init_done is the only thing the worker ever
+    // posts. Without it the frame reports `started: false`, and a script error
+    // from a timer reads as "this browser can't run scripts" and stops Play.
+    const onError = vi.fn();
+    const { host } = await startHost({ onError });
+    hosts.push(host);
+    const received: unknown[] = [];
+    host.onmessage = (event) => received.push(event.data);
+    await vi.waitFor(() => expect(FakeWorker.created).toHaveLength(1));
+    const worker = FakeWorker.created[0];
+
+    const g = globalThis as Record<string, unknown>;
+    const savedSelf = g.self;
+    const workerSelf: Record<string, unknown> = { postMessage: (message: unknown) => worker.emit(message) };
+    g.self = workerSelf;
+    try {
+      vi.resetModules();
+      await import('../scriptWorker');
+      const handleInWorker = workerSelf.onmessage as (e: { data: unknown }) => void;
+      expect(handleInWorker).toBeInstanceOf(Function);
+
+      host.postMessage({
+        type: 'init',
+        scripts: [{ entityId: 'quiet', enabled: true, source: 'var n = 0; function onStart() { n = 1; }' }],
+        entities: {},
+        entityInfos: {},
+      });
+      await vi.waitFor(() => expect(worker.posted).toHaveLength(1));
+      handleInWorker({ data: worker.posted[0] });
+
+      // The script's later throw, as the browser reports an uncaught worker error.
+      worker.onerror?.({ message: 'TypeError: thrown from a timer' });
+      await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+      expect(onError).toHaveBeenCalledWith(expect.stringMatching(/worker-error: TypeError: thrown from a timer/), 'runtime');
+      expect(host.frame).not.toBeNull();
+      await vi.waitFor(() => expect(received).toEqual([{ type: 'init_done' }]));
+    } finally {
+      g.self = savedSelf;
+    }
   });
 
   it('a later message that overtakes an earlier boot error does not turn it into a runtime failure', async () => {
