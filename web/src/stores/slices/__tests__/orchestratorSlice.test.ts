@@ -1685,6 +1685,80 @@ describe('orchestratorSlice', () => {
       expect(budgetCalls()).toContainEqual({ action: 'release', reservationId: 'res-late', actualUsed: 0 });
     });
 
+    /**
+     * `resetOrchestrator` does NOT release by itself: it nulls the store's
+     * `reservationId` and unparks the run, and the run's own `finally` releases
+     * the id it captured. Before that fix a reset nulled the id with the run
+     * still parked at a gate, so nothing ever refunded the hold. These three
+     * pin every place a reset can land relative to the reservation.
+     */
+    it('releases the held reservation exactly once when the user resets a run parked at a gate', async () => {
+      const plan = makeMockPlan();
+      store.getState().setPlan(plan);
+      let markParked!: () => void;
+      const parked = new Promise<void>((resolve) => {
+        markParked = resolve;
+      });
+      vi.mocked(runPipeline).mockImplementationOnce(
+        async (_plan: unknown, _registry: unknown, _ctx: unknown, callbacks?: PipelineCallbacks) => {
+          const onGateReached = callbacks?.onGateReached;
+          if (!onGateReached) throw new Error('runPipeline was given no onGateReached callback');
+          const gatePromise = onGateReached(plan.approvalGates[0]);
+          markParked();
+          await gatePromise;
+          return plan;
+        },
+      );
+
+      const run = store.getState().runPipelineFromPlan();
+      await parked;
+      expect(store.getState().reservationId).toBe('res-default');
+      expect(budgetCalls().filter((c) => c.action === 'release')).toEqual([]);
+
+      store.getState().resetOrchestrator();
+      expect(store.getState().reservationId).toBeNull();
+
+      await run;
+      expect(budgetCalls().filter((c) => c.action === 'release')).toEqual([
+        { action: 'release', reservationId: 'res-default', actualUsed: 0 },
+      ]);
+    });
+
+    it('releases a reservation that lands after the user reset', async () => {
+      let answer!: () => void;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answer = () =>
+              resolve({ ok: true, json: async () => ({ reservationId: 'res-late-reset', remaining: { total: 1 } }) });
+          }),
+      );
+      store.getState().setPlan(makeMockPlan());
+
+      const run = store.getState().runPipelineFromPlan();
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      store.getState().resetOrchestrator();
+      answer();
+      await run;
+
+      expect(runPipeline).not.toHaveBeenCalled();
+      expect(mockEditorState.setProjectType).not.toHaveBeenCalled();
+      expect(store.getState().orchestratorStatus).toBe('idle');
+      expect(store.getState().reservationId).toBeNull();
+      expect(budgetCalls().filter((c) => c.action === 'release')).toEqual([
+        { action: 'release', reservationId: 'res-late-reset', actualUsed: 0 },
+      ]);
+    });
+
+    it('releases nothing when a plan is reset before it was ever built', () => {
+      store.getState().setPlan(makeMockPlan());
+
+      store.getState().resetOrchestrator();
+
+      expect(store.getState().currentPlan).toBeNull();
+      expect(budgetCalls()).toEqual([]);
+    });
+
     it('starts one run when the build is started twice before the first gets going', async () => {
       store.getState().setPlan(makeMockPlan());
 
