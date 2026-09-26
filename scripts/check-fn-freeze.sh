@@ -34,10 +34,15 @@
 # `function name() {` or `function name {`, at column 0, outside heredocs and
 # comments), the line IMMEDIATELY after the definition's closing brace must be
 # exactly `readonly -f name`. The body must be a brace group, opened on the
-# definition line or on the next non-blank, non-comment line; a one-line
-# definition closes where its own line ends (a trailing comment is not part of
-# it), and a multi-line definition closes at the first later line that starts
-# with `}` at column 0. A definition whose body is anything else — a subshell
+# definition line or on the next non-blank, non-comment line; a definition
+# closes on its own line when its closing brace stands there in command
+# position, as bash reads it, whatever code follows (`f() { :; }; true`
+# closes there, while in `f() { echo }` the brace is an argument and the next
+# line is still the body; the word after fi, done or esac is in command
+# position, so `h() { if true; then :; fi }` closes too; a trailing comment
+# is not part of the line: the thirty-second and thirty-third board rounds),
+# and otherwise at the first later line that
+# starts with `}` at column 0. A definition whose body is anything else — a subshell
 # `( )`, a bare `if`/`while`/`case` — is reported as `unsupported` and fails
 # the gate, so a helper the derivation cannot follow is never a helper it
 # silently forgot (the sixth board round found `name()` with the brace on
@@ -53,7 +58,10 @@
 # self-defense suite has no use for aliases, so the gate reports the WORDS
 # `alias NAME=` and `shopt -s expand_aliases` wherever they occur in
 # executable text, after the quote removal and backslash unescaping bash
-# itself performs before it looks a command up: `\alias`, `"alias"`,
+# itself performs before it looks a command up (inside double quotes a
+# backslash escapes only a dollar, a backtick, a double quote, a backslash or
+# a newline and is otherwise kept, so `"al\ias"` is not alias: the
+# thirty-second round): `\alias`, `"alias"`,
 # `al"ias"`, `\a\l\i\a\s`, `$'alias'` and its escaped forms (octal, hex,
 # `\u`, `\U`, a NUL ending the value), a backslash line continuation in the
 # middle of the statement, and anything in front of the word (`builtin`,
@@ -123,9 +131,15 @@
 # Definitions nested in something are out of scope: inside a function body
 # (it runs on every call, so it cannot be frozen on its first run without
 # breaking its second), a loop (the same), a subshell (it does not outlive
-# it), or an `if`/`case` arm or brace group (a conditional helper; the gate
-# does not follow which arm ran). The lexer tracks that nesting by command
-# word — `if`/`fi`, `case`/`esac`, `do`/`done`, `{`/`}` — not by indentation.
+# it), or an `if`/`case` arm (a conditional helper; the gate does not follow
+# which arm ran). A BARE brace group `{ ...; }` is not one of them: it runs
+# its contents once and unconditionally, as top level does, so a definition
+# inside it is judged as at top level (thirty-third board round: nesting was
+# counted alike for every compound, and a helper defined in a bare group was
+# never derived and never had to be frozen). The lexer tracks that nesting
+# by command word — `if`/`fi`, `case`/`esac`, `do`/`done`, `{`/`}` — not by
+# indentation, and records what opened each level, so a brace that opens a
+# function body hides its contents and a bare one does not.
 # A reserved word counts only where bash would read one: unquoted, in command
 # position. A case pattern (the words before each `)` that follows `in`,
 # `;;`, `;&` or `;;&`) is text, and so is a quoted `"{"` (the twelfth board
@@ -470,7 +484,9 @@ derive_file() {
       if (pat) {
         if (!rq && w == "esac" && pat_n == 0) {
           if (bs > 0) bs--
-          pat = 0; cmd_seen = 1; cmd_word = "esac"; nwords = 1
+          # Like fi and done below, esac ends a compound command, and what
+          # follows it is in command position (a closing brace included).
+          pat = 0; cmd_seen = 0; cmd_word = ""; nwords = 0
         } else pat_n++
         w = ""; return
       }
@@ -504,8 +520,16 @@ derive_file() {
         # Still looking for the command word of this statement.
         # Compound-command nesting, counted by command word so that layout
         # cannot fake it: `if`, `do` and `{` open, `fi`, `done` and `}` close
-        # (`case`/`esac` are handled below as ordinary command words).
-        if (!rq && (w == "if" || w == "do" || w == "{")) bs++
+        # (`case`/`esac` are handled below as ordinary command words). Each
+        # level records what opened it (bk): a function body (f), a bare
+        # brace group (b) or a conditional or repeated compound (c). A bare
+        # group runs once, unconditionally, so a definition inside one is
+        # judged as at top level (thirty-third board round); fn_body says the
+        # next brace opens the body of a definition just seen (2 while that
+        # definition name word is still to be consumed).
+        was_fn = (fn_body == 1); fn_body = (fn_body == 2) ? 1 : 0
+        if (!rq && (w == "if" || w == "do")) { bs++; bk[bs] = "c" }
+        if (!rq && w == "{") { bs++; bk[bs] = was_fn ? "f" : "b" }
         if (!rq && (w == "}") && bs > 0) {
           bs--
           # The brace group of the definition on this line closed here, in
@@ -515,8 +539,13 @@ derive_file() {
         if ((!rq && w ~ /^(!|if|then|elif|else|do|while|until|coproc|\{|\})$/) ||
             w ~ /^(builtin|command|time|-p)$/ ||
             w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { w = ""; return }
-        if (!rq && w == "case") bs++
-        if (!rq && (w == "fi" || w == "done" || w == "esac") && bs > 0) bs--
+        if (!rq && w == "case") { bs++; bk[bs] = "c" }
+        # fi, done and esac end a compound command, and the word after one is
+        # in command position again: in h() { if true; then :; fi } the brace
+        # after fi closes h, as bash reads it (thirty-third board round: the
+        # brace was read as an argument, h stayed open and swallowed every
+        # definition up to the next column-0 brace).
+        if (!rq && (w == "fi" || w == "done" || w == "esac")) { if (bs > 0) bs--; w = ""; return }
         cmd_seen = 1; cmd_word = w; nwords = 1
         # Inside a definition, remember what the body runs: an exit or exec
         # marks the function as one that ends the shell, anything else is a
@@ -547,7 +576,7 @@ derive_file() {
         # The body group follows the name, so what comes next is a command
         # word again, as after `name()`: its brace counts toward the nesting,
         # which is what closes a one-line definition (thirty-second round).
-        in_function = 0; cmd_seen = 0; cmd_word = ""; nwords = 0
+        in_function = 0; cmd_seen = 0; cmd_word = ""; nwords = 0; fn_body = 1
       }
       if (in_alias && anym("^[A-Za-z_][A-Za-z0-9_]*="))
         printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
@@ -647,9 +676,16 @@ derive_file() {
     # excused. A second definition of the same name later on the line is a
     # redefinition the freeze on the next line would protect instead (twelfth
     # board round: `fail() { ...; }; fail() { :; }` was reported frozen).
+    # Nesting levels above the definition context that are not bare brace
+    # groups: a bare group runs its contents once, so it hides nothing.
+    function cond_depth(   k, c) {
+      c = 0
+      for (k = def_bs + 1; k <= bs; k++) if (bk[k] != "b") c++
+      return c
+    }
     function shape_check(label, n) {
       if (n == line_def && !line_def_hit) { line_def_hit = 1; return }
-      if (d == 0 && bs == def_bs && (def_name == "" || def_name == line_def))
+      if (d == 0 && cond_depth() == 0 && (def_name == "" || def_name == line_def))
         printf "%s\t%s\t%d\t%d\tshape\n", file, label, NR, NR
     }
     # Every statement starts with no trap state of its own; a trap inside a
@@ -907,6 +943,9 @@ derive_file() {
           else if (cmd_seen && w == "" && nwords == 1) dn = cmd_word
           if (dn != "" && index(builtins, " " dn " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, dn "()", NR, NR
           if (dn != "" && dn !~ /[=$]/) shape_check(dn "()", dn)
+          # The next brace opens this definition body; if the name word is
+          # still pending here, consuming it must not use up the mark.
+          if (dn != "") fn_body = (w != "") ? 2 : 1
         }
         # Assigning an array to the posix-mode variable enters posix mode as
         # a scalar does (twenty-fifth board round), so the name is judged

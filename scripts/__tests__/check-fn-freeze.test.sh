@@ -1823,6 +1823,104 @@ else
   fail "30q-b. the argument-brace probe did not reproduce in this bash (got '$close_bash')"
 fi
 
+# ---- 30s. the brace after fi, done or esac closes a one-line definition -----
+# Thirty-third board round (architect): after fi, done or esac the next word
+# is in command position, so the brace in h1() { if true; then :; fi } closes
+# h1, as bash reads it. The lexer read it as an argument, h1 stayed open, and
+# a redefinition of pass after it (as on line 12) was never derived. Lines 3
+# to 10 close through fi, done, esac after a double semicolon, and esac after
+# a last clause without one; lines 11 to 13 show the swallow is gone. 30s-b
+# checks in bash that the brace closes the group.
+d_fiesac="$(mkfixture fi-done-esac <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+h1() { if true; then :; fi }
+readonly -f h1
+h2() { for x in 1; do :; done }
+readonly -f h2
+h3() { case x in a) :;; esac }
+readonly -f h3
+h5() { case x in a) :; esac }
+readonly -f h5
+h4() { if true; then :; fi }
+pass() { :; }
+readonly -f h4
+FIX
+)"
+out_fiesac="$(run_gate "$d_fiesac")"
+expect_rc "30s. the brace after fi, done or esac closes a one-line definition" 1 "$out_fiesac" \
+  "3 violation(s)" "(7 definition(s) derived)" \
+  "fixture.test.sh:11: h4() is not frozen" "fixture.test.sh:12: pass() is not frozen" \
+  "fixture.test.sh:13: 'readonly -f h4'"
+fiesac_bash="$(bash -c $'h() { if true; then :; fi }\ng() { echo TOPLEVEL; }\ng' 2>&1)"
+if [ "$fiesac_bash" = "TOPLEVEL" ]; then
+  pass "30s-b. in this bash the brace after fi closes the group, so the next line is top level"
+else
+  fail "30s-b. the fi-brace probe did not reproduce in this bash (got '$fiesac_bash')"
+fi
+
+# ---- 30t. a bare brace group hides no definition ----------------------------
+# Thirty-third board round (security): nesting was counted alike for every
+# compound, so a helper defined inside a bare { } group was never derived and
+# never had to be frozen, although the group runs its contents once and
+# unconditionally, as top level does. Each nesting level now records what
+# opened it, and only a function body or a conditional or repeated compound
+# hides a definition. Lines 4 and 6 are reported as shape (define at column
+# 0, then freeze), and so are the indented definitions on lines 25, 28 and
+# 31, one per spelling. A definition nested in each spelling of a function
+# body, at column 0 (lines 8, 12, 16) or indented (lines 26, 29, 32), an if
+# arm (line 20), a case arm (line 22) and a loop (line 23) is still out of
+# scope and not reported: the indented bodies are what tell a function body
+# brace from a bare one, since a column-0 body is excluded before its
+# nesting is read.
+d_bare="$(mkfixture bare-group <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+{
+  fail() { :; }
+}
+{ helper() { :; }; }
+outer() {
+  inner() { :; }
+}
+readonly -f outer
+function outer2 {
+  inner2() { :; }
+}
+readonly -f outer2
+outer3 () {
+  inner3() { :; }
+}
+readonly -f outer3
+if true; then
+  cond() { :; }
+fi
+case x in a) incase() { :; } ;; esac
+for x in 1; do inloop() { :; }; done
+{
+  outer4() {
+    inner4() { :; }
+  }
+  function outer5 {
+    inner5() { :; }
+  }
+  outer6 () {
+    inner6() { :; }
+  }
+}
+FIX
+)"
+out_bare="$(run_gate "$d_bare")"
+expect_rc "30t. a definition inside a bare brace group is judged as at top level" 1 "$out_bare" \
+  "5 violation(s)" "fixture.test.sh:4: 'fail()'" "fixture.test.sh:6: 'helper()'" \
+  "fixture.test.sh:25: 'outer4()'" "fixture.test.sh:28: 'function outer5'" \
+  "fixture.test.sh:31: 'outer6()'"
+if grep -Eq 'fixture.test.sh:(8|12|16|20|22|23|26|29|32):' <<<"$out_bare"; then
+  fail "30t-b. a definition nested in a function body, an if or case arm or a loop is not reported" "$out_bare"
+else
+  pass "30t-b. a definition nested in a function body, an if or case arm or a loop is not reported"
+fi
+
 # ---- 30r. inside double quotes a backslash escapes only five characters -----
 # Thirty-second board round (architect): the lexer dropped every backslash in
 # a double-quoted word, while bash keeps one before anything but a dollar, a

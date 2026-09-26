@@ -988,6 +988,18 @@ was replaced with this one (round twenty-nine).
   double quote, backslash or newline: `"al\ias"` is the command `al\ias`.
   That only ever reported too much, never too little, but the gate claims to
   tokenise as bash does, so it now keeps the backslash where bash does.
+  The thirty-third found the same close missed one more way: the lexer read
+  the word after `fi`, `done` or `esac` as an argument, so the brace in
+  `h() { if true; then :; fi }` closed nothing, `h` stayed open, and an
+  unfrozen redefinition of `fail` after it was never derived (bash accepts
+  the brace there and closes the group). All three now leave the next word
+  in command position, where the brace closes `h`. The same round found the
+  scope rule hiding too much: nesting was counted alike for every compound,
+  so a helper defined inside a bare `{ ...; }` group was never derived and
+  never had to be frozen, although the group runs once and unconditionally,
+  as top level does. Each nesting level now records what opened it (a
+  function body, a bare group, or a conditional or repeated compound), and
+  only a bare group is transparent.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
@@ -1072,7 +1084,9 @@ reproduction are what prove a surviving freeze is in force.
 
 `lockfile-sync-tests` gained a shellcheck entry and two steps (suite, then
 gate), mirrored in this suite's step-block and shellcheck pins;
-`SELF_EXEC_EXPECTED_DROP` moved 658 → 663 with the heredoc payload. Shellcheck
+`SELF_EXEC_EXPECTED_DROP` moved 658 → 663 with the heredoc payload at the time of
+the sweep, and to 665 when a later merge brought main's own 2 (round
+twenty-nine; 665 is the value in the suite now). Shellcheck
 clean on every touched file. At the time of the sweep, all 67 suites under the
 scanned directories (54 in `scripts/__tests__`, 12 in `.claude/hooks/__tests__`,
 1 in `.claude/tools/__tests__`; `scripts/__tests__/lib` holds a sourced helper,

@@ -186,7 +186,10 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
 - No `alias NAME=` and no `shopt -s expand_aliases` anywhere in a suite: an
   alias is resolved before functions and `readonly -f` does not stop it. The
   gate tokenises executable text the way bash does (quotes removed, escapes
-  and continuations resolved), finds each statement's command word, and when
+  and continuations resolved; inside double quotes a backslash escapes only
+  `$`, a backtick, `"`, `\` or a newline and is kept before anything else,
+  so `"al\ias"` is the command `al\ias`, round thirty-two), finds each
+  statement's command word, and when
   it is `alias` reports every later `NAME=` word, or `expand_aliases` after
   `shopt` plus an `s` flag — so `\alias`, `"alias"`, `\a\l\i\a\s`,
   `alias nothing fail=:` and anything in front of the word are all caught.
@@ -257,18 +260,24 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   where its `}` stands in command position, as bash reads it, whatever code
   follows (`f() { :; }; true` is a one-liner), and a `}` that is only an
   argument (`f() { echo }`) closes nothing, so the next line is still the
-  body (round thirty-two). A subshell body or a
+  body (round thirty-two). The word after `fi`, `done` or `esac` is in
+  command position, so `h() { if true; then :; fi }` closes on its line
+  (round thirty-three). A subshell body or a
   bare compound body is reported as `unsupported` — the gate never skips a
   definition it cannot follow.
 - Every function at true top level (outside any function body, subshell,
-  loop, `if`/`case` arm or brace group, counted by command word, not
-  indentation; a case pattern, extglob groups included, or a quoted `"{"`
-  is not a command word) is
+  loop or `if`/`case` arm, counted by command word, not indentation; a case
+  pattern, extglob groups included, or a quoted `"{"` is not a command word)
+  is
   defined at column 0, at the start of its own line, with a
   plain identifier name. Anything else at top level — indented, after another
   command or a closing brace, second on a line (even under the same name), a
   dashed name — is reported as `shape`, because
-  the freeze rule cannot tie it to a freeze line.
+  the freeze rule cannot tie it to a freeze line. A bare brace group
+  `{ ...; }` runs once and unconditionally, so it is top level too: a
+  definition inside one is reported, while one inside a function body brace
+  is not (round thirty-three; case 30t pins each spelling of the body,
+  indented, because a column-0 body is excluded before its nesting is read).
 - `<<` inside `(( ))`, `$(( ))` or the deprecated `$[ ]` is a shift operator,
   not a heredoc.
 - A heredoc delimiter is any word (`<<1EOF`, `<<-ZEOF`, `<<'.EOF'`), and a
