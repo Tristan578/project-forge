@@ -168,7 +168,11 @@ its own suite) derives every column-0 definition and fails on one whose next
 line is not its freeze, on a stray freeze (before the definition, after a blank
 line, inside a quoted program or heredoc fixture, or naming a function the file
 never defines), and fail-closed on a file
-it cannot lex to EOF. Rules that follow from `readonly -f` itself:
+it cannot lex to EOF. That report names every construct still open, outermost
+first, each at the line it opened on: each substitution frame's interrupted
+array literal and quote, the frame itself, then the array literal, quote and
+queued heredocs open at the innermost level. Rules that follow from
+`readonly -f` itself:
 
 - It cannot pre-declare, so no freeze block at the end of the file — each freeze
   follows its own definition, with no blank line between.
@@ -311,7 +315,12 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   not a top-level helper.
 - Heredocs follow bash: only `<<-` strips leading tabs before the terminator;
   a plain `<<` body runs to the column-0 delimiter, tab-indented lookalikes
-  included.
+  included. A body is held back while a quote, `$( )`, backtick, `$(( ))`,
+  `$[ ]` or `(( ))` opened after the `<<` on its line is still open: those
+  lines are code. A `( )` subshell or an array literal holds nothing back. A
+  heredoc queued inside a substitution is read before one queued outside it.
+- A backtick span closes only on a backtick, and `$[ ]` only on `]`; a `)`
+  inside either is text.
 
 ## Platform contract (#9611)
 
