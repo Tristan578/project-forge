@@ -28,7 +28,9 @@ QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "script not found: $SCRIPT"; exit 1; }
 
@@ -70,6 +72,7 @@ run_resolve() {
   RESOLVE_OUT="$(cat "$out")"
   rm -f "$out"
 }
+readonly -f run_resolve
 
 # ---- pull_request: passes the event payload straight through ---------------
 run_resolve EVENT_NAME=pull_request PR_BASE_SHA=aaa111 PR_HEAD_SHA=bbb222
@@ -124,6 +127,7 @@ assert_hard_failure() {
     pass "$label: exits non-zero and writes no outputs"
   fi
 }
+readonly -f assert_hard_failure
 
 assert_hard_failure "pull_request with empty base SHA" \
   EVENT_NAME=pull_request PR_BASE_SHA= PR_HEAD_SHA=bbb222
@@ -171,6 +175,7 @@ pin() {
     fail "$label: no line matching /$pattern/ in ${file##*/}"
   fi
 }
+readonly -f pin
 
 pin "ci.yml still declares the workflow_dispatch trigger (#9161/#9381)" \
   "$CI_YML" '^  workflow_dispatch:'

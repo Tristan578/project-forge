@@ -30,7 +30,9 @@ command -v grep >/dev/null 2>&1 || { echo "FATAL: grep not found on host"; exit 
 PASS=0
 FAIL=0
 ok()  { echo "  ok: $1"; PASS=$((PASS + 1)); }
+readonly -f ok
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f bad
 
 echo "== dx-audit: file existence =="
 if [ -f "$AUDIT" ]; then ok "dx-audit.sh exists"; else bad "dx-audit.sh missing"; fi

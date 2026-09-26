@@ -24,7 +24,9 @@ TMPDIR_T="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_T"' EXIT
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 command -v node >/dev/null 2>&1 || { echo "node not on PATH — suite cannot run"; exit 1; }
 [ -f "$GATE" ] || { echo "gate script not found: $GATE"; exit 1; }
@@ -42,6 +44,7 @@ mktree() {
   done
   echo "$nm"
 }
+readonly -f mktree
 
 # Run the gate against a tree with optional platform/arch seam overrides.
 # Usage: run_gate <nm_dir> [platform] [arch]
@@ -50,6 +53,7 @@ run_gate() {
     bash "$GATE" "$1" >/dev/null 2>&1
   echo $?
 }
+readonly -f run_gate
 
 HOST_PLATFORM="$(node -p process.platform)"
 HOST_ARCH="$(node -p process.arch)"
@@ -323,6 +327,7 @@ command_needs_bindings() {
   fi
   return 1
 }
+readonly -f command_needs_bindings
 
 # $1 = workspace dir, $2 = package.json script name, $3 = depth. A workspace
 # with no package.json, or a script it does not declare, is UNRESOLVABLE (2),
@@ -336,6 +341,7 @@ script_needs_bindings() {
   text="$(node -e 'const s=(JSON.parse(require("fs").readFileSync(0,"utf8")).scripts||{})[process.argv[1]];if(s===undefined)process.exit(3);process.stdout.write(String(s))' "$script" <"$pkg")" || return 2
   command_needs_bindings "$text" "$dir" "$depth"
 }
+readonly -f script_needs_bindings
 
 # $1 = workspace dir, $2 = --config path (empty → playwright.config.*), $3 =
 # depth. Reads every `command: '...'` string in the config (the webServer
@@ -371,6 +377,7 @@ config_needs_bindings() {
   done <<<"$cmds"
   return "$verdict"
 }
+readonly -f config_needs_bindings
 
 # Reads workflow text on stdin; prints each job that loads a native binding
 # once, sorted. A W or P row that cannot be resolved prints
@@ -394,6 +401,7 @@ native_binding_jobs() {
     esac
   done <<<"$rows" | sort -u
 }
+readonly -f native_binding_jobs
 
 # Reads workflow text on stdin; prints one line per way <job> fails to run the
 # gate, and nothing when it is wired. Job blocks are extracted individually so
@@ -441,6 +449,7 @@ job_wiring_defects() {
     echo "native-bindings step does not run 'bash scripts/check-native-bindings.sh' as its whole run: line — neutered, rewritten, or comment-suffixed"
   fi
 }
+readonly -f job_wiring_defects
 
 # 14. EVERY job that loads a native binding must invoke the gate, where
 #     "every" is the derived set above rather than a list someone keeps in
@@ -485,6 +494,7 @@ assert_gate_wired() {
     fi
   done <<<"$derived_jobs"
 }
+readonly -f assert_gate_wired
 
 # 14a. Negative control: replace <job>'s gate invocation in the text on stdin
 #      with `echo skipped` and assert the pin goes red. Each mutates the REAL
@@ -509,6 +519,7 @@ assert_unwiring_caught() {
     pass "negative control: unwiring $label ${job}'s gate is caught"
   fi
 }
+readonly -f assert_unwiring_caught
 
 if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   ci="$(cat "$CI_YML")"
@@ -679,6 +690,7 @@ mkrolldown() {
   done
   echo "$nm"
 }
+readonly -f mkrolldown
 
 # R1. Happy path: the host's rolldown binding present with a .node binary → 0.
 nm="$(mkrolldown r-ok linux x64 binding-linux-x64-gnu)"

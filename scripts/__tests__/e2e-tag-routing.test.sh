@@ -32,7 +32,9 @@ REPORTER_TS="${E2E_TAG_ROUTING_REPORTER_TS:-$HERE/../../web/e2e/lib/uiSuiteRepor
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 # A `run: |` block may spread one command over several physical lines with a
 # trailing backslash (quality-gates.yml does exactly this). grep hands back a
@@ -49,6 +51,7 @@ join_continuations() {
     buf = ""
   } END { if (buf != "") print buf }' "$1"
 }
+readonly -f join_continuations
 
 if [ ! -f "$CI_YML" ]; then
   echo "  FAIL: ci.yml not found at $CI_YML"
@@ -529,6 +532,7 @@ resolve_test_match_globs() {
   done < <(grep -oE "^[[:space:]]{4,}testMatch: ('[^']+'|[A-Za-z_][A-Za-z0-9_]*)" "$cfg" \
     | sed -E 's/.*testMatch: //')
 }
+readonly -f resolve_test_match_globs
 
 match_count=0
 empty_globs=""

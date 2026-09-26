@@ -25,7 +25,9 @@ TMPDIR_T="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_T"' EXIT
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$GATE" ] || { echo "gate script not found: $GATE"; exit 1; }
 
@@ -42,6 +44,7 @@ mkfixture() {
     printf '#!/usr/bin/env bash\nexit 0\n' >"$TMPDIR_T/$name/tests/$suite"
   done
 }
+readonly -f mkfixture
 
 # wire <name> <suite-basenames...> — append a workflow that names each suite.
 wire() {
@@ -57,6 +60,7 @@ wire() {
     done
   } >>"$wf"
 }
+readonly -f wire
 
 # run_gate <name> — invoke the gate against fixture <name>; echoes output,
 # returns the gate's exit code.
@@ -66,6 +70,7 @@ run_gate() {
   SUITE_WIRING_WORKFLOW_DIR="$TMPDIR_T/$name/workflows" \
     bash "$GATE" 2>&1
 }
+readonly -f run_gate
 
 # ---- 1. Fully wired tree passes ----
 mkfixture wired a.test.sh b.test.sh

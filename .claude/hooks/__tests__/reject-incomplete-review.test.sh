@@ -31,6 +31,7 @@ run_hook() {
     | bash "$HOOK" >/dev/null 2>&1
   echo $?
 }
+readonly -f run_hook
 
 # run_hook_raw <raw_stdin> -> echoes the hook's exit code, piping bytes verbatim
 # (used to feed malformed / non-JSON input).
@@ -38,11 +39,13 @@ run_hook_raw() {
   printf '%s' "$1" | bash "$HOOK" >/dev/null 2>&1
   echo $?
 }
+readonly -f run_hook_raw
 
 # repeat_char <char> <count> -> a string of <count> copies of <char>.
 repeat_char() {
   printf '%*s' "$2" '' | tr ' ' "$1"
 }
+readonly -f repeat_char
 
 assert_exit() {
   local desc="$1" expected="$2" actual="$3"
@@ -54,6 +57,7 @@ assert_exit() {
     printf '  FAIL %s (expected exit %s, got %s)\n' "$desc" "$expected" "$actual"
   fi
 }
+readonly -f assert_exit
 
 # A genuine, substantive review body that omits a verdict (>200 chars, no
 # PASS/FAIL). Deliberately avoids the words pass/fail to keep intent unambiguous.

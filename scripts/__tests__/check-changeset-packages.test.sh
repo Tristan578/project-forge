@@ -33,7 +33,9 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 command -v node >/dev/null 2>&1 || { echo "node not found — required to run these tests"; exit 1; }
@@ -54,9 +56,11 @@ make_repo() {
   printf '%s' '{"name":"@spawnforge/docs"}'       > "$repo/apps/docs/package.json"
   echo "$repo"
 }
+readonly -f make_repo
 
 # write_changeset <repo> <name> <body...> — write .changeset/<name>.md verbatim.
 write_changeset() { printf '%s' "$3" > "$1/.changeset/$2.md"; }
+readonly -f write_changeset
 
 # Run the gate inside <repo>; echo "<exit>|<output>".
 run_gate() {
@@ -65,6 +69,7 @@ run_gate() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate
 
 echo "=== check-changeset-packages.sh tests ==="
 

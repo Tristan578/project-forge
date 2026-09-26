@@ -18,6 +18,7 @@ check_workflow() {
     failures=$((failures + 1))
   fi
 }
+readonly -f check_workflow
 
 check_workflow changeset-check.yml changeset-check
 check_workflow pr-workitem-check.yml pr-workitem-check

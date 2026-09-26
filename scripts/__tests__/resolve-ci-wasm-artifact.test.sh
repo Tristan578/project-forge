@@ -33,7 +33,9 @@ QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "resolver script not found: $SCRIPT"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required to run these tests"; exit 1; }
@@ -73,6 +75,7 @@ make_repo() {
   )
   printf '%s' "$repo"
 }
+readonly -f make_repo
 
 # Canned API payloads, one directory per case. A file whose whole content is
 # ERROR makes the stub fail the call like an HTTP 502; a file that does not
@@ -83,6 +86,7 @@ new_fixtures() {
   : > "$fx/calls.log"
   printf '%s' "$fx"
 }
+readonly -f new_fixtures
 
 # $1 = head sha, $2 = head repo, $3 = merge_commit_sha (default @HEAD@, which
 # the stub replaces with the checked-out commit), $4 = merged_at as a JSON
@@ -93,18 +97,21 @@ pull_json() {
   printf '{"number":123,"state":"closed","merged_at":%s,"merge_commit_sha":"%s","head":{"sha":"%s","repo":{"full_name":"%s"}}}\n' \
     "$merged_at" "$merge_sha" "$1" "$2"
 }
+readonly -f pull_json
 
 # One workflow_runs element. $1 id, $2 path, $3 event, $4 head repo, $5 head sha
 run_obj() {
   printf '{"id":%s,"name":"x","path":"%s","event":"%s","head_sha":"%s","head_repository":{"full_name":"%s"},"status":"completed","conclusion":"success"}' \
     "$1" "$2" "$3" "$5" "$4"
 }
+readonly -f run_obj
 
 runs_json() { # args: run objects
   local joined
   joined="$(IFS=,; printf '%s' "$*")"
   printf '{"total_count":%s,"workflow_runs":[%s]}\n' "$#" "$joined"
 }
+readonly -f runs_json
 
 jobs_json() { # $1 = WASM Build conclusion ('absent' leaves the job out, 'null' is JSON null)
   local wasm
@@ -115,10 +122,12 @@ jobs_json() { # $1 = WASM Build conclusion ('absent' leaves the job out, 'null' 
   esac
   printf '{"total_count":3,"jobs":[%s{"name":"Quality Gates / Lint","conclusion":"success"},{"name":"CI Gate","conclusion":"success"}]}\n' "$wasm"
 }
+readonly -f jobs_json
 
 artifacts_json() { # $1 = name, $2 = expired
   printf '{"total_count":1,"artifacts":[{"id":42,"name":"%s","expired":%s,"size_in_bytes":1}]}\n' "$1" "$2"
 }
+readonly -f artifacts_json
 
 # The happy-path payload set: one same-repo pull_request CI run (222) whose WASM
 # Build succeeded and whose reuse artifact is still live. Cases overwrite one
@@ -134,6 +143,7 @@ happy_fixtures() {
   artifacts_json "$ARTIFACT" false > "$fx/artifacts-222.json"
   printf '%s' "$fx"
 }
+readonly -f happy_fixtures
 
 STUB_DIR="$WORK/bin"
 mkdir -p "$STUB_DIR"
@@ -187,6 +197,7 @@ run_find() {
       GITHUB_REPOSITORY=o/r GITHUB_OUTPUT="$fx/out" \
       bash "$SCRIPT" find 2>&1 )
 }
+readonly -f run_find
 
 assert_run_id() { # $1 label, $2 want ('' = no reuse), $3 output, $4 fixtures dir
   local label="$1" want="$2" out="$3" fx="$4"
@@ -205,6 +216,7 @@ assert_run_id() { # $1 label, $2 want ('' = no reuse), $3 output, $4 fixtures di
     fail "$label -> GITHUB_OUTPUT carries $(grep -c '^run-id=' "$fx/out") run-id lines (expected 1)"
   fi
 }
+readonly -f assert_run_id
 
 echo "=== resolve-ci-wasm-artifact.sh find ==="
 
@@ -439,8 +451,10 @@ make_artifact() { # $1 = key to record
   printf '%s\n' "$1" > "$dir/$KEY_FILE"
   printf '%s' "$dir"
 }
+readonly -f make_artifact
 
 key_of() { ( cd "$1" && bash "$REPO_ROOT/scripts/engine-wasm-cache-key.sh" ci-reuse ); }
+readonly -f key_of
 
 # run_adopt <repo> <artifact dir> — echoes combined output; GITHUB_OUTPUT is
 # left at <repo>/.out.
@@ -448,6 +462,7 @@ run_adopt() {
   : > "$1/.out"
   ( cd "$1" && GITHUB_OUTPUT="$1/.out" bash "$SCRIPT" adopt "$2" 2>&1 )
 }
+readonly -f run_adopt
 
 assert_reused() { # $1 label, $2 want, $3 output, $4 repo
   if grep -qx "reused=$2" <<<"$3" && grep -qx "reused=$2" "$4/.out" && [ "$(grep -c '^reused=' "$4/.out")" -eq 1 ]; then
@@ -456,6 +471,7 @@ assert_reused() { # $1 label, $2 want, $3 output, $4 repo
     fail "$1 -> expected reused=$2; output: $(tr '\n' ' ' <<<"$3") | GITHUB_OUTPUT: $(tr '\n' ' ' < "$4/.out")"
   fi
 }
+readonly -f assert_reused
 
 assert_engine_untouched() { # $1 label, $2 repo
   local v leaked=''
@@ -468,6 +484,7 @@ assert_engine_untouched() { # $1 label, $2 repo
     fail "$1 -> engine/ gained${leaked} although the artifact was refused"
   fi
 }
+readonly -f assert_engine_untouched
 
 # --- the positive case --------------------------------------------------------
 REPO_A="$(make_repo "feat(engine): a change (#123)")"
@@ -584,15 +601,19 @@ echo ""
 echo "=== quality-gates.yml publishes the artifact CD adopts ==="
 # Extract one job block (its key line through the line before the next job).
 job_block() { awk -v j="  $2:" '$0 == j {f=1; print; next} f && /^  [a-z][a-z0-9-]*:$/ {exit} f' "$1"; }
+readonly -f job_block
 # Extract one step block from a job block, by a substring of its opening line.
 step_block() { awk -v id="$2" '/^      - / { instep = (index($0, id) > 0) } instep { print }' <<<"$1"; }
+readonly -f step_block
 # The 1-based line of a step's opening line inside a job block, or empty.
 step_line() { awk -v id="$2" '/^      - / && index($0, id) > 0 { print NR; exit }' <<<"$1"; }
+readonly -f step_line
 # A step as a recipe: its lines minus the `if:` guard (CD gates its builds,
 # quality-gates does not), comments and blank lines. A step block runs up to
 # the next step, so it also carries the explanatory comment above that next
 # step, which differs between the two files and decides nothing.
 recipe_step() { step_block "$1" "$2" | grep -vE '^        if:|^[[:space:]]*(#.*)?$'; }
+readonly -f recipe_step
 
 QG_BW="$(job_block "$QG_YML" build-wasm)"
 CD_BW="$(job_block "$CD_YML" build-wasm)"

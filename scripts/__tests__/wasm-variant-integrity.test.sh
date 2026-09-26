@@ -30,7 +30,9 @@ WF_DIR="${WASM_INTEGRITY_WF_DIR:-$HERE/../../.github/workflows}"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 # features -> the out-dir that build is allowed to feed.
 #   webgl2          -> pkg-webgl2
@@ -45,6 +47,7 @@ expected_outdir() {
   case "$feats" in *runtime*) suffix="-runtime" ;; esac
   printf 'pkg-%s%s' "$base" "$suffix"
 }
+readonly -f expected_outdir
 
 # Emit "BUILD <features>" / "BINDGEN <out-dir>" in file order for one workflow.
 # Comment lines are dropped so prose describing the bug cannot be read as code.
@@ -52,6 +55,7 @@ variant_ops() {
   grep -oE '^[^#]*(cargo build[^|]*--features[[:space:]]+[a-z0-9,]+|wasm-bindgen[^|]*--out-dir[[:space:]]+[a-zA-Z0-9-]+)' "$1" \
     | sed -E 's/.*--features[[:space:]]+([a-z0-9,]+).*/BUILD \1/; s/.*--out-dir[[:space:]]+([a-zA-Z0-9-]+).*/BINDGEN \1/'
 }
+readonly -f variant_ops
 
 check_workflow() {
   local wf="$1" name
@@ -105,6 +109,7 @@ check_workflow() {
     pass "$name: all $n_bindgen variant(s) bindgen'd from their own build"
   fi
 }
+readonly -f check_workflow
 
 echo "=== every WASM variant is bindgen'd from its own build ==="
 for wf in cd.yml ci.yml quality-gates.yml; do

@@ -33,7 +33,9 @@ FAILURES=0
 SHA40="0123456789abcdef0123456789abcdef01234567"
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 
@@ -48,9 +50,11 @@ make_repo() {
   cp "$SCRIPT" "$repo/scripts/check-actions-pinned.sh"
   echo "$repo"
 }
+readonly -f make_repo
 
 # write_wf <repo> <filename> <contents...> — write .github/workflows/<filename>.
 write_wf() { printf '%s' "$3" > "$1/.github/workflows/$2"; }
+readonly -f write_wf
 
 # Run the gate inside <repo>; echo "<exit>|<output>".
 run_gate() {
@@ -59,6 +63,7 @@ run_gate() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate
 
 echo "=== check-actions-pinned.sh tests ==="
 
