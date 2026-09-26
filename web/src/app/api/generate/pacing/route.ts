@@ -6,6 +6,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { generateText, Output } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { z } from 'zod';
@@ -56,6 +57,7 @@ const POST_impl = createGenerationHandler<
   PacingReport
 >({
   route: '/api/generate/pacing',
+  panel: 'pacing-analyzer',
   provider: DB_PROVIDER.chat,
   operation: 'pacing_analysis',
   rateLimitKey: 'gen-pacing',
@@ -111,7 +113,9 @@ ${existingSuggestions || 'None yet.'}
 
 Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
 
-    const anthropicClient = createAnthropic({ apiKey });
+    // A platform key can be a federated Bearer token (#8858); passing it as
+    // `apiKey` would send it as `x-api-key`, which Anthropic rejects.
+    const anthropicClient = createAnthropic(anthropicClientAuthForKey(apiKey));
     const startedAt = Date.now();
     const aiResult = await generateText({
       model: anthropicClient(AI_MODEL_FAST),

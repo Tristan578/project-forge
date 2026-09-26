@@ -468,7 +468,7 @@ export interface CspRouteRule {
  */
 export function playCspOptionsFromEnv(): Omit<PlayCspOptions, 'nonce'> {
   return {
-    engineCdn: process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '',
+    engineCdn: process.env.NEXT_PUBLIC_ENGINE_CDN_URL ?? '',
     clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
     devUnsafeEval: isDevEvalAllowed(),
   };

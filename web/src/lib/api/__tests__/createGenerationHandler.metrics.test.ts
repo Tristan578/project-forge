@@ -49,7 +49,13 @@ vi.mock('@/lib/keys/resolver', () => ({
     }
   },
 }));
-vi.mock('@/lib/tokens/pricing', () => ({ getTokenCost: vi.fn().mockReturnValue(40) }));
+// Spread the actual module: `createGenerationHandler` now imports
+// `@/lib/ai/tierAccess` for the panel tier gate (#7715), which reaches
+// `TRIAL_GRANT_TOKENS` off this module at import time — a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return { ...actual, getTokenCost: vi.fn().mockReturnValue(40) };
+});
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
   sentryLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -125,6 +131,7 @@ function makeRequest(): NextRequest {
 
 const baseConfig = {
   route: '/api/generate/test',
+  panel: 'generate-sound',
   provider: 'elevenlabs' as const,
   operation: 'test_generation',
   rateLimitKey: 'gen-test',
@@ -351,8 +358,8 @@ describe('createGenerationHandler — business metrics wiring (PF-1053)', () => 
 
   it('separates a DEGRADED auth path from a provider outage, though both return 503', async () => {
     // authenticateRequest returns 503 when the DB/user-sync path is degraded —
-    // a Neon circuit-breaker signal. Reported as `provider_unavailable` it pages
-    // on-call for an upstream AI incident that is not happening.
+    // a Neon circuit-breaker signal. Reported as `provider_unavailable` it raises an
+    // alert for an upstream AI incident that is not happening.
     mockAuth.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: 'Service degraded', code: 'SERVICE_DEGRADED' }, { status: 503 }),

@@ -52,6 +52,11 @@ export function TokenDashboard() {
     }
   }
 
+  // The free (`starter`) plan has no monthly allocation (#7715): its balance
+  // is the one-time signup grant (or what a cancelled plan left behind), so it
+  // must not read as a monthly allowance or promise a refill.
+  const isStarter = tier === 'starter';
+
   return (
     <div className="space-y-6 p-4">
       {/* Balance Card */}
@@ -72,7 +77,9 @@ export function TokenDashboard() {
               <div className="text-lg font-medium text-zinc-200">
                 {tokenBalance.monthlyRemaining.toLocaleString()}
               </div>
-              <div className="text-xs text-zinc-400">Monthly Remaining</div>
+              <div className="text-xs text-zinc-400">
+                {isStarter ? 'Trial Remaining' : 'Monthly Remaining'}
+              </div>
             </div>
             <div>
               <div className="text-lg font-medium text-zinc-200">
@@ -84,10 +91,18 @@ export function TokenDashboard() {
         ) : (
           <div className="text-sm text-zinc-400">Loading...</div>
         )}
-        {tokenBalance?.nextRefillDate && (
-          <div className="mt-2 text-xs text-zinc-400">
-            Next refill: {new Date(tokenBalance.nextRefillDate).toLocaleDateString()}
-          </div>
+        {isStarter ? (
+          tokenBalance && (
+            <div className="mt-2 text-xs text-zinc-400">
+              One-time trial grant — does not renew. Upgrade for a monthly allowance.
+            </div>
+          )
+        ) : (
+          tokenBalance?.nextRefillDate && (
+            <div className="mt-2 text-xs text-zinc-400">
+              Next refill: {new Date(tokenBalance.nextRefillDate).toLocaleDateString()}
+            </div>
+          )
         )}
       </div>
 

@@ -371,7 +371,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
             });
             break;
           case 'ui':
-            setHudElements(msg.elements || []);
+            setHudElements(msg.elements ?? []);
             break;
           case 'ui_screen': {
             try {
@@ -394,7 +394,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           case 'camera_set_mode': {
             const { mode } = msg;
             const store = useEditorStore.getState();
-            const primaryId = store.activeGameCameraId || store.primaryId;
+            const primaryId = store.activeGameCameraId ?? store.primaryId;
             if (primaryId) {
               const existing = store.allGameCameras[primaryId] || { mode: 'thirdPersonFollow', targetEntity: null };
               store.setGameCamera(primaryId, { ...existing, mode });
@@ -404,7 +404,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           case 'camera_set_target': {
             const { entityId: targetEntityId } = msg;
             const store = useEditorStore.getState();
-            const primaryId = store.activeGameCameraId || store.primaryId;
+            const primaryId = store.activeGameCameraId ?? store.primaryId;
             if (primaryId) {
               const existing = store.allGameCameras[primaryId] || { mode: 'thirdPersonFollow', targetEntity: null };
               store.setGameCamera(primaryId, { ...existing, targetEntity: targetEntityId });
@@ -423,7 +423,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           case 'camera_set_property': {
             const { property, value } = msg;
             const store = useEditorStore.getState();
-            const primaryId = store.activeGameCameraId || store.primaryId;
+            const primaryId = store.activeGameCameraId ?? store.primaryId;
             if (primaryId) {
               const existing = store.allGameCameras[primaryId] || { mode: 'thirdPersonFollow', targetEntity: null };
               store.setGameCamera(primaryId, { ...existing, [property]: value });
@@ -533,6 +533,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         // above the collider of anything shorter.
         entityInfos[eid] = {
           name: node.name,
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a component name not found is unset; falls back to 'unknown'
           type: node.components.find(c => c.startsWith('EntityType')) || 'unknown',
           colliderRadius: 0.5,
           // 0 UNTIL THE ENGINE REPORTS A TRANSFORM, and deliberately not a
@@ -599,6 +600,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
 
       // Send scene info to worker
       const sceneNames = store.scenes.map(s => s.name);
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank active scene name is unset; falls back to 'Main'
       const activeScene = store.scenes.find(s => s.id === store.activeSceneId)?.name || 'Main';
       worker.postMessage({
         type: 'scene_info',
@@ -649,26 +651,24 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         });
 
         // Start watchdog — if Worker doesn't respond in 5s, terminate it
-        if (!watchdogRef.current) {
-          watchdogRef.current = setTimeout(() => {
-            console.error('[ScriptRunner] Worker timeout — possible infinite loop. Terminating.');
-            showError('Script timed out — possible infinite loop detected. Play mode stopped.');
-            addScriptLog({
-              // '*' for the same reason as above: '' matched no entity, so the
-              // one message explaining why Play stopped was never displayed.
-              entityId: '*',
-              level: 'error',
-              message: 'Script execution timed out (possible infinite loop). Play mode stopped.',
-              timestamp: Date.now(),
-            });
-            workerRef.current?.terminate();
-            workerRef.current = null;
-            watchdogRef.current = null;
-            setPlayTickCallback(null);
-            // Stop play mode via store action
-            useEditorStore.getState().setEngineMode('edit');
-          }, WATCHDOG_TIMEOUT_MS);
-        }
+        watchdogRef.current ??= setTimeout(() => {
+          console.error('[ScriptRunner] Worker timeout — possible infinite loop. Terminating.');
+          showError('Script timed out — possible infinite loop detected. Play mode stopped.');
+          addScriptLog({
+            // '*' for the same reason as above: '' matched no entity, so the
+            // one message explaining why Play stopped was never displayed.
+            entityId: '*',
+            level: 'error',
+            message: 'Script execution timed out (possible infinite loop). Play mode stopped.',
+            timestamp: Date.now(),
+          });
+          workerRef.current?.terminate();
+          workerRef.current = null;
+          watchdogRef.current = null;
+          setPlayTickCallback(null);
+          // Stop play mode via store action
+          useEditorStore.getState().setEngineMode('edit');
+        }, WATCHDOG_TIMEOUT_MS);
 
         // Gather 2D state for the worker (tilemap data can change during play via setTile)
         const currentStore = useEditorStore.getState();
