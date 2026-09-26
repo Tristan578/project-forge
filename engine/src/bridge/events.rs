@@ -1136,3 +1136,10 @@ pub fn emit_performance_stats(
 pub fn emit_custom_wgsl_source_changed(source: &crate::core::custom_wgsl::CustomWgslSource) {
     emit_event("CUSTOM_WGSL_SOURCE_CHANGED", source);
 }
+
+/// Emit a render-error report (#8887). The payload is
+/// `core::render_errors::RenderErrorReport`, serialized camelCase:
+/// `{ errorClass, outcome, detail, occurrence }`.
+pub fn emit_render_error(report: &crate::core::render_errors::RenderErrorReport) {
+    emit_event("RENDER_ERROR", report);
+}

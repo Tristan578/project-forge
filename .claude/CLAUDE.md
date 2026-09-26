@@ -18,7 +18,7 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 
 ## Rendering Strategy
 
-- **Primary: WebGPU** (Bevy 0.18, wgpu 27) — auto-detected via `navigator.gpu`
+- **Primary: WebGPU** (Bevy 0.19, wgpu 29) — auto-detected via `navigator.gpu`
 - **Fallback: WebGL2** — for browsers without WebGPU
 - **4 binaries**: 2 editor + 2 runtime (WebGPU/WebGL2), JS auto-selects at runtime
 - **MUST include `tonemapping_luts`** Bevy feature — without it, materials render pink/magenta
@@ -63,7 +63,7 @@ Key: `_` prefix for unused params, no `useRef.current` during render, no blanket
 
 | File | Contents |
 |------|----------|
-| `rules/bevy-api.md` | Bevy 0.18 API, 0.16->0.18 migration, ECS limits, library APIs |
+| `rules/bevy-api.md` | Bevy 0.19 API, 0.16->0.19 migration, ECS limits, library APIs |
 | `rules/entity-snapshot.md` | EntityType, EntitySnapshot, history, selection events |
 | `rules/web-quality.md` | ESLint rules, React patterns, Next.js constraints |
 | `rules/library-apis.md` | csgrs, noise, terrain, texture pipeline, particles |

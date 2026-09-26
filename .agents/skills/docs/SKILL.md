@@ -22,7 +22,7 @@ Every document should be scannable in 30 seconds, complete in 5 minutes, and pre
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Bevy | 0.18 | wgpu 27, WebGPU primary, WebGL2 fallback |
+| Bevy | 0.19 | wgpu 29, WebGPU primary, WebGL2 fallback |
 | Next.js | 16.x | Turbopack build, Webpack dev |
 | React | 19.x | Via Next.js |
 | Zustand | 5.x | Slice-based store composition |
@@ -34,9 +34,9 @@ Every document should be scannable in 30 seconds, complete in 5 minutes, and pre
 | TypeScript | 5.x | Strict mode |
 | Rust | stable | wasm32-unknown-unknown target |
 | wasm-bindgen | 0.2.127 | Pinned — must match Cargo.lock |
-| bevy_rapier3d/2d | 0.33 | Physics |
-| bevy_hanabi | 0.18 | GPU particles (WebGPU only) |
-| bevy_panorbit_camera | 0.34 | Editor camera |
+| bevy_rapier3d/2d | 0.35 | Physics |
+| bevy_hanabi | 0.19 | GPU particles (WebGPU only) |
+| bevy_panorbit_camera | 0.35 | Editor camera |
 | csgrs | 0.20 | CSG booleans |
 
 ## Documentation Types

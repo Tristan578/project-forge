@@ -119,7 +119,7 @@ jobs:
           # .transform-gizmo-fork is a PATH DEPENDENCY of the engine
           # (engine/Cargo.toml: path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"),
           # so it compiles into every shipped WASM binary. It is a local patch we
-          # maintain for Bevy 0.18, not merely vendored code. Matching only
+          # maintain for Bevy 0.19, not merely vendored code. Matching only
           # '^engine/' meant a PR editing just the fork set engine=false, skipped
           # Quality Gates / WASM Build entirely, and was first compiled by CD on
           # main AFTER merge -- so a fork edit that failed to build reddened main

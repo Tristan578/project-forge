@@ -89,7 +89,7 @@ runtime = []  # Strips editor-only systems for game export
 
 ## Rendering Strategy
 
-- **Primary:** WebGPU (Bevy 0.18, wgpu 27) — auto-detected via `navigator.gpu`
+- **Primary:** WebGPU (Bevy 0.19, wgpu 29) — auto-detected via `navigator.gpu`
 - **Fallback:** WebGL2 — for browsers without WebGPU
 - **Two editor binaries** + **two runtime binaries** exist in `web/public/engine-pkg-*/`
 - **MUST include `tonemapping_luts` Bevy feature** — without it, materials render pink/magenta

@@ -41,6 +41,8 @@ vi.mock('@/hooks/usePointerLock', () => ({
 const mockHandleCommand = vi.fn();
 vi.mock('@/hooks/useEngine', () => ({
   getWasmModule: vi.fn(() => ({ handle_command: mockHandleCommand })),
+  getActiveEngineBackend: vi.fn(() => 'webgl2'),
+  setPreferredBackend: vi.fn(),
 }));
 
 vi.mock('../InitOverlay', () => ({
@@ -62,6 +64,7 @@ vi.mock('../ui-builder/UIRuntimeRenderer', () => ({
 import { useEditorStore } from '@/stores/editorStore';
 import { useViewport } from '@/hooks/useViewport';
 import { useScriptRunner } from '@/lib/scripting/useScriptRunner';
+import { useRenderErrorStore } from '@/stores/renderErrorStore';
 
 function mockEditorStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -108,6 +111,17 @@ describe('CanvasArea', () => {
     // desktop layout branches), so a second call would signal an accidental
     // double-mount and double registration.
     expect(useScriptRunner).toHaveBeenCalledTimes(1);
+  });
+
+  // #8887: the render-error notice must be mounted over the viewport, or a
+  // stopped viewport is back to freezing with no explanation.
+  it('shows the render-error notice over the viewport when the engine reports one', () => {
+    mockEditorStore();
+    useRenderErrorStore.getState().reset();
+    useRenderErrorStore.getState().report({ errorClass: 'deviceLost', outcome: 'stopped', detail: '', occurrence: 1 });
+    const { getByRole } = render(<CanvasArea />);
+    expect(getByRole('heading', { name: 'The connection to the graphics card was lost' })).toBeInTheDocument();
+    useRenderErrorStore.getState().reset();
   });
 
   it('does not show dimension indicator when not ready', () => {

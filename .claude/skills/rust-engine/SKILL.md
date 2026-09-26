@@ -1,6 +1,6 @@
 ---
 name: rust-engine
-description: Write Bevy 0.18 ECS components, bridge systems, pending queues, and WASM commands for SpawnForge. Use when modifying engine/ Rust code, adding ECS components, fixing bridge isolation, or implementing new engine capabilities.
+description: Write Bevy 0.19 ECS components, bridge systems, pending queues, and WASM commands for SpawnForge. Use when modifying engine/ Rust code, adding ECS components, fixing bridge isolation, or implementing new engine capabilities.
 paths: "engine/src/**"
 ---
 
@@ -27,7 +27,10 @@ engine/src/
 
 **core/ is sacred.** It must compile on any Rust target. If you need browser APIs, that logic goes in bridge/.
 
-## Bevy 0.18 API Rules
+## Bevy 0.19 API Rules
+
+0.19 migration specifics (scene rename, `Skybox`, `shadow_maps_enabled`, `AssetMut`, `RenderStartup`
+pipelines, resources-as-components) are in `.claude/rules/bevy-api.md` → "Bevy 0.19 changes".
 
 ### Event System (0.17+ naming)
 - `EventWriter<T>` → `MessageWriter<T>`, `EventReader<T>` → `MessageReader<T>`
@@ -55,10 +58,10 @@ engine/src/
 - Anti-alias: `bevy::anti_alias::contrast_adaptive_sharpening::*`
 
 ### Library-Specific
-- **bevy_rapier3d 0.33**: `RapierConfiguration` is a Component (not Resource). Never enable `parallel` feature (rayon panics on WASM).
-- **bevy_rapier2d 0.33**: Same pattern. `debug-render-2d` feature only.
-- **bevy_panorbit_camera 0.34**: `yaw`/`pitch`/`radius` — NO `alpha`/`beta`.
-- **bevy_hanabi 0.18**: GPU particles, WebGPU only. Gate with `#[cfg(feature = "webgpu")]`.
+- **bevy_rapier3d 0.35**: `RapierConfiguration` is a Component (not Resource). Never enable `parallel` feature (rayon panics on WASM).
+- **bevy_rapier2d 0.35**: Same pattern. `debug-render-2d` feature only.
+- **bevy_panorbit_camera 0.35**: `yaw`/`pitch`/`radius` — NO `alpha`/`beta`.
+- **bevy_hanabi 0.19**: GPU particles, WebGPU only. Gate with `#[cfg(feature = "webgpu")]`.
 - **csgrs 0.20**: `use csgrs::traits::CSG;` for boolean ops. Re-export nalgebra via csgrs.
 
 ## New Component Checklist
@@ -113,7 +116,8 @@ Add the dispatch arm in the domain's `dispatch()` function. This is how AI-Human
 - Float type inference: `.abs()` on match-returned floats needs explicit `let raw: f32 = ...`
 - Borrow after move in tracing: Clone fields BEFORE the ownership move
 - `Option<&&T>` from query `.find()`: Use `.and_then(|(_, sd)| sd.cloned())` not `.as_ref()`
-- `Assets::insert` returns `Result` in Bevy 0.18 — must handle or `let _ =`
+- `Assets::insert` returns `Result` (since Bevy 0.18) — must handle or `let _ =`
+- `Assets::get_mut` returns an `AssetMut<A>` guard (Bevy 0.19) — bind it `mut` and pass `&mut guard` where `&mut A` is expected
 - `runtime` feature gates system *registrations* in bridge/mod.rs, NOT function definitions
 
 ## Validation Tools
