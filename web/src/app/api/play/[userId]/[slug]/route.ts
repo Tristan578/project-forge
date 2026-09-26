@@ -122,6 +122,7 @@ async function GET_impl(
         description: game.description,
         slug: game.slug,
         version: game.version,
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored displayName is unset, same as absent; falls back to a display placeholder
         creatorName: user.displayName || 'Unknown Creator',
         sceneData,
       },

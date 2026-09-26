@@ -14,6 +14,9 @@ import {
   type RetiredByokProvider,
 } from '../config/providers';
 import { TIER_DISPLAY_NAMES } from '../billing/tierPlans';
+import { effectiveTier, spendableTokensOf } from '../ai/tierAccess';
+import type { Tier } from '@/lib/db/schema';
+import { STATUS_CHECK_OPERATION } from './statusCheckOperation';
 import { resolveAnthropicClientAuth } from '../ai/wifCredential';
 
 export interface ResolvedKey {
@@ -116,6 +119,11 @@ async function getPlatformKey(provider: Provider, capability?: ProviderCapabilit
  * 3. No key available (starter tier, zero balance, or unconfigured platform
  *    key) → throw with guidance.
  *
+ * Exception to 2-3: a status poll (`tokenCost` 0 AND `operation`
+ * `STATUS_CHECK_OPERATION`) gets the platform key with no tier or balance
+ * check and no deduction — the polled job was paid for at creation. Its tier
+ * control is the route's poll gate, `panelTierGateResponseForPoll`.
+ *
  * `capability` is optional and affects only the platform path: when it is a
  * resolver-gateway capability (image/embedding, #9523 — NOT chat, see
  * `RESOLVER_GATEWAY_CAPABILITIES`) the platform key resolves to
@@ -167,9 +175,32 @@ export async function resolveApiKey(
   );
   if (!user) throw new Error(`User not found: ${userId}`);
 
-  // Pro tier always has platform key access
-  // Other paid tiers can use platform keys if they have addon tokens
-  if (user.tier === 'starter') {
+  // Status poll of an already-paid job (#7715). The job's tokens were
+  // deducted when it was CREATED, so the live balance says nothing about
+  // whether its result may be read. A trial starter whose one generation
+  // spent the whole grant, or a hobbyist left at exactly 0, would otherwise be
+  // refused here on every poll: the client never receives the result, and the
+  // durable webhook finalizes the paid job as failed and refunds it. So a
+  // zero-cost STATUS_CHECK_OPERATION skips the tier and balance checks below,
+  // and it neither deducts nor records usage. The only tier control left for
+  // polls is the per-route poll gate (`panelTierGateResponseForPoll` in
+  // `@/lib/api/panelTierGate`), which still refuses a $0 account on a
+  // creator-or-above panel and a starter that never held tokens on every
+  // hobbyist panel. It is NOT a job-ownership check: the status routes do not
+  // bind jobId to the caller (pre-existing, tracked in #10262). BYOK was already preferred above, and
+  // `getPlatformKey` still throws when the platform key is not configured.
+  // BOTH halves are required: a charged call named `status_check`, or a free
+  // call named anything else, still goes through every check.
+  if (tokenCost === 0 && operation === STATUS_CHECK_OPERATION) {
+    return { type: 'platform', key: await getPlatformKey(provider, capability), metered: true };
+  }
+
+  // Pro tier always has platform key access. Other paid tiers can use
+  // platform keys while they have tokens. A starter account with spendable
+  // tokens (the signup trial grant, #7715) is treated as hobbyist here, the
+  // same rule `/api/chat` and the editor's panel gate apply; once the tokens
+  // are spent it is a starter account again and the message below applies.
+  if (effectiveTier(user.tier as Tier, spendableTokensOf(user)) === 'starter') {
     throw new ApiKeyError(
       'TIER_NOT_ALLOWED',
       `The ${TIER_DISPLAY_NAMES.starter} tier cannot use AI generation. Upgrade to ${TIER_DISPLAY_NAMES.hobbyist} and add your own ${provider} API key, or upgrade to ${TIER_DISPLAY_NAMES.pro} for platform keys.`

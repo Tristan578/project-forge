@@ -7,9 +7,9 @@ import { ShareButtons } from './ShareButtons';
 import { RemixButton } from './RemixButton';
 import { ReportGameDialog } from './ReportGameDialog';
 import { withTimeout } from '@/lib/async/withTimeout';
-import { loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
+import { describeOrigin, isCdnOrigin, loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
 import { loadSceneWhenReady, refusalOf, settleDelay, SceneLoadCancelled } from '@/lib/engine/playSceneLoad';
-import { captureException } from '@/lib/monitoring/sentry-client';
+import { addBreadcrumb, captureException, captureMessage, setTag } from '@/lib/monitoring/sentry-client';
 import {
   ENGINE_GLOBAL_TIMEOUT_MS,
   PLAY_GAME_FETCH_TIMEOUT_MS,
@@ -113,6 +113,7 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
         );
         if (!res.ok) {
           const data = await res.json().catch(() => ({ error: 'Failed to load game' }));
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
           setError(data.error || 'Game not found');
           setLoading(false);
           return;
@@ -162,7 +163,29 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       // would let a slow-but-not-hung load spend the full budget twice over and
       // leave "Starting engine..." on screen for double the intended time.
       const runtime: PlayEngineRuntime = await withTimeout(
-        loadPlayEngine(),
+        loadPlayEngine({
+          // A CDN that fails or stalls falls back to same-origin and the player
+          // never notices — which is the point, and also why it must be
+          // reported: a broken CDN prefix would otherwise route every player
+          // through the slower origin with nothing in Sentry to show for it.
+          // Same signals the editor emits (`wasm.source`, breadcrumb, #8250).
+          onOriginSkipped: (basePath, err) => {
+            // Browser import errors quote the full URL, which carries the
+            // build SHA; the loader's own messages use the host, and this
+            // scrub makes the breadcrumb host-only whichever produced it.
+            const reason = (err instanceof Error ? err.message : String(err))
+              .replace(/https?:\/\/\S+/g, '<url>');
+            addBreadcrumb({
+              category: 'wasm',
+              message: `Play engine load skipped ${describeOrigin(basePath)}: ${reason}`,
+              level: 'warning',
+            });
+            captureMessage('Play engine origin skipped, falling back', 'warning');
+          },
+          onOriginUsed: (basePath) => {
+            setTag('wasm.source', isCdnOrigin(basePath) ? 'cdn' : 'same-origin');
+          },
+        }),
         ENGINE_GLOBAL_TIMEOUT_MS,
         'Game engine load',
       );

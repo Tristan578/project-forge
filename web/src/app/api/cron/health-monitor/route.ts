@@ -21,8 +21,8 @@ const HEALTH_MONITOR = getCronMonitor('/api/cron/health-monitor')!;
  * GET /api/cron/health-monitor
  *
  * Runs every 15 minutes via Vercel Cron. Executes all service health checks and
- * reports any failures to Sentry as structured exceptions so on-call engineers
- * are alerted without manual polling.
+ * reports any failures to Sentry as structured exceptions so the owner is
+ * notified without manual polling (there is no paging service).
  *
  * Auth: Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` on every
  * invocation. Requests without a matching secret are rejected 401. If

@@ -196,6 +196,18 @@ describe('WIF exchange success', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).assertion).toBe('header-oidc-jwt');
   });
 
+  it('falls back to VERCEL_OIDC_TOKEN when the request-context header is blank', async () => {
+    stubWifEnv();
+    (globalThis as Record<symbol, unknown>)[REQUEST_CONTEXT] = {
+      get: () => ({ headers: { 'x-vercel-oidc-token': '   ' } }),
+    };
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => okExchange());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getAnthropicCredential();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).assertion).toBe(OIDC_TOKEN);
+  });
+
   it('sets expiresAt from expires_in', async () => {
     stubWifEnv();
     vi.stubGlobal('fetch', vi.fn(async () => okExchange({ expires_in: 600 })));

@@ -544,10 +544,13 @@ jobs:
   # `.claude/hooks/` inherited 62 failing assertions that had nothing to do with
   # its change.
   #
-  # So the trade is explicit: cheap PRs, and whoever next edits a hook pays the
-  # accumulated debt. If that becomes the common case, the fix is a scheduled
-  # run (5 min/week) rather than moving to every-PR — see #9606 for the
-  # discussion.
+  # So the gate stays, but it is no longer the only thing running these suites:
+  # `.github/workflows/hook-tests-scheduled.yml` runs them every Monday, and
+  # opens a tracking issue if they fail. That is roughly 5 minutes a week to
+  # bound the blast radius — rot is found by the schedule rather than by
+  # whoever happens to edit a hook months later. Do not remove one without
+  # reconsidering the other; together they are the reason a skipped run here is
+  # safe to ignore.
   hook-tests:
     name: Hook Tests
     needs: [ci-gate]
@@ -1270,6 +1273,9 @@ jobs:
         run: |
           bash scripts/__tests__/install-vercel-cli.test.sh
           node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs
+
+      - name: Verify scheduled hook-test contracts
+        run: node --test scripts/__tests__/hook-tests-scheduled.test.mjs
 
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
@@ -2076,11 +2082,15 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: npx next build
 
+      # VERCEL_GIT_COMMIT_SHA reaches the `next start` webServer (it inherits
+      # this step's env), so /api/health reports this run's commit instead of
+      # 'local' (#10157). Runtime-only: nothing reads it at build time.
       - name: Run strict interactive-journey gate
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
           E2E_STRICT_STORES: 'true'
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
         run: npx playwright test --config playwright.journey.config.ts
 
       - name: Upload journey report
@@ -2094,10 +2104,11 @@ jobs:
   # Engine smoke gate (#8602 F10). The FIRST per-PR job that actually boots the
   # WASM engine: it builds ONLY the WebGL2 variant, serves it same-origin, and
   # runs the curated `@engine-smoke` set under ANGLE/SwiftShader software WebGL2
-  # — two specs: `engine-smoke.spec.ts` (load -> spawn -> inspect -> play -> stop
-  # -> export, the breadth check) and `pipeline-live-engine.spec.ts` (the real
+  # — three specs: `engine-smoke.spec.ts` (load -> spawn -> inspect -> play -> stop
+  # -> export, the breadth check), `pipeline-live-engine.spec.ts` (the real
   # game-creation pipeline -> real Play button -> engineMode === 'play', the
-  # depth check). NOT `--disable-gpu`,
+  # depth check) and `journey-evidence-canary.spec.ts` (a /dev release journey
+  # whose evidence record the post-run check requires, #10157). NOT `--disable-gpu`,
   # which leaves wgpu with no GL context and hangs `init_engine` (the exact reason
   # every other CI Playwright config can only run store-less @ui/@journey specs).
   #
@@ -2294,7 +2305,7 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: npx next build
 
-      # Runs the curated @engine-smoke set (two specs — see the job comment
+      # Runs the curated @engine-smoke set (three specs — see the job comment
       # above), under SwiftShader software WebGL2. Launch flags and testMatch
       # live in playwright.engine.config.ts, which also carries the 90s DEFAULT
       # per-test budget (E2E_TIMEOUT_ENGINE_FULL_MS) that engine-smoke.spec.ts
@@ -2306,10 +2317,19 @@ jobs:
       # configure call, not this workflow. The editor fixture's load() seeds
       # localStorage['forge:preferred-backend'] = 'webgl2' so loadWasm never
       # probes WebGPU, which SwiftShader cannot drive.
+      #
+      # Journey evidence (#10157). The `next start` webServer inherits this
+      # step's env, so VERCEL_GIT_COMMIT_SHA makes /api/health report this
+      # run's commit rather than 'local'; the journey fixture records that
+      # alongside GITHUB_SHA (on a pull_request event, the merge ref) and the
+      # PR head, which GitHub expands to '' on push and dispatch runs.
       - name: Run engine smoke gate
+        id: engine-smoke-run
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npx playwright test --config playwright.engine.config.ts
 
       - name: Upload engine-smoke report
@@ -2319,6 +2339,35 @@ jobs:
           name: e2e-engine-smoke-report
           path: web/playwright-report/
           retention-days: 14
+
+      # One record per @release-journey test plus every attempt's trace and
+      # video, written by e2e/lib/journeyEvidenceReporter.ts. Uploaded before
+      # the check below so a failing check still leaves the evidence to read.
+      # if-no-files-found: error — an absent directory means the reporter
+      # never ran, which must not upload as an empty success. Both evidence
+      # steps skip only when the Playwright step itself never ran (an earlier
+      # step failed and the job is already red), so they add no second error.
+      - name: Upload journey evidence
+        if: ${{ !cancelled() && steps.engine-smoke-run.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: journey-evidence
+          path: web/journey-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      # The post-run check: exactly one valid record per journey-tagged test
+      # the run selected (never zero), every attempt's trace and video present,
+      # GITHUB_SHA and the PR head equal to this run's, and /api/health's
+      # commit equal to GITHUB_SHA's first 8 characters. A journey test whose
+      # record was never attached fails the job here even though Playwright
+      # reported it green. Rules: web/e2e/lib/journeyEvidenceCheck.ts.
+      - name: Check journey evidence
+        if: ${{ !cancelled() && steps.engine-smoke-run.outcome != 'skipped' }}
+        working-directory: web
+        env:
+          JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npx tsx scripts/check-journey-evidence.ts journey-evidence --min-journeys 1 --expect-github-sha "$GITHUB_SHA" --expect-pr-head-sha "$JOURNEY_PR_HEAD_SHA"
 
   # Cross-browser E2E (#9610). firefox, webkit and the two mobile projects had
   # been declared in playwright.config.ts for months and executed by nothing:
