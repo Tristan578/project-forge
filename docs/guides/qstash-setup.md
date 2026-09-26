@@ -26,6 +26,13 @@ The feature is **fully dormant** until an owner sets the QStash env vars:
 There is **no code change** to activate — it is purely environment config. Until
 then the existing client-side poller remains the only completion path.
 
+Once configured, the client side follows (#8892): `GET /api/jobs` reports
+`durableCompletionEnabled: true`, its `?status=active` list also returns durable
+jobs the callback finished while no tab was open (terminal, `imported = 0`),
+`useGenerationPolling` imports or refunds those from their row on the next load
+without starting a poll loop, and a durable job's 30-second safety poll reads
+`GET /api/jobs/[id]` before the provider status route.
+
 ## Activation steps (owner-only)
 
 1. **Create a QStash project.** In the [Upstash console](https://console.upstash.com)

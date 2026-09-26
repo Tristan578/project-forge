@@ -42,9 +42,50 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # ======================= CHROMATIC PAUSE SWITCH =======================
+  # PAUSED 2026-09-26 — tracking issue #10279. The snapshot quota is
+  # exhausted, so a baseline build here would fail on every design-system
+  # push to main. While 'true', the baseline job is SKIPPED and the
+  # pause-switch job warns that no baseline was written.
+  #
+  # Lockstep with the `chromatic-paused` input default in quality-gates.yml;
+  # visual-ci-contract.test.mjs fails if the two disagree.
+  # TO RE-ENABLE: set this to 'false' (and that default to false), merge,
+  # then dispatch this workflow once so the baseline covers everything
+  # merged while paused. See docs/operations/visual-ci-gate.md.
+  CHROMATIC_PAUSED: 'true'
+
 jobs:
+  pause-switch:
+    name: Chromatic pause switch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      paused: ${{ steps.read.outputs.paused }}
+    steps:
+      - name: Read the pause switch
+        id: read
+        run: |
+          case "$CHROMATIC_PAUSED" in
+            true)
+              echo "paused=true" >> "$GITHUB_OUTPUT"
+              echo "::warning title=Chromatic baseline NOT written::Chromatic is paused (snapshot quota exhausted, #10279). No baseline was written for this commit."
+              ;;
+            false)
+              echo "paused=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::CHROMATIC_PAUSED must be 'true' or 'false', got '$CHROMATIC_PAUSED'"
+              exit 1
+              ;;
+          esac
+
   baseline:
     name: Accept Chromatic baseline on main
+    needs: pause-switch
+    if: ${{ needs.pause-switch.outputs.paused == 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

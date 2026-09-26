@@ -19,17 +19,32 @@ vi.mock('@/lib/db/client', () => ({
 }));
 
 vi.mock('@/lib/db/schema', async () => {
-  const { pgTable, text } = await import('drizzle-orm/pg-core');
-  const table = pgTable('generation_jobs', { resultUrl: text('result_url') });
-  return { generationJobs: { userId: 'userId', status: 'status', createdAt: 'createdAt', resultUrl: table.resultUrl } };
+  const { pgTable, text, integer } = await import('drizzle-orm/pg-core');
+  const table = pgTable('generation_jobs', {
+    resultUrl: text('result_url'),
+    parameters: text('parameters'),
+    imported: integer('imported'),
+  });
+  return {
+    generationJobs: {
+      userId: 'userId', status: 'status', createdAt: 'createdAt',
+      resultUrl: table.resultUrl, parameters: table.parameters, imported: table.imported,
+    },
+  };
 });
 
 vi.mock('drizzle-orm', async (importOriginal) => ({
   sql: (await importOriginal<typeof import('drizzle-orm')>()).sql,
   eq: vi.fn((...args: unknown[]) => ({ type: 'eq', args })),
   and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
+  or: vi.fn((...args: unknown[]) => ({ type: 'or', args })),
   inArray: vi.fn((...args: unknown[]) => ({ type: 'inArray', args })),
   desc: vi.fn((col: unknown) => ({ type: 'desc', col })),
+}));
+
+const qstash = vi.hoisted(() => ({ configured: false }));
+vi.mock('@/lib/qstash/client', () => ({
+  isQstashConfigured: () => qstash.configured,
 }));
 
 vi.mock('@/lib/auth/api-auth', () => ({
@@ -278,6 +293,52 @@ describe('/api/jobs', () => {
       const response = await GET(req);
 
       expect(response.status).toBe(200);
+    });
+
+    it('status=active also returns durable rows the callback finished but no client reflected (#8892)', async () => {
+      mockAuth(true);
+      const { selectChain } = setupDb();
+      mockSelectFrom.mockResolvedValueOnce([]);
+
+      await GET(new NextRequest('http://localhost/api/jobs?status=active'));
+
+      // and(user, or(live states, and(terminal states, imported = 0, durable)))
+      type Node = { type: string; args: unknown[] };
+      const where = selectChain.where.mock.calls[0][0] as Node;
+      expect(where.type).toBe('and');
+      const orArm = where.args[1] as Node;
+      expect(orArm.type).toBe('or');
+      const live = orArm.args[0] as Node;
+      expect(live.type).toBe('inArray');
+      expect(live.args[1]).toEqual(['pending', 'processing', 'downloading']);
+      const terminalAnd = orArm.args[1] as Node;
+      expect(terminalAnd.type).toBe('and');
+      expect((terminalAnd.args[0] as Node).type).toBe('inArray');
+      expect((terminalAnd.args[0] as Node).args[1]).toEqual(['completed', 'failed']);
+      // imported = 0: the live client sets it, the webhook never does.
+      expect((terminalAnd.args[1] as Node).type).toBe('eq');
+      expect((terminalAnd.args[1] as Node).args[1]).toBe(0);
+      // Scoped to rows the client marked durable at creation, so a failed
+      // legacy row (imported = 0 forever) never resurfaces.
+      const durableScope = new PgDialect().sqlToQuery(terminalAnd.args[2] as SQL);
+      expect(durableScope.sql).toContain(`->>'durable' = 'true'`);
+    });
+
+    it('reports durableCompletionEnabled as a boolean only', async () => {
+      mockAuth(true);
+      setupDb();
+      mockSelectFrom.mockResolvedValueOnce([]);
+      qstash.configured = false;
+      let body = await (await GET(new NextRequest('http://localhost/api/jobs'))).json();
+      expect(body.durableCompletionEnabled).toBe(false);
+
+      setupDb();
+      mockSelectFrom.mockResolvedValueOnce([]);
+      qstash.configured = true;
+      body = await (await GET(new NextRequest('http://localhost/api/jobs?status=active'))).json();
+      expect(body.durableCompletionEnabled).toBe(true);
+      expect(JSON.stringify(body)).not.toMatch(/QSTASH|token/i);
+      qstash.configured = false;
     });
 
     it('filters by specific status', async () => {

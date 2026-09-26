@@ -1792,6 +1792,10 @@ on:
         description: 'Whether the ratchet job can commit+push (only fires on main branch, requires write perms)'
         type: boolean
         default: true
+      chromatic-paused:
+        description: 'Temporary pause of the Chromatic visual gate, tracking issue 10279. true = chromatic job skipped and a NOT-checked warning emitted'
+        type: boolean
+        default: true
     outputs:
       lint-result:
         description: 'Outcome of the lint job'
@@ -1836,7 +1840,8 @@ STEPS_EOF
   security:
   lighthouse-delta:
   storybook-internal-gate:
-  chromatic:"
+  chromatic:
+  chromatic-paused-notice:"
 
   # Top of the duplicate-key hierarchy: the top-level jobs: key itself is
   # COUNT-pinned. An appended second jobs: mapping at end of file replaces
@@ -1868,8 +1873,9 @@ STEPS_EOF
   # appended second security: job at end of file replaces the whole job
   # under YAML last-key-wins while every pin below keeps reading the dead
   # first block, and the job reports SUCCESS under the original display
-  # name (actionlint would flag the duplicate job key, but it is not wired
-  # into this repo's CI). The level above THIS — a duplicated top-level
+  # name (the `actionlint` job, #8719, flags the duplicate job key, but it
+  # runs from the same PR-controlled ci.yml, so this pin stays the
+  # independent backstop). The level above THIS — a duplicated top-level
   # jobs: key — is count-pinned above rather than argued away: the
   # rationale (and why "fails closed on its own" was rejected) lives at
   # that pin.
@@ -2637,6 +2643,7 @@ STEPS_EOF
   agentic-sync:
   taskboard-onboarding-guard:
   codex-config-guard:
+  actionlint:
   ghaw-lock-sync:
   actions-pin-check:
   lockfile-sync-tests:
@@ -3395,7 +3402,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=660
+readonly SELF_EXEC_EXPECTED_DROP=664
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
