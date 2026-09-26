@@ -58,7 +58,12 @@ describe('DashboardLayout', () => {
 
   it('links to creator analytics from the header (#8352)', () => {
     render(<DashboardLayout />);
-    fireEvent.click(screen.getByRole('button', { name: 'Analytics' }));
+    const analytics = screen.getByRole('button', { name: 'Analytics' });
+    // Rendered by the @spawnforge/ui Button (ghost, sm): the sm size carries the
+    // 44px mobile touch target, which a hand-rolled header button lacked.
+    expect(analytics.className).toContain('min-h-[44px]');
+    expect(analytics.className).toContain('bg-transparent');
+    fireEvent.click(analytics);
     expect(mockPush).toHaveBeenCalledWith('/dashboard/analytics');
   });
 
