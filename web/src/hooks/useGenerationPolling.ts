@@ -360,6 +360,7 @@ export function useGenerationPolling() {
       await triggerRefund(id);
       // Same rule as the provider-failure branch: the message a server route
       // wrote is passed through; the bare fallback gets the next step appended.
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank job error is unset; falls back to a generated retry message
       failJob(id, dbJob.errorMessage || withRetryGuidance('Generation failed'));
       return true;
     }
