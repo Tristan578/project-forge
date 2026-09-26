@@ -1080,7 +1080,12 @@ was replaced with this one (round twenty-nine).
   at the wrong line and as the wrong kind. Naming only the innermost would
   hide the outer one the same way, so every construct still open now gets
   its own row, outermost first: each frame's interrupted array literal and
-  quote, the frame itself, then what is open at the innermost level.
+  quote, the frame itself, then what is open at the innermost level. The
+  forty-fourth found a `)` closed whatever frame was innermost, a backtick
+  span or `$[ ]` included, although bash closes those only on a backtick
+  and a `]`. So in ``$(echo `echo inner)`` the open backtick was never
+  reported, and a valid ``X=`echo a)` `` failed as a parse error. To both,
+  a `)` is now text.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

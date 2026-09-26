@@ -1066,7 +1066,13 @@ derive_file() {
         }
         if (c2 == "((" && w == "") { open_sub("", 1, 1, 0); i += 2; continue }
         if (c == "(") { open_sub("", arith, 0, 0); i++; continue }
+        # A backtick span closes only on a backtick and $[ ] only on ]; to
+        # either, a ) is text, as it is to bash (forty-fourth board round:
+        # the ) in $(echo `echo inner) popped the backtick frame, so the
+        # backtick left open was never reported, and a valid `echo a)` was
+        # read as a closed span followed by a new one).
         if (c == ")") {
+          if (d > 0 && st_dbl[d] >= 2) { w = w c; i++; continue }
           if (d > 0 && st_dbl[d] && c2 == "))") { close_sub(); i += 2; continue }
           close_sub(); i++; continue
         }

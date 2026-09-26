@@ -423,9 +423,11 @@ OPENERS
 [ "$k" -eq 7 ] || fail "12i. expected 7 quote openers, walked $k"
 
 # ---- 12j. every construct still open at EOF is reported, outermost first -----
-# Forty-third board round (ux): only the outermost substitution frame was
-# named, so a backtick left open inside an outer $( ) was reported as the
-# $( ) alone, at the wrong line and as the wrong kind. Each fixture lists
+# Forty-third board round (ux, architect): only the outermost substitution
+# frame was named, so a backtick left open inside an outer $( ) was reported
+# as the $( ) alone, at the wrong line and as the wrong kind. Forty-fourth
+# (ux): a ) inside a backtick span or $[ ] popped that frame, which hid the
+# same backtick when it opened on the $( )'s own line. Each fixture lists
 # every row it must produce, in order, and the report must print exactly
 # those rows: a missing row, an extra row or a reordering is a failure.
 open_rows() {
@@ -453,9 +455,30 @@ a quote left open inside a $( ) inside a quoted array element|arr=(a\n"b $(echo\
 an array literal left open inside a subshell|( echo sub\narr=(a|fixture.test.sh:3: unterminated ( ) subshell opened here is still open at end of file\nfixture.test.sh:4: unterminated array literal ( opened here is still open at end of file
 two $( ) left open, one inside the other|X=$(echo start\n$(cat|fixture.test.sh:3: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file\nfixture.test.sh:4: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file
 an array literal left open around a $( ) holding another|arr=(a $(echo\nb=(c|fixture.test.sh:3: unterminated array literal ( opened here is still open at end of file\nfixture.test.sh:3: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file\nfixture.test.sh:4: unterminated array literal ( opened here is still open at end of file
+a ) inside a backtick span left open inside a $( )|X=$(echo `echo inner)|fixture.test.sh:3: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file\nfixture.test.sh:3: unterminated backtick span ` opened here is still open at end of file
+a )) inside a backtick span left open|X=`echo a))|fixture.test.sh:3: unterminated backtick span ` opened here is still open at end of file
+a ) inside a $[ ] left open|x=$[1 )|fixture.test.sh:3: unterminated $[ ] arithmetic opened here is still open at end of file
+a quote left open inside a top-level array literal|arr=(a\n'b|fixture.test.sh:3: unterminated array literal ( opened here is still open at end of file\nfixture.test.sh:4: unterminated quoted string opened here is still open at end of file
+a quote left open on the line that queues a heredoc|cat <<EOF 'x\nbody|fixture.test.sh:3: unterminated quoted string opened here is still open at end of file\nfixture.test.sh:3: unterminated heredoc <<EOF opened here is still open at end of file
 a heredoc left open inside a $( )|X=$(cat <<EOF\nbody|fixture.test.sh:3: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file\nfixture.test.sh:3: unterminated heredoc <<EOF opened here is still open at end of file
 NESTED
-[ "$k" -eq 6 ] || fail "12j. expected 6 nested fixtures, walked $k"
+[ "$k" -eq 11 ] || fail "12j. expected 11 nested fixtures, walked $k"
+
+# ---- 12k. a ) inside a closed backtick span or $[ ] is text ----------------
+# Forty-fourth board round (ux): a ) closed whatever frame was innermost, so a
+# valid `echo a)` was read as a span closed early and a new one opened by its
+# closing backtick, and the file failed as a parse error. bash -n accepts
+# every line here; the gate must derive the frozen helper and exit 0.
+d_paren_text="$(mkfixture paren-text <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+X=`echo a)`
+Y=`echo b))`
+Z=$[ 1 ) ]
+FIX
+)"
+expect_rc "12k. a ) inside a closed backtick span or \$[ ] is text, not a closer" 0 \
+  "$(run_gate "$d_paren_text")" "1 function(s) across 1 file(s) are frozen"
 
 # ---- 12f. a column-0 definition inside a quoted program is string content ------
 # The sweep that introduced this gate froze `function flush() {` inside a
