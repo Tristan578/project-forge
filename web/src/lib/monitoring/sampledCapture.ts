@@ -8,7 +8,7 @@
  * an unconditional `captureException` would turn the alert into its own storm.
  *
  * `sampledCaptureException` records at most one event per `action` per
- * `SAMPLE_THROTTLE_MS`, giving on-call a clear signal without the flood
+ * `SAMPLE_THROTTLE_MS`, giving the owner a clear signal without the flood
  * (issues #8664, #8666).
  */
 
