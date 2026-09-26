@@ -65,6 +65,15 @@ describe('useScrollLock', () => {
     expect(document.documentElement.style.overflow).toBe('');
   });
 
+  it('acquires the lock when `locked` flips from false to true without a fresh mount', () => {
+    const { rerender, unmount } = render(<LockConsumer locked={false} />);
+    expect(document.documentElement.style.overflow).toBe('');
+    rerender(<LockConsumer locked />);
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    unmount();
+    expect(document.documentElement.style.overflow).toBe('');
+  });
+
   it('stacked dialogs: keeps the lock while any consumer is still locked, only releases when the last one unmounts', () => {
     const outer = render(<LockConsumer locked />);
     expect(document.documentElement.style.overflow).toBe('hidden');

@@ -3,6 +3,7 @@ import { cn } from "../utils/cn";
 import { useDialogA11y } from "../hooks/useDialogA11y";
 import { useScrollLock } from "../hooks/useScrollLock";
 import { Z_INDEX } from "../tokens";
+import { ScrollArea } from "./ScrollArea";
 
 export interface DialogProps {
   open: boolean;
@@ -49,6 +50,7 @@ export function Dialog({
         className={cn(
           "fixed",
           "w-full max-w-md",
+          "max-h-[85vh]",
           "rounded-[var(--sf-radius-xl)]",
           "border border-[var(--sf-border)]",
           "bg-[var(--sf-bg-surface)] text-[var(--sf-text)]",
@@ -74,8 +76,17 @@ export function Dialog({
             </p>
           )}
         </div>
-        {/* Body */}
-        {children && <div className="px-6 py-3 text-sm">{children}</div>}
+        {/* Body -- ScrollArea gives this its own scroll container (so tall
+            content scrolls internally rather than growing the fixed panel
+            past the viewport) and carries `[overscroll-behavior:contain]`,
+            which stops a drag that hits the end of this list from chaining
+            into the (locked) document behind it (PF-1032 / #9052 acceptance
+            criterion 5). */}
+        {children && (
+          <ScrollArea className="min-h-0 flex-1 px-6 py-3 text-sm">
+            {children}
+          </ScrollArea>
+        )}
         {/* Actions */}
         {actions && (
           <div className="flex justify-end gap-2 px-6 py-4 border-t border-[var(--sf-border)] bg-[var(--sf-bg-app)]/30 rounded-b-[var(--sf-radius-xl)]">

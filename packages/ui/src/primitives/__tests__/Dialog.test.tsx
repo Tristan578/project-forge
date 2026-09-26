@@ -99,6 +99,23 @@ describe('Dialog', () => {
     expect(document.documentElement.style.overflow).toBe('');
   });
 
+  it("wires the body content through ScrollArea's overscroll containment (PF-1032 / #9052 AC5)", () => {
+    const { container } = render(
+      <Dialog open onClose={vi.fn()} title="Dialog">
+        Long body content
+      </Dialog>
+    );
+    const body = screen.getByText('Long body content').closest('div');
+    expect(body?.className).toContain('[overscroll-behavior:contain]');
+    // The body must be its own scroll container, distinct from the fixed
+    // panel, so tall content scrolls internally instead of growing the
+    // panel past the viewport.
+    expect(body?.className).toContain('overflow-auto');
+    expect(container.querySelector('[role="dialog"]')?.className).toContain(
+      'max-h-[85vh]'
+    );
+  });
+
   it.each(THEME_NAMES)('renders without error in %s theme', (theme) => {
     document.documentElement.setAttribute('data-sf-theme', theme);
     const { container } = render(

@@ -19,6 +19,12 @@ describe('ScrollArea', () => {
     expect(scrollArea?.className).toContain('overflow-auto');
   });
 
+  it('contains overscroll so a drag that hits the end does not chain into document scroll (PF-1032 / #9052 AC5)', () => {
+    const { container } = render(<ScrollArea>Content</ScrollArea>);
+    const scrollArea = container.firstChild as HTMLElement;
+    expect(scrollArea?.className).toContain('[overscroll-behavior:contain]');
+  });
+
   it('accepts height prop', () => {
     const { container } = render(
       <ScrollArea height="200px">Content</ScrollArea>
