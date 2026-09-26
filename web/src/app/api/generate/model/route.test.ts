@@ -9,6 +9,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { refundTokens } from '@/lib/tokens/service';
+import { bindProviderJob } from '@/lib/generate/jobOwnership';
 import type { User } from '@/lib/db/schema';
 
 vi.mock('@/lib/auth/api-auth');
@@ -37,6 +38,9 @@ vi.mock('@/lib/ai/contentSafety', () => ({
 }));
 vi.mock('@/lib/tokens/service', () => ({
   refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
+}));
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn().mockResolvedValue(undefined),
 }));
 
 function makeRequest(body: unknown): NextRequest {
@@ -167,6 +171,11 @@ describe('POST /api/generate/model', () => {
     expect(data.provider).toBe('meshy');
     expect(data.status).toBe('pending');
     expect(data.usageId).toBeDefined();
+  });
+
+  it('binds the returned jobId to the caller for ownership (#10262)', async () => {
+    await POST(makeRequest({ prompt: 'a red dragon', mode: 'text-to-3d' }));
+    expect(vi.mocked(bindProviderJob)).toHaveBeenCalledWith('user_1', 'meshy', 'task-1');
   });
 
   // -------------------------------------------------------------------------

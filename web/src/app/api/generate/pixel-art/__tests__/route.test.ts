@@ -43,6 +43,9 @@ vi.mock('@/lib/tokens/service', () => ({
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn(),
+}));
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimitResponse } from '@/lib/rateLimit';
@@ -50,6 +53,7 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { bindProviderJob } from '@/lib/generate/jobOwnership';
 import { NextResponse } from 'next/server';
 
 const mockAuth = authenticateRequest as ReturnType<typeof vi.fn>;
@@ -59,6 +63,7 @@ const mockAggregateRateLimit = aggregateGenerationRateLimit as ReturnType<typeof
 const mockResolveKey = resolveApiKey as ReturnType<typeof vi.fn>;
 const mockRefundTokens = refundTokens as ReturnType<typeof vi.fn>;
 const mockCaptureException = captureException as ReturnType<typeof vi.fn>;
+const mockBindProviderJob = bindProviderJob as ReturnType<typeof vi.fn>;
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/generate/pixel-art', {
@@ -94,6 +99,7 @@ describe('POST /api/generate/pixel-art', () => {
     mockResolveKey.mockResolvedValue({ type: 'byok', key: 'sk-test-key', metered: false, usageId: 'usage-abc' });
     mockRefundTokens.mockResolvedValue(undefined);
     mockCaptureException.mockReturnValue(undefined);
+    mockBindProviderJob.mockResolvedValue(undefined);
 
     // Default: provider returns a Replicate prediction
     pixelArtClientMock.generate.mockResolvedValue({ predictionId: 'pred-xyz', status: 'starting' });
@@ -165,6 +171,23 @@ describe('POST /api/generate/pixel-art', () => {
     expect(data.provider).toBe('replicate');
     expect(data.tokenCost).toBe(10);
     expect(pixelArtClientMock.generate).toHaveBeenCalledTimes(1);
+  });
+
+  // #10262: pixel-art has no `generation_type` enum member and therefore no
+  // `asyncJob` (see pollProviderStatus.ts), so unlike the other 6 async
+  // generate routes it must set `jobIdForOwnership` explicitly for the
+  // status route's ownership check to have anything to verify against.
+  it('binds the returned jobId to the caller for ownership (#10262)', async () => {
+    pixelArtClientMock.generate.mockResolvedValue({ predictionId: 'pred-real-123', status: 'starting' });
+    const res = await POST(makeRequest(validBody));
+    expect(res.status).toBe(201);
+    expect(mockBindProviderJob).toHaveBeenCalledWith('user-123', 'replicate', 'pred-real-123');
+  });
+
+  it('does not bind when the provider delivers no artifact (no jobId to bind)', async () => {
+    pixelArtClientMock.generate.mockResolvedValue({});
+    await POST(makeRequest(validBody));
+    expect(mockBindProviderJob).not.toHaveBeenCalled();
   });
 
   it('rejects the unsupported openai path before resolving a key or charging tokens (PF-1074)', async () => {

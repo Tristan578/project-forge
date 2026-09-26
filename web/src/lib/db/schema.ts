@@ -630,6 +630,34 @@ export const generationJobs = pgTable(
   ]
 );
 
+// --- Provider Job Ownership (#10262) ---
+//
+// Binds a provider job id to the user whose request produced it. Written by
+// `createGenerationHandler` right after the provider returns the job id and
+// BEFORE the response reaches the client (see `lib/generate/jobOwnership.ts`).
+// Every `/api/generate/<type>/status` route resolves a PLATFORM provider key
+// by default, so without this table any signed-in caller could poll ANY
+// job id and read back another user's result. `generation_jobs` cannot serve
+// this purpose on its own: its rows are created by the CLIENT, fire-and-forget,
+// with a client-supplied `providerJobId` — a caller can claim someone else's
+// id, and the row can be missing or late relative to the first poll.
+export const providerJobOwners = pgTable(
+  'provider_job_owners',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    provider: text('provider').notNull(),
+    providerJobId: text('provider_job_id').notNull(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // First writer wins: a status route's ownership check keys off this pair,
+    // never off `generation_jobs`, so it cannot be spoofed via that client-owned
+    // table.
+    uniqueIndex('uq_provider_job_owners_provider_job').on(table.provider, table.providerJobId),
+  ]
+);
+
 // --- Webhook Idempotency ---
 
 export const webhookEvents = pgTable('webhook_events', {
@@ -857,6 +885,9 @@ export type SellerProfile = typeof sellerProfiles.$inferSelect;
 
 export type GenerationJob = typeof generationJobs.$inferSelect;
 export type NewGenerationJob = typeof generationJobs.$inferInsert;
+
+export type ProviderJobOwner = typeof providerJobOwners.$inferSelect;
+export type NewProviderJobOwner = typeof providerJobOwners.$inferInsert;
 
 export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 export type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno' | 'openai' | 'replicate' | 'removebg';

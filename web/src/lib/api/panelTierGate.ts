@@ -37,13 +37,15 @@
  *   `TRIAL_ACCESS_TIER` — the same answer `canAccessPanelBeforeProfileLoad`
  *   gives the editor. Paid tiers get the same answer from both variants.
  *
- *   THIS IS NOT AN OWNERSHIP CHECK. The status routes do not bind `jobId` to
- *   the caller — pre-existing on main for every paid tier, tracked in #10262 —
- *   and `resolveApiKey` skips its tier and balance checks for a zero-cost
- *   `STATUS_CHECK_OPERATION`, so any account the poll gate admits can poll an
- *   arbitrary job id on that route with the platform key. The poll gate
- *   narrows WHO can reach a status route; it does not decide WHICH jobs they
- *   may read.
+ *   THIS IS NOT AN OWNERSHIP CHECK, and was never meant to be one — the poll
+ *   gate narrows WHO can reach a status route; it does not decide WHICH jobs
+ *   they may read. That decision belongs to `verifyProviderJobOwner`
+ *   (`@/lib/generate/jobOwnership`, #10262), which every status route calls
+ *   right after this gate and before resolving any provider key. Before that
+ *   check existed, `resolveApiKey`'s zero-cost `STATUS_CHECK_OPERATION` skips
+ *   its own tier and balance checks, so any account this gate admitted could
+ *   poll an arbitrary job id on that route with the platform key — that gap
+ *   is what #10262 closed; this gate's job has not changed.
  *
  * `panel` must be a key of `PANEL_TIER_REQUIREMENTS` in
  * `@/lib/ai/tierAccess`: `canAccessPanel` returns true for an unmapped id, so

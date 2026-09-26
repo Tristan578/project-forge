@@ -9,6 +9,7 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { findProviderJobOwnerId } from '@/lib/generate/jobOwnership';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +47,18 @@ async function POST_impl(req: NextRequest) {
 
     const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId, resultUrl } =
       mid.body as z.infer<typeof createJobSchema>;
+
+    // #10262: this row is CLIENT-reported (fire-and-forget, client-supplied
+    // providerJobId), so it is never the ownership record status routes trust
+    // — see `src/lib/generate/jobOwnership.ts`. But it must not let a caller
+    // plant a row that CLAIMS someone else's already-bound job id, which would
+    // otherwise surface a stranger's job in this caller's own `GET /api/jobs`
+    // list (their id, but bound provider/providerJobId belonging to another
+    // account). Bound-to-this-user and never-bound are both accepted.
+    const existingOwnerId = await findProviderJobOwnerId(provider, providerJobId);
+    if (existingOwnerId && existingOwnerId !== mid.userId) {
+      return redactedJson({ error: 'This job belongs to another account' }, { status: 409 });
+    }
 
     const [job] = await queryWithResilience(() =>
       getDb()

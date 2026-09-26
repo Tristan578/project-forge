@@ -3,6 +3,7 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
+import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
@@ -49,6 +50,17 @@ async function GET_impl(request: NextRequest) {
       progress: 100,
       resultUrl,
     });
+  }
+
+  // Ownership check (#10262): resolveApiKey below returns the PLATFORM key by
+  // default, so without this ANY signed-in caller admitted past the tier gate
+  // above could poll a job id they never created and read back another user's
+  // result. Checked BEFORE any provider key is resolved. See
+  // `src/lib/generate/jobOwnership.ts`. (The dalle3-sync:/dalle3: branches
+  // above never resolve a key or touch the provider, so they need no check.)
+  const isOwner = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.sprite, jobId);
+  if (!isOwner) {
+    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
   }
 
   // Poll Replicate for prediction status

@@ -200,6 +200,12 @@ vi.mock('bcryptjs', () => ({
 
 vi.mock('@/lib/generate/meshyClient', () => ({ MeshyClient: vi.fn() }));
 vi.mock('@/lib/generate/spriteClient', () => ({ SpriteClient: vi.fn() }));
+// Job-ownership check (#10262): the status routes' contract shape is what
+// this suite measures, not the ownership decision — it has its own unit
+// tests (jobOwnership.test.ts) and route tests (each */status/route.test.ts).
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  verifyProviderJobOwner: vi.fn(async () => true),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers

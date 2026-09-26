@@ -51,6 +51,10 @@ vi.mock('@/lib/auth/api-auth', () => ({
   authenticateRequest: vi.fn(),
 }));
 
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  findProviderJobOwnerId: vi.fn(),
+}));
+
 vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 }),
   rateLimitResponse: vi.fn(() => new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 })),
@@ -60,6 +64,7 @@ import { POST, GET } from '../route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
+import { findProviderJobOwnerId } from '@/lib/generate/jobOwnership';
 
 const mockInsertReturning = vi.fn();
 const mockSelectFrom = vi.fn();
@@ -100,6 +105,10 @@ function mockAuth(ok = true) {
 describe('/api/jobs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // #10262: no existing binding by default, so POST creates the row as
+    // before. Tests that exercise the "already bound to someone else" branch
+    // override this per-test.
+    vi.mocked(findProviderJobOwnerId).mockResolvedValue(null);
   });
 
   // ── POST ──────────────────────────────────────────────────────────────
@@ -232,6 +241,56 @@ describe('/api/jobs', () => {
 
       expect(response.status).toBe(500);
       expect(body.error).toBe('Failed to create job');
+    });
+
+    // #10262: this row is client-reported, so a caller could otherwise plant
+    // one claiming someone else's already-bound providerJobId, surfacing a
+    // stranger's job in the caller's own GET /api/jobs list.
+    describe('job ownership (#10262)', () => {
+      it('returns 409 without inserting when providerJobId is already bound to a different user', async () => {
+        mockAuth(true);
+        const { insertChain } = setupDb();
+        vi.mocked(findProviderJobOwnerId).mockResolvedValue('someone-else');
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerJobId: 'j-1',
+            provider: 'meshy',
+            type: 'model',
+            prompt: 'A red cube',
+          }),
+        });
+
+        const response = await POST(req);
+        const body = await response.json();
+
+        expect(response.status).toBe(409);
+        expect(body.error).toBe('This job belongs to another account');
+        expect(insertChain.values).not.toHaveBeenCalled();
+      });
+
+      it('allows creating a row for a providerJobId already bound to THIS SAME user', async () => {
+        mockAuth(true);
+        setupDb();
+        mockInsertReturning.mockResolvedValueOnce([{ id: 'job-abc' }]);
+        vi.mocked(findProviderJobOwnerId).mockResolvedValue('user-123');
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerJobId: 'j-1',
+            provider: 'meshy',
+            type: 'model',
+            prompt: 'A red cube',
+          }),
+        });
+
+        const response = await POST(req);
+
+        expect(response.status).toBe(201);
+        expect(findProviderJobOwnerId).toHaveBeenCalledWith('meshy', 'j-1');
+      });
     });
   });
 

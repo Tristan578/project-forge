@@ -83,6 +83,13 @@ vi.mock('@/lib/qstash/client', () => ({
   isQstashConfigured: vi.fn(() => false),
   publishGenerationCallback: vi.fn(async () => {}),
 }));
+// Job-ownership binding (#10262) is covered in its own unit tests
+// (jobOwnership.test.ts) and in createGenerationHandler.qstash.test.ts;
+// isolate it here too so a mocked `getDb()` with no `insert` doesn't silently
+// fail inside `bindProviderJob` (harmlessly, but noisily) on every test below.
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn(async () => {}),
+}));
 // Provider kill switch (PF-971 / #8952): dormant by default (not killed) so
 // existing tests are unaffected. Tests exercising the switch itself set
 // mockProviderKilled.mockReturnValue(true).
