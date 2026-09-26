@@ -194,9 +194,14 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   `shopt` plus an `s` flag — so `\alias`, `"alias"`, `\a\l\i\a\s`,
   `alias nothing fail=:` and anything in front of the word are all caught:
   `builtin`, `command`, and a prefix assignment in every form bash accepts
-  there (`X="1" alias`, `X+=1 alias`, `a[0]=1 alias`, `a[b[0]]=1 alias`;
-  rounds thirty-five and thirty-six added the last three, which the gate had
-  read as the command word).
+  there (`X="1" alias`, `X+=1 alias`, `a[0]=1 alias`, `a[b[0]]=1 alias`,
+  `a["x]"]=1 alias`; rounds thirty-five to thirty-seven added the last four,
+  which the gate had read as the command word). A subscript is not parsed:
+  a word starting `NAME[` that holds `]=` or `]+=` is an assignment, and a
+  command word starting `NAME[` followed by more words is a subscript with a
+  blank, reported as `subscript` (write it without blanks). In an EXIT, ERR
+  or RETURN trap every word of the action is judged as a possible call,
+  since its command words cannot be found reliably in the action text.
   Every command name and argument is also judged with its expansions
   removed, because each can expand to nothing (`$()`, `$(true)`, backticks,
   `${x:+Q}`, an unset `$1`), so `ali$()as`, `ali${x:+Q}as` and `shopt -$()s
@@ -270,9 +275,10 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   (round thirty-three). A multi-line body whose brace closes anywhere but
   column 0 (an indented `}`), or never, is reported as `close` (round
   thirty-five). Where a definition ends is where the lexer sees its brace
-  close, so a column-0 `}` that closes only a group nested in the body does
-  not end it, and code after the closing brace on its line is top level
-  (round thirty-six). A subshell body or a
+  close (round thirty-six). A column-0 `}` that closes only a group nested
+  in the body does not end it: the body goes on, and a definition after that
+  brace is nested and out of scope. Code after the definition's OWN closing
+  brace on its line is top level, where a definition is `shape`. A subshell body or a
   bare compound body is reported as `unsupported` — the gate never skips a
   definition it cannot follow.
 - Every function at true top level (outside any function body, subshell,

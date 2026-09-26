@@ -1025,6 +1025,16 @@ was replaced with this one (round twenty-nine).
   pattern stopped a subscript at its first closing bracket, so
   `a[b[2]]=1 alias fail=:` passed. The lexer alone now ends a definition,
   at the brace, mid-line, and the subscript is matched by bracket depth.
+  The thirty-seventh found the depth scan one spelling short, the way every
+  earlier enumeration of this grammar was: a quoted `]` (`a["x]"]=1`) left
+  the dequoted word unbalanced, and bash also reads a subscript across
+  blanks (`a[1 + 1]=5 alias fail=:` binds), which the lexer splits into
+  several words. So the subscript is no longer parsed at all. A word that
+  starts `NAME[` and holds `]=` is an assignment (this can only
+  over-report), a command word starting `NAME[` with more words after it is
+  a new `subscript` violation, and in an EXIT, ERR or RETURN trap every word
+  of the action is judged as a possible call rather than the one the gate
+  took for its command word.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

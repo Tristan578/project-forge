@@ -48,9 +48,10 @@
 # freeze line (thirty-fifth board round: such a body stayed open until a
 # later function column-0 brace, and that function and its freeze were
 # misreported). A column-0 brace that closes only a group nested in the
-# body does not end it, and code after the closing brace on its line is top
+# body does not end it: the body goes on, and a definition after that brace
+# is nested. Code after the definition OWN closing brace on its line is top
 # level (thirty-sixth round: the first column-0 brace ended the definition,
-# and code after a closing brace was read as still inside it). A definition
+# and code after the closing brace was read as still inside it). A definition
 # whose body is anything else — a subshell
 # `( )`, a bare `if`/`while`/`case` — is reported as `unsupported` and fails
 # the gate, so a helper the derivation cannot follow is never a helper it
@@ -209,7 +210,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline|close|parse-error
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline|close|subscript|parse-error
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -235,25 +236,18 @@ derive_file() {
     # the command after each, even when it refuses the subscript). Only
     # NAME= was recognised until the thirty-fifth board round, so in
     # X+=2 alias fail=: the word X+=2 was read as the command word and the
-    # alias went unreported. The subscript is matched by bracket depth, not
-    # by a pattern, because it nests (thirty-sixth round: a[b[2]]=1 ended a
-    # pattern at its first closing bracket). One function, called by every
-    # site that skips or strips an assignment word.
-    function is_assign(s,   i, n, dep, c) {
-      if (s !~ /^[A-Za-z_]/) return 0
-      n = length(s); i = 2
-      while (i <= n && substr(s, i, 1) ~ /[A-Za-z0-9_]/) i++
-      if (substr(s, i, 1) == "[") {
-        dep = 0
-        for (; i <= n; i++) {
-          c = substr(s, i, 1)
-          if (c == "[") dep++
-          else if (c == "]" && --dep == 0) break
-        }
-        i++
-      }
-      if (substr(s, i, 1) == "+") i++
-      return substr(s, i, 1) == "="
+    # alias went unreported. A subscript is not parsed: bash reads it to its
+    # closing bracket with quotes, escapes and nesting of its own, and each
+    # attempt to follow that here was one spelling short (thirty-sixth round:
+    # a[b[2]]=1; thirty-seventh: a["x]"]=1, whose quote is gone from the
+    # word). A word that starts NAME[ and holds a ] followed by = or += is
+    # taken as an assignment, which can only over-report (it would take a
+    # command named that way for a prefix). A subscript holding a blank is
+    # split into several words and is reported instead (subscript, below).
+    # One function, called by every site that skips an assignment word.
+    function is_assign(s) {
+      if (s ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=/) return 1
+      return s ~ /^[A-Za-z_][A-Za-z0-9_]*\[/ && s ~ /\]\+?=/
     }
     function flush_def() {
       pending_name = def_name; pending_def = def_line; pending_end = NR
@@ -613,6 +607,13 @@ derive_file() {
         w = ""; return
       }
       nwords++
+      # A statement whose command word starts NAME[ but is not an assignment
+      # is a subscripted prefix split at a blank (a[1 + 1]=5 alias fail=:):
+      # bash reads the subscript to its closing bracket, blanks included, and
+      # runs what follows as the command, which the gate cannot place, so it
+      # is reported (thirty-seventh board round).
+      if (nwords == 2 && cmd_word ~ /^[A-Za-z_][A-Za-z0-9_]*\[/)
+        printf "%s\t%s\t%d\t%d\tsubscript\n", file, cmd_word, NR, NR
       # `case WORD in`: what follows is a pattern, up to its `)`.
       if (cmd_word == "case" && nwords == 2) case_wait = 1
       # (`pat_d` needs no reset where a pattern opens: a pattern ends only at
@@ -677,19 +678,17 @@ derive_file() {
           break
         }
         if (trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/) {
-          # The command word of every segment of the action is a function the
-          # trap may call; which of them this file defines is only known at
-          # END, since a trap is often set before its handler is written.
-          ns = split(a, segs, /[;&|]+/)
+          # EVERY word of the action is a function the trap may call. Its
+          # command words cannot be found reliably in the action text: the
+          # quotes are gone, and a prefix assignment may hold a subscript with
+          # blanks (thirty-seventh board round: a[1 + 1]=5 cleanup hid the
+          # call). A word that is only an argument costs nothing unless it
+          # names a function of this file that exits. Which of them this file
+          # defines is only known at END, since a trap is often set before
+          # its handler is written.
+          ns = split(a, segs, /[;&|[:space:]]+/)
           for (k = 1; k <= ns; k++) {
-            seg = segs[k]; sub(/^[[:space:]]+/, "", seg)
-            while (seg ~ /[[:space:]]/) {
-              if (!is_assign(seg)) break
-              sub(/^[^[:space:]]*[[:space:]]+/, "", seg)
-            }
-            nw = split(seg, tw, /[[:space:]]+/)
-            cw = tw[1]
-            if ((cw == "command" || cw == "builtin") && nw > 1) cw = tw[2]
+            cw = segs[k]
             if (cw != "" && index(cws, " " cw " ") == 0) { cws = cws " " cw " "; nt++; t_word[nt] = cw; t_line[nt] = NR; t_sigs[nt] = trap_sigs }
           }
         }
@@ -1250,7 +1249,7 @@ if [ "${derived:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline|close)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline|close|subscript)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
   # The report is the block reason, so it goes to stderr like every other
@@ -1269,6 +1268,7 @@ if [ -n "$violations" ]; then
         brace)    echo "  - $file:$def: '$name' — this brace expansion produces more words than the gate enumerates (64, nested 8 deep), in a command name or an alias, shopt, set or trap statement, so a guarded word could sit past the cut where the gate cannot see it — list the words it needs explicitly, or split the statement" ;;
         split)    echo "  - $file:$def: '$name' — this parameter expansion's default, alternate or replacement text holds a blank, and bash splits an unquoted expansion into separate words there, so in a command name or an alias, shopt, set or trap statement it can spell a guarded command the gate cannot place — write the words out literally" ;;
         multiline) echo "  - $file:$def: '$name' — this \${...} group does not close on the line it opens on; the gate reads a group one line at a time, so text written in it on a later line (a default, alternate or replacement that can spell a guarded word) would go unjudged — put the whole group on one line" ;;
+        subscript) echo "  - $file:$def: '$name' — this statement starts with a subscripted name holding a blank; bash reads a subscript to its closing bracket, blanks included, so what follows it may be the command (a[1 + 1]=5 alias fail=: defines an alias), and the gate cannot place it — write the subscript without blanks (a[1+1]=5)" ;;
         close)
           if [ "$end" -gt 0 ]; then
             echo "  - $file:$def: $name() closes on line $end, but not with a '}' at column 0 — the gate ties a multi-line definition to its freeze by a column-0 closing brace, so it cannot tell where $name() ends; move that brace to column 0 and put 'readonly -f $name' on the line after it"

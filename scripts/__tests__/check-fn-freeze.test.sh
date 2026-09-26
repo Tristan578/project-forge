@@ -2152,6 +2152,56 @@ else
   fail "30y-b. the nested-subscript probe did not reproduce in this bash (got '$nestsub_bash')"
 fi
 
+# ---- 30z. a subscript is not parsed ------------------------------------------
+# Thirty-seventh board round (security, architect): the bracket-depth scan
+# counted brackets in the dequoted word, so a quoted or escaped bracket
+# (lines 4 to 7) unbalanced it and the command after the prefix passed, and
+# bash also reads a subscript across blanks (line 3), which the lexer splits
+# into words. A word starting NAME[ that holds ]= is now an assignment, so
+# lines 4 to 7 are judged at their real command word; a command word
+# starting NAME[ with more words after it is a subscript violation (line 3,
+# and line 12, a harmless assignment the rule reports anyway); and every
+# word of an EXIT trap action is a possible call (line 8). Lines 13 and 14
+# are an assignment alone and a prefix to true, and line 15 is a command
+# named x]=1 to bash (a subscript needs a name before it): none is
+# reported. 30z-b checks in bash that lines 3 to 7 bind.
+d_subscr="$(mkfixture subscript <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+a[1 + 1]=5 alias f1=:
+a["x]"]=1 alias f2=:
+a[']']=1 shopt -s expand_aliases
+a[\]]=1 alias f4=:
+a['[']=1 alias f5=:
+trap 'a[1 + 1]=5 cleanup' EXIT
+cleanup() { exit 0; }
+readonly -f cleanup
+b=1
+c[i + 1]=2
+c[0]=x
+c[1]=y true
+x]=1 alias q=:
+FIX
+)"
+out_subscr="$(run_gate "$d_subscr")"
+expect_rc "30z. a subscripted prefix is judged at its command word or reported" 1 "$out_subscr" \
+  "7 violation(s)" "fixture.test.sh:3: 'a[1' — this statement starts with a subscripted name" \
+  "fixture.test.sh:4: 'alias f2=:'" "fixture.test.sh:5: 'shopt -s expand_aliases'" \
+  "fixture.test.sh:6: 'alias f4=:'" "fixture.test.sh:7: 'alias f5=:'" \
+  "fixture.test.sh:8: 'trap cleanup ... EXIT" "fixture.test.sh:12: 'c[i'"
+if grep -Eq 'fixture.test.sh:(11|13|14|15):' <<<"$out_subscr"; then
+  fail "30z-c. a subscripted assignment alone or before a plain command, or a ]= word with no name, is not reported" "$out_subscr"
+else
+  pass "30z-c. a subscripted assignment alone or before a plain command, or a ]= word with no name, is not reported"
+fi
+subscr_bash="$(bash -c 'shopt -s expand_aliases; a[1 + 1]=5 alias f1=: 2>/dev/null; a["x]"]=1 alias f2=: 2>/dev/null; a[\]]=1 alias f4=: 2>/dev/null; alias' 2>&1)"
+if grep -q "^alias f1=':'$" <<<"$subscr_bash" && grep -q "^alias f2=':'$" <<<"$subscr_bash" &&
+   grep -q "^alias f4=':'$" <<<"$subscr_bash"; then
+  pass "30z-b. in this bash a subscript with a blank, a quoted or an escaped bracket still runs the command after it"
+else
+  fail "30z-b. the subscript probe did not reproduce in this bash (got '$subscr_bash')"
+fi
+
 # ---- 30r. inside double quotes a backslash escapes only five characters -----
 # Thirty-second board round (architect): the lexer dropped every backslash in
 # a double-quoted word, while bash keeps one before anything but a dollar, a
