@@ -1085,7 +1085,14 @@ was replaced with this one (round twenty-nine).
   span or `$[ ]` included, although bash closes those only on a backtick
   and a `]`. So in ``$(echo `echo inner)`` the open backtick was never
   reported, and a valid ``X=`echo a)` `` failed as a parse error. To both,
-  a `)` is now text.
+  a `)` is now text. The same round found a heredoc body was read on the
+  next line whatever was open. bash holds the body back until a quote,
+  `$( )`, backtick, `$(( ))`, `$[ ]` or `(( ))` opened after the `<<`
+  closes; a `( )` subshell or an array literal holds nothing back. So in
+  `cat <<EOF $(` the command inside the substitution was skipped as body
+  text, and a file bash runs was reported as unparseable. Each queued
+  heredoc now records the depth it was lexed at, and a body is read only
+  when nothing that holds it back is open above that depth.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

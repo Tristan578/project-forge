@@ -286,6 +286,20 @@ derive_file() {
       if (st_dbl[k] == 1) return st_dol[k] ? "$(( )) arithmetic" : "(( )) arithmetic"
       return st_dol[k] ? "$( ), <( ) or >( ) substitution" : "( ) subshell"
     }
+    # The first queued heredoc whose body bash reads at this newline, or 0.
+    # An open quote holds every body back; a $( ), backtick, $(( )), $[ ] or
+    # (( )) holds back the bodies of heredocs queued outside it. Of those it
+    # does not hold back, the first queued is read first.
+    function hd_ready(   i, k, ok) {
+      if (q != "") return 0
+      for (i = 1; i <= hd_n; i++) {
+        ok = 1
+        for (k = hd_dep[i] + 1; k <= d; k++)
+          if (st_dol[k] || st_dbl[k] == 1) { ok = 0; break }
+        if (ok) return i
+      }
+      return 0
+    }
     function flush_def() {
       pending_name = def_name; pending_def = def_line; pending_end = NR
       def_name = ""
@@ -1092,8 +1106,7 @@ derive_file() {
             tok = substr(rest, RSTART, RLENGTH)
             gsub(/[\047"\\]/, "", tok)
             hd_n++; hd_term[hd_n] = tok; hd_strip[hd_n] = strip
-            # Every heredoc queued before the bodies start is on this line.
-            if (hd_n == 1) hd_line = NR
+            hd_dep[hd_n] = d; hd_ln[hd_n] = NR
             i += 2 + (length(line) - i - 1 - length(rest)) + RLENGTH
             continue
           }
@@ -1133,10 +1146,22 @@ derive_file() {
       # Only a `<<-` heredoc lets bash strip leading tabs before matching
       # the terminator; a plain `<<` needs the delimiter byte-exact at column
       # 0, and a tab-indented body line spelling the delimiter is body text.
-      if (hd_n > 0) {
-        t = line; if (hd_strip[1]) sub(/^\t+/, "", t)
-        if (t == hd_term[1]) {
-          for (k = 1; k < hd_n; k++) { hd_term[k] = hd_term[k + 1]; hd_strip[k] = hd_strip[k + 1] }
+      # bash reads a heredoc body at the first newline the lexer sees at the
+      # level the << was lexed on, so a quote, $( ), backtick, $(( )), $[ ]
+      # or (( )) opened after it on its line, and still open, holds the body
+      # back until it closes; those lines are code. A ( ) subshell or an
+      # array literal is parsed above the lexer and holds nothing back
+      # (forty-fourth board round: the body was read on the next line
+      # whatever was open, so in cat <<EOF $( the command inside the
+      # substitution was skipped as body text, its ) never seen, and a file
+      # bash runs was reported as unparseable).
+      if (hd_n > 0 && (hi = hd_ready()) > 0) {
+        t = line; if (hd_strip[hi]) sub(/^\t+/, "", t)
+        if (t == hd_term[hi]) {
+          for (k = hi; k < hd_n; k++) {
+            hd_term[k] = hd_term[k + 1]; hd_strip[k] = hd_strip[k + 1]
+            hd_dep[k] = hd_dep[k + 1]; hd_ln[k] = hd_ln[k + 1]
+          }
           hd_n--
         }
         next
@@ -1281,8 +1306,8 @@ derive_file() {
       # naming only the innermost would hide the outer one the same way
       # (forty-third board round). A frame saved the array literal and the
       # quote it interrupted, in that order (an array can hold a quote, not
-      # the reverse); what is open at the innermost level comes last, and a
-      # heredoc queued there last of all.
+      # the reverse); what is open at the innermost level comes last, and
+      # every heredoc still queued last of all, in the order it was queued.
       for (k = 1; k <= d; k++) {
         if (st_arr[k]) emit("unterminated array literal (", st_al[k], NR, "parse-error")
         if (st_q[k] != "") emit("unterminated quoted string", st_ql[k], NR, "parse-error")
@@ -1290,7 +1315,7 @@ derive_file() {
       }
       if (arr) emit("unterminated array literal (", arr_line, NR, "parse-error")
       if (q != "") emit("unterminated quoted string", q_line, NR, "parse-error")
-      if (hd_n > 0) emit("unterminated heredoc <<" hd_term[1], hd_line, NR, "parse-error")
+      for (k = 1; k <= hd_n; k++) emit("unterminated heredoc <<" hd_term[k], hd_ln[k], NR, "parse-error")
     }
   ' "$1"
 }

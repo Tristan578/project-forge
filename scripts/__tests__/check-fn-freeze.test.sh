@@ -460,9 +460,12 @@ a )) inside a backtick span left open|X=`echo a))|fixture.test.sh:3: unterminate
 a ) inside a $[ ] left open|x=$[1 )|fixture.test.sh:3: unterminated $[ ] arithmetic opened here is still open at end of file
 a quote left open inside a top-level array literal|arr=(a\n'b|fixture.test.sh:3: unterminated array literal ( opened here is still open at end of file\nfixture.test.sh:4: unterminated quoted string opened here is still open at end of file
 a quote left open on the line that queues a heredoc|cat <<EOF 'x\nbody|fixture.test.sh:3: unterminated quoted string opened here is still open at end of file\nfixture.test.sh:3: unterminated heredoc <<EOF opened here is still open at end of file
+a second heredoc queued a line later, left open after the first closes|cat <<A "x\ny" <<B\na-body\nA\nb-body|fixture.test.sh:4: unterminated heredoc <<B opened here is still open at end of file
+two heredocs on different lines, both left open|cat <<A "x\ny" <<B\nbody|fixture.test.sh:3: unterminated heredoc <<A opened here is still open at end of file\nfixture.test.sh:4: unterminated heredoc <<B opened here is still open at end of file
+two heredocs queued on one line and never terminated|cat <<A <<B\nbody|fixture.test.sh:3: unterminated heredoc <<A opened here is still open at end of file\nfixture.test.sh:3: unterminated heredoc <<B opened here is still open at end of file
 a heredoc left open inside a $( )|X=$(cat <<EOF\nbody|fixture.test.sh:3: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file\nfixture.test.sh:3: unterminated heredoc <<EOF opened here is still open at end of file
 NESTED
-[ "$k" -eq 11 ] || fail "12j. expected 11 nested fixtures, walked $k"
+[ "$k" -eq 14 ] || fail "12j. expected 14 nested fixtures, walked $k"
 
 # ---- 12k. a ) inside a closed backtick span or $[ ] is text ----------------
 # Forty-fourth board round (ux): a ) closed whatever frame was innermost, so a
@@ -479,6 +482,76 @@ FIX
 )"
 expect_rc "12k. a ) inside a closed backtick span or \$[ ] is text, not a closer" 0 \
   "$(run_gate "$d_paren_text")" "1 function(s) across 1 file(s) are frozen"
+
+# ---- 12l. a heredoc body waits for what opened after its << -----------------
+# Forty-fourth board round (architect): the body was read on the next line
+# whatever was open, so in cat <<EOF $( the command inside the substitution
+# was skipped as body text, its ) never seen, and a file bash runs was
+# reported as unparseable. bash holds the body back until a quote, $( ),
+# backtick, $(( )), $[ ] or (( )) opened after the << closes, and a heredoc
+# queued inside a substitution is read before one queued outside it; a ( )
+# subshell holds nothing back, so fail() below is body text. The last
+# three commands pin the queue: a <<- body inside a substitution matched
+# with its own tab rule, and a heredoc queued outside a substitution still
+# held back after the one queued inside it is read. bash -n accepts this
+# file (bash warns about the last command and runs it as modelled here),
+# and bash defines none of the functions after pass from it.
+d_hd_wait="$(mkfixture heredoc-wait <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+cat <<EOF $(
+echo MARKER >&2
+)
+BODY
+EOF
+cat <<EOF "x
+y"
+BODY
+EOF
+cat <<EOF `
+echo TICK >&2
+`
+BODY
+EOF
+cat <<EOF; x=$(( 1 +
+2 ))
+BODY
+EOF
+cat <<EOF; (( y = 1 +
+2 ))
+BODY
+EOF
+cat <<EOF; z=$[ 1 +
+2 ]
+BODY
+EOF
+cat <<EOF; ( echo SUB
+fail() { :; }
+EOF
+)
+cat <<A $(cat <<B
+inner() { :; }
+B
+)
+outer() { :; }
+A
+cat <<A $(cat <<-B
+inner2() { :; }
+	B
+)
+outer2() { :; }
+A
+X=$(cat <<A); cat <<B $(
+a_body() { :; }
+A
+echo CODE >&2
+)
+b_body() { :; }
+B
+FIX
+)"
+expect_rc "12l. a heredoc body waits for a construct opened after its << to close" 0 \
+  "$(run_gate "$d_hd_wait")" "1 function(s) across 1 file(s) are frozen"
 
 # ---- 12f. a column-0 definition inside a quoted program is string content ------
 # The sweep that introduced this gate froze `function flush() {` inside a
