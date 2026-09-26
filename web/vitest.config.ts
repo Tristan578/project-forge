@@ -29,8 +29,8 @@ export default defineConfig({
       // The thresholds below are the enforced minimums; CI coverage reports show current measurements.
       thresholds: {
         statements: 85,
-        branches: 77,
-        functions: 80,
+        branches: 78,
+        functions: 81,
         lines: 87,
       },
     },
