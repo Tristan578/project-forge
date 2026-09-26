@@ -44,7 +44,7 @@ export function CommentSection({ comments, gameId, onAddComment }: CommentSectio
     e.preventDefault();
     if (!content.trim()) return;
 
-    onAddComment(content, replyTo || undefined);
+    onAddComment(content, replyTo ?? undefined);
     setContent('');
     setReplyTo(null);
   };

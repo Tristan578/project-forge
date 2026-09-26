@@ -121,6 +121,7 @@ export function CanvasArea() {
                   left: `${el.x}%`,
                   top: `${el.y}%`,
                   fontSize: `${el.fontSize && el.fontSize > 0 ? el.fontSize : 24}px`,
+                  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored text color is unset; falls back to the default swatch
                   color: el.color || 'white',
                   textShadow: '1px 1px 2px rgba(0,0,0,0.8)',
                   fontFamily: 'monospace',

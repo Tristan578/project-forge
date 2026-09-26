@@ -126,9 +126,14 @@ vi.mock('@/lib/keys/resolver', () => ({
   },
 }));
 
-vi.mock('@/lib/tokens/pricing', () => ({
-  getTokenCost: vi.fn().mockReturnValue(0),
-}));
+// Spread the actual module: the generate status routes now import the shared
+// panel tier gate (`@/lib/api/panelTierGate`, #7715), which reaches
+// `TRIAL_GRANT_TOKENS` off this module at import time via
+// `@/lib/ai/tierAccess` -> `@/lib/billing/tierPlans`, so a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return { ...actual, getTokenCost: vi.fn().mockReturnValue(0) };
+});
 
 vi.mock('@/lib/tokens/service', () => ({
   getTokenBalance: vi.fn().mockResolvedValue({ monthlyRemaining: 0, monthlyTotal: 0, addon: 0, total: 0 }),
