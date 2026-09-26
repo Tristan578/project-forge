@@ -422,6 +422,41 @@ arr=(a $'b
 OPENERS
 [ "$k" -eq 7 ] || fail "12i. expected 7 quote openers, walked $k"
 
+# ---- 12j. every construct still open at EOF is reported, outermost first -----
+# Forty-third board round (ux): only the outermost substitution frame was
+# named, so a backtick left open inside an outer $( ) was reported as the
+# $( ) alone, at the wrong line and as the wrong kind. Each fixture lists
+# every row it must produce, in order, and the report must print exactly
+# those rows: a missing row, an extra row or a reordering is a failure.
+open_rows() {
+  grep -F 'opened here is still open at end of file' <<<"$1" | sed 's|^  - .*/||'
+}
+readonly -f open_rows
+k=0
+while IFS='|' read -r name body rows; do
+  k=$((k + 1))
+  d_open="$(printf '%s\n' "$open_head" "$(printf '%b' "$body")" 'evil() { :; }' | mkfixture "open-nest-$k")"
+  out_open="$(run_gate "$d_open")"
+  want="$(printf '%b' "$rows")"
+  got="$(open_rows "$out_open")"
+  if [ "$got" = "$want" ]; then
+    pass "12j. ${name}: every open construct is reported, outermost first"
+  else
+    fail "12j. ${name}: every open construct is reported, outermost first — want:
+${want}
+got:
+${got}" "$out_open"
+  fi
+done <<'NESTED'
+a backtick left open inside a $( )|X=$(echo outer\necho `echo inner|fixture.test.sh:3: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file\nfixture.test.sh:4: unterminated backtick span ` opened here is still open at end of file
+a quote left open inside a $( ) inside a quoted array element|arr=(a\n"b $(echo\n'c|fixture.test.sh:3: unterminated array literal ( opened here is still open at end of file\nfixture.test.sh:4: unterminated quoted string opened here is still open at end of file\nfixture.test.sh:4: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file\nfixture.test.sh:5: unterminated quoted string opened here is still open at end of file
+an array literal left open inside a subshell|( echo sub\narr=(a|fixture.test.sh:3: unterminated ( ) subshell opened here is still open at end of file\nfixture.test.sh:4: unterminated array literal ( opened here is still open at end of file
+two $( ) left open, one inside the other|X=$(echo start\n$(cat|fixture.test.sh:3: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file\nfixture.test.sh:4: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file
+an array literal left open around a $( ) holding another|arr=(a $(echo\nb=(c|fixture.test.sh:3: unterminated array literal ( opened here is still open at end of file\nfixture.test.sh:3: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file\nfixture.test.sh:4: unterminated array literal ( opened here is still open at end of file
+a heredoc left open inside a $( )|X=$(cat <<EOF\nbody|fixture.test.sh:3: unterminated $( ), <( ) or >( ) substitution opened here is still open at end of file\nfixture.test.sh:3: unterminated heredoc <<EOF opened here is still open at end of file
+NESTED
+[ "$k" -eq 6 ] || fail "12j. expected 6 nested fixtures, walked $k"
+
 # ---- 12f. a column-0 definition inside a quoted program is string content ------
 # The sweep that introduced this gate froze `function flush() {` inside a
 # single-quoted awk program held in a variable, which broke the program. The

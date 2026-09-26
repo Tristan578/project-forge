@@ -192,8 +192,9 @@
 # Exit codes: 0 every definition frozen; 1 at least one violation; 2 tooling,
 # vacuity or parse error (no files, nothing derived from them — a gate that
 # scans nothing is not a passing gate, lesson #9 — or a file the lexer cannot
-# carry to EOF, reported at the line the unclosed heredoc, quote,
-# substitution, arithmetic, subshell or array literal opened on).
+# carry to EOF, which reports every heredoc, quote, substitution,
+# arithmetic, subshell or array literal still open, outermost first, each at
+# the line it opened on).
 #
 # Usage:
 #   bash scripts/check-fn-freeze.sh           # check, report violations
@@ -1260,24 +1261,30 @@ derive_file() {
         emit(def_name, def_line, NR, "unsupported")
       else if (def_name != "")
         emit(def_name, def_line, 0, "close")
-      # A lexer that ends the file inside a heredoc or a quoted string has
-      # skipped everything after the opener; that is a parse failure, not a
-      # clean file, and the gate must not report the skipped tail as frozen.
+      # A lexer that ends the file inside a heredoc, a quoted string, a
+      # substitution, a subshell, an arithmetic context or an array literal
+      # has lexed everything after the opener as its contents, so a
+      # definition there was never judged; that is a parse failure, not a
+      # clean file (forty-first board round: an unclosed backtick span, or
+      # $( ), passed with exit 0).
       # Each row names the line the construct OPENED on, which is where the
       # reader has to go; the last line of the file says nothing about it
-      # (forty-second board round).
-      if (hd_n > 0)
-        emit("unterminated heredoc <<" hd_term[1], hd_line, NR, "parse-error")
-      else if (q != "")
-        emit("unterminated quoted string", q_line, NR, "parse-error")
-      # So is one that ends inside a substitution, a subshell, an arithmetic
-      # context or an array literal: everything after the opener was lexed
-      # as its contents, so a definition there was never judged (forty-first
-      # board round: an unclosed backtick span, or $( ), passed with exit 0).
-      else if (d > 0)
-        emit("unterminated " open_kind(1), st_ln[1], NR, "parse-error")
-      else if (arr)
-        emit("unterminated array literal (", arr_line, NR, "parse-error")
+      # (forty-second board round). EVERY construct still open gets a row,
+      # outermost first: naming only the outermost frame sent the reader to
+      # an outer $( ) when the backtick inside it was the one left open, and
+      # naming only the innermost would hide the outer one the same way
+      # (forty-third board round). A frame saved the array literal and the
+      # quote it interrupted, in that order (an array can hold a quote, not
+      # the reverse); what is open at the innermost level comes last, and a
+      # heredoc queued there last of all.
+      for (k = 1; k <= d; k++) {
+        if (st_arr[k]) emit("unterminated array literal (", st_al[k], NR, "parse-error")
+        if (st_q[k] != "") emit("unterminated quoted string", st_ql[k], NR, "parse-error")
+        emit("unterminated " open_kind(k), st_ln[k], NR, "parse-error")
+      }
+      if (arr) emit("unterminated array literal (", arr_line, NR, "parse-error")
+      if (q != "") emit("unterminated quoted string", q_line, NR, "parse-error")
+      if (hd_n > 0) emit("unterminated heredoc <<" hd_term[1], hd_line, NR, "parse-error")
     }
   ' "$1"
 }

@@ -1074,7 +1074,13 @@ was replaced with this one (round twenty-nine).
   one interrupted by a `$( )` that holds a quote of its own; a heredoc; a
   substitution, arithmetic context or subshell; and an array literal. The
   report reads `file:line: … opened here is still open at end of file`. The
-  gate header's exit-code line now names the parse error as well.
+  gate header's exit-code line now names the parse error as well. The
+  forty-third found that only the outermost substitution frame was named, so
+  a backtick left open inside an outer `$( )` was reported as the `$( )`,
+  at the wrong line and as the wrong kind. Naming only the innermost would
+  hide the outer one the same way, so every construct still open now gets
+  its own row, outermost first: each frame's interrupted array literal and
+  quote, the frame itself, then what is open at the innermost level.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
