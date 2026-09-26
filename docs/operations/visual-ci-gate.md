@@ -41,7 +41,7 @@ A missing `CHROMATIC_PROJECT_TOKEN` fails the design-change job with a safe diag
 
 If a build is paused for account quota, restore the account snapshot allowance through its administrator. Confirm visual tests are enabled for the project, then rerun the failed Chromatic job. Inspect and accept intended visual differences in Chromatic before rerunning; reject unintended changes and fix their source. Previously passing Windows and other jobs do not need to be repeated just to retry the failed visual job.
 
-The Chromatic action is pinned to v18.8.1 by SHA, and TurboSnap remains enabled. These inputs explicitly enforce completed results and reviewed changes:
+The Chromatic action is pinned to v18.9.4 by SHA, and TurboSnap remains enabled. These inputs explicitly enforce completed results and reviewed changes:
 
 ```yaml
 exitOnceUploaded: false
