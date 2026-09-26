@@ -12,7 +12,7 @@ import { withEgressGuard } from '@/lib/security/egressGuard';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
-import { unlinkSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
 
 /**
  * Template params that name files on the server. The templates hand them to
@@ -23,11 +23,28 @@ import { unlinkSync } from 'fs';
 const SERVER_PATH_PARAMS = new Set(['outputPath', 'inputPath', 'outputPng', 'outputJson']);
 
 /**
+ * The operations this route runs, and the only ones it advertises. An explicit
+ * list rather than `ALLOWED_TEMPLATES` minus exclusions, so a template added
+ * later is not exposed to clients by default.
+ */
+const ROUTE_OPERATIONS = ['createSprite', 'createAnimation'] as const;
+const ROUTE_OPERATION_SET: ReadonlySet<string> = new Set(ROUTE_OPERATIONS);
+const ALLOWED_LIST = ROUTE_OPERATIONS.join(', ');
+
+/**
  * Templates only server code may run. `drawFrames` needs server-generated
  * output paths and is reached through `drawPixelArt`, which validates the pixel
  * data and returns the sheet.
  */
 const SERVER_ONLY_TEMPLATES = new Set(['drawFrames']);
+
+/**
+ * Templates that begin with `app.open("{{inputPath}}")`. The client may not
+ * name that path (above), and the server has no way yet to name an existing
+ * sprite of its own, so they would open `""` and do nothing. Refused until a
+ * server-owned input exists: #10283.
+ */
+const INPUT_SPRITE_TEMPLATES = new Set(['editSprite', 'applyPalette', 'exportSheet']);
 
 const asepriteExecuteSchema = z.object({
   operation: z.string().min(1).max(100),
@@ -59,17 +76,28 @@ async function POST_impl(req: NextRequest) {
   try {
     const { operation, params } = mid.body as z.infer<typeof asepriteExecuteSchema>;
 
-    // Runtime allowlist check — ALLOWED_TEMPLATES is a Set, not expressible as a static Zod enum
-    if (!ALLOWED_TEMPLATES.has(operation)) {
+    if (SERVER_ONLY_TEMPLATES.has(operation)) {
       return NextResponse.json(
-        { error: `Unknown operation: "${operation}". Allowed: ${[...ALLOWED_TEMPLATES].join(', ')}` },
+        { error: `Operation "${operation}" is not available through this route` },
         { status: 400 }
       );
     }
 
-    if (SERVER_ONLY_TEMPLATES.has(operation)) {
+    if (INPUT_SPRITE_TEMPLATES.has(operation)) {
       return NextResponse.json(
-        { error: `Operation "${operation}" is not available through this route` },
+        {
+          error: `Operation "${operation}" requires an input sprite, which this route cannot accept yet. `
+            + `Allowed: ${ALLOWED_LIST}`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Runtime allowlist check. Both lists must agree: the route's own, and the
+    // template loader's (which `executeOperation` enforces again).
+    if (!ROUTE_OPERATION_SET.has(operation) || !ALLOWED_TEMPLATES.has(operation)) {
+      return NextResponse.json(
+        { error: `Unknown operation: "${operation}". Allowed: ${ALLOWED_LIST}` },
         { status: 400 }
       );
     }
@@ -99,15 +127,19 @@ async function POST_impl(req: NextRequest) {
       );
     }
 
-    // The templates that save need a destination; it is the server's, under
-    // its temp directory, and is removed once the operation has run.
+    // Both operations `saveAs` a destination; it is the server's, under its
+    // temp directory. The saved bytes ARE the result, so they are read into
+    // memory before the file is removed (the same read-then-delete order as
+    // `drawPixelArt`), and only the bytes leave — never the path.
     const outputPath = join(tmpdir(), 'spawnforge-bridge', `${randomUUID()}.aseprite`).replace(/\\/g, '/');
     let result;
+    let saved: Buffer | null = null;
     try {
       result = await executeOperation(binaryPath, {
         name: operation,
         params: { ...(params ?? {}), outputPath },
       });
+      if (result.success && existsSync(outputPath)) saved = readFileSync(outputPath);
     } finally {
       try {
         unlinkSync(outputPath);
@@ -123,9 +155,13 @@ async function POST_impl(req: NextRequest) {
     // intent ("avoid leaking internal paths or system details"); this is the
     // half that was not doing it. The rule cannot see this shape: no catch, no
     // construction it can follow, so only a test can hold the line.
-    if (!result.success) {
+    if (!result.success || saved === null) {
       captureException(
-        new Error(`Aseprite operation failed: ${operation}`),
+        new Error(
+          result.success
+            ? `Aseprite reported success but saved no file: ${operation}`
+            : `Aseprite operation failed: ${operation}`,
+        ),
         {
           route: '/api/bridges/aseprite/execute',
           operation,
@@ -150,9 +186,15 @@ async function POST_impl(req: NextRequest) {
       );
     }
 
+    // No `outputFiles`: a BridgeResult's file list would be server paths, and
+    // the one file this route produced is returned in full below.
     return redactedJson({
       success: true,
-      outputFiles: result.outputFiles,
+      sprite: {
+        format: 'aseprite',
+        contentType: 'application/octet-stream',
+        base64: saved.toString('base64'),
+      },
       metadata: result.metadata,
     });
   } catch (err) {

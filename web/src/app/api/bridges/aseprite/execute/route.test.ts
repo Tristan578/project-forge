@@ -2,6 +2,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import type { BridgeToolConfig, BridgeResult } from '@/lib/bridges/types';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { dirname } from 'path';
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/bridges/luaTemplates', () => ({
@@ -46,6 +48,36 @@ const mockResult: BridgeResult = {
   outputFiles: ['/tmp/output.png'],
   metadata: { width: 32, height: 32 },
 };
+
+/** Stand-in for a saved `.aseprite` file: arbitrary bytes, including non-UTF-8. */
+const SPRITE_BYTES = Buffer.from([0xe0, 0xa5, 0x00, 0x00, 0xff, 0x46, 0x2d, 0x31, 0x30, 0x32, 0x37, 0x31]);
+
+/**
+ * An `executeOperation` that behaves like the real one on success: it writes
+ * the sprite to the server-chosen `outputPath` the route handed it. Records
+ * each path so a test can check the route removed the file afterwards.
+ */
+function savingExecute(bytes: Buffer = SPRITE_BYTES) {
+  const paths: string[] = [];
+  const fn = vi.fn(async (_binary: string, op: { params: Record<string, unknown> }) => {
+    const out = String(op.params.outputPath);
+    paths.push(out);
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, bytes);
+    return mockResult;
+  });
+  return { fn, paths };
+}
+
+function authed() {
+  vi.doMock('@/lib/auth/api-auth', () => ({
+    authenticateRequest: vi.fn().mockResolvedValue({
+      ok: true as const,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+    }),
+  }));
+}
 
 function makeRequest(body: unknown) {
   return new NextRequest('http://test/api/bridges/aseprite/execute', {
@@ -142,9 +174,10 @@ describe('POST /api/bridges/aseprite/execute', () => {
     const res = await POST(makeRequest({ operation: 'maliciousScript' }));
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toContain('Unknown operation');
-    expect(data.error).toContain('maliciousScript');
-    expect(data.error).toContain('createSprite');
+    // Advertise exactly what this route runs. `drawFrames` is server-only and
+    // the input-sprite templates are refused below, so naming them here would
+    // invite a request that the very next check rejects (#10271).
+    expect(data.error).toBe('Unknown operation: "maliciousScript". Allowed: createSprite, createAnimation');
   });
 
   it('returns 422 when params is an array', async () => {
@@ -236,29 +269,85 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(data.error).toBe('No Aseprite binary path for current platform');
   });
 
-  it('returns 200 with result on successful execution', async () => {
-    vi.doMock('@/lib/auth/api-auth', () => ({
-      authenticateRequest: vi.fn().mockResolvedValue({
-        ok: true as const,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
-      }),
-    }));
+  // #10271 board round 1: the route used to delete the server-chosen file in
+  // `finally` before reading it, so a "successful" createSprite returned
+  // nothing the caller could use. The bytes are the artifact; the path never is.
+  it.each([['createSprite'], ['createAnimation']])(
+    '%s returns the saved sprite bytes and removes the temp file',
+    async (operation) => {
+      authed();
+      vi.doMock('@/lib/bridges/bridgeManager', () => ({
+        discoverTool: vi.fn().mockResolvedValue(connectedConfig),
+      }));
+      const saving = savingExecute();
+      vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: saving.fn }));
+
+      const POST = await importRoute();
+      const res = await POST(makeRequest({ operation, params: { width: 32, height: 32 } }));
+
+      expect(res.status).toBe(200);
+      const raw = await res.text();
+      expect(JSON.parse(raw)).toEqual({
+        success: true,
+        sprite: {
+          format: 'aseprite',
+          contentType: 'application/octet-stream',
+          base64: SPRITE_BYTES.toString('base64'),
+        },
+        metadata: { width: 32, height: 32 },
+      });
+      expect(Buffer.from(JSON.parse(raw).sprite.base64, 'base64').equals(SPRITE_BYTES)).toBe(true);
+      // The server's path is not the caller's business, in any field.
+      expect(saving.paths).toHaveLength(1);
+      expect(raw).not.toContain('spawnforge-bridge');
+      expect(raw).not.toContain('outputFiles');
+      // And it is gone once the response exists.
+      expect(existsSync(saving.paths[0])).toBe(false);
+    },
+  );
+
+  it('returns the bridge failure, not an empty success, when Aseprite saved nothing', async () => {
+    authed();
     vi.doMock('@/lib/bridges/bridgeManager', () => ({
       discoverTool: vi.fn().mockResolvedValue(connectedConfig),
     }));
+    // Reports success but never writes outputPath.
     vi.doMock('@/lib/bridges/asepriteBridge', () => ({
       executeOperation: vi.fn().mockResolvedValue(mockResult),
     }));
 
     const POST = await importRoute();
     const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.success).toBe(true);
-    expect(data.outputFiles).toEqual(['/tmp/output.png']);
-    expect(data.metadata).toEqual({ width: 32, height: 32 });
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ success: false, error: BRIDGE_FAILURE_MESSAGE });
   });
+
+  // #10271 board round 1: these three open an existing sprite with
+  // `app.open("{{inputPath}}")`. The route refuses a client path and has no
+  // server-owned input to give them, so they would run `app.open("")`. They
+  // are refused up front, before discovery or any Aseprite run.
+  it.each([['editSprite'], ['applyPalette'], ['exportSheet']])(
+    'refuses %s, which needs an input sprite the route cannot supply',
+    async (operation) => {
+      authed();
+      const discoverToolMock = vi.fn().mockResolvedValue(connectedConfig);
+      vi.doMock('@/lib/bridges/bridgeManager', () => ({ discoverTool: discoverToolMock }));
+      const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
+      vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: executeOperationMock }));
+
+      const POST = await importRoute();
+      const res = await POST(makeRequest({ operation, params: { width: 16 } }));
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe(
+        `Operation "${operation}" requires an input sprite, which this route cannot accept yet. `
+        + 'Allowed: createSprite, createAnimation',
+      );
+      expect(discoverToolMock).not.toHaveBeenCalled();
+      expect(executeOperationMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('never forwards stdout or stderr to the client, on either outcome', async () => {
     // The route used to `NextResponse.json(result)` verbatim, and a
@@ -307,7 +396,7 @@ describe('POST /api/bridges/aseprite/execute', () => {
   });
 
   it('accepts null params and defaults to empty object', async () => {
-    const nullParamsMock = vi.fn().mockResolvedValue(mockResult);
+    const nullParamsMock = savingExecute().fn;
     vi.doMock('@/lib/auth/api-auth', () => ({
       authenticateRequest: vi.fn().mockResolvedValue({
         ok: true as const,
@@ -336,7 +425,7 @@ describe('POST /api/bridges/aseprite/execute', () => {
   });
 
   it('accepts missing params and defaults to empty object', async () => {
-    const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
+    const executeOperationMock = savingExecute().fn;
     vi.doMock('@/lib/auth/api-auth', () => ({
       authenticateRequest: vi.fn().mockResolvedValue({
         ok: true as const,
