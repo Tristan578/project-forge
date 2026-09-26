@@ -12,7 +12,7 @@ import { withEgressGuard } from '@/lib/security/egressGuard';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
-import { existsSync, readFileSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, statSync, unlinkSync } from 'fs';
 
 /**
  * Template params that name files on the server. The templates hand them to
@@ -45,6 +45,32 @@ const SERVER_ONLY_TEMPLATES = new Set(['drawFrames']);
  * server-owned input exists: #10283.
  */
 const INPUT_SPRITE_TEMPLATES = new Set(['editSprite', 'applyPalette', 'exportSheet']);
+
+/**
+ * Size limits for what a client may ask Aseprite to build. The template
+ * loader's numeric check (0-99999) exists to reject non-numbers, not to bound
+ * work: 99999 x 99999 x 99999 frames passes it. The route returns the saved
+ * file's bytes, so every byte Aseprite writes is read into memory and sent
+ * back; both the request and the file are capped here. (Not exported: a
+ * Next.js route file may export only route handlers and config.)
+ */
+const SPRITE_LIMITS = {
+  maxDimension: 2048,
+  maxFrames: 256,
+  maxOutputBytes: 8 * 1024 * 1024,
+} as const;
+
+const SIZE_PARAMS: Record<string, number> = {
+  width: SPRITE_LIMITS.maxDimension,
+  height: SPRITE_LIMITS.maxDimension,
+  frameCount: SPRITE_LIMITS.maxFrames,
+};
+
+function oversizedParams(params: Record<string, unknown>): string[] {
+  return Object.entries(SIZE_PARAMS)
+    .filter(([key, max]) => key in params && Number(params[key]) > max)
+    .map(([key, max]) => `${key} (max ${max})`);
+}
 
 const asepriteExecuteSchema = z.object({
   operation: z.string().min(1).max(100),
@@ -110,6 +136,14 @@ async function POST_impl(req: NextRequest) {
       );
     }
 
+    const oversized = oversizedParams(params ?? {});
+    if (oversized.length > 0) {
+      return NextResponse.json(
+        { error: `Sprite too large. Reduce: ${oversized.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
     const tool = await getCachedTool();
     if (tool.status !== 'connected') {
       return NextResponse.json(
@@ -139,7 +173,15 @@ async function POST_impl(req: NextRequest) {
         name: operation,
         params: { ...(params ?? {}), outputPath },
       });
-      if (result.success && existsSync(outputPath)) saved = readFileSync(outputPath);
+      // The size is checked before the read, so an oversized file is never
+      // loaded; it is reported like any other failed run below.
+      if (
+        result.success
+        && existsSync(outputPath)
+        && statSync(outputPath).size <= SPRITE_LIMITS.maxOutputBytes
+      ) {
+        saved = readFileSync(outputPath);
+      }
     } finally {
       try {
         unlinkSync(outputPath);

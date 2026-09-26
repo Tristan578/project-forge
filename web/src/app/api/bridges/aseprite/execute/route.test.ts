@@ -323,6 +323,65 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(await res.json()).toEqual({ success: false, error: BRIDGE_FAILURE_MESSAGE });
   });
 
+  // #10271 board round 3: the route returns the saved file's bytes, so an
+  // unbounded request (the template loader allows 0-99999 per number) meant an
+  // unbounded read into memory. Oversized requests are refused before Aseprite
+  // runs, and an oversized file is never read.
+  it.each([
+    [{ width: 2049, height: 32 }, 'width (max 2048)'],
+    [{ width: 32, height: 2049 }, 'height (max 2048)'],
+    [{ width: 32, height: 32, frameCount: 257 }, 'frameCount (max 256)'],
+    [{ width: 99999, height: 99999, frameCount: 99999 }, 'width (max 2048), height (max 2048), frameCount (max 256)'],
+  ])('refuses an oversized request %j before Aseprite runs', async (params, named) => {
+    authed();
+    const discoverToolMock = vi.fn().mockResolvedValue(connectedConfig);
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({ discoverTool: discoverToolMock }));
+    const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: executeOperationMock }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({ operation: 'createAnimation', params }));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(`Sprite too large. Reduce: ${named}`);
+    expect(discoverToolMock).not.toHaveBeenCalled();
+    expect(executeOperationMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts a request exactly at the size limits', async () => {
+    authed();
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({
+      discoverTool: vi.fn().mockResolvedValue(connectedConfig),
+    }));
+    const saving = savingExecute();
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: saving.fn }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({
+      operation: 'createAnimation',
+      params: { width: 2048, height: 2048, frameCount: 256 },
+    }));
+
+    expect(res.status).toBe(200);
+    expect(saving.fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not read or return a saved file over the byte limit, and still removes it', async () => {
+    authed();
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({
+      discoverTool: vi.fn().mockResolvedValue(connectedConfig),
+    }));
+    const saving = savingExecute(Buffer.alloc(8 * 1024 * 1024 + 1));
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: saving.fn }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ success: false, error: BRIDGE_FAILURE_MESSAGE });
+    expect(existsSync(saving.paths[0])).toBe(false);
+  });
+
   // #10271 board round 1: these three open an existing sprite with
   // `app.open("{{inputPath}}")`. The route refuses a client path and has no
   // server-owned input to give them, so they would run `app.open("")`. They
