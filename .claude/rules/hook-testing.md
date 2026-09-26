@@ -200,7 +200,8 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   first (`$'\141lias'` is `alias`). A `$"..."` locale string is its text,
   and a word with brace groups is judged as every word it expands to
   (`al{i,}as`, `{a..a}lias`, `alias {x,fail=:}`); one longer than the gate
-  enumerates, in a guarded position, is itself a violation. Text written
+  enumerates, in a guarded position (a command name, or any word of an
+  alias, shopt, set or trap statement), is itself a violation. Text written
   inside a parameter expansion (`${n:-alias}`, `${HOME:+alias}`,
   `${x/*/alias}`) is judged both with and without it, and such text holding
   a blank, which bash splits into words, is a `split` violation in a guarded
@@ -262,7 +263,9 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   argument (`f() { echo }`) closes nothing, so the next line is still the
   body (round thirty-two). The word after `fi`, `done` or `esac` is in
   command position, so `h() { if true; then :; fi }` closes on its line
-  (round thirty-three). A subshell body or a
+  (round thirty-three). A multi-line body whose brace closes anywhere but
+  column 0 (an indented `}`), or never, is reported as `close` (round
+  thirty-five). A subshell body or a
   bare compound body is reported as `unsupported` — the gate never skips a
   definition it cannot follow.
 - Every function at true top level (outside any function body, subshell,

@@ -909,8 +909,9 @@ was replaced with this one (round twenty-nine).
   A word is now judged as every word its brace groups expand to. The
   nineteenth found that the 64-word enumeration cap passed a guarded word at
   position 65; an expansion cut short by the cap or by the 8-level nesting
-  bound, in a command name or an alias, shopt or trap statement (and, from
-  the twenty-sixth, a set statement), is now a `brace` violation, and a numeric range (`trap 'exit 0' {0..0}`) is pinned.
+  bound, in a command name or an alias, shopt, set or trap statement (set
+  joined the list in the twenty-sixth), is now a `brace` violation, and a
+  numeric range (`trap 'exit 0' {0..0}`) is pinned.
   The twenty-first found that bash reads a numeric trap signal as an
   optionally signed decimal after leading blanks, so `00`, `+0` and `' 00'`
   are all signal 0 (EXIT); the gate now stores each numeric signal as its
@@ -1006,7 +1007,16 @@ was replaced with this one (round twenty-nine).
   never had to be frozen, although the group runs once and unconditionally,
   as top level does. Each nesting level now records what opened it (a
   function body, a bare group, or a conditional or repeated compound), and
-  only a bare group is transparent.
+  only a bare group is transparent. The thirty-fifth found two more. A
+  multi-line body whose brace closed off column 0 stayed open until the next
+  column-0 brace, which belonged to a later function, so that function was
+  misreported (its own freeze called stray) and the missing freeze was put on
+  the wrong line; the lexer now sees the group close on any body line, and
+  off column 0, or at the end of the file, that is a `close` violation. And
+  only `NAME=` was skipped as a prefix assignment, so `X+=2 alias fail=:` and
+  `a[0]=1 alias f1=:` (bash binds both) read the assignment as the command
+  word and passed; one pattern now covers `NAME=`, `NAME+=` and a subscript,
+  at every site that skips or strips an assignment word.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

@@ -1928,6 +1928,11 @@ fi
 # named set. Both lists are derived from the gate at run time: the in_ flags
 # on each guard line, and the statement list in each report line. Each flag
 # must be named in its message, and the walk must find at least one flag.
+# Thirty-fifth round (dx): the same list, restated in the gate comment above
+# the guard and in gotchas-build-ci.md, still lacked set. 30u-b sweeps every
+# "alias, shopt ... trap" statement list in the gate and the three docs (line
+# breaks and comment markers joined first) and requires every guard flag in
+# each; it fails when it finds fewer lists than the five it was written with.
 for pair in "brace bx_trunc" "split px_split"; do
   st="${pair%% *}"; fv="${pair#* }"
   # A subshell, so each early exit ends only this pair's check.
@@ -1953,6 +1958,122 @@ for pair in "brace bx_trunc" "split px_split"; do
     fail "30u. the $st message names every statement its guard fires in" "$res"
   fi
 done
+sweep_flags="$(grep -E '^[[:space:]]*if \((bx_trunc|px_split) && ' "$GATE" | grep -oE '\|\| in_[a-z]+' | sed 's/.*in_//' | sort -u)"
+sweep_n=0; sweep_bad=""
+for doc in "$GATE" "$REPO_ROOT/.claude/rules/hook-testing.md" \
+    "$REPO_ROOT/.claude/rules/gotchas-build-ci.md" \
+    "$REPO_ROOT/docs/guides/npm-audit-gate-hardening.md"; do
+  while read -r list; do
+    sweep_n=$((sweep_n + 1))
+    while read -r flag; do
+      grep -qw "$flag" <<<"$list" || sweep_bad="$sweep_bad ${doc#"$REPO_ROOT"/}: '$list' omits $flag;"
+    done <<<"$sweep_flags"
+  done < <(tr '\n' ' ' <"$doc" | sed 's/[[:space:]]#[[:space:]]/ /g; s/[[:space:]][[:space:]]*/ /g' |
+    grep -oE 'alias, shopt[a-z, ]* (or|and) trap')
+done
+if [ -z "$sweep_flags" ]; then
+  fail "30u-b. every restated guard list names every guard flag" "no in_ flag found on either guard line"
+elif [ "$sweep_n" -lt 5 ]; then
+  fail "30u-b. every restated guard list names every guard flag" "found $sweep_n lists, fewer than the 5 written"
+elif [ -n "$sweep_bad" ]; then
+  fail "30u-b. every restated guard list names every guard flag" "$sweep_bad"
+else
+  pass "30u-b. every restated guard list names every guard flag ($sweep_n lists)"
+fi
+
+# ---- 30v. a multi-line body that closes off column 0 is a close violation --
+# Thirty-fifth board round (ux): foo closed with an indented brace (line 5),
+# so the gate kept it open until the next column-0 brace, which was bar's
+# (line 8). It then said foo needed its freeze on line 9 and that bar's own
+# freeze was stray, both false. The lexer now sees the group close on any
+# body line: off column 0 it is a close violation, and the definition ends
+# there, so foo's missing freeze names line 6 and bar is judged alone. The
+# same close rule replaces the old ends-in-a-brace test on a line that opens
+# a pending brace group: baz (lines 10-11) closes on its brace line although
+# code follows, while in qux (lines 13-14) the brace is an argument, so the
+# freeze on line 15 is still body and the column-0 brace on line 16 closes
+# it. A body still open at EOF (line 18) is a close violation of its own.
+d_close2="$(mkfixture close-off-column <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+foo() {
+  echo "hi"
+  }
+bar() {
+  echo "bye"
+}
+readonly -f bar
+baz()
+{ :; }; true
+readonly -f baz
+qux()
+{ echo }
+readonly -f qux
+}
+readonly -f qux
+open() {
+  :
+FIX
+)"
+out_close2="$(run_gate "$d_close2")"
+expect_rc "30v. a multi-line body that closes off column 0, or never, is a close violation" 1 "$out_close2" \
+  "3 violation(s)" "fixture.test.sh:3: foo() closes on line 5, but not with a '}' at column 0" \
+  "fixture.test.sh:3: foo() is not frozen — add 'readonly -f foo' on line 6" \
+  "fixture.test.sh:18: open() opens a brace group that never closes before the end of the file"
+if grep -Eq "readonly -f (bar|baz|qux)' does not|(bar|baz|qux)\(\) is not frozen" <<<"$out_close2"; then
+  fail "30v-b. the definitions after an off-column close are judged alone" "$out_close2"
+else
+  pass "30v-b. the definitions after an off-column close are judged alone"
+fi
+
+# ---- 30w. an assignment word is NAME=, NAME+= or a subscripted NAME[...]= ---
+# Thirty-fifth board round (architect): only NAME= was skipped as a prefix
+# assignment, so in X+=2 alias fail=: the word X+=2 was read as the command
+# word and the alias went unreported, while bash binds it (30w-b). The same
+# held for a subscripted prefix (bash refuses the subscript and still runs
+# the command) and for a trap action whose handler call follows such a
+# prefix. Lines 5 to 10 are reported; line 11 was already. Lines 12 to 14,
+# 16 and 17 are assignment VALUES, which bash never brace-expands or splits
+# into words, so neither a long expansion nor a blank in a default there is
+# a violation; line 15 is one in command position.
+d_assign="$(mkfixture assignment-words <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+cleanup() { exit 0; }
+readonly -f cleanup
+X+=2 alias fail=:
+a[0]=1 alias f1=:
+a[1]+=1 shopt -s expand_aliases
+X+=1 set -o posix
+trap 'X+=1 cleanup' EXIT
+trap 'a[0]=1 cleanup' ERR
+X=1 alias ok=:
+X+={0..99}{0..9} true
+a[0]={0..99}{0..9} true
+a[1]+={0..99}{0..9} true
+{0..99}{0..9} true
+X+=${n:-a b} true
+a[0]+=${n:-a b} true
+FIX
+)"
+out_assign="$(run_gate "$d_assign")"
+expect_rc "30w. a command after an append or subscripted prefix assignment is judged as the command" 1 "$out_assign" \
+  "8 violation(s)" "fixture.test.sh:5: 'alias fail=:'" "fixture.test.sh:6: 'alias f1=:'" \
+  "fixture.test.sh:7: 'shopt -s expand_aliases'" "fixture.test.sh:8: 'set -o posix'" \
+  "fixture.test.sh:9: 'trap cleanup ... EXIT" "fixture.test.sh:10: 'trap cleanup ... ERR" \
+  "fixture.test.sh:11: 'alias ok=:'" "fixture.test.sh:15: '{0..99}{0..9}'"
+if grep -Eq 'fixture.test.sh:(12|13|14|16|17):' <<<"$out_assign"; then
+  fail "30w-c. an assignment value is neither brace-expanded nor split, so it is not judged" "$out_assign"
+else
+  pass "30w-c. an assignment value is neither brace-expanded nor split, so it is not judged"
+fi
+assign_bash="$(bash -c 'shopt -s expand_aliases; X+=2 alias fail=:; a[0]=1 alias f1=: 2>/dev/null; alias; trap "X+=1 cleanup" EXIT; cleanup() { echo CLEANUP-RAN; }' 2>&1)"
+if grep -q "^alias fail=':'$" <<<"$assign_bash" && grep -q "^alias f1=':'$" <<<"$assign_bash" &&
+   grep -q '^CLEANUP-RAN$' <<<"$assign_bash"; then
+  pass "30w-b. in this bash an append or subscripted prefix still runs the command after it"
+else
+  fail "30w-b. the prefix-assignment probe did not reproduce in this bash (got '$assign_bash')"
+fi
 
 # ---- 30r. inside double quotes a backslash escapes only five characters -----
 # Thirty-second board round (architect): the lexer dropped every backslash in

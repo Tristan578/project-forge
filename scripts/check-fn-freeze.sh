@@ -42,7 +42,11 @@
 # position, so `h() { if true; then :; fi }` closes too; a trailing comment
 # is not part of the line: the thirty-second and thirty-third board rounds),
 # and otherwise at the first later line that
-# starts with `}` at column 0. A definition whose body is anything else — a subshell
+# starts with `}` at column 0. A multi-line body whose brace closes anywhere
+# else (an indented `}`), or never, is reported as `close`: the freeze rule
+# cannot tie it to a freeze line (thirty-fifth board round: such a body
+# stayed open until a later function column-0 brace, and that function and
+# its freeze were misreported). A definition whose body is anything else — a subshell
 # `( )`, a bare `if`/`while`/`case` — is reported as `unsupported` and fails
 # the gate, so a helper the derivation cannot follow is never a helper it
 # silently forgot (the sixth board round found `name()` with the brace on
@@ -65,7 +69,8 @@
 # `al"ias"`, `\a\l\i\a\s`, `$'alias'` and its escaped forms (octal, hex,
 # `\u`, `\U`, a NUL ending the value), a backslash line continuation in the
 # middle of the statement, and anything in front of the word (`builtin`,
-# `command`, `time -p`, `X="1"`, `!`, `if`) are all the same word, and so
+# `command`, `time -p`, `X="1"`, `X+=1`, `a[0]=1`, `!`, `if`) are all the
+# same word, and so
 # is a word spelled around an expansion that can be empty (`ali$()as`,
 # `ali${x:+Q}as`, `DEBU$1G`): every command name and argument is also judged
 # with its expansions removed (see end_word), an ANSI-C string decoded, a
@@ -199,7 +204,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline|parse-error
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline|close|parse-error
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -220,6 +225,14 @@ readonly BUILTINS
 
 derive_file() {
   awk -v file="$2" -v builtins=" $BUILTINS " '
+    # An assignment word, as bash recognises one before the command name:
+    # NAME=, NAME+=, and a subscripted NAME[...]= or NAME[...]+= (bash runs
+    # the command after each, even when it refuses the subscript). Only
+    # NAME= was recognised until the thirty-fifth board round, so in
+    # X+=2 alias fail=: the word X+=2 was read as the command word and the
+    # alias went unreported. One pattern, read by every site that skips or
+    # strips an assignment word.
+    BEGIN { ASSIGN = "^[A-Za-z_][A-Za-z0-9_]*(\\[[^]]*\\])?\\+?=" }
     function flush_def() {
       pending_name = def_name; pending_def = def_line; pending_end = NR
       def_name = ""
@@ -233,7 +246,8 @@ derive_file() {
     # escapes the next character
     # (`\a\l\i\a\s`), and whitespace or a control operator ends the word. The
     # alias rule is then a check on the WORDS of a statement: the COMMAND
-    # word is the first word that is not an assignment (`X="1"`) and not one
+    # word is the first word that is not an assignment (`X="1"`, `X+=1`,
+    # `a[0]=1`: see ASSIGN) and not one
     # of the words bash lets stand in front of a command (`builtin`,
     # `command`, `time`, `-p`, `!`, `if`/`then`/`else`/`do`/`while`/..., `{`).
     # When that word is `alias`, every later `NAME=` word in the statement is
@@ -500,15 +514,15 @@ derive_file() {
         printf "%s\t%s\t%d\t%d\talias\n", file, w, NR, NR
       # A word whose brace expansion was cut short is judged as a guarded
       # word would be only on the words it produced; where the missing ones
-      # could be guarded (a command name, or any word of an alias, shopt or
-      # trap statement) that is not a verdict, so it is a violation. An
+      # could be guarded (a command name, or any word of an alias, shopt,
+      # set or trap statement) that is not a verdict, so it is a violation. An
       # assignment word before the command name is not brace-expanded by
       # bash at all, so its value is never judged.
-      if (bx_trunc && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/))
+      if (bx_trunc && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && w ~ ASSIGN))
         printf "%s\t%s\t%d\t%d\tbrace\n", file, w, NR, NR
       # The same positions, for a parameter expansion whose TEXT bash splits
       # into fields (see pexp); a trap action is text, judged by check_trap.
-      if (px_split && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) && !(in_trap && !trap_has_action && w !~ /^-/))
+      if (px_split && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && w ~ ASSIGN) && !(in_trap && !trap_has_action && w !~ /^-/))
         printf "%s\t%s\t%d\t%d\tsplit\n", file, w, NR, NR
       if (!cmd_seen) {
         # `case WORD` ended its line without `in`: the first word of a later
@@ -532,13 +546,14 @@ derive_file() {
         if (!rq && w == "{") { bs++; bk[bs] = was_fn ? "f" : "b" }
         if (!rq && (w == "}") && bs > 0) {
           bs--
-          # The brace group of the definition on this line closed here, in
-          # command position, as bash reads it (see the definition rule).
-          if (def_name != "" && def_line == NR && d == 0 && bs == def_bs) grp_closed = 1
+          # The brace group of the open definition closed here, in command
+          # position, as bash reads it (see the definition rule): on its own
+          # line, on the line its brace opened on, or on a later body line.
+          if (def_name != "" && d == 0 && bs == def_bs) grp_closed = 1
         }
         if ((!rq && w ~ /^(!|if|then|elif|else|do|while|until|coproc|\{|\})$/) ||
             w ~ /^(builtin|command|time|-p)$/ ||
-            w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { w = ""; return }
+            w ~ ASSIGN) { w = ""; return }
         if (!rq && w == "case") { bs++; bk[bs] = "c" }
         # fi, done and esac end a compound command, and the word after one is
         # in command position again: in h() { if true; then :; fi } the brace
@@ -633,8 +648,8 @@ derive_file() {
           ns = split(a, segs, /[;&|]+/)
           for (k = 1; k <= ns; k++) {
             seg = segs[k]; sub(/^[[:space:]]+/, "", seg)
-            while (seg ~ /^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/)
-              sub(/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/, "", seg)
+            while (seg ~ (ASSIGN "[^[:space:]]*[[:space:]]+"))
+              sub(ASSIGN "[^[:space:]]*[[:space:]]+", "", seg)
             nw = split(seg, tw, /[[:space:]]+/)
             cw = tw[1]
             if ((cw == "command" || cw == "builtin") && nw > 1) cw = tw[2]
@@ -1040,9 +1055,14 @@ derive_file() {
         if (line ~ /^[[:space:]]*$/ || line ~ /^[[:space:]]*#/) next
         if (line ~ /^[[:space:]]*\{/) {
           brace_pending = 0
+          # Closed on this line when the lexer saw the group brace close in
+          # command position, as on the definition line (thirty-fifth board
+          # round: the old test, a code part ending in a brace, missed a
+          # group followed by more code and closed one ending in an argument).
+          # grp_closed needs no reset here or below: it is cleared where every
+          # definition opens, and a close always ends the definition.
           lex_line(line)
-          body = substr(line, 1, code_end - 1); sub(/[[:space:]]+$/, "", body)
-          if (body ~ /\}$/ && body !~ /^[[:space:]]*\{[[:space:]]*$/) flush_def()
+          if (grp_closed) flush_def()
           next
         }
         printf "%s\t%s\t%d\t%d\tunsupported\n", file, def_name, def_line, NR
@@ -1053,9 +1073,19 @@ derive_file() {
       # Whatever follows that brace on the same line runs at top level, so it
       # is lexed like any other top-level text once the body is closed (the
       # twelfth board round hid `alias fail=:` after `};` on that line).
+      # A body line on which the group closes anywhere but at column 0 is a
+      # close violation: the freeze rule ties a multi-line definition to the
+      # line after a column-0 brace, and without this the definition stayed
+      # open until the next such brace, which belonged to a later function,
+      # so that function and its freeze were misreported (thirty-fifth board
+      # round). The definition ends there, so what follows is judged again.
       if (def_name != "") {
         if (line ~ /^\}/ && !pat) { flush_def(); lex_line(substr(line, 2)); next }
         lex_line(line)
+        if (grp_closed) {
+          printf "%s\t%s\t%d\t%d\tclose\n", file, def_name, def_line, NR
+          flush_def()
+        }
         next
       }
 
@@ -1118,7 +1148,7 @@ derive_file() {
       if (def_name != "" && brace_pending)
         printf "%s\t%s\t%d\t%d\tunsupported\n", file, def_name, def_line, NR
       else if (def_name != "")
-        printf "%s\t%s\t%d\t%d\tunfrozen\n", file, def_name, def_line, NR
+        printf "%s\t%s\t%d\t%d\tclose\n", file, def_name, def_line, 0
       # A lexer that ends the file inside a heredoc or a quoted string has
       # skipped everything after the opener; that is a parse failure, not a
       # clean file, and the gate must not report the skipped tail as frozen.
@@ -1186,7 +1216,7 @@ if [ "${derived:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline|close)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
   # The report is the block reason, so it goes to stderr like every other
@@ -1205,6 +1235,12 @@ if [ -n "$violations" ]; then
         brace)    echo "  - $file:$def: '$name' — this brace expansion produces more words than the gate enumerates (64, nested 8 deep), in a command name or an alias, shopt, set or trap statement, so a guarded word could sit past the cut where the gate cannot see it — list the words it needs explicitly, or split the statement" ;;
         split)    echo "  - $file:$def: '$name' — this parameter expansion's default, alternate or replacement text holds a blank, and bash splits an unquoted expansion into separate words there, so in a command name or an alias, shopt, set or trap statement it can spell a guarded command the gate cannot place — write the words out literally" ;;
         multiline) echo "  - $file:$def: '$name' — this \${...} group does not close on the line it opens on; the gate reads a group one line at a time, so text written in it on a later line (a default, alternate or replacement that can spell a guarded word) would go unjudged — put the whole group on one line" ;;
+        close)
+          if [ "$end" -gt 0 ]; then
+            echo "  - $file:$def: $name() closes on line $end, but not with a '}' at column 0 — the gate ties a multi-line definition to its freeze by a column-0 closing brace, so it cannot tell where $name() ends; move that brace to column 0 and put 'readonly -f $name' on the line after it"
+          else
+            echo "  - $file:$def: $name() opens a brace group that never closes before the end of the file — close it with a '}' at column 0 and put 'readonly -f $name' on the line after it"
+          fi ;;
         unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as a one-liner '$name() { ...; }', or multi-line with the closing '}' at column 0, then freeze it on the next line" ;;
       esac
     done <<<"$violations"
