@@ -620,18 +620,23 @@ jobs:
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
     runs-on: windows-latest
-    # Raised from 30 after review measured 26:52 on a branch — ~3 minutes of
-    # headroom on a job that is in ci-success's needs:, so a tip-over blocks
-    # every PR rather than one. Remeasured 2026-09-24: main took 36:53, 36:54
-    # and 39:04, so the headroom is about 6 minutes, not the ~23 that main's
-    # earlier ~22 minutes implied. The slowest suite is check-ci-success
-    # (about 6 minutes). check-fn-freeze took 52 s here at 151 cases (job
-    # 108446401974, 2026-09-26, whole job 30:38), up from 44 s at 144 cases
-    # (job 108440510702); its bash probes cost more under Git Bash than on
-    # Linux, so re-measure it from this job after the suite changes. The
-    # spread between runs of the same tree is mostly runner variance, which
-    # is the argument for headroom rather than for hunting a culprit.
-    timeout-minutes: 45
+    # The job is in ci-success's needs:, so a tip-over blocks every PR rather
+    # than one. Raised from 30 to 45 after review measured 26:52 on a branch,
+    # about 3 minutes of headroom; main then took about 22 minutes.
+    # Raised from 45 to 60 (#10285): on 2026-09-24 main measured 36:54 with
+    # 66 suites, then 36:53 and 39:04 with 70, against about 22 on 2026-09-15.
+    # That growth is not runner variance. The job runs every bash suite one
+    # after another under Git Bash, where process spawns are slow. #10229
+    # added the 71st suite, check-fn-freeze, and its case count grew across
+    # that PR's heads. In a 41:22 run of the final head on 2026-09-26 (job
+    # 108460157387), check-ci-success alone took 553 s, and check-fn-freeze
+    # took 92 s at 175 cases against about 8 s on Linux. Earlier heads
+    # measured it at 44 s with 144 cases (job 108440510702) and 52 s with 151
+    # (job 108446401974, whole job 30:38), so re-measure it from this job
+    # after the suite changes. 60 is headroom while #10290 finds and cuts
+    # where the time goes; raise it again only with that issue's
+    # measurements, not in its place.
+    timeout-minutes: 60
     permissions:
       contents: read
     defaults:
