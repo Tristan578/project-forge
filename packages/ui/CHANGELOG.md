@@ -1,5 +1,17 @@
 # @spawnforge/ui
 
+## 0.3.1
+
+### Patch Changes
+
+- [#10232](https://github.com/Tristan578/project-forge/pull/10232) [`33116b2`](https://github.com/Tristan578/project-forge/commit/33116b25de2fe3f65b42720ffb278d2f10808b7d) Thanks [@Tristan578](https://github.com/Tristan578)! - Enable `exactOptionalPropertyTypes` in the three small TypeScript workspaces ([#7592](https://github.com/Tristan578/project-forge/issues/7592)).
+  
+  `apps/docs`, `mcp-server` and `packages/ui` now distinguish an omitted optional property from one set to `undefined`. The handful of sites that relied on the old equivalence build their objects and JSX props with conditional spread instead, so no serialized output gains a literal `undefined` key. The stateless MCP HTTP transport drops its explicit `sessionIdGenerator: undefined` (the SDK gates stateless mode on the option being falsy, so an absent key is identical). No runtime behaviour changes. `web` is not touched: it measures 320 errors across 165 files and is tracked separately.
+
+- [#10137](https://github.com/Tristan578/project-forge/pull/10137) [`7f4653b`](https://github.com/Tristan578/project-forge/commit/7f4653b46a0a10d16ec4b80095c7321a7c506540) Thanks [@dependabot](https://github.com/apps/dependabot)! - Update runtime dependencies for AI providers, authentication, storage, monitoring, validation, and documentation. Refresh related development and test tooling.
+
+- [#10113](https://github.com/Tristan578/project-forge/pull/10113) [`d0f8cbc`](https://github.com/Tristan578/project-forge/commit/d0f8cbc915e7ffc579e09fbf03a88bacf435cf67) Thanks [@Tristan578](https://github.com/Tristan578)! - Use semantic theme colours for health status cards and documentation, with readable status indicators and accessible shared controls.
+
 ## 0.3.0
 
 ### Minor Changes
