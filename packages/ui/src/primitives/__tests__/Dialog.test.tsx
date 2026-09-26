@@ -64,6 +64,41 @@ describe('Dialog', () => {
     expect(dialog.getAttribute('aria-modal')).toBe('true');
   });
 
+  it('locks document scroll on documentElement (never body) while open', () => {
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
+    const { unmount } = render(
+      <Dialog open onClose={vi.fn()} title="Dialog">
+        Content
+      </Dialog>
+    );
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    expect(document.body.style.overflow).toBe('');
+    unmount();
+    expect(document.documentElement.style.overflow).toBe('');
+  });
+
+  it('keeps the scroll lock held while a second, stacked dialog is still open', () => {
+    document.documentElement.style.overflow = '';
+    const outer = render(
+      <Dialog open onClose={vi.fn()} title="Outer">
+        Outer content
+      </Dialog>
+    );
+    const inner = render(
+      <Dialog open onClose={vi.fn()} title="Inner">
+        Inner content
+      </Dialog>
+    );
+    expect(document.documentElement.style.overflow).toBe('hidden');
+
+    inner.unmount();
+    expect(document.documentElement.style.overflow).toBe('hidden');
+
+    outer.unmount();
+    expect(document.documentElement.style.overflow).toBe('');
+  });
+
   it.each(THEME_NAMES)('renders without error in %s theme', (theme) => {
     document.documentElement.setAttribute('data-sf-theme', theme);
     const { container } = render(

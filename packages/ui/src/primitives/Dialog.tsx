@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import { cn } from "../utils/cn";
 import { useDialogA11y } from "../hooks/useDialogA11y";
+import { useScrollLock } from "../hooks/useScrollLock";
 import { Z_INDEX } from "../tokens";
 
 export interface DialogProps {
@@ -27,6 +28,7 @@ export function Dialog({
     isOpen: open,
     onClose,
   });
+  useScrollLock(open);
 
   if (!open) return null;
 

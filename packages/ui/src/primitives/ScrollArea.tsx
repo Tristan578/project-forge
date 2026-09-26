@@ -21,6 +21,10 @@ export function ScrollArea({
     <div
       className={cn(
         "overflow-auto",
+        // Stop a drag that hits the end of this container from chaining
+        // into document scroll -- relevant when this sits inside a
+        // scroll-locked dialog (PF-1032 / #9052 acceptance criterion 5).
+        "[overscroll-behavior:contain]",
         // Custom scrollbar styling via CSS custom properties
         "[scrollbar-width:thin]",
         "[scrollbar-color:var(--sf-bg-elevated)_transparent]",
