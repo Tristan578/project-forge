@@ -1090,6 +1090,57 @@ describe('useScriptRunner', () => {
     expect(mockSetEngineMode).not.toHaveBeenCalled();
   });
 
+  // A script that never calls forge.* sends no commands, logs or errors, so
+  // before #10286 its ticks were silent and the watchdog stopped Play after
+  // 5 s. The worker now acknowledges every tick with tick_done.
+  it('keeps Play running past the watchdog while every tick is acknowledged', () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    const tick = () => mockPlayTickCallback!({
+      entities: {},
+      entityInfos: {},
+      inputState: { pressed: {}, justPressed: {}, justReleased: {}, axes: {} },
+    });
+
+    for (let i = 0; i < 4; i++) {
+      act(() => {
+        tick();
+        vi.advanceTimersByTime(WATCHDOG_TIMEOUT_MS - 1000);
+        latestWorker!.simulateMessage({ type: 'tick_done' });
+      });
+    }
+    // Four acknowledged ticks span 16 s, over three watchdog periods.
+    expect(mockSetEngineMode).not.toHaveBeenCalled();
+    expect(mockAddScriptLog).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('timed out') }));
+
+    // A tick that never returns is still caught.
+    act(() => {
+      tick();
+      vi.advanceTimersByTime(WATCHDOG_TIMEOUT_MS + 1);
+    });
+    expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
+  });
+
+  it("ignores the worker's tick_done: no command, no script-console entry, no warning", () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockAddScriptLog.mockClear();
+
+    act(() => {
+      latestWorker!.simulateMessage({ type: 'tick_done' });
+    });
+
+    expect(mockWasmModule.handle_command).not.toHaveBeenCalled();
+    expect(mockAddScriptLog).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(mockSetEngineMode).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
   // ---------------------------------------------------------------------------
   // dispatchCommand error handling
   // ---------------------------------------------------------------------------
