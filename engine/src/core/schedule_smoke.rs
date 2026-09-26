@@ -79,6 +79,7 @@ use super::physics_2d_sim::Physics2dPlugin;
 use super::post_processing::PostProcessingPlugin;
 use super::project_type::ProjectType;
 use super::quality::QualitySettings;
+use super::render_errors::RenderErrorReportingPlugin;
 use super::scene_file::SceneName;
 use super::scene_graph::SceneGraphCache;
 use super::selection::{Selection, SelectionChangedEvent};
@@ -172,6 +173,7 @@ const REGISTERED_PLUGINS: &[&str] = &[
     "Physics2dPlugin",
     "PhysicsPlugin",
     "PostProcessingPlugin",
+    "RenderErrorReportingPlugin",
     "ShaderEffectsPlugin",
     "SnapPlugin",
 ];
@@ -342,6 +344,11 @@ fn build_full_app() -> App {
         .init_resource::<SortingLayerConfig>()
         .init_resource::<TerrainChangeEvents>()
         .add_message::<SelectionChangedEvent>();
+
+    // Registered right after `DefaultPlugins` in `bridge::init_engine`. It
+    // adds resources only (the render-error handler and its tracker); its
+    // drain system lives in the wasm32-only bridge.
+    app.add_plugins(RenderErrorReportingPlugin);
 
     // The 16 `core::*` plugins that own `fn build`. Registration order
     // mirrors `bridge::init_engine` so `.after(...)`/`.before(...)` edges

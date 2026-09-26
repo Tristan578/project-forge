@@ -18,6 +18,7 @@ import {
   handleParticleEvent,
   handlePerformanceEvent,
   handleEditModeEvent,
+  handleRenderErrorEvent,
 } from './events';
 import { THROTTLED_EVENTS } from './events/throttledEvents';
 import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
@@ -176,6 +177,7 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       if (handleParticleEvent(type, payload, set, get)) return;
       if (handlePerformanceEvent(type, payload, set, get)) return;
       if (handleEditModeEvent(type, payload, set, get)) return;
+      if (handleRenderErrorEvent(type, payload, set, get)) return;
 
       console.warn('Unknown engine event:', type);
     };
