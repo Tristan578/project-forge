@@ -762,6 +762,21 @@ if grep -q 'make its action return' <<<"$out_debug_trap" || ! grep -q 'or enable
 else
   pass "19j-c. a DEBUG trap or extdebug report tells the reader to delete the line, not to edit an action"
 fi
+# Fortieth board round (ux): the report chose between the two messages by
+# the label text, and an EXIT action that began with three dots matched the
+# DEBUG label shape. A DEBUG trap and extdebug now carry their own status.
+d_dots="$(mkfixture dots-trap <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+trap '... ; exit 5' EXIT
+FIX
+)"
+out_dots="$(run_gate "$d_dots")"
+if grep -q 'make its action return without exiting' <<<"$out_dots" && ! grep -q 'a DEBUG trap under extdebug' <<<"$out_dots"; then
+  pass "19j-d. an EXIT action that begins with three dots gets the EXIT message, not the DEBUG one"
+else
+  fail "19j-d. an EXIT action that begins with three dots gets the EXIT message, not the DEBUG one" "$out_dots"
+fi
 d_debug_words="$(mkfixture debug-words <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -2292,6 +2307,56 @@ if grep -q '^EXPAND-ON$' <<<"$redir_bash" && grep -q '^POSIX-ON$' <<<"$redir_bas
   pass "30ab-b. in this bash lines 3 to 8, 17 to 24 and 26 of the fixture bind, except the arguments on lines 13 and 22"
 else
   fail "30ab-b. the redirection probe did not reproduce in this bash (got '$redir_bash')"
+fi
+
+# ---- 30ac. a backtick span is a substitution, not word text ----------------
+# Fortieth board round (security, architect): the lexer read a backtick span
+# as ordinary word text, so a ;, &, | or blank inside it ended the enclosing
+# statement and the guarded words after it were never judged (lines 3 to 8),
+# while bash reads the span as one word and, when it prints nothing, drops
+# it. A backtick now opens a substitution like $( ), with the statement
+# saved and restored, unquoted, inside double quotes (line 9) or in an array
+# literal (line 11, as $( ) there is). A command inside the span is judged
+# as one (line 10, as inside $( ), and line 13, a span inside double
+# quotes). Line 12 is text. 30ac-b runs lines 3 to
+# 9 in bash.
+d_tick="$(mkfixture backtick <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+alias `echo generate; :` f1=:
+shopt -s `true;true` expand_aliases
+alias `true&` f2=:
+alias `true|true` f3=:
+alias `true >/dev/null` f4=:
+set -o `true;true` posix
+X="`echo a;echo b`" alias f5=:
+echo `true; alias f6=:`
+arr=(`alias f7=:`)
+echo "`true`" ok
+echo "`alias f8=:`"
+FIX
+)"
+out_tick="$(run_gate "$d_tick")"
+expect_rc "30ac. a backtick span keeps the statement around it" 1 "$out_tick" \
+  "10 violation(s)" "fixture.test.sh:3: 'alias f1=:'" "fixture.test.sh:4: 'shopt -s expand_aliases'" \
+  "fixture.test.sh:5: 'alias f2=:'" "fixture.test.sh:6: 'alias f3=:'" "fixture.test.sh:7: 'alias f4=:'" \
+  "fixture.test.sh:8: 'set -o posix'" "fixture.test.sh:9: 'alias f5=:'" \
+  "fixture.test.sh:10: 'alias f6=:'" "fixture.test.sh:11: 'alias f7=:'" \
+  "fixture.test.sh:13: 'alias f8=:'"
+if grep -q 'fixture.test.sh:12:' <<<"$out_tick"; then
+  fail "30ac-c. a backtick span holding a plain command is text to the rules" "$out_tick"
+else
+  pass "30ac-c. a backtick span holding a plain command is text to the rules"
+fi
+tick_bash="$({ echo 'shopt -u expand_aliases'; sed -n '3,9p' "$d_tick/fixture.test.sh"
+  echo 'shopt -q expand_aliases && echo EXPAND-ON; shopt -qo posix && echo POSIX-ON; alias'; } | bash 2>/dev/null)"
+if grep -q '^EXPAND-ON$' <<<"$tick_bash" && grep -q '^POSIX-ON$' <<<"$tick_bash" &&
+   grep -Eq "^(alias )?f1=':'$" <<<"$tick_bash" && grep -Eq "^(alias )?f2=':'$" <<<"$tick_bash" &&
+   grep -Eq "^(alias )?f3=':'$" <<<"$tick_bash" && grep -Eq "^(alias )?f4=':'$" <<<"$tick_bash" &&
+   grep -Eq "^(alias )?f5=':'$" <<<"$tick_bash"; then
+  pass "30ac-b. in this bash lines 3 to 9 of the fixture bind across the backtick span"
+else
+  fail "30ac-b. the backtick probe did not reproduce in this bash (got '$tick_bash')"
 fi
 
 # ---- 30r. inside double quotes a backslash escapes only five characters -----

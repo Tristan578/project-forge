@@ -201,7 +201,12 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   command word starting `NAME[` followed by more words is a subscript with a
   blank, reported as `subscript` (write it without blanks). A redirection
   and its target in front of the word (`>/tmp/x alias`, `2>&1 alias`,
-  `<<<x alias`) are skipped the same way (round thirty-eight). In an EXIT,
+  `<<<x alias`) are skipped the same way (round thirty-eight). A process
+  substitution (`<( )`, `>( )`) and a backtick span are lexed like `$( )`:
+  part of their word, with the statement around them resumed when they
+  close, so `alias <(true) fail=:` and ``alias `true;true` fail=:`` are
+  caught (rounds thirty-nine and forty). A DEBUG trap or `extdebug` is
+  reported with its own `debug` status. In an EXIT,
   ERR, RETURN or 0 trap every word of the action is judged as a possible
   call, since its command words cannot be found reliably in the action text
   (the action is split at blanks, `;`, `&`, `|`, `<` and `>`, so

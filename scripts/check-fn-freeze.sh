@@ -77,7 +77,10 @@
 # middle of the statement, and anything in front of the word (`builtin`,
 # `command`, `time -p`, a prefix assignment, `!`, `if`, and a redirection
 # with its target: `>/tmp/x`, `2>&1`, `<<<x`, the thirty-eighth round) are
-# all the same word. A prefix assignment is `NAME=` or `NAME+=`, or a word
+# all the same word. A process substitution (`<( )`, `>( )`, thirty-ninth
+# round) and a backtick span (fortieth) are lexed like `$( )`: part of the
+# word they sit in, their contents a statement of their own, and the
+# statement around them resumed when they close. A prefix assignment is `NAME=` or `NAME+=`, or a word
 # that starts `NAME[` and holds `]=` or `]+=` anywhere: a subscript is not
 # parsed (thirty-seventh round: quotes, escapes, nesting and blanks inside
 # one each defeated an attempt to follow it), so this over-reports at worst.
@@ -121,8 +124,8 @@
 # trap returns non-zero, so `trap '[[ $BASH_COMMAND != fail\ * ]]' DEBUG`
 # makes every `fail "..."` call vanish with the function still frozen (the
 # seventh board round). The words `trap ... DEBUG` (any case; bash accepts
-# `debug`) and `shopt -s extdebug` in command position are reported the
-# same way: a self-defense suite has no use for either. A trap on EXIT, ERR,
+# `debug`) and `shopt -s extdebug` in command position are reported, with
+# the `debug` status: a self-defense suite has no use for either. A trap on EXIT, ERR,
 # RETURN or 0 (any numeric spelling of 0: bash reads a signal number as a
 # signed decimal between blanks, so 00, +0, -0, ' 00' and '0 ' are all 0,
 # the twenty-first to twenty-third rounds; see sig_word) whose action exits or execs
@@ -220,7 +223,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline|close|subscript|parse-error
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|debug|trap|builtin|shape|unsupported|brace|split|multiline|close|subscript|parse-error
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -658,9 +661,9 @@ derive_file() {
       if (in_shopt && sflag != "" && has("posix"))
         printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " sflag " " w, NR, NR
       if (in_shopt && sflag != "" && has("extdebug"))
-        printf "%s\t%s\t%d\t%d\ttrap\n", file, "shopt " sflag " " w, NR, NR
+        printf "%s\t%s\t%d\t%d\tdebug\n", file, "shopt " sflag " " w, NR, NR
       if (in_trap && anym("^[Dd][Ee][Bb][Uu][Gg]$"))
-        printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap ... " w, NR, NR
+        printf "%s\t%s\t%d\t%d\tdebug\n", file, "trap ... " w, NR, NR
       # The first non-flag argument of trap is its action; every later word
       # is a signal. The pair is judged when the statement ends. bash reads
       # a numeric signal as an optionally signed decimal between blanks, so
@@ -923,6 +926,7 @@ derive_file() {
           if (c == "\"") { q = ""; i++; continue }
           if (c3 == "$((") { open_sub(q, 1, 1, 1); i += 3; continue }
           if (c2 == "$(") { open_sub(q, 0, 0, 1); i += 2; continue }
+          if (c == "`") { open_sub(q, 0, 3, 1); i++; continue }
           if (c == "$" && match(substr(line, i + 1), /^([A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])/)) { w = w "${" substr(line, i + 1, RLENGTH) "}"; i += 1 + RLENGTH; continue }
           w = w c; i++; continue
         }
@@ -933,6 +937,7 @@ derive_file() {
           if (c == "\"") { q = "d"; i++; continue }
           if (c3 == "$((") { open_sub("", 1, 1, 1); i += 3; continue }
           if (c2 == "$(") { open_sub("", 0, 0, 1); i += 2; continue }
+          if (c == "`") { open_sub("", 0, 3, 1); i++; continue }
           if (c == "(") arr_d++
           if (c == ")") {
             arr_d--
@@ -1005,6 +1010,13 @@ derive_file() {
         if (c2 == "$[") { open_sub("", 1, 2, 1); i += 2; continue }
         if (c2 == "$(") { open_sub("", 0, 0, 1); i += 2; continue }
         if (c == "]" && d > 0 && st_dbl[d] == 2) { close_sub(); i++; continue }
+        # A backtick span is a command substitution like $( ) (dbl 3): the
+        # statement around it is saved and resumes when the matching
+        # backtick closes it (fortieth board round: read as word text, a ;
+        # inside it ended the enclosing statement, so in
+        # alias `true;true` fail=: the alias word was never judged).
+        if (c == "`" && d > 0 && st_dbl[d] == 3) { close_sub(); i++; continue }
+        if (c == "`") { open_sub("", 0, 3, 1); i++; continue }
         # `NAME=(` / `NAME+=(` opens an ARRAY LITERAL: its elements are words
         # that are stored, never run, so none of them can be a command word.
         # The group is skipped to its closing paren (quotes inside it are
@@ -1292,7 +1304,7 @@ if [ "${derived:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline|close|subscript)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias|debug|trap|builtin|shape|unsupported|brace|split|multiline|close|subscript)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
   # The report is the block reason, so it goes to stderr like every other
@@ -1305,16 +1317,12 @@ if [ -n "$violations" ]; then
         unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
         stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, a freeze inside a quoted string or fixture is text, not a statement, and a freeze naming a function this file never defines is left over from a rename or a deletion: move this line to directly after the closing brace of $name(), or delete it" ;;
         alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion (shopt -s expand_aliases, or posix mode: set -o posix, shopt -s -o posix, or any use of POSIXLY_CORRECT) — delete this line" ;;
-        # A DEBUG trap row is labelled 'trap ... SIGNAL' and an extdebug row
-        # 'shopt ...': neither has an action to change, so their line is the
-        # fix. Every other trap row is an EXIT, ERR, RETURN or 0 action
-        # (thirty-ninth board round: one message told all three to edit an
-        # action).
-        trap)
-          case "$name" in
-            'trap ... '*|'shopt '*) echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding; a self-defense suite may not set a DEBUG trap (in any spelling of the signal) or enable extdebug — delete this line" ;;
-            *) echo "  - $file:$def: '$name' — a trap on EXIT, ERR, RETURN or 0 (or any numeric spelling of 0, such as 00, +0, -0 or a quoted '0 ') whose action exits or execs, directly or through a function of this file it may call, can replace the exit status the script chose, so a self-defense suite may not exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — make its action return without exiting, or delete the trap; every word of such an action is read as a possible call, so when a function that exits is named in it only as an argument, leave that name out of the action" ;;
-          esac ;;
+        # A DEBUG trap and extdebug have no action to change, so their line is
+        # the fix; they carry their own status (fortieth board round: routing
+        # on the label text sent an EXIT action that began with three dots to
+        # this message).
+        debug)    echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding; a self-defense suite may not set a DEBUG trap (in any spelling of the signal) or enable extdebug — delete this line" ;;
+        trap)     echo "  - $file:$def: '$name' — a trap on EXIT, ERR, RETURN or 0 (or any numeric spelling of 0, such as 00, +0, -0 or a quoted '0 ') whose action exits or execs, directly or through a function of this file it may call, can replace the exit status the script chose, so a self-defense suite may not exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — make its action return without exiting, or delete the trap; every word of such an action is read as a possible call, so when a function that exits is named in it only as an argument, leave that name out of the action" ;;
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable — rename this function, or delete the enable call" ;;
         shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command or a closing brace, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
         brace)    echo "  - $file:$def: '$name' — this brace expansion produces more words than the gate enumerates (64, nested 8 deep), in a command name or an alias, shopt, set or trap statement, so a guarded word could sit past the cut where the gate cannot see it — list the words it needs explicitly, or split the statement" ;;

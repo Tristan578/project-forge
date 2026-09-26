@@ -1050,7 +1050,12 @@ was replaced with this one (round twenty-nine).
   of its word, and the statement resumes when it closes. The same round
   split the `trap` report: a DEBUG trap or extdebug line is told to delete
   the line, and only an EXIT, ERR, RETURN or 0 action is told how to change
-  its action.
+  its action. The fortieth found the same gap one construct over: a
+  backtick span was read as word text, so a `;`, `&`, `|` or blank inside
+  it ended the enclosing statement (``alias `true;true` fail=:`` passed);
+  it is now lexed like `$( )` too. And the report split routed on label
+  text, so an EXIT action that began with three dots got the DEBUG message;
+  a DEBUG trap or extdebug now carries its own `debug` status.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
