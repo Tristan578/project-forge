@@ -24,6 +24,7 @@ const POST_impl = createGenerationHandler<
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({
   route: '/api/generate/texture',
+  panel: 'generate-texture',
   provider: DB_PROVIDER.texture,
   operation: 'texture_generation',
   rateLimitKey: 'gen-texture',

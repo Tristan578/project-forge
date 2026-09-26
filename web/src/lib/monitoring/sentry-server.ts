@@ -23,6 +23,7 @@ import * as Sentry from '@sentry/nextjs';
 // the empty value, and the fallback this comment describes never fired. That is
 // the one shape a test can produce with `vi.stubEnv`, and it is how the defect
 // was caught. `cronMonitors.ts` already used `||`; now all four agree.
+// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an explicitly blank SENTRY_DSN and an unset one are operationally identical
 const DSN = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
 
 /**

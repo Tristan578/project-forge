@@ -83,6 +83,8 @@ web/auth-results/
 web/playwright-report/
 web/playwright-report-crossbrowser/
 web/blob-report/
+# Journey evidence records + traces/videos (#10157), uploaded as an artifact
+web/journey-evidence/
 # Playwright MCP browser-session scratch output (console-*.log / page-*.yml)
 .playwright-mcp/
 

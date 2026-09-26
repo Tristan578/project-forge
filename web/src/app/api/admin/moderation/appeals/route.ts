@@ -28,8 +28,11 @@ async function GET_impl(req: NextRequest) {
     if (rateLimitError) return rateLimitError;
 
     const searchParams = req.nextUrl.searchParams;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `limit` query param is the same as an omitted one, not a distinct value
     const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `offset` query param is the same as an omitted one, not a distinct value
     const offset = parseInt(searchParams.get('offset') || '0', 10);
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `status` query param is the same as an omitted one, not a distinct value
     const statusFilter = searchParams.get('status') || 'pending';
 
     const validStatuses = ['pending', 'approved', 'rejected'];
@@ -82,6 +85,7 @@ async function GET_impl(req: NextRequest) {
         reason: a.reason,
         status: a.status,
         userId: a.userId,
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored userName is unset, same as absent; falls back to a display placeholder
         userName: a.userName || 'Unknown',
         userEmail: a.userEmail,
         createdAt: a.createdAt.toISOString(),

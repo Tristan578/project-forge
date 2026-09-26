@@ -26,6 +26,7 @@ const POST_impl = createGenerationHandler<
   { audioBase64: string; durationSeconds: number; provider: string }
 >({
   route: '/api/generate/voice',
+  panel: 'generate-sound',
   provider: DB_PROVIDER.voice,
   operation: 'voice_generation',
   rateLimitKey: 'gen-voice',

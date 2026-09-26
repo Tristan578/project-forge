@@ -51,6 +51,7 @@ import { isQstashConfigured, verifyQstashSignature, publishGenerationCallback } 
 import { pollProviderStatus } from '@/lib/generate/pollProviderStatus';
 import { updateJobStatusByProviderJob } from '@/lib/generate/jobRecord';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException, sentryLogger } from '@/lib/monitoring/sentry-server';
 
@@ -179,6 +180,25 @@ describe('POST /api/webhooks/generation-complete — terminal polling', () => {
       'generation completed',
       expect.objectContaining({ providerJobId: 'job-1', type: 'model' }),
     );
+  });
+
+  // #7715: a trial starter's one tileset (50 tokens = the whole grant) leaves
+  // the account at 0 before the first callback. The callback must still
+  // finalize the paid job as SUCCEEDED, not "key unavailable" + refund. The
+  // route asks for the key as a status poll (cost 0, STATUS_CHECK_OPERATION),
+  // and resolver.test.ts ("status poll") pins that this exact pair resolves
+  // the platform key for a spent starter. This suite mocks the resolver, so it
+  // pins the OTHER half: the call shape, and that a resolved key leads to
+  // completion with no refund.
+  it('finalizes a spent trial starter\'s paid job as completed (no refund), asking for the key as a zero-cost status poll', async () => {
+    mockPoll.mockResolvedValue({ status: 'completed', progress: 100, resultUrl: 'https://x/tiles.png', succeededButEmpty: false });
+    const res = await POST(makeReq(payload({ type: 'tileset', tokenUsageId: 'usage-trial' })));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ finalized: 'completed' });
+    expect(mockResolve).toHaveBeenCalledTimes(1);
+    expect(mockResolve).toHaveBeenCalledWith('user-1', 'replicate', 0, STATUS_CHECK_OPERATION);
+    expect(mockUpdate).toHaveBeenCalledWith('job-1', 'user-1', expect.objectContaining({ status: 'completed', resultUrl: 'https://x/tiles.png' }));
+    expect(mockRefund).not.toHaveBeenCalled();
   });
 
   it('captures a DB error from the row update to Sentry but still returns 200', async () => {

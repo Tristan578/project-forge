@@ -5,7 +5,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 import { MeshyClient } from '@/lib/generate/meshyClient';
+import { panelTierGateResponse, panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
@@ -13,6 +15,17 @@ vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/keys/resolver')>();
   return { ...mod, resolveApiKey: vi.fn() };
+});
+// Both gate variants refuse every starter and hobbyist on a creator panel, so
+// no response can tell them apart here. Spy on the module (real behaviour
+// passed through) so a test can pin WHICH variant the route calls (#7715).
+vi.mock('@/lib/api/panelTierGate', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/api/panelTierGate')>();
+  return {
+    ...mod,
+    panelTierGateResponse: vi.fn(mod.panelTierGateResponse),
+    panelTierGateResponseForPoll: vi.fn(mod.panelTierGateResponseForPoll),
+  };
 });
 vi.mock('@/lib/generate/meshyClient', () => ({
   MeshyClient: vi.fn(() => ({
@@ -180,5 +193,87 @@ describe('GET /api/generate/skybox/status', () => {
     // path the credential in play is the platform's (#9736).
     expect(data.error).not.toContain('Network error');
     expect(data.error).toBe('Could not read the Skybox generation status. Please try again.');
+  });
+
+  // Per-panel tier gate (#7715). This route resolves the platform key itself
+  // rather than going through `createGenerationHandler`, so without its own
+  // `panelTierGateResponseForPoll('generate-skybox', …)` call a trial starter (effective
+  // hobbyist) could poll the creator-gated skybox provider with the platform key.
+  describe('panel tier gate (generate-skybox, creator)', () => {
+    function authAs(user: Record<string, unknown>) {
+      vi.mocked(authenticateRequest).mockResolvedValue({
+        ok: true as const,
+        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', ...user } as unknown as User },
+      });
+    }
+
+    it('refuses a starter holding 50 spendable trial tokens with 403 TIER_REQUIRED and never resolves a key', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(403);
+      const data = await res.json();
+      expect(data).toEqual({
+        error: 'TIER_REQUIRED',
+        message: 'This feature requires the Creator plan',
+        currentTier: 'starter',
+        requiredTier: 'creator',
+      });
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
+    it('refuses a starter whose trial balance is spent: the poll rule ignores the balance but never reaches creator', async () => {
+      authAs({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: 'TIER_REQUIRED', currentTier: 'starter', requiredTier: 'creator' });
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
+    it('refuses a real hobbyist account the same way', async () => {
+      authAs({ tier: 'hobbyist', monthlyTokens: 300, monthlyTokensUsed: 0, addonTokens: 0 });
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toBe('TIER_REQUIRED');
+      expect(resolveApiKey).not.toHaveBeenCalled();
+    });
+
+    it('lets a creator account through to resolveApiKey', async () => {
+      authAs({ tier: 'creator', monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0 });
+      vi.mocked(MeshyClient).mockImplementation(
+        function (this: InstanceType<typeof MeshyClient>) {
+          this.getTextureStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 40 });
+        } as unknown as typeof MeshyClient
+      );
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+      // A zero-cost status poll: the pair the resolver requires before it
+      // skips its own tier and balance checks (#7715).
+      expect(vi.mocked(resolveApiKey).mock.calls[0].slice(2)).toEqual([0, STATUS_CHECK_OPERATION]);
+    });
+
+    it('runs the POLL variant of the panel gate, never the create variant', async () => {
+      // Every refusal above is the same 403 from either variant, so they
+      // cannot see a route that calls the create variant by mistake. This can.
+      authAs({ tier: 'creator', monthlyTokens: 1000, monthlyTokensUsed: 1000, addonTokens: 0 });
+      vi.mocked(MeshyClient).mockImplementation(
+        function (this: InstanceType<typeof MeshyClient>) {
+          this.getTextureStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 40 });
+        } as unknown as typeof MeshyClient
+      );
+
+      const res = await GET(makeRequest('job-123'));
+      expect(res.status).toBe(200);
+      expect(panelTierGateResponseForPoll).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(panelTierGateResponseForPoll).mock.calls[0][0]).toBe('generate-skybox');
+      expect(panelTierGateResponse).not.toHaveBeenCalled();
+    });
   });
 });

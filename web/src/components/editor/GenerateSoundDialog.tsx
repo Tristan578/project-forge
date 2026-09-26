@@ -274,6 +274,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
                 className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
               />
               <label htmlFor="attach" className="text-xs text-zinc-300">
+                {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank primary entity name is unset; falls back to a display placeholder */}
                 Auto-attach to <span className="font-medium">{primaryName || 'selected entity'}</span>
               </label>
             </div>

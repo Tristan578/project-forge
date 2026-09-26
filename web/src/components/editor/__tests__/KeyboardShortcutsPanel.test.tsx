@@ -17,7 +17,7 @@ vi.mock('@/lib/workspace/keybindings', () => ({
   groupByCategory: vi.fn((bindings) => {
     const grouped: Record<string, typeof bindings> = {};
     for (const b of bindings) {
-      if (!grouped[b.category]) grouped[b.category] = [];
+      grouped[b.category] ??= [];
       grouped[b.category].push(b);
     }
     return grouped;
