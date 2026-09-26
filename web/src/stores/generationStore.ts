@@ -201,7 +201,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       const res = await fetch('/api/jobs?status=active');
       if (!res.ok) return;
       const data = await res.json();
-      const serverJobs = data.jobs || [];
+      const serverJobs = data.jobs ?? [];
 
       if (serverJobs.length === 0) {
         set({ hydrated: true });

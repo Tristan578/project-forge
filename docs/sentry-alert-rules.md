@@ -12,19 +12,26 @@ fingerprint groups and tags set by that module.
 
 ## Alert Priority Levels
 
+There is no paging service and no on-call rotation — see
+`docs/decisions/2026-09-24-no-paging-or-on-call.md` and
+`docs/operations/incident-response.md`. "Action" below means notifying the
+owner, not paging one; channel names indicate which Sentry-to-Slack mapping
+would carry the notification if one is configured — this document does not
+assert that mapping exists.
+
 | Level | SLA | Channel | Meaning |
 |-------|-----|---------|---------|
-| P1 | Page immediately (< 5 min) | PagerDuty + Slack #incidents | Production revenue or auth is broken |
-| P2 | Alert in 15 min | Slack #alerts | Core AI feature degraded |
-| P3 | Daily digest | Slack #monitoring | Trending issues, no immediate action needed |
+| P0 | Notify immediately (< 5 min) | `#incidents`, if configured in Sentry | Production revenue or auth is broken |
+| P1 | Notify (< 5 min), no page | `#incidents`, if configured in Sentry | Core AI feature degraded / elevated 5xx |
+| P2 | Alert / daily digest | `#engineering-alerts`, if configured in Sentry | Trending issues, no immediate action |
 
 ---
 
-## P1 — Page Immediately
+## P0 — Notify Immediately
 
 ### 1. Auth failures spike
 **Trigger:** Issue count for fingerprint `auth-error` > 10 in a 1-minute window.
-**Why P1:** Auth failures at this rate typically mean our Clerk integration,
+**Why P0:** Auth failures at this rate typically mean our Clerk integration,
 Neon DB, or Stripe webhook is down — users cannot log in or pay.
 
 | Field | Value |
@@ -32,11 +39,11 @@ Neon DB, or Stripe webhook is down — users cannot log in or pay.
 | Metric | `issue.count` |
 | Filter | `fingerprint:auth-error` |
 | Threshold | > 10 per minute |
-| Action | PagerDuty + Slack #incidents |
+| Action | Notify the owner via `#incidents`, if configured in Sentry |
 
 ### 2. Payment webhook failures
 **Trigger:** Any error in `/api/stripe/*` routes over the last 5 minutes.
-**Why P1:** Failed webhooks silently break subscription upgrades and can cause
+**Why P0:** Failed webhooks silently break subscription upgrades and can cause
 revenue loss and double-charges.
 
 | Field | Value |
@@ -44,13 +51,53 @@ revenue loss and double-charges.
 | Metric | `issue.count` |
 | Filter | `url:*/api/stripe/*` |
 | Threshold | > 0 per 5 minutes |
-| Action | PagerDuty + Slack #incidents |
+| Action | Notify the owner via `#incidents`, if configured in Sentry |
 
 ---
 
-## P2 — Alert in 15 Minutes
+## P1 — Notify (No Page)
 
-### 3. AI provider down (timeout rate spike)
+### 3. Trial token grant failure
+**Trigger:** Any error in the `/api/auth/webhook` route over the last 5 minutes.
+**Why P1:** A failing `user.created` trial grant (#7715, `grantTrialTokens` in
+`web/src/lib/billing/trial-grant.ts`) means every new signup gets zero tokens
+and cannot use any AI feature for the length of the outage. The same route
+surfaces `user.deleted` failures, which also require prompt owner attention.
+
+| Field | Value |
+|-------|-------|
+| Metric | `issue.count` |
+| Filter | `url:*/api/auth/webhook*` |
+| Threshold | > 0 per 5 minutes |
+| Action | Notify the owner via `#incidents`, if configured in Sentry (no page) |
+
+Filter on the route URL, not on the capture context: the grant site calls
+`captureException(err, { context: 'trial-token-grant-failure', userId })`, and
+the shared helper (`web/src/lib/monitoring/sentry-server.ts`) forwards that
+object as Sentry **`extra`**, which issue-alert rules cannot filter on. Treat
+`extra.context = trial-token-grant-failure` as the triage breadcrumb once the
+issue is open. Making it filterable would mean setting a Sentry **tag** at the
+capture site, which the shared helper does not do today.
+
+### 4. AI generation failure rate spike
+**Trigger:** Issue count for fingerprint `generation-failure` > 10 in a
+10-minute window.
+**Why P1:** Generation routes call external providers (Meshy, ElevenLabs,
+Suno, DALL-E). A spike means one provider is down, quota is exhausted, or
+content safety is triggering too aggressively.
+
+| Field | Value |
+|-------|-------|
+| Metric | `issue.count` |
+| Filter | `fingerprint:generation-failure` |
+| Threshold | > 10 per 10 minutes |
+| Action | Notify the owner via `#incidents`, if configured in Sentry (no page) — include `generation_type` tag |
+
+---
+
+## P2 — Notify / Daily Digest
+
+### 5. AI provider down (timeout rate spike)
 **Trigger:** Issue count for fingerprint `ai-provider-timeout` > 5 in any
 5-minute window AND the last occurrence is within the past 5 minutes.
 **Why P2:** Sustained timeouts mean the AI chat is broken for all users on the
@@ -61,10 +108,10 @@ affected provider. Failover should be considered immediately.
 | Metric | `issue.count` |
 | Filter | `fingerprint:ai-provider-timeout` |
 | Threshold | > 5 per 5-minute window |
-| Action | Slack #alerts — include `ai_provider` tag in message |
+| Action | Notify the owner via `#engineering-alerts`, if configured in Sentry — include `ai_provider` tag in message |
 | Note | Create one rule per provider by filtering `tags[ai_provider]` for finer routing |
 
-### 4. WASM panic rate
+### 6. WASM panic rate
 **Trigger:** Issue count for fingerprint `wasm-command-failure` > 1 per minute.
 **Why P2:** WASM panics crash the editor for affected users and require a
 session reload. A rate above 1/min suggests a systematic regression, not a
@@ -75,30 +122,12 @@ one-off user action.
 | Metric | `issue.count` |
 | Filter | `fingerprint:wasm-command-failure` |
 | Threshold | > 1 per minute |
-| Action | Slack #alerts — include `wasm_command` tag in message |
+| Action | Notify the owner via `#engineering-alerts`, if configured in Sentry — include `wasm_command` tag in message |
 
-### 5. AI generation failure rate spike
-**Trigger:** Issue count for fingerprint `generation-failure` > 10 in a
-10-minute window.
-**Why P2:** Generation routes call external providers (Meshy, ElevenLabs,
-Suno, DALL-E). A spike means one provider is down, quota is exhausted, or
-content safety is triggering too aggressively.
-
-| Field | Value |
-|-------|-------|
-| Metric | `issue.count` |
-| Filter | `fingerprint:generation-failure` |
-| Threshold | > 10 per 10 minutes |
-| Action | Slack #alerts — include `generation_type` tag |
-
----
-
-## P3 — Daily Digest
-
-### 6. Rate limit hits trending up (weekly)
+### 7. Rate limit hits trending up (weekly)
 **Trigger:** 7-day volume for fingerprint `rate-limit-exceeded` increases by
 more than 25 % week-over-week.
-**Why P3:** A gradual increase in rate limit hits is expected as the product
+**Why P2:** A gradual increase in rate limit hits is expected as the product
 grows. A sudden 25 %+ spike might indicate a scripted abuse pattern or a
 poorly-tuned limit that needs to be raised for legitimate users.
 
@@ -107,12 +136,12 @@ poorly-tuned limit that needs to be raised for legitimate users.
 | Metric | 7-day issue count |
 | Filter | `fingerprint:rate-limit-exceeded` |
 | Threshold | > 25 % WoW increase |
-| Action | Daily digest email + Slack #monitoring |
+| Action | Daily digest email + `#engineering-alerts`, if configured in Sentry |
 
-### 7. Error rate above baseline (catch-all)
+### 8. Error rate above baseline (catch-all)
 **Trigger:** Total unhandled error count exceeds a rolling 7-day average by
 > 50 % in a 1-hour window.
-**Why P3:** Acts as a backstop for any error class that does not match a
+**Why P2:** Acts as a backstop for any error class that does not match a
 specific fingerprint rule.
 
 | Field | Value |
@@ -120,7 +149,7 @@ specific fingerprint rule.
 | Metric | Total `issue.count` |
 | Filter | (none — all errors) |
 | Threshold | > 150 % of 7-day rolling average, evaluated hourly |
-| Action | Slack #monitoring |
+| Action | Notify the owner via `#engineering-alerts`, if configured in Sentry |
 
 ---
 
@@ -134,9 +163,12 @@ specific fingerprint rule.
    - Tag filter: `tags[ai_provider]:anthropic`
    - URL filter: `url:*/api/stripe/*`
 4. Set the **Threshold** and **Time Window** as specified above.
-5. Configure the **Action** — PagerDuty integration for P1, Slack webhook for P2/P3.
-6. Set the **Environment** to `production` for all P1/P2 rules.
-7. Assign the rule to the **Engineering** team.
+5. Configure the **Action** — a Slack webhook, if one is configured for this
+   project, for every tier. There is no paging integration to configure; see
+   `docs/decisions/2026-09-24-no-paging-or-on-call.md`.
+6. Set the **Environment** to `production` for all P0/P1 rules.
+7. Leave the rule's owner as the project owner. There is no team to assign
+   it to; see `docs/decisions/2026-09-24-no-paging-or-on-call.md`.
 
 ---
 
@@ -157,8 +189,10 @@ These fingerprints are set by `web/src/lib/monitoring/sentryConfig.ts`:
 
 ## Maintenance
 
-- Review P3 thresholds quarterly as traffic grows.
+- Review P2 thresholds quarterly as traffic grows.
 - If a new AI provider is added, verify `extractProvider()` in `sentryConfig.ts`
   recognises its name before going to production.
-- After any major release that changes error patterns, check the P2 thresholds
-  have not become too sensitive (false-positive pages are expensive to team trust).
+- After any major release that changes error patterns, check the P1 thresholds
+  have not become too sensitive (false-positive notifications are noisy and
+  erode trust in the alerts — there is no paging cost, but a noisy channel
+  still gets ignored).

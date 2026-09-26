@@ -5,7 +5,7 @@ import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Sparkles, C
 import { Tabs } from '@spawnforge/ui';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
-import { canAccessPanel, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
+import { canAccessPanel, canAccessPanelBeforeProfileLoad, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
 import { showError } from '@/lib/toast';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -87,7 +87,11 @@ export const AssetPanel = memo(function AssetPanel() {
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const dragCounterRef = useRef(0);
 
-  const tier = useUserStore((s) => s.tier);
+  const rawTier = useUserStore((s) => s.tier);
+  const spendableTokens = useUserStore((s) => s.spendableTokens);
+  const profileLoaded = useUserStore((s) => s.profileLoaded);
+  // A starter account with trial tokens reads as hobbyist here (#7715).
+  const tier = effectiveTier(rawTier, spendableTokens);
   // #9117: every AI-menu item is gated by its own capability (a fixed set, so
   // one hook call each), never just music — the next UNAVAILABLE_CAPABILITIES
   // entry must disable its item here, not drop the user into a dead dialog.
@@ -305,7 +309,17 @@ export const AssetPanel = memo(function AssetPanel() {
                           // known, so the item must not paint as ready and then flip
                           // to a disabled amber badge when the answer arrives
                           // (#9725 p8).
-                          const allowed = canAccessPanel(id, tier) && !gated && !gate.loading;
+                          // Before /api/user/profile resolves, `tier`/
+                          // `spendableTokens` are still defaults. An item the
+                          // trial could open reads as access-unknown rather
+                          // than flash a lock badge at a trial-eligible
+                          // starter; a creator-gated item (3D model, skybox)
+                          // stays locked until the profile loads, since no $0
+                          // account can open it (#7715 review round 3).
+                          const tierOk = profileLoaded
+                            ? canAccessPanel(id, tier)
+                            : canAccessPanelBeforeProfileLoad(id);
+                          const allowed = tierOk && !gated && !gate.loading;
                           const required = getRequiredTier(id);
                           return (
                             <button

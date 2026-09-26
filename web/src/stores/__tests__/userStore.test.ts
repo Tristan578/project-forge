@@ -10,7 +10,11 @@ import { useUserStore, type Tier } from '../userStore';
 
 describe('userStore', () => {
   beforeEach(() => {
-    // Reset store to initial state
+    // Reset store to initial state. `profileLoaded: true` here (unlike the
+    // real store's `false` default) so every existing test in this file
+    // exercises the POST-first-paint gate unless it opts into the loading
+    // state explicitly — see 'Permission Checks - AI Access, profile not yet
+    // loaded (#7715 review round 2)' below.
     useUserStore.setState({
       tier: 'starter',
       activeFeatures: null,
@@ -18,6 +22,8 @@ describe('userStore', () => {
       isLoading: false,
       error: null,
       billingStatus: null,
+      profileLoaded: true,
+      spendableTokens: 0,
     });
   });
 
@@ -98,6 +104,26 @@ describe('userStore', () => {
       useUserStore.setState({ tier: 'pro' });
       const { canUseAI } = useUserStore.getState();
       expect(canUseAI()).toBe(true);
+    });
+  });
+
+  // #7715 review round 2 — before /api/user/profile resolves,
+  // `tier`/`spendableTokens` read their module defaults ('starter'/0), which
+  // is indistinguishable from "no trial access". `canUseAI()` must read
+  // `!profileLoaded` as access-unknown, not locked, or a trial-eligible
+  // starter account flashes "AI requires upgrade" for one render before its
+  // real balance lands.
+  describe('Permission Checks - AI Access, profile not yet loaded (#7715 review round 2)', () => {
+    it('reports AI usable while the profile is still loading, even for a default starter/zero-balance state', () => {
+      useUserStore.setState({ tier: 'starter', spendableTokens: 0, profileLoaded: false });
+      const { canUseAI } = useUserStore.getState();
+      expect(canUseAI()).toBe(true);
+    });
+
+    it('falls back to the real gate once the profile has loaded', () => {
+      useUserStore.setState({ tier: 'starter', spendableTokens: 0, profileLoaded: true });
+      const { canUseAI } = useUserStore.getState();
+      expect(canUseAI()).toBe(false);
     });
   });
 

@@ -57,16 +57,27 @@ export default defineConfig({
   // (`dispatchCommand` returns void, so the fake-bridge integration suite can
   // never see one). Its describe block raises the cap to
   // E2E_TIMEOUT_PIPELINE_LIVE_MS.
-  // The @engine-ui set (#9586) lives across nine editor spec files, so file
+  // The @engine-ui set (#9586) lives across ten editor spec files, so file
   // matching can no longer be the primary filter -- the TAG is. Every test
   // selected here still has to carry @engine-smoke or @engine-ui, so an
   // untagged slow spec elsewhere cannot wander into this job's budget.
   //
-  // @engine-ui marks the 36 tests that assert on #game-canvas. The editor holds
-  // that canvas `invisible` until the Bevy/wgpu renderer starts, so they can
+  // @engine-ui marks the 38 tests, across ten files, that assert on
+  // #game-canvas (counted with `npx playwright test --list` against this config
+  // on 1693d6d2: 42 tests in 13 files in all; this comment said 36 across nine
+  // files before 9261e23f and 37 before 1693d6d2). The editor holds that canvas
+  // `invisible` until the Bevy/wgpu renderer starts, so they can
   // only pass where there is a real engine and a software GL context — which is
   // this job and nowhere else. They were previously excluded from the @ui job
   // and selected by nothing, i.e. they ran nowhere at all.
+  //
+  // journey-evidence-canary.spec.ts (#10157) is the third @engine-smoke spec:
+  // a /dev release journey that exists to prove the evidence pipeline on every
+  // PR. @release-journey is deliberately NOT in this grep — the account
+  // journeys planned under #9723 need a database and must not wander into this
+  // job; a journey lands here only by also carrying @engine-smoke. (Those
+  // account journeys are also refused by describeJourney() until #10266 adds
+  // trace/video redaction.)
   testMatch: '**/*.spec.ts',
   grep: /@engine-smoke|@engine-ui/,
   fullyParallel: true,
@@ -78,7 +89,15 @@ export default defineConfig({
   // Software rendering is CPU-bound; keep workers low so parallel WASM inits
   // don't starve each other and trip the engine-ready timeout.
   workers: 1,
-  reporter: [['github'], ['html', { open: 'never' }]],
+  // The journey evidence reporter (#10157) writes web/journey-evidence/: one
+  // record per @release-journey test plus each attempt's trace and video. The
+  // CI job's post-run check (scripts/check-journey-evidence.ts) fails when a
+  // journey test has no record, so unregistering this reporter turns it red.
+  reporter: [
+    ['github'],
+    ['html', { open: 'never' }],
+    ['./e2e/lib/journeyEvidenceReporter.ts', { outputDir: 'journey-evidence' }],
+  ],
   timeout: E2E_TIMEOUT_ENGINE_FULL_MS,
   expect: { timeout: E2E_TIMEOUT_LOAD_MS },
 
@@ -86,6 +105,10 @@ export default defineConfig({
     baseURL: 'http://localhost:3000',
     actionTimeout: E2E_TIMEOUT_LOAD_MS,
     navigationTimeout: E2E_NAVIGATION_TIMEOUT_MS,
+    // Defaults for the @engine-smoke / @engine-ui tests. Release journeys
+    // override both to 'on' inside their describeJourney() block
+    // (e2e/fixtures/journey.fixture.ts), so every journey attempt keeps a trace
+    // and a video without the @engine-ui tests inflating the artifact.
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
