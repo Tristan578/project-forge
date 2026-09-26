@@ -399,6 +399,58 @@ export function buildPlayContentSecurityPolicy({
   ].join('; ');
 }
 
+export interface SandboxFrameCspOptions {
+  /**
+   * Base64 SHA-256 of the frame's one inline bootstrap script. The frame has no
+   * other way to run code: `default-src 'none'` and no `'unsafe-inline'`.
+   */
+  bootstrapSha256: string;
+}
+
+/**
+ * Policy for the script-isolation frame (#8700, `NEXT_PUBLIC_SCRIPT_ISOLATION=
+ * 'sandboxed-origin'`) — see `web/src/lib/scripting/sandboxOrigin.ts`.
+ *
+ * Delivered INSIDE the frame's `srcdoc` as `<meta http-equiv>`, never through
+ * {@link buildCspRouteRules} / `next.config.ts`: a srcdoc frame has no response,
+ * so a route header cannot reach it. The frame also inherits the editor's own
+ * policy (srcdoc frames share the parent's policy container), and the browser
+ * enforces both, so this policy only ever NARROWS what the editor allows.
+ *
+ * The `blob:` worker the frame spawns inherits the frame's policies, which is
+ * what makes `connect-src 'none'` govern the user script itself: `fetch`, XHR,
+ * `WebSocket`, `EventSource` and `sendBeacon` are refused before a request is
+ * made, whether or not `revokeNetworkGlobals()` found the global first.
+ *
+ * - `default-src 'none'` — every fetch directive not named below (img, font,
+ *   media, frame, object, manifest) is closed.
+ * - `script-src` — the bootstrap by hash, and `'unsafe-eval'` because
+ *   `compileScript()` builds hooks with `Function`. No host, no `'self'`, no
+ *   `blob:`: `importScripts(url)` and dynamic `import(url)` are script loads,
+ *   governed here and not by `connect-src`, so any source listed here would be
+ *   a GET channel out of the frame.
+ * - `worker-src blob:` — exactly the one worker the bootstrap creates.
+ * - `base-uri` / `form-action` do not fall back to `default-src`, so they are
+ *   closed explicitly.
+ */
+export function buildSandboxFrameContentSecurityPolicy({
+  bootstrapSha256,
+}: SandboxFrameCspOptions): string {
+  // Interpolated into a policy: refuse anything that is not a base64 digest
+  // rather than emit a directive built from an unexpected value.
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(bootstrapSha256)) {
+    throw new Error('buildSandboxFrameContentSecurityPolicy: bootstrapSha256 is not a base64 SHA-256');
+  }
+  return [
+    "default-src 'none'",
+    `script-src 'sha256-${bootstrapSha256}' 'unsafe-eval'`,
+    'worker-src blob:',
+    "connect-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join('; ');
+}
+
 export interface CspRouteRule {
   source: string;
   headers: Array<{ key: 'Content-Security-Policy'; value: string }>;

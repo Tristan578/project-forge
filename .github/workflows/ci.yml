@@ -127,7 +127,11 @@ jobs:
           # that too.
           echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
-          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
+          # The three tsconfig.json files are here because the job that pins their
+          # exactOptionalPropertyTypes (#7592, scripts/__tests__/exact-optional-
+          # property-types.test.mjs, CI Self-Defense Tests) runs on needs-ci. A PR
+          # deleting only that flag would otherwise skip its own pin.
+          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/|^(apps/docs|mcp-server|packages/ui)/tsconfig\.json$' && ci=true
           # The docs gate is what runs apps/docs/scripts/check-manifest-sync.ts,
           # the ONLY check comparing the canonical MCP manifest against its two
           # derived copies. The canonical dir and the apps/docs copy were listed;
@@ -1272,7 +1276,7 @@ jobs:
       - name: Verify executable cache and coverage artifact contracts
         run: |
           bash scripts/__tests__/install-vercel-cli.test.sh
-          node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs
+          node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs scripts/__tests__/exact-optional-property-types.test.mjs
 
       - name: Verify scheduled hook-test contracts
         run: node --test scripts/__tests__/hook-tests-scheduled.test.mjs

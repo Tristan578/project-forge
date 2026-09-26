@@ -174,7 +174,9 @@ export function toParameterList(cmd: CommandEntry): CommandParameter[] {
       name,
       type: schema?.type ?? 'unknown',
       required: required.has(name),
-      description: schema?.description,
+      // Only present when the manifest gives one: `description: undefined`
+      // and "no description" are different rows under exactOptionalPropertyTypes.
+      ...(schema?.description !== undefined && { description: schema.description }),
     }))
     .sort((a, b) => {
       if (a.required !== b.required) return a.required ? -1 : 1;

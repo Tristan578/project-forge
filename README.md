@@ -249,7 +249,7 @@ project-forge/
 | `cd web && npm run lint` | Run ESLint |
 | `cd web && npx tsc --noEmit` | TypeScript type checking |
 | `cd web && npx vitest run` | Run web tests (~14,200+ tests) |
-| `cd mcp-server && npx vitest run` | Run MCP server tests |
+| `cd mcp-server && npx tsc --noEmit && npx vitest run` | Run MCP server tests |
 
 ### Key conventions
 
@@ -583,7 +583,7 @@ Contributions are welcome! Here's how to get involved.
 
    # Run tests
    cd web && npx vitest run
-   cd ../mcp-server && npx vitest run
+   cd ../mcp-server && npx tsc --noEmit && npx vitest run
    ```
 3. Commit your changes with a clear message:
    ```bash
