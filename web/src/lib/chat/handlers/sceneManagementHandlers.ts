@@ -413,13 +413,17 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     }), args);
     if (p.error) return p.error;
     await ctx.store.startSceneTransition(p.data.sceneName, {
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank transition type is not a member of the transition enum; treated as unset
       type: p.data.transitionType || 'fade',
       duration: p.data.duration ?? 500,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank transition color is unset; falls back to the default swatch
       color: p.data.color || '#000000',
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank direction is not a member of the direction enum; treated as unset
       direction: p.data.direction || 'left',
     });
     return {
       success: true,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank transition type is not a member of the transition enum; treated as unset
       result: { message: `Loaded scene "${p.data.sceneName}" with ${p.data.transitionType || 'fade'} transition` },
     };
   },
@@ -442,6 +446,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     });
     return {
       success: true,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank transition type is not a member of the transition enum; treated as unset
       result: { message: `Default transition set to ${p.data.transitionType || 'updated'}` },
     };
   },

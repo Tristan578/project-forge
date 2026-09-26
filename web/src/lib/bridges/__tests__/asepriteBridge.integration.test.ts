@@ -10,6 +10,7 @@ import { execFile } from 'child_process';
 import { randomBytes } from 'crypto';
 
 const ASEPRITE_BIN = process.env.ASEPRITE_PATH
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an explicitly blank ASEPRITE_PATH env var and an unset one are operationally identical
   || '/Applications/Aseprite.app/Contents/MacOS/aseprite';
 
 const HAS_ASEPRITE = existsSync(ASEPRITE_BIN);

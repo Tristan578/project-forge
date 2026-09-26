@@ -279,27 +279,40 @@ const eslintConfig = defineConfig([
       // documented recurring bug here was a numeric default written `x || 60`,
       // where an explicit 0 silently becomes 60.
       //
-      // Two carve-outs, both measured rather than assumed, both with a ticket:
+      // #8938 shipped this rule with two carve-outs -- ignorePrimitives.string
+      // (101 `someString || fallback` sites) and ignoreIfStatements (13
+      // `if (!x) x = y` sites) -- because auditing all of them individually
+      // would have meant either 101+13 disable comments or that many behaviour
+      // regressions in one PR. #9565 is that audit: every site was read and
+      // classified as either safe to convert (empty string is a value, or the
+      // operand can never legitimately be '') or requiring `||` (empty string
+      // is an absence, or the site is a boolean-truthiness OR that `??` cannot
+      // express), and both carve-outs were then dropped. Sites kept as `||`
+      // each carry an eslint-disable-next-line naming what an empty string
+      // means there. `if (!x) x = y` sites became `x ??= y`.
       //
-      //   ignorePrimitives.string -- 101 of the 245 first-run findings were
-      //   `someString || fallback`, and for strings that is usually the INTENDED
-      //   semantic: `p.data.title || store.sceneName` should fall back on an
-      //   empty title, and `??` would export a game named "". Enforcing here
-      //   would mean 101 disable comments or 101 behaviour regressions. Auditing
-      //   them individually is #9565.
+      // The full vitest suite caught a real near-miss during that audit: two
+      // sites in useEngine.ts (`data.wasmHash || data.hash || ''` and
+      // `data.buildId || wasmHash`) looked like safe "hash string, never
+      // legitimately empty" conversions, but a WASM manifest CAN carry an
+      // empty-string hash/buildId (legacy or malformed build output), and the
+      // existing test suite already pinned that blank buildId must fall back
+      // to wasmHash. Those two stayed `||`, with the test name cited in the
+      // disable reason -- see useEngine.test.ts.
       //
-      //   ignoreIfStatements -- 13 findings were `if (!x) x = y` asking to become
-      //   `x ??= y`. Every one was type-checked: none can hold 0/''/false, and
-      //   the five written `x === null` are already nullish checks, so none is a
-      //   latent falsy bug. That is a statement restructure rather than an
-      //   operator swap, and seven wrap multi-line bodies. Also #9565.
-      //
-      // Both carve-outs are narrower than they look: the operator form on
-      // numbers and booleans -- the actual bug class -- is fully enforced.
+      // The review board found the same class twice more. A chat tool argument
+      // typed `z.string().optional()` (no `.min(1)`) is model output, and the
+      // model can send `''` for "not given": `graphId` in three shader handlers
+      // and `entityId` in save_material_to_library fell through to a "nothing
+      // selected" error under `??`, so they stay `||` (shaderHandlers.ts,
+      // gameplayHandlers.ts, with blank-argument tests). And a field of an
+      // untyped `JSON.parse` (an imported file) can be any type at all:
+      // `data.tags ?? []` stored a string that the next search called `.some`
+      // on, so importScript validates the type instead (scriptLibraryStore.ts).
+      // Before converting a `||` on a tool argument, a parsed file or any
+      // other external input, check what its schema actually allows.
       '@typescript-eslint/prefer-nullish-coalescing': ['error', {
         ignoreConditionalTests: true,
-        ignoreIfStatements: true,
-        ignorePrimitives: { string: true },
       }],
     },
   },

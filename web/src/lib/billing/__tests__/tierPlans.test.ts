@@ -167,7 +167,7 @@ describe('tierPlans', () => {
 
     it('classifies every feature the free tier lists', () => {
       const free = getTierPlan('starter');
-      expect(free.features.filter(isExclusionFeature)).toEqual(['No AI features']);
+      expect(free.features.filter(isExclusionFeature)).toEqual(['No monthly AI tokens']);
     });
   });
 

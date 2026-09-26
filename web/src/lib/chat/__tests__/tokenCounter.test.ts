@@ -73,6 +73,44 @@ describe('tokenCounter', () => {
       expect(tokens).toBeGreaterThan(4);
     });
 
+    it.each([
+      ['a number', 0],
+      ['false', false],
+    ])('counts a malformed tool_use block (%s in every field) like an empty one (#9565)', (_label, bad) => {
+      const empty = estimateMessageTokens({ role: 'assistant', content: [{ type: 'tool_use', name: '', input: {} }] });
+      const malformed = estimateMessageTokens({ role: 'assistant', content: [{ type: 'tool_use', name: bad, input: bad }] });
+      expect(malformed).toBe(empty);
+    });
+
+    // A truthy non-string name: `0` and `false` above cannot tell the name
+    // guard from `String(b.name || '')`, which also maps them to ''.
+    it('counts a non-string tool_use name like an empty one (#9565)', () => {
+      const empty = estimateMessageTokens({ role: 'assistant', content: [{ type: 'tool_use', name: '', input: {} }] });
+      const numericName = estimateMessageTokens({ role: 'assistant', content: [{ type: 'tool_use', name: 123456789012, input: {} }] });
+      expect(numericName).toBe(empty);
+    });
+
+    it('counts a non-object tool_use input like an empty object (#9565)', () => {
+      const empty = estimateMessageTokens({ role: 'assistant', content: [{ type: 'tool_use', name: 'n', input: {} }] });
+      const stringInput = estimateMessageTokens({ role: 'assistant', content: [{ type: 'tool_use', name: 'n', input: 'x'.repeat(40) }] });
+      expect(stringInput).toBe(empty);
+    });
+
+    it.each([
+      ['a number', 0],
+      ['false', false],
+    ])('counts a malformed tool_result body (%s) as empty (#9565)', (_label, bad) => {
+      const empty = estimateMessageTokens({ role: 'user', content: [{ type: 'tool_result', content: '' }] });
+      const malformed = estimateMessageTokens({ role: 'user', content: [{ type: 'tool_result', content: bad }] });
+      expect(malformed).toBe(empty);
+    });
+
+    it('counts an array tool_result body by its content, not as "[object Object]" (#9565)', () => {
+      const long = 'x'.repeat(400);
+      const tokens = estimateMessageTokens({ role: 'user', content: [{ type: 'tool_result', content: [{ type: 'text', text: long }] }] });
+      expect(tokens).toBeGreaterThan(100);
+    });
+
     it('estimates image blocks at ~1600 tokens', () => {
       const tokens = estimateMessageTokens({
         role: 'user',

@@ -41,6 +41,7 @@ import {
   type PlatformKeyProvider,
 } from '@/lib/config/providers';
 import { ASSET_STORAGE_ENV } from '@/lib/config/assetStorage';
+import { isAnthropicWifConfigured } from '@/lib/config/anthropicWif';
 import { HEALTH_CACHE_TTL_MS, UPSTASH_REST_TIMEOUT_MS } from '@/lib/config/timeouts';
 import { isUpstashConfigured, postUpstashCommand } from '@/lib/upstash/restCommand';
 import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
@@ -69,7 +70,7 @@ export interface ServiceHealth {
    *
    *   - `computeOverallStatus` / `deriveOverallStatus` skip it, so the public
    *     banner and `/api/status`'s `overall` are not pinned amber forever, and
-   *   - `/api/cron/health-monitor` logs it at warn instead of paging Sentry
+   *   - `/api/cron/health-monitor` logs it at warn instead of reporting it to Sentry
    *     every 15 minutes (~96 synthetic-monitor exceptions a day) for a state
    *     the owner deliberately chose.
    *
@@ -540,7 +541,8 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
  *               body strips both of those — in `summary`. Marked
  *               `configurationOnly` only when an explicit deployment baseline
  *               declares all the missing capabilities. Otherwise it affects
- *               overall health and synthetic-monitor paging
+ *               overall health and the synthetic health monitor's Sentry
+ *               report (there is no paging service)
  *   healthy   — chat resolves and every capability in CAPABILITY_ENV_VARS is
  *               configured
  *
@@ -717,7 +719,7 @@ export async function checkChatBackend(): Promise<ServiceHealth> {
       latencyMs: 0,
       lastChecked: new Date().toISOString(),
       error: 'No chat backend is configured',
-      details: { configured: false },
+      details: { configured: false, wifConfigured: isAnthropicWifConfigured() },
     };
   }
 
@@ -730,8 +732,14 @@ export async function checkChatBackend(): Promise<ServiceHealth> {
   // missed a call site) is at least VISIBLE in the health report. It is not
   // verification: nothing here confirms the Gateway actually serves it, which
   // would require a billable call this check is intentionally not making.
+  // `wifConfigured` (#8858): whether all three ANTHROPIC_WIF_* variables are
+  // set, i.e. whether the direct Anthropic client ATTEMPTS a federated token
+  // before falling back to ANTHROPIC_API_KEY. A boolean derived from variable
+  // presence only — no credential value, and not proof an exchange succeeds
+  // (a failed one is reported to Sentry by `wifCredential.ts`).
   const details = {
     configured: true,
+    wifConfigured: isAnthropicWifConfigured(),
     backend: backend.id,
     backendName: backend.name,
     configuredModel: AI_MODEL_PRIMARY,
@@ -831,6 +839,7 @@ export async function checkCloudflareR2(): Promise<ServiceHealth> {
   const bucketName = process.env[ASSET_STORAGE_ENV.bucketName];
 
   const allConfigured = !!(accountId && accessKeyId && secretAccessKey && bucketName);
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is R2 partially configured); ?? cannot substitute this OR
   const anyConfigured = !!(accountId || accessKeyId || secretAccessKey || bucketName);
 
   const details = {
@@ -930,6 +939,9 @@ async function checkGenerationFactory(): Promise<ServiceHealth> {
         const { createGenerationHandler } = await import('@/lib/api/createGenerationHandler');
         const handler = createGenerationHandler({
           route: '/api/health/factory-smoke',
+          // Never reached — the smoke test is unauthenticated and returns 401
+          // before the panel gate runs — but the field is required.
+          panel: 'ai-chat',
           provider: DB_PROVIDER.chat,
           operation: 'chat_short',
           rateLimitKey: 'health-smoke',

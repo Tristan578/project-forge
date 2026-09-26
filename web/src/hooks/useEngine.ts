@@ -305,8 +305,8 @@ export async function probeWebGPU(): Promise<boolean> {
  * carries immutable Cache-Control headers uploaded by upload-wasm-to-r2.sh.
  * Without a version the /latest/ alias is used, which has a short TTL.
  */
-const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
-const ENGINE_VERSION = (process.env.NEXT_PUBLIC_ENGINE_VERSION || '').trim();
+const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL ?? '').replace(/\/+$/, '');
+const ENGINE_VERSION = (process.env.NEXT_PUBLIC_ENGINE_VERSION ?? '').trim();
 /** Resolved prefix: "<cdn>/<version>" or "<cdn>/latest" or "" for same-origin. */
 const ENGINE_CDN_ROOT = ENGINE_CDN_BASE
   ? ENGINE_VERSION
@@ -350,9 +350,11 @@ export async function fetchWasmManifest(basePath: string, signal?: AbortSignal):
       buildId?: string;
       hash?: string;
     };
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a manifest can legitimately carry an empty-string hash (legacy/malformed build output); that must fall back to the legacy `hash` field exactly like a missing one does
     const wasmHash = data.wasmHash || data.hash || '';
     if (!wasmHash) return null;
-    const jsHash = data.jsHash || '';
+    const jsHash = data.jsHash ?? '';
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- an empty-string buildId is a real manifest shape (see useEngine.test.ts "uses wasmHash as buildId when buildId is empty string"); ?? would leave it blank instead of falling back to wasmHash
     const buildId = data.buildId || wasmHash;
     return { wasmHash, jsHash, buildId };
   } catch {

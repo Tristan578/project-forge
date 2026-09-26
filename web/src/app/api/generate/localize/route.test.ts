@@ -8,6 +8,8 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
 import { refundTokens } from '@/lib/tokens/service';
 import { _memoryCache, _inFlight } from '@/lib/api/responseCache';
 
@@ -43,6 +45,11 @@ vi.mock('ai', () => ({
 }));
 vi.mock('@ai-sdk/anthropic', () => ({
   createAnthropic: vi.fn(() => mockAnthropicModel),
+}));
+// The key -> client-auth mapping (#8858) is unit-tested in wifCredential.test.ts;
+// this marks its output so the test below can see the route USES it.
+vi.mock('@/lib/ai/wifCredential', () => ({
+  anthropicClientAuthForKey: vi.fn((key: string) => ({ authToken: `mapped:${key}` })),
 }));
 
 function makeRequest(body: unknown): NextRequest {
@@ -298,5 +305,15 @@ describe('POST /api/generate/localize', () => {
     expect(res.status).toBe(500);
     expect(body.error).toBe('Generation failed due to a server error. Please try again later.');
     expect(body.error).not.toContain('DB connection');
+  });
+
+  it('builds the Anthropic client from anthropicClientAuthForKey(resolved key), not { apiKey } (#8858)', async () => {
+    // A platform key can be a federated Bearer token; `{ apiKey }` would send
+    // it as x-api-key, which Anthropic rejects.
+    const res = await POST(makeRequest(validBody));
+    expect(res.status).toBeLessThan(300);
+    expect(anthropicClientAuthForKey).toHaveBeenCalledWith('test-key');
+    expect(createAnthropic).toHaveBeenCalledWith({ authToken: 'mapped:test-key' });
+    expect(createAnthropic).not.toHaveBeenCalledWith({ apiKey: 'test-key' });
   });
 });

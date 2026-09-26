@@ -10,6 +10,7 @@ const POST_impl = createGenerationHandler<
   { audioBase64: string; durationSeconds: number; provider: string }
 >({
   route: '/api/generate/sfx',
+  panel: 'generate-sound',
   provider: DB_PROVIDER.sfx,
   operation: 'sfx_generation',
   rateLimitKey: 'gen-sfx',

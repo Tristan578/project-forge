@@ -14,6 +14,12 @@
 // edge runtime too, where node `crypto` (pulled in by encryption.ts) is unavailable.
 import { MASTER_KEY_HEX } from '@/lib/keys/masterKeyFormat';
 import { ASSET_STORAGE_ENV } from '@/lib/config/assetStorage';
+import {
+  ANTHROPIC_WIF_REQUIRED_ENV,
+  ANTHROPIC_WIF_REQUIRED_ENV_NAMES,
+  ANTHROPIC_WIF_WORKSPACE_ENV,
+  missingAnthropicWifEnv,
+} from '@/lib/config/anthropicWif';
 
 /** Descriptor for a required environment variable. */
 interface RequiredVar {
@@ -45,6 +51,29 @@ const OPTIONAL_VARS: OptionalVar[] = [
   {
     key: 'ANTHROPIC_API_KEY',
     description: 'Anthropic API key for direct AI calls (AI Gateway OIDC is preferred)',
+    defaultValue: '',
+  },
+  // Anthropic Workload Identity Federation (#8858) — all three or none; see
+  // `@/lib/config/anthropicWif` and docs/guides/anthropic-wif-setup.md. Unset,
+  // the direct chat client uses ANTHROPIC_API_KEY exactly as before.
+  {
+    key: ANTHROPIC_WIF_REQUIRED_ENV.federationRuleId,
+    description: 'Anthropic WIF federation rule ID (fdrl_...) for the token exchange',
+    defaultValue: '',
+  },
+  {
+    key: ANTHROPIC_WIF_REQUIRED_ENV.organizationId,
+    description: 'Anthropic organization UUID for the WIF token exchange',
+    defaultValue: '',
+  },
+  {
+    key: ANTHROPIC_WIF_REQUIRED_ENV.serviceAccountId,
+    description: 'Anthropic service account ID (svac_...) the federated token acts as',
+    defaultValue: '',
+  },
+  {
+    key: ANTHROPIC_WIF_WORKSPACE_ENV,
+    description: 'Anthropic workspace (wrkspc_... or default); needed only when the WIF rule spans several workspaces',
     defaultValue: '',
   },
   {
@@ -175,6 +204,15 @@ export function validateEnvironment(): EnvValidationResult {
     const msg = 'ENCRYPTION_MASTER_KEY is set but is not a 64-character hex string (32 bytes). BYOK encryption will crash on first use.';
     if (!missing.includes('ENCRYPTION_MASTER_KEY')) missing.push('ENCRYPTION_MASTER_KEY');
     console.error(`[validateEnvironment] CRITICAL: ${msg}`);
+  }
+
+  // Anthropic WIF is all-three-or-none (#8858). A partial set is not an error
+  // — boot must not break — but it silently leaves federation OFF, so say so.
+  const wifMissing = missingAnthropicWifEnv();
+  if (wifMissing.length > 0 && wifMissing.length < ANTHROPIC_WIF_REQUIRED_ENV_NAMES.length) {
+    const msg = `Anthropic Workload Identity Federation is partially configured — ${wifMissing.join(', ')} not set. Federation stays OFF and direct chat uses ANTHROPIC_API_KEY. Set all of ${ANTHROPIC_WIF_REQUIRED_ENV_NAMES.join(', ')}, or none.`;
+    warnings.push(msg);
+    console.warn(`[validateEnvironment] WARNING: ${msg}`);
   }
 
   for (const v of OPTIONAL_VARS) {

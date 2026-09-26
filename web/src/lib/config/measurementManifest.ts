@@ -451,6 +451,7 @@ export function buildMeasurementManifest(options: BuildManifestOptions = {}): Me
     buildSha,
     fixtureChecksum: options.fixtureChecksum ?? UNKNOWN,
     os: parseOs(nav?.userAgent),
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank supplied browser version is unset; falls back to parsing the user agent
     browserVersion: options.browserVersion || parseBrowserVersion(nav?.userAgent),
     gpuDriver: options.gpuDriver ?? UNKNOWN,
     backend: options.backend ?? UNKNOWN,
