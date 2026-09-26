@@ -28,7 +28,9 @@ CD_YML="$HERE/../../.github/workflows/cd.yml"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "script not found: $SCRIPT"; exit 1; }
 
@@ -48,6 +50,7 @@ exit 0
 STUB
   chmod +x "$dir/aws"
 }
+readonly -f make_aws
 
 run_case() {
   local ls_latest="$1" ls_dest="$2" cp_rc="$3"
@@ -59,6 +62,7 @@ run_case() {
   printf '%s\n---RC---%s\n---ARGV---\n%s' "$out" "$rc" "$(cat "$dir/argv.log" 2>/dev/null)"
   rm -rf "$dir"
 }
+readonly -f run_case
 
 echo "=== alias-wasm-cdn-version.sh ==="
 
@@ -103,6 +107,7 @@ check_type() {
     fail "${label} is not given ${ctype} - REPLACE drops the type and the browser refuses the asset: ${ARGV}"
   fi
 }
+readonly -f check_type
 check_type ".wasm" "application/wasm" "the wasm module"
 check_type ".js" "text/javascript" "the glue module"
 check_type ".json" "application/json" "the manifest"

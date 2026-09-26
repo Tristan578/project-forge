@@ -26,7 +26,9 @@ ROOT="${CLAUDE_REFS_ROOT:-$(cd "$HERE/../.." && pwd)}"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 if [ ! -d "$ROOT/.claude" ]; then
   echo "  FAIL: no .claude directory under $ROOT"

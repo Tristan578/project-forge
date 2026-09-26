@@ -41,7 +41,9 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$CI_YML" ] || { echo "ci.yml not found: $CI_YML"; exit 1; }
 
@@ -69,6 +71,7 @@ extract_step_body() {
     }
   ' "$CI_YML" | grep -v '^CHANGED='
 }
+readonly -f extract_step_body
 
 extract_step_body > "$STEP_BODY"
 
@@ -98,6 +101,7 @@ assert_extraction_is_real() {
   [ "$missing" -eq 0 ] || exit 1
   pass "step body extracted from ci.yml ($body_lines lines, all 16 outputs present)"
 }
+readonly -f assert_extraction_is_real
 
 # ---- Harness ----------------------------------------------------------------
 #
@@ -113,6 +117,7 @@ run_gate() {
   cat "$out"
   rm -f "$out"
 }
+readonly -f run_gate
 
 # assert_output <case name> <file list> <key> <expected>
 assert_output() {
@@ -125,6 +130,7 @@ assert_output() {
     fail "$name: expected $key=$expected, got '${actual:-<unset>}'"
   fi
 }
+readonly -f assert_output
 
 echo "=== ci-gate path filters ==="
 assert_extraction_is_real
