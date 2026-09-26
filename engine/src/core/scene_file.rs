@@ -13,6 +13,7 @@ use super::custom_wgsl::CustomWgslSource;
 use super::environment::EnvironmentSettings;
 use super::history::EntitySnapshot;
 use super::input::InputMap;
+use super::material::{decode_scene_attenuation_distance, encode_scene_attenuation_distance};
 use super::post_processing::PostProcessingSettings;
 
 /// Maximum serialized scene size accepted by both preflight and load.
@@ -142,6 +143,49 @@ pub fn build_scene_file(
     }
 }
 
+/// Serialize a `SceneFile` to its on-disk JSON form.
+///
+/// This is the save-side counterpart of [`parse_scene_file`]'s
+/// `attenuationDistance` handling (#10267): `MaterialData`'s own `Serialize`
+/// impl stays plain (see `core::material`'s comment on the field) so live
+/// bridge events keep emitting `null` for a non-finite value, which means a
+/// non-finite `attenuation_distance` — usually the default, `f32::INFINITY`
+/// — comes out of a plain `serde_json::to_value` as indistinguishable `null`.
+/// That is fine for `+Infinity` (the only value `null` ever meant before this
+/// fix, and `parse_scene_file` maps it back), but it would silently coerce a
+/// `-Infinity` or `NaN` attenuation distance to `+Infinity` on the next load.
+/// This function re-encodes just those two edge cases through
+/// `encode_scene_attenuation_distance`'s sentinel strings before writing the
+/// scene out, scoped to scene persistence only — never touching
+/// `MaterialData`'s own (de)serialize impl.
+pub fn serialize_scene_file(scene: &SceneFile) -> Result<String, String> {
+    let mut value = serde_json::to_value(scene)
+        .map_err(|error| format!("Failed to serialize scene: {error}"))?;
+    if let Some(entities) = value.get_mut("entities").and_then(|v| v.as_array_mut()) {
+        for (index, entity) in scene.entities.iter().enumerate() {
+            let Some(material) = entity.material_data.as_ref() else {
+                continue;
+            };
+            if material.attenuation_distance.is_finite() {
+                // The plain, unpatched output is already exact.
+                continue;
+            }
+            let Some(material_value) = entities
+                .get_mut(index)
+                .and_then(|e| e.get_mut("materialData"))
+                .and_then(|m| m.as_object_mut())
+            else {
+                continue;
+            };
+            material_value.insert(
+                "attenuationDistance".to_string(),
+                encode_scene_attenuation_distance(material.attenuation_distance),
+            );
+        }
+    }
+    serde_json::to_string(&value).map_err(|error| format!("Failed to serialize scene: {error}"))
+}
+
 /// Parse and validate a scene before any editor state is changed.
 ///
 /// Both the synchronous preflight command and the queued loader use this
@@ -150,8 +194,48 @@ pub fn parse_scene_file(json: &str) -> Result<SceneFile, String> {
     if json.len() > MAX_SCENE_JSON_BYTES {
         return Err("Scene JSON exceeds the 50 MiB limit".to_string());
     }
-    let scene: SceneFile =
+
+    // `attenuationDistance` may arrive as `null` (every scene saved before
+    // #10267 — see the comment on `MaterialData::attenuation_distance`) or as
+    // one of `serialize_scene_file`'s sentinel strings for a non-finite
+    // value. `MaterialData`'s own (plain) Deserialize accepts neither, so
+    // decode it here — on a generic `Value`, before the strict, fully-typed
+    // parse below — substituting a finite placeholder so that typed parse
+    // does not reject the field, then patch the real decoded value back onto
+    // the result afterward.
+    let mut raw: serde_json::Value =
         serde_json::from_str(json).map_err(|error| format!("Invalid scene file: {error}"))?;
+    let mut decoded_attenuation: Vec<(usize, f32)> = Vec::new();
+    if let Some(entities) = raw.get_mut("entities").and_then(|v| v.as_array_mut()) {
+        for (index, entity) in entities.iter_mut().enumerate() {
+            let Some(material) = entity.get_mut("materialData") else {
+                continue;
+            };
+            let Some(material_obj) = material.as_object_mut() else {
+                continue;
+            };
+            let Some(attenuation) = material_obj.get("attenuationDistance") else {
+                continue;
+            };
+            let decoded = decode_scene_attenuation_distance(attenuation)
+                .map_err(|error| format!("Invalid scene file: entity {index}: {error}"))?;
+            material_obj.insert("attenuationDistance".to_string(), serde_json::json!(0.0));
+            decoded_attenuation.push((index, decoded));
+        }
+    }
+
+    let mut scene: SceneFile =
+        serde_json::from_value(raw).map_err(|error| format!("Invalid scene file: {error}"))?;
+    for (index, decoded) in decoded_attenuation {
+        if let Some(material) = scene
+            .entities
+            .get_mut(index)
+            .and_then(|entity| entity.material_data.as_mut())
+        {
+            material.attenuation_distance = decoded;
+        }
+    }
+
     if !(1..=3).contains(&scene.format_version) {
         return Err(format!(
             "Unsupported scene format version: {}",
@@ -324,34 +408,135 @@ mod validation_tests {
     // #10267: `MaterialData::default()` sets `attenuation_distance` to
     // `f32::INFINITY`, which serde_json serializes as `null`. A scene
     // carrying an entity with a default, unmodified material must still
-    // save-and-load, end to end through `build_scene_file` / `parse_scene_file`.
-    #[test]
-    fn scene_with_a_default_material_round_trips() {
+    // save-and-load, end to end through `build_scene_file` /
+    // `serialize_scene_file` / `parse_scene_file` — the scoped scene-file
+    // wire format, not `MaterialData`'s own (unmodified) Serialize/Deserialize.
+    mod attenuation_distance_scene_round_trip {
+        use super::*;
         use crate::core::material::MaterialData;
 
-        let mut snapshot = entity("root", None);
-        snapshot.material_data = Some(MaterialData::default());
+        fn scene_with_material(material: MaterialData) -> SceneFile {
+            let mut snapshot = entity("root", None);
+            snapshot.material_data = Some(material);
+            build_scene_file(
+                "Recovery",
+                &EnvironmentSettings::default(),
+                &GlobalAmbientLight::default(),
+                &InputMap::default(),
+                HashMap::new(),
+                &PostProcessingSettings::default(),
+                &AudioBusConfig::default(),
+                vec![snapshot],
+                None,
+                None,
+            )
+        }
 
-        let scene_file = build_scene_file(
-            "Recovery",
-            &EnvironmentSettings::default(),
-            &GlobalAmbientLight::default(),
-            &InputMap::default(),
-            HashMap::new(),
-            &PostProcessingSettings::default(),
-            &AudioBusConfig::default(),
-            vec![snapshot],
-            None,
-            None,
-        );
-        let json = serde_json::to_string(&scene_file).expect("serialize scene with a material");
+        fn round_trip(material: MaterialData) -> f32 {
+            let scene_file = scene_with_material(material);
+            let json = serialize_scene_file(&scene_file).expect("serialize scene with a material");
+            let parsed = parse_scene_file(&json)
+                .expect("a scene with this material must load");
+            parsed.entities[0]
+                .material_data
+                .as_ref()
+                .expect("material_data must survive the round trip")
+                .attenuation_distance
+        }
 
-        let parsed = parse_scene_file(&json)
-            .expect("a scene with a default (unmodified) material must load");
-        let material = parsed.entities[0]
-            .material_data
-            .as_ref()
-            .expect("material_data must survive the round trip");
-        assert_eq!(material.attenuation_distance, f32::INFINITY);
+        #[test]
+        fn default_infinity_material_round_trips() {
+            assert_eq!(round_trip(MaterialData::default()), f32::INFINITY);
+        }
+
+        #[test]
+        fn neg_infinity_round_trips() {
+            let mut material = MaterialData::default();
+            material.attenuation_distance = f32::NEG_INFINITY;
+            assert_eq!(round_trip(material), f32::NEG_INFINITY);
+        }
+
+        #[test]
+        fn nan_round_trips() {
+            let mut material = MaterialData::default();
+            material.attenuation_distance = f32::NAN;
+            // NaN != NaN under `assert_eq!`.
+            assert!(round_trip(material).is_nan());
+        }
+
+        #[test]
+        fn finite_fractional_value_round_trips() {
+            let mut material = MaterialData::default();
+            material.attenuation_distance = 4.5;
+            assert_eq!(round_trip(material), 4.5);
+        }
+
+        #[test]
+        fn finite_integer_valued_value_round_trips() {
+            // JSON numbers written without a fractional part parse to a
+            // different `serde_json::Number` variant than `4.5` above;
+            // `decode_scene_attenuation_distance` must handle both.
+            let mut material = MaterialData::default();
+            material.attenuation_distance = 5.0;
+            assert_eq!(round_trip(material), 5.0);
+        }
+
+        #[test]
+        fn legacy_null_attenuation_distance_loads_as_infinity() {
+            // The exact shape every scene saved before #10267 used:
+            // `serde_json` wrote `null` for `f32::INFINITY` and nothing
+            // mapped it back.
+            let scene_file = scene_with_material(MaterialData::default());
+            let mut value = serde_json::to_value(&scene_file).expect("serialize scene to a Value");
+            value["entities"][0]["materialData"]["attenuationDistance"] = serde_json::Value::Null;
+            let parsed = parse_scene_file(&value.to_string())
+                .expect("a legacy null attenuationDistance must still load");
+            assert_eq!(
+                parsed.entities[0].material_data.as_ref().unwrap().attenuation_distance,
+                f32::INFINITY
+            );
+        }
+
+        #[test]
+        fn missing_attenuation_distance_key_defaults_to_infinity() {
+            // Scenes saved before the field existed at all.
+            let scene_file = scene_with_material(MaterialData::default());
+            let mut value = serde_json::to_value(&scene_file).expect("serialize scene to a Value");
+            value["entities"][0]["materialData"]
+                .as_object_mut()
+                .unwrap()
+                .remove("attenuationDistance");
+            let parsed = parse_scene_file(&value.to_string())
+                .expect("a missing attenuationDistance key must still load");
+            assert_eq!(
+                parsed.entities[0].material_data.as_ref().unwrap().attenuation_distance,
+                f32::INFINITY
+            );
+        }
+
+        #[test]
+        fn an_unrecognized_sentinel_string_is_rejected() {
+            let scene_file = scene_with_material(MaterialData::default());
+            let mut value = serde_json::to_value(&scene_file).expect("serialize scene to a Value");
+            value["entities"][0]["materialData"]["attenuationDistance"] =
+                serde_json::json!("not-a-real-sentinel");
+            assert!(parse_scene_file(&value.to_string()).is_err());
+        }
+
+        #[test]
+        fn material_data_own_serialize_stays_plain_inside_a_scene_too() {
+            // `serialize_scene_file` only patches the JSON when the value is
+            // non-finite; a finite value must come straight from
+            // `MaterialData`'s own Serialize, untouched.
+            let mut material = MaterialData::default();
+            material.attenuation_distance = 10.0;
+            let scene_file = scene_with_material(material);
+            let json = serialize_scene_file(&scene_file).expect("serialize scene with a material");
+            let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(
+                value["entities"][0]["materialData"]["attenuationDistance"],
+                serde_json::json!(10.0)
+            );
+        }
     }
 }

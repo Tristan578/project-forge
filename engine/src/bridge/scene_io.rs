@@ -299,7 +299,7 @@ pub(super) fn apply_scene_export(
         wgsl_source,
     );
 
-    match serde_json::to_string(&scene_file) {
+    match scene_file::serialize_scene_file(&scene_file) {
         Ok(json) => {
             // One event per DISTINCT correlation id, not per request: the JSON
             // is built once, but each caller needs its own id echoed back
