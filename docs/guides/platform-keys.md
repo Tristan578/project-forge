@@ -52,7 +52,9 @@ Deliberately unprovisioned capabilities can be listed explicitly in the server-o
 capability IDs). With no setting, missing keys are incident signals. Invalid IDs
 also disable suppression. Only when every missing capability appears in this
 list does the degraded entry carry `configurationOnly: true`, keeping that
-expected state out of overall health and synthetic-monitor paging.
+expected state out of overall health and the synthetic health monitor's
+alerting (there is no paging service — see
+`docs/operations/incident-response.md`).
 
 For the currently deferred asset providers, an operator may declare
 `model3d,texture,sfx,voice,music,sprite,bg_removal`. Music shares the ElevenLabs
@@ -61,7 +63,8 @@ This repository does not set the
 deployment value automatically. When provisioning a capability, remove its ID
 from the declaration in the same deployment. For example, provisioning Meshy
 requires removing both `model3d` and `texture`. A later missing Meshy key then
-changes overall health and pages instead of being silently treated as intentional.
+changes overall health and is treated as an incident signal instead of being
+silently treated as intentional.
 An actual `down` verdict is never suppressed.
 
 ## Decision per capability

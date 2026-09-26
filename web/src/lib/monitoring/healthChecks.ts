@@ -70,7 +70,7 @@ export interface ServiceHealth {
    *
    *   - `computeOverallStatus` / `deriveOverallStatus` skip it, so the public
    *     banner and `/api/status`'s `overall` are not pinned amber forever, and
-   *   - `/api/cron/health-monitor` logs it at warn instead of paging Sentry
+   *   - `/api/cron/health-monitor` logs it at warn instead of reporting it to Sentry
    *     every 15 minutes (~96 synthetic-monitor exceptions a day) for a state
    *     the owner deliberately chose.
    *
@@ -541,7 +541,8 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
  *               body strips both of those — in `summary`. Marked
  *               `configurationOnly` only when an explicit deployment baseline
  *               declares all the missing capabilities. Otherwise it affects
- *               overall health and synthetic-monitor paging
+ *               overall health and the synthetic health monitor's Sentry
+ *               report (there is no paging service)
  *   healthy   — chat resolves and every capability in CAPABILITY_ENV_VARS is
  *               configured
  *

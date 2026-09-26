@@ -1,56 +1,13 @@
 # Incident Runbook
 
-> **Last updated:** 2026-03-16
+> **Last updated:** 2026-09-24
 
-## SLA Targets
+## Response Process
 
-| Priority | Description | Response Time | Resolution Time | Examples |
-|----------|-------------|---------------|-----------------|----------|
-| P1 — Critical | Site down, data loss, security breach | 30 minutes | 4 hours | Production outage, DB corruption, auth bypass |
-| P2 — Degraded | Major feature broken, significant perf degradation | 4 hours | 24 hours | WASM CDN failure, payment processing down, AI generation broken |
-| P3 — Minor | Non-critical bug, cosmetic issue, minor perf regression | 24 hours | 72 hours | UI glitch, tooltip wrong, non-blocking error in logs |
-
-## Escalation Path
-
-```
-1. Sentry Alert fires
-   |
-2. Slack #incidents channel notification (via Sentry integration)
-   |
-3. On-call engineer acknowledges within SLA response time
-   |
-4. PagerDuty escalation (when configured) if no acknowledgment
-   |
-5. Engineering lead notified for P1 after 15 minutes without response
-```
-
-### Contact Points
-
-| Role | Channel | When |
-|------|---------|------|
-| On-call engineer | Slack #incidents | All alerts |
-| Engineering lead | Slack DM + phone | P1 unacknowledged after 15 min |
-| Product lead | Slack #incidents | P1 confirmed, P2 customer-facing |
-
-## Incident Response Process
-
-### 1. Acknowledge
-- Respond in Slack #incidents with "Investigating" and your name
-- Set Sentry issue status to "In Progress"
-
-### 2. Assess
-- Determine priority (P1/P2/P3) based on impact scope
-- Identify affected systems (DB, CDN, auth, payments, engine)
-- Check: Is this a new deploy? If yes, consider immediate rollback
-
-### 3. Mitigate
-- Apply the relevant recovery procedure below
-- Communicate status updates every 15 minutes for P1, every hour for P2
-
-### 4. Resolve
-- Confirm service restored
-- Write postmortem for P1/P2 within 48 hours
-- Create follow-up tickets for root cause fixes
+This file holds recovery and rollback procedures only. The severity model
+(P0/P1/P2), the first-response steps and what "resolved" means are defined
+once, in `docs/operations/incident-response.md`. There is no on-call rotation
+or paging service — see `docs/decisions/2026-09-24-no-paging-or-on-call.md`.
 
 ## Recovery Procedures
 
@@ -113,7 +70,7 @@
 3. If Clerk is experiencing an outage:
    - The app will be largely non-functional for authenticated features
    - The `/dev` route bypasses auth for local testing but is gated in production
-   - Communicate to users via status page
+   - Post an update in #incidents if one is configured (there is no manually updated status page; https://spawnforge.ai/health shows live status)
 4. If keys are rotated or expired:
    - Update keys in Vercel environment variables
    - Redeploy (Vercel > Deployments > Redeploy)
