@@ -146,4 +146,52 @@ describe('ApprovalGateDialog', () => {
     expect(heading.className).toContain('text-[var(--sf-text)]');
     expect(heading.className).not.toContain('text-[var(--sf-warning)]');
   });
+
+  // #6831: the quick-start plan review reuses this dialog with its own labels,
+  // a guard against a second click, and the build's token cost as children.
+  describe('plan-review options', () => {
+    it('names the buttons after what they do', () => {
+      render(
+        <ApprovalGateDialog
+          gate={makeGate()}
+          onApprove={vi.fn()}
+          onCancel={vi.fn()}
+          approveLabel="Build it"
+          cancelLabel="Discard plan"
+        />,
+      );
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+    });
+
+    it('makes approve inert while approveDisabled is set', () => {
+      const onApprove = vi.fn();
+      render(<ApprovalGateDialog gate={makeGate()} onApprove={onApprove} onCancel={vi.fn()} approveDisabled />);
+      const approve = screen.getByRole('button', { name: 'Approve' });
+      expect(approve).toBeDisabled();
+      fireEvent.click(approve);
+      expect(onApprove).not.toHaveBeenCalled();
+    });
+
+    // A cost the user has to scroll to find is not a cost they confirmed.
+    it('renders children outside the scrollable summary, between it and the buttons', () => {
+      render(
+        <ApprovalGateDialog
+          gate={makeGate({ sceneSummaries: [{ name: 'Level 1', entityCount: 3, systemDescriptions: [] }] })}
+          onApprove={vi.fn()}
+          onCancel={vi.fn()}
+        >
+          <p>Estimated token cost 340</p>
+        </ApprovalGateDialog>,
+      );
+      const cost = screen.getByText('Estimated token cost 340');
+      const scroll = screen.getByTestId('approval-gate-scroll');
+      expect(scroll.contains(cost)).toBe(false);
+      const approve = screen.getByRole('button', { name: 'Approve' });
+      // DOCUMENT_POSITION_FOLLOWING: scroll region, then the cost, then Approve.
+      expect(scroll.compareDocumentPosition(cost) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(cost.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
 });

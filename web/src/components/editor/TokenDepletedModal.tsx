@@ -6,7 +6,7 @@ import { AlertCircle, ArrowUpCircle, CreditCard, Key } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useUserStore } from '@/stores/userStore';
 import { TIER_DISPLAY_NAMES } from '@/lib/billing/tierPlans';
-import { SETTINGS_BILLING_HREF, SETTINGS_KEYS_HREF } from '@/lib/navigation/settingsRoutes';
+import { SETTINGS_KEYS_HREF, SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
 
 /**
  * Modal shown when the user has 0 tokens and attempts to send an AI message.
@@ -30,13 +30,13 @@ export function TokenDepletedModal() {
     router.push('/pricing');
   }, [setShowModal, router]);
 
-  // `/settings?tab=billing`, not `/settings/billing`: there is no nested billing
-  // route and never was (#9046) — billing is a TAB on /settings, selected by the
-  // `?tab=` query param SettingsPage reads at mount. This modal is deliberately
-  // non-dismissible, so a dead link here strands a paying user with no exit.
+  // `/settings?tab=tokens`: the Tokens tab is where the packs are sold (the
+  // Billing tab only upgrades plans). Settings sections are TABS on /settings,
+  // selected by `?tab=`; there are no nested routes (#9046). This modal is
+  // deliberately non-dismissible, so a dead link here strands a paying user.
   const handleBuyTokens = useCallback(() => {
     setShowModal(false);
-    router.push(SETTINGS_BILLING_HREF);
+    router.push(SETTINGS_TOKENS_HREF);
   }, [setShowModal, router]);
 
   // The tab id is `keys`, NOT `api-keys` (SettingsPage TABS). This one matters
