@@ -471,7 +471,11 @@ NESTED
 # Forty-fourth board round (ux): a ) closed whatever frame was innermost, so a
 # valid `echo a)` was read as a span closed early and a new one opened by its
 # closing backtick, and the file failed as a parse error. bash -n accepts
-# every line here; the gate must derive the frozen helper and exit 0.
+# every line here; the gate must derive the frozen helper and exit 0. The
+# $[ ] line checks only that: in a file that closes its $[ ], a ) that
+# wrongly closed it would leave the same state behind, so the guard's $[ ]
+# arm is pinned by the unclosed 12j fixture instead (forty-fifth board
+# round, test).
 d_paren_text="$(mkfixture paren-text <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -491,9 +495,11 @@ expect_rc "12k. a ) inside a closed backtick span or \$[ ] is text, not a closer
 # backtick, $(( )), $[ ] or (( )) opened after the << closes, and a heredoc
 # queued inside a substitution is read before one queued outside it; a ( )
 # subshell holds nothing back, so fail() below is body text. The last
-# three commands pin the queue: a <<- body inside a substitution matched
-# with its own tab rule, and a heredoc queued outside a substitution still
-# held back after the one queued inside it is read. bash -n accepts this
+# four commands pin the queue: a <<- body inside a substitution matched
+# with its own tab rule, a heredoc queued outside a substitution still held
+# back after the one queued inside it is read, and (forty-fifth board
+# round, test) a plain << read after a <<- keeps its own tab rule, so a
+# tab-indented B in its body is body text, not its terminator. bash -n accepts this
 # file (bash warns about the last command and runs it as modelled here),
 # and bash defines none of the functions after pass from it.
 d_hd_wait="$(mkfixture heredoc-wait <<'FIX'
@@ -547,6 +553,12 @@ A
 echo CODE >&2
 )
 b_body() { :; }
+B
+cat <<-A <<B
+	a-body
+	A
+	B
+fb() { :; }
 B
 FIX
 )"
