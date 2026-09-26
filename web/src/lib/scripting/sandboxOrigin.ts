@@ -216,20 +216,18 @@ export class SandboxWorkerNotBundledError extends Error {
  * so the chunk is in memory before the first tick starts the 5 s watchdog.
  */
 export function loadSandboxWorkerSource(): Promise<string> {
-  if (!workerSourcePromise) {
-    workerSourcePromise = import('./scriptWorkerSource.bundle')
-      .then((mod) => {
-        const source = mod.default;
-        if (typeof source !== 'string' || source.length === 0) {
-          throw new SandboxWorkerNotBundledError();
-        }
-        return source;
-      })
-      .catch((err: unknown) => {
-        workerSourcePromise = null;
-        throw err;
-      });
-  }
+  workerSourcePromise ??= import('./scriptWorkerSource.bundle')
+    .then((mod) => {
+      const source = mod.default;
+      if (typeof source !== 'string' || source.length === 0) {
+        throw new SandboxWorkerNotBundledError();
+      }
+      return source;
+    })
+    .catch((err: unknown) => {
+      workerSourcePromise = null;
+      throw err;
+    });
   return workerSourcePromise;
 }
 
