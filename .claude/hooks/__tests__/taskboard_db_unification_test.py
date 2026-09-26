@@ -144,13 +144,28 @@ class SyncScriptDelegatesPathResolution(unittest.TestCase):
 
     def test_db_path_matches_default_db_via_taskboard_db_env(self):
         sentinel = str(Path(tempfile.gettempdir()) / 'sync-sentinel' / 'taskboard.db')
+        # The literal comparison below must go through the SAME
+        # expanduser().resolve() pipeline default_db() applies, not the raw
+        # sentinel string. On some Windows hosts (observed on a GitHub-hosted
+        # Windows runner, not reproducible on every machine) `Path.resolve()`
+        # normalizes an ancestor directory's on-disk case or follows a
+        # reparse point for a component of the temp path, so the resolved
+        # value can legitimately differ from `tempfile.gettempdir()`'s raw,
+        # unresolved string even though nothing is wrong. Resolving the
+        # sentinel here — in the same process, against the same filesystem,
+        # before it crosses into the subprocess — keeps the assertion's real
+        # purpose intact: proving DB_PATH tracks the sentinel we set via
+        # TASKBOARD_DB rather than silently falling back to the platform
+        # default (which resolves under a completely different ancestor and
+        # so could never match either form of the sentinel).
+        resolved_sentinel = str(Path(sentinel).expanduser().resolve())
         script = (
             "import sys; sys.path.insert(0, r'" + str(HOOKS_DIR) + "')\n"
             "import taskboard_runtime as runtime\n"
             "import github_project_sync as sync\n"
             "expected = runtime.default_db()\n"
             "assert str(sync.DB_PATH) == str(expected), (sync.DB_PATH, expected)\n"
-            "assert str(sync.DB_PATH) == r'" + sentinel + "', sync.DB_PATH\n"
+            "assert str(sync.DB_PATH) == r'" + resolved_sentinel + "', sync.DB_PATH\n"
             "print('MATCH')\n"
         )
         result = _run_py(script, {'TASKBOARD_DB': sentinel})
