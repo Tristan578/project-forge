@@ -1,6 +1,6 @@
 // Web Worker for sandboxed script execution.
 // Receives: init (scripts + entity states), tick (dt + states), stop
-// Sends: commands (engine commands), log (console output), error (runtime errors), ui (HUD updates)
+// Sends: commands, log, error, script_timeout, ui, the forge API's async_request / scene_* / ui_* / camera_* / dialogue_* / game_* messages, and init_done / tick_done (init or a tick finished; the watchdog's liveness signal)
 
 import { injectLoopGuards } from './loopGuards';
 import { SHADOWED_GLOBALS } from './sandboxGlobals';
