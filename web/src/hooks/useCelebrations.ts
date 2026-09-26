@@ -110,5 +110,29 @@ export function useCelebrations(): UseCelebrationsReturn {
     return unsub;
   }, [enqueueData]);
 
+  // Subscribe to pipeline status for FIRST_AI_GENERATION (#10170). Only a run
+  // that actually finishes counts: 'executing' -> 'completed' is the one
+  // transition `runPipelineFromPlan` makes on success, so a run that fails or
+  // is cancelled never reaches it. `checkMilestone` records the milestone, so
+  // it fires once per user, and that record is what keeps the checklist's
+  // "Build a Game with AI" task ticked after the next run starts.
+  useEffect(() => {
+    let prevStatus = useEditorStore.getState().orchestratorStatus;
+
+    const unsub = useEditorStore.subscribe((state) => {
+      const status = state.orchestratorStatus;
+      if (status === prevStatus) return;
+      const from = prevStatus;
+      prevStatus = status;
+
+      if (from === 'executing' && status === 'completed') {
+        const d = checkMilestone('FIRST_AI_GENERATION');
+        if (d) enqueueData(d.title, d.message);
+      }
+    });
+
+    return unsub;
+  }, [enqueueData]);
+
   return { activeCelebration, dismissCelebration, triggerMilestone };
 }

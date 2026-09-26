@@ -195,15 +195,18 @@ describe('OnboardingWizard', () => {
 
   // ---- Path navigation ----
 
-  it('clicking "Blank Canvas" calls selectPath, completeOnboarding, and onComplete', () => {
+  // #6831: OnboardingGate is the ONE writer of the completed flag. The wizard
+  // reports the user's choice through `onComplete` and never writes the flag,
+  // which is what lets the gate withhold completion from an AI run that fails.
+  it('clicking "Blank Canvas" calls selectPath and onComplete, leaving the completed flag to the caller', () => {
     render(<OnboardingWizard onComplete={onComplete} />);
     fireEvent.click(screen.getByTestId('path-card-blank'));
     expect(mockSelectPath).toHaveBeenCalledWith('blank');
-    expect(mockCompleteOnboarding).toHaveBeenCalledTimes(1);
+    expect(mockCompleteOnboarding).not.toHaveBeenCalled();
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
-  it('clicking "Build with AI" switches to chat tab and calls onComplete', () => {
+  it('with no onStartAi (standalone), "Build with AI" switches to chat and falls back to onComplete', () => {
     render(<OnboardingWizard onComplete={onComplete} />);
     fireEvent.click(screen.getByTestId('path-card-ai'));
     expect(mockSelectPath).toHaveBeenCalledWith('ai');
@@ -213,11 +216,17 @@ describe('OnboardingWizard', () => {
 
   // PF-1215: before this, "Build with AI" only switched the right panel to chat
   // and left the user to guess a phrase the intent classifier would recognise.
-  it('clicking "Build with AI" opens the quick-start dialog', () => {
+  //
+  // #6831: picking AI must NOT complete onboarding. Whether it completes is
+  // decided by the outcome of the run the dialog starts (OnboardingGate).
+  it('clicking "Build with AI" opens the quick-start dialog without completing onboarding', () => {
     const onStartAi = vi.fn();
     render(<OnboardingWizard onComplete={onComplete} onStartAi={onStartAi} />);
     fireEvent.click(screen.getByTestId('path-card-ai'));
     expect(onStartAi).toHaveBeenCalledTimes(1);
+    expect(mockSelectPath).toHaveBeenCalledWith('ai');
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(mockCompleteOnboarding).not.toHaveBeenCalled();
   });
 
   it('does not open the quick-start dialog for the non-AI paths', () => {
@@ -307,7 +316,7 @@ describe('OnboardingWizard', () => {
       settle(LOADED_OK);
     });
 
-    expect(mockCompleteOnboarding).toHaveBeenCalledTimes(1);
+    expect(mockCompleteOnboarding).not.toHaveBeenCalled();
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(trackEvent).toHaveBeenCalledTimes(2);
     expect(trackEvent).toHaveBeenNthCalledWith(1, AnalyticsEvent.TEMPLATE_USED, { templateId: 'platformer' });
@@ -342,8 +351,9 @@ describe('OnboardingWizard', () => {
     await act(async () => {
       settle(LOADED_OK);
     });
-    // Exactly once, from the load itself.
-    expect(mockCompleteOnboarding).toHaveBeenCalledTimes(1);
+    // The wizard never writes the completed flag (the caller does, #6831)...
+    expect(mockCompleteOnboarding).not.toHaveBeenCalled();
+    // ...and reports completion exactly once, from the load itself.
     expect(onComplete).toHaveBeenCalledTimes(1);
 
     // And the exits work again after a failed load re-enables the selector.
@@ -436,10 +446,10 @@ describe('OnboardingWizard', () => {
 
   // ---- Dismiss button ----
 
-  it('X button dismisses the wizard via completeOnboarding + onComplete', () => {
+  it('X button dismisses the wizard via onComplete, leaving the completed flag to the caller', () => {
     render(<OnboardingWizard onComplete={onComplete} />);
     fireEvent.click(screen.getByLabelText('Dismiss and start with blank canvas'));
-    expect(mockCompleteOnboarding).toHaveBeenCalledTimes(1);
+    expect(mockCompleteOnboarding).not.toHaveBeenCalled();
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 });

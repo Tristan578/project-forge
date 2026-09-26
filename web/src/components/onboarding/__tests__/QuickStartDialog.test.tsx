@@ -14,6 +14,12 @@ import {
 import { toast } from 'sonner';
 import { QuickStartDialog } from '../QuickStartDialog';
 import {
+  INSUFFICIENT_TOKENS_MESSAGE,
+  RESERVATION_UNCONFIRMED_MESSAGE,
+  SIGNED_OUT_MESSAGE,
+  ENGINE_NOT_READY_MESSAGE,
+} from '@/stores/slices/orchestratorSlice';
+import {
   QUICK_START_GAME_TYPES,
   QUICK_START_PROMPT_MAX,
   findQuickStartGameType,
@@ -68,6 +74,7 @@ const cancelPipeline = vi.fn();
 // refused or no engine is attached (gameSlice.ts, #10166).
 const play = vi.fn().mockReturnValue(true);
 const setEngineMode = vi.fn();
+const runPipelineFromPlan = vi.fn().mockResolvedValue(undefined);
 
 function setState(overrides: Record<string, unknown> = {}) {
   Object.keys(hoisted.state).forEach((k) => delete hoisted.state[k]);
@@ -81,6 +88,9 @@ function setState(overrides: Record<string, unknown> = {}) {
     cancelPipeline,
     play,
     setEngineMode,
+    runPipelineFromPlan,
+    currentPlan: null,
+    tokenEstimate: null,
     ...overrides,
   });
 }
@@ -89,6 +99,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   startQuickStart.mockResolvedValue(true);
   play.mockReturnValue(true);
+  runPipelineFromPlan.mockResolvedValue(undefined);
   setState();
 });
 
@@ -156,7 +167,7 @@ describe('QuickStartDialog', () => {
       screen.getByLabelText(/what happens in your platformer/i),
       'lava caves with three gems',
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     expect(hoisted.openPanel).toHaveBeenCalledWith('orchestrator');
     expect(startQuickStart).toHaveBeenCalledWith(
@@ -168,7 +179,7 @@ describe('QuickStartDialog', () => {
   it('falls back to the card placeholder when the prompt is left blank', async () => {
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const card = QUICK_START_GAME_TYPES[0];
     expect(startQuickStart).toHaveBeenCalledWith(
@@ -184,7 +195,7 @@ describe('QuickStartDialog', () => {
     });
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const region = await screen.findByRole('status');
     expect(region.getAttribute('aria-live')).toBe('polite');
@@ -195,7 +206,7 @@ describe('QuickStartDialog', () => {
     startQuickStart.mockRejectedValueOnce(new Error('decompose route is down'));
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('decompose route is down');
@@ -213,7 +224,7 @@ describe('QuickStartDialog', () => {
     });
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Not enough tokens to build this game.');
@@ -237,7 +248,7 @@ describe('QuickStartDialog', () => {
     });
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Could not start building your game. Please try again.');
@@ -251,7 +262,7 @@ describe('QuickStartDialog', () => {
   it('shows a gate the run did not auto-approve so the user is never stranded', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     setState({
       orchestratorStatus: 'executing',
@@ -279,7 +290,7 @@ describe('QuickStartDialog', () => {
   it('never nests the approval gate action row inside a scroll-bounded container', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     setState({
       orchestratorStatus: 'executing',
@@ -311,7 +322,7 @@ describe('QuickStartDialog', () => {
     await userEvent.tab();
     await userEvent.tab();
 
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Build it' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Plan my game' }));
   });
 
   it('closes on Escape', async () => {
@@ -344,7 +355,7 @@ describe('QuickStartDialog', () => {
   it('focuses the live region when the build view replaces the prompt', async () => {
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
     const status = await screen.findByRole('status');
     expect(document.activeElement).toBe(status);
   });
@@ -376,7 +387,7 @@ describe('QuickStartDialog', () => {
     startQuickStart.mockResolvedValueOnce(false);
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('A build is already running');
@@ -391,7 +402,7 @@ describe('QuickStartDialog', () => {
     setState({ orchestratorStatus: 'executing' });
     render(<QuickStartDialog open onClose={vi.fn()} />);
 
-    // Reopening must not put "Build it" back in front of a user whose second
+    // Reopening must not put "Plan my game" back in front of a user whose second
     // run the slice would refuse.
     expect(screen.queryByRole('button', { name: /platformer/i })).toBeNull();
     expect(screen.getByRole('status').textContent).toContain('Building your game');
@@ -441,7 +452,7 @@ describe('QuickStartDialog', () => {
     });
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     expect((await screen.findByRole('status')).textContent).toContain('ready');
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
@@ -452,7 +463,7 @@ describe('QuickStartDialog', () => {
     startQuickStart.mockRejectedValueOnce(new Error('decompose route is down'));
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
     await screen.findByRole('alert');
 
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
@@ -464,7 +475,7 @@ describe('QuickStartDialog', () => {
   it('lands focus on Approve when a gate appears and rejects it on Cancel', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     setState({
       orchestratorStatus: 'executing',
@@ -489,9 +500,479 @@ describe('QuickStartDialog', () => {
     expect(resolveGate).toHaveBeenCalledWith('rejected');
   });
 
-  // The real UI can never leave `selectedId` pointing at a card that isn't in
-  // `QUICK_START_GAME_TYPES` -- `handlePick` only ever sets it from that same
-  // list. This forces the one lookup miss `handleSubmit` defends against.
+  // #6831, owner decision "confirm cost first": the describe step's "Plan my
+  // game" only DESIGNS the game (startQuickStart stops at 'awaiting_approval').
+  // The plan and its token estimate are shown here, and the build's tokens are
+  // reserved only when the user presses "Build it" on this review.
+  describe('plan review before any build spend (#6831)', () => {
+    const PLAN_GATE = {
+      id: 'gate_plan',
+      label: 'Review your game plan',
+      description: 'Check the scenes, entities, and systems before building starts.',
+      afterStepId: 'step_0',
+      status: 'pending',
+      displayData: {
+        sceneSummaries: [{ name: 'Jungle Canopy', entityCount: 7, systemDescriptions: [] }],
+      },
+    };
+    const PLAN = { approvalGates: [PLAN_GATE] };
+    const ESTIMATE = {
+      totalEstimated: 340,
+      totalVarianceLow: 300,
+      totalVarianceHigh: 400,
+      breakdown: [
+        { category: 'Asset generation', estimatedTokens: 300 },
+        { category: 'Scripts', estimatedTokens: 40 },
+      ],
+      sufficientBalance: true,
+    };
+
+    /** Walks to the review: the design finished and left a plan on the store. */
+    async function reachPlanReview(
+      overrides: Record<string, unknown> = {},
+      onClose: () => void = vi.fn(),
+    ) {
+      startQuickStart.mockImplementationOnce(async () => {
+        Object.assign(hoisted.state, {
+          orchestratorStatus: 'awaiting_approval',
+          currentPlan: PLAN,
+          tokenEstimate: ESTIMATE,
+          ...overrides,
+        });
+        return true;
+      });
+      const utils = render(<QuickStartDialog open onClose={onClose} />);
+      await pickPlatformer();
+      await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
+      await screen.findByRole('button', { name: 'Build it' });
+      return utils;
+    }
+
+    it('shows the plan and its cost, and has run nothing yet', async () => {
+      await reachPlanReview();
+
+      expect(screen.getByRole('heading', { name: 'Review your game plan' })).toBeTruthy();
+      expect(screen.getByText('Jungle Canopy')).toBeTruthy();
+      expect(screen.getByText('Estimated token cost')).toBeTruthy();
+      expect(screen.getByText('340')).toBeTruthy();
+      // The number that actually leaves the balance: the reservation is the
+      // estimate's upper bound, refunded down to what the build uses.
+      expect(screen.getByText(/tokens are held while it builds/).textContent).toContain('Up to 400 tokens');
+      expect(screen.getByText('Asset generation')).toBeTruthy();
+      expect(screen.getByRole('status').textContent).toContain('Your game plan is ready');
+      expect(runPipelineFromPlan).not.toHaveBeenCalled();
+      // The review's own Cancel is the way out; a second "Stop" beside it
+      // would be two controls for one action.
+      expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    });
+
+    it('puts focus on "Build it" so the confirmation is one keypress away', async () => {
+      await reachPlanReview();
+      const build = screen.getByRole('button', { name: 'Build it' });
+      await waitFor(() => expect(document.activeElement).toBe(build));
+    });
+
+    it('runs the plan only when the user presses "Build it"', async () => {
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts one build however fast "Build it" is pressed twice', async () => {
+      let finish!: () => void;
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await reachPlanReview();
+      const build = screen.getByRole('button', { name: 'Build it' });
+
+      fireEvent.click(build);
+      fireEvent.click(build);
+
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(build).toHaveProperty('disabled', true));
+      finish();
+    });
+
+    // The plan cost tokens to design, so Discard asks once -- the same rule
+    // as OrchestratorPanel, through the same useDiscardConfirm.
+    it('asks once, then drops the plan and closes on "Discard it"', async () => {
+      const onClose = vi.fn();
+      await reachPlanReview({}, onClose);
+
+      const discard = screen.getByRole('button', { name: 'Discard plan' });
+      await userEvent.click(discard);
+
+      expect(cancelPipeline).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByText('Discard this plan? Planning it again costs tokens.')).toBeTruthy();
+      // One button whose label changes, so focus stays where the user pressed.
+      expect(screen.getByRole('button', { name: 'Discard it' })).toBe(discard);
+      expect(document.activeElement).toBe(discard);
+
+      await userEvent.click(discard);
+
+      expect(cancelPipeline).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(runPipelineFromPlan).not.toHaveBeenCalled();
+    });
+
+    it('backs out of Discard with "Keep plan"', async () => {
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Keep plan' }));
+
+      // The pressed button unmounts with the prompt; focus goes back to Discard.
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Discard plan' }));
+      expect(screen.queryByText(/Discard this plan\?/)).toBeNull();
+      expect(cancelPipeline).not.toHaveBeenCalled();
+    });
+
+    // An armed Discard must not survive a build attempt: a refused build puts
+    // the same plan back on the review, where one click would then drop it.
+    it('disarms Discard when Build it is pressed, so a refused build returns unarmed', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'awaiting_approval';
+        hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
+      });
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+      expect(screen.getByRole('button', { name: 'Discard it' })).toBeTruthy();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      await screen.findByText(/The build did not start/);
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Discard it' })).toBeNull();
+      expect(cancelPipeline).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a build that fails after confirmation, with Try again', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        // A step ran and failed: the plan is spent, so the way on is a new one.
+        hoisted.state.orchestratorStatus = 'failed';
+      });
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toContain('Could not start building your game. Please try again.');
+      expect(toast.error).toHaveBeenCalledWith(
+        'Could not start building your game. Please try again.',
+      );
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    });
+
+    // #6831 review: a refused build returns the plan to the review with the
+    // reason on the STORE (status 'awaiting_approval', `orchestratorError`), so
+    // "Build it" is right there again and nothing is re-designed. Because it is
+    // store state, it also survives the dialog closing and in-app navigation
+    // (not a full page load such as a Stripe checkout; see #10270).
+    it('keeps the review up with the reason and a Buy tokens link when the reservation is refused', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'awaiting_approval';
+        hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
+      });
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
+      expect(screen.getByRole('link', { name: 'Buy tokens' }).getAttribute('href')).toBe(
+        '/settings?tab=tokens',
+      );
+      // One announcement: the alert and the status line, not also a toast.
+      expect(toast.error).not.toHaveBeenCalled();
+      // Says what happened, not "building" or "stopped early".
+      expect(screen.getByRole('status').textContent).toContain('The build did not start');
+      // Scoped to the build: designing the plan was metered.
+      expect(screen.getByText(/No build tokens were taken/)).toBeTruthy();
+      expect(screen.queryByText(/Nothing was spent/)).toBeNull();
+      // The way on is the plan it already has, not a paid re-design.
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+      expect(startQuickStart).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the refusal again when the dialog is reopened, e.g. after visiting settings', () => {
+      setState({
+        orchestratorStatus: 'awaiting_approval',
+        orchestratorError: INSUFFICIENT_TOKENS_MESSAGE,
+        currentPlan: PLAN,
+        tokenEstimate: ESTIMATE,
+      });
+
+      render(<QuickStartDialog open onClose={vi.fn()} />);
+
+      expect(screen.getByRole('heading', { name: 'Review your game plan' })).toBeTruthy();
+      expect(screen.getByRole('alert').textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
+    });
+
+    // The cached estimate is usually short too when the server refuses for
+    // balance. Its "this MAY cost more" row, with a second Buy tokens link,
+    // would contradict the refusal right above it.
+    it('shows one Buy tokens link, not the cost bar\'s speculative warning too, on a balance refusal', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'awaiting_approval';
+        hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
+      });
+      await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
+      expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      await screen.findByText(/The build did not start/);
+      expect(screen.getAllByRole('link', { name: 'Buy tokens' })).toHaveLength(1);
+      expect(screen.queryByText(/may cost more than your token balance/)).toBeNull();
+    });
+
+    // Any refusal but a short balance leaves the cost bar's balance warning
+    // (and its Buy tokens link) as the only one on screen, so it stays.
+    it('keeps the cost bar\'s balance warning for a refusal that is not about the balance', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'awaiting_approval';
+        hoisted.state.orchestratorError = SIGNED_OUT_MESSAGE;
+      });
+      await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
+
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      expect((await screen.findByRole('alert')).textContent).toContain(SIGNED_OUT_MESSAGE);
+      expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
+      // The alert names no link of its own; the bar's is the one.
+      expect(screen.getAllByRole('link', { name: /buy tokens/i })).toHaveLength(1);
+    });
+
+    // No reply, or a 2xx the client could not read: the hold may already have
+    // been taken. The dialog must not say nothing was spent.
+    it('does not claim nothing was spent when the reservation outcome is unknown', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'failed';
+        hoisted.state.orchestratorError = RESERVATION_UNCONFIRMED_MESSAGE;
+      });
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      expect((await screen.findByRole('alert')).textContent).toContain(RESERVATION_UNCONFIRMED_MESSAGE);
+      expect(screen.queryByText(/No build tokens were taken/)).toBeNull();
+      // The message says to check the balance; the way to is right there.
+      expect(screen.getByRole('link', { name: 'Check balance' }).getAttribute('href')).toBe(
+        '/settings?tab=tokens',
+      );
+      expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+    });
+
+    it('keeps the review up when the engine is not ready, with no Buy tokens link', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'awaiting_approval';
+        hoisted.state.orchestratorError = ENGINE_NOT_READY_MESSAGE;
+      });
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      expect((await screen.findByRole('alert')).textContent).toContain(ENGINE_NOT_READY_MESSAGE);
+      expect(screen.queryByRole('link', { name: 'Buy tokens' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    });
+
+    it('surfaces a step failure the store recorded, with Try again', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'failed';
+        hoisted.state.orchestratorError = 'The level could not be generated.';
+      });
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      expect((await screen.findByRole('alert')).textContent).toContain('The level could not be generated.');
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+      expect(screen.getByText('Nothing is running now.')).toBeTruthy();
+    });
+
+    it('surfaces a thrown failure', async () => {
+      runPipelineFromPlan.mockRejectedValueOnce(new Error('pipeline import failed'));
+      await reachPlanReview();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      expect((await screen.findByRole('alert')).textContent).toContain('pipeline import failed');
+    });
+
+    // "Build it" reserves the build's tokens, and the server's answer is the
+    // real balance check; `sufficientBalance` reads a cached client balance.
+    // The warning is shown and the build is not blocked on it (the panel's
+    // Start Building agrees). A refused reservation surfaces as an error.
+    it('shows a low-balance warning without blocking the build on a cached balance', async () => {
+      await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
+
+      expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Build it' })).toHaveProperty('disabled', false);
+    });
+
+    it('still offers "Build it" for a plan that carries no gate_plan', async () => {
+      await reachPlanReview({ currentPlan: { approvalGates: [] } });
+
+      expect(screen.getByRole('heading', { name: 'Review your game plan' })).toBeTruthy();
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
+    });
+
+    // "Close", Escape and the backdrop all keep the plan: nothing has been
+    // reserved yet, the design is already paid for, and reopening the dialog
+    // returns to this review. "Discard plan" is the way to drop it.
+    it.each([
+      ['the footer Close button', () => userEvent.click(screen.getByRole('button', { name: 'Close' }))],
+      ['Escape', () => userEvent.keyboard('{Escape}')],
+    ])('keeps the plan when the review is dismissed with %s', async (_how, dismiss) => {
+      const onClose = vi.fn();
+      await reachPlanReview({}, onClose);
+
+      await dismiss();
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(cancelPipeline).not.toHaveBeenCalled();
+      expect(runPipelineFromPlan).not.toHaveBeenCalled();
+    });
+
+    it('returns to the review when reopened with the plan still waiting', () => {
+      setState({ orchestratorStatus: 'awaiting_approval', currentPlan: PLAN, tokenEstimate: ESTIMATE });
+      render(<QuickStartDialog open onClose={vi.fn()} />);
+
+      expect(screen.getByRole('heading', { name: 'Review your game plan' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /platformer/i })).toBeNull();
+    });
+
+    // `confirming` guards the click until the whole run settles, so it must
+    // not own the status line: once the run reports 'executing', and at every
+    // mid-run gate, the live region has to say so.
+    it('drops "Starting the build" once the run is executing, and shows a mid-run gate\'s wait', async () => {
+      let finish!: () => void;
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const { rerender } = await reachPlanReview();
+      fireEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Starting the build'));
+
+      hoisted.state.orchestratorStatus = 'executing';
+      rerender(<QuickStartDialog open onClose={vi.fn()} />);
+      expect(screen.getByRole('status').textContent).toContain('Building your game');
+
+      hoisted.state.orchestratorStatus = 'awaiting_approval';
+      hoisted.state.pendingGate = {
+        id: 'gate_assets',
+        label: 'Generate assets?',
+        description: 'These cost tokens.',
+        displayData: {},
+      };
+      rerender(<QuickStartDialog open onClose={vi.fn()} />);
+      expect(screen.getByRole('status').textContent).toContain('Waiting on your approval');
+      finish();
+    });
+
+    it('says the build is starting, not "review it", while Build it is in flight', async () => {
+      let finish!: () => void;
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await reachPlanReview();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Build it' }));
+
+      await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Starting the build'));
+      expect(screen.queryByText(/only when you press Build it/)).toBeNull();
+      finish();
+    });
+
+    // "Build it" unmounts with the review once the run moves to 'executing'.
+    // Without a hand-off, focus falls to document.body inside the modal.
+    it('hands focus to the status line when the review goes away after Build it', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorStatus = 'executing';
+      });
+      await reachPlanReview();
+      const build = screen.getByRole('button', { name: 'Build it' });
+      await waitFor(() => expect(document.activeElement).toBe(build));
+
+      await userEvent.click(build);
+
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull());
+      expect(document.activeElement).toBe(screen.getByRole('status'));
+    });
+
+    it('hands focus to the status line when an answered mid-run gate goes away', async () => {
+      setState({
+        orchestratorStatus: 'awaiting_approval',
+        currentPlan: PLAN,
+        tokenEstimate: ESTIMATE,
+        pendingGate: {
+          id: 'gate_assets',
+          label: 'Generate assets?',
+          description: 'These cost tokens.',
+          displayData: {},
+        },
+      });
+      const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
+      const approve = screen.getByRole('button', { name: 'Approve' });
+      await waitFor(() => expect(document.activeElement).toBe(approve));
+
+      hoisted.state.pendingGate = null;
+      hoisted.state.orchestratorStatus = 'executing';
+      rerender(<QuickStartDialog open onClose={vi.fn()} />);
+
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull());
+      expect(document.activeElement).toBe(screen.getByRole('status'));
+    });
+
+    it('shows a mid-run gate, not the plan review, when a gate is pending', async () => {
+      setState({
+        orchestratorStatus: 'awaiting_approval',
+        currentPlan: PLAN,
+        tokenEstimate: ESTIMATE,
+        pendingGate: {
+          id: 'gate_assets',
+          label: 'Generate assets?',
+          description: 'These cost tokens.',
+          displayData: {},
+        },
+      });
+      render(<QuickStartDialog open onClose={vi.fn()} />);
+
+      expect(screen.getByText('Generate assets?')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+    });
+  });
+
+  // The dialog's description must follow the run: "Building. You can keep
+  // working" under a finished, failed or cancelled run misstates what is
+  // happening.
+  it.each([
+    ['completed', 'Your game is built.'],
+    ['cancelled', 'Nothing is running now.'],
+    ['failed', 'Nothing is running now.'],
+  ] as const)('describes a %s run without saying it is still building', async (status, copy) => {
+    startQuickStart.mockImplementationOnce(async () => {
+      hoisted.state.orchestratorStatus = status;
+      return true;
+    });
+    render(<QuickStartDialog open onClose={vi.fn()} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
+
+    expect(await screen.findByText(copy)).toBeTruthy();
+    expect(screen.queryByText(/Building\. You can keep working/)).toBeNull();
+  });
+
   describe('Play now (#10166)', () => {
     /** Builds through to the running view with the orchestrator in `status`. */
     async function buildToStatus(status: string, onClose = vi.fn()) {
@@ -501,7 +982,7 @@ describe('QuickStartDialog', () => {
       });
       render(<QuickStartDialog open onClose={onClose} />);
       await pickPlatformer();
-      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
       await screen.findByRole('status');
       return onClose;
     }
@@ -548,12 +1029,15 @@ describe('QuickStartDialog', () => {
     });
   });
 
+  // The real UI can never leave `selectedId` pointing at a card that isn't in
+  // `QUICK_START_GAME_TYPES` -- `handlePick` only ever sets it from that same
+  // list. This forces the one lookup miss `handleSubmit` defends against.
   it('refuses to submit and returns to pick when the selected card cannot be found', async () => {
     render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
 
     vi.mocked(findQuickStartGameType).mockReturnValueOnce(null);
-    await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Pick a game type first.');

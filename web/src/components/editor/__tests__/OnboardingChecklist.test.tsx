@@ -8,6 +8,7 @@ import { render, screen, fireEvent, cleanup, act } from '@/test/utils/componentT
 import { OnboardingChecklist } from '../OnboardingChecklist';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore as _useEditorStore } from '@/stores/editorStore';
+import { useChatStore } from '@/stores/chatStore';
 
 vi.mock('@/stores/onboardingStore', () => ({
   useOnboardingStore: vi.fn(() => ({})),
@@ -47,6 +48,10 @@ describe('OnboardingChecklist', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    // clearAllMocks keeps implementations, so restore the defaults a test may
+    // have replaced.
+    vi.mocked(useChatStore.getState).mockImplementation(() => ({ messages: [] }) as never);
+    vi.mocked(_useEditorStore.getState).mockImplementation(() => ({}) as never);
   });
 
   afterEach(() => {
@@ -165,10 +170,10 @@ describe('OnboardingChecklist', () => {
     expect(screen.getByText('Progress')).toBeInTheDocument();
   });
 
-  it('shows task count as 0/12 by default', () => {
+  it('shows task count as 0/13 by default', () => {
     setupStore();
     render(<OnboardingChecklist />);
-    expect(screen.getByText('0 / 12')).toBeInTheDocument();
+    expect(screen.getByText('0 / 13')).toBeInTheDocument();
   });
 
   // Every test above renders against a store whose `subscribe` captures the
@@ -195,6 +200,7 @@ describe('OnboardingChecklist', () => {
           hudElements: [],
           primaryAnimationClip: null,
           projectId: null,
+          orchestratorStatus: 'idle',
           ...over,
         });
       });
@@ -208,7 +214,7 @@ describe('OnboardingChecklist', () => {
 
       emitState({ entityAudio: { 'ent-1': { assetId: 'asset-1' } } });
 
-      expect(screen.getByText('1 / 12')).toBeInTheDocument();
+      expect(screen.getByText('1 / 13')).toBeInTheDocument();
     });
 
     it('leaves the audio task incomplete when no entity carries audio', () => {
@@ -217,7 +223,7 @@ describe('OnboardingChecklist', () => {
 
       emitState({ entityAudio: {} });
 
-      expect(screen.getByText('0 / 12')).toBeInTheDocument();
+      expect(screen.getByText('0 / 13')).toBeInTheDocument();
     });
 
     it('survives a snapshot with no entityAudio at all', () => {
@@ -228,7 +234,7 @@ describe('OnboardingChecklist', () => {
       render(<OnboardingChecklist />);
 
       expect(() => emitState({ entityAudio: undefined })).not.toThrow();
-      expect(screen.getByText('0 / 12')).toBeInTheDocument();
+      expect(screen.getByText('0 / 13')).toBeInTheDocument();
     });
 
     it('counts several completed tasks together', () => {
@@ -241,7 +247,126 @@ describe('OnboardingChecklist', () => {
         entityAudio: { 'ent-1': { assetId: 'asset-1' } },
       });
 
-      expect(screen.getByText('3 / 12')).toBeInTheDocument();
+      expect(screen.getByText('3 / 13')).toBeInTheDocument();
+    });
+
+    // #10170: the first AI-built game. Completion is rebuilt from each snapshot,
+    // so the status alone would untick the task when the next run starts; the
+    // FIRST_AI_GENERATION record (written by useCelebrations) keeps it ticked.
+    describe('"Build a Game with AI"', () => {
+      const recordFirstAiGeneration = () =>
+        localStorage.setItem(
+          'spawnforge-celebrated-milestones',
+          JSON.stringify(['FIRST_AI_GENERATION']),
+        );
+
+      it('ticks when a run completes', () => {
+        setupStore();
+        render(<OnboardingChecklist />);
+
+        emitState({ orchestratorStatus: 'completed' });
+
+        expect(screen.getByText('1 / 13')).toBeInTheDocument();
+      });
+
+      it.each([['failed'], ['cancelled'], ['executing']])(
+        'stays unticked when the run is %s',
+        (status) => {
+          setupStore();
+          render(<OnboardingChecklist />);
+
+          emitState({ orchestratorStatus: status });
+
+          expect(screen.getByText('0 / 13')).toBeInTheDocument();
+        },
+      );
+
+      it('stays ticked when a new run starts once the milestone is recorded', () => {
+        setupStore();
+        render(<OnboardingChecklist />);
+        emitState({ orchestratorStatus: 'completed' });
+        recordFirstAiGeneration();
+
+        emitState({ orchestratorStatus: 'decomposing' });
+
+        expect(screen.getByText('1 / 13')).toBeInTheDocument();
+      });
+
+      it('would untick on the next run without the record: the status alone is not enough', () => {
+        setupStore();
+        render(<OnboardingChecklist />);
+        emitState({ orchestratorStatus: 'completed' });
+
+        emitState({ orchestratorStatus: 'decomposing' });
+
+        expect(screen.getByText('0 / 13')).toBeInTheDocument();
+      });
+    });
+
+    // #10170 review: "Build a Game with AI" joined Basics after users had
+    // already unlocked Advanced with the six original tasks. Nothing about the
+    // unlock is persisted — it is recomputed from live state — so counting the
+    // new task in the gate would re-lock Advanced for every one of them.
+    describe('Advanced unlock', () => {
+      /**
+       * Satisfy the six original basics, with no AI build ever completed. Two of
+       * them read other stores rather than the snapshot: "Use AI Chat" reads the
+       * chat history and "Export Your Game" reads `useEditorStore.getState()`.
+       */
+      function completeSixOriginalBasics(over: Record<string, unknown> = {}) {
+        vi.mocked(useChatStore.getState).mockImplementation(
+          () => ({ messages: [{ role: 'user', content: 'hi' }] }) as never,
+        );
+        vi.mocked(_useEditorStore.getState).mockImplementation(
+          () => ({ cloudSaveStatus: 'saved' }) as never,
+        );
+        emitState({
+          nodeCount: 3,
+          primaryMaterial: { baseColor: [1, 0, 0, 1] },
+          physicsEnabled: true,
+          allScripts: { s1: { source: 'x'.repeat(60) } },
+          cloudSaveStatus: 'saved',
+          ...over,
+        });
+      }
+
+      /** A section's "done/total" count: JSX splits it across text nodes. */
+      const sectionCount = (text: string) =>
+        screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === text);
+
+      it('stays unlocked for a user with the six original basics and no AI build', () => {
+        setupStore();
+        render(<OnboardingChecklist />);
+
+        completeSixOriginalBasics();
+
+        // Basics reads 6 of 7 — the AI task is still offered, just not a gate.
+        expect(sectionCount('6/7')).toBeInTheDocument();
+        expect(screen.queryByText('Locked')).toBeNull();
+        expect(sectionCount('0/6')).toBeInTheDocument();
+      });
+
+      it('stays locked when an AI build stands in for one of the original basics', () => {
+        // A new user still has to do the original basics: the AI task is not a
+        // substitute for any of them.
+        setupStore();
+        render(<OnboardingChecklist />);
+
+        completeSixOriginalBasics({ physicsEnabled: false, orchestratorStatus: 'completed' });
+
+        expect(sectionCount('6/7')).toBeInTheDocument();
+        expect(screen.getByText('Locked')).toBeInTheDocument();
+      });
+
+      it('is locked for a brand-new user with nothing done', () => {
+        setupStore();
+        render(<OnboardingChecklist />);
+
+        emitState();
+
+        expect(sectionCount('0/7')).toBeInTheDocument();
+        expect(screen.getByText('Locked')).toBeInTheDocument();
+      });
     });
 
     it('drops a task back to incomplete when the state that satisfied it goes away', () => {
@@ -251,10 +376,10 @@ describe('OnboardingChecklist', () => {
       render(<OnboardingChecklist />);
 
       emitState({ entityAudio: { 'ent-1': { assetId: 'asset-1' } } });
-      expect(screen.getByText('1 / 12')).toBeInTheDocument();
+      expect(screen.getByText('1 / 13')).toBeInTheDocument();
 
       emitState({ entityAudio: {} });
-      expect(screen.getByText('0 / 12')).toBeInTheDocument();
+      expect(screen.getByText('0 / 13')).toBeInTheDocument();
     });
   });
 });

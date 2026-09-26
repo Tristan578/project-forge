@@ -64,7 +64,7 @@ declare global {
      *
      * Exists for the strict journey gate, which builds no WASM and runs Chromium
      * with `--disable-gpu` (which hangs `init_engine`). Without a dispatcher,
-     * `runPipelineFromPlan` fails with 'Engine not loaded' before any step runs,
+     * `runPipelineFromPlan` fails with `ENGINE_NOT_READY_MESSAGE` before any step runs,
      * so the generated-game pipeline could not be exercised there at all. The
      * supplied function goes through the same `tracked` wrapper as the real
      * engine dispatcher and is wired into every slice.

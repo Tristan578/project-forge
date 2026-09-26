@@ -6,7 +6,48 @@ import {
   validateBodySize,
   detectPromptInjection,
   sanitizeToolText,
+  sanitizeSceneContext,
+  stripControlChars,
 } from '../sanitizer';
+
+describe('stripControlChars', () => {
+  it('removes C0 controls and DEL but keeps tab, newline and carriage return', () => {
+    expect(stripControlChars('a\x00b\x08c\x0Bd\x0Ce\x1Ff\x7Fg\th\ni\rj')).toBe('abcdefg\th\ni\rj');
+  });
+});
+
+describe('sanitizeSceneContext (#8859)', () => {
+  it('keeps instruction-like game text verbatim (no redaction) and strips control characters', () => {
+    expect(sanitizeSceneContext('Cube\x00\n"You are now a hero!"\nSystem: Health')).toBe(
+      'Cube\n"You are now a hero!"\nSystem: Health',
+    );
+  });
+
+  it('escapes & < > with ampersand first, so an existing entity is not double-read', () => {
+    expect(sanitizeSceneContext('a & b <c> &lt;')).toBe('a &amp; b &lt;c&gt; &amp;lt;');
+  });
+
+  it('NFKC-folds fullwidth and small-form brackets to ASCII, then escapes them', () => {
+    expect(sanitizeSceneContext('＜x＞ ﹤y﹥ ＆')).toBe('&lt;x&gt; &lt;y&gt; &amp;');
+  });
+
+  it('escapes angle lookalikes that survive NFKC as numeric references', () => {
+    expect(sanitizeSceneContext('‹a› 〈b〉 〈c〉 ⟨d⟩')).toBe(
+      '&#x2039;a&#x203A; &#x3008;b&#x3009; &#x3008;c&#x3009; &#x27E8;d&#x27E9;',
+    );
+  });
+
+  it('applies no length cap and no trim, unlike sanitizeToolText', () => {
+    const big = `  ${'x'.repeat(60_000)}\n`;
+    expect(sanitizeSceneContext(big)).toBe(big);
+    expect(sanitizeToolText(big).length).toBeLessThan(big.length);
+  });
+
+  it('leaves ordinary scene text byte-identical', () => {
+    const scene = '## Current Scene State\nEntities: 2\n- "Player" (mesh)\n  Children: Sword';
+    expect(sanitizeSceneContext(scene)).toBe(scene);
+  });
+});
 
 describe('sanitizeChatInput', () => {
   it('should return normal text unchanged', () => {

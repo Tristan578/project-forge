@@ -284,11 +284,12 @@ export function search(
     const doc = docIndex.docs.get(path);
     if (!doc) continue;
 
+    const matchSection = findMatchSection(doc, rawQueryTerms);
     results.push({
       path,
       title: doc.title,
       score: Math.round(score * 100) / 100,
-      matchSection: findMatchSection(doc, rawQueryTerms),
+      ...(matchSection !== undefined && { matchSection }),
       snippet: extractSnippet(doc, rawQueryTerms),
     });
   }

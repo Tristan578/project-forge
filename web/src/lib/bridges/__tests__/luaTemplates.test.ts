@@ -92,6 +92,19 @@ describe('Lua Templates', () => {
       ).toThrow('exceeds maximum length');
     });
 
+    it('accepts pixelData up to MAX_PIXEL_DATA_CHARS, past the generic 1000-char cap', () => {
+      const atCap = '01'.repeat(luaTemplates.MAX_PIXEL_DATA_CHARS / 2);
+      const result = luaTemplates.renderTemplate('local p = "{{pixelData}}"', { pixelData: atCap });
+      expect(result).toBe(`local p = "${atCap}"`);
+    });
+
+    it('rejects pixelData one pixel over MAX_PIXEL_DATA_CHARS', () => {
+      const overCap = '01'.repeat(luaTemplates.MAX_PIXEL_DATA_CHARS / 2 + 1);
+      expect(() =>
+        luaTemplates.renderTemplate('local p = "{{pixelData}}"', { pixelData: overCap })
+      ).toThrow(`Parameter "pixelData" exceeds maximum length (${luaTemplates.MAX_PIXEL_DATA_CHARS} chars)`);
+    });
+
     it('allows safe string params', () => {
       const result = luaTemplates.renderTemplate(
         'local name = "{{name}}"',

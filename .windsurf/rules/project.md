@@ -65,7 +65,8 @@ cd web && npx eslint --max-warnings 0          # Lint (ZERO warnings)
 cd web && npx tsc --noEmit                      # TypeScript
 cd web && npx vitest run                        # Unit tests (2200+)
 cd web && npx vitest run --coverage             # With coverage
-cd mcp-server && npx vitest run                 # MCP server tests
+# MCP server: type-check first (vitest does not type-check)
+cd mcp-server && npx tsc --noEmit && npx vitest run
 cd web && npx playwright test                   # E2E (requires WASM build)
 ```
 

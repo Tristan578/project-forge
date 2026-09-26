@@ -264,10 +264,10 @@ cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 | Suite | Command |
 |-------|---------|
 | `lint` | `cd web && npx eslint --max-warnings 0 .` |
-| `tsc` | `cd web && npx tsc --noEmit` |
+| `tsc` | `cd web && npx tsc --noEmit` (also run in `mcp-server`, `packages/ui` and `apps/docs` when you touch them — CI type-checks all four) |
 | `vitest` | `cd web && npx vitest run` |
 | `playwright` | `cd web && npx playwright test` (requires WASM build) |
-| `mcp` | `cd mcp-server && npx vitest run` |
+| `mcp` | `cd mcp-server && npx tsc --noEmit && npx vitest run` (vitest does not type-check) |
 | `coverage` | `cd web && npm run test:coverage` (bounded, 600s timeout) |
 
 ### Targeted (preferred during development — avoid full suite when only a few files changed)

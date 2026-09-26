@@ -275,6 +275,12 @@ jobs:
 
       - run: npm ci
 
+      # vitest does not type-check. Without this step, mcp-server's tsconfig
+      # (strict + exactOptionalPropertyTypes, #7592) is enforced only by
+      # whoever remembers to run tsc by hand.
+      - run: npx tsc --noEmit
+        working-directory: mcp-server
+
       - run: npx vitest run
         working-directory: mcp-server
 

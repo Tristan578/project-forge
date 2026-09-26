@@ -154,7 +154,7 @@ export function isEditorOrigin(origin: string | undefined, extra: readonly strin
  * loopback-bound listener can otherwise produce.
  */
 export function handshakeRejection(
-  req: Pick<IncomingMessage, 'url' | 'headers'> & { socket: { remoteAddress?: string } },
+  req: Pick<IncomingMessage, 'url' | 'headers'> & { socket: { remoteAddress?: string | undefined } },
   extraEditorOrigins: readonly string[] = [],
 ): string | null {
   if (!isLoopbackPeer(req.socket.remoteAddress)) {

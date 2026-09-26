@@ -74,7 +74,7 @@ cd web && npx eslint --max-warnings 0 .
 cd web && npx vitest run <changed-test-dirs>
 
 # MCP tests
-cd mcp-server && npx vitest run
+cd mcp-server && npx tsc --noEmit && npx vitest run
 ```
 
 Record which checks pass and which fail BEFORE making changes. This is the baseline.
@@ -101,7 +101,7 @@ Re-run ALL checks from Phase 4. Every check that was green before must still be 
 cd web && npx tsc --noEmit
 cd web && npx eslint --max-warnings 0 .
 cd web && npx vitest run
-cd mcp-server && npx vitest run
+cd mcp-server && npx tsc --noEmit && npx vitest run
 ```
 
 If ANY check regresses, go back to Phase 5. Do not push until local validation is fully green.
@@ -157,7 +157,7 @@ Do NOT parallelize. Each PR must be fully GREEN before starting the next. If a f
 ## Scripts
 
 - `bash "${CLAUDE_SKILL_DIR}/scripts/pr-status.sh" <pr-number>` — Run the fail-closed repository readiness auditor
-- `bash "${CLAUDE_SKILL_DIR}/scripts/fix-common-ci.sh"` — Auto-fix common CI failures: runs `eslint --fix`, then `tsc --noEmit` to surface remaining type errors, then targeted unit tests
+- `bash "${CLAUDE_SKILL_DIR}/scripts/fix-common-ci.sh"` — Auto-fix common CI failures: runs `eslint --fix`, then `tsc --noEmit` in web, packages/ui, apps/docs and mcp-server to surface remaining type errors, then the MCP suite and targeted unit tests
 
 ## References
 

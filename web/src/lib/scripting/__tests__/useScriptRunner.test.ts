@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
 // ---------------------------------------------------------------------------
@@ -182,7 +183,40 @@ vi.mock('@/lib/playtest/playTickBus', () => ({
   resetPlayTickBus: mockResetPlayTickBus,
 }));
 
-import { useScriptRunner, getScriptCollisionCallback, getScriptGameEventCallback } from '../useScriptRunner';
+// A CALL-THROUGH spy on the toast: the real `showError` still runs, and the
+// sandbox boot-reason tests can read which creator message it was given.
+vi.mock('@/lib/toast', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/toast')>();
+  return { ...actual, showError: vi.fn(actual.showError) };
+});
+
+// A CALL-THROUGH wrapper, not a stub: every test runs the real
+// `createSandboxedScriptHost` unless it swaps the implementation, which only
+// the sandbox runtime-failure suite at the bottom does (and restores after).
+vi.mock('../sandboxOrigin', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../sandboxOrigin')>();
+  return { ...actual, createSandboxedScriptHost: vi.fn(actual.createSandboxedScriptHost) };
+});
+
+import {
+  useScriptRunner,
+  getScriptCollisionCallback,
+  getScriptGameEventCallback,
+  WATCHDOG_TIMEOUT_MS,
+  SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT,
+} from '../useScriptRunner';
+import {
+  createSandboxedScriptHost,
+  SANDBOX_BOOT_TIMEOUT_MS,
+  SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE,
+  SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+  SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE,
+  SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
+  type SandboxedScriptHost,
+  type SandboxedScriptHostOptions,
+} from '../sandboxOrigin';
+import { showError } from '@/lib/toast';
+import { AST_FALLBACK_NOTICE } from '../sandboxConfig';
 import { audioManager } from '@/lib/audio/audioManager';
 // Deliberately NOT mocked: the module singleton IS the thing under test here,
 // and a stub would pin the test's own idea of the wire instead of the hook's.
@@ -365,6 +399,29 @@ describe('useScriptRunner', () => {
       'update_transform',
       expect.objectContaining({ entityId: 'e1' }),
     );
+  });
+
+  it("ignores the worker's init_done: no command, no script-console entry, no warning", () => {
+    // scriptWorker posts { type: 'init_done' } at the end of every init (#8700,
+    // for the sandboxed frame's started flag). The same-origin transport sees
+    // it too, and it must stay invisible here.
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockAddScriptLog.mockClear();
+
+    act(() => {
+      latestWorker!.simulateMessage({ type: 'init_done' });
+    });
+
+    expect(mockWasmModule.handle_command).not.toHaveBeenCalled();
+    expect(mockAddScriptLog).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(mockSetEngineMode).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it('blocks unauthorized commands', () => {
@@ -978,6 +1035,33 @@ describe('useScriptRunner', () => {
     expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
   });
 
+  it('a watchdog stop runs the whole teardown itself, because the edit-mode branch will find no worker to tear down', () => {
+    mockEngineMode = 'play';
+    renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    act(() => {
+      mockPlayTickCallback!({
+        entities: {},
+        entityInfos: {},
+        inputState: { pressed: {}, justPressed: {}, justReleased: {}, axes: {} },
+      });
+    });
+    expect(mockResetPlayTickBus).not.toHaveBeenCalled();
+    expect(mockSetHudElements).not.toHaveBeenCalledWith([]);
+
+    act(() => {
+      vi.advanceTimersByTime(WATCHDOG_TIMEOUT_MS + 1);
+    });
+
+    // `mockSetEngineMode` is a bare vi.fn, so no 'edit' render follows: what is
+    // asserted here is only what the watchdog did on its own. It nulls the
+    // worker ref, so the edit-mode branch (guarded on that ref) skips the rest
+    // of the teardown — the watchdog has to do all of it.
+    expect(workerTerminated).toBe(true);
+    expect(mockPlayTickCallback).toBeNull();
+    expect(mockResetPlayTickBus).toHaveBeenCalled();
+    expect(mockSetHudElements).toHaveBeenCalledWith([]);
+  });
+
   it('clears watchdog when worker responds', () => {
     mockEngineMode = 'play';
     renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
@@ -1294,5 +1378,454 @@ describe('useScriptRunner', () => {
     unmount();
 
     expect(mockResetPlayTickBus).toHaveBeenCalledTimes(1);
+  });
+});
+// ---------------------------------------------------------------------------
+// Script isolation transport (#8700). NOT mocked: the flag is read through the
+// real sandboxConfig, and the sandboxed path runs the real sandboxOrigin module
+// (through the call-through wrapper declared at the top of this file).
+// Vitest does not run the build-time loader, so the bundled worker is the empty
+// placeholder — which is itself the observable: the host must refuse it loudly
+// rather than start a worker with no code.
+// ---------------------------------------------------------------------------
+describe('useScriptRunner — script isolation transport', () => {
+  const mockWasmModule = { handle_command: vi.fn() };
+
+  // The suite above unstubs every global in its afterAll.
+  afterAll(() => vi.unstubAllGlobals());
+
+  beforeEach(() => {
+    vi.stubGlobal('Worker', TestWorker);
+    vi.clearAllMocks();
+    mockEngineMode = 'play';
+    latestWorker = null;
+    workerPostMessages = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    document.body.innerHTML = '';
+  });
+
+  it('flag unset: the same-origin module Worker, exactly as before', () => {
+    vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', undefined);
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    expect(latestWorker).not.toBeNull();
+    expect(workerPostMessages.some((m) => (m as { type?: string }).type === 'init')).toBe(true);
+    unmount();
+  });
+
+  it("'sandboxed-origin': no same-origin Worker is constructed, and an unbundled worker is reported, not run", async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', 'sandboxed-origin');
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    expect(latestWorker).toBeNull();
+    // The creator sees plain words in the script console: vitest never runs
+    // the build-time loader, so this is the not-bundled case, which offers
+    // no retry because every Play of this build fails the same way...
+    await vi.waitFor(() =>
+      expect(mockAddScriptLog).toHaveBeenCalledWith(
+        expect.objectContaining({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE }),
+      ),
+    );
+    // ...and the bundling hint goes to the devtools, never to the script console.
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/was not bundled/));
+    const logged = mockAddScriptLog.mock.calls.map(([entry]) => (entry as { message: string }).message);
+    expect(logged.some((m) => /bundled|next\.config|boot-error|worker-error/.test(m))).toBe(false);
+    unmount();
+    errorSpy.mockRestore();
+  });
+
+  it("'ast': tells the creator in plain words and runs the sandboxed transport — never the weaker one", () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', 'ast');
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    expect(latestWorker).toBeNull();
+    expect(mockAddScriptLog).toHaveBeenCalledWith(
+      expect.objectContaining({ entityId: '*', level: 'warn', message: AST_FALLBACK_NOTICE }),
+    );
+    // The mode and issue number are for developers, in the devtools.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/'ast' is not implemented yet \(#8700/));
+    unmount();
+    warnSpy.mockRestore();
+  });
+
+  it('the sandbox boot timeout is shorter than the watchdog, so a boot failure is reported before the watchdog can fire', () => {
+    // By value, not by source text: both are the constants the code runs with.
+    expect(SANDBOX_BOOT_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(SANDBOX_BOOT_TIMEOUT_MS).toBeLessThan(WATCHDOG_TIMEOUT_MS);
+  });
+
+  it('a sandbox boot failure is logged to the creator once, stops Play, and is NOT followed by the infinite-loop message', async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', 'sandboxed-origin');
+      const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+
+      // A tick lands BEFORE the (asynchronous) boot failure, arming the
+      // watchdog — the ordering in which the misleading message used to follow.
+      expect(mockPlayTickCallback).not.toBeNull();
+      act(() => {
+        mockPlayTickCallback!({
+          entities: {},
+          entityInfos: {},
+          inputState: { pressed: {}, justPressed: {}, justReleased: {}, axes: {} },
+        });
+      });
+      expect(mockAddScriptLog).not.toHaveBeenCalled();
+
+      await vi.waitFor(() =>
+        expect(mockAddScriptLog).toHaveBeenCalledWith(
+          expect.objectContaining({ entityId: '*', level: 'error', message: SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE }),
+        ),
+      );
+
+      // Well past the watchdog AND the host's own boot timer.
+      act(() => {
+        vi.advanceTimersByTime(WATCHDOG_TIMEOUT_MS + SANDBOX_BOOT_TIMEOUT_MS + 1000);
+      });
+
+      const logged = mockAddScriptLog.mock.calls.map(([entry]) => (entry as { message: string }).message);
+      expect(logged).toEqual([SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE]);
+      expect(errorSpy).not.toHaveBeenCalledWith(expect.stringMatching(/timeout|infinite loop/i));
+      // Play is stopped, and no further tick can re-arm the watchdog.
+      expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
+      expect(mockPlayTickCallback).toBeNull();
+      // Fail CLOSED: a sandbox that cannot start is never replaced by the
+      // weaker same-origin transport. The same teardown serves WebKit's
+      // boot failure (CI run 35997735154; reason 'worker-error', pinned with
+      // the fake host below), so "no Worker" is what keeps its scripts off
+      // the network rather than merely off the sandbox. This test reaches it
+      // through a 'not-bundled' failure (the unbundled placeholder).
+      expect(latestWorker).toBeNull();
+      expect(vi.mocked(createSandboxedScriptHost)).toHaveBeenCalledTimes(1);
+      unmount();
+    } finally {
+      errorSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sandbox RUNTIME failures (#8700) — what the hook does with phase 'runtime'.
+//
+// The host is FAKED here, and only here: it captures the `onError` the hook
+// hands it and lets the test call it. That the real host reports an uncaught
+// error in an already-started worker as 'runtime' (and one before start as
+// 'boot') is pinned in `sandboxOrigin.test.ts` ("an uncaught error in a worker
+// that has STARTED is a runtime failure"); this suite pins the other half —
+// the hook's handling of that report.
+// ---------------------------------------------------------------------------
+describe('useScriptRunner — sandbox runtime failures (fake sandboxed host)', () => {
+  const mockWasmModule = { handle_command: vi.fn() };
+  type OnError = SandboxedScriptHostOptions['onError'];
+  const mockShowError = vi.mocked(showError);
+  let fakeHosts: { host: SandboxedScriptHost; onError: OnError }[] = [];
+  let actualCreate: typeof createSandboxedScriptHost;
+  let errorSpy: MockInstance<typeof console.error>;
+
+  const tick = () =>
+    act(() => {
+      mockPlayTickCallback!({
+        entities: {},
+        entityInfos: {},
+        inputState: { pressed: {}, justPressed: {}, justReleased: {}, axes: {} },
+      });
+    });
+
+  /** The worker says something, so it has started (and the watchdog is cleared). */
+  const workerSpeaks = (host: SandboxedScriptHost) =>
+    act(() => {
+      host.onmessage?.(new MessageEvent('message', { data: { type: 'log', entityId: 'e1', level: 'info', message: 'hi' } }));
+    });
+
+  const scriptLogMessages = () => mockAddScriptLog.mock.calls.map(([entry]) => (entry as { message: string }).message);
+  const runtimeDetailLines = () =>
+    errorSpy.mock.calls.filter(([line]) => typeof line === 'string' && line.includes('Script sandbox runtime failure'));
+  const suppressedLines = () =>
+    errorSpy.mock.calls.filter(([line]) => typeof line === 'string' && /suppressed/i.test(line));
+
+  afterAll(() => vi.unstubAllGlobals());
+
+  beforeEach(async () => {
+    actualCreate = (await vi.importActual<typeof import('../sandboxOrigin')>('../sandboxOrigin')).createSandboxedScriptHost;
+    vi.stubGlobal('Worker', TestWorker);
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    vi.stubEnv('NEXT_PUBLIC_SCRIPT_ISOLATION', 'sandboxed-origin');
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockEngineMode = 'play';
+    mockPlayTickCallback = null;
+    latestWorker = null;
+    fakeHosts = [];
+    vi.mocked(createSandboxedScriptHost).mockImplementation((options) => {
+      const host: SandboxedScriptHost = { onmessage: null, frame: null, postMessage: vi.fn(), terminate: vi.fn() };
+      fakeHosts.push({ host, onError: options.onError });
+      return host;
+    });
+  });
+
+  afterEach(() => {
+    vi.mocked(createSandboxedScriptHost).mockImplementation(actualCreate);
+    errorSpy.mockRestore();
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+  });
+
+  it("ignores init_done from the sandboxed worker: no command, no script-console entry, no warning, no stop", () => {
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    expect(latestWorker).toBeNull();
+    expect(fakeHosts).toHaveLength(1);
+    const [{ host }] = fakeHosts;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockAddScriptLog.mockClear();
+
+    act(() => {
+      host.onmessage?.(new MessageEvent('message', { data: { type: 'init_done' } }));
+    });
+
+    expect(mockWasmModule.handle_command).not.toHaveBeenCalled();
+    expect(mockAddScriptLog).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(mockShowError).not.toHaveBeenCalled();
+    expect(mockSetEngineMode).not.toHaveBeenCalled();
+    expect(host.terminate).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+    unmount();
+  });
+
+  it('tells the creator in the RUNTIME words, and leaves Play, the tick callback and the watchdog alone', () => {
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    // The sandboxed transport, not the same-origin Worker.
+    expect(latestWorker).toBeNull();
+    expect(fakeHosts).toHaveLength(1);
+    const [{ host, onError }] = fakeHosts;
+    expect(typeof onError).toBe('function');
+
+    workerSpeaks(host);
+    // A tick with no answer yet arms the watchdog.
+    tick();
+    mockAddScriptLog.mockClear();
+
+    act(() => onError('Script sandbox worker-error: TypeError: late', 'runtime'));
+
+    expect(scriptLogMessages()).toEqual([SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE]);
+    expect(scriptLogMessages()).not.toContain(SCRIPT_SANDBOX_START_FAILED_MESSAGE);
+    expect(mockAddScriptLog).toHaveBeenCalledWith(expect.objectContaining({ entityId: '*', level: 'error' }));
+    // The raw detail is for the devtools.
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('worker-error: TypeError: late'));
+    // Play keeps running: no stop, no teardown of the tick callback.
+    expect(mockSetEngineMode).not.toHaveBeenCalled();
+    expect(mockPlayTickCallback).not.toBeNull();
+    expect(host.terminate).not.toHaveBeenCalled();
+
+    // The watchdog armed by the tick is still armed: it fires on schedule. Had
+    // the runtime path cleared it (as the boot path does), nothing would.
+    act(() => {
+      vi.advanceTimersByTime(WATCHDOG_TIMEOUT_MS);
+    });
+    expect(scriptLogMessages()).toContain('Script execution timed out (possible infinite loop). Play mode stopped.');
+    expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
+    unmount();
+  });
+
+  it('a script that throws forever: ONE script-console entry, and a bounded devtools console', () => {
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    const [{ host, onError }] = fakeHosts;
+    workerSpeaks(host);
+    mockAddScriptLog.mockClear();
+    errorSpy.mockClear();
+
+    const failures = SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT * 20;
+    act(() => {
+      for (let i = 0; i < failures; i++) onError(`Script sandbox worker-error: Error: boom ${i}`, 'runtime');
+    });
+
+    expect(scriptLogMessages()).toEqual([SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE]);
+    // The first LIMIT details, in order, then one suppression line, then silence.
+    expect(runtimeDetailLines()).toHaveLength(SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT);
+    expect(runtimeDetailLines().map(([line]) => line)).toEqual(
+      Array.from({ length: SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT }, (_, i) =>
+        `[ScriptRunner] Script sandbox runtime failure: Script sandbox worker-error: Error: boom ${i}`,
+      ),
+    );
+    expect(suppressedLines()).toHaveLength(1);
+    expect(errorSpy).toHaveBeenCalledTimes(SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT + 1);
+    // Guard the premise: the loop really did outrun the bound.
+    expect(failures).toBeGreaterThan(SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT + 1);
+    unmount();
+  });
+
+  // BOOT reasons. The real host's mapping (WebKit's shape => 'worker-error', a
+  // silent frame => 'timeout') is pinned in sandboxOrigin.test.ts; these pin
+  // the runner's choice of creator message for each, and that everything else
+  // about the fail-closed path is identical for both.
+  it.each([
+    {
+      reason: 'worker-error' as const,
+      shown: SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
+      notShown: SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+      detail: 'Script sandbox worker-error: Error: Script error.',
+    },
+    {
+      reason: 'timeout' as const,
+      shown: SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+      notShown: SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE,
+      detail: 'Script sandbox did not start within 4000 ms.',
+    },
+    {
+      // A worker source that failed to load, or had not loaded when the boot
+      // budget ran out: possibly transient, so the retry is offered.
+      reason: 'source-load' as const,
+      shown: SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+      notShown: SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE,
+      detail: 'Script sandbox worker source did not load within 4000 ms.',
+    },
+    {
+      // A build that shipped without the bundled worker fails the same way on
+      // every Play and every reload, so neither is offered (round eight, ux).
+      reason: 'not-bundled' as const,
+      shown: SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE,
+      notShown: SCRIPT_SANDBOX_START_FAILED_MESSAGE,
+      detail: 'The sandboxed script worker was not bundled: scriptWorkerSource.bundle.ts was not rewritten.',
+    },
+  ])("boot failure, reason '$reason': shows the matching creator message and fails closed", ({ reason, shown, notShown, detail }) => {
+    const { unmount } = renderHook(() => useScriptRunner({ wasmModule: mockWasmModule }));
+    expect(fakeHosts).toHaveLength(1);
+    const [{ onError }] = fakeHosts;
+    // A tick arms the watchdog before the boot failure arrives.
+    tick();
+    mockAddScriptLog.mockClear();
+
+    act(() => onError(detail, 'boot', reason));
+
+    expect(scriptLogMessages()).toEqual([shown]);
+    expect(scriptLogMessages()).not.toContain(notShown);
+    expect(mockShowError).toHaveBeenCalledTimes(1);
+    expect(mockShowError).toHaveBeenCalledWith(shown);
+    // The raw detail and the reason are for the devtools.
+    expect(errorSpy).toHaveBeenCalledWith(`[ScriptRunner] Script sandbox boot failure (${reason}): ${detail}`);
+    // Fail closed, identically for both reasons: Play stops, the tick callback
+    // is gone, the watchdog never fires, and no same-origin Worker is built.
+    expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
+    expect(mockPlayTickCallback).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(WATCHDOG_TIMEOUT_MS + 1000);
+    });
+    expect(scriptLogMessages()).toEqual([shown]);
+    expect(latestWorker).toBeNull();
+    expect(vi.mocked(createSandboxedScriptHost)).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  // Sentry review thread on #10256: the boot-failure branch used to call
+  // setEngineMode('edit') with the failed host still in `workerRef`, leaving
+  // it to the edit-mode branch to release. The play-mode branch is guarded on
+  // `!workerRef.current`, so a play-mode effect run landing before that
+  // teardown found the dead host "running" and started nothing.
+  //
+  // How the race is modelled: `mockSetEngineMode` is a bare vi.fn, so the
+  // store never re-renders with 'edit' and the edit-mode teardown does NOT
+  // run. The play-mode effect is then re-run with engineMode still 'play' by
+  // giving it a new `wasmModule` identity (one of its real dependencies). That
+  // is exactly the precondition the review names: the effect evaluates its
+  // play guard after a boot failure, before any edit-mode teardown.
+  it('a boot failure releases the host itself, so a Play before the edit-mode teardown builds a NEW host', () => {
+    const wasmA = { handle_command: vi.fn() };
+    const wasmB = { handle_command: vi.fn() };
+    const { rerender, unmount } = renderHook(
+      ({ mode, wasm }) => {
+        mockEngineMode = mode;
+        return useScriptRunner({ wasmModule: wasm });
+      },
+      { initialProps: { mode: 'play' as string, wasm: wasmA } },
+    );
+    expect(fakeHosts).toHaveLength(1);
+    const first = fakeHosts[0];
+    tick();
+
+    act(() => first.onError('Script sandbox did not start within 4000 ms.', 'boot', 'timeout'));
+    expect(mockSetEngineMode).toHaveBeenCalledWith('edit');
+
+    rerender({ mode: 'play', wasm: wasmB });
+
+    // The new Play really starts: a second host, and a live tick callback.
+    expect(fakeHosts).toHaveLength(2);
+    expect(mockPlayTickCallback).not.toBeNull();
+    // The failed host was released by the boot-failure branch, once.
+    expect(first.host.terminate).toHaveBeenCalledTimes(1);
+
+    // The later edit-mode teardown ends the NEW session and does not touch the
+    // failed host again.
+    rerender({ mode: 'edit', wasm: wasmB });
+    expect(fakeHosts[1].host.terminate).toHaveBeenCalledTimes(1);
+    expect(first.host.terminate).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('after a boot failure, the ordinary edit-mode render tears nothing down twice, and the next Play starts', () => {
+    const { rerender, unmount } = renderHook(
+      ({ mode }) => {
+        mockEngineMode = mode;
+        return useScriptRunner({ wasmModule: mockWasmModule });
+      },
+      { initialProps: { mode: 'play' as string } },
+    );
+    const first = fakeHosts[0];
+    act(() => first.onError('Script sandbox did not start within 4000 ms.', 'boot', 'timeout'));
+
+    expect(() => rerender({ mode: 'edit' })).not.toThrow();
+    expect(first.host.terminate).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(first.host.postMessage).mock.calls.filter(([m]) => (m as { type?: string }).type === 'stop')).toHaveLength(1);
+
+    rerender({ mode: 'play' });
+    expect(fakeHosts).toHaveLength(2);
+    expect(mockPlayTickCallback).not.toBeNull();
+    unmount();
+  });
+
+  it('the three boot messages are distinct, and only the start-failed one offers a retry', () => {
+    // Guard the premise of the test above: were two constants equal, it could
+    // not tell those choices apart.
+    const messages = [SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE, SCRIPT_SANDBOX_START_FAILED_MESSAGE, SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE];
+    expect(new Set(messages).size).toBe(3);
+    expect(SCRIPT_SANDBOX_START_FAILED_MESSAGE).toMatch(/Play again|reload/i);
+    expect(SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE).not.toMatch(/Play again|reload|retry/i);
+    expect(SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE).not.toMatch(/Play again|reload|retry/i);
+  });
+
+  it('a new Play session reports again', () => {
+    const { rerender, unmount } = renderHook(
+      ({ mode }) => {
+        mockEngineMode = mode;
+        return useScriptRunner({ wasmModule: mockWasmModule });
+      },
+      { initialProps: { mode: 'play' as string } },
+    );
+    const first = fakeHosts[0];
+    workerSpeaks(first.host);
+    act(() => {
+      for (let i = 0; i < SANDBOX_RUNTIME_ERROR_CONSOLE_LIMIT + 3; i++) first.onError(`first ${i}`, 'runtime');
+    });
+    expect(scriptLogMessages().filter((m) => m === SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE)).toHaveLength(1);
+
+    rerender({ mode: 'edit' });
+    expect(first.host.terminate).toHaveBeenCalled();
+    rerender({ mode: 'play' });
+    expect(fakeHosts).toHaveLength(2);
+    const second = fakeHosts[1];
+    workerSpeaks(second.host);
+    mockAddScriptLog.mockClear();
+    errorSpy.mockClear();
+
+    act(() => second.onError('second 0', 'runtime'));
+
+    expect(scriptLogMessages()).toEqual([SCRIPT_SANDBOX_RUNTIME_FAILED_MESSAGE]);
+    expect(errorSpy).toHaveBeenCalledWith('[ScriptRunner] Script sandbox runtime failure: second 0');
+    expect(suppressedLines()).toHaveLength(0);
+    unmount();
   });
 });

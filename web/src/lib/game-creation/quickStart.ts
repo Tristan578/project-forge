@@ -18,8 +18,10 @@
  *
  * `gate_plan` fires immediately after decomposition (`planBuilder` always plans
  * it after `step_0`) and exists so a chat-driven user can review the plan before
- * spending tokens. A user who clicked "Make me a game" has already said yes to
- * exactly that, so re-asking strands them on a second confirmation.
+ * spending tokens. The quick-start dialog asks exactly that question itself: it
+ * shows the plan and its estimated cost and only runs the pipeline when the
+ * user presses "Build it" (#6831). Answering the gate as well would ask the
+ * same question twice.
  *
  * `gate_assets` and `gate_final` are deliberately NOT here — they gate real
  * spend and the finished result, and the quick-start dialog renders them inline.
