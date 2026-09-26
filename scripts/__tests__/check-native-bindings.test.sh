@@ -193,11 +193,14 @@ rc="$(run_gate "$space_nm" linux x64)"
 if [ "$rc" = "0" ]; then pass "path with spaces → gate 0 (quoting holds)"; else fail "path with spaces → expected 0, got $rc"; fi
 
 # ── workflow structural wiring (self-defense — canonical pattern from
-#    check-npm-audit.test.sh's quality-gates/ci.yml sections). The gate is only
-#    real if CI actually invokes it; a PR that unwires an invocation, adds
-#    continue-on-error, or drops the self-defense registration must fail here.
+#    check-npm-audit.test.sh's quality-gates/ci.yml/cd.yml sections). The gate
+#    is only real if CI actually invokes it; a PR that unwires an invocation,
+#    adds continue-on-error, or drops the self-defense registration must fail
+#    here. cd.yml (the deploy path) is derived the same way as ci.yml and
+#    quality-gates.yml, not hand-listed (#10222).
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
+CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
 
 # WHICH jobs need a native binding is DERIVED from the workflow text, never
 # typed out. This list was hand-maintained twice and wrong both times: first
@@ -510,9 +513,10 @@ assert_unwiring_caught() {
   fi
 }
 
-if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
+if [ -f "$CI_YML" ] && [ -f "$QG_YML" ] && [ -f "$CD_YML" ]; then
   ci="$(cat "$CI_YML")"
   qg="$(cat "$QG_YML")"
+  cdwf="$(cat "$CD_YML")"
 
   assert_gate_wired "$ci" ci.yml \
     build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-crossbrowser docs-e2e \
@@ -522,6 +526,12 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   # and editor-boot's Playwright config starts `next dev` (#10200).
   assert_gate_wired "$qg" quality-gates.yml \
     test-web test-mcp editor-boot lighthouse-delta
+  # cd.yml (the deploy path, outside ci.yml/quality-gates.yml's own PR-time
+  # coverage) has the same shape: test-web and test-mcp run vitest directly,
+  # and e2e builds Next.js itself (`npx next build`) before its own Playwright
+  # run. e2e already carried the gate; test-web and test-mcp did not (#10222).
+  assert_gate_wired "$cdwf" cd.yml \
+    test-web test-mcp e2e
 
   # The regression from #8632: test-e2e-crossbrowser loses its gate. The
   # hand-typed list did not contain that job, so this exact mutation left the
@@ -533,6 +543,12 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   assert_unwiring_caught test-mcp quality-gates.yml <<<"$qg"
   assert_unwiring_caught lighthouse-delta quality-gates.yml <<<"$qg"
   assert_unwiring_caught editor-boot quality-gates.yml <<<"$qg"
+  # #10222: cd.yml's own regression shape — test-web/test-mcp losing the gate
+  # they were just given, and e2e (which always had it) losing it too, so a
+  # future edit to any of the three is caught the same way.
+  assert_unwiring_caught test-web cd.yml <<<"$cdwf"
+  assert_unwiring_caught test-mcp cd.yml <<<"$cdwf"
+  assert_unwiring_caught e2e cd.yml <<<"$cdwf"
 
   # A NEW job appended to ci.yml. $1 = job name, $2 = its steps after npm ci.
   with_job() {
@@ -618,8 +634,12 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   #     the non-zero exit and pass the job on a dropped binding. Windowed to
   #     the invocation lines so legitimate continue-on-error elsewhere in a
   #     workflow does not false-positive.
-  for wf_label in ci.yml quality-gates.yml; do
-    if [ "$wf_label" = ci.yml ]; then wf_text="$ci"; else wf_text="$qg"; fi
+  for wf_label in ci.yml quality-gates.yml cd.yml; do
+    case "$wf_label" in
+      ci.yml) wf_text="$ci" ;;
+      quality-gates.yml) wf_text="$qg" ;;
+      *) wf_text="$cdwf" ;;
+    esac
     native_windows="$(grep -v '^[[:space:]]*#' <<<"$wf_text" | grep -B3 -A1 'bash scripts/check-native-bindings.sh' || true)"
     if grep -q 'continue-on-error' <<<"$native_windows"; then
       fail "a $wf_label native-bindings gate step has continue-on-error — gate exit code would be ignored"
@@ -643,7 +663,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
     fail "self-defense job does not run scripts/__tests__/check-native-bindings.test.sh"
   fi
 else
-  fail "workflow files not found at $CI_YML / $QG_YML — structural assertions cannot run"
+  fail "workflow files not found at $CI_YML / $QG_YML / $CD_YML — structural assertions cannot run"
 fi
 
 # ── @rolldown: the second native binding, and the reason this gate is a list ──
