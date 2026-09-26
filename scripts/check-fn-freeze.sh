@@ -1066,8 +1066,12 @@ derive_file() {
         # read as the command word, a here-string did the same, and >&2
         # ended the statement at its &). A doubled operator (>>, <>, &>>) is
         # read as two, which drops the same target. A process substitution,
-        # <( or >(, needs nothing here: the subshell it opens starts a new
-        # statement.
+        # <( or >(, is not a redirection: like $( ) it is part of the word it
+        # sits in (echo<(true) is one word to bash), and the statement around
+        # it resumes when it closes (thirty-ninth board round: opened as a
+        # plain subshell, it ended the statement, so in alias <(true) fail=:
+        # the alias words after it were never judged).
+        if ((c == "<" || c == ">") && substr(line, i + 1, 1) == "(") { open_sub("", 0, 0, 1); i += 2; continue }
         if (c == "<" || c == ">" || c2 == "&>") {
           if (fd_prefix()) w = ""
           end_word()
@@ -1301,7 +1305,16 @@ if [ -n "$violations" ]; then
         unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
         stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, a freeze inside a quoted string or fixture is text, not a statement, and a freeze naming a function this file never defines is left over from a rename or a deletion: move this line to directly after the closing brace of $name(), or delete it" ;;
         alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion (shopt -s expand_aliases, or posix mode: set -o posix, shopt -s -o posix, or any use of POSIXLY_CORRECT) — delete this line" ;;
-        trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 (or any numeric spelling of 0, such as 00, +0, -0 or a quoted '0 ') that exits or execs, directly or through a function of this file it may call, can replace the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — delete this trap or extdebug line, or make its action return without exiting; every word of such an action is read as a possible call, so when a function that exits is named in it only as an argument, leave that name out of the action" ;;
+        # A DEBUG trap row is labelled 'trap ... SIGNAL' and an extdebug row
+        # 'shopt ...': neither has an action to change, so their line is the
+        # fix. Every other trap row is an EXIT, ERR, RETURN or 0 action
+        # (thirty-ninth board round: one message told all three to edit an
+        # action).
+        trap)
+          case "$name" in
+            'trap ... '*|'shopt '*) echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding; a self-defense suite may not set a DEBUG trap (in any spelling of the signal) or enable extdebug — delete this line" ;;
+            *) echo "  - $file:$def: '$name' — a trap on EXIT, ERR, RETURN or 0 (or any numeric spelling of 0, such as 00, +0, -0 or a quoted '0 ') whose action exits or execs, directly or through a function of this file it may call, can replace the exit status the script chose, so a self-defense suite may not exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — make its action return without exiting, or delete the trap; every word of such an action is read as a possible call, so when a function that exits is named in it only as an argument, leave that name out of the action" ;;
+          esac ;;
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable — rename this function, or delete the enable call" ;;
         shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command or a closing brace, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
         brace)    echo "  - $file:$def: '$name' — this brace expansion produces more words than the gate enumerates (64, nested 8 deep), in a command name or an alias, shopt, set or trap statement, so a guarded word could sit past the cut where the gate cannot see it — list the words it needs explicitly, or split the statement" ;;

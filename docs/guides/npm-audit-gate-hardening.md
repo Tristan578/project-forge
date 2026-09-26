@@ -1041,6 +1041,16 @@ was replaced with this one (round twenty-nine).
   command word and the alias passed. A redirection operator and its target
   are now skipped as bash skips them, a substitution in the target is still
   lexed as the command it is, and `<(` and `>(` stay process substitutions.
+  A trap action's words are split at `<` and `>` too, so
+  `trap 'cleanup>/dev/null' EXIT` names `cleanup` (it was one word that
+  named nothing). The thirty-ninth found that `<(` and `>(`, lexed as a
+  plain subshell, ended the statement they sat in: in `alias <(true) fail=:`
+  the words after the process substitution were never judged, while bash
+  binds the alias. A process substitution is now lexed like `$( )`, as part
+  of its word, and the statement resumes when it closes. The same round
+  split the `trap` report: a DEBUG trap or extdebug line is told to delete
+  the line, and only an EXIT, ERR, RETURN or 0 action is told how to change
+  its action.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

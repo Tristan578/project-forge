@@ -753,6 +753,15 @@ FIX
 )"
 expect_rc "19j. 'trap ... DEBUG' in any case or spelling and 'shopt -s extdebug' in executable text are violations" 1 \
   "$(run_gate "$d_debug_trap")" "5 violation(s)" "fixture.test.sh:3: 'shopt -s extdebug'" "fixture.test.sh:4: 'trap ... DEBUG'" "fixture.test.sh:5: 'trap ... debug'" "fixture.test.sh:6: 'trap ... Debug'" "fixture.test.sh:7: 'shopt -s extdebug'"
+# Thirty-ninth board round (ux): these rows have no action to change, so
+# their report names only the line itself; the action advice belongs to the
+# EXIT, ERR, RETURN or 0 rows (19k-c).
+out_debug_trap="$(run_gate "$d_debug_trap")"
+if grep -q 'make its action return' <<<"$out_debug_trap" || ! grep -q 'or enable extdebug — delete this line' <<<"$out_debug_trap"; then
+  fail "19j-c. a DEBUG trap or extdebug report tells the reader to delete the line, not to edit an action" "$out_debug_trap"
+else
+  pass "19j-c. a DEBUG trap or extdebug report tells the reader to delete the line, not to edit an action"
+fi
 d_debug_words="$(mkfixture debug-words <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -832,8 +841,9 @@ finish() {
 readonly -f finish
 FIX
 )"
+out_fn_trap="$(run_gate "$d_fn_trap")"
 expect_rc "19k-c. an EXIT or ERR trap whose action calls a function of this file that exits or execs, directly or through another function, is a violation" 1 \
-  "$(run_gate "$d_fn_trap")" "2 violation(s)" "fixture.test.sh:5: 'trap cleanup ... EXIT (names cleanup(), which exits)'" "fixture.test.sh:6: 'trap teardown ... ERR (names teardown(), which exits)'"
+  "$out_fn_trap" "make its action return without exiting" "2 violation(s)" "fixture.test.sh:5: 'trap cleanup ... EXIT (names cleanup(), which exits)'" "fixture.test.sh:6: 'trap teardown ... ERR (names teardown(), which exits)'"
 d_fn_trap_ok="$(mkfixture function-trap-ok <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -2219,8 +2229,11 @@ fi
 # heredoc (19), >| (23) and <& (24); on line 22 &> follows echo, so the
 # alias words are its arguments and are not reported. In a trap action a
 # redirection ends a word too
-# (line 16: cleanup>/dev/null calls cleanup, the architect seat). 30ab-b runs
-# lines 3 to 8, 13 and 17 to 24 in bash (posix mode, which line 8 enables, lists an
+# (line 16: cleanup>/dev/null calls cleanup, the architect seat; line 25,
+# the same with <). A process substitution is part of its word and the
+# statement goes on after it (lines 26 and 27, the security seat of the
+# thirty-ninth round). 30ab-b runs
+# lines 3 to 8, 13, 17 to 24 and 26 in bash (posix mode, which line 8 enables, lists an
 # alias without the word alias).
 d_redir="$(mkfixture redirection <<'FIX'
 pass() { echo "  PASS: $1"; }
@@ -2247,31 +2260,36 @@ EOF
 echo &>/dev/null alias f12=:
 >|/dev/null alias f13=:
 <&0 alias f14=:
+trap 'cleanup</dev/null' ERR
+alias <(true) f15=:
+shopt -s >(true) expand_aliases
 FIX
 )"
 out_redir="$(run_gate "$d_redir")"
 expect_rc "30ab. a redirection and its target in front of a guarded command do not hide it" 1 "$out_redir" \
-  "13 violation(s)" "fixture.test.sh:3: 'alias f1=:'" "fixture.test.sh:4: 'shopt -s expand_aliases'" \
+  "16 violation(s)" "fixture.test.sh:3: 'alias f1=:'" "fixture.test.sh:4: 'shopt -s expand_aliases'" \
   "fixture.test.sh:5: 'alias f3=:'" "fixture.test.sh:6: 'alias f4=:'" "fixture.test.sh:7: 'alias f5=:'" \
   "fixture.test.sh:8: 'set -o posix'" "fixture.test.sh:9: 'alias f7=:'" \
   "fixture.test.sh:16: 'trap cleanup ... EXIT" "fixture.test.sh:17: 'alias f9=:'" \
   "fixture.test.sh:18: 'alias f10=:'" "fixture.test.sh:19: 'alias f11=:'" \
-  "fixture.test.sh:23: 'alias f13=:'" "fixture.test.sh:24: 'alias f14=:'"
+  "fixture.test.sh:23: 'alias f13=:'" "fixture.test.sh:24: 'alias f14=:'" \
+  "fixture.test.sh:25: 'trap cleanup ... ERR" "fixture.test.sh:26: 'alias f15=:'" \
+  "fixture.test.sh:27: 'shopt -s expand_aliases'"
 if grep -Eq 'fixture.test.sh:(10|11|12|13|20|21|22):' <<<"$out_redir"; then
   fail "30ab-c. an ordinary redirection, and a quoted 2 that is a command word, are not reported" "$out_redir"
 else
   pass "30ab-c. an ordinary redirection, and a quoted 2 that is a command word, are not reported"
 fi
-redir_bash="$({ echo 'shopt -u expand_aliases'; sed -n '3,8p;13p;17,24p' "$d_redir/fixture.test.sh"
+redir_bash="$({ echo 'shopt -u expand_aliases'; sed -n '3,8p;13p;17,24p;26p' "$d_redir/fixture.test.sh"
   echo 'shopt -q expand_aliases && echo EXPAND-ON; shopt -qo posix && echo POSIX-ON; alias'; } | bash 2>/dev/null)"
 if grep -q '^EXPAND-ON$' <<<"$redir_bash" && grep -q '^POSIX-ON$' <<<"$redir_bash" &&
    grep -Eq "^(alias )?f1=':'$" <<<"$redir_bash" && grep -Eq "^(alias )?f3=':'$" <<<"$redir_bash" &&
    grep -Eq "^(alias )?f4=':'$" <<<"$redir_bash" && grep -Eq "^(alias )?f5=':'$" <<<"$redir_bash" &&
    grep -Eq "^(alias )?f9=':'$" <<<"$redir_bash" && grep -Eq "^(alias )?f10=':'$" <<<"$redir_bash" &&
    grep -Eq "^(alias )?f11=':'$" <<<"$redir_bash" && grep -Eq "^(alias )?f13=':'$" <<<"$redir_bash" &&
-   grep -Eq "^(alias )?f14=':'$" <<<"$redir_bash" &&
+   grep -Eq "^(alias )?f14=':'$" <<<"$redir_bash" && grep -Eq "^(alias )?f15=':'$" <<<"$redir_bash" &&
    ! grep -Eq '^(alias )?f(8|12)=' <<<"$redir_bash"; then
-  pass "30ab-b. in this bash lines 3 to 8 and 17 to 24 of the fixture bind, except the arguments on lines 13 and 22"
+  pass "30ab-b. in this bash lines 3 to 8, 17 to 24 and 26 of the fixture bind, except the arguments on lines 13 and 22"
 else
   fail "30ab-b. the redirection probe did not reproduce in this bash (got '$redir_bash')"
 fi

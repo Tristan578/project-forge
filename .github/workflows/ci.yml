@@ -621,9 +621,13 @@ jobs:
     # every PR rather than one. Remeasured 2026-09-24: main took 36:53, 36:54
     # and 39:04, so the headroom is about 6 minutes, not the ~23 that main's
     # earlier ~22 minutes implied. The slowest suite is check-ci-success
-    # (about 6 minutes); check-fn-freeze adds 37 s (job 107713633065). The
-    # spread between runs of the same tree is mostly runner variance, which
-    # is the argument for headroom rather than for hunting a culprit.
+    # (about 6 minutes). check-fn-freeze measured 37 s here when its suite
+    # had 110 cases (job 107713633065, 2026-09-24); it has grown since, and
+    # its bash probes cost more under Git Bash than on Linux, so read that
+    # figure as a floor and re-measure it from this job after the suite
+    # changes. The spread between runs of the same tree is mostly runner
+    # variance, which is the argument for headroom rather than for hunting a
+    # culprit.
     timeout-minutes: 45
     permissions:
       contents: read
