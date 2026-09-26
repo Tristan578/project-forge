@@ -40,7 +40,7 @@ describe('ChatInput composer draft (#10172)', () => {
   it('adopts a draft set before it mounted, then clears the store copy', () => {
     setDraft('Change this Platformer so that ');
 
-    render(<ChatInput />);
+    render(<ChatInput draftTarget />);
 
     expect(composer().value).toBe('Change this Platformer so that ');
     expect(useChatStore.getState().composerDraft).toBe('');
@@ -49,17 +49,17 @@ describe('ChatInput composer draft (#10172)', () => {
 
   it('does not apply the same draft again on a later mount', () => {
     setDraft('Change this Platformer so that ');
-    const first = render(<ChatInput />);
+    const first = render(<ChatInput draftTarget />);
     expect(composer().value).toBe('Change this Platformer so that ');
     first.unmount();
 
-    render(<ChatInput />);
+    render(<ChatInput draftTarget />);
 
     expect(composer().value).toBe('');
   });
 
   it('puts a draft after what the user already typed, on its own line', () => {
-    render(<ChatInput />);
+    render(<ChatInput draftTarget />);
     fireEvent.change(composer(), { target: { value: 'make it night' } });
 
     setDraft('Change this Platformer so that ');
@@ -69,7 +69,7 @@ describe('ChatInput composer draft (#10172)', () => {
   });
 
   it('focuses the composer with the caret at the end so the user can finish the sentence', () => {
-    render(<ChatInput />);
+    render(<ChatInput draftTarget />);
 
     setDraft('Change this Platformer so that ');
 
@@ -79,8 +79,18 @@ describe('ChatInput composer draft (#10172)', () => {
     expect(el.selectionEnd).toBe(el.value.length);
   });
 
-  it('adopts a second, different draft while still mounted', () => {
+  it('a composer that is not the draft target neither adopts, clears, nor focuses', () => {
     render(<ChatInput />);
+
+    setDraft('Change this Platformer so that ');
+
+    expect(composer().value).toBe('');
+    expect(document.activeElement).not.toBe(composer());
+    expect(useChatStore.getState().composerDraft).toBe('Change this Platformer so that ');
+  });
+
+  it('adopts a second, different draft while still mounted', () => {
+    render(<ChatInput draftTarget />);
     setDraft('First draft');
     fireEvent.change(composer(), { target: { value: '' } });
 
