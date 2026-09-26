@@ -81,9 +81,14 @@ def ensure_running():
     try:
         projects = api('/projects')
     except (OSError, ValueError):
-        args = [binary(), 'start', '--port', '3010']
-        if os.environ.get('TASKBOARD_DB'):
-            args += ['--db', str(default_db())]
+        # Always pass the resolved path explicitly, never conditionally on
+        # TASKBOARD_DB being set. The taskboard binary has its own default
+        # (os.UserConfigDir(), falling back to ~/.config on ANY platform,
+        # Windows included, the moment APPDATA is unset) which does not
+        # match default_db()'s platform-specific fallback above. Passing
+        # --db unconditionally makes default_db() the ONLY path the server
+        # can open, closing exactly the divergence #9995 reported.
+        args = [binary(), 'start', '--port', '3010', '--db', str(default_db())]
         subprocess.run(args, env=runtime_env(), check=True, stdout=sys.stderr)
         for _ in range(20):
             try:
@@ -103,9 +108,11 @@ def main():
         return
     ensure_running()
     if command == 'mcp':
-        args = [binary(), 'mcp']
-        if os.environ.get('TASKBOARD_DB'):
-            args += ['--db', str(default_db())]
+        # Same rule as ensure_running(): --db is unconditional. The MCP
+        # subcommand opens its OWN database connection rather than talking
+        # to the already-verified HTTP server, so without an explicit path
+        # it can silently diverge from what ensure_running() just verified.
+        args = [binary(), 'mcp', '--db', str(default_db())]
         raise SystemExit(subprocess.call(args, env=runtime_env()))
     if command == 'identity':
         import taskboard_sync
