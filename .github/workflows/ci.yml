@@ -620,11 +620,17 @@ jobs:
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
     runs-on: windows-latest
-    # Raised from 30 after review measured 26:52 on this branch — ~3 minutes
-    # of headroom on a job that is in ci-success's needs:, so a tip-over blocks
-    # every PR rather than one. The delta against main's ~22 minutes is mostly
-    # runner variance rather than any single suite, which is the argument for
-    # headroom rather than for hunting a culprit.
+    # Raised from 30 after review measured 26:52 on a branch — ~3 minutes of
+    # headroom on a job that is in ci-success's needs:, so a tip-over blocks
+    # every PR rather than one. Remeasured 2026-09-24: main took 36:53, 36:54
+    # and 39:04, so the headroom is about 6 minutes, not the ~23 that main's
+    # earlier ~22 minutes implied. The slowest suite is check-ci-success
+    # (about 6 minutes). check-fn-freeze took 52 s here at 151 cases (job
+    # 108446401974, 2026-09-26, whole job 30:38), up from 44 s at 144 cases
+    # (job 108440510702); its bash probes cost more under Git Bash than on
+    # Linux, so re-measure it from this job after the suite changes. The
+    # spread between runs of the same tree is mostly runner variance, which
+    # is the argument for headroom rather than for hunting a culprit.
     timeout-minutes: 45
     permissions:
       contents: read
@@ -1265,6 +1271,7 @@ jobs:
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
+            scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -1435,6 +1442,19 @@ jobs:
         # suite-wiring pair above: the gate's own suite runs first so a broken
         # gate is distinguishable from a genuine finding.
         run: bash scripts/check-pin-strength.sh
+
+      - name: Run function-freeze gate test suite
+        run: bash scripts/__tests__/check-fn-freeze.test.sh
+
+      - name: Run function-freeze gate
+        # Every function a bash self-defense suite defines must be frozen with
+        # `readonly -f` directly after its definition (PF-1076 / #9125): a
+        # bash function resolves by name at call time, so one inserted
+        # `fail() { :; }` otherwise turns every FAIL into silence and the suite
+        # exits 0 having checked nothing. Same pairing as the two gates above:
+        # the gate's own suite runs first so a broken gate is distinguishable
+        # from a genuine finding.
+        run: bash scripts/check-fn-freeze.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without

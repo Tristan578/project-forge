@@ -32,7 +32,9 @@ SCRIPT="$HERE/../cd-rolling-release.sh"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -76,16 +78,21 @@ fixture() {
   key="$(printf '%s %s' "$1" "$2" | tr '/ ' '__')"
   printf '%s\n%s' "$4" "$3" > "$TMP/fx/$key"
 }
+readonly -f fixture
 # fixture_nth <N> <METHOD> <path> <status> <body>: the answer for the Nth call only.
 fixture_nth() {
   local key
   key="$(printf '%s %s' "$2" "$3" | tr '/ ' '__')"
   printf '%s\n%s' "$5" "$4" > "$TMP/fx/$key.$1"
 }
+readonly -f fixture_nth
 reset_fixtures() { rm -f "$TMP/fx"/* "$TMP/cnt"/*; : > "$TMP/log"; : > "$TMP/out"; }
+readonly -f reset_fixtures
 count() { grep -c "^$1\$" "$TMP/log" || true; }
+readonly -f count
 # The LAST disposition written is the one cd.yml reads.
 last_disposition() { grep '^disposition=' "$TMP/out" | tail -1; }
+readonly -f last_disposition
 
 run() {
   (cd "$TMP" && PATH="$TMP/bin:$PATH" CURL_LOG="$TMP/log" FIXTURES="$TMP/fx" COUNTS="$TMP/cnt" \
@@ -93,6 +100,7 @@ run() {
     VERCEL_API_URL=https://api.example.test RR_POLL_ATTEMPTS="${ATTEMPTS:-3}" RR_POLL_INTERVAL_S=0 \
     GITHUB_OUTPUT="$TMP/out" bash "$SCRIPT" "$@" 2>&1)
 }
+readonly -f run
 
 RR=/v1/projects/prj_1/rolling-release
 PROJECT=/v9/projects/prj_1
@@ -105,6 +113,7 @@ ROLLBACK_BASE=/v1/projects/prj_1/rollback/dpl_base
 # the script reads. Note the wrapper and the nesting.
 LIVE_ACTIVE='{"rollingRelease":{"state":"ACTIVE","substate":null,"currentDeployment":{"id":"dpl_4ReF3BPyrssnUfUQC7f4aB7wH9jt","url":"spawnforge-75vgr46qg-tnolan.vercel.app","target":"production","createdAt":1788320738792,"readyState":"READY"},"canaryDeployment":{"id":"dpl_B6Ug75PArByBjN76t2EtanXNmBhj","url":"spawnforge-ia2589c6u-tnolan.vercel.app","target":"production","createdAt":1788323657956,"readyState":"READY"},"queuedDeploymentId":null,"currentCanaryPercentage":5,"activeStage":{"index":0,"isFinalStage":false,"targetPercentage":5,"requireApproval":false,"duration":10,"linearShift":true}}}'
 wrap() { printf '{"rollingRelease":%s}' "$1"; }
+readonly -f wrap
 
 # ---------------------------------------------------------------------------
 echo "=== lkg: the rollback target is the rolling-release BASE, never the canary ==="
