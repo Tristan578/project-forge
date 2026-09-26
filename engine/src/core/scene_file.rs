@@ -320,4 +320,38 @@ mod validation_tests {
             .collect();
         assert!(parse_entities(entities).is_ok());
     }
+
+    // #10267: `MaterialData::default()` sets `attenuation_distance` to
+    // `f32::INFINITY`, which serde_json serializes as `null`. A scene
+    // carrying an entity with a default, unmodified material must still
+    // save-and-load, end to end through `build_scene_file` / `parse_scene_file`.
+    #[test]
+    fn scene_with_a_default_material_round_trips() {
+        use crate::core::material::MaterialData;
+
+        let mut snapshot = entity("root", None);
+        snapshot.material_data = Some(MaterialData::default());
+
+        let scene_file = build_scene_file(
+            "Recovery",
+            &EnvironmentSettings::default(),
+            &GlobalAmbientLight::default(),
+            &InputMap::default(),
+            HashMap::new(),
+            &PostProcessingSettings::default(),
+            &AudioBusConfig::default(),
+            vec![snapshot],
+            None,
+            None,
+        );
+        let json = serde_json::to_string(&scene_file).expect("serialize scene with a material");
+
+        let parsed = parse_scene_file(&json)
+            .expect("a scene with a default (unmodified) material must load");
+        let material = parsed.entities[0]
+            .material_data
+            .as_ref()
+            .expect("material_data must survive the round trip");
+        assert_eq!(material.attenuation_distance, f32::INFINITY);
+    }
 }
