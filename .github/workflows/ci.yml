@@ -626,10 +626,13 @@ jobs:
     # runner variance rather than any single suite, which is the argument for
     # headroom rather than for hunting a culprit.
     # Raised from 45 to 60 (#10285): the job took 41:22 on 2026-09-26 (job
-    # 108460157387, a PR head carrying the 175-case function-freeze suite),
-    # under 4 minutes short of 45. Main measured 36:53, 36:54 and 39:04 on
-    # 2026-09-24. Suites only grow and runner variance spans minutes, so 60
-    # leaves about 19 minutes; re-measure before trusting it again.
+    # 108460157387), under 4 minutes short of 45; main measured 36:53, 36:54
+    # and 39:04 on 2026-09-24, against about 22 on 2026-09-15. That growth is
+    # not runner variance. This job runs all 70 bash suites one after another
+    # under Git Bash, where process spawns are slow: check-ci-success alone
+    # took 553 s of that run, and check-fn-freeze 92 s against about 10 s on
+    # Linux. 60 is headroom while #10290 finds and cuts where the time goes;
+    # raise it again only with that issue's measurements, not in its place.
     timeout-minutes: 60
     permissions:
       contents: read
