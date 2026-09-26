@@ -506,7 +506,12 @@ derive_file() {
         # cannot fake it: `if`, `do` and `{` open, `fi`, `done` and `}` close
         # (`case`/`esac` are handled below as ordinary command words).
         if (!rq && (w == "if" || w == "do" || w == "{")) bs++
-        if (!rq && (w == "}") && bs > 0) bs--
+        if (!rq && (w == "}") && bs > 0) {
+          bs--
+          # The brace group of the definition on this line closed here, in
+          # command position, as bash reads it (see the definition rule).
+          if (def_name != "" && def_line == NR && d == 0 && bs == def_bs) grp_closed = 1
+        }
         if ((!rq && w ~ /^(!|if|then|elif|else|do|while|until|coproc|\{|\})$/) ||
             w ~ /^(builtin|command|time|-p)$/ ||
             w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { w = ""; return }
@@ -539,7 +544,10 @@ derive_file() {
       if (in_function) {
         if (index(builtins, " " w " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "function " w, NR, NR
         shape_check("function " w, w)
-        in_function = 0
+        # The body group follows the name, so what comes next is a command
+        # word again, as after `name()`: its brace counts toward the nesting,
+        # which is what closes a one-line definition (thirty-second round).
+        in_function = 0; cmd_seen = 0; cmd_word = ""; nwords = 0
       }
       if (in_alias && anym("^[A-Za-z_][A-Za-z0-9_]*="))
         printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
@@ -790,7 +798,16 @@ derive_file() {
           i++; continue
         }
         if (q == "d") {
-          if (c == "\\") { w = w substr(line, i + 1, 1); i += 2; continue }
+          # Inside double quotes a backslash escapes only a dollar, a backtick,
+          # a double quote, a backslash or the newline; before anything else
+          # bash keeps it, so "al\ias" runs al\ias, not alias (thirty-second
+          # board round). A trap action is unescaped again where it is judged.
+          if (c == "\\") {
+            dq_nc = substr(line, i + 1, 1)
+            if (dq_nc == "" || dq_nc == "$" || dq_nc == "`" || dq_nc == "\"" || dq_nc == "\\") w = w dq_nc
+            else w = w c dq_nc
+            i += 2; continue
+          }
           if (c == "\"") { q = ""; i++; continue }
           if (c3 == "$((") { open_sub(q, 1, 1, 1); i += 3; continue }
           if (c2 == "$(") { open_sub(q, 0, 0, 1); i += 2; continue }
@@ -1011,8 +1028,14 @@ derive_file() {
       # round found the adjacent-only pattern left such a helper invisible).
       # What follows the opener on the line decides the body: nothing (after
       # the comment is removed) means the brace group opens on a later line;
-      # `{` means it opens here and closes here if the code part ends in `}`;
-      # anything else is a body this derivation does not follow, reported.
+      # `{` means it opens here, and it closes here when the lexer saw its
+      # closing brace in command position on this line (grp_closed), whatever
+      # code follows it; anything else is a body this derivation does not
+      # follow, reported. A brace that is only an argument (`echo }`) closes
+      # nothing, to bash or here, and a one-liner followed by more code
+      # (`f() { :; }; true`) still ends on its own line (thirty-second board
+      # round: the old test, a code part ending in a brace, left both open
+      # until a later column-0 brace and swallowed every definition between).
       name = ""; rest = ""
       if (match(line, /^(function[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\([[:space:]]*\)/)) {
         name = substr(line, RSTART, RLENGTH); rest = substr(line, RLENGTH + 1)
@@ -1026,12 +1049,13 @@ derive_file() {
         # The name is recorded before the line is lexed, so the commands of a
         # one-line body are attributed to it (the trap rule reads them).
         def_name = name; def_line = NR; defined[name] = 1; line_def = name; def_bs = bs
+        grp_closed = 0
         lex_line(line)
         body = (code_end > opener + 1) ? substr(line, opener + 1, code_end - opener - 1) : ""
         sub(/^[[:space:]]+/, "", body); sub(/[[:space:]]+$/, "", body)
         if (body == "") { brace_pending = 1; next }
         if (body ~ /^\{/) {
-          if (body ~ /\}$/) flush_def()
+          if (grp_closed) flush_def()
           next
         }
         printf "%s\t%s\t%d\t%d\tunsupported\n", file, name, NR, NR

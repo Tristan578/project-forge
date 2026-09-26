@@ -975,6 +975,19 @@ was replaced with this one (round twenty-nine).
   group left open at the end of its line is now a `multiline` violation
   wherever it stands, since the text past the line end cannot be judged;
   a quoted one is judged whole, because a quote carries across lines.
+  The thirty-second found where a one-line definition ends. The gate had
+  called a definition line a one-liner when its code ended in a brace, so
+  `noop() { :; }; true` stayed open until a later column-0 brace and the
+  definitions in between were never derived (a real, unfrozen `evil()` read
+  as frozen), while `f() { echo }`, whose brace is only an argument, was
+  closed although bash reads the next line as its body, freeze included. A
+  definition now closes where the lexer sees its brace in command position,
+  and `function NAME {` puts that brace in command position as `NAME()`
+  does. The same round found the double-quote branch dropping every
+  backslash, while bash keeps one before anything but a dollar, backtick,
+  double quote, backslash or newline: `"al\ias"` is the command `al\ias`.
+  That only ever reported too much, never too little, but the gate claims to
+  tokenise as bash does, so it now keeps the backslash where bash does.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

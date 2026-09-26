@@ -1785,6 +1785,83 @@ else
   fail "30p-b. the multi-line default did not reproduce in this bash (got '$multi_bash')"
 fi
 
+# ---- 30q. a definition line closes where bash closes its brace group --------
+# Thirty-second board round (security): a one-line body followed by more code
+# (line 3) did not end in a brace, so the definition stayed open until a later
+# column-0 brace and every definition in between (evil, lines 4 to 6) was never
+# derived. A group now closes on its line when its brace closes in command
+# position, whatever follows. The reverse also holds: a brace that is only an
+# argument (line 8, echo }) closes nothing, so the freeze on line 9 runs inside
+# f and f is unfrozen, as it is in bash. Line 11 closes its group and then
+# opens an if on the same line. 30q-b checks the line-8 shape in bash.
+d_close="$(mkfixture definition-close <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+noop() { :; }; true
+evil() {
+  echo pwned
+}
+readonly -f evil
+f() { echo }
+readonly -f f
+}
+g() { :; }; if true; then
+  :
+fi
+readonly -f g
+FIX
+)"
+out_close="$(run_gate "$d_close")"
+expect_rc "30q. a definition closes where its brace closes in command position, whatever follows it" 1 "$out_close" \
+  "4 violation(s)" "(5 definition(s) derived)" \
+  "fixture.test.sh:3: noop() is not frozen" "fixture.test.sh:8: f() is not frozen" \
+  "fixture.test.sh:11: g() is not frozen" "fixture.test.sh:14: 'readonly -f g'"
+close_bash="$(bash -c $'f() { echo }\nreadonly -f f\n}\nf() { echo REDEFINED; }\nf' 2>&1)"
+if [ "$close_bash" = "REDEFINED" ]; then
+  pass "30q-b. in this bash a brace that is only an argument does not close the group, so the freeze after it never runs"
+else
+  fail "30q-b. the argument-brace probe did not reproduce in this bash (got '$close_bash')"
+fi
+
+# ---- 30r. inside double quotes a backslash escapes only five characters -----
+# Thirty-second board round (architect): the lexer dropped every backslash in
+# a double-quoted word, while bash keeps one before anything but a dollar, a
+# backtick, a double quote, a backslash or the newline. So "al\ias" (line 3)
+# is the command al\ias to bash, not alias, and "expand\_aliases" (line 4) is
+# not an option name: neither is reported. Line 5, quotes split around the
+# word with no backslash, is still alias. Lines 6 to 10 pin each of the five
+# escapes through the reported word: an escaped dollar, backtick, double
+# quote and backslash lose the backslash, an ordinary letter keeps it. Lines
+# 11 and 12 continue a double-quoted word over a backslash-newline, which bash
+# removes, so the word is alias. 30r-b runs line 3 in bash.
+d_dqbs="$(mkfixture dq-backslash <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+"al\ias" fail=:
+shopt -s "expand\_aliases"
+"al"ias fail=:
+alias "fail=a\$b"
+alias "fail=a\`b"
+alias "fail=a\"b"
+alias "fail=a\\b"
+alias "fail=a\qb"
+"ali\
+as" fail=:
+FIX
+)"
+out_dqbs="$(run_gate "$d_dqbs")"
+expect_rc "30r. a double-quoted backslash escapes a dollar, backtick, quote, backslash or newline and is kept before anything else" 1 "$out_dqbs" \
+  "7 violation(s)" "fixture.test.sh:5: 'alias fail=:'" \
+  "fixture.test.sh:6: 'alias fail=a\$b'" "fixture.test.sh:7: 'alias fail=a\`b'" \
+  "fixture.test.sh:8: 'alias fail=a\"b'" "fixture.test.sh:9: 'alias fail=a\\b'" \
+  "fixture.test.sh:10: 'alias fail=a\\qb'" "fixture.test.sh:12: 'alias fail=:'"
+dqbs_bash="$(bash -c 'shopt -s expand_aliases; "al\ias" fail=: 2>/dev/null; echo "rc=$?"' 2>&1)"
+if [ "$dqbs_bash" = "rc=127" ]; then
+  pass "30r-b. in this bash \"al\\ias\" is a command named al\\ias, not alias"
+else
+  fail "30r-b. the double-quoted backslash probe did not reproduce in this bash (got '$dqbs_bash')"
+fi
+
 # ---- 30k. an ANSI-C quoted string is decoded before the word is judged -------
 # Seventeenth board round (security): bash decodes octal, hex, \u, \U and
 # named escapes inside an ANSI-C quoted string, and a NUL ends its value, so

@@ -253,7 +253,11 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   names as arguments or in strings are text.
 - The body is a brace group, opened on the definition line or the next
   non-blank, non-comment line, closed by `}` at column 0 (or on the same line
-  for a one-liner; a trailing comment is not part of it). A subshell body or a
+  for a one-liner; a trailing comment is not part of it). A one-liner ends
+  where its `}` stands in command position, as bash reads it, whatever code
+  follows (`f() { :; }; true` is a one-liner), and a `}` that is only an
+  argument (`f() { echo }`) closes nothing, so the next line is still the
+  body (round thirty-two). A subshell body or a
   bare compound body is reported as `unsupported` — the gate never skips a
   definition it cannot follow.
 - Every function at true top level (outside any function body, subshell,
