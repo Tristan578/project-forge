@@ -420,8 +420,8 @@ job_wiring_defects() {
   # reads green. Measured live against ci.yml's build-nextjs step (#9031). On
   # the `pull_request` path GitHub runs the PR's OWN workflow file, so the
   # mutation takes effect in the very run that should have caught it.
-  # actionlint flags duplicate keys, but it is not wired into this repo's CI —
-  # this count is the backstop. Scope it to the gate's STEP block so a
+  # actionlint (the `actionlint` job, #8719) flags duplicate keys, but it runs
+  # from this same PR-controlled file — this count is the independent backstop. Scope it to the gate's STEP block so a
   # legitimate `run:` in a sibling step is not counted.
   step_block="$(awk '
     !f && /^      - name:/ && index($0, "Assert native swc binding survived npm ci") {f=1; print; next}
