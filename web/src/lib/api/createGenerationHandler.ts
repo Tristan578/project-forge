@@ -64,12 +64,12 @@ const GENERIC_500_MESSAGE = 'Generation failed due to a server error. Please try
  *   nouns, so no provider text or server internal can reach the client through
  *   it (the property that earns the exemption from GENERIC_500_MESSAGE);
  * - "the upstream provider is degraded" is what actually happened, and 503
- *   keeps it out of the generic error rate that pages someone.
+ *   keeps it out of the generic error rate that alerts the owner.
  *
  * The metrics outcome is set to `empty_artifact` by the caller rather than left
  * to derive from the 503, which would file it under `provider_unavailable`
  * alongside real outages. Both 503s mean "try later" to the user and entirely
- * different things to whoever is on call.
+ * different things to whoever is investigating.
  *
  * `refunded` is passed rather than assumed. Both call sites refund before
  * formatting, but only when a platform deduction actually happened — a BYOK
@@ -413,7 +413,7 @@ export function createGenerationHandler<TParams, TResult>(
       // returns 403 for a BANNED account (which the classifier would file under
       // bot_blocked, hiding ban-evasion volume inside bot traffic) and 503 when
       // the user-sync path is degraded — a Neon circuit-breaker signal that the
-      // classifier would file under provider_unavailable, paging on-call for an
+      // classifier would file under provider_unavailable, raising an alert for an
       // AI-provider incident that isn't happening. Name the real cause here; 401
       // and anything else fall through to classifyGenerationOutcome().
       if (authResult.response.status === 403) mctx.outcome = 'banned';
