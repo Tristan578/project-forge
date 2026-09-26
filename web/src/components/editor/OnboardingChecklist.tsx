@@ -142,6 +142,9 @@ const CHECKLIST_TASKS: ChecklistTask[] = [
   },
 ];
 
+/** Basics tasks that do not gate the Advanced section (see `advancedUnlocked`). */
+const ADVANCED_GATE_EXEMPT = new Set(['build-with-ai']);
+
 const STORAGE_KEY = 'forge-checklist-dismissed';
 
 export function OnboardingChecklist() {
@@ -196,7 +199,14 @@ export function OnboardingChecklist() {
   const advancedCompleted = advancedTasks.filter((t) => completedTasks.has(t.id)).length;
   const totalCompleted = completedTasks.size;
   const totalTasks = CHECKLIST_TASKS.length;
-  const basicsAllDone = basicsCompleted === basicsTasks.length;
+  // Advanced unlocks on the six ORIGINAL basics. "Build a Game with AI" was
+  // added later (#10170), and nothing about the unlock is persisted — it is
+  // recomputed from live state — so gating on it would re-lock Advanced for
+  // every returning user who had already earned it. It still counts toward the
+  // Basics and overall progress; it just isn't part of the gate.
+  const advancedUnlocked = basicsTasks
+    .filter((t) => !ADVANCED_GATE_EXEMPT.has(t.id))
+    .every((t) => completedTasks.has(t.id));
 
   const progressPercent = Math.round((totalCompleted / totalTasks) * 100);
 
@@ -273,12 +283,12 @@ export function OnboardingChecklist() {
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
                   Advanced
                 </h4>
-                {!basicsAllDone && (
+                {!advancedUnlocked && (
                   <span className="rounded bg-amber-900/30 px-1.5 py-0.5 text-xs text-amber-400">
                     Locked
                   </span>
                 )}
-                {basicsAllDone && (
+                {advancedUnlocked && (
                   <span className="text-xs text-zinc-400">
                     {advancedCompleted}/{advancedTasks.length}
                   </span>
@@ -290,7 +300,7 @@ export function OnboardingChecklist() {
                     key={task.id}
                     task={task}
                     completed={completedTasks.has(task.id)}
-                    locked={!basicsAllDone}
+                    locked={!advancedUnlocked}
                   />
                 ))}
               </div>

@@ -8,6 +8,7 @@ import { render, screen, fireEvent, cleanup, act } from '@/test/utils/componentT
 import { OnboardingChecklist } from '../OnboardingChecklist';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore as _useEditorStore } from '@/stores/editorStore';
+import { useChatStore } from '@/stores/chatStore';
 
 vi.mock('@/stores/onboardingStore', () => ({
   useOnboardingStore: vi.fn(() => ({})),
@@ -47,6 +48,10 @@ describe('OnboardingChecklist', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    // clearAllMocks keeps implementations, so restore the defaults a test may
+    // have replaced.
+    vi.mocked(useChatStore.getState).mockImplementation(() => ({ messages: [] }) as never);
+    vi.mocked(_useEditorStore.getState).mockImplementation(() => ({}) as never);
   });
 
   afterEach(() => {
@@ -257,6 +262,72 @@ describe('OnboardingChecklist', () => {
         emitState({ orchestratorStatus: 'decomposing' });
 
         expect(screen.getByText('0 / 13')).toBeInTheDocument();
+      });
+    });
+
+    // #10170 review: "Build a Game with AI" joined Basics after users had
+    // already unlocked Advanced with the six original tasks. Nothing about the
+    // unlock is persisted — it is recomputed from live state — so counting the
+    // new task in the gate would re-lock Advanced for every one of them.
+    describe('Advanced unlock', () => {
+      /**
+       * Satisfy the six original basics, with no AI build ever completed. Two of
+       * them read other stores rather than the snapshot: "Use AI Chat" reads the
+       * chat history and "Export Your Game" reads `useEditorStore.getState()`.
+       */
+      function completeSixOriginalBasics(over: Record<string, unknown> = {}) {
+        vi.mocked(useChatStore.getState).mockImplementation(
+          () => ({ messages: [{ role: 'user', content: 'hi' }] }) as never,
+        );
+        vi.mocked(_useEditorStore.getState).mockImplementation(
+          () => ({ cloudSaveStatus: 'saved' }) as never,
+        );
+        emitState({
+          nodeCount: 3,
+          primaryMaterial: { baseColor: [1, 0, 0, 1] },
+          physicsEnabled: true,
+          allScripts: { s1: { source: 'x'.repeat(60) } },
+          cloudSaveStatus: 'saved',
+          ...over,
+        });
+      }
+
+      /** A section's "done/total" count: JSX splits it across text nodes. */
+      const sectionCount = (text: string) =>
+        screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === text);
+
+      it('stays unlocked for a user with the six original basics and no AI build', () => {
+        setupStore();
+        render(<OnboardingChecklist />);
+
+        completeSixOriginalBasics();
+
+        // Basics reads 6 of 7 — the AI task is still offered, just not a gate.
+        expect(sectionCount('6/7')).toBeInTheDocument();
+        expect(screen.queryByText('Locked')).toBeNull();
+        expect(sectionCount('0/6')).toBeInTheDocument();
+      });
+
+      it('stays locked when an AI build stands in for one of the original basics', () => {
+        // A new user still has to do the original basics: the AI task is not a
+        // substitute for any of them.
+        setupStore();
+        render(<OnboardingChecklist />);
+
+        completeSixOriginalBasics({ physicsEnabled: false, orchestratorStatus: 'completed' });
+
+        expect(sectionCount('6/7')).toBeInTheDocument();
+        expect(screen.getByText('Locked')).toBeInTheDocument();
+      });
+
+      it('is locked for a brand-new user with nothing done', () => {
+        setupStore();
+        render(<OnboardingChecklist />);
+
+        emitState();
+
+        expect(sectionCount('0/7')).toBeInTheDocument();
+        expect(screen.getByText('Locked')).toBeInTheDocument();
       });
     });
 
