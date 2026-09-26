@@ -62,6 +62,18 @@ expect_rc() {
       ok=0
     fi
   done
+  # Every counted violation must print its own detail line (forty-first
+  # board round: a label holding a tab or a newline split its row, and the
+  # report counted a violation it did not print).
+  local counted printed
+  counted="$(sed -n 's/.* \([0-9][0-9]*\) violation(s) across.*/\1/p' <<<"$out")"
+  if [ -n "$counted" ]; then
+    printed="$(grep -c '^  - ' <<<"$out")"
+    if [ "$printed" != "$counted" ]; then
+      fail "$desc — the report counts $counted violation(s) but prints $printed detail line(s): ${out}"
+      ok=0
+    fi
+  fi
   [ "$ok" -eq 1 ] && pass "$desc"
 }
 readonly -f expect_rc
@@ -342,6 +354,33 @@ FIX
 )"
 expect_rc "12e. an unterminated quoted string is a parse failure (exit 2)" 2 \
   "$(run_gate "$d_unquoted")" "unterminated quoted string still open"
+
+# ---- 12h. a file that ends inside any other opener is a parse failure too ------
+# Forty-first board round (architect): only an open heredoc or quote failed
+# closed, so a file ending inside a backtick span, a $( ), an arithmetic
+# context, a subshell or an array literal exited 0 with the definition after
+# the opener (evil() here) never judged. Each is now a parse error naming
+# what stayed open.
+open_head="$(cat <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+FIX
+)"
+k=0
+while IFS='|' read -r opener kind; do
+  k=$((k + 1))
+  d_open="$(printf '%s\n' "$open_head" "$opener" 'evil() { :; }' | mkfixture "open-$k")"
+  expect_rc "12h. a file ending inside ${kind} is a parse failure (exit 2)" 2 \
+    "$(run_gate "$d_open")" "unterminated ${kind} still open"
+done <<'OPENERS'
+X=`echo start|backtick span `
+X=$(echo start|$( ), <( ) or >( ) substitution
+arr=(a|array literal (
+(( 1 +|(( )) arithmetic
+x=$[1 +|$[ ] arithmetic
+( echo sub|( ) subshell
+OPENERS
+[ "$k" -eq 6 ] || fail "12h. expected 6 openers, walked $k"
 
 # ---- 12f. a column-0 definition inside a quoted program is string content ------
 # The sweep that introduced this gate froze `function flush() {` inside a
@@ -757,10 +796,10 @@ expect_rc "19j. 'trap ... DEBUG' in any case or spelling and 'shopt -s extdebug'
 # their report names only the line itself; the action advice belongs to the
 # EXIT, ERR, RETURN or 0 rows (19k-c).
 out_debug_trap="$(run_gate "$d_debug_trap")"
-if grep -q 'make its action return' <<<"$out_debug_trap" || ! grep -q 'or enable extdebug — delete this line' <<<"$out_debug_trap"; then
-  fail "19j-c. a DEBUG trap or extdebug report tells the reader to delete the line, not to edit an action" "$out_debug_trap"
+if grep -q 'make its action return' <<<"$out_debug_trap" || ! grep -q 'or enable extdebug — delete the whole trap or shopt statement this line belongs to' <<<"$out_debug_trap"; then
+  fail "19j-c. a DEBUG trap or extdebug report tells the reader to delete the statement, not to edit an action" "$out_debug_trap"
 else
-  pass "19j-c. a DEBUG trap or extdebug report tells the reader to delete the line, not to edit an action"
+  pass "19j-c. a DEBUG trap or extdebug report tells the reader to delete the statement, not to edit an action"
 fi
 # Fortieth board round (ux): the report chose between the two messages by
 # the label text, and an EXIT action that began with three dots matched the
@@ -2358,6 +2397,23 @@ if grep -q '^EXPAND-ON$' <<<"$tick_bash" && grep -q '^POSIX-ON$' <<<"$tick_bash"
 else
   fail "30ac-b. the backtick probe did not reproduce in this bash (got '$tick_bash')"
 fi
+
+# ---- 30ad. a label holding a tab or a newline keeps its row -----------------
+# Forty-first board round (ux): a label is built from source text, and a
+# trap action holding a tab (line 3) or, decoded from an ANSI-C string, a
+# newline (line 4) split the TSV row, so the report counted the violation
+# and printed no line for it. Labels are now written through emit, which
+# turns a tab, newline or carriage return into ?. expect_rc checks for every
+# case that each counted violation prints its own line.
+d_tabnl="$(mkfixture tab-newline <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+trap 'exit	0' EXIT
+trap $'exit\n0' ERR
+FIX
+)"
+expect_rc "30ad. a trap action holding a tab or a newline is reported on its own line" 1 "$(run_gate "$d_tabnl")" \
+  "2 violation(s)" "fixture.test.sh:3: 'trap exit?0 ... EXIT'" "fixture.test.sh:4: 'trap exit?0 ... ERR'"
 
 # ---- 30r. inside double quotes a backslash escapes only five characters -----
 # Thirty-second board round (architect): the lexer dropped every backslash in

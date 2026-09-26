@@ -1055,7 +1055,20 @@ was replaced with this one (round twenty-nine).
   it ended the enclosing statement (``alias `true;true` fail=:`` passed);
   it is now lexed like `$( )` too. And the report split routed on label
   text, so an EXIT action that began with three dots got the DEBUG message;
-  a DEBUG trap or extdebug now carries its own `debug` status.
+  a DEBUG trap or extdebug now carries its own `debug` status. The
+  forty-first found two report defects. A label built from a trap action
+  holding a tab or a newline split its TSV row, so the report counted a
+  violation it did not print: every row is now written through one `emit`
+  that turns those characters into `?`, and the suite checks, for every
+  case, that each counted violation prints its own line. And the `debug`
+  message said to delete "this line", which for a statement continued
+  across lines (a backslash, an open quote) left half of it behind or joined
+  the next statement into it; it now names the whole statement. The same
+  round found the fail-closed rule at the end of a file covered only an open
+  heredoc or quote: a file ending inside a backtick span, a `$( )`, an
+  arithmetic context, a subshell or an array literal exited 0, and every
+  definition after the opener went unjudged. Each is now a parse error
+  (exit 2) naming what stayed open.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

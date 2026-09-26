@@ -267,6 +267,22 @@ derive_file() {
     function fd_prefix() {
       return !wq && (w ~ /^[0-9]+$/ || w ~ /^\{[A-Za-z_][A-Za-z0-9_]*\}$/)
     }
+    # Every row is one TSV line. A label built from source text (a trap
+    # action, a word decoded from an ANSI-C string) can hold a tab or a
+    # newline, which would shift the columns or split the row, and the
+    # report would count a violation it cannot print (forty-first board
+    # round). Both, and a carriage return, become ?.
+    function emit(label, first, last, status) {
+      gsub(/[\t\n\r]/, "?", label)
+      printf "%s\t%s\t%d\t%d\t%s\n", file, label, first, last, status
+    }
+    # What the substitution stack entry k was opened by, for a parse error.
+    function open_kind(k) {
+      if (st_dbl[k] == 3) return "backtick span `"
+      if (st_dbl[k] == 2) return "$[ ] arithmetic"
+      if (st_dbl[k] == 1) return st_dol[k] ? "$(( )) arithmetic" : "(( )) arithmetic"
+      return st_dol[k] ? "$( ), <( ) or >( ) substitution" : "( ) subshell"
+    }
     function flush_def() {
       pending_name = def_name; pending_def = def_line; pending_end = NR
       def_name = ""
@@ -561,7 +577,7 @@ derive_file() {
       # word is judged as written (a default expansion is removed by no_exp)
       # and as every word it expands to.
       if (w ~ /(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)/ || anym("(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)"))
-        printf "%s\t%s\t%d\t%d\talias\n", file, w, NR, NR
+        emit(w, NR, NR, "alias")
       # A word whose brace expansion was cut short is judged as a guarded
       # word would be only on the words it produced; where the missing ones
       # could be guarded (a command name, or any word of an alias, shopt,
@@ -569,11 +585,11 @@ derive_file() {
       # assignment word before the command name is not brace-expanded by
       # bash at all, so its value is never judged.
       if (bx_trunc && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && is_assign(w)))
-        printf "%s\t%s\t%d\t%d\tbrace\n", file, w, NR, NR
+        emit(w, NR, NR, "brace")
       # The same positions, for a parameter expansion whose TEXT bash splits
       # into fields (see pexp); a trap action is text, judged by check_trap.
       if (px_split && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && is_assign(w)) && !(in_trap && !trap_has_action && w !~ /^-/))
-        printf "%s\t%s\t%d\t%d\tsplit\n", file, w, NR, NR
+        emit(w, NR, NR, "split")
       if (!cmd_seen) {
         # `case WORD` ended its line without `in`: the first word of a later
         # line is that `in` (only blank and comment lines may come between).
@@ -624,7 +640,7 @@ derive_file() {
         if (has("set")) in_set = 1
         if (has("trap")) in_trap = 1
         if (!rq && w == "function") in_function = 1
-        if (has("enable")) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "enable", NR, NR
+        if (has("enable")) emit("enable", NR, NR, "builtin")
         w = ""; return
       }
       nwords++
@@ -634,7 +650,7 @@ derive_file() {
       # runs what follows as the command, which the gate cannot place, so it
       # is reported (thirty-seventh board round).
       if (nwords == 2 && cmd_word ~ /^[A-Za-z_][A-Za-z0-9_]*\[/)
-        printf "%s\t%s\t%d\t%d\tsubscript\n", file, cmd_word, NR, NR
+        emit(cmd_word, NR, NR, "subscript")
       # `case WORD in`: what follows is a pattern, up to its `)`.
       if (cmd_word == "case" && nwords == 2) case_wait = 1
       # (`pat_d` needs no reset where a pattern opens: a pattern ends only at
@@ -643,7 +659,7 @@ derive_file() {
       if (cmd_word == "case" && nwords == 3 && !rq && w == "in") { pat = 1; pat_n = 0 }
       # The word after `function` is a definition name whatever follows it.
       if (in_function) {
-        if (index(builtins, " " w " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, "function " w, NR, NR
+        if (index(builtins, " " w " ") > 0) emit("function " w, NR, NR, "builtin")
         shape_check("function " w, w)
         # The body group follows the name, so what comes next is a command
         # word again, as after `name()`: its brace counts toward the nesting,
@@ -651,19 +667,19 @@ derive_file() {
         in_function = 0; cmd_seen = 0; cmd_word = ""; nwords = 0; fn_body = 1
       }
       if (in_alias && anym("^[A-Za-z_][A-Za-z0-9_]*="))
-        printf "%s\t%s\t%d\t%d\talias\n", file, "alias " w, NR, NR
+        emit("alias " w, NR, NR, "alias")
       if (in_shopt && sflag != "" && has("expand_aliases"))
-        printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " sflag " " w, NR, NR
+        emit("shopt " sflag " " w, NR, NR, "alias")
       # posix mode turns expand_aliases on too (twenty-fourth board round):
       # set with an o flag cluster before posix, or shopt -s -o posix.
       if (in_set && oflag != "" && has("posix"))
-        printf "%s\t%s\t%d\t%d\talias\n", file, "set " oflag " " w, NR, NR
+        emit("set " oflag " " w, NR, NR, "alias")
       if (in_shopt && sflag != "" && has("posix"))
-        printf "%s\t%s\t%d\t%d\talias\n", file, "shopt " sflag " " w, NR, NR
+        emit("shopt " sflag " " w, NR, NR, "alias")
       if (in_shopt && sflag != "" && has("extdebug"))
-        printf "%s\t%s\t%d\t%d\tdebug\n", file, "shopt " sflag " " w, NR, NR
+        emit("shopt " sflag " " w, NR, NR, "debug")
       if (in_trap && anym("^[Dd][Ee][Bb][Uu][Gg]$"))
-        printf "%s\t%s\t%d\t%d\tdebug\n", file, "trap ... " w, NR, NR
+        emit("trap ... " w, NR, NR, "debug")
       # The first non-flag argument of trap is its action; every later word
       # is a signal. The pair is judged when the statement ends. bash reads
       # a numeric signal as an optionally signed decimal between blanks, so
@@ -695,7 +711,7 @@ derive_file() {
       for (ka = 1; ka <= na; ka++) {
         a = acand[ka]
         if (a ~ /(^|[^A-Za-z0-9_])(exit|exec)([^A-Za-z0-9_]|$)/ && trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/) {
-          printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " a " ..." trap_sigs, NR, NR
+          emit("trap " a " ..." trap_sigs, NR, NR, "trap")
           break
         }
         if (trap_sigs ~ /(^| )(EXIT|ERR|RETURN|0)( |$)/) {
@@ -736,7 +752,7 @@ derive_file() {
       for (k = 1; k <= nt; k++) {
         delete seen; seen[t_word[k]] = 1
         if (fn_exits(t_word[k]))
-          printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " t_word[k] " ..." t_sigs[k] " (names " t_word[k] "(), which exits)", t_line[k], t_line[k]
+          emit("trap " t_word[k] " ..." t_sigs[k] " (names " t_word[k] "(), which exits)", t_line[k], t_line[k], "trap")
       }
     }
     # A definition the lexer found at the start of a statement is in scope when
@@ -760,7 +776,7 @@ derive_file() {
     function shape_check(label, n) {
       if (n == line_def && !line_def_hit) { line_def_hit = 1; return }
       if (d == 0 && cond_depth() == 0 && (def_name == "" || def_name == line_def))
-        printf "%s\t%s\t%d\t%d\tshape\n", file, label, NR, NR
+        emit(label, NR, NR, "shape")
     }
     # Every statement starts with no trap state of its own; a trap inside a
     # substitution must not read the enclosing trap action as its own.
@@ -949,7 +965,7 @@ derive_file() {
               # as written (NAME=(...)) rather than rebuilding its text, on
               # the line where it opens, where that name is written.
               if (arr_txt ~ /(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)/ || w ~ /(^|[^A-Za-z0-9_])POSIXLY_CORRECT([^A-Za-z0-9_]|$)/)
-                printf "%s\t%s\t%d\t%d\talias\n", file, arr_nm "(...)", arr_line, arr_line
+                emit(arr_nm "(...)", arr_line, arr_line, "alias")
               arr = 0; w = ""
             }
           }
@@ -976,7 +992,7 @@ derive_file() {
           # a later line (bash allows it) would have its text judged cut
           # short, and the rest lexed as a new statement, so it is refused
           # outright rather than guessed at (thirtieth board round).
-          if (bc_open) printf "%s\t%s\t%d\t%d\tmultiline\n", file, substr(line, i), NR, NR
+          if (bc_open) emit(substr(line, i), NR, NR, "multiline")
           w = w substr(line, i, j - i); i = j; continue
         }
         # A `$NAME` is kept as `${NAME}`, so the name still ends where bash
@@ -1029,7 +1045,7 @@ derive_file() {
           dn = ""
           if (!cmd_seen && w != "") dn = w
           else if (cmd_seen && w == "" && nwords == 1) dn = cmd_word
-          if (dn != "" && index(builtins, " " dn " ") > 0) printf "%s\t%s\t%d\t%d\tbuiltin\n", file, dn "()", NR, NR
+          if (dn != "" && index(builtins, " " dn " ") > 0) emit(dn "()", NR, NR, "builtin")
           if (dn != "" && dn !~ /[=$]/) shape_check(dn "()", dn)
           # The next brace opens this definition body; if the name word is
           # still pending here, consuming it must not use up the mark.
@@ -1039,7 +1055,7 @@ derive_file() {
         # a scalar does (twenty-fifth board round), so the name is judged
         # here, where the word is consumed without reaching end_word.
         if (c == "(" && w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=$/) {
-          if (w ~ /^POSIXLY_CORRECT\+?=$/) printf "%s\t%s\t%d\t%d\talias\n", file, w "(", NR, NR
+          if (w ~ /^POSIXLY_CORRECT\+?=$/) emit(w "(", NR, NR, "alias")
           arr = 1; arr_d = 1; arr_txt = ""; arr_nm = w; arr_line = NR; w = ""; i++; continue
         }
         if (c2 == "((" && w == "") { open_sub("", 1, 1, 0); i += 2; continue }
@@ -1122,7 +1138,7 @@ derive_file() {
       if (q != "" || d > 0 || arr) {
         if (line ~ /^readonly -f [A-Za-z_][A-Za-z0-9_]*[[:space:]]*$/) {
           n2 = line; sub(/^readonly -f /, "", n2); sub(/[[:space:]]*$/, "", n2)
-          printf "%s\t%s\t%d\t%d\tstray\n", file, n2, NR, NR
+          emit(n2, NR, NR, "stray")
         }
         lex_line(line)
         next
@@ -1131,11 +1147,11 @@ derive_file() {
       # Resolve a deferred definition: the line right after its closing brace.
       if (pending_name != "") {
         if (line ~ ("^readonly -f " pending_name "[[:space:]]*$")) {
-          printf "%s\t%s\t%d\t%d\tfrozen\n", file, pending_name, pending_def, pending_end
+          emit(pending_name, pending_def, pending_end, "frozen")
           pending_name = ""
           next
         }
-        printf "%s\t%s\t%d\t%d\tunfrozen\n", file, pending_name, pending_def, pending_end
+        emit(pending_name, pending_def, pending_end, "unfrozen")
         pending_name = ""
       }
 
@@ -1156,7 +1172,7 @@ derive_file() {
           lex_line(line)
           next
         }
-        printf "%s\t%s\t%d\t%d\tunsupported\n", file, def_name, def_line, NR
+        emit(def_name, def_line, NR, "unsupported")
         brace_pending = 0; def_name = ""
       }
 
@@ -1176,7 +1192,7 @@ derive_file() {
       if (def_name != "") {
         lex_line(line)
         if (grp_closed && !closed_col0)
-          printf "%s\t%s\t%d\t%d\tclose\n", file, closed_name, closed_line, NR
+          emit(closed_name, closed_line, NR, "close")
         next
       }
 
@@ -1215,7 +1231,7 @@ derive_file() {
         sub(/^[[:space:]]+/, "", body); sub(/[[:space:]]+$/, "", body)
         if (body == "") { brace_pending = 1; next }
         if (body ~ /^\{/) next
-        printf "%s\t%s\t%d\t%d\tunsupported\n", file, name, NR, NR
+        emit(name, NR, NR, "unsupported")
         def_name = ""
         next
       }
@@ -1223,7 +1239,7 @@ derive_file() {
       # A freeze that is not the resolution of a pending definition is a stray.
       if (match(line, /^readonly -f [A-Za-z_][A-Za-z0-9_]*[[:space:]]*$/)) {
         n2 = line; sub(/^readonly -f /, "", n2); sub(/[[:space:]]*$/, "", n2)
-        printf "%s\t%s\t%d\t%d\tstray\n", file, n2, NR, NR
+        emit(n2, NR, NR, "stray")
         next
       }
 
@@ -1232,18 +1248,26 @@ derive_file() {
     END {
       resolve_traps()
       if (pending_name != "")
-        printf "%s\t%s\t%d\t%d\tunfrozen\n", file, pending_name, pending_def, pending_end
+        emit(pending_name, pending_def, pending_end, "unfrozen")
       if (def_name != "" && brace_pending)
-        printf "%s\t%s\t%d\t%d\tunsupported\n", file, def_name, def_line, NR
+        emit(def_name, def_line, NR, "unsupported")
       else if (def_name != "")
-        printf "%s\t%s\t%d\t%d\tclose\n", file, def_name, def_line, 0
+        emit(def_name, def_line, 0, "close")
       # A lexer that ends the file inside a heredoc or a quoted string has
       # skipped everything after the opener; that is a parse failure, not a
       # clean file, and the gate must not report the skipped tail as frozen.
       if (hd_n > 0)
-        printf "%s\t%s\t%d\t%d\tparse-error\n", file, "unterminated heredoc <<" hd_term[1], NR, NR
+        emit("unterminated heredoc <<" hd_term[1], NR, NR, "parse-error")
       else if (q != "")
-        printf "%s\t%s\t%d\t%d\tparse-error\n", file, "unterminated quoted string", NR, NR
+        emit("unterminated quoted string", NR, NR, "parse-error")
+      # So is one that ends inside a substitution, a subshell, an arithmetic
+      # context or an array literal: everything after the opener was lexed
+      # as its contents, so a definition there was never judged (forty-first
+      # board round: an unclosed backtick span, or $( ), passed with exit 0).
+      else if (d > 0)
+        emit("unterminated " open_kind(1), NR, NR, "parse-error")
+      else if (arr)
+        emit("unterminated array literal (", NR, NR, "parse-error")
     }
   ' "$1"
 }
@@ -1321,7 +1345,7 @@ if [ -n "$violations" ]; then
         # the fix; they carry their own status (fortieth board round: routing
         # on the label text sent an EXIT action that began with three dots to
         # this message).
-        debug)    echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding; a self-defense suite may not set a DEBUG trap (in any spelling of the signal) or enable extdebug — delete this line" ;;
+        debug)    echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding; a self-defense suite may not set a DEBUG trap (in any spelling of the signal) or enable extdebug — delete the whole trap or shopt statement this line belongs to, including any lines it continues from (a backslash or an open quote carries a statement across lines)" ;;
         trap)     echo "  - $file:$def: '$name' — a trap on EXIT, ERR, RETURN or 0 (or any numeric spelling of 0, such as 00, +0, -0 or a quoted '0 ') whose action exits or execs, directly or through a function of this file it may call, can replace the exit status the script chose, so a self-defense suite may not exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — make its action return without exiting, or delete the trap; every word of such an action is read as a possible call, so when a function that exits is named in it only as an argument, leave that name out of the action" ;;
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable — rename this function, or delete the enable call" ;;
         shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command or a closing brace, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
