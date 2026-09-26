@@ -623,14 +623,15 @@ jobs:
     # The job is in ci-success's needs:, so a tip-over blocks every PR rather
     # than one. Raised from 30 to 45 after review measured 26:52 on a branch,
     # about 3 minutes of headroom; main then took about 22 minutes.
-    # Raised from 45 to 60 (#10285): the job took 41:22 on 2026-09-26 (job
-    # 108460157387), under 4 minutes short of 45; main measured 36:53, 36:54
-    # and 39:04 on 2026-09-24, against about 22 on 2026-09-15. That growth is
-    # not runner variance. This job runs all 70 bash suites one after another
-    # under Git Bash, where process spawns are slow: check-ci-success alone
-    # took 553 s of that run, and check-fn-freeze 92 s against about 10 s on
-    # Linux. 60 is headroom while #10290 finds and cuts where the time goes;
-    # raise it again only with that issue's measurements, not in its place.
+    # Raised from 45 to 60 (#10285): main measured 36:53, 36:54 and 39:04 on
+    # 2026-09-24 with 70 suites, against about 22 on 2026-09-15. That growth
+    # is not runner variance. The job runs every bash suite one after another
+    # under Git Bash, where process spawns are slow: in a 41:22 run on
+    # 2026-09-26 (job 108460157387, on the unmerged #10229, which adds a 71st
+    # suite, check-fn-freeze, at 92 s against about 10 s on Linux),
+    # check-ci-success alone took 553 s. 60 is headroom while #10290 finds
+    # and cuts where the time goes; raise it again only with that issue's
+    # measurements, not in its place.
     timeout-minutes: 60
     permissions:
       contents: read
