@@ -299,7 +299,7 @@ Claude Code also has three **subagents** (`.claude/agents/`):
 cd project-forge
 # Copilot reads .github/hooks/hooks.json and .github/copilot-instructions.md
 ```
-Hooks trigger on session start (pull), prompt submit (ticket gate), and post-tool-use (validate + push). Skills available in `.github/skills/` and `.agents/skills/`. Prompts for manual sync in `.github/prompts/`.
+Hooks trigger on session start (pull), prompt submit (ticket gate), and post-tool-use (validate + push). Skills available in `.github/skills/` and `.agents/skills/`; manual sync is the `sync-pull` and `sync-push` skills.
 
 </details>
 
@@ -526,8 +526,7 @@ project-forge/
 │   ├── hooks/hooks.json         #   Hook wiring (sessionStart, promptSubmit, postToolUse)
 │   ├── copilot-instructions.md  #   Copilot guidance (agentic-sync target)
 │   ├── instructions/review.instructions.md  # PR review criteria
-│   ├── skills/                  #   kanban, sync-push, sync-pull
-│   └── prompts/                 #   sync-push.prompt.md, sync-pull.prompt.md
+│   └── skills/                  #   kanban, sync-push, sync-pull
 ├── .gemini/                     # Gemini CLI (+ Antigravity model config)
 │   └── settings.json            #   Hooks + model (gemini-3.1-pro-preview)
 ├── .agents/                     # Shared skills (Codex CLI + Copilot + Gemini CLI); the project skills here are GENERATED mirrors of .claude/skills/ — never hand-edit them
