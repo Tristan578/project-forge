@@ -199,9 +199,12 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   which the gate had read as the command word). A subscript is not parsed:
   a word starting `NAME[` that holds `]=` or `]+=` is an assignment, and a
   command word starting `NAME[` followed by more words is a subscript with a
-  blank, reported as `subscript` (write it without blanks). In an EXIT, ERR
-  or RETURN trap every word of the action is judged as a possible call,
-  since its command words cannot be found reliably in the action text.
+  blank, reported as `subscript` (write it without blanks). A redirection
+  and its target in front of the word (`>/tmp/x alias`, `2>&1 alias`,
+  `<<<x alias`) are skipped the same way (round thirty-eight). In an EXIT,
+  ERR, RETURN or 0 trap every word of the action is judged as a possible
+  call, since its command words cannot be found reliably in the action text,
+  so a function that exits must not be named in such an action at all.
   Every command name and argument is also judged with its expansions
   removed, because each can expand to nothing (`$()`, `$(true)`, backticks,
   `${x:+Q}`, an unset `$1`), so `ali$()as`, `ali${x:+Q}as` and `shopt -$()s

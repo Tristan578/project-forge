@@ -1030,11 +1030,17 @@ was replaced with this one (round twenty-nine).
   the dequoted word unbalanced, and bash also reads a subscript across
   blanks (`a[1 + 1]=5 alias fail=:` binds), which the lexer splits into
   several words. So the subscript is no longer parsed at all. A word that
-  starts `NAME[` and holds `]=` is an assignment (this can only
+  starts `NAME[` and holds `]=` or `]+=` is an assignment (this can only
   over-report), a command word starting `NAME[` with more words after it is
-  a new `subscript` violation, and in an EXIT, ERR or RETURN trap every word
-  of the action is judged as a possible call rather than the one the gate
-  took for its command word.
+  a new `subscript` violation, and in an EXIT, ERR, RETURN or 0 trap every
+  word of the action is judged as a possible call rather than the one the
+  gate took for its command word. The thirty-eighth found the lexer read a
+  redirection only as a word break, so the target of a leading one
+  (`>/tmp/x alias fail=:`, `<<<x alias fail=:`), an fd prefix (`2>`) or the
+  2 after `>&` (which ended the statement at its `&`) was taken for the
+  command word and the alias passed. A redirection operator and its target
+  are now skipped as bash skips them, a substitution in the target is still
+  lexed as the command it is, and `<(` and `>(` stay process substitutions.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.

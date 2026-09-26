@@ -75,8 +75,15 @@
 # `al"ias"`, `\a\l\i\a\s`, `$'alias'` and its escaped forms (octal, hex,
 # `\u`, `\U`, a NUL ending the value), a backslash line continuation in the
 # middle of the statement, and anything in front of the word (`builtin`,
-# `command`, `time -p`, `X="1"`, `X+=1`, `a[0]=1`, `a[b[0]]=1`, `!`, `if`)
-# are all the same word, and so
+# `command`, `time -p`, a prefix assignment, `!`, `if`, and a redirection
+# with its target: `>/tmp/x`, `2>&1`, `<<<x`, the thirty-eighth round) are
+# all the same word. A prefix assignment is `NAME=` or `NAME+=`, or a word
+# that starts `NAME[` and holds `]=` or `]+=` anywhere: a subscript is not
+# parsed (thirty-seventh round: quotes, escapes, nesting and blanks inside
+# one each defeated an attempt to follow it), so this over-reports at worst.
+# A command word that starts `NAME[` with more words after it is a subscript
+# split at a blank (`a[1 + 1]=5 alias fail=:` binds the alias) and is
+# reported as `subscript`. And so
 # is a word spelled around an expansion that can be empty (`ali$()as`,
 # `ali${x:+Q}as`, `DEBU$1G`): every command name and argument is also judged
 # with its expansions removed (see end_word), an ANSI-C string decoded, a
@@ -122,10 +129,13 @@
 # overrides the exit status the script
 # itself chose — `trap 'exit 0' EXIT` turns a suite that reached `exit 1`
 # with FAILED=1 into a green one (the ninth board round) — so such an
-# action is reported too, including an action that calls a function this
+# action is reported too, including an action that names a function this
 # file defines whose body exits or execs, directly or through another
 # function of the file (`cleanup() { exit 0; }` + `trap cleanup EXIT`, the
-# tenth round). A trap on a real signal (`trap 'exit 143' TERM`) and a
+# tenth round). EVERY word of such an action is read as a possible call,
+# since its command words cannot be found reliably in the action text
+# (thirty-seventh round), so a function that exits named only as an
+# argument is reported too. A trap on a real signal (`trap 'exit 143' TERM`) and a
 # cleanup trap whose functions never exit (`trap 'rm -rf "$TMP"' EXIT`)
 # are fine. A function defined in a sourced file is outside the scan.
 #
@@ -248,6 +258,11 @@ derive_file() {
     function is_assign(s) {
       if (s ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=/) return 1
       return s ~ /^[A-Za-z_][A-Za-z0-9_]*\[/ && s ~ /\]\+?=/
+    }
+    # The word before a redirection operator is its file descriptor, not a
+    # word of the statement, when it is unquoted digits or {NAME} (2>, {fd}>).
+    function fd_prefix() {
+      return !wq && (w ~ /^[0-9]+$/ || w ~ /^\{[A-Za-z_][A-Za-z0-9_]*\}$/)
     }
     function flush_def() {
       pending_name = def_name; pending_def = def_line; pending_end = NR
@@ -521,6 +536,9 @@ derive_file() {
       # reserved word (bash recognises those before quote removal).
       rq = wq; wq = 0
       if (w == "") return
+      # The word after a redirection operator is its target: never the
+      # command word, never an argument (thirty-eighth board round).
+      if (redir) { redir = 0; w = ""; return }
       px_split = 0; wk = no_exp(pexp(w)); brace_exp(wk)
       # A case pattern is text. Only an unquoted `esac` where a pattern would
       # start ends the case (after the last `;;`).
@@ -683,10 +701,12 @@ derive_file() {
           # quotes are gone, and a prefix assignment may hold a subscript with
           # blanks (thirty-seventh board round: a[1 + 1]=5 cleanup hid the
           # call). A word that is only an argument costs nothing unless it
-          # names a function of this file that exits. Which of them this file
+          # names a function of this file that exits. A redirection ends a
+          # word here as in the lexer (thirty-eighth round: cleanup>/dev/null
+          # was one word that named nothing). Which of them this file
           # defines is only known at END, since a trap is often set before
           # its handler is written.
-          ns = split(a, segs, /[;&|[:space:]]+/)
+          ns = split(a, segs, /[;&|<>[:space:]]+/)
           for (k = 1; k <= ns; k++) {
             cw = segs[k]
             if (cw != "" && index(cws, " " cw " ") == 0) { cws = cws " " cw " "; nt++; t_word[nt] = cw; t_line[nt] = NR; t_sigs[nt] = trap_sigs }
@@ -713,7 +733,7 @@ derive_file() {
       for (k = 1; k <= nt; k++) {
         delete seen; seen[t_word[k]] = 1
         if (fn_exits(t_word[k]))
-          printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " t_word[k] " ..." t_sigs[k] " (" t_word[k] "() exits)", t_line[k], t_line[k]
+          printf "%s\t%s\t%d\t%d\ttrap\n", file, "trap " t_word[k] " ..." t_sigs[k] " (names " t_word[k] "(), which exits)", t_line[k], t_line[k]
       }
     }
     # A definition the lexer found at the start of a statement is in scope when
@@ -741,7 +761,7 @@ derive_file() {
     }
     # Every statement starts with no trap state of its own; a trap inside a
     # substitution must not read the enclosing trap action as its own.
-    function end_command() { end_word(); if (in_trap) check_trap(); cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; in_set = 0; oflag = ""; set_end = 0; trap_action = ""; trap_sigs = ""; trap_has_action = 0 }
+    function end_command() { end_word(); if (in_trap) check_trap(); redir = 0; cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; in_set = 0; oflag = ""; set_end = 0; trap_action = ""; trap_sigs = ""; trap_has_action = 0 }
     # Entering `$( ... )` or `( ... )` starts a new context: the enclosing
     # quote state and the enclosing array-literal state are both pushed and
     # both cleared, and the matching `)` restores them. Array-literal skipping
@@ -783,6 +803,9 @@ derive_file() {
       st_ia[d] = in_alias; st_ish[d] = in_shopt; st_it[d] = in_trap; st_sf[d] = sflag
       st_is[d] = in_set; st_of[d] = oflag; st_se[d] = set_end
       st_ta[d] = trap_action; st_ts[d] = trap_sigs; st_th[d] = trap_has_action
+      # A redirection target may hold a substitution (>$(cmd)): the command
+      # inside is lexed as one, and the target is dropped when it ends.
+      st_rd[d] = redir
       # A trap statement is judged once, when it really ends, not here too.
       if (dol) in_trap = 0
       end_command()
@@ -798,6 +821,7 @@ derive_file() {
           in_alias = st_ia[d]; in_shopt = st_ish[d]; in_trap = st_it[d]; sflag = st_sf[d]
           in_set = st_is[d]; oflag = st_of[d]; set_end = st_se[d]
           trap_action = st_ta[d]; trap_sigs = st_ts[d]; trap_has_action = st_th[d]
+          redir = st_rd[d]
           w = st_w[d] "$()"; wq = 1
         }
         d--
@@ -1012,8 +1036,9 @@ derive_file() {
           if (d > 0 && st_dbl[d] && c2 == "))") { close_sub(); i += 2; continue }
           close_sub(); i++; continue
         }
-        if (c3 == "<<<") { end_word(); i += 3; continue }
+        if (c3 == "<<<") { if (fd_prefix()) w = ""; end_word(); i += 3; redir = 1; continue }
         if (c2 == "<<" && !arith) {
+          if (fd_prefix()) w = ""
           end_word()
           rest = substr(line, i + 2)
           strip = (substr(rest, 1, 1) == "-")
@@ -1035,6 +1060,20 @@ derive_file() {
         # `;;`, `;&` and `;;&` end an arm, so a pattern follows (a trailing
         # `&` then ends an empty statement, which changes nothing).
         if (c2 == ";;" || c2 == ";&") { end_command(); pat = 1; pat_n = 0; i += 2; continue }
+        # A redirection: its fd prefix (2>, {fd}>) is not a word, and the
+        # word after the operator is its target, never the command word
+        # (thirty-eighth board round: in >/tmp/x alias fail=: the target was
+        # read as the command word, a here-string did the same, and >&2
+        # ended the statement at its &). A doubled operator (>>, <>, &>>) is
+        # read as two, which drops the same target. A process substitution,
+        # <( or >(, needs nothing here: the subshell it opens starts a new
+        # statement.
+        if (c == "<" || c == ">" || c2 == "&>") {
+          if (fd_prefix()) w = ""
+          end_word()
+          match(substr(line, i), /^(&>|<&|>&|>\||<|>)/)
+          i += RLENGTH; redir = 1; continue
+        }
         if (c ~ /[;&|]/) { end_command(); i++; continue }
         if (c ~ /[[:space:]<>]/) { end_word(); i++; continue }
         w = w c; i++
@@ -1262,13 +1301,13 @@ if [ -n "$violations" ]; then
         unfrozen) echo "  - $file:$def: $name() is not frozen — add 'readonly -f $name' on line $((end + 1)), directly after its closing brace" ;;
         stray)    echo "  - $file:$def: 'readonly -f $name' does not directly follow a top-level definition of $name() — a freeze before the definition cannot bind, a freeze with a window after it leaves that window open, a freeze inside a quoted string or fixture is text, not a statement, and a freeze naming a function this file never defines is left over from a rename or a deletion: move this line to directly after the closing brace of $name(), or delete it" ;;
         alias)    echo "  - $file:$def: '$name' — 'readonly -f' freezes the function binding, not the name: once expand_aliases is on an alias takes every later call of a frozen helper, so a self-defense suite may not define an alias or enable alias expansion (shopt -s expand_aliases, or posix mode: set -o posix, shopt -s -o posix, or any use of POSIXLY_CORRECT) — delete this line" ;;
-        trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 (or any numeric spelling of 0, such as 00, +0, -0 or a quoted '0 ') that exits or execs, directly or through a function of this file, replaces the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — delete this trap or extdebug line, or make its action return without exiting" ;;
+        trap)     echo "  - $file:$def: '$name' — a DEBUG trap under extdebug makes bash skip the next command, so every call of a frozen helper can be made to vanish without touching its binding, and a trap on EXIT, ERR, RETURN or 0 (or any numeric spelling of 0, such as 00, +0, -0 or a quoted '0 ') that exits or execs, directly or through a function of this file it may call, can replace the exit status the script chose, so a self-defense suite may not set a DEBUG trap, enable extdebug, or exit from a trap on EXIT, ERR, RETURN or 0 (a trap on a real signal such as INT or TERM may) — delete this trap or extdebug line, or make its action return without exiting; every word of such an action is read as a possible call, so when a function that exits is named in it only as an argument, leave that name out of the action" ;;
         builtin)  echo "  - $file:$def: '$name' — a function named after a bash builtin shadows it for the rest of the script (a readonly that returns 0 makes every later freeze a no-op; an exit or a test that returns 0 makes the final verdict a no-op), and enable can switch a builtin off outright, so a self-defense suite may not define a function named after a builtin (compgen -b) or call enable — rename this function, or delete the enable call" ;;
         shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command or a closing brace, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
         brace)    echo "  - $file:$def: '$name' — this brace expansion produces more words than the gate enumerates (64, nested 8 deep), in a command name or an alias, shopt, set or trap statement, so a guarded word could sit past the cut where the gate cannot see it — list the words it needs explicitly, or split the statement" ;;
         split)    echo "  - $file:$def: '$name' — this parameter expansion's default, alternate or replacement text holds a blank, and bash splits an unquoted expansion into separate words there, so in a command name or an alias, shopt, set or trap statement it can spell a guarded command the gate cannot place — write the words out literally" ;;
         multiline) echo "  - $file:$def: '$name' — this \${...} group does not close on the line it opens on; the gate reads a group one line at a time, so text written in it on a later line (a default, alternate or replacement that can spell a guarded word) would go unjudged — put the whole group on one line" ;;
-        subscript) echo "  - $file:$def: '$name' — this statement starts with a subscripted name holding a blank; bash reads a subscript to its closing bracket, blanks included, so what follows it may be the command (a[1 + 1]=5 alias fail=: defines an alias), and the gate cannot place it — write the subscript without blanks (a[1+1]=5)" ;;
+        subscript) echo "  - $file:$def: '$name' — this statement starts with a subscripted name holding a blank; bash reads a subscript to its closing bracket, blanks included, so what follows it may be the command (a[1 + 1]=5 alias fail=: defines an alias), and the gate cannot place it — write the subscript without blanks (a[1+1]=5); the gate then judges what follows it as the command, so a guarded command there (the alias in this example) is still reported and has to go too" ;;
         close)
           if [ "$end" -gt 0 ]; then
             echo "  - $file:$def: $name() closes on line $end, but not with a '}' at column 0 — the gate ties a multi-line definition to its freeze by a column-0 closing brace, so it cannot tell where $name() ends; move that brace to column 0 and put 'readonly -f $name' on the line after it"
