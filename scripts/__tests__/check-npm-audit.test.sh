@@ -1792,6 +1792,10 @@ on:
         description: 'Whether the ratchet job can commit+push (only fires on main branch, requires write perms)'
         type: boolean
         default: true
+      chromatic-paused:
+        description: 'Temporary pause of the Chromatic visual gate, tracking issue 10279. true = chromatic job skipped and a NOT-checked warning emitted'
+        type: boolean
+        default: true
     outputs:
       lint-result:
         description: 'Outcome of the lint job'
@@ -1836,7 +1840,8 @@ STEPS_EOF
   security:
   lighthouse-delta:
   storybook-internal-gate:
-  chromatic:"
+  chromatic:
+  chromatic-paused-notice:"
 
   # Top of the duplicate-key hierarchy: the top-level jobs: key itself is
   # COUNT-pinned. An appended second jobs: mapping at end of file replaces
@@ -3398,7 +3403,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=665
+readonly SELF_EXEC_EXPECTED_DROP=669
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))

@@ -1178,8 +1178,9 @@ reproduction are what prove a surviving freeze is in force.
 `lockfile-sync-tests` gained a shellcheck entry and two steps (suite, then
 gate), mirrored in this suite's step-block and shellcheck pins;
 `SELF_EXEC_EXPECTED_DROP` moved 658 → 663 with the heredoc payload at the time of
-the sweep, and to 665 when a later merge brought main's own 2 (round
-twenty-nine; 665 is the value in the suite now). Shellcheck
+the sweep, to 665 when a later merge brought main's own 2 (round
+twenty-nine), and to 669 when the round-45 merge brought main's next 4
+(main had 664; 669 is the value in the suite now). Shellcheck
 clean on every touched file. At the time of the sweep, all 67 suites under the
 scanned directories (54 in `scripts/__tests__`, 12 in `.claude/hooks/__tests__`,
 1 in `.claude/tools/__tests__`; `scripts/__tests__/lib` holds a sourced helper,
