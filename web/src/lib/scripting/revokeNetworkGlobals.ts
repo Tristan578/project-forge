@@ -56,9 +56,11 @@
  * is inherently enumerate-and-revoke: a future browser global that exposes a new
  * network/exec primitive would need to be added here. The editor CSP still
  * allows `unsafe-eval` (so the constructor chain reaches `Function`). The
- * durable boundary — a sandboxed iframe/origin with `connect-src 'none'`, or an
- * AST/bytecode interpreter instead of `Function()` — is tracked as a follow-up
- * in #8700. What this closes is the concrete network-exfiltration capability of
+ * durable boundary — a sandboxed null-origin iframe with `connect-src 'none'`
+ * (#8700) — exists behind `NEXT_PUBLIC_SCRIPT_ISOLATION=sandboxed-origin`
+ * (see `sandboxOrigin.ts`); there this module is belt-and-braces. It is off by
+ * default, and under the default transport this module remains the primary
+ * control. What it closes is the concrete network-exfiltration capability of
  * an escaped script in the author's authenticated editing session.
  *
  * Call {@link revokeNetworkGlobalsIfWorker} once at worker module init, before
