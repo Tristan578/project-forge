@@ -74,6 +74,7 @@
     "@upstash/ratelimit": "^2.1.0",
     "@upstash/redis": "^1.38.4",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/config": "^0.7.2",
     "@vercel/speed-insights": "^2.0.0",
     "@xyflow/react": "^12.11.6",
     "acorn": "^8.18.0",
