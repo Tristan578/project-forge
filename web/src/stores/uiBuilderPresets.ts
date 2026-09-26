@@ -14,6 +14,7 @@ export function createWidget(
   const defaults = getWidgetDefaults(type);
   const baseWidget: UIWidgetBase = {
     id: nextPresetId('widget'),
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank requested widget name is unset; falls back to a generated name
     name: overrides.name || `${type}_${nextPresetId('widget').slice(-4)}`,
     type,
     x: overrides.x ?? 50,

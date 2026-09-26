@@ -85,9 +85,13 @@ vi.mock('@/lib/keys/resolver', () => ({
   ApiKeyError: class ApiKeyError extends Error {},
 }));
 
-vi.mock('@/lib/tokens/pricing', () => ({
-  getTokenCost: (...args: unknown[]) => mockGetTokenCost(...args),
-}));
+// Spread the actual module: `assertAiAccess`/`createGenerationHandler` reach
+// `TRIAL_GRANT_TOKENS` off this module at import time (#7715 review round 2)
+// via `@/lib/billing/tierPlans`, so a bare mock throws.
+vi.mock('@/lib/tokens/pricing', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tokens/pricing')>();
+  return { ...actual, getTokenCost: (...args: unknown[]) => mockGetTokenCost(...args) };
+});
 
 vi.mock('@/lib/auth/user-service', () => ({
   getUserByClerkId: vi.fn().mockResolvedValue(null),
@@ -443,10 +447,15 @@ describe('POST /api/generate/model — negative cases', () => {
     expect(res.status).toBe(401);
   });
 
+  // These four /api/generate/model cases exercise rate-limit/body/validation
+  // handling below the tier gate, so the user is `creator` (the panel's own
+  // requirement) rather than `starter` — a starter account would now be
+  // turned away at the new panel tier gate (#7715 review round 2) before
+  // reaching the behavior each test actually checks.
   it('returns 429 when rate limited', async () => {
     mockAuthenticateRequest.mockResolvedValue({
       ok: true,
-      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+      ctx: { user: { id: 'user-1', tier: 'creator' }, clerkId: 'clerk_1' },
     });
     mockDistributedRateLimit.mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
     mockRateLimitResponse.mockReturnValue(makeRateLimitedResponse());
@@ -460,7 +469,7 @@ describe('POST /api/generate/model — negative cases', () => {
   it('returns 400 for invalid JSON body', async () => {
     mockAuthenticateRequest.mockResolvedValue({
       ok: true,
-      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+      ctx: { user: { id: 'user-1', tier: 'creator' }, clerkId: 'clerk_1' },
     });
     mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
 
@@ -473,7 +482,7 @@ describe('POST /api/generate/model — negative cases', () => {
   it('returns 422 when prompt is too short', async () => {
     mockAuthenticateRequest.mockResolvedValue({
       ok: true,
-      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+      ctx: { user: { id: 'user-1', tier: 'creator' }, clerkId: 'clerk_1' },
     });
     mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
 
@@ -489,7 +498,7 @@ describe('POST /api/generate/model — negative cases', () => {
   it('returns 422 when image-to-3d mode is missing imageBase64', async () => {
     mockAuthenticateRequest.mockResolvedValue({
       ok: true,
-      ctx: { user: { id: 'user-1', tier: 'starter' }, clerkId: 'clerk_1' },
+      ctx: { user: { id: 'user-1', tier: 'creator' }, clerkId: 'clerk_1' },
     });
     mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
 

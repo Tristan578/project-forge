@@ -1000,6 +1000,53 @@ describe('useGenerationPolling', () => {
     });
   });
 
+  // The tier gate (#7715) and the auth layer write a CODE in `error` and the
+  // sentence in `message`. The existing-shape body (sentence in `error`) is
+  // pinned by the test above; these two pin the other shape.
+  async function giveUpWith(body: unknown): Promise<void> {
+    mockJobs['t3'] = makeJob('t3', { usageId: 'usage-t3' });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return { ok: false, status: 403, json: () => Promise.resolve(body) } as Response;
+    });
+    renderHook(() => useGenerationPolling());
+    for (let i = 0; i < 101; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+    }
+  }
+
+  function failureTexts(): string[] {
+    const stored = mockUpdateJob.mock.calls
+      .map((c: unknown[]) => (c[1] as Record<string, unknown>).error)
+      .filter((e): e is string => typeof e === 'string');
+    const toasted = mockShowPersistentError.mock.calls.map((c: unknown[]) => c[0] as string);
+    return [...stored, ...toasted];
+  }
+
+  it('surfaces the sentence in `message`, not the code in `error`, when the status route refuses on tier', async () => {
+    const SENTENCE = 'This feature requires the Starter plan';
+    await giveUpWith({ error: 'TIER_REQUIRED', message: SENTENCE, currentTier: 'starter', requiredTier: 'hobbyist' });
+
+    expect(mockShowPersistentError).toHaveBeenCalledWith(SENTENCE, { id: `generation-failed:${SENTENCE}` });
+    const texts = failureTexts();
+    expect(texts.length).toBeGreaterThan(0);
+    expect(texts.some((t) => t.includes('TIER_REQUIRED'))).toBe(false);
+  });
+
+  it('never shows a bare code when the body carries no sentence at all', async () => {
+    await giveUpWith({ error: 'TIER_REQUIRED' });
+
+    const expected = `Generation timed out. ${RETRY_GUIDANCE}`;
+    expect(mockShowPersistentError).toHaveBeenCalledWith(expected, { id: `generation-failed:${expected}` });
+    const texts = failureTexts();
+    expect(texts.length).toBeGreaterThan(0);
+    expect(texts.some((t) => t.includes('TIER_REQUIRED'))).toBe(false);
+  });
+
   it('toasts the provider failure reason when the status route reports failed', async () => {
     const PROVIDER_MESSAGE = 'The 3D model provider rejected the prompt.';
     mockJobs['t3'] = makeJob('t3', { usageId: 'usage-t3' });

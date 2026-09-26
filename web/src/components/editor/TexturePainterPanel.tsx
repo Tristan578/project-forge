@@ -57,6 +57,7 @@ export function TexturePainterPanel() {
     // Generate prompt for texture generation
     const prompt = generateTexturePrompt(
       {
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank texture description is unset; falls back to the style's or a generic description
         description: description || selectedStyle?.description || 'custom texture',
         targetSlot,
         intensity: clampedIntensity,

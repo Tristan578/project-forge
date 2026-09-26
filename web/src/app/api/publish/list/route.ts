@@ -43,6 +43,7 @@ async function GET_impl() {
       description: p.description,
       status: p.status,
       version: p.version,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored publish URL is unset; falls back to the canonical /play route
       url: p.url || `/play/${clerkId}/${p.slug}`,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,

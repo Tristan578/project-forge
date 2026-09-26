@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 
@@ -210,5 +211,49 @@ describe('GET /api/generate/texture/status', () => {
     // path the credential in play is the platform's (#9736).
     expect(data.error).not.toContain('Provider error');
     expect(data.error).toBe('Could not read the Texture generation status. Please try again.');
+  });
+
+  // Per-panel tier gate, POLL variant (#7715). 'generate-texture' is
+  // hobbyist-gated. A poll reads a job already paid for, so a starter that has
+  // HELD tokens reaches the provider whether or not it has trial tokens left;
+  // a starter that never held any is refused before a key is resolved. The
+  // creator-only status suites (model, skybox) pin that a starter at any
+  // balance is refused there and that each calls the POLL variant.
+  describe('panel tier gate (generate-texture, hobbyist)', () => {
+    it('lets a starter holding 50 spendable trial tokens through to resolveApiKey', async () => {
+      const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+      mockGetTextureStatus.mockResolvedValue({ status: 'IN_PROGRESS', progress: 30 });
+
+      const res = await GET(makeRequest({ jobId: 'task_123' }));
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('admits a starter whose trial balance is spent: it is reading the job it paid for', async () => {
+      const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+      mockGetTextureStatus.mockResolvedValue({ status: 'IN_PROGRESS', progress: 30 });
+
+      const res = await GET(makeRequest({ jobId: 'task_123' }));
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processing');
+      expect(resolveApiKey).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(resolveApiKey).mock.calls[0].slice(2)).toEqual([0, STATUS_CHECK_OPERATION]);
+    });
+
+    it('refuses a never-granted starter (no tokens ever held) with 403 TIER_REQUIRED before any key is resolved', async () => {
+      const user = makeUser({ tier: 'starter', monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 });
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+      const res = await GET(makeRequest({ jobId: 'task_123' }));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: 'TIER_REQUIRED', currentTier: 'starter', requiredTier: 'hobbyist' });
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(mockGetTextureStatus).not.toHaveBeenCalled();
+    });
   });
 });

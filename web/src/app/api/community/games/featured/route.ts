@@ -106,6 +106,7 @@ async function GET_impl(req: NextRequest) {
       description: g.description,
       slug: g.slug,
       authorId: g.authorId,
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank stored authorName is unset, same as absent; falls back to a display placeholder
       authorName: g.authorName || 'Unknown',
       playCount: g.playCount,
       likeCount: Number(g.likeCount),

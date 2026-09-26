@@ -25,6 +25,7 @@ Create a new `/api/generate/<route-name>` endpoint using `createGenerationHandle
 | 2 | `web/src/lib/tokens/pricing.ts` | Edit — add TOKEN_COSTS entry |
 | 3 | `web/src/app/api/generate/__tests__/route-integration.test.ts` | Edit — add integration test |
 | 4 | `web/src/app/api/__tests__/sentry-regressions.test.ts` | Edit — add to ASYNC_ROUTES if async |
+| 5 | `web/src/app/api/generate/<name>/status/route.ts` | Create if async — gate with `panelTierGateResponseForPoll` before `resolveApiKey` (Step 4) |
 
 ## Step 1: Create the Route File
 
@@ -54,6 +55,10 @@ const POST_impl = createGenerationHandler<
 >({
   route: '/api/generate/<name>',
   provider: DB_PROVIDER.<provider>,
+  // REQUIRED (#7715): the editor panel that fronts this route. Must be a key of
+  // PANEL_TIER_REQUIREMENTS in web/src/lib/ai/tierAccess.ts — an unknown key is
+  // default-OPEN, because canAccessPanel returns true for unmapped panels.
+  panel: '<panel-id>',
   // The capability this route spends (#9117). ALSO add the route to
   // ROUTE_CAPABILITY in web/src/lib/config/providers.ts — a test walks every
   // generate route and fails on one missing there. When the capability is in
@@ -161,7 +166,46 @@ it('<name>: rejects missing prompt', async () => {
 });
 ```
 
-## Step 4: Update Sentry Regression Test (if async)
+## Step 4: Status Poller (if async)
+
+An async route usually gets a `GET /api/generate/<name>/status` poller. Pollers
+call `resolveApiKey()` directly rather than through `createGenerationHandler`,
+so the factory's per-panel tier gate does NOT run for them. After
+`withApiMiddleware` authenticates and BEFORE `resolveApiKey`, call the POLL
+variant of the shared gate with the SAME panel id the create route declares,
+and resolve the key as a zero-cost `STATUS_CHECK_OPERATION`:
+
+```typescript
+import { panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
+import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
+// ...
+if (mid.error) return mid.error;
+const tierDenied = panelTierGateResponseForPoll('<panel-id>', mid.authContext!.user);
+if (tierDenied) return tierDenied;
+// ...
+const resolved = await resolveApiKey(mid.userId!, DB_PROVIDER.<x>, 0, STATUS_CHECK_OPERATION);
+```
+
+A poll reads a job the caller already paid for, so neither half reads the
+live balance. The poll gate judges a `starter` at the trial tier (`hobbyist`)
+only when it has HELD tokens (`monthlyTokens > 0 || addonTokens > 0` — a spent
+trial still has `monthlyTokens` set), and a never-granted `starter` as plain
+`starter`; the resolver skips its tier and balance checks for
+exactly that pair (cost 0 AND the constant, never the literal). Do NOT use the
+create variant `panelTierGateResponse` here: one generation can spend the whole
+trial grant, and the balance-aware rule would then refuse every poll of the job
+the user just paid for. Without the gate at all, a caller whose panel is locked
+could poll a creator-tier provider with the platform key. The gate is NOT a
+job-ownership check: status routes do not bind `jobId` to the caller
+(pre-existing, tracked in #10262). Add route tests: an account below the
+panel's tier (for a creator panel, a starter with or without tokens) gets 403
+`TIER_REQUIRED` and `resolveApiKey` is never called; for a hobbyist panel, a
+starter with a spent trial balance is admitted and a never-granted starter
+(every token column 0) is refused. For a creator panel, where both variants
+refuse the same accounts, spy on `@/lib/api/panelTierGate` and assert the
+route calls `panelTierGateResponseForPoll` and not `panelTierGateResponse`.
+
+## Step 5: Update Sentry Regression Test (if async)
 
 If the route returns `usageId` in success responses (async job pattern), add the route name to `ASYNC_ROUTES` in `web/src/app/api/__tests__/sentry-regressions.test.ts`.
 
@@ -186,6 +230,7 @@ npx tsc --noEmit  # (may need NODE_OPTIONS="--max-old-space-size=4096")
 ## Common Mistakes to Avoid
 
 0. **Exporting the handler directly** — `export const POST = createGenerationHandler(...)` is the pre-#9736 shape and puts the route OUTSIDE `withEgressGuard`, so its responses are never redacted. Nothing in lint, types or the integration suite notices; only `egressGuardCoverage.test.ts` does. Always `const POST_impl = ...; export const POST = withEgressGuard(POST_impl);`, and import `withEgressGuard` from `@/lib/security/egressGuard` — an alias or a locally-defined function of the same name is rejected by the coverage test on purpose
+0a. **Missing or misspelled `panel`** — `canAccessPanel` returns true for a panel id absent from `PANEL_TIER_REQUIREMENTS`, so a typo silently removes the server-side tier gate. Copy the id from the map. The same applies to the `panelTierGateResponseForPoll(...)` call in a status poller
 1. **Raw provider strings** — always use `DB_PROVIDER.<x>` from `@/lib/config/providers`, never `'anthropic'` or `'openai'` literals
 2. **Truthy checks for optional enum fields** — `if (style && ...)` misses `0`, `false`. Use `style !== undefined && typeof style !== 'string'`
 3. **Missing Number.isInteger() on counts** — `frameCount`, `itemCount` must be integers or billing gets fractional costs

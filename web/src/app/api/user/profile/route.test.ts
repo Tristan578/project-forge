@@ -43,6 +43,17 @@ describe('/api/user/profile', () => {
       expect(data.tier).toBe('creator');
       expect(data.createdAt).toBeDefined();
     });
+
+    it('reports the tokens the account can spend, so the client can derive trial access (#7715)', async () => {
+      const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 20, addonTokens: 5 });
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+      const res = await GET(new NextRequest('http://localhost/api/user/profile'));
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.spendableTokens).toBe(35);
+    });
   });
 
   describe('PUT', () => {

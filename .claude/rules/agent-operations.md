@@ -287,3 +287,34 @@ The full conventions (running the suites, the shellcheck scope, fixture seams, s
 anti-tamper, the four-branch runtime assertion, and how to extend a fixture-seam suite) live
 in `.claude/rules/hook-testing.md`, which loads automatically whenever you touch
 `.claude/hooks/**`.
+
+## 13. Native Plan Mode
+
+Claude Code has a built-in plan mode. In it, Claude reads files and runs exploratory
+commands, then writes a plan, and file edits stay blocked until you approve that plan.
+Ways to enter it, checked against Claude Code 2.1.281 (`claude --help`, the `/plan`
+command) and https://code.claude.com/docs/en/permission-modes:
+
+- `/plan` enters plan mode. `/plan <description>` enters it and starts on that task.
+- `Shift+Tab` cycles the permission modes (`default` → `acceptEdits` → `plan`).
+- `claude --permission-mode plan` starts a session in plan mode.
+
+Approving the plan leaves plan mode and switches to the permission mode that the approve
+option names.
+
+**Plan mode does not replace a spec.** The Spec-First rule in `.claude/CLAUDE.md` still
+applies: nothing is implemented without an approved spec in `specs/`, and the `planner`
+skill (`.claude/skills/planner/SKILL.md`) still writes that spec. Plan mode works at a
+smaller scale. Use it inside a session, after the spec and ticket exist, to work out
+*how* to deliver one subtask before any file changes. Then check that plan against the
+ticket's acceptance criteria.
+
+Two limits:
+
+- **Not the default here.** The documented way to start every session in plan mode is
+  `defaultMode: "plan"` in `.claude/settings.json`. #8695 deliberately left that file
+  unchanged, so no project default is set. Enter plan mode yourself.
+- **Not enforced when bypass is available.** In an interactive terminal session where
+  `bypassPermissions` is available, plan mode's edit block is not enforced. Claude is
+  told to plan, but an edit made while planning goes through without a prompt. Treat it
+  as a planning aid, not a control.
