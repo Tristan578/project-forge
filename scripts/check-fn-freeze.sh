@@ -72,7 +72,12 @@
 # command OUTPUT (`al${x}as` with x=i, `al$(echo i)as`), `eval`, a `source`
 # of a file written by the suite, and `declare -n` (a variable, not a
 # function) remain outside this gate (the Honest bound of the Sweep section in
-# docs/guides/npm-audit-gate-hardening.md).
+# docs/guides/npm-audit-gate-hardening.md). So does a write to the suite
+# counter by any route: the freeze protects the binding, not the counter it
+# writes, so a plain `FAILED=0`, an arithmetic reset, or a trap action that
+# runs one (`set -o functrace` with a RETURN trap that assigns `FAILED=0`,
+# round thirty) is for review to catch. The trap rule below covers only a
+# trap whose action exits or execs.
 #
 # posix mode turns expand_aliases on as a side effect, so entering it is the
 # same violation (the twenty-fourth board round; checked in bash 5.2, where
