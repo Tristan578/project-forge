@@ -29,8 +29,8 @@ Design decisions must account for these constraints. A pattern that works on nat
 ├─────────────────────────────────────────────────┤
 │  JSON Commands (wasm-bindgen 0.2.127)           │  ← Bridge protocol
 ├─────────────────────────────────────────────────┤
-│  Bevy 0.18 Engine (Rust → WASM)                 │  ← ECS, rendering, physics
-│  Rapier 0.33, Hanabi 0.18, PanOrbit 0.34       │
+│  Bevy 0.19 Engine (Rust → WASM)                 │  ← ECS, rendering, physics
+│  Rapier 0.35, Hanabi 0.19, PanOrbit 0.35       │
 ├─────────────────────────────────────────────────┤
 │  Game Runtime + TypeScript Scripting             │  ← Exported games
 │  Web Workers, forge.* API, sandbox               │

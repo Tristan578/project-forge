@@ -19,7 +19,7 @@ Invoke the `planner` skill to draft a spec for: {{input}}
 ## 2. Build
 
 Once approved, invoke the `builder` skill to implement it. The builder will:
-- Use `/rust-engine` patterns for Bevy 0.18 / Rapier 0.33 / WASM code
+- Use `/rust-engine` patterns for Bevy 0.19 / Rapier 0.35 / WASM code
 - Use `/frontend` patterns for React 19 / Next.js 16 / Zustand 5 / Tailwind 4 code
 - Use `/mcp-commands` patterns for AI parity (commands, handlers, manifest)
 - Use `/testing` patterns for 100% coverage target
@@ -61,6 +61,6 @@ After verification passes, update project context files:
 ## Version Reference
 
 All implementations must use these exact versions:
-- Bevy 0.18, bevy_rapier 0.33, bevy_hanabi 0.18, bevy_panorbit_camera 0.34
+- Bevy 0.19, bevy_rapier 0.35, bevy_hanabi 0.19, bevy_panorbit_camera 0.35
 - Next.js 16, React 19, Zustand 5, TypeScript 5, Tailwind 4, Vitest 4
 - Rust stable, wasm-bindgen 0.2.127, csgrs 0.20

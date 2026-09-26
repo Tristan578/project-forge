@@ -2,7 +2,7 @@
 
 ## Architecture Overview
 
-SpawnForge uses Bevy 0.18 ECS running as WASM in the browser. All engine state is ECS components. No global mutable state. No direct DOM access from Rust.
+SpawnForge uses Bevy 0.19 ECS running as WASM in the browser. All engine state is ECS components. No global mutable state. No direct DOM access from Rust.
 
 ```
 engine/src/
@@ -260,7 +260,7 @@ When the component is user-facing and state changes should be undoable:
 - `engine/src/core/entity_factory.rs` — Add arm in `spawn_from_snapshot` if component carries data needed to recreate the entity
 - `engine/src/core/engine_mode.rs` — Add field to `snapshot_scene` query if component should be saved in scene snapshots
 
-## ECS System Limits (Bevy 0.18)
+## ECS System Limits (Bevy 0.19)
 
 | Limit | Value | Workaround |
 |-------|-------|-----------|

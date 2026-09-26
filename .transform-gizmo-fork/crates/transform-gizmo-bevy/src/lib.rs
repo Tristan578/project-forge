@@ -43,6 +43,7 @@ use picking::TransformGizmoPickingPlugin;
 use uuid::Uuid;
 
 use render::{DrawDataHandles, TransformGizmoRenderPlugin};
+pub use render::gizmo_view_key;
 use transform_gizmo::config::{
     DEFAULT_SNAP_ANGLE, DEFAULT_SNAP_DISTANCE, DEFAULT_SNAP_SCALE, GizmoModeKind,
     TransformPivotPoint,
@@ -595,28 +596,39 @@ fn draw_gizmos(
 
         let mut bevy_draw_data = render::GizmoDrawData::default();
 
-        let (asset, is_new_asset) = if let Some(handle) = draw_data_handles.handles.get(gizmo_uuid)
-        {
-            (draw_data_assets.get_mut(handle).unwrap(), false)
-        } else {
-            (&mut bevy_draw_data, true)
+        // Bevy 0.19 (bevy#22460): `Assets::get_mut` returns an `AssetMut`
+        // guard instead of `&mut A`. The guard borrows `draw_data_assets`
+        // until it is dropped, so it lives in this block and is gone before
+        // `draw_data_assets.add` below. It still emits `AssetEvent::Modified`,
+        // because every field is written unconditionally.
+        let is_new_asset = {
+            let mut existing_asset;
+            let (asset, is_new_asset): (&mut render::GizmoDrawData, bool) =
+                if let Some(handle) = draw_data_handles.handles.get(gizmo_uuid) {
+                    existing_asset = draw_data_assets.get_mut(handle).unwrap();
+                    (&mut *existing_asset, false)
+                } else {
+                    (&mut bevy_draw_data, true)
+                };
+
+            let viewport = &gizmo.config().viewport;
+
+            asset.0.vertices.clear();
+            asset
+                .0
+                .vertices
+                .extend(draw_data.vertices.into_iter().map(|vert| {
+                    [
+                        ((vert[0] - viewport.left()) / viewport.width()) * 2.0 - 1.0,
+                        ((vert[1] - viewport.top()) / viewport.height()) * 2.0 - 1.0,
+                    ]
+                }));
+
+            asset.0.colors = draw_data.colors;
+            asset.0.indices = draw_data.indices;
+
+            is_new_asset
         };
-
-        let viewport = &gizmo.config().viewport;
-
-        asset.0.vertices.clear();
-        asset
-            .0
-            .vertices
-            .extend(draw_data.vertices.into_iter().map(|vert| {
-                [
-                    ((vert[0] - viewport.left()) / viewport.width()) * 2.0 - 1.0,
-                    ((vert[1] - viewport.top()) / viewport.height()) * 2.0 - 1.0,
-                ]
-            }));
-
-        asset.0.colors = draw_data.colors;
-        asset.0.indices = draw_data.indices;
 
         if is_new_asset {
             let asset = draw_data_assets.add(bevy_draw_data);

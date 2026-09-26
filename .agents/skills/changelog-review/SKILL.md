@@ -58,9 +58,9 @@ You are reviewing changelogs and release notes for SpawnForge's dependency stack
 
 | Library | Changelog Source | Current Version |
 |---------|-----------------|-----------------|
-| Bevy | https://github.com/bevyengine/bevy/releases | 0.18.1 |
+| Bevy | https://github.com/bevyengine/bevy/releases | 0.19.1 |
 | wasm-bindgen | https://github.com/rustwasm/wasm-bindgen/releases | =0.2.127 (pinned) |
-| bevy_rapier | https://github.com/dimforge/bevy_rapier/releases | 0.34 |
+| bevy_rapier | https://github.com/dimforge/bevy_rapier/releases | 0.35 |
 
 ## Procedure
 
@@ -205,4 +205,4 @@ GitHub is a primary dependency (CI/CD, issue tracking, PR workflows, CLI). Check
 
 ## References
 
-- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^22.6.0, wasm-bindgen =0.2.127, Next.js 16.x, Bevy 0.18, upload/download-artifact v4. Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency
+- See [version-pins.md](references/version-pins.md) — Documents all version pins with the upgrade blockers: stripe ^22.6.0, wasm-bindgen =0.2.127, Next.js 16.x, Bevy 0.19, upload/download-artifact v4. Includes an upgrade decision matrix and pre-upgrade audit checklists for each pinned dependency

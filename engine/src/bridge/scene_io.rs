@@ -749,7 +749,9 @@ pub(super) fn apply_gltf_scene_spawn(
     memory_dir: Res<crate::core::asset_manager::GltfMemoryDir>,
 ) {
     use crate::core::asset_manager::{AssetKind, GltfSceneSpawned, GltfSourceHandle};
-    use bevy::scene::SceneRoot;
+    // Bevy 0.19 renamed the old scene crate to `bevy_world_serialization`
+    // (`SceneRoot` -> `WorldAssetRoot`); glTF scenes still spawn through it.
+    use bevy::world_serialization::WorldAssetRoot;
 
     // Phase 1: Spawn scenes for entities that already have GltfSourceHandle
     for (entity, gltf_handle, eid) in gltf_entities.iter() {
@@ -772,7 +774,7 @@ pub(super) fn apply_gltf_scene_spawn(
 
         // Spawn the glTF scene as a child of our root entity
         let scene_child = commands.spawn((
-            SceneRoot(scene_handle),
+            WorldAssetRoot(scene_handle),
             Transform::default(),
         )).id();
         commands.entity(scene_child).insert(ChildOf(entity));

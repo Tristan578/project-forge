@@ -31,6 +31,7 @@ mod query;
 mod animation;
 mod particles;
 mod scene_io;
+mod render_errors;
 // Editor-only modules. Every item in each of these three files is reachable
 // only from the `#[cfg(not(feature = "runtime"))]` block in
 // `SelectionPlugin::build()` below, so the whole module is gated rather than
@@ -74,6 +75,7 @@ use crate::core::{
     animation_clip::AnimationClipPlugin,
     post_processing::PostProcessingPlugin,
     quality::QualitySettings,
+    render_errors::RenderErrorReportingPlugin,
     scene,
     scene_file::SceneName,
     scene_graph::{self, SceneGraphCache},
@@ -215,6 +217,12 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
                     ..default()
                 }),
         );
+
+    // Replace Bevy 0.19's default RenderErrorHandler, which quits the app on
+    // ANY wgpu error and leaves the editor frozen with no explanation. Ours
+    // never quits; it skips a one-off error or stops rendering, and reports
+    // either to the editor (`RENDER_ERROR`). Policy: `core/render_errors.rs`.
+    app.add_plugins(RenderErrorReportingPlugin);
 
     // Insert the glTF memory directory resource (shared with the "memory" asset source reader)
     app.insert_resource(core::asset_manager::GltfMemoryDir(gltf_memory_dir));
@@ -385,7 +393,10 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, query::process_terrain_queries)
             .add_systems(Update, query::process_quality_queries)
             .add_systems(Update, query::process_reverb_zone_queries)
-            .add_systems(Update, query::process_play_state_queries);
+            .add_systems(Update, query::process_play_state_queries)
+            // Render-error reports (#8887). Always-active: a published game can
+            // hit a GPU error as easily as the editor can.
+            .add_systems(Update, render_errors::emit_render_error_reports);
 
         // Joint reads and the joint / gravity / debug-toggle drains run in BOTH
         // builds (#9550). `core::commands::physics::dispatch` accepts and queues

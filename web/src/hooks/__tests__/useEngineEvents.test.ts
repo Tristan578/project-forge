@@ -24,6 +24,7 @@ vi.mock('../events', () => ({
   handleParticleEvent: vi.fn().mockReturnValue(false),
   handlePerformanceEvent: vi.fn().mockReturnValue(false),
   handleEditModeEvent: vi.fn().mockReturnValue(false),
+  handleRenderErrorEvent: vi.fn().mockReturnValue(false),
 }));
 
 describe('useEngineEvents', () => {
@@ -135,6 +136,25 @@ describe('useEngineEvents', () => {
     
     // It should stop after the first handler returns true, so material handler shouldn't be called
     expect(events.handleMaterialEvent).not.toHaveBeenCalled();
+  });
+
+  // #8887: without this arm a RENDER_ERROR falls through to "Unknown engine
+  // event" and the editor shows nothing while the viewport is frozen.
+  it('routes RENDER_ERROR to the render-error handler', () => {
+    renderHook(() => useEngineEvents({ wasmModule }));
+    const callback = wasmModule.set_event_callback.mock.calls[0][0];
+    const payload = { errorClass: 'deviceLost', outcome: 'stopped', detail: '', occurrence: 1 };
+
+    vi.mocked(events.handleRenderErrorEvent).mockReturnValueOnce(true);
+    callback({ type: 'RENDER_ERROR', payload });
+
+    expect(events.handleRenderErrorEvent).toHaveBeenCalledWith(
+      'RENDER_ERROR',
+      payload,
+      useEditorStore.setState,
+      useEditorStore.getState,
+    );
+    expect(console.warn).not.toHaveBeenCalledWith('Unknown engine event:', 'RENDER_ERROR');
   });
 
   it('warns on unknown engine event', () => {
