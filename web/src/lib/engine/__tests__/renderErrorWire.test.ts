@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   RENDER_ERROR_CLASSES,
   parseRenderErrorReport,
+  playerRenderErrorCopy,
   renderErrorCopy,
   type RenderErrorClass,
 } from '../renderErrorWire';
@@ -89,6 +90,66 @@ describe('renderErrorCopy', () => {
       for (const outcome of outcomes) {
         const { title, body } = renderErrorCopy(errorClass, outcome);
         expect(`${title} ${body}`).not.toMatch(/wgpu|validation|pipeline|bind group|RenderError/i);
+        checked += 1;
+      }
+    }
+    expect(checked).toBe(8);
+  });
+});
+
+/**
+ * The published-game player's copy (#8887). A player did not make the game and
+ * has no editor, no toolbar and no Save: the only real actions on /play are
+ * reloading the game and leaving it, so the words must only point at those.
+ */
+describe('playerRenderErrorCopy', () => {
+  it('says a skipped error kept the game running', () => {
+    for (const errorClass of ['validation', 'internal'] as const) {
+      expect(playerRenderErrorCopy(errorClass, 'continued')).toEqual({
+        title: 'A graphics glitch was skipped',
+        body:
+          'The game hit a graphics error, skipped one frame and kept running. ' +
+          'If the picture looks wrong, reload the game to restart it.',
+      });
+    }
+  });
+
+  it('explains a repeated error that stopped the game drawing', () => {
+    for (const errorClass of ['validation', 'internal'] as const) {
+      expect(playerRenderErrorCopy(errorClass, 'stopped')).toEqual({
+        title: 'The game stopped drawing',
+        body:
+          'The same graphics error kept happening, so the game stopped drawing to avoid flickering. ' +
+          'Reload to restart the game. If it happens again, try a different browser.',
+      });
+    }
+  });
+
+  it('explains out of memory', () => {
+    expect(playerRenderErrorCopy('outOfMemory', 'stopped')).toEqual({
+      title: 'Your device ran out of graphics memory',
+      body:
+        'The game stopped drawing because your device ran out of graphics memory. ' +
+        'Close other tabs or apps that use graphics, then reload to restart the game.',
+    });
+  });
+
+  it('explains a lost device', () => {
+    expect(playerRenderErrorCopy('deviceLost', 'stopped')).toEqual({
+      title: 'The game lost its connection to the graphics card',
+      body:
+        'The game stopped drawing because your browser lost access to the graphics card. This can happen after a driver ' +
+        'update, waking from sleep, or a graphics crash. Reload to restart the game.',
+    });
+  });
+
+  it('never tells a player about the editor, saving, or a wgpu term', () => {
+    let checked = 0;
+    for (const errorClass of RENDER_ERROR_CLASSES as readonly RenderErrorClass[]) {
+      for (const outcome of ['continued', 'stopped'] as const) {
+        const { title, body } = playerRenderErrorCopy(errorClass, outcome);
+        expect(`${title} ${body}`).not.toMatch(/editor|save|toolbar|scene|viewport|wgpu|validation|pipeline|bind group|WebGL|WebGPU/i);
+        expect(body).toMatch(/reload/i);
         checked += 1;
       }
     }

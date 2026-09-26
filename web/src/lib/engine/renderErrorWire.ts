@@ -9,6 +9,11 @@
  * engine, the scene and saving keep working. Every decision is emitted as
  * `RENDER_ERROR` with the payload `{ errorClass, outcome, detail, occurrence }`.
  *
+ * Two surfaces read it, each with its own words from this file: the editor
+ * (`hooks/events/renderErrorEvents.ts` -> `RenderErrorNotice`, `renderErrorCopy`)
+ * and the published-game player (`components/play/GamePlayer.tsx` ->
+ * `PlayRenderErrorNotice`, `playerRenderErrorCopy`).
+ *
  * The Rust enum spellings are pinned against this file by
  * `hooks/events/__tests__/renderErrorWireParity.test.ts`.
  */
@@ -98,6 +103,53 @@ export function renderErrorCopy(errorClass: RenderErrorClass, outcome: RenderErr
         body:
           'The same graphics error kept happening, so the engine stopped drawing the viewport to avoid flicker. ' +
           saveThenReload,
+      };
+  }
+}
+
+/**
+ * The same notice, worded for someone PLAYING a published game on `/play`
+ * (`components/play/PlayRenderErrorNotice.tsx`). Kept beside the editor copy so
+ * the two surfaces change together.
+ *
+ * A player did not make the game and has none of the editor's tools: no
+ * toolbar, no Save, no scene. The only actions that exist on `/play` are
+ * reloading (which restarts the game from its start) and leaving, so this copy
+ * points at nothing else. It also never names a graphics backend: the player
+ * has no backend preference to switch (`loadPlayEngine` always auto-selects),
+ * so "try WebGL2" would be advice with no control behind it.
+ */
+export function playerRenderErrorCopy(errorClass: RenderErrorClass, outcome: RenderErrorOutcome): RenderErrorCopy {
+  if (outcome === 'continued') {
+    return {
+      title: 'A graphics glitch was skipped',
+      body:
+        'The game hit a graphics error, skipped one frame and kept running. ' +
+        'If the picture looks wrong, reload the game to restart it.',
+    };
+  }
+  switch (errorClass) {
+    case 'outOfMemory':
+      return {
+        title: 'Your device ran out of graphics memory',
+        body:
+          'The game stopped drawing because your device ran out of graphics memory. ' +
+          'Close other tabs or apps that use graphics, then reload to restart the game.',
+      };
+    case 'deviceLost':
+      return {
+        title: 'The game lost its connection to the graphics card',
+        body:
+          'The game stopped drawing because your browser lost access to the graphics card. This can happen after a driver ' +
+          'update, waking from sleep, or a graphics crash. Reload to restart the game.',
+      };
+    case 'validation':
+    case 'internal':
+      return {
+        title: 'The game stopped drawing',
+        body:
+          'The same graphics error kept happening, so the game stopped drawing to avoid flickering. ' +
+          'Reload to restart the game. If it happens again, try a different browser.',
       };
   }
 }
