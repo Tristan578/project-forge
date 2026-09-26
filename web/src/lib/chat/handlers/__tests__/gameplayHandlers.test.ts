@@ -1164,8 +1164,16 @@ describe('export_game', () => {
     await invokeHandler(gameplayHandlers, 'export_game', { title: 'TestGame' }, { sceneName: 'G' });
     expect(mockDownloadBlob).toHaveBeenCalledTimes(1);
     const [, filename] = mockDownloadBlob.mock.calls[0] as [Blob, string];
-    expect(filename).toContain('TestGame');
-    expect(filename).toMatch(/\.html$/);
+    expect(filename).toBe('TestGame.html');
+  });
+
+  // exportGame returns a zip archive in zip mode, so the download and the name
+  // reported back to the chat must say .zip, not .html.
+  it('names a zip-mode export .zip, in the download and in the result', async () => {
+    const { result } = await invokeHandler(gameplayHandlers, 'export_game', { title: 'TestGame', mode: 'zip' }, { sceneName: 'G' });
+    const [, filename] = mockDownloadBlob.mock.calls[0] as [Blob, string];
+    expect(filename).toBe('TestGame.zip');
+    expect((result.result as { filename: string }).filename).toBe('TestGame.zip');
   });
 
   it('resets isExporting=false even on export failure', async () => {

@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useId, useSyncExternalStore } from 'react';
 import { X, ChevronRight, Trophy } from 'lucide-react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore } from '@/stores/editorStore';
@@ -94,6 +94,13 @@ export function TutorialOverlay() {
     if (!activeTutorialId) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // The listener is window-wide, and action steps ask the user to type
+      // (a chat prompt, an entity name). Arrow keys there move the caret and
+      // Escape belongs to that field or its popup; neither may also step or
+      // end the tour. Modified keys and keys another handler consumed are
+      // left alone for the same reason.
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (isEditableTarget(e.target)) return;
       const s = keyHandlerState.current;
       switch (e.key) {
         case 'Escape':
@@ -226,15 +233,32 @@ export function TutorialOverlay() {
   // Early return after all hooks
   if (!activeTutorialId || !tutorial || !currentStep) return null;
 
+  // Blocking is an explicit opt-in on the tutorial (`blocksPage`), set only by
+  // the "What can SpawnForge do?" tour: its promise that it spends nothing
+  // would otherwise be one stray click on the highlighted Quick Start, Play or
+  // Export away from false (#10171). It is NOT inferred from a step lacking an
+  // actionRequired: the older tutorials end on such a step ("Press Stop to
+  // return to Edit Mode") while the engine is still playing, and must leave
+  // the Stop button reachable, exactly as before. A step that asks the user to
+  // DO something never blocks: the click on the real control is the step.
+  const blocksPage = tutorial.blocksPage === true && !currentStep.actionRequired;
+  const pointerEvents = blocksPage ? 'pointer-events-auto' : 'pointer-events-none';
+
   return (
     <>
       {/* Backdrop with spotlight */}
-      <div className="fixed inset-0 z-[100] bg-black/60 pointer-events-none" />
+      <div
+        data-testid="tutorial-backdrop"
+        aria-hidden="true"
+        className={`fixed inset-0 z-[100] bg-black/60 ${pointerEvents}`}
+      />
 
       {/* Highlight border */}
       {highlightRect && (
         <div
-          className="fixed z-[101] border-3 border-blue-500 rounded-lg pointer-events-none"
+          data-testid="tutorial-highlight"
+          aria-hidden="true"
+          className={`fixed z-[101] border-3 border-blue-500 rounded-lg ${pointerEvents}`}
           style={{
             left: `${highlightRect.left - 8}px`,
             top: `${highlightRect.top - 8}px`,
@@ -247,12 +271,14 @@ export function TutorialOverlay() {
 
       {/* Instruction bubble */}
       <TutorialBubble
+        stepKey={`${activeTutorialId}:${tutorialStep}`}
         step={currentStep}
         stepNumber={tutorialStep + 1}
         totalSteps={tutorial.steps.length}
         actionCompleted={actionCompleted}
         isLastStep={isLastStep}
         highlightRect={highlightRect}
+        blocksPage={blocksPage}
         onNext={handleNext}
         onSkip={handleSkip}
       />
@@ -260,76 +286,274 @@ export function TutorialOverlay() {
   );
 }
 
+/** Widest the bubble gets; narrower on small screens. */
+const BUBBLE_MAX_WIDTH = 400;
+/**
+ * Room a side must offer before the bubble is placed there: a worst case for a
+ * 288px-wide bubble (header, title, a seven-line description, a two-line key
+ * hint and 44px buttons, about 350px). It only CHOOSES the side. The bubble is
+ * anchored to the edge facing its target and capped at the room it was given,
+ * so it cannot overlap the target or leave the viewport whatever its real
+ * height turns out to be; a longer one scrolls.
+ */
+const BUBBLE_HEIGHT_BUDGET = 380;
+/** With less room than this on either side, the step shows as a centred card. */
+const BUBBLE_MIN_HEIGHT = 160;
+/** Minimum gap between the bubble and the viewport edge. */
+const EDGE = 16;
+/** Gap between the bubble and its target. */
+const GAP = 16;
+
+type TargetRect = Pick<DOMRect, 'top' | 'bottom' | 'left' | 'right' | 'width' | 'height'>;
+
+/**
+ * Where the bubble goes, in viewport pixels. Exactly one vertical anchor is
+ * set: `top` (bubble below or beside its target), `bottom` (bubble above its
+ * target, so it grows upward away from it), or `centred` (no usable target).
+ */
+export interface BubblePlacement {
+  left: number;
+  width: number;
+  maxHeight: number;
+  top?: number;
+  bottom?: number;
+  centred?: true;
+}
+
+export function placeBubble(
+  rect: TargetRect | null,
+  position: TutorialStep['targetPosition'],
+  viewportW: number,
+  viewportH: number,
+): BubblePlacement {
+  const width = Math.max(0, Math.min(BUBBLE_MAX_WIDTH, viewportW - 2 * EDGE));
+  const clampLeft = (left: number) => Math.max(EDGE, Math.min(left, viewportW - width - EDGE));
+  const centredCard: BubblePlacement = {
+    left: clampLeft((viewportW - width) / 2),
+    width,
+    maxHeight: Math.max(0, viewportH - 2 * EDGE),
+    centred: true,
+  };
+
+  if (!rect || !position) return centredCard;
+
+  // Above or below the target, preferring `prefer`. The compact layout docks
+  // the quick-start trigger at the bottom of the screen, so a 'bottom' step
+  // has to be able to flip above it (#10171).
+  const vertical = (prefer: 'above' | 'below'): BubblePlacement => {
+    const roomAbove = rect.top - GAP - EDGE;
+    const roomBelow = viewportH - rect.bottom - GAP - EDGE;
+    const other = prefer === 'above' ? 'below' : 'above';
+    const room = (side: 'above' | 'below') => (side === 'above' ? roomAbove : roomBelow);
+    let side: 'above' | 'below';
+    if (room(prefer) >= BUBBLE_HEIGHT_BUDGET) side = prefer;
+    else if (room(other) >= BUBBLE_HEIGHT_BUDGET) side = other;
+    else side = room(other) > room(prefer) ? other : prefer;
+
+    if (room(side) < BUBBLE_MIN_HEIGHT) return centredCard;
+    const left = clampLeft(rect.left + rect.width / 2 - width / 2);
+    return side === 'above'
+      ? { left, width, bottom: viewportH - rect.top + GAP, maxHeight: roomAbove }
+      : { left, width, top: rect.bottom + GAP, maxHeight: roomBelow };
+  };
+
+  switch (position) {
+    case 'top':
+      return vertical('above');
+    case 'bottom':
+      return vertical('below');
+    case 'left':
+    case 'right': {
+      const left = position === 'left' ? rect.left - GAP - width : rect.right + GAP;
+      // No room beside the target (a phone, or a target near that edge):
+      // clamping would slide the bubble back over it, so go below instead.
+      if (left < EDGE || left + width > viewportW - EDGE) return vertical('below');
+      const budget = Math.min(BUBBLE_HEIGHT_BUDGET, viewportH - 2 * EDGE);
+      const top = Math.max(
+        EDGE,
+        Math.min(rect.top + rect.height / 2 - budget / 2, viewportH - EDGE - budget),
+      );
+      return { left, width, top, maxHeight: Math.max(0, viewportH - EDGE - top) };
+    }
+  }
+}
+
+/** A field the user types into: its keys are theirs, not the tour's. */
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
+  if (target instanceof HTMLInputElement) {
+    // Buttons, checkboxes and the like take no text, so arrows are free there.
+    return !['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file', 'image'].includes(
+      target.type,
+    );
+  }
+  return false;
+}
+
+function subscribeToViewport(onChange: () => void) {
+  window.addEventListener('resize', onChange, { passive: true });
+  window.addEventListener('orientationchange', onChange);
+  return () => {
+    window.removeEventListener('resize', onChange);
+    window.removeEventListener('orientationchange', onChange);
+  };
+}
+const readViewportWidth = () => window.innerWidth;
+const readViewportHeight = () => window.innerHeight;
+const serverViewportWidth = () => 1024;
+const serverViewportHeight = () => 768;
+
 interface TutorialBubbleProps {
+  /** Changes on every step of every tutorial; focus moves to Next when it does. */
+  stepKey: string;
   step: TutorialStep;
   stepNumber: number;
   totalSteps: number;
   actionCompleted: boolean;
   isLastStep: boolean;
   highlightRect: DOMRect | null;
+  /** The tutorial opts in to blocking and this step only points: the page behind is blocked and focus stays in the bubble. */
+  blocksPage: boolean;
   onNext: () => void;
   onSkip: () => void;
 }
 
+/** Pointer events stopped before the page sees them while a step blocks it. */
+const BLOCKED_POINTER_EVENTS = [
+  'pointerdown',
+  'pointerup',
+  'mousedown',
+  'mouseup',
+  'click',
+  'dblclick',
+  'auxclick',
+  'contextmenu',
+] as const;
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 function TutorialBubble({
+  stepKey,
   step,
   stepNumber,
   totalSteps,
   actionCompleted,
   isLastStep,
   highlightRect,
+  blocksPage,
   onNext,
   onSkip,
 }: TutorialBubbleProps) {
-  // Use useMemo to compute position (render-time calculation)
-  const position = useMemo(() => {
-    if (!highlightRect || !step.targetPosition) {
-      return {
-        top: typeof window !== 'undefined' ? window.innerHeight / 2 - 150 : 300,
-        left: typeof window !== 'undefined' ? window.innerWidth / 2 - 200 : 200,
-      };
-    }
+  // Re-laid out on resize and rotation, including for untargeted cards, which
+  // have no highlight listener to re-render them.
+  const viewportW = useSyncExternalStore(subscribeToViewport, readViewportWidth, serverViewportWidth);
+  const viewportH = useSyncExternalStore(subscribeToViewport, readViewportHeight, serverViewportHeight);
+  const placement = useMemo(
+    () => placeBubble(highlightRect, step.targetPosition, viewportW, viewportH),
+    [highlightRect, step.targetPosition, viewportW, viewportH],
+  );
 
-    const padding = 16;
-    let top = 0;
-    let left = 0;
+  const titleId = useId();
+  const bodyId = useId();
+  const hintId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const nextRef = useRef<HTMLButtonElement>(null);
 
-    switch (step.targetPosition) {
-      case 'top':
-        top = highlightRect.top - 200 - padding;
-        left = highlightRect.left + highlightRect.width / 2 - 200;
-        break;
-      case 'bottom':
-        top = highlightRect.bottom + padding;
-        left = highlightRect.left + highlightRect.width / 2 - 200;
-        break;
-      case 'left':
-        top = highlightRect.top + highlightRect.height / 2 - 100;
-        left = highlightRect.left - 400 - padding;
-        break;
-      case 'right':
-        top = highlightRect.top + highlightRect.height / 2 - 100;
-        left = highlightRect.right + padding;
-        break;
-    }
+  // Give focus back to whatever had it before the tour (the Help button, when
+  // started from the Help menu) once the tour ends. Declared before the effect
+  // below so it records the opener before focus moves into the bubble.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
 
-    // Clamp to viewport
-    if (typeof window !== 'undefined') {
-      top = Math.max(16, Math.min(top, window.innerHeight - 216));
-      left = Math.max(16, Math.min(left, window.innerWidth - 416));
-    }
+  // Each step takes focus, so a keyboard or screen reader user lands in the
+  // tour rather than on whatever launched it. A step waiting on an action has a
+  // disabled Next, so the dialog itself takes focus instead.
+  useEffect(() => {
+    const next = nextRef.current;
+    if (next && !next.disabled) next.focus();
+    else dialogRef.current?.focus();
+  }, [stepKey]);
 
-    return { top, left };
-  }, [highlightRect, step.targetPosition]);
+  // A blocking step (see blocksPage above) blocks the page. The backdrop and ring already take
+  // the pointer; this also covers a control stacked above them and the
+  // keyboard. Anything aimed outside the bubble is stopped in the capture
+  // phase, before React or the engine sees it: a click (including the one
+  // Enter or Space synthesises on a focused button), and Tab, which cycles
+  // through the bubble's own controls instead of walking onto the page.
+  // Listeners are removed when the step changes or the tour ends, so the
+  // opener-focus restore above is unaffected.
+  useEffect(() => {
+    if (!blocksPage) return;
+    const inBubble = (target: EventTarget | null) =>
+      target instanceof Node && !!dialogRef.current?.contains(target);
+
+    const stopPointer = (e: Event) => {
+      if (inBubble(e.target)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+
+    const trapTab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey) return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const items = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+      e.preventDefault();
+      if (items.length === 0) {
+        dialog.focus();
+        return;
+      }
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const nextIndex =
+        at === -1
+          ? e.shiftKey ? items.length - 1 : 0
+          : (at + (e.shiftKey ? -1 : 1) + items.length) % items.length;
+      items[nextIndex]!.focus();
+    };
+
+    for (const type of BLOCKED_POINTER_EVENTS) window.addEventListener(type, stopPointer, true);
+    window.addEventListener('keydown', trapTab, true);
+    return () => {
+      for (const type of BLOCKED_POINTER_EVENTS) window.removeEventListener(type, stopPointer, true);
+      window.removeEventListener('keydown', trapTab, true);
+    };
+  }, [blocksPage]);
+
+  const anchor = placement.centred
+    ? { top: '50%', transform: 'translateY(-50%)' }
+    : placement.bottom !== undefined
+      ? { bottom: `${placement.bottom}px` }
+      : { top: `${placement.top}px` };
 
   return (
     <div
-      className="fixed z-[102] w-[400px] rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-2xl pointer-events-auto"
+      ref={dialogRef}
+      data-testid="tutorial-bubble"
+      role="dialog"
+      aria-modal={blocksPage ? true : undefined}
+      aria-labelledby={titleId}
+      aria-describedby={`${bodyId} ${hintId}`}
+      tabIndex={-1}
+      className="fixed z-[102] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-2xl pointer-events-auto"
       style={{
-        top: `${position.top}px`,
-        left: `${position.left}px`,
+        ...anchor,
+        left: `${placement.left}px`,
+        width: `${placement.width}px`,
+        maxHeight: `${placement.maxHeight}px`,
       }}
     >
+      {/* Announced on every step change; the first step is announced when focus enters the dialog. */}
+      <p data-testid="tutorial-live" role="status" className="sr-only">
+        {`Step ${stepNumber} of ${totalSteps}: ${step.title}. ${step.description}`}
+      </p>
+
       {/* Header */}
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -341,41 +565,48 @@ function TutorialBubble({
           </span>
         </div>
         <button
+          type="button"
           onClick={onSkip}
-          className="rounded p-1 text-zinc-400 hover:text-zinc-300 transition-colors"
-          title="Skip tutorial"
+          aria-label="Skip tutorial"
+          className="-my-2 -mr-2 flex min-h-11 min-w-11 items-center justify-center rounded text-zinc-400 hover:text-zinc-300 transition-colors"
         >
-          <X size={16} />
+          <X size={16} aria-hidden="true" />
         </button>
       </div>
 
       {/* Content */}
-      <h3 className="mb-2 text-lg font-semibold text-zinc-100">{step.title}</h3>
-      <p className="mb-4 text-sm text-zinc-300">{step.description}</p>
+      <h3 id={titleId} className="mb-2 text-lg font-semibold text-zinc-100">{step.title}</h3>
+      <p id={bodyId} className="mb-3 text-sm text-zinc-300">{step.description}</p>
+      <p id={hintId} data-testid="tutorial-key-hint" className="mb-3 text-xs text-zinc-400">
+        Keys: Right arrow for next, Left arrow for back, Esc to skip.
+      </p>
 
       {/* Actions */}
       <div className="flex items-center justify-end gap-2">
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={onSkip}
-            className="rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
+            className="min-h-11 rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
           >
             Skip Tutorial
           </button>
           <button
+            ref={nextRef}
+            type="button"
             onClick={onNext}
             disabled={!actionCompleted && !!step.actionRequired}
-            className="flex items-center gap-1 rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex min-h-11 items-center gap-1 rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isLastStep ? (
               <>
                 Complete
-                <Trophy size={16} />
+                <Trophy size={16} aria-hidden="true" />
               </>
             ) : (
               <>
                 Next
-                <ChevronRight size={16} />
+                <ChevronRight size={16} aria-hidden="true" />
               </>
             )}
           </button>

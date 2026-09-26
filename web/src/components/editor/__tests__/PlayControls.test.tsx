@@ -41,6 +41,18 @@ describe('PlayControls', () => {
     expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument();
   });
 
+  // The capabilities tour (#10171) highlights `[data-testid="play-controls-play"]`,
+  // a hook of its own: `aria-label="Play"` is also on the Adaptive Music
+  // inspector's preview button, and paused PlayControls shows Resume instead.
+  it.each([['edit'], ['paused']] as const)(
+    'renders the tour\'s play target exactly once in %s mode',
+    (engineMode) => {
+      mockEditorStore({ engineMode });
+      render(<PlayControls />);
+      expect(document.querySelectorAll('[data-testid="play-controls-play"]')).toHaveLength(1);
+    },
+  );
+
   it('shows Playing status indicator when in play mode', () => {
     mockEditorStore({ engineMode: 'play' });
     render(<PlayControls />);

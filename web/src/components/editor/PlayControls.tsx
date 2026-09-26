@@ -23,6 +23,7 @@ export function PlayControls() {
           className="flex h-6 w-6 items-center justify-center rounded text-green-400 hover:bg-zinc-700"
           title="Resume (Ctrl+P)"
           aria-label="Resume"
+          data-testid="play-controls-play"
         >
           <Play size={13} fill="currentColor" />
         </button>
@@ -33,6 +34,7 @@ export function PlayControls() {
           className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-green-400 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400"
           title="Play (Ctrl+P)"
           aria-label="Play"
+          data-testid="play-controls-play"
         >
           <Play size={13} fill={isEdit ? 'none' : 'currentColor'} />
         </button>

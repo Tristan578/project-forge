@@ -31,6 +31,25 @@ export interface TutorialFlow {
   persona: 'beginner' | 'hobbyist' | 'developer' | 'ai-first';
   steps: TutorialStep[];
   tags: string[];
+  /**
+   * Whether finishing this tutorial means the user has onboarded.
+   * `OnboardingChecklist` permanently dismisses itself when an onboarding
+   * tutorial completes. A highlight-only tour teaches nothing hands-on, so it
+   * sets this to false and leaves the checklist alone (#10171). Default: true.
+   */
+  completesOnboarding?: boolean;
+  /**
+   * Whether this tutorial's highlight-only steps (those without an
+   * `actionRequired`) block the page: backdrop takes the pointer, clicks
+   * outside the bubble are stopped, Tab is trapped and the bubble is
+   * `aria-modal`. Opt-in, set only by a tour that promises it changes nothing,
+   * so a stray click on a highlighted control cannot break that promise
+   * (#10171). Every other tutorial stays non-modal: their closing cards say
+   * "Press Stop" while the engine is still in play mode, and a blocked page
+   * would leave the user unable to do it. Steps with an `actionRequired` never
+   * block, even here. Default: false.
+   */
+  blocksPage?: boolean;
 }
 
 // Tutorial 1: Your First Scene
@@ -314,10 +333,80 @@ export const TUTORIAL_PHYSICS: TutorialFlow = {
   ],
 };
 
+// Tour: What can SpawnForge do? (#10171)
+//
+// Highlight-only on purpose. No step has an `actionRequired`, so nothing
+// dispatches a command, calls AI or changes the scene; the user only reads
+// and presses Next. That is the whole contract: a curious creator can see
+// where AI building, playing and exporting live before spending tokens.
+// `blocksPage: true` makes that hold even against a stray click or Tab onto a
+// highlighted control; no other tutorial sets it.
+//
+// Targets are dedicated data-testids, not labels: `aria-label="Play"` also
+// matches the Adaptive Music inspector's preview button, and a paused editor
+// shows Resume instead of Play. In the compact layout there is no Export
+// control, so that step renders as an untargeted card and says how to export
+// from there: the AI chat's export_game, which writes an HTML file or a zip
+// (no embed code) and, being a chat message, is charged up front by
+// /api/chat. The step says so, because this tour's promise is showing what
+// costs tokens before anyone spends them.
+export const TUTORIAL_CAPABILITIES: TutorialFlow = {
+  id: 'capabilities',
+  name: 'What can SpawnForge do?',
+  description: 'A one-minute look at where AI building, playing and exporting live',
+  difficulty: 'beginner',
+  estimatedMinutes: 1,
+  persona: 'beginner',
+  tags: ['Overview', 'Essential'],
+  completesOnboarding: false,
+  blocksPage: true,
+  steps: [
+    {
+      id: 'intro',
+      title: 'What can SpawnForge do?',
+      description:
+        "Here's where the main tools live. This tour only points at things: it doesn't spend tokens or change your scene.",
+    },
+    {
+      id: 'build-with-ai',
+      title: 'Build a game with AI',
+      description:
+        'Describe the game you want and SpawnForge designs and builds a playable scene from it. AI building uses tokens from your balance.',
+      target: '[data-testid="quick-start-trigger"]',
+      targetPosition: 'bottom',
+    },
+    {
+      id: 'play',
+      title: 'Play it',
+      description: 'Run your game right here in the editor. Press Stop to go back to editing.',
+      target: '[data-testid="play-controls-play"]',
+      targetPosition: 'bottom',
+    },
+    {
+      id: 'export',
+      title: 'Share it',
+      description:
+        "Export your game as a single HTML file or a zip you can host, or copy embed code for your site. On a small screen there's no Export button: ask the AI chat to export it as an HTML file or a zip instead. That's a chat message, so it uses tokens.",
+      target: '[data-testid="scene-toolbar-export"]',
+      targetPosition: 'bottom',
+    },
+  ],
+};
+
 // Tutorial registry
 export const TUTORIALS: TutorialFlow[] = [
   TUTORIAL_FIRST_SCENE,
   TUTORIAL_MAKE_IT_MOVE,
   TUTORIAL_AI_CHAT,
   TUTORIAL_PHYSICS,
+  TUTORIAL_CAPABILITIES,
 ];
+
+/**
+ * Whether completing the tutorial with this id counts as onboarding. Ids not in
+ * the registry count, which keeps the checklist's historical behaviour for any
+ * completion record written by an older build.
+ */
+export function tutorialCompletesOnboarding(id: string): boolean {
+  return TUTORIALS.find((t) => t.id === id)?.completesOnboarding !== false;
+}

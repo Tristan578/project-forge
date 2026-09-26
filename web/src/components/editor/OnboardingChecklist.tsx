@@ -10,6 +10,7 @@ import { CheckCircle2, Circle, ChevronDown, ChevronUp, X, Trophy } from 'lucide-
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
+import { tutorialCompletesOnboarding } from '@/data/tutorials';
 import { hasCelebrated } from '@/lib/celebrations/milestones';
 
 interface ChecklistTask {
@@ -156,7 +157,12 @@ export function OnboardingChecklist() {
   const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
 
   const tutorialCompleted = useOnboardingStore((s) => s.tutorialCompleted);
-  const hasCompletedOnboarding = Object.keys(tutorialCompleted).length > 0;
+  // Only a hands-on tutorial counts. Finishing the highlight-only
+  // "What can SpawnForge do?" tour used to dismiss this checklist for good,
+  // before the user had done any of it (#10171).
+  const hasCompletedOnboarding = Object.entries(tutorialCompleted).some(
+    ([id, done]) => done && tutorialCompletesOnboarding(id),
+  );
 
   // Auto-dismiss if user completed onboarding via tutorial
   const [prevOnboarded, setPrevOnboarded] = useState(hasCompletedOnboarding);
