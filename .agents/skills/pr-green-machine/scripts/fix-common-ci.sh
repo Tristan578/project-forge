@@ -46,7 +46,10 @@ if [ "$LINT_FIX_EXIT" -eq 0 ]; then
   pass "ESLint auto-fix completed successfully"
 else
   echo "  ESLint fix output:"
-  echo "$LINT_FIX_OUTPUT" | head -50 | sed 's/^/    /'
+  # Previews use `sed -n '1,Ns/.../p'`, never `head -N`: head closes the pipe
+  # early, and under pipefail the writer's SIGPIPE kills the script (exit 141)
+  # before the remaining checks and the RESULT summary run.
+  echo "$LINT_FIX_OUTPUT" | sed -n '1,50s/^/    /p'
   warn "ESLint auto-fix completed with some remaining issues (see above)"
 fi
 
@@ -64,7 +67,7 @@ else
   fail "Lint issues remain after auto-fix — requires manual fix"
   echo ""
   echo "  Remaining lint issues:"
-  echo "$LINT_CHECK_OUTPUT" | head -60 | sed 's/^/    /'
+  echo "$LINT_CHECK_OUTPUT" | sed -n '1,60s/^/    /p'
   echo ""
   echo "  Common manual fixes:"
   echo "    - Unused vars: prefix with _ or remove"
@@ -90,7 +93,7 @@ else
   fail "TypeScript errors found"
   echo ""
   echo "  TypeScript errors:"
-  echo "$TSC_OUTPUT" | head -80 | sed 's/^/    /'
+  echo "$TSC_OUTPUT" | sed -n '1,80s/^/    /p'
   echo ""
   echo "  Common type error patterns:"
   echo "    - 'Type X is not assignable to Y': check the types match, add proper types"
@@ -98,6 +101,24 @@ else
   echo "    - 'Property does not exist': verify the property name is correct"
   echo "    - 'any' type issues: import or define proper interfaces"
 fi
+
+# The other TypeScript workspaces carry their own tsconfig (strict +
+# exactOptionalPropertyTypes, #7592) that web's tsc never reads, and vitest
+# strips types without checking them. CI type-checks each one, so this does too.
+for ws in packages/ui apps/docs mcp-server; do
+  [ -d "${REPO_ROOT}/${ws}" ] || continue
+  echo "  Running: npx tsc --noEmit (${ws})"
+  set +e
+  WS_TSC_OUTPUT=$(cd "${REPO_ROOT}/${ws}" && npx tsc --noEmit 2>&1)
+  WS_TSC_EXIT=$?
+  set -e
+  if [ "$WS_TSC_EXIT" -eq 0 ]; then
+    pass "Zero TypeScript errors (${ws})"
+  else
+    fail "TypeScript errors found (${ws})"
+    echo "$WS_TSC_OUTPUT" | sed -n '1,40s/^/    /p'
+  fi
+done
 
 # ---------------------------------------------------------------------------
 # 3. MCP tests (fast, catches manifest sync issues)
@@ -132,11 +153,13 @@ fi
 # ---------------------------------------------------------------------------
 section "Changed File Tests"
 
-CHANGED_FILES=$(git diff --name-only HEAD 2>/dev/null | grep -E "\.ts$|\.tsx$" | grep -v "__tests__" | head -20 || echo "")
+CHANGED_FILES=$(git diff --name-only HEAD 2>/dev/null | grep -E "\.ts$|\.tsx$" | grep -v "__tests__" | sed -n '1,20p' || echo "")
 
 if [ -n "$CHANGED_FILES" ]; then
   echo "  Changed source files:"
-  echo "$CHANGED_FILES" | sed 's/^/    /'
+  while IFS= read -r changed; do
+    echo "    $changed"
+  done <<< "$CHANGED_FILES"
   echo ""
 
   # Find test files for changed source files
@@ -151,9 +174,11 @@ if [ -n "$CHANGED_FILES" ]; then
   if [ -n "$TEST_DIRS" ]; then
     # Deduplicate dirs and strip web/ prefix (we cd into web/ before running vitest)
     UNIQUE_DIRS=$(echo "$TEST_DIRS" | tr ' ' '\n' | sed 's|^web/||' | sort -u | tr '\n' ' ')
+    # One argv entry per directory: an unquoted expansion would also glob.
+    read -r -a DIR_ARGS <<< "$UNIQUE_DIRS"
     echo "  Running targeted tests for changed directories..."
     set +e
-    VITEST_OUTPUT=$(cd "$WEB_DIR" && npx vitest run $UNIQUE_DIRS 2>&1)
+    VITEST_OUTPUT=$(cd "$WEB_DIR" && npx vitest run "${DIR_ARGS[@]}" 2>&1)
     VITEST_EXIT=$?
     set -e
 

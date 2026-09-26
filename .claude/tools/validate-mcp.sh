@@ -63,11 +63,21 @@ if [ -f "$MCP_MANIFEST" ]; then
   echo "  Commands: $CMD_COUNT across $CAT_COUNT categories"
 fi
 
-# 3. MCP server tests
+# 3. MCP server type-check + tests
 if [ "$MODE" = "test" ] || [ "$MODE" = "full" ]; then
+  cd "$PROJECT_ROOT/mcp-server"
+  # vitest strips types without checking them, so a tree that fails
+  # exactOptionalPropertyTypes (or any other tsconfig rule) passes the test
+  # step. CI runs tsc here (quality-gates.yml, cd.yml); so must this gate.
+  echo ""
+  echo "--- MCP Server TypeScript ---"
+  if npx tsc --noEmit 2>&1; then
+    pass "MCP server: no type errors"
+  else
+    fail "MCP server: type errors found"
+  fi
   echo ""
   echo "--- MCP Server Tests ---"
-  cd "$PROJECT_ROOT/mcp-server"
   if npx vitest run 2>&1; then
     pass "MCP server tests passed"
   else

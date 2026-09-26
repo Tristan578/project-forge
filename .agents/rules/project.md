@@ -51,7 +51,7 @@ cd web && npm install && npm run dev
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # MCP server tests
-cd mcp-server && npx vitest run
+cd mcp-server && npx tsc --noEmit && npx vitest run
 
 # E2E tests (requires WASM build)
 cd web && npx playwright test

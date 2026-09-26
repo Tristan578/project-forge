@@ -43,7 +43,7 @@ cd web && npx tsc --noEmit
 cd web && npx vitest run
 
 # MCP tests
-cd mcp-server && npx vitest run
+cd mcp-server && npx tsc --noEmit && npx vitest run
 ```
 
 If any check fails, fix immediately before proceeding.

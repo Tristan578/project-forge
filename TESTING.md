@@ -2,7 +2,7 @@
 
 Manual verification checklist for user-facing features. Run these after major changes to ensure end-to-end functionality.
 
-> **Automated tests:** 14,200+ unit tests (`cd web && npx vitest run`), 63 E2E spec files (`cd web && npx playwright test`), 400 MCP tests (`cd mcp-server && npx vitest run`)
+> **Automated tests:** 14,200+ unit tests (`cd web && npx vitest run`), 63 E2E spec files (`cd web && npx playwright test`), 520+ MCP tests (`cd mcp-server && npx tsc --noEmit && npx vitest run`)
 >
 > **Vitest pool:** The standalone `vitest.config.ts` uses `pool: 'threads'`. All test files must use `vi.stubEnv()` / `vi.unstubAllEnvs()` for env var mutations — do NOT mutate `process.env` directly, as threads share the same process object. The `vitest.config.jsdom.ts` workspace config still uses `pool: 'forks'` for jsdom compatibility.
 
