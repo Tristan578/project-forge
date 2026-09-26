@@ -9,10 +9,14 @@
  * project B's. Measured through the real store and the real deferral, with
  * only the page's heavy children and Next's navigation stubbed.
  *
+ * Reopening a saved project also restores its completion mode (#9998): the
+ * page adopts it straight from `sceneData` at once, because the scene load it
+ * defers only reaches `SCENE_LOADED` after the engine attaches.
+ *
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, act } from '@testing-library/react';
+import { render, cleanup, act, waitFor } from '@testing-library/react';
 import EditorPage from '../page';
 import { useEditorStore } from '@/stores/editorStore';
 import { hasDeferredSceneLoad, setSceneDispatcher } from '@/stores/slices/sceneSlice';
@@ -131,5 +135,51 @@ describe('EditorPage cold open (#10192, deferred scene load ownership)', () => {
     await act(async () => { settleBody(); });
     expect(hasDeferredSceneLoad()).toBe(false);
     expect(useEditorStore.getState().projectId).toBeNull();
+  });
+});
+
+const BASE_SCENE = { formatVersion: 3, metadata: { name: 'My game' }, entities: [] };
+
+function serveProject(sceneData: Record<string, unknown>) {
+  global.fetch = vi.fn(async () => new Response(JSON.stringify({ name: 'My game', sceneData }), { status: 200 })) as unknown as typeof fetch;
+}
+
+describe('EditorPage reopen restores the completion mode (#9998)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentProjectId = 'project-a';
+    setSceneDispatcher(null);
+    useEditorStore.setState({ projectId: null });
+    // A previous project's mode, which the reopened one must not inherit.
+    useEditorStore.getState().hydrateCompletionMode('narrative');
+  });
+
+  afterEach(() => {
+    cleanup();
+    setSceneDispatcher(null);
+  });
+
+  it.each(['win', 'endless', 'sandbox', 'narrative'] as const)(
+    'restores a saved %s mode on a cold open',
+    async (mode) => {
+      useEditorStore.getState().hydrateCompletionMode(undefined);
+      serveProject({ ...BASE_SCENE, completionMode: mode });
+
+      render(<EditorPage />);
+
+      await waitFor(() => expect(useEditorStore.getState().sceneGraph.completionMode).toBe(mode));
+      // Restoring what was saved is not an unsaved edit or an undo step.
+      expect(useEditorStore.getState().completionModeHistory).toEqual({ past: [], future: [] });
+      expect(useEditorStore.getState().sceneModified).toBe(false);
+    },
+  );
+
+  it('opens a legacy project (no field) in the legacy win mode, not the previous project mode', async () => {
+    serveProject(BASE_SCENE);
+
+    render(<EditorPage />);
+
+    await waitFor(() => expect(useEditorStore.getState().projectId).toBe('project-a'));
+    expect(useEditorStore.getState().sceneGraph.completionMode).toBeUndefined();
   });
 });

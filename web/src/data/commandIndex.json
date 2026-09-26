@@ -1431,6 +1431,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "set_completion_mode",
+      "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "set_coordinate_mode",
       "category": "editor",
       "requiredScope": "scene:write"

@@ -3,6 +3,14 @@
  * All interfaces and types originally defined in editorStore.ts.
  */
 
+// The completion-mode vocabulary lives in `lib/playMode/completionMode.ts` so
+// the server-side decomposer can validate a brief against the same list the
+// store and the picker use (`stores/` is client-only). Re-exported here so
+// every existing `@/stores/slices/types` import keeps working.
+import type { CompletionMode } from '@/lib/playMode/completionMode';
+export { COMPLETION_MODES, DEFAULT_COMPLETION_MODE } from '@/lib/playMode/completionMode';
+export type { CompletionMode } from '@/lib/playMode/completionMode';
+
 // Scene node data matching Rust's SceneNodeData struct
 export interface SceneNode {
   entityId: string;
@@ -13,47 +21,20 @@ export interface SceneNode {
   visible: boolean;
 }
 
-/**
- * How a game is considered "complete", authored intentionally by the creator
- * rather than inferred from the scene's contents.
- *
- * - `win`       — a classic goal-driven game; the pre-play winnability gate
- *                 requires at least one satisfiable win condition (the legacy
- *                 behaviour, and the default for every scene without the field).
- * - `endless`   — score-chasing / survival with no terminal win state.
- * - `sandbox`   — a toy or creative space with no win condition at all.
- * - `narrative` — a story/exploration piece that ends by authored progression.
- *
- * Only `win` (and, per the legacy convention below, its absence) demands a win
- * condition; the other three intentionally do not.
- */
-export type CompletionMode = 'win' | 'endless' | 'sandbox' | 'narrative';
-
-/** Every completion mode, single-sourced for validators, UI menus and Zod. */
-export const COMPLETION_MODES: readonly CompletionMode[] = ['win', 'endless', 'sandbox', 'narrative'];
-
-/**
- * The mode assumed when `SceneGraph.completionMode` is absent.
- *
- * Legacy convention (the "explicit versioned field" migration rule for #9901):
- * a scene written before this field existed — any `.forge` file at a
- * `formatVersion` predating the field, see `CURRENT_FORMAT_VERSION` in
- * `sceneFile.ts` — has `completionMode === undefined` and MUST behave exactly
- * as it did before, i.e. as a `win`-mode game. The mode is never inferred from
- * entity names; absence deterministically means `win`.
- */
-export const DEFAULT_COMPLETION_MODE: CompletionMode = 'win';
-
 // Full scene graph matching Rust's SceneGraphData struct
 export interface SceneGraph {
   nodes: Record<string, SceneNode>;
   rootIds: string[];
   /**
-   * Intentional completion semantics for this scene. Optional and versioned by
-   * the scene `formatVersion`: absent on legacy scenes, where it is treated as
-   * `DEFAULT_COMPLETION_MODE` ('win'). The persistence write-path and manual/AI
-   * controls that SET this are tracked separately (child of #9901); this field
-   * is the shared contract the pre-play/verify validator reads.
+   * Intentional completion semantics for this scene (#9901). Frontend-only:
+   * the engine's SceneGraphData never carries it. Absent on legacy scenes,
+   * where it is treated as `DEFAULT_COMPLETION_MODE` ('win').
+   *
+   * Set only through `setCompletionMode` (manual picker and the
+   * `set_completion_mode` chat tool) or, for a generated game, by
+   * `scene_create` staging the brief's mode on `newScene`. Persisted as the
+   * top-level `completionMode` key of the scene file — see
+   * `lib/scenes/sceneCompletionMode.ts` and `docs/features/save-load.md`.
    */
   completionMode?: CompletionMode;
 }

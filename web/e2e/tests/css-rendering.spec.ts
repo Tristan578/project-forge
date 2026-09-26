@@ -1,37 +1,37 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { auditBackgroundColors } from '../helpers/backgroundAudit';
 
 test.describe('CSS & Visual Rendering Tests @ui @dev', () => {
-  test('no elements with bg- class but transparent background', async ({ page, editor }) => {
+  test('active background colors are painted', async ({ page, editor }) => {
     await editor.loadPage();
+    const audit = await page.evaluate(auditBackgroundColors);
+    expect(audit.checked, 'the audit must examine real background-color controls').toBeGreaterThan(0);
+    expect(audit.missing, 'unconditional background-color utilities must paint').toEqual([]);
+  });
 
-    // Find all visible elements with bg- class
-    const transparentCount = await page.evaluate(() => {
-      const elements = document.querySelectorAll('[class*="bg-"]');
-      let count = 0;
-
-      for (const el of elements) {
-        const htmlEl = el as HTMLElement;
-        if (htmlEl.offsetWidth === 0 || htmlEl.offsetHeight === 0) continue;
-
-        const bgColor = window.getComputedStyle(el).backgroundColor;
-
-        // Check for transparent or rgba(0,0,0,0)
-        if (bgColor === 'rgba(0, 0, 0, 0)' || bgColor === 'transparent') {
-          const cls = el.getAttribute('class') || '';
-          // Ignore elements hidden by E2E test suppression or backdrop overlays.
-          // Note: compound Tailwind bg- classes like bg-black/30 render with rgba alpha
-          // and won't be counted here because their computed backgroundColor is not transparent.
-          if (cls.includes('e2e') || cls.includes('backdrop')) continue;
-          count++;
-        }
-      }
-      return count;
+  test('background audit detects a lost color without counting inactive or transparent utilities', async ({ page }) => {
+    await page.setContent(
+      '<style>.bg-zinc-900 { background-color: rgb(24, 24, 27); } div { width: 80px; height: 40px; }</style>' +
+      '<div class="bg-zinc-900">Painted</div>' +
+      '<div class="hover:bg-zinc-800">Hover only</div>' +
+      '<div class="bg-transparent">Transparent</div>' +
+      '<div class="bg-inherit">Inherited</div>' +
+      '<div class="bg-linear-to-r">Gradient</div>' +
+      '<div class="bg-cover">Size only</div>' +
+      '<div class="bg-black/0">Zero alpha</div>',
+    );
+    expect(await page.evaluate(auditBackgroundColors)).toEqual({ checked: 1, missing: [] });
+    await page.locator('.bg-zinc-900').evaluate((el) => { (el as HTMLElement).style.backgroundColor = 'transparent'; });
+    expect(await page.evaluate(auditBackgroundColors)).toEqual({
+      checked: 1, missing: [{ tag: 'div', classes: 'bg-zinc-900' }],
     });
-
-    // Allow transparent bg- elements: Tailwind utility classes like bg-transparent,
-    // bg-inherit, and dockview internal elements legitimately have transparent backgrounds.
-    // The threshold catches regressions where many elements lose their backgrounds.
-    expect(transparentCount).toBeLessThan(30);
+    await page.locator('.bg-zinc-900').evaluate((el) => {
+      (el as HTMLElement).style.removeProperty('background-color');
+      el.setAttribute('class', 'bg-missing-color');
+    });
+    expect(await page.evaluate(auditBackgroundColors)).toEqual({
+      checked: 1, missing: [{ tag: 'div', classes: 'bg-missing-color' }],
+    });
   });
 
   test('all visible text elements have non-zero opacity', async ({ page, editor }) => {

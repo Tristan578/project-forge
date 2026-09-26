@@ -4,7 +4,15 @@
 
 import { safeLocalStorageSet, wouldExceedThreshold, evictOldAutoSaves } from '@/lib/storage/storageQuota';
 
-/** Maximum scene format version the web client supports. Must match engine. */
+/**
+ * Maximum scene format version the web client supports. Must match engine.
+ *
+ * Optional editor-side top-level keys the engine ignores on load and never
+ * writes — `prefabInstances`/`prefabDefinitions`, the music arrangement and
+ * `completionMode` (#9998) — do NOT bump this: their absence is their legacy
+ * value, and the engine rejects any version outside 1..=3. See
+ * `lib/scenes/sceneCompletionMode.ts`.
+ */
 export const CURRENT_FORMAT_VERSION = 3;
 
 // ---------------------------------------------------------------------------

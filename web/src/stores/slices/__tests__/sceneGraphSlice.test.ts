@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { create } from 'zustand';
 import { createMockDispatch } from './sliceTestTemplate';
-import { createSceneGraphSlice, setSceneGraphDispatcher, type SceneGraphSlice } from '../sceneGraphSlice';
+import {
+  COMPLETION_MODE_HISTORY_LIMIT,
+  createSceneGraphSlice,
+  setSceneGraphDispatcher,
+  type SceneGraphSlice,
+} from '../sceneGraphSlice';
 import type { SceneGraph, SceneNode } from '../types';
 
 // SceneGraphSlice depends on external state (selectedIds, primaryId, etc.)
@@ -12,6 +17,7 @@ type TestState = SceneGraphSlice & {
   primaryName: string | null;
   primaryTransform: unknown | null;
   spawnTerrain: () => string | undefined;
+  sceneModified: boolean;
 };
 
 const mockGraph: SceneGraph = {
@@ -33,6 +39,7 @@ function createTestStore() {
       primaryName: null,
       primaryTransform: null,
       spawnTerrain: spawnTerrainMock,
+      sceneModified: false,
     })),
     spawnTerrainMock,
   };
@@ -561,6 +568,133 @@ describe('sceneGraphSlice', () => {
     it('should preserve completionMode across an incremental update, including a reparent', () => {
       store.getState().setFullGraph({ ...mockGraph, completionMode: 'sandbox' });
       store.getState().updateNode('sphere-1', { parentId: null });
+
+      expect(store.getState().sceneGraph.completionMode).toBe('sandbox');
+    });
+  });
+
+  // The one action both the manual picker and the `set_completion_mode` chat
+  // tool call (idea.FR-1.OP-04, #9998). Its history is the undo the picker's
+  // Undo/Redo buttons drive: the engine's Ctrl+Z stack cannot hold a value the
+  // engine never sees.
+  describe('setCompletionMode', () => {
+    it.each(['win', 'endless', 'sandbox', 'narrative'] as const)(
+      'sets %s, marks the scene modified and records the previous mode for undo',
+      (mode) => {
+        store.getState().setFullGraph(mockGraph);
+
+        const result = store.getState().setCompletionMode(mode);
+
+        expect(result).toEqual({ ok: true, mode, changed: true });
+        expect(store.getState().sceneGraph.completionMode).toBe(mode);
+        expect(store.getState().sceneModified).toBe(true);
+        // The legacy scene had no mode; that absence is what undo restores.
+        expect(store.getState().completionModeHistory).toEqual({ past: [undefined], future: [] });
+        // Only the mode moved: the graph itself is untouched.
+        expect(store.getState().sceneGraph.nodes).toBe(mockGraph.nodes);
+      },
+    );
+
+    it('rejects an unknown mode with the shared validator text and changes nothing', () => {
+      store.getState().setFullGraph({ ...mockGraph, completionMode: 'sandbox' });
+
+      const result = store.getState().setCompletionMode('puzzle');
+
+      expect(result).toEqual({
+        ok: false,
+        error: 'Unknown completion mode "puzzle". Choose one of: win, endless, sandbox, narrative.',
+      });
+      expect(store.getState().sceneGraph.completionMode).toBe('sandbox');
+      expect(store.getState().sceneModified).toBe(false);
+      expect(store.getState().completionModeHistory).toEqual({ past: [], future: [] });
+    });
+
+    it('treats re-selecting the current mode as a no-op, not an undo step', () => {
+      store.getState().setCompletionMode('endless');
+      const result = store.getState().setCompletionMode('endless');
+
+      expect(result).toEqual({ ok: true, mode: 'endless', changed: false });
+      expect(store.getState().completionModeHistory.past).toHaveLength(1);
+    });
+
+    it('records an explicit win on a legacy scene, because the saved file changes', () => {
+      // Absent and 'win' play identically, but only one of them writes the key.
+      const result = store.getState().setCompletionMode('win');
+
+      expect(result).toEqual({ ok: true, mode: 'win', changed: true });
+      expect(store.getState().sceneGraph.completionMode).toBe('win');
+    });
+
+    it('undoes and redoes through the whole history, including back to the legacy absence', () => {
+      store.getState().setCompletionMode('sandbox');
+      store.getState().setCompletionMode('narrative');
+
+      expect(store.getState().undoCompletionMode()).toBe(true);
+      expect(store.getState().sceneGraph.completionMode).toBe('sandbox');
+      expect(store.getState().undoCompletionMode()).toBe(true);
+      expect(store.getState().sceneGraph.completionMode).toBeUndefined();
+      expect(store.getState().undoCompletionMode()).toBe(false);
+
+      expect(store.getState().redoCompletionMode()).toBe(true);
+      expect(store.getState().sceneGraph.completionMode).toBe('sandbox');
+      expect(store.getState().redoCompletionMode()).toBe(true);
+      expect(store.getState().sceneGraph.completionMode).toBe('narrative');
+      expect(store.getState().redoCompletionMode()).toBe(false);
+    });
+
+    it('marks the scene modified on undo and redo, so the reverted mode is saved too', () => {
+      store.getState().setCompletionMode('sandbox');
+      store.setState({ sceneModified: false });
+
+      store.getState().undoCompletionMode();
+      expect(store.getState().sceneModified).toBe(true);
+
+      store.setState({ sceneModified: false });
+      store.getState().redoCompletionMode();
+      expect(store.getState().sceneModified).toBe(true);
+    });
+
+    it('drops the redo branch when a new mode is chosen after an undo', () => {
+      store.getState().setCompletionMode('sandbox');
+      store.getState().setCompletionMode('endless');
+      store.getState().undoCompletionMode();
+
+      store.getState().setCompletionMode('narrative');
+
+      expect(store.getState().completionModeHistory).toEqual({ past: [undefined, 'sandbox'], future: [] });
+      expect(store.getState().redoCompletionMode()).toBe(false);
+    });
+
+    it('bounds the history so a long session cannot grow it without limit', () => {
+      const modes = ['win', 'endless', 'sandbox', 'narrative'] as const;
+      for (let i = 0; i < 250; i += 1) store.getState().setCompletionMode(modes[i % modes.length]);
+
+      expect(store.getState().completionModeHistory.past).toHaveLength(COMPLETION_MODE_HISTORY_LIMIT);
+    });
+
+    it('hydrates a persisted mode without inheriting outgoing dirty state or history', () => {
+      store.getState().setCompletionMode('endless');
+      expect(store.getState().sceneModified).toBe(true);
+
+      store.getState().hydrateCompletionMode('narrative');
+
+      expect(store.getState().sceneGraph.completionMode).toBe('narrative');
+      expect(store.getState().completionModeHistory).toEqual({ past: [], future: [] });
+      expect(store.getState().sceneModified).toBe(false);
+
+      store.getState().hydrateCompletionMode(undefined);
+      expect(store.getState().sceneGraph.completionMode).toBeUndefined();
+    });
+
+    it('keeps a manually chosen mode through a later engine rebuild of the same scene', () => {
+      // An AI edit to entities comes back as SCENE_GRAPH_UPDATE / node events,
+      // none of which carry a mode. The creator's choice must survive them.
+      store.getState().setFullGraph(mockGraph);
+      store.getState().setCompletionMode('sandbox');
+
+      store.getState().setFullGraph({ ...mockGraph, rootIds: ['cube-1'] });
+      store.getState().addNode({ entityId: 'n-1', name: 'New', parentId: null, children: [], components: [], visible: true });
+      store.getState().removeNode('cam-1');
 
       expect(store.getState().sceneGraph.completionMode).toBe('sandbox');
     });

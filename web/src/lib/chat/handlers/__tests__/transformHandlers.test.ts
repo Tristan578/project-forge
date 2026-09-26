@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { invokeHandler } from './handlerTestUtils';
 import { transformHandlers } from '../transformHandlers';
+import { create } from 'zustand';
+import { createSceneGraphSlice, type SceneGraphSlice } from '@/stores/slices/sceneGraphSlice';
 
 describe('transformHandlers', () => {
   it('spawn_entity calls spawnEntity and surfaces the returned id', async () => {
@@ -343,5 +345,133 @@ describe('transformHandlers', () => {
     const { result, store } = await invokeHandler(transformHandlers, 'redo');
     expect(result.success).toBe(true);
     expect(store.redo).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// undo/redo `scope` (idea.FR-1.OP-04, #9998)
+// ---------------------------------------------------------------------------
+
+/**
+ * The REAL completion-mode history, so "nothing to undo" is the slice's own
+ * answer rather than a stubbed `false`. The engine's undo/redo stay mocks: the
+ * assertion there is that the scoped call never reaches them.
+ */
+function createCompletionModeStore() {
+  type State = SceneGraphSlice & {
+    selectedIds: Set<string>;
+    primaryId: string | null;
+    primaryName: string | null;
+    primaryTransform: unknown | null;
+    spawnTerrain: () => string | undefined;
+    sceneModified: boolean;
+  };
+  const real = create<State>()((set, get, api) => ({
+    ...createSceneGraphSlice(set, get, api),
+    selectedIds: new Set<string>(),
+    primaryId: null,
+    primaryName: null,
+    primaryTransform: null,
+    spawnTerrain: () => undefined,
+    sceneModified: false,
+  }));
+  const overrides = {
+    undo: vi.fn(),
+    redo: vi.fn(),
+    undoCompletionMode: vi.fn(real.getState().undoCompletionMode),
+    redoCompletionMode: vi.fn(real.getState().redoCompletionMode),
+  };
+  return { real, overrides };
+}
+
+describe('undo/redo scope', () => {
+  it('undo with scope completion_mode steps the mode back, not the engine', async () => {
+    const { real, overrides } = createCompletionModeStore();
+    real.getState().setCompletionMode('sandbox');
+    real.getState().setCompletionMode('narrative');
+
+    const { result } = await invokeHandler(transformHandlers, 'undo', { scope: 'completion_mode' }, overrides);
+
+    expect(result).toEqual({ success: true, result: { scope: 'completion_mode' } });
+    expect(overrides.undoCompletionMode).toHaveBeenCalledTimes(1);
+    expect(overrides.undo).not.toHaveBeenCalled();
+    expect(overrides.redoCompletionMode).not.toHaveBeenCalled();
+    expect(real.getState().sceneGraph.completionMode).toBe('sandbox');
+  });
+
+  it('redo with scope completion_mode re-applies the undone mode, not the engine', async () => {
+    const { real, overrides } = createCompletionModeStore();
+    real.getState().setCompletionMode('endless');
+    real.getState().undoCompletionMode();
+
+    const { result } = await invokeHandler(transformHandlers, 'redo', { scope: 'completion_mode' }, overrides);
+
+    expect(result).toEqual({ success: true, result: { scope: 'completion_mode' } });
+    expect(overrides.redoCompletionMode).toHaveBeenCalledTimes(1);
+    expect(overrides.redo).not.toHaveBeenCalled();
+    expect(overrides.undoCompletionMode).not.toHaveBeenCalled();
+    expect(real.getState().sceneGraph.completionMode).toBe('endless');
+  });
+
+  it('undo with scope completion_mode and no history fails instead of claiming success', async () => {
+    const { real, overrides } = createCompletionModeStore();
+
+    const { result } = await invokeHandler(transformHandlers, 'undo', { scope: 'completion_mode' }, overrides);
+
+    expect(result).toEqual({ success: false, error: 'No completion-mode change to undo.' });
+    expect(overrides.undoCompletionMode).toHaveBeenCalledTimes(1);
+    expect(overrides.undo).not.toHaveBeenCalled();
+    expect(real.getState().sceneGraph.completionMode).toBeUndefined();
+  });
+
+  it('redo with scope completion_mode and nothing undone fails instead of claiming success', async () => {
+    const { real, overrides } = createCompletionModeStore();
+    real.getState().setCompletionMode('win');
+
+    const { result } = await invokeHandler(transformHandlers, 'redo', { scope: 'completion_mode' }, overrides);
+
+    expect(result).toEqual({ success: false, error: 'No completion-mode change to redo.' });
+    expect(overrides.redoCompletionMode).toHaveBeenCalledTimes(1);
+    expect(overrides.redo).not.toHaveBeenCalled();
+    expect(real.getState().sceneGraph.completionMode).toBe('win');
+  });
+
+  it.each(['undo', 'redo'] as const)('%s rejects an unknown scope and touches neither history', async (name) => {
+    const { overrides } = createCompletionModeStore();
+
+    const { result } = await invokeHandler(transformHandlers, name, { scope: 'everything' }, overrides);
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Invalid arguments: scope: Invalid option: expected one of "engine"|"completion_mode"',
+    });
+    expect(overrides.undo).not.toHaveBeenCalled();
+    expect(overrides.redo).not.toHaveBeenCalled();
+    expect(overrides.undoCompletionMode).not.toHaveBeenCalled();
+    expect(overrides.redoCompletionMode).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['undo', {}],
+    ['undo', { scope: 'engine' }],
+    ['redo', {}],
+    ['redo', { scope: 'engine' }],
+  ] as const)('%s with args %j drives the engine history only', async (name, args) => {
+    const { real, overrides } = createCompletionModeStore();
+    real.getState().setCompletionMode('sandbox');
+    real.getState().undoCompletionMode();
+    real.getState().redoCompletionMode();
+    if (name === 'redo') real.getState().undoCompletionMode();
+    const modeBefore = real.getState().sceneGraph.completionMode;
+
+    const { result } = await invokeHandler(transformHandlers, name, { ...args }, overrides);
+
+    expect(result).toEqual({ success: true });
+    expect(overrides[name]).toHaveBeenCalledTimes(1);
+    expect(overrides[name === 'undo' ? 'redo' : 'undo']).not.toHaveBeenCalled();
+    expect(overrides.undoCompletionMode).not.toHaveBeenCalled();
+    expect(overrides.redoCompletionMode).not.toHaveBeenCalled();
+    // A completion-mode step was available and was NOT taken.
+    expect(real.getState().sceneGraph.completionMode).toBe(modeBefore);
   });
 });

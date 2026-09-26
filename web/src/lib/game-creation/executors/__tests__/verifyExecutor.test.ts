@@ -203,7 +203,7 @@ describe('verifyExecutor', () => {
       expect(result.error?.userFacingMessage).toBe(
         [
           "This game can't be won yet, so the Play button will refuse it:",
-          '• [NO_WIN_CONDITION] This scene has no win condition, so the game can never be won. Add a Win Condition component — for example "reach goal" tied to a goal entity, or "collect all" with collectible items.',
+          '• [NO_WIN_CONDITION] This scene has no win condition, so the game can never be won. Add a Win Condition component — for example "reach goal" tied to a goal entity, or "collect all" with collectible items. If the game is not meant to be won, set its completion mode to endless, sandbox or narrative instead.',
           'Add or repair a win condition, then build again.',
         ].join('\n'),
       );

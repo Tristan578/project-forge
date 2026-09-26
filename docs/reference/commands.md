@@ -1,13 +1,13 @@
 # Command Reference
 
-Reference for all 379 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
+Reference for all 380 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
 
 ## Categories
 
-- [Scene](#scene) (30 commands)
+- [Scene](#scene) (31 commands)
 - [Materials](#materials) (11 commands)
 - [Lighting](#lighting) (2 commands)
 - [Environment](#environment) (5 commands)
@@ -636,6 +636,28 @@ Set the default transition configuration used when switching scenes
 {
   "command": "set_default_transition",
   "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `set_completion_mode`
+
+Set how the open scene's game counts as complete. "win" (what a scene with no mode plays as) lets Play start only when at least one win condition the player can complete exists; "endless", "sandbox" and "narrative" let a game with no win condition play and pass verification. A win condition the scene does have is still validated in every mode. Saved with the scene file and undoable from Scene Settings. Set it when the creator asks for a sandbox, endless or story game; never infer it from entity names.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mode` | `"win"` \| `"endless"` \| `"sandbox"` \| `"narrative"` | Yes | win: requires a completable win condition. endless: score or survival, no final win. sandbox: a toy with no goal. narrative: ends through authored story progression. |
+
+**Example:**
+```json
+{
+  "command": "set_completion_mode",
+  "params": {
+    "mode": "win"
+  }
 }
 ```
 
@@ -1484,7 +1506,11 @@ Scope: `scene:read` | Token cost: 0
 
 ### `undo`
 
-Undo the last action
+Undo an action. Defaults to engine history. Use scope completion_mode for changes made by set_completion_mode or the completion-mode picker.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | `"engine"` \| `"completion_mode"` | No | History to step: engine (default) or completion_mode. Completion-mode history is separate from engine entity history. |
 
 **Example:**
 ```json
@@ -1500,7 +1526,11 @@ Scope: `scene:write` | Token cost: 0
 
 ### `redo`
 
-Redo the last undone action
+Redo an action. Defaults to engine history. Use scope completion_mode for changes made by set_completion_mode or the completion-mode picker.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | `"engine"` \| `"completion_mode"` | No | History to step: engine (default) or completion_mode. Completion-mode history is separate from engine entity history. |
 
 **Example:**
 ```json
@@ -5213,7 +5243,7 @@ Add a pre-built game component (e.g., CharacterController, Health, Collectible) 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `entityId` | string | Yes | Target entity ID |
-| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` | Yes | Type of game component to add |
+| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` \| `"dialogue_trigger"` | Yes | Type of game component to add |
 | `properties` | object | No | Optional property overrides (uses defaults if omitted) |
 
 **Example:**
@@ -5238,8 +5268,8 @@ Update properties of an existing game component. Only the named properties chang
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `entityId` | string | Yes | Target entity ID |
-| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` | Yes | Type of game component to update |
-| `properties` | object | Yes | Property values to update |
+| `componentType` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` \| `"dialogue_trigger"` | Yes | Type of game component to update |
+| `properties` | object | Yes | Property values to update; unnamed properties keep their current values |
 
 **Example:**
 ```json
@@ -5263,7 +5293,7 @@ Remove a game component from an entity
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `entityId` | string | Yes | Target entity ID |
-| `componentName` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` | Yes | Name of component to remove |
+| `componentName` | `"character_controller"` \| `"health"` \| `"collectible"` \| `"damage_zone"` \| `"checkpoint"` \| `"teleporter"` \| `"moving_platform"` \| `"trigger_zone"` \| `"spawner"` \| `"follower"` \| `"projectile"` \| `"win_condition"` \| `"dialogue_trigger"` | Yes | Name of component to remove |
 
 **Example:**
 ```json

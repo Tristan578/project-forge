@@ -5,6 +5,7 @@ import { setSceneDispatcher, hasDeferredSceneLoad, cancelDeferredSceneLoad } fro
 import { loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
 import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
 import { takeStagedSceneAudio, clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
+import { stageSceneCompletionMode, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
 import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage, savePrefab, getPrefab } from '@/lib/prefabs/prefabStore';
 import * as prefabStoreModule from '@/lib/prefabs/prefabStore';
@@ -232,6 +233,80 @@ describe('sceneSlice', () => {
       );
 
       expect(takeStagedSceneAudio()).toEqual({});
+    });
+  });
+
+  // #9998: a scene's completion mode is frontend-only, so the SCENE_LOADED
+  // handler is where the incoming scene's mode lands (it is also where the
+  // outgoing one is cleared). These pin the staging side of that handoff.
+  describe('completion mode crosses the load boundary (#9998)', () => {
+    beforeEach(() => {
+      takeStagedSceneCompletionMode();
+    });
+
+    it.each(['win', 'endless', 'sandbox', 'narrative'] as const)(
+      'loadScene stages the %s mode the scene file declares',
+      (mode) => {
+        store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: mode }));
+
+        expect(takeStagedSceneCompletionMode()).toBe(mode);
+      },
+    );
+
+    it('a legacy scene stages no mode, displacing whatever an earlier rejected load left', () => {
+      stageSceneCompletionMode('sandbox');
+
+      store.getState().loadScene(JSON.stringify(sceneFixture('Legacy')));
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('rolls the staging back when the engine refuses the load', () => {
+      stageSceneCompletionMode('narrative');
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'Scene JSON too large' })));
+
+      expect(store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: 'sandbox' }))).toBe(false);
+
+      expect(takeStagedSceneCompletionMode()).toBe('narrative');
+    });
+
+    it('rolls the staging back when the load dispatch throws', () => {
+      setSceneDispatcher(vi.fn(() => { throw new Error('engine trapped'); }));
+
+      expect(() => store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: 'sandbox' }))).toThrow('engine trapped');
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('stages nothing when there is no engine to load the scene', () => {
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: 'sandbox' }));
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('newScene clears a stash the engine never confirmed', () => {
+      store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: 'sandbox' }));
+      store.getState().newScene();
+
+      expect(takeStagedSceneCompletionMode()).toBeUndefined();
+    });
+
+    it('newScene stages the mode its caller asks the empty scene to open with', () => {
+      // `scene_create` uses this to give a generated game the brief's mode.
+      store.getState().newScene({ completionMode: 'endless' });
+
+      expect(takeStagedSceneCompletionMode()).toBe('endless');
+    });
+
+    it('a rejected newScene puts the previous staging back', () => {
+      stageSceneCompletionMode('narrative');
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+
+      expect(store.getState().newScene({ completionMode: 'endless' })).toBe(false);
+
+      expect(takeStagedSceneCompletionMode()).toBe('narrative');
     });
   });
 
@@ -671,6 +746,25 @@ describe('sceneSlice', () => {
       // A LIVE load of the same scene still resets the arrangement to the scene's own (#10058).
       expect(store.getState().loadScene(JSON.stringify(scene))).toBe(true);
       expect(useMusicArrangementStore.getState().arrangement.tracks.map((t) => t.name)).toEqual(['From the project']);
+    });
+
+    it('keeps a completion mode chosen while the engine loaded when the deferred load replays (#9998)', () => {
+      // Same contract as the arrangement above: the editor page hydrates the
+      // mode from the project data when it defers the load, and the picker (or
+      // the AI's set_completion_mode) can change it before WASM attaches. The
+      // replay's SCENE_LOADED must hand over THAT mode, not the saved one.
+      takeStagedSceneCompletionMode();
+      setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      const scene = JSON.stringify({ entities: [], completionMode: 'sandbox' });
+      store.getState().loadScene(scene, { deferUntilEngineAttaches: true });
+      store.setState({ sceneGraph: { ...store.getState().sceneGraph, completionMode: 'endless' } });
+
+      setSceneDispatcher(createMockDispatch());
+      expect(takeStagedSceneCompletionMode()).toBe('endless');
+
+      // A LIVE load of the same scene still adopts the scene's own mode.
+      expect(store.getState().loadScene(scene)).toBe(true);
+      expect(takeStagedSceneCompletionMode()).toBe('sandbox');
     });
 
     it('holds nothing when the load was dispatched live', () => {

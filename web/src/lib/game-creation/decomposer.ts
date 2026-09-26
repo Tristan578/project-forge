@@ -24,6 +24,8 @@ import type { OrchestratorGDD, SystemCategory } from './types';
 // enumerates it from the SAME constant the schema validates against, so the
 // model is never offered a verb the planner cannot build.
 import { BEHAVIOR_VOCAB, behaviorPromptLines, zBehavior } from './behaviorVocabulary';
+// Server-safe home of the completion-mode vocabulary (`stores/` is client-only).
+import { COMPLETION_MODES, COMPLETION_MODE_INFO } from '@/lib/playMode/completionMode';
 
 // ---------------------------------------------------------------------------
 // Zod schemas for LLM output validation
@@ -108,6 +110,12 @@ const zDecompositionShape = z.object({
   styleDirective: z.string().max(500),
   feelDirective: zFeelDirective,
   constraints: z.array(z.string().max(200)),
+  // How the game is "complete" (idea.FR-1.OP-04, #9998). CLOSED to the shared
+  // `COMPLETION_MODES` — the list the manual picker offers and the
+  // `set_completion_mode` tool validates against — so an unknown mode fails
+  // validation and the retry loop asks again instead of guessing. Optional:
+  // omitted means the legacy `win`, which keeps every older brief valid.
+  completionMode: z.enum(COMPLETION_MODES).optional(),
 });
 
 const zDecompositionOutput = zDecompositionShape.superRefine((gdd, ctx) => {
@@ -159,6 +167,9 @@ ${SYSTEM_CATEGORIES.map(c => `- "${c}"`).join('\n')}
 10. Entity "behavior" is OPTIONAL, and when present must be EXACTLY one of ${BEHAVIOR_VOCAB.map(b => `"${b}"`).join(', ')}. Any other value is rejected and the whole design is asked for again. What each one does:
 ${behaviorPromptLines().join('\n')}
 10b. Set "behavior" on the things that act -- the enemy that hunts, the guard that walks a route, the creature that runs away, the turret that shoots. Leave it off scenery, lights, cameras and pickups: an object with no "behavior" simply stays where it is placed. Use "idle" only to say that an entity is deliberately still.
+11. "completionMode" is OPTIONAL and says how the game is complete. When present it must be EXACTLY one of ${COMPLETION_MODES.map(m => `"${m}"`).join(', ')}:
+${COMPLETION_MODES.map(m => `   - "${m}": ${COMPLETION_MODE_INFO[m].description}`).join('\n')}
+11b. Set it only when the description says so -- a sandbox or toy, an endless or survival game, a story to explore. Omit it for a game with a goal to reach; an omitted completionMode means "win". Never pick a mode from entity names.
 
 ## Output Format
 Respond with ONLY valid JSON matching this exact structure (no markdown, no explanation):
@@ -170,7 +181,8 @@ Respond with ONLY valid JSON matching this exact structure (no markdown, no expl
   "estimatedScope": "small|medium|large",
   "styleDirective": "string",
   "feelDirective": { "mood": "string", "pacing": "slow|medium|fast", "weight": "floaty|light|medium|heavy|weighty", "referenceGames": ["string"], "oneLiner": "string" },
-  "constraints": ["string"]
+  "constraints": ["string"],
+  "completionMode": "${COMPLETION_MODES.join('|')} (optional)"
 }`;
 
 // ---------------------------------------------------------------------------
@@ -379,6 +391,10 @@ export async function decomposeIntoSystems(
       },
       constraints: sanitizedConstraints, // [FIX: NB3] unsafe constraints dropped
       projectType,
+      // An enum value, so nothing to sanitize. Spread in only when stated: an
+      // absent key is the legacy `win` brief, and a key present with
+      // `undefined` would read as a stated mode to anything checking `in`.
+      ...(data.completionMode !== undefined ? { completionMode: data.completionMode } : {}),
     };
   }
 

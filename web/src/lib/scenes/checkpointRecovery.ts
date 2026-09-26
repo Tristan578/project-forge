@@ -73,7 +73,9 @@ function matchesExpected(expected: unknown, actual: unknown, path = ''): boolean
       // (scene.FR-1 N1) would otherwise fail this engine-application check every
       // time. Their round trip is verified separately by the registry install in
       // `restoreCheckpoint`; this comparison is only about what the ENGINE applied.
-      return ['metadata.createdAt', 'metadata.modifiedAt', 'sceneName', 'formatVersion', 'prefabInstances', 'prefabDefinitions'].includes(field) ||
+      // `completionMode` (#9998) is the same kind of key: frontend-only, never
+      // echoed, and carried to the store by the SCENE_LOADED handoff instead.
+      return ['metadata.createdAt', 'metadata.modifiedAt', 'sceneName', 'formatVersion', 'prefabInstances', 'prefabDefinitions', 'completionMode'].includes(field) ||
         matchesExpected(value, (actual as Record<string, unknown>)[key], field);
     });
   }

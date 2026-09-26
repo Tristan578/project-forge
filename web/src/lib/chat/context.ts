@@ -10,6 +10,7 @@ import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, Phy
 import type { GenerationJob } from '@/stores/generationStore';
 import { loadScripts as loadLibraryScripts } from '@/stores/scriptLibraryStore';
 import { buildEntityIndex } from '@/lib/engine/entityIndex';
+import { DEFAULT_COMPLETION_MODE, isCompletionMode, requiresWinCondition } from '@/lib/playMode/completionMode';
 
 /**
  * Render an entity id the scene graph has no name for.
@@ -216,7 +217,18 @@ export function buildSceneContext(state: EditorSnapshot): string {
 
   // Scene overview
   const sceneLabel = state.sceneName && state.sceneName !== 'Untitled' ? ` "${state.sceneName}"` : '';
-  sections.push(`## Current Scene State${sceneLabel}\nEntities: ${nodeCount}`);
+  // The completion mode (#9998) is stated so the AI can tell a sandbox the
+  // creator chose from a win game missing its goal — and so it reads the mode
+  // before `set_completion_mode` changes it, rather than overriding a manual
+  // choice it never saw. Absent is the legacy `win`, said as such. Narrowed
+  // before interpolation: this string is part of the system prompt, so only
+  // one of the four known words may ever reach it.
+  const mode = isCompletionMode(sceneGraph.completionMode) ? sceneGraph.completionMode : undefined;
+  const modeLabel = mode ?? `${DEFAULT_COMPLETION_MODE} (default, not set)`;
+  const modeRule = requiresWinCondition(mode)
+    ? 'Play requires a win condition the player can complete'
+    : 'Play does not require a win condition';
+  sections.push(`## Current Scene State${sceneLabel}\nEntities: ${nodeCount}\nCompletion mode: ${modeLabel} — ${modeRule}`);
 
   if (nodeCount === 0) {
     sections.push('(Empty scene — no entities yet)');

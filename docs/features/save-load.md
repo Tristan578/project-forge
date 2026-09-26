@@ -41,6 +41,16 @@ The `.forge` file is a JSON document containing:
 - Input bindings
 - Environment settings
 - Post-processing settings
+- The scene's completion mode, when one has been chosen (see below)
+
+### Completion mode
+How the game counts as complete: `win`, `endless`, `sandbox` or `narrative`. It is set from **Scene Settings → Completion mode** or by the AI (`set_completion_mode`, or a generated game's brief), and it decides whether **Play** and orchestrator verification require a win condition. Only `win` requires one; a win condition the scene does have is validated in every mode.
+
+It is stored as an optional top-level `completionMode` key of the `.forge` file. The engine ignores the key, so it needs no `formatVersion` change, and every save path carries it: the `.forge` download, auto-save, cloud save, scene switching and checkpoints.
+
+**Undo and redo.** Scene Settings has dedicated completion-mode Undo/Redo buttons. In-app AI uses `undo` or `redo` with `scope: "completion_mode"` to step the same history. Omitting the scope retains engine entity history; an empty completion-mode history returns an error without undoing an unrelated entity edit.
+
+**Migration rule for older files.** A file with no `completionMode` key, at any `formatVersion`, is a `win` game. It opens in win mode, keeps the win-condition requirement it always had, and re-saves without gaining the key, so nothing is added and nothing is dropped. A value that is not one of the four modes is read as `win` and logged as a warning. The mode is never guessed from entity names.
 
 ## Auto-Save
 The editor auto-saves to browser localStorage every 30 seconds. If you close and reopen, your last session is restored.

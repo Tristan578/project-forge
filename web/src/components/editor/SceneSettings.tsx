@@ -1,4 +1,4 @@
-/** Scene-wide lighting, environment, post-processing, quality and bridge-tool settings. */
+/** Scene-wide completion mode, lighting, environment, post-processing, quality and bridge-tool settings. */
 'use client';
 
 import { useCallback, useId, useRef, useState } from 'react';
@@ -10,6 +10,7 @@ import { SceneStatistics } from './SceneStatistics';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { linearToHex, hexToLinear } from '@/lib/colorUtils';
 import { BridgeToolsSection } from './BridgeToolsSection';
+import { CompletionModeSection } from './CompletionModeSection';
 
 /** Visible tab text, reused as the name of the tab's slider group. */
 const GRADING_SECTION_LABELS = {
@@ -112,8 +113,13 @@ export function SceneSettings() {
 
   return (
     <div className="space-y-4" data-testid="scene-settings">
+      {/* Completion mode (#9998) — the scene-wide rule for how the game ends. */}
+      <CompletionModeSection />
+
       {/* Scene Statistics */}
-      <SceneStatistics />
+      <div className="border-t border-zinc-800 pt-4">
+        <SceneStatistics />
+      </div>
 
       {/* Quality Preset */}
       <div role="group" aria-labelledby={fieldId('quality-heading')} className="border-t border-zinc-800 pt-4">

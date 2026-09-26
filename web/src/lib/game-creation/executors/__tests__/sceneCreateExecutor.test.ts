@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { sceneCreateExecutor } from '../sceneCreateExecutor';
-import type { ExecutorContext } from '../../types';
+import type { ExecutorContext, OrchestratorGDD } from '../../types';
 import { loadProjectScenes, saveProjectScenes, createInitialProject } from '@/lib/scenes/sceneManager';
 import { attachFixtureValidator } from '@/lib/scenes/__tests__/sceneFixture';
 import { setSceneValidator } from '@/lib/scenes/sceneValidation';
@@ -104,6 +104,31 @@ describe('sceneCreateExecutor', () => {
 
     expect(ctx.getStore().newScene).toHaveBeenCalled();
     expect(ctx.dispatchCommand).not.toHaveBeenCalledWith('new_scene', {});
+  });
+
+  // #9998: the brief's completion mode becomes the scene's native, editable
+  // `SceneGraph.completionMode`. It rides on `newScene` because the
+  // SCENE_LOADED that command emits is the boundary that sets the incoming
+  // scene's mode — written any earlier, that same event would wipe it.
+  it.each(['win', 'endless', 'sandbox', 'narrative'] as const)(
+    'opens the new scene in the brief\'s %s mode',
+    async (mode) => {
+      const ctx = makeCtx({ gdd: { completionMode: mode } as OrchestratorGDD });
+      await sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx);
+
+      expect(ctx.getStore().newScene).toHaveBeenCalledWith({ completionMode: mode });
+    },
+  );
+
+  it('opens a legacy win scene when the brief declares no mode, rather than keeping the previous one', async () => {
+    const withoutMode = makeCtx({ gdd: {} as OrchestratorGDD });
+    await sceneCreateExecutor.execute({ name: 'Cave Level' }, withoutMode);
+    expect(withoutMode.getStore().newScene).toHaveBeenCalledWith({ completionMode: undefined });
+
+    // A context built before `gdd` existed (every older caller) behaves the same.
+    const withoutGdd = makeCtx();
+    await sceneCreateExecutor.execute({ name: 'Cave Level' }, withoutGdd);
+    expect(withoutGdd.getStore().newScene).toHaveBeenCalledWith({ completionMode: undefined });
   });
 
   // PF-1138. `worldType`/`worldConfig` used to be accepted by this schema and

@@ -28,6 +28,11 @@ vi.mock('@/components/editor/SceneStatistics', () => ({
   SceneStatistics: () => <div data-testid="scene-statistics">Stats</div>,
 }));
 
+// The picker drives the real store in its own suite (CompletionModeSection.test.tsx).
+vi.mock('@/components/editor/CompletionModeSection', () => ({
+  CompletionModeSection: () => <div data-testid="completion-mode-section">Completion mode</div>,
+}));
+
 vi.mock('@/components/ui/InfoTooltip', () => ({
   InfoTooltip: ({ term, text }: { term?: string; text?: string }) => (
     // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- test stub default for a missing tooltip term, used only to build a stable test id
@@ -156,6 +161,19 @@ describe('SceneSettings', () => {
     setupStore();
     render(<SceneSettings />);
     expect(screen.getByTestId('scene-statistics')).toBeInTheDocument();
+  });
+
+  it('renders the completion-mode picker first, where the axe audits can see it (#9998)', () => {
+    // #10188 dropped the Scene Settings axe exemption, so no part of this panel
+    // may reintroduce a `data-a11y-defer` subtree the audits would skip.
+    setupStore();
+    const { container } = render(<SceneSettings />);
+    const picker = screen.getByTestId('completion-mode-section');
+    expect(picker.closest('[data-a11y-defer]')).toBeNull();
+    expect(container.querySelector('[data-a11y-defer]')).toBeNull();
+    // The picker leads the panel: it precedes the scene statistics in document order.
+    const stats = screen.getByTestId('scene-statistics');
+    expect(picker.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders Quality Preset section', () => {

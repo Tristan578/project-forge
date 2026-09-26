@@ -12,6 +12,7 @@ const EditorLayout = dynamic(
 import { useEditorStore } from '@/stores/editorStore';
 import { cancelDeferredSceneLoad } from '@/stores/slices/sceneSlice';
 import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
+import { readCompletionModeFromSceneData } from '@/lib/scenes/sceneCompletionMode';
 import { trackProjectOpen } from '@/lib/workspace/recentProjects';
 import { EditorErrorBoundary } from '@/components/editor/EditorErrorBoundary';
 import { WasmErrorBoundary } from '@/components/editor/WasmErrorBoundary';
@@ -80,6 +81,13 @@ function EditorPageContent() {
         // run even if `loadScene` bails out early on a dispatch that isn't
         // ready yet.
         useMusicArrangementStore.getState().hydrate(readArrangementFromSceneData(project.sceneData));
+        // Same guarantee for the completion mode (#9998). When `loadScene`
+        // reaches the engine it stages this very value for SCENE_LOADED, so
+        // the two agree. When it defers (the cold open, #10192) the mode is
+        // live from here on — the picker works before WASM attaches — and the
+        // replay hands SCENE_LOADED the store's current mode rather than this
+        // saved one, so an edit made while the engine loaded survives.
+        useEditorStore.getState().hydrateCompletionMode(readCompletionModeFromSceneData(project.sceneData));
         setLoading(false);
       } catch (err) {
         if (cancelled) return;

@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { decomposeIntoSystems, PromptRejectedError } from '../decomposer';
 import { BEHAVIOR_VOCAB } from '../behaviorVocabulary';
+import { COMPLETION_MODES } from '@/lib/playMode/completionMode';
 
 // The decomposer asks the model for a typed object via `Output.object`
 // (PF-1216 / #9339), so the seam under mock returns an OBJECT — there is no
@@ -658,5 +659,65 @@ describe('decomposeIntoSystems', () => {
     }
     // The plural is the removed shape and must not return through the prompt.
     expect(prompt).not.toContain('behaviors');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The completion mode on the brief (idea.FR-1.OP-04, #9998)
+//
+// The typed in-app AI operation that sets a generated game's mode. The schema
+// is `z.enum(COMPLETION_MODES)` — the same list the manual picker offers and
+// the `set_completion_mode` tool validates against — so the three surfaces
+// accept exactly the same values.
+// ---------------------------------------------------------------------------
+
+describe('decomposeIntoSystems — completionMode', () => {
+  it('carries every mode the model states onto the brief', async () => {
+    for (const mode of COMPLETION_MODES) {
+      generateDecomposition.mockClear();
+      generateDecomposition.mockResolvedValue(makeValidDecomposition({ completionMode: mode }));
+
+      const gdd = await decomposeIntoSystems('make a game', '3d');
+
+      expect(generateDecomposition).toHaveBeenCalledTimes(1);
+      expect(gdd.completionMode).toBe(mode);
+    }
+  });
+
+  it('leaves the field off when the model omits it, which downstream reads as win', async () => {
+    const gdd = await decomposeIntoSystems('make a platformer', '2d');
+
+    expect(gdd).not.toHaveProperty('completionMode');
+  });
+
+  it('rejects a mode outside the list and RETRIES rather than guessing one', async () => {
+    generateDecomposition.mockResolvedValue(makeValidDecomposition({ completionMode: 'puzzle' }));
+
+    await expect(decomposeIntoSystems('make a game', '3d')).rejects.toThrow(/completionMode/);
+    // One initial attempt plus MAX_RETRIES.
+    expect(generateDecomposition).toHaveBeenCalledTimes(3);
+  });
+
+  it('hands the provider a schema that accepts exactly the shared mode list', async () => {
+    await decomposeIntoSystems('make a game', '3d');
+
+    const schema = generateDecomposition.mock.calls[0][2] as {
+      safeParse: (value: unknown) => { success: boolean };
+    };
+    for (const mode of COMPLETION_MODES) {
+      expect(schema.safeParse(makeValidDecomposition({ completionMode: mode })).success).toBe(true);
+    }
+    expect(schema.safeParse(makeValidDecomposition({ completionMode: 'Sandbox' })).success).toBe(false);
+  });
+
+  it('states every mode to the model and that leaving it out means win', async () => {
+    await decomposeIntoSystems('make a game', '3d');
+
+    const [, systemPrompt] = generateDecomposition.mock.calls[0] as [string, string];
+    for (const mode of COMPLETION_MODES) {
+      expect(systemPrompt).toContain(`"${mode}"`);
+    }
+    expect(systemPrompt).toMatch(/completionMode/);
+    expect(systemPrompt).toMatch(/omit[^.]*"win"/i);
   });
 });

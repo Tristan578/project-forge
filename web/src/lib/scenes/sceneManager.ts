@@ -6,6 +6,7 @@
 import { sanitizeInstanceRecord, type PrefabInstance } from '../prefabs/prefabInstance';
 import { sanitizePrefabDefinition, type Prefab } from '../prefabs/prefabStore';
 import { emptySceneFile, isSceneFileEnvelope, isValidSceneFile } from './sceneValidation';
+import type { CompletionMode } from '@/lib/playMode/completionMode';
 
 /** Scene payload retained losslessly; persistence validates its full Rust SceneFile schema. */
 export interface SceneFileData {
@@ -32,6 +33,13 @@ export interface SceneFileData {
    * `readPrefabDefinitions` and `prefabStore.collectTransitivePrefabDefinitions`.
    */
   prefabDefinitions?: Prefab[];
+  /**
+   * The scene's completion mode (#9998), an editor-side key the engine ignores
+   * on load and never writes on export. Optional: absent is the legacy `win`
+   * rule, so every pre-existing scene file stays valid with no migration. Read
+   * only through `readCompletionModeFromSceneData`, which validates it.
+   */
+  completionMode?: CompletionMode;
 }
 
 /** Defense-in-depth cap on how many instance records one scene load accepts. */

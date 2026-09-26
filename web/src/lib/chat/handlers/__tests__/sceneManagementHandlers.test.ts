@@ -6,6 +6,8 @@ import {
   createFakeEngineDispatcher,
 } from '@/stores/slices/__tests__/sceneSliceTestStore';
 import { setSceneDispatcher } from '@/stores/slices/sceneSlice';
+import { create } from 'zustand';
+import { createSceneGraphSlice, type SceneGraphSlice } from '@/stores/slices/sceneGraphSlice';
 import { emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
 import { foldExportedSceneJson } from '@/lib/prefabs/prefabSceneFold';
 import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
@@ -1327,5 +1329,120 @@ describe('validate_scene', () => {
   it('requires the JSON argument', async () => {
     const { result } = await invokeHandler(sceneManagementHandlers, 'validate_scene', {});
     expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// set_completion_mode (idea.FR-1.OP-04, #9998)
+// ---------------------------------------------------------------------------
+
+/**
+ * The REAL completion-mode slice, not a mock: the handler deliberately hands the
+ * raw `mode` to `setCompletionMode`, which owns validation, so a mocked action
+ * would test nothing but the handler's formatting of a result it invented.
+ */
+function createCompletionModeStore() {
+  type State = SceneGraphSlice & {
+    selectedIds: Set<string>;
+    primaryId: string | null;
+    primaryName: string | null;
+    primaryTransform: unknown | null;
+    spawnTerrain: () => string | undefined;
+    sceneModified: boolean;
+  };
+  return create<State>()((set, get, api) => ({
+    ...createSceneGraphSlice(set, get, api),
+    selectedIds: new Set<string>(),
+    primaryId: null,
+    primaryName: null,
+    primaryTransform: null,
+    spawnTerrain: () => undefined,
+    sceneModified: false,
+  }));
+}
+
+describe('set_completion_mode', () => {
+  it('sets the mode through the store action and reports what the picker shows', async () => {
+    const real = createCompletionModeStore();
+    const setCompletionMode = vi.fn(real.getState().setCompletionMode);
+
+    const { result } = await invokeHandler(
+      sceneManagementHandlers, 'set_completion_mode', { mode: 'endless' }, { setCompletionMode },
+    );
+
+    expect(setCompletionMode).toHaveBeenCalledTimes(1);
+    expect(setCompletionMode).toHaveBeenCalledWith('endless');
+    expect(result).toEqual({
+      success: true,
+      result: {
+        mode: 'endless',
+        changed: true,
+        message: 'Completion mode set to Endless. Score-chasing or survival with no final win. Play does not require a win condition.',
+      },
+    });
+    expect(real.getState().sceneGraph.completionMode).toBe('endless');
+    // Recorded in the picker's undo history, so the AI's choice is one Undo away.
+    expect(real.getState().completionModeHistory).toEqual({ past: [undefined], future: [] });
+    expect(real.getState().sceneModified).toBe(true);
+  });
+
+  it('reports a no-op, not a change, when the scene already has that mode', async () => {
+    const real = createCompletionModeStore();
+    real.getState().setCompletionMode('sandbox');
+    const setCompletionMode = vi.fn(real.getState().setCompletionMode);
+
+    const { result } = await invokeHandler(
+      sceneManagementHandlers, 'set_completion_mode', { mode: 'sandbox' }, { setCompletionMode },
+    );
+
+    expect(setCompletionMode).toHaveBeenCalledWith('sandbox');
+    expect(result).toEqual({
+      success: true,
+      result: { mode: 'sandbox', changed: false, message: 'Completion mode is already Sandbox.' },
+    });
+    // No second undo step for a value that did not move.
+    expect(real.getState().completionModeHistory).toEqual({ past: [undefined], future: [] });
+  });
+
+  it('refuses an unknown mode with the shared validator text and changes nothing', async () => {
+    const real = createCompletionModeStore();
+    real.getState().setCompletionMode('win');
+    real.setState({ sceneModified: false });
+    const historyBefore = real.getState().completionModeHistory;
+    const setCompletionMode = vi.fn(real.getState().setCompletionMode);
+
+    const { result } = await invokeHandler(
+      sceneManagementHandlers, 'set_completion_mode', { mode: 'puzzle' }, { setCompletionMode },
+    );
+
+    // The raw value reaches the store action un-coerced: that action IS the
+    // validator the manual picker uses, which is the parity this tool relies on.
+    expect(setCompletionMode).toHaveBeenCalledWith('puzzle');
+    expect(result).toEqual({
+      success: false,
+      error: 'Unknown completion mode "puzzle". Choose one of: win, endless, sandbox, narrative.',
+    });
+    expect(real.getState().sceneGraph.completionMode).toBe('win');
+    expect(real.getState().completionModeHistory).toBe(historyBefore);
+    expect(real.getState().sceneModified).toBe(false);
+  });
+
+  it.each([
+    ['a missing mode', {}, 'no value'],
+    ['a numeric mode', { mode: 3 }, 'a number'],
+  ])('refuses %s without echoing it', async (_label, args, received) => {
+    const real = createCompletionModeStore();
+    const setCompletionMode = vi.fn(real.getState().setCompletionMode);
+
+    const { result } = await invokeHandler(
+      sceneManagementHandlers, 'set_completion_mode', args, { setCompletionMode },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: `Completion mode must be one of: win, endless, sandbox, narrative. Received ${received}.`,
+    });
+    expect(real.getState().sceneGraph.completionMode).toBeUndefined();
+    expect(real.getState().completionModeHistory).toEqual({ past: [], future: [] });
   });
 });

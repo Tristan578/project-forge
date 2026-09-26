@@ -95,4 +95,19 @@ describe('checkpoint engine confirmation', () => {
     await expect(applyWithReadback(expected, actual)).resolves.toBeUndefined();
   });
 
+  it('accepts a readback without the completion mode, which the engine never echoes (#9998)', async () => {
+    // The mode is editor-side metadata like `prefabInstances`: the engine
+    // ignores the key on load and never writes it on export, so a checkpoint
+    // that records it must not fail its own engine-application check.
+    attachFixtureValidator();
+    const expected = { ...entityScene(0), completionMode: 'sandbox' as const };
+    await expect(applyWithReadback(expected, entityScene(0))).resolves.toBeUndefined();
+  });
+
+  it('still rejects a readback that differs in engine data when a mode is recorded', async () => {
+    attachFixtureValidator();
+    const expected = { ...entityScene(1), completionMode: 'sandbox' as const };
+    await expect(applyWithReadback(expected, entityScene(2))).rejects.toThrow('different scene data');
+  });
+
 });
