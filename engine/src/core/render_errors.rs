@@ -442,9 +442,13 @@ mod tests {
         let validation = render_error(ErrorType::Validation, "x");
         assert!(matches!(run_installed_handler(&mut app, &validation), RenderErrorPolicy::Ignore));
 
+        // `Time<Real>`'s first update only records the instant; the second
+        // one advances `elapsed`. Prime it, then step past the window.
         let later = std::time::Duration::from_secs_f64(REPEAT_WINDOW_SECS + 1.0);
-        let start = app.world().resource::<Time<Real>>().startup();
-        app.world_mut().resource_mut::<Time<Real>>().update_with_instant(start + later);
+        let mut time = app.world_mut().resource_mut::<Time<Real>>();
+        time.update_with_duration(std::time::Duration::ZERO);
+        time.update_with_duration(later);
+        assert!(time.elapsed_secs_f64() > REPEAT_WINDOW_SECS, "the clock did not advance; this test would be vacuous");
         assert!(matches!(run_installed_handler(&mut app, &validation), RenderErrorPolicy::Ignore));
     }
 }
