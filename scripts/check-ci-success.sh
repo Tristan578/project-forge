@@ -158,6 +158,7 @@ check_triggered "skills-lint"               "needs-skills"
 check_triggered "ghaw-lock-sync"            "needs-ghaw"
 check_triggered "openapi-route-sync"        "needs-api"
 check_triggered "actions-pin-check"         "needs-ci"
+check_triggered "actionlint"                "needs-ci"
 check_triggered "observatory-tests"         "needs-observatory" "needs-ci" "needs-deps"
 # quality-gates is `workflow_call`-only, and ci.yml's `quality-gates:` job is its
 # SOLE caller — cd.yml does not run on `pull_request`, so on the PR path that one

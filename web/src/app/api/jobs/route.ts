@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { generationResultUrlSchema } from '@/lib/generation/resultUrl';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
-import { eq, and, inArray, desc, sql } from 'drizzle-orm';
+import { eq, and, inArray, desc, sql, or } from 'drizzle-orm';
+import { isQstashConfigured } from '@/lib/qstash/client';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
@@ -76,10 +77,14 @@ async function POST_impl(req: NextRequest) {
 
 /**
  * GET: List up to 50 owned jobs, newest first. status=active selects pending,
- * processing and downloading; all or an absent status includes every state.
- * HTTP 200 {jobs} retains HTTP resultUrl values, but inline artifacts are
- * excluded in SQL and represented by resultUrl:null, hasInlineResult:true.
- * Fetch each flagged artifact with GET /api/jobs/{id} during recovery.
+ * processing and downloading, PLUS durable jobs the server-side callback has
+ * already finished (completed/failed) but no client has reflected yet
+ * (imported = 0) — see #8892. all or an absent status includes every state.
+ * HTTP 200 {durableCompletionEnabled, jobs} retains HTTP resultUrl values, but
+ * inline artifacts are excluded in SQL and represented by resultUrl:null,
+ * hasInlineResult:true. Fetch each flagged artifact with GET /api/jobs/{id}
+ * during recovery. durableCompletionEnabled is a boolean only (whether the
+ * QStash callback path is configured), never a key value.
  * Authentication errors use middleware; query failures return fixed HTTP 500.
  */
 async function GET_impl(req: NextRequest) {
@@ -92,9 +97,24 @@ async function GET_impl(req: NextRequest) {
 
     let conditions;
     if (statusFilter === 'active') {
+      // DURABLE COMPLETION (#8892). The QStash callback finalizes a job's row
+      // with no tab open, so on the next load the job is already terminal and
+      // a live-states-only filter dropped it from the UI: the asset finished
+      // and simply vanished. `imported` is the signal — the live client sets
+      // it when IT resolves a job (PATCH in generationStore.updateJob); the
+      // webhook never touches it. Scoped to rows the client marked durable at
+      // creation, because a legacy job is only ever finalized by a live client
+      // and a failed legacy row legitimately keeps imported = 0 forever.
       conditions = and(
         eq(generationJobs.userId, mid.userId!),
-        inArray(generationJobs.status, ['pending', 'processing', 'downloading'])
+        or(
+          inArray(generationJobs.status, ['pending', 'processing', 'downloading']),
+          and(
+            inArray(generationJobs.status, ['completed', 'failed']),
+            eq(generationJobs.imported, 0),
+            sql`${generationJobs.parameters}->>'durable' = 'true'`,
+          ),
+        ),
       );
     } else if (statusFilter && statusFilter !== 'all') {
       conditions = and(
@@ -135,6 +155,7 @@ async function GET_impl(req: NextRequest) {
     // possibly months ago. Redacting on the way out is the only control that
     // covers rows already in the table.
     return redactedJson({
+      durableCompletionEnabled: isQstashConfigured(),
       jobs: jobs.map((j) => ({
         id: j.id,
         providerJobId: j.providerJobId,
