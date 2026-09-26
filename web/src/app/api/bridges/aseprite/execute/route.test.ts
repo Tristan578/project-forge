@@ -366,7 +366,10 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(saving.fn).toHaveBeenCalledTimes(1);
   });
 
-  it('does not read or return a saved file over the byte limit, and still removes it', async () => {
+  // Board round 4 (ux): an oversized output is not a bridge failure. Aseprite
+  // ran; "check Aseprite is installed ... try again" would name the wrong
+  // cause, and a retry with the same size fails the same way.
+  it('reports a saved file over the byte limit as too large (not a bridge failure), unread, and removes it', async () => {
     authed();
     vi.doMock('@/lib/bridges/bridgeManager', () => ({
       discoverTool: vi.fn().mockResolvedValue(connectedConfig),
@@ -377,8 +380,29 @@ describe('POST /api/bridges/aseprite/execute', () => {
     const POST = await importRoute();
     const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
 
-    expect(res.status).toBe(502);
-    expect(await res.json()).toEqual({ success: false, error: BRIDGE_FAILURE_MESSAGE });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({
+      success: false,
+      error: 'The sprite Aseprite produced is too large to return (over 8 MiB). '
+        + 'Try a smaller size or fewer frames.',
+    });
+    expect(existsSync(saving.paths[0])).toBe(false);
+  });
+
+  it('returns a file exactly at the byte limit', async () => {
+    authed();
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({
+      discoverTool: vi.fn().mockResolvedValue(connectedConfig),
+    }));
+    const atLimit = Buffer.alloc(8 * 1024 * 1024, 7);
+    const saving = savingExecute(atLimit);
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({ executeOperation: saving.fn }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({ operation: 'createSprite', params: { width: 32, height: 32 } }));
+
+    expect(res.status).toBe(200);
+    expect(Buffer.from((await res.json()).sprite.base64, 'base64').equals(atLimit)).toBe(true);
     expect(existsSync(saving.paths[0])).toBe(false);
   });
 

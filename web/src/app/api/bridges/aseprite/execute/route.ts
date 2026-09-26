@@ -168,19 +168,20 @@ async function POST_impl(req: NextRequest) {
     const outputPath = join(tmpdir(), 'spawnforge-bridge', `${randomUUID()}.aseprite`).replace(/\\/g, '/');
     let result;
     let saved: Buffer | null = null;
+    let tooLarge = false;
     try {
       result = await executeOperation(binaryPath, {
         name: operation,
         params: { ...(params ?? {}), outputPath },
       });
       // The size is checked before the read, so an oversized file is never
-      // loaded; it is reported like any other failed run below.
-      if (
-        result.success
-        && existsSync(outputPath)
-        && statSync(outputPath).size <= SPRITE_LIMITS.maxOutputBytes
-      ) {
-        saved = readFileSync(outputPath);
+      // loaded.
+      if (result.success && existsSync(outputPath)) {
+        if (statSync(outputPath).size > SPRITE_LIMITS.maxOutputBytes) {
+          tooLarge = true;
+        } else {
+          saved = readFileSync(outputPath);
+        }
       }
     } finally {
       try {
@@ -188,6 +189,21 @@ async function POST_impl(req: NextRequest) {
       } catch {
         /* never written */
       }
+    }
+
+    // Aseprite ran and the bridge works; the sprite it built is simply too big
+    // to send back. The bridge-failure text below ("check Aseprite is
+    // installed ... try again") would name the wrong cause and a retry with the
+    // same parameters fails the same way, so this case says what to change.
+    if (tooLarge) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'The sprite Aseprite produced is too large to return (over 8 MiB). '
+            + 'Try a smaller size or fewer frames.',
+        },
+        { status: 413 }
+      );
     }
 
     // Forwarding `result` verbatim is a leak on the SUCCESS path (#9736): a
