@@ -628,7 +628,7 @@ jobs:
     # That growth is not runner variance. The job runs every bash suite one
     # after another under Git Bash, where process spawns are slow: in a 41:22
     # run on 2026-09-26 (job 108460157387, on the unmerged #10229, which adds a
-    # 71st suite, check-fn-freeze, at 92 s against about 10 s on Linux),
+    # 71st suite, check-fn-freeze, at 92 s against about 8 s on Linux),
     # check-ci-success alone took 553 s. 60 is headroom while #10290 finds
     # and cuts where the time goes; raise it again only with that issue's
     # measurements, not in its place.
