@@ -27,6 +27,7 @@ export function RemixButton({ userId, slug, isAuthenticated }: RemixButtonProps)
       const data = await res.json();
 
       if (!res.ok) {
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank API error message falls back to a generic one, same as an absent one
         setError(data.error || 'Failed to remix');
         setLoading(false);
         return;

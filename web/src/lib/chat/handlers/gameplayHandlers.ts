@@ -306,6 +306,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
     const prefab = getPrefab(p.data.prefabId);
     if (!prefab) return { success: false, error: `Prefab not found: ${p.data.prefabId}` };
 
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank spawned-entity name is unset; falls back to the prefab's default name
     const entityId = ctx.store.spawnEntity(prefab.snapshot.entityType as EntityType, p.data.name || prefab.snapshot.name);
     if (!entityId) {
       // spawnEntity returns undefined for a non-spawnable entityType (imported prefabs
@@ -462,6 +463,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
       entityId: z.string().optional(),
     }), args);
     if (p.error) return p.error;
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- entityId is a model-supplied tool argument (z.string().optional(), no min(1)); a blank one means "not given" and falls back to the selected entity
     const entityId = p.data.entityId || ctx.store.primaryId;
     if (!entityId) return { success: false, error: 'No entity selected' };
     const mat = ctx.store.primaryMaterial;

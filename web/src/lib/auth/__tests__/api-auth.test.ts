@@ -25,7 +25,7 @@ vi.mock('@/lib/auth/user-service', () => ({
 // ---------------------------------------------------------------------------
 // Import module under test AFTER mocks
 // ---------------------------------------------------------------------------
-import { authenticateRequest, authenticateClerkSession, assertAdmin, assertTier } from '../api-auth';
+import { authenticateRequest, authenticateClerkSession, assertAdmin, assertTier, assertAiAccess } from '../api-auth';
 import type { User } from '@/lib/db/schema';
 
 // ---------------------------------------------------------------------------
@@ -264,6 +264,39 @@ describe('assertTier', () => {
 });
 
 // ---------------------------------------------------------------------------
+// assertAiAccess (#7715)
+// ---------------------------------------------------------------------------
+
+describe('assertAiAccess', () => {
+  it('rejects a starter account with nothing to spend', () => {
+    const user = makeUser({ tier: 'starter', monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 });
+    expect(assertAiAccess(user)?.status).toBe(403);
+  });
+
+  it('admits a starter account holding trial tokens', () => {
+    const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+    expect(assertAiAccess(user)).toBeNull();
+  });
+
+  it('rejects a starter account again once the trial is spent', () => {
+    const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 50, addonTokens: 0 });
+    expect(assertAiAccess(user)?.status).toBe(403);
+  });
+
+  it('admits every paid tier regardless of balance', () => {
+    for (const tier of ['hobbyist', 'creator', 'pro'] as const) {
+      expect(assertAiAccess(makeUser({ tier, monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 }))).toBeNull();
+    }
+  });
+
+  it('does not mutate the user it is given', () => {
+    const user = makeUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0, addonTokens: 0 });
+    assertAiAccess(user);
+    expect(user.tier).toBe('starter');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Edge Cases: Expired tokens, banned users, tier downgrades, etc. (PF-686)
 // ---------------------------------------------------------------------------
 
@@ -277,7 +310,7 @@ describe('authenticateRequest — edge cases', () => {
       expect(result.response.status).toBe(401);
       const body = await result.response.json();
       // The `reason` sub-code distinguishes a provider outage from a
-      // routine missing-session 401 for on-call observability.
+      // routine missing-session 401 in Sentry.
       expect(body.reason).toBe('AUTH_PROVIDER_ERROR');
     }
     // Ensure the throw did NOT propagate — it must be caught and converted to 401.

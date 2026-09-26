@@ -179,7 +179,7 @@ export function ChatInput() {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognitionCtor = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
     if (!SpeechRecognitionCtor) return;
 
     const recognition = new SpeechRecognitionCtor();

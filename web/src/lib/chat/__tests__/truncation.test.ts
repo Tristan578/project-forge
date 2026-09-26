@@ -3,6 +3,7 @@ import { buildTruncatedApiMessages, type ChatMessage } from '@/stores/chatStore'
 
 function makeMessage(role: 'user' | 'assistant', content: string, id?: string): ChatMessage {
   return {
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- test fixture default: a blank id falls back to a generated one for the assertion
     id: id || `msg_${Math.random()}`,
     role,
     content,

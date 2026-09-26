@@ -153,6 +153,7 @@ export function AdminDashboard() {
       <div className="min-h-screen bg-zinc-900 text-zinc-300 flex items-center justify-center">
         <div className="bg-red-900/20 border border-red-500 rounded-lg p-6 max-w-md">
           <h2 className="text-xl font-bold text-red-400 mb-2">Error</h2>
+          {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank error string is unset for display purposes; falls back to a generic message */}
           <p>{error || 'Failed to load data'}</p>
           <button
             onClick={fetchData}
@@ -218,11 +219,13 @@ export function AdminDashboard() {
                 {data.costSummary.map((row, i) => (
                   <tr key={i} className="hover:bg-zinc-800/50">
                     <td className="px-4 py-2 border-b border-zinc-700">{row.actionType}</td>
+                    {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank provider column value is unset for display purposes */}
                     <td className="px-4 py-2 border-b border-zinc-700">{row.provider || '-'}</td>
                     <td className="px-4 py-2 text-right border-b border-zinc-700">
                       {row.totalCost ? `$${(Number(row.totalCost) / 100).toFixed(2)}` : '-'}
                     </td>
                     <td className="px-4 py-2 text-right border-b border-zinc-700">
+                      {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank totalTokens string is unset for display purposes, shown as 0 */}
                       {row.totalTokens || '0'}
                     </td>
                     <td className="px-4 py-2 text-right border-b border-zinc-700">{row.count}</td>
@@ -259,6 +262,7 @@ export function AdminDashboard() {
                 {data.tokenConfigs.map((config) => (
                   <tr key={config.id} className="hover:bg-zinc-800/50">
                     <td className="px-4 py-2 border-b border-zinc-700">{config.actionType}</td>
+                    {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank provider column value is unset for display purposes */}
                     <td className="px-4 py-2 border-b border-zinc-700">{config.provider || '-'}</td>
                     <td className="px-4 py-2 text-center border-b border-zinc-700">
                       <input
@@ -406,6 +410,7 @@ export function AdminDashboard() {
                       {txn.amount >= 0 ? '+' : ''}{txn.amount}
                     </td>
                     <td className="px-4 py-2 text-right border-b border-zinc-700">{txn.balanceAfter}</td>
+                    {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank source column value is unset for display purposes */}
                     <td className="px-4 py-2 border-b border-zinc-700">{txn.source || '-'}</td>
                   </tr>
                 ))}
