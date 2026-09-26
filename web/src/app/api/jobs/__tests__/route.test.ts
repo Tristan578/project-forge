@@ -291,6 +291,36 @@ describe('/api/jobs', () => {
         expect(response.status).toBe(201);
         expect(findProviderJobOwnerId).toHaveBeenCalledWith('meshy', 'j-1');
       });
+
+      // findProviderJobOwnerId deliberately does NOT catch a lookup failure
+      // (see its doc comment and jobOwnership.test.ts's "propagates a lookup
+      // failure" case) — it rejects, relying on this route's outer try/catch
+      // to turn that into a fixed 500 and skip the insert. That fail-closed
+      // behavior at the route level is the actual security property #10262
+      // is about, so it must be exercised here, not just at the DB-insert
+      // failure ("returns 500 on DB error") which never touches this path.
+      it('returns 500 without inserting when findProviderJobOwnerId itself rejects', async () => {
+        mockAuth(true);
+        const { insertChain } = setupDb();
+        vi.mocked(findProviderJobOwnerId).mockRejectedValueOnce(new Error('db down'));
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerJobId: 'j-1',
+            provider: 'meshy',
+            type: 'model',
+            prompt: 'A red cube',
+          }),
+        });
+
+        const response = await POST(req);
+        const body = await response.json();
+
+        expect(response.status).toBe(500);
+        expect(body.error).toBe('Failed to create job');
+        expect(insertChain.values).not.toHaveBeenCalled();
+      });
     });
   });
 

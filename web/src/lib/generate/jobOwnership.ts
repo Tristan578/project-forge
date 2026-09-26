@@ -97,9 +97,19 @@ export async function verifyProviderJobOwner(
  * regardless of who owns it. Used by `POST /api/jobs` (#10262) to refuse a
  * client-reported job row whose `providerJobId` is already bound to a
  * DIFFERENT user — distinct from `verifyProviderJobOwner`, which answers
- * "is this caller the owner" for a status poll. Fails closed (treats a
- * lookup error as "owned by someone else") for the same reason
- * `verifyProviderJobOwner` does: this IS the security decision.
+ * "is this caller the owner" for a status poll.
+ *
+ * Unlike `verifyProviderJobOwner`, this function does NOT catch a lookup
+ * failure itself — there is no try/catch here, and a DB error propagates
+ * (rejects) to the caller rather than resolving to `null` or any other
+ * value. This IS the security decision, so callers MUST NOT treat a
+ * rejection as "unbound": the only safe way to consume this function is to
+ * let the rejection propagate (or explicitly re-throw after side effects)
+ * so an enclosing handler denies the write, the way `POST /api/jobs`'s
+ * outer try/catch turns this rejecting into a fixed 500 that skips the
+ * insert. A caller that swallows the error and defaults to "no owner found"
+ * would silently reopen the ownership-spoofing hole this function exists to
+ * close.
  */
 export async function findProviderJobOwnerId(
   provider: string,
