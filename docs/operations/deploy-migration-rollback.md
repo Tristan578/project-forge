@@ -217,4 +217,5 @@ same one `DATABASE_URL` points at in production.
 - `docs/decisions/2026-09-11-drizzle-migrate-not-push.md` — why production applies
   migrations with `migrate` (supersedes the 2026-08-29 `push` decision)
 - `docs/operations/backup-recovery.md` — general Neon PITR guidance
-- `docs/operations/incident-runbook.md` — broader incident process
+- `docs/operations/incident-response.md` — the broader incident process
+- `docs/operations/incident-runbook.md` — recovery and rollback procedures

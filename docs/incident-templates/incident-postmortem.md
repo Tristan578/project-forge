@@ -1,8 +1,8 @@
 # Post-Incident Review (Postmortem) Template
 
-> Complete this document within **5 business days** of incident resolution.
+> Optional. This project has no formal postmortem process (see `docs/operations/incident-response.md` § Resolution); use this template when a paragraph in the closing ticket is not enough.
 > Blameless postmortems focus on systems, processes, and tools — not individuals.
-> Share with the Engineering team and link from the resolved incident ticket.
+> Link it from the resolved incident ticket.
 
 ---
 
@@ -12,9 +12,8 @@
 **Severity:** {P0 / P1 / P2}
 **Date:** {YYYY-MM-DD}
 **Duration:** {N hours N minutes}
-**Author(s):** {NAME(S)}
-**Reviewers:** {NAME(S)}
-**Status:** {Draft / In Review / Final}
+**Author:** {NAME}
+**Status:** {Draft / Final}
 
 ---
 
@@ -44,19 +43,19 @@
 
 ## Timeline
 
-> All times in UTC. Include key events: first symptom, detection, escalation, root cause identified, fix deployed, recovery confirmed.
+> All times in UTC. Include key events: first symptom, detection, root cause identified, fix deployed, recovery confirmed.
 
 | Time (UTC) | Event | Who |
 |------------|-------|-----|
 | {HH:MM} | {event} | {name} |
 | {HH:MM} | {event} | {name} |
-| {HH:MM} | Incident detected | {monitoring / user / engineer} |
-| {HH:MM} | Incident commander assigned | {name} |
-| {HH:MM} | First update posted to status page | {name} |
+| {HH:MM} | Incident detected | {monitoring / user / owner} |
+| {HH:MM} | Owner began response | {name} |
+| {HH:MM} | First update posted | {name} |
 | {HH:MM} | Root cause identified | {name} |
 | {HH:MM} | Fix deployed to production | {name} |
 | {HH:MM} | Recovery validated | {name} |
-| {HH:MM} | Incident resolved, status page updated | {name} |
+| {HH:MM} | Incident resolved | {name} |
 
 ---
 
@@ -90,7 +89,7 @@
 ## Detection
 
 **How was the incident detected?**
-{monitoring alert / user report / engineer observation}
+{monitoring alert / user report / owner observation}
 
 **Time to detection:** {N minutes from first symptom to incident declared}
 
@@ -104,7 +103,7 @@
 
 ## Response
 
-**Time to first update:** {N minutes from detection to first status page update}
+**Time to first update:** {N minutes from detection to first update}
 **Time to root cause:** {N minutes from detection to root cause identified}
 **Time to fix deployed:** {N minutes from root cause to fix deployed}
 **Time to recovery:** {N minutes from fix deployed to recovery confirmed}
@@ -150,7 +149,7 @@
 
 ## Lessons Learned
 
-<!-- What should every engineer on the team know after this incident? -->
+<!-- What should anyone working on SpawnForge later know after this incident? -->
 
 1. {lesson}
 2. {lesson}
