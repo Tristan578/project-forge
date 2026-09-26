@@ -344,7 +344,7 @@ fail() { :; }
 FIX
 )"
 expect_rc "12d. an unterminated heredoc is a parse failure (exit 2), never a pass over the visible prefix" 2 \
-  "$(run_gate "$d_unterminated")" "unterminated heredoc <<EOF still open"
+  "$(run_gate "$d_unterminated")" "fixture.test.sh:3: unterminated heredoc <<EOF opened here is still open at end of file"
 d_unquoted="$(mkfixture unquoted <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
@@ -353,7 +353,7 @@ function flush() {
 FIX
 )"
 expect_rc "12e. an unterminated quoted string is a parse failure (exit 2)" 2 \
-  "$(run_gate "$d_unquoted")" "unterminated quoted string still open"
+  "$(run_gate "$d_unquoted")" "fixture.test.sh:3: unterminated quoted string opened here is still open at end of file"
 
 # ---- 12h. a file that ends inside any other opener is a parse failure too ------
 # Forty-first board round (architect): only an open heredoc or quote failed
@@ -371,7 +371,7 @@ while IFS='|' read -r opener kind; do
   k=$((k + 1))
   d_open="$(printf '%s\n' "$open_head" "$opener" 'evil() { :; }' | mkfixture "open-$k")"
   expect_rc "12h. a file ending inside ${kind} is a parse failure (exit 2)" 2 \
-    "$(run_gate "$d_open")" "unterminated ${kind} still open"
+    "$(run_gate "$d_open")" "fixture.test.sh:3: unterminated ${kind} opened here is still open at end of file"
 done <<'OPENERS'
 X=`echo start|backtick span `
 X=$(echo start|$( ), <( ) or >( ) substitution
@@ -381,6 +381,46 @@ x=$[1 +|$[ ] arithmetic
 ( echo sub|( ) subshell
 OPENERS
 [ "$k" -eq 6 ] || fail "12h. expected 6 openers, walked $k"
+
+# ---- 12i. a parse error names the line the construct opened on --------------
+# Forty-second board round (ux): every parse error named the file's LAST line,
+# which says nothing about where the construct opened. 12d, 12e and 12h end
+# their fixtures one or two lines after the opener; here a quote opened on
+# line 3 is interrupted by a $( ) on line 4 holding a quote of its own, and
+# the error must still name line 3, the quote left open, not line 4, the
+# last quote opened, nor line 6, the end of the file.
+d_openline="$(mkfixture open-line <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+X="start
+$(echo "inner")
+evil() { :; }
+more
+FIX
+)"
+expect_rc "12i. a quote interrupted by a substitution is reported where the quote opened" 2 \
+  "$(run_gate "$d_openline")" "fixture.test.sh:3: unterminated quoted string opened here is still open at end of file"
+
+# Each quote opener records its own line: plain and ANSI-C and dollar-double
+# quotes at top level, and single, double and ANSI-C quotes inside an array
+# literal. The head's line 1 holds a closed double quote, so an opener that
+# forgot to record its line reports line 1, not 3.
+k=0
+while IFS= read -r opener; do
+  k=$((k + 1))
+  d_open="$(printf '%s\n' "$open_head" "$opener" 'evil() { :; }' | mkfixture "quote-open-$k")"
+  expect_rc "12i. a file ending inside the quote opened by: ${opener} names line 3" 2 \
+    "$(run_gate "$d_open")" "fixture.test.sh:3: unterminated quoted string opened here is still open at end of file"
+done <<'OPENERS'
+X='start
+X="start
+X=$'start
+X=$"start
+arr=(a 'b
+arr=(a "b
+arr=(a $'b
+OPENERS
+[ "$k" -eq 7 ] || fail "12i. expected 7 quote openers, walked $k"
 
 # ---- 12f. a column-0 definition inside a quoted program is string content ------
 # The sweep that introduced this gate froze `function flush() {` inside a
@@ -2404,16 +2444,20 @@ fi
 # newline (line 4) split the TSV row, so the report counted the violation
 # and printed no line for it. Labels are now written through emit, which
 # turns a tab, newline or carriage return into ?. expect_rc checks for every
-# case that each counted violation prints its own line.
+# case that each counted violation prints its own line. A carriage return
+# (line 5) splits nothing, so the count check cannot see it; its needle is
+# the only thing that pins it (forty-second board round).
 d_tabnl="$(mkfixture tab-newline <<'FIX'
 pass() { echo "  PASS: $1"; }
 readonly -f pass
 trap 'exit	0' EXIT
 trap $'exit\n0' ERR
+trap $'exit\r0' RETURN
 FIX
 )"
 expect_rc "30ad. a trap action holding a tab or a newline is reported on its own line" 1 "$(run_gate "$d_tabnl")" \
-  "2 violation(s)" "fixture.test.sh:3: 'trap exit?0 ... EXIT'" "fixture.test.sh:4: 'trap exit?0 ... ERR'"
+  "3 violation(s)" "fixture.test.sh:3: 'trap exit?0 ... EXIT'" "fixture.test.sh:4: 'trap exit?0 ... ERR'" \
+  "fixture.test.sh:5: 'trap exit?0 ... RETURN'"
 
 # ---- 30r. inside double quotes a backslash escapes only five characters -----
 # Thirty-second board round (architect): the lexer dropped every backslash in

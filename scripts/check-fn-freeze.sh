@@ -189,9 +189,11 @@
 # answer the gate acts on (lessons-learned #18: derive the subject, never
 # restate it).
 #
-# Exit codes: 0 every definition frozen; 1 at least one violation; 2 tooling
-# or vacuity error (no files, or nothing derived from them — a gate that scans
-# nothing is not a passing gate, lesson #9).
+# Exit codes: 0 every definition frozen; 1 at least one violation; 2 tooling,
+# vacuity or parse error (no files, nothing derived from them — a gate that
+# scans nothing is not a passing gate, lesson #9 — or a file the lexer cannot
+# carry to EOF, reported at the line the unclosed heredoc, quote,
+# substitution, arithmetic, subshell or array literal opened on).
 #
 # Usage:
 #   bash scripts/check-fn-freeze.sh           # check, report violations
@@ -818,6 +820,9 @@ derive_file() {
       else { end_word(); d++ }
       st_q[d] = saved_q; st_arr[d] = arr; st_arrd[d] = arr_d; st_at[d] = arr_txt; st_an[d] = arr_nm; st_al[d] = arr_line; st_arith[d] = arith; st_dbl[d] = dbl
       st_pat[d] = pat; st_dol[d] = dol
+      # Where this opener stands, and where the quote it interrupts opened,
+      # for a parse error at end of file.
+      st_ln[d] = NR; st_ql[d] = q_line
       st_cs[d] = cmd_seen; st_cw[d] = cmd_word; st_nw[d] = nwords
       st_ia[d] = in_alias; st_ish[d] = in_shopt; st_it[d] = in_trap; st_sf[d] = sflag
       st_is[d] = in_set; st_of[d] = oflag; st_se[d] = set_end
@@ -834,7 +839,7 @@ derive_file() {
       end_command()
       if (d > 0) {
         q = st_q[d]; arr = st_arr[d]; arr_d = st_arrd[d]; arr_txt = st_at[d]; arr_nm = st_an[d]; arr_line = st_al[d]; arith = st_arith[d]
-        pat = st_pat[d]
+        pat = st_pat[d]; q_line = st_ql[d]
         if (st_dol[d]) {
           cmd_seen = st_cs[d]; cmd_word = st_cw[d]; nwords = st_nw[d]
           in_alias = st_ia[d]; in_shopt = st_ish[d]; in_trap = st_it[d]; sflag = st_sf[d]
@@ -948,9 +953,9 @@ derive_file() {
         }
         if (arr) {
           if (c == "\\") { i += 2; continue }
-          if (c2 == "$\047") { q = "a"; i += 2; continue }
-          if (c == "\047") { q = "s"; i++; continue }
-          if (c == "\"") { q = "d"; i++; continue }
+          if (c2 == "$\047") { q = "a"; q_line = NR; i += 2; continue }
+          if (c == "\047") { q = "s"; q_line = NR; i++; continue }
+          if (c == "\"") { q = "d"; q_line = NR; i++; continue }
           if (c3 == "$((") { open_sub("", 1, 1, 1); i += 3; continue }
           if (c2 == "$(") { open_sub("", 0, 0, 1); i += 2; continue }
           if (c == "`") { open_sub("", 0, 3, 1); i++; continue }
@@ -976,14 +981,14 @@ derive_file() {
           if (i == n) { cont = 1; i++; continue }
           w = w substr(line, i + 1, 1); wq = 1; i += 2; continue
         }
-        if (c2 == "$\047") { q = "a"; wq = 1; i += 2; continue }
+        if (c2 == "$\047") { q = "a"; q_line = NR; wq = 1; i += 2; continue }
         # A dollar-double-quoted string is a locale-translated string; with no
         # translation catalog, and in every self-defense suite, it is its own
         # text, so it opens the same state as a plain double quote (eighteenth
         # board round: the dollar was kept, so the word read as a variable).
-        if (c2 == "$\"") { q = "d"; wq = 1; i += 2; continue }
-        if (c == "\047") { q = "s"; wq = 1; i++; continue }
-        if (c == "\"") { q = "d"; wq = 1; i++; continue }
+        if (c2 == "$\"") { q = "d"; q_line = NR; wq = 1; i += 2; continue }
+        if (c == "\047") { q = "s"; q_line = NR; wq = 1; i++; continue }
+        if (c == "\"") { q = "d"; q_line = NR; wq = 1; i++; continue }
         # A `${...}` is one part of the current word up to its matching brace,
         # so `ali${x:+ Q}as` is one word, as it is to bash (sixteenth round).
         if (c2 == "${") {
@@ -1080,6 +1085,8 @@ derive_file() {
             tok = substr(rest, RSTART, RLENGTH)
             gsub(/[\047"\\]/, "", tok)
             hd_n++; hd_term[hd_n] = tok; hd_strip[hd_n] = strip
+            # Every heredoc queued before the bodies start is on this line.
+            if (hd_n == 1) hd_line = NR
             i += 2 + (length(line) - i - 1 - length(rest)) + RLENGTH
             continue
           }
@@ -1256,18 +1263,21 @@ derive_file() {
       # A lexer that ends the file inside a heredoc or a quoted string has
       # skipped everything after the opener; that is a parse failure, not a
       # clean file, and the gate must not report the skipped tail as frozen.
+      # Each row names the line the construct OPENED on, which is where the
+      # reader has to go; the last line of the file says nothing about it
+      # (forty-second board round).
       if (hd_n > 0)
-        emit("unterminated heredoc <<" hd_term[1], NR, NR, "parse-error")
+        emit("unterminated heredoc <<" hd_term[1], hd_line, NR, "parse-error")
       else if (q != "")
-        emit("unterminated quoted string", NR, NR, "parse-error")
+        emit("unterminated quoted string", q_line, NR, "parse-error")
       # So is one that ends inside a substitution, a subshell, an arithmetic
       # context or an array literal: everything after the opener was lexed
       # as its contents, so a definition there was never judged (forty-first
       # board round: an unclosed backtick span, or $( ), passed with exit 0).
       else if (d > 0)
-        emit("unterminated " open_kind(1), NR, NR, "parse-error")
+        emit("unterminated " open_kind(1), st_ln[1], NR, "parse-error")
       else if (arr)
-        emit("unterminated array literal (", NR, NR, "parse-error")
+        emit("unterminated array literal (", arr_line, NR, "parse-error")
     }
   ' "$1"
 }
@@ -1313,7 +1323,7 @@ if [ -n "$parse_errors" ]; then
   echo "::error::check-fn-freeze: the derivation could not parse to the end of file — every definition after the opener would be invisible to this gate (fail closed):" >&2
   while IFS=$'\t' read -r file what line _rest; do
     [ -n "$file" ] || continue
-    echo "  - $file: $what still open at line $line" >&2
+    echo "  - $file:$line: $what opened here is still open at end of file" >&2
   done <<<"$parse_errors"
   exit 2
 fi

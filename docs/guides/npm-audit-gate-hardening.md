@@ -1068,7 +1068,13 @@ was replaced with this one (round twenty-nine).
   heredoc or quote: a file ending inside a backtick span, a `$( )`, an
   arithmetic context, a subshell or an array literal exited 0, and every
   definition after the opener went unjudged. Each is now a parse error
-  (exit 2) naming what stayed open.
+  (exit 2) naming what stayed open. The forty-second found that every parse
+  error named the file's last line, which says nothing about where the
+  construct opened. Each opener now records its line: a quote, including
+  one interrupted by a `$( )` that holds a quote of its own; a heredoc; a
+  substitution, arithmetic context or subshell; and an array literal. The
+  report reads `file:line: … opened here is still open at end of file`. The
+  gate header's exit-code line now names the parse error as well.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
