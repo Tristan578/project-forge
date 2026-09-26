@@ -19,7 +19,7 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 | Library | Version | Notes |
 |---------|---------|-------|
 | Bevy | 0.19 | wgpu 29, WebGPU primary |
-| bevy_rapier3d/2d | 0.33 | `default-features=false` |
+| bevy_rapier3d/2d | 0.35 | `default-features=false` |
 | bevy_hanabi | 0.19 | GPU particles, WebGPU only |
 | transform-gizmo-bevy | 0.9 | Local fork at `.transform-gizmo-fork/` |
 | bevy_panorbit_camera | 0.35 | `yaw`/`pitch`/`radius` |

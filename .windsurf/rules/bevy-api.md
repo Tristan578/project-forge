@@ -44,7 +44,7 @@
 
 ## Library-Specific
 
-### bevy_rapier3d v0.33
+### bevy_rapier3d / bevy_rapier2d v0.35
 - `RapierConfiguration` is a **Component** (not Resource)
 - `DebugRenderContext` is a **Resource** (not Component)
 - Never enable `parallel` feature (rayon panics on WASM)
