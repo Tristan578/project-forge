@@ -273,39 +273,144 @@ export function filterCameraNumerics(
   }
   // A GDD-spelled key only fills a field the translator's own names left unset,
   // so an explicit `topDownHeight` always beats an aliased `altitude`.
-  for (const [alias, field] of Object.entries(GDD_CONFIG_KEY_ALIASES)) {
+  for (const [alias, { field, convert }] of Object.entries(GDD_CONFIG_KEY_ALIASES)) {
     if (out[field] !== undefined) continue;
     if (!Object.hasOwn(obj, alias)) continue;
-    const val = obj[alias];
+    const val = convertAliasedValue(obj[alias], convert);
     if (isSendableCameraValue(field, val)) out[field] = val;
   }
   return out;
 }
 
 /**
- * GDD config spellings that map onto an engine parameter without changing units.
+ * Apply a {@link GddConfigAlias.convert} only to a value it can actually take.
  *
- * Deliberately short. The GDD's camera `config` vocabulary and the engine's
- * parameter list were written independently and overlap in exactly NOTHING: the
- * keys the generator actually emits are `altitude`, `tilt`, `smoothing`,
- * `offset`, `perspective`, `followX`, `followY`, `leadAhead`, `zoomMin`,
- * `zoomMax`, `canOrbit` and `locked`, while the translator accepts
- * `followDistance`, `followHeight`, `topDownHeight` and friends. So before this
- * map, `filterCameraNumerics` returned `{}` for 100% of real GDD input while the
- * step still reported `applied: true`.
- *
- * `smoothing` is the conspicuous omission, and it is omitted on purpose: the GDD
- * means a 0..1 lerp factor and the engine's `followSmoothing` is a rate per
- * second (`t = (damping * delta).min(1.0)`, default 5). Forwarding the fixtures'
- * `smoothing: 0.1` as a rate would run the follow ~50x slower than default —
- * a camera that visibly lags the player. A wrong number is worse than a reported
- * omission, so the unit-converting entries are tracked separately (PF-1134)
- * rather than guessed at here. Everything unmapped is REPORTED by
- * {@link classifyCameraConfigKeys}, which is the part PF-1125 is actually about:
- * the drop was silent.
+ * `convert` is typed `(value: number) => number` — it has no obligation to
+ * handle a string, an array, or `NaN` sensibly, and calling it on one would
+ * make the conversion function responsible for a check this module already
+ * owns. A non-finite-number input is passed through UNCONVERTED instead, so
+ * {@link cameraValueRejection}'s own `typeof`/`Number.isFinite` guard is what
+ * rejects it — with the same `"not a finite number"` reason a direct field
+ * gets, rather than a conversion-specific one that would say the wrong thing.
  */
-const GDD_CONFIG_KEY_ALIASES: Record<string, NumericCameraField> = {
-  altitude: 'topDownHeight',
+function convertAliasedValue(raw: unknown, convert: (value: number) => number): unknown {
+  return typeof raw === 'number' && Number.isFinite(raw) ? convert(raw) : raw;
+}
+
+/**
+ * A GDD spelling that reaches an engine field, plus how to get its VALUE from
+ * the GDD's unit into the engine's.
+ *
+ * Split out from a bare `Record<string, NumericCameraField>` because that shape
+ * cannot express `smoothing`: the GDD and engine units disagree there, and a
+ * rename is not a conversion. `convert` is required rather than optional so a
+ * new entry cannot forget to say which — `identityConversion` names the "no,
+ * really, the units already match" case rather than leaving it implicit.
+ */
+interface GddConfigAlias {
+  field: NumericCameraField;
+  /** GDD unit -> engine unit. The identity function where the two agree. */
+  convert: (value: number) => number;
+}
+
+function identityConversion(value: number): number {
+  return value;
+}
+
+/**
+ * The frame time `smoothing` is anchored to, for {@link convertGddSmoothingToDamping}.
+ *
+ * Not a claim about the engine's actual step size, which is whatever `delta`
+ * a given frame took — this is a fixed reference point, chosen because it is
+ * the SAME one `game_camera.rs`'s own tests use throughout
+ * (`follow_lerp_factor(5.0, 1.0 / 60.0)` and every `update_*` test call site):
+ * 60fps is this codebase's baseline assumption for "a frame", not a number
+ * invented for this conversion.
+ */
+const GDD_SMOOTHING_REFERENCE_DELTA_SECONDS = 1 / 60;
+
+/**
+ * Convert the GDD's authored `smoothing` into the engine's `followSmoothing`
+ * (wire name `damping`).
+ *
+ * The GDD's `smoothing` is authored as the fraction of the remaining
+ * camera-to-target gap that should close on ONE rendered frame — the familiar
+ * `Vector3.Lerp(current, target, smoothing)`-per-frame authoring convention,
+ * where the value is called "smoothing" despite bigger meaning SNAPPIER, not
+ * more smoothed. The engine instead stores a rate and multiplies by whatever
+ * `delta` the frame actually took: `t = (damping * delta).min(1.0)`. Both
+ * quantities move the SAME direction — bigger closes more of the gap per
+ * frame — so this is a pure rescale, not a sign flip or an inversion, and
+ * inverting `t = damping * delta` at the reference frame time above gives
+ * `damping = smoothing / delta`.
+ *
+ * That the reference point is right, not just self-consistent, is checkable
+ * against this module's own fixtures (`__fixtures__/*.json`): GDD-authored
+ * `smoothing` values of 0.05/0.08/0.1 land at damping 3/4.8/6 — all close to
+ * the engine's OWN default follow damping of 5 (`ENGINE_CAMERA_DEFAULTS.followSmoothing`
+ * in `gameCameraPayload.ts`). A wrong reference delta would have scattered
+ * these into a wildly different regime instead of clustering near the value
+ * the engine already treats as "normal".
+ *
+ * Sign and magnitude are otherwise untouched — a negative `smoothing` yields a
+ * negative `damping`, which `cameraValueRejection` still refuses for the exact
+ * same reason a hand-authored negative `followSmoothing` is refused (PF-1166),
+ * and an oversized one is still absorbed by the engine's own `.min(1.0)`.
+ */
+function convertGddSmoothingToDamping(smoothing: number): number {
+  return smoothing / GDD_SMOOTHING_REFERENCE_DELTA_SECONDS;
+}
+
+/**
+ * GDD config spellings that map onto an engine parameter — verbatim where the
+ * units already agree, and through {@link GddConfigAlias.convert} where they
+ * do not.
+ *
+ * Deliberately short relative to the GDD's real vocabulary. The GDD's camera
+ * `config` vocabulary and the engine's parameter list were written
+ * independently: the keys the generator actually emits are `altitude`, `tilt`,
+ * `smoothing`, `offset`, `perspective`, `followX`, `followY`, `leadAhead`,
+ * `zoomMin`, `zoomMax`, `canOrbit` and `locked`, while the translator accepts
+ * `followDistance`, `followHeight`, `topDownHeight` and friends. Before any
+ * entry existed here, `filterCameraNumerics` returned `{}` for 100% of real GDD
+ * input while the step still reported `applied: true` (PF-1125).
+ *
+ * `smoothing` -> `followSmoothing` needs {@link convertGddSmoothingToDamping}
+ * rather than a bare rename, because the GDD's unit (a 0..1 per-frame lerp
+ * fraction) and the engine's unit (a per-second rate) disagree — forwarding
+ * `smoothing: 0.1` unconverted would have run the follow ~50x slower than
+ * default, a camera that visibly lags the player. See that function for the
+ * derivation (PF-1134).
+ *
+ * Four more of the generator's keys have NO engine parameter under any
+ * spelling — confirmed here rather than merely assumed, so the next reader
+ * does not go looking for one:
+ *   - `tilt` — no camera mode exposes an authored tilt/pitch angle. `topDown`
+ *     is height/damping/followRotation; `firstPerson`'s only angular control
+ *     is `pitchClamp`, a *limit* on player-driven look, not a value to author.
+ *   - `perspective` — a categorical label (e.g. `"over-shoulder"`), not a
+ *     magnitude, so there is no numeric field it could become.
+ *   - `locked` / `canOrbit` — booleans with no engine-side counterpart. The
+ *     nearest control, `orbital`'s `autoRotate`, is DERIVED from
+ *     `orbitalAutoRotateSpeed` (see `buildSetGameCameraPayload`) rather than
+ *     authored directly, so there is nothing for `canOrbit` to alias either.
+ * All four already land in {@link classifyCameraConfigKeys}'s `unknown`
+ * bucket with no code change required — this comment is the acceptance
+ * criterion that PF-1134 asked for, not a promise of future work.
+ *
+ * The rest of the generator's vocabulary — `followX`, `followY`, `offset`,
+ * `leadAhead`, `zoomMin`, `zoomMax` — are candidates for the `offset` vector
+ * and the side-scroller/orbital parameters, but are NOT settled: each needs
+ * its own check against the specific engine arm it would target, the same way
+ * `smoothing` needed a derived conversion rather than a rename. Guessing here
+ * would repeat the exact mistake this module exists to avoid — a wrong number
+ * is worse than a reported omission — so they stay unmapped and REPORTED
+ * (never silently dropped) by {@link classifyCameraConfigKeys} until that work
+ * happens.
+ */
+const GDD_CONFIG_KEY_ALIASES: Record<string, GddConfigAlias> = {
+  altitude: { field: 'topDownHeight', convert: identityConversion },
+  smoothing: { field: 'followSmoothing', convert: convertGddSmoothingToDamping },
 };
 
 /**
@@ -341,13 +446,21 @@ export function classifyCameraConfigKeys(raw: unknown): CameraConfigReport {
 
   // The author's own key order, so the report reads back in the order they wrote.
   for (const key of Object.keys(obj)) {
-    const isAlias = Object.hasOwn(GDD_CONFIG_KEY_ALIASES, key);
-    const field = isAlias ? GDD_CONFIG_KEY_ALIASES[key] : asCameraField(key);
+    const alias = Object.hasOwn(GDD_CONFIG_KEY_ALIASES, key)
+      ? GDD_CONFIG_KEY_ALIASES[key]
+      : undefined;
+    const field = alias ? alias.field : asCameraField(key);
     if (field === undefined) {
       report.unknown.push(key);
       continue;
     }
-    const reason = cameraValueRejection(field, obj[key]);
+    // Convert BEFORE judging sendability, matching `filterCameraNumerics`: a
+    // rejection on the raw GDD unit (e.g. refusing `smoothing: -3` for being
+    // "too small" against `followSmoothing`'s policy) would use the wrong
+    // scale, and the two helpers sharing `cameraValueRejection` is what keeps
+    // them from disagreeing about what "sendable" means.
+    const value = alias ? convertAliasedValue(obj[key], alias.convert) : obj[key];
+    const reason = cameraValueRejection(field, value);
     if (reason !== null) {
       report.unusable.push({ key, reason });
       continue;
@@ -357,7 +470,7 @@ export function classifyCameraConfigKeys(raw: unknown): CameraConfigReport {
     // a SENDABLE value, matching `filterCameraNumerics`: an explicit
     // `topDownHeight: NaN` is dropped, and then the alias is what applies.
     if (
-      isAlias &&
+      alias &&
       Object.hasOwn(obj, field) &&
       cameraValueRejection(field, obj[field]) === null
     ) {

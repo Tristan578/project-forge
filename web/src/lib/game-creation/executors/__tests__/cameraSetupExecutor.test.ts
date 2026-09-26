@@ -231,11 +231,14 @@ describe('cameraSetupExecutor', () => {
 
     // The real vocabulary the GDD generator emits. Before PF-1125's second half,
     // `filterCameraNumerics` returned `{}` for input like this — 100% of it
-    // dropped — while the step still reported `applied: true`.
+    // dropped — while the step still reported `applied: true`. `smoothing` is
+    // deliberately NOT one of the keys here any more — PF-1134 gave it a
+    // conversion onto `followSmoothing`/`damping`, so it now reaches the
+    // engine instead of landing in this warning (see the dedicated test below).
     const result = await cameraSetupExecutor.execute(
       {
         cameraMode: 'side-scroll',
-        cameraConfig: { smoothing: 0.1, leadAhead: 3, locked: true },
+        cameraConfig: { tilt: 30, leadAhead: 3, locked: true },
         targetEntityId: 'p',
       },
       ctx,
@@ -248,9 +251,32 @@ describe('cameraSetupExecutor', () => {
       targetEntity: 'p',
     });
     expect(result.output?.warning).toContain('no parameter for');
-    for (const key of ['smoothing', 'leadAhead', 'locked']) {
+    for (const key of ['tilt', 'leadAhead', 'locked']) {
       expect(result.output?.warning).toContain(key);
     }
+  });
+
+  it('converts smoothing to damping instead of reporting it as unknown (PF-1134)', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    const result = await cameraSetupExecutor.execute(
+      {
+        cameraMode: 'follow',
+        cameraConfig: { smoothing: 0.1 },
+        targetEntityId: 'p',
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    // 0.1 / (1/60) = 6 — see `convertGddSmoothingToDamping` in `cameraResolution.ts`.
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'thirdPersonFollow',
+      targetEntity: 'p',
+      damping: 6,
+    });
+    expect(result.output?.warning).toBeUndefined();
   });
 
   it('reports a real field carrying a value that cannot be sent', async () => {
@@ -306,13 +332,15 @@ describe('cameraSetupExecutor', () => {
   it('combines the targetless and ignored-key warnings into one report', async () => {
     const { ctx } = makeCtx(CAMERA_NODE);
 
+    // `tilt`, not `smoothing`: PF-1134 gave `smoothing` a conversion, so it no
+    // longer belongs in this "ignored key" case.
     const result = await cameraSetupExecutor.execute(
-      { cameraMode: 'follow', cameraConfig: { smoothing: 0.2 } },
+      { cameraMode: 'follow', cameraConfig: { tilt: 5 } },
       ctx,
     );
 
     expect(result.output?.warning).toContain('will not move');
-    expect(result.output?.warning).toContain('smoothing');
+    expect(result.output?.warning).toContain('tilt');
   });
 
   // ---------------------------------------------------------------------------

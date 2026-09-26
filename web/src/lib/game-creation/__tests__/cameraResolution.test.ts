@@ -214,6 +214,88 @@ describe('filterCameraNumerics', () => {
       expect(filterCameraNumerics({ altitude: -18 })).toEqual({ topDownHeight: -18 });
     });
   });
+
+  describe('GDD smoothing -> damping conversion (PF-1134)', () => {
+    /**
+     * The conversion is `damping = smoothing / (1/60)`, i.e. `smoothing * 60`.
+     * These three are this module's own real fixtures
+     * (`cozy-farming.json`, `narrative-adventure.json`, and the rest at 0.1),
+     * and all three land near the engine's own default follow damping of 5 —
+     * the sanity check that the reference frame rate is the right one, not
+     * merely a self-consistent one.
+     */
+    it.each([
+      [0.05, 3],
+      [0.08, 4.8],
+      [0.1, 6],
+    ])('scales smoothing %s to damping %s', (smoothing, damping) => {
+      expect(filterCameraNumerics({ smoothing })).toEqual({ followSmoothing: damping });
+    });
+
+    it('lets an explicit followSmoothing win over the smoothing alias', () => {
+      // Same precedence rule as `altitude`/`topDownHeight`: an explicit
+      // spelling of the real field is authoritative over any GDD alias.
+      expect(filterCameraNumerics({ smoothing: 0.1, followSmoothing: 2 })).toEqual({
+        followSmoothing: 2,
+      });
+    });
+
+    it('applies the alias when the explicit field is unsendable', () => {
+      expect(filterCameraNumerics({ smoothing: 0.1, followSmoothing: Number.NaN })).toEqual({
+        followSmoothing: 6,
+      });
+    });
+
+    it('rejects a negative smoothing exactly like a negative followSmoothing', () => {
+      // -0.1 converts to damping -6, which is still negative — the conversion
+      // is a pure positive rescale, so it cannot launder a bad sign into a
+      // good one. Reusing `cameraValueRejection` is what guarantees that.
+      expect(filterCameraNumerics({ smoothing: -0.1 })).toEqual({});
+      expect(classifyCameraConfigKeys({ smoothing: -0.1 })).toEqual({
+        unknown: [],
+        unusable: [{ key: 'smoothing', reason: 'must not be negative' }],
+        overridden: [],
+      });
+    });
+
+    it('keeps an exact 0 smoothing', () => {
+      expect(filterCameraNumerics({ smoothing: 0 })).toEqual({ followSmoothing: 0 });
+    });
+
+    it('drops a non-numeric smoothing value with the ordinary reason', () => {
+      // The conversion function is never called on a non-number: the shared
+      // finite check runs first, so the report reads "not a finite number"
+      // rather than something conversion-specific and misleading.
+      expect(filterCameraNumerics({ smoothing: 'slow' })).toEqual({});
+      expect(classifyCameraConfigKeys({ smoothing: 'slow' })).toEqual({
+        unknown: [],
+        unusable: [{ key: 'smoothing', reason: 'not a finite number' }],
+        overridden: [],
+      });
+    });
+
+    it('does not let a boolean masquerade as a convertible number', () => {
+      // `true / (1/60)` is a finite 60 in plain JS arithmetic — coercion would
+      // let this slip through as a "sendable" damping if the guard in
+      // `convertAliasedValue` called `convert` on anything besides an actual
+      // `number`, silently accepting a value the field-name check above
+      // already refuses for every OTHER numeric field.
+      expect(filterCameraNumerics({ smoothing: true })).toEqual({});
+      expect(classifyCameraConfigKeys({ smoothing: true })).toEqual({
+        unknown: [],
+        unusable: [{ key: 'smoothing', reason: 'not a finite number' }],
+        overridden: [],
+      });
+    });
+
+    it('reports smoothing as overridden when it lost to an explicit followSmoothing', () => {
+      expect(classifyCameraConfigKeys({ smoothing: 0.1, followSmoothing: 2 })).toEqual({
+        unknown: [],
+        unusable: [],
+        overridden: [{ key: 'smoothing', field: 'followSmoothing' }],
+      });
+    });
+  });
 });
 
 describe('classifyCameraConfigKeys', () => {
@@ -227,16 +309,18 @@ describe('classifyCameraConfigKeys', () => {
    * other half, because the silent drop is the PF-1125 defect itself.
    */
   it('reports the real GDD config vocabulary as unknown', () => {
+    // `smoothing` is excluded here on purpose — PF-1134 gave it a conversion
+    // onto `followSmoothing`, so it is exercised in its own describe block
+    // below rather than asserted unknown here.
     expect(
       classifyCameraConfigKeys({
-        smoothing: 0.1,
         tilt: 30,
         offset: [0, 5, -10],
         leadAhead: 3,
         locked: true,
       }),
     ).toEqual({
-      unknown: ['smoothing', 'tilt', 'offset', 'leadAhead', 'locked'],
+      unknown: ['tilt', 'offset', 'leadAhead', 'locked'],
       unusable: [],
       overridden: [],
     });
