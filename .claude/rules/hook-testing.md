@@ -176,7 +176,10 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   that runs twice would be refused on the second run. Define helpers at the top
   level.
 - Initialise counters (`FAILURES=0`) BEFORE the helpers, so a failure recorded
-  early cannot be reset by the counter's own assignment.
+  early cannot be reset by the counter's own assignment. The gate does not
+  guard the counter: a later write to it by any route (a plain assignment, an
+  arithmetic reset, or a trap action such as `trap 'FAILED=0' RETURN` under
+  `set -o functrace`) is for review to catch.
 - A `fail()` you redefine on purpose inside `bash -c '...'` (a child process, as
   `platform-contract.test.sh` does) is unaffected — the freeze lives in the
   parent shell only.
@@ -205,7 +208,9 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   neither an escaped or quoted slash in a replacement pattern
   (`${x/a\/b/alias}`) nor a bracket inside a nested expansion in an array
   subscript (`${a[${y:-0]0}]:-alias fail=:}`) can hide the boundary
-  (rounds twenty-seven and twenty-eight). Only a variable value or a command output that must contribute
+  (rounds twenty-seven and twenty-eight). A group is read one line at a
+  time, so an unquoted one whose closing brace is on a later line is a
+  `multiline` violation wherever it stands (round thirty). Only a variable value or a command output that must contribute
   text to spell the word (`al$(echo i)as`), `eval`, a `source` of a file the
   suite wrote, and `declare -n` stay out of reach. The word
   as an argument (`echo alias fail=:`), inside a quoted string

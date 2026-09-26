@@ -965,6 +965,16 @@ was replaced with this one (round twenty-nine).
   while this bash rejects them are a zero followed by an escaped newline,
   vertical tab, form feed or carriage return, picked out from the line text
   and counted so the exemption cannot quietly widen or vanish.
+  The twenty-ninth found the brace matcher helper for `$( )` reading an
+  ANSI-C string as a plain single quote, so an escaped quote inside one
+  ended it and the stray quote swallowed a later `alias`; it now shares the
+  brace matcher quote model, nested substitutions included. The thirtieth
+  found that a group is read one line at a time while bash lets its closing
+  brace sit on a later line: `shopt -s ${x:-expand_aliases` with the `}` on
+  the next line enabled alias expansion with the gate green. An unquoted
+  group left open at the end of its line is now a `multiline` violation
+  wherever it stands, since the text past the line end cannot be judged;
+  a quoted one is judged whole, because a quote carries across lines.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
@@ -997,7 +1007,13 @@ a freeze found inside one is reported as a stray instead of being invisible.
 The freeze protects the binding, not the counter the helper writes.
 `check-skills.test.sh` assigned `FAILED=0` after defining `fail()`, so a failure
 recorded between the two was reset; the counter now initialises first, and the
-rule is stated in `.claude/rules/hook-testing.md`.
+rule is stated in `.claude/rules/hook-testing.md`. A write to the counter is
+outside the gate by any route: a plain `FAILED=0` before the summary, an
+arithmetic reset, or a trap action that runs one (`set -o functrace` with
+`trap 'FAILED=0' RETURN` resets it after every function return, round thirty).
+Banning one route would not close the others, since the counter is an
+ordinary variable the suite itself must write; review and the effect probe,
+not this gate, are what catch it.
 
 A bash `alias` is resolved before functions once `shopt -s expand_aliases` is
 on, and `readonly -f` says nothing about it: measured on this bash (5.2), a

@@ -15,9 +15,10 @@
 # `scripts/__tests__/check-npm-audit.test.sh` before it was frozen: with its
 # gate deliberately degated, that single line scored 228 PASS / 0 FAIL, exit 0,
 # byte-identical to the clean control (docs/guides/npm-audit-gate-hardening.md,
-# round 40). Measured again for this sweep on the untouched tree: 45 of the 46
+# round 40). Measured again for this sweep on main at a525ca4a: 46 of the 52
 # suites that define a `fail`/`bad` helper stayed at exit 0 with that helper
-# neutered and a forced failure called immediately after.
+# neutered and a forced failure called immediately after; only the 6 already
+# frozen there (check-npm-audit.test.sh and five hook suites) went red.
 #
 # `readonly -f name` closes it: bash refuses to rebind a readonly function
 # (`bash: name: readonly function`, status 1) on every version from 3.2 up,
@@ -179,7 +180,7 @@ readonly -f resolve
 # One awk program derives every definition and every freeze in a file ($1,
 # reported under the display path $2) and prints one TSV row per definition
 # plus one per stray freeze:
-#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|parse-error
+#   <file> \t <name> \t <def line> \t <end line> \t frozen|unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline|parse-error
 # Only column-0 lines that start OUTSIDE a quoted region count: the program
 # lexes single quotes, double quotes, $'...' strings, backslash escapes,
 # `$(`/`(` contexts (a `$(` inside double quotes opens a fresh quoting
@@ -338,6 +339,7 @@ derive_file() {
         else if (cj == "}") bd--
         j++
       }
+      bc_open = (bd > 0)
       return j
     }
     # The TEXT of a default, alternate or replacement starts right after the
@@ -831,6 +833,11 @@ derive_file() {
         # so `ali${x:+ Q}as` is one word, as it is to bash (sixteenth round).
         if (c2 == "${") {
           j = brace_close(line, i + 2, n)
+          # A group is read one line at a time. One whose closing brace is on
+          # a later line (bash allows it) would have its text judged cut
+          # short, and the rest lexed as a new statement, so it is refused
+          # outright rather than guessed at (thirtieth board round).
+          if (bc_open) printf "%s\t%s\t%d\t%d\tmultiline\n", file, substr(line, i), NR, NR
           w = w substr(line, i, j - i); i = j; continue
         }
         # A `$NAME` is kept as `${NAME}`, so the name still ends where bash
@@ -1111,7 +1118,7 @@ if [ "${derived:-0}" -eq 0 ]; then
   exit 2
 fi
 
-violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split)$' <<<"$rows" || true)"
+violations="$(grep -E $'\t(unfrozen|stray|alias|trap|builtin|shape|unsupported|brace|split|multiline)$' <<<"$rows" || true)"
 if [ -n "$violations" ]; then
   count="$(grep -c '' <<<"$violations")"
   # The report is the block reason, so it goes to stderr like every other
@@ -1129,6 +1136,7 @@ if [ -n "$violations" ]; then
         shape)    echo "  - $file:$def: '$name' — a top-level function defined anywhere but column 0 at the start of its own line (indented, after another command or a closing brace, second on a line) or with a name that is not a plain identifier is invisible to the freeze rule, so one inserted redefinition could take it unnoticed — define it at column 0 on its own line with a plain name, then freeze it on the next line" ;;
         brace)    echo "  - $file:$def: '$name' — this brace expansion produces more words than the gate enumerates (64, nested 8 deep), in a command name or an alias, shopt or trap statement, so a guarded word could sit past the cut where the gate cannot see it — list the words it needs explicitly, or split the statement" ;;
         split)    echo "  - $file:$def: '$name' — this parameter expansion's default, alternate or replacement text holds a blank, and bash splits an unquoted expansion into separate words there, so in a command name or an alias, shopt, set or trap statement it can spell a guarded command the gate cannot place — write the words out literally" ;;
+        multiline) echo "  - $file:$def: '$name' — this \${...} group does not close on the line it opens on; the gate reads a group one line at a time, so text written in it on a later line (a default, alternate or replacement that can spell a guarded word) would go unjudged — put the whole group on one line" ;;
         unsupported) echo "  - $file:$def: $name() has a body this gate cannot follow (not a brace group opened on the definition line or the next) — write it as a one-liner '$name() { ...; }', or multi-line with the closing '}' at column 0, then freeze it on the next line" ;;
       esac
     done <<<"$violations"

@@ -1753,6 +1753,38 @@ else
   fail "30o-b. a probe did not reproduce (alias '$pexp_alias', split '$pexp_split', trap rc $pexp_trap, posix '$pexp_posix', quoted brace '$pexp_quote', ANSI-C in a subscript '$pexp_ansi')"
 fi
 
+# ---- 30p. a parameter expansion that closes on a later line is refused ------
+# Thirtieth board round (architect): the gate reads a ${...} group one line at
+# a time, and bash lets the closing brace sit on a later line. Line 3 enabled
+# alias expansion with the gate green. A group left open at the end of its
+# line is now a multiline violation wherever it stands (line 5 is an argument
+# of :), since the text past the line end cannot be judged. Lines 7 and 8 are
+# the same group on one line, and in quotes across two lines (judged whole,
+# since a quote carries across lines), so neither is a multiline violation.
+d_multi="$(mkfixture multiline-expansion <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+shopt -s ${x:-expand_aliases
+}
+: ${x:-a
+}
+: ${x:-a}
+: "${x:-a
+}"
+FIX
+)"
+out_multi="$(run_gate "$d_multi")"
+expect_rc "30p. a \${...} group that closes on a later line is a multiline violation" 1 "$out_multi" "2 violation(s)" \
+  "fixture.test.sh:3: '\${x:-expand_aliases' — this \${...} group does not close on the line it opens on" \
+  "fixture.test.sh:5: '\${x:-a' — this \${...} group does not close"
+multi_bash="$(bash -c 'shopt -s ${x:-expand_aliases
+}; shopt -p expand_aliases' 2>&1)"
+if [ "$multi_bash" = "shopt -s expand_aliases" ]; then
+  pass "30p-b. a default whose closing brace is on the next line enables alias expansion in this bash"
+else
+  fail "30p-b. the multi-line default did not reproduce in this bash (got '$multi_bash')"
+fi
+
 # ---- 30k. an ANSI-C quoted string is decoded before the word is judged -------
 # Seventeenth board round (security): bash decodes octal, hex, \u, \U and
 # named escapes inside an ANSI-C quoted string, and a NUL ends its value, so
