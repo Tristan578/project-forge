@@ -40,6 +40,30 @@ cd project-forge && bash .claude/hooks/on-session-start.sh
 
 **You MUST select or create a ticket before writing any code.**
 
+## Planning (Gemini CLI Plan Mode)
+
+This repository is spec-first. The rule in `.claude/CLAUDE.md` is: "Spec-First: Never
+implement without an approved spec in `specs/`". Gemini CLI's Plan Mode is how to keep
+to that rule inside a session. It is read-only: Gemini researches and drafts a plan,
+and makes no changes until you approve that plan. Use it after the spec and ticket exist,
+before you implement a subtask, and check the plan against the ticket's acceptance
+criteria.
+
+Ways to enter it, checked against the Gemini CLI docs (`docs/cli/plan-mode.md` and
+`docs/reference/commands.md` in `google-gemini/gemini-cli`, read 2026-09-24):
+
+- `/plan` switches to Plan Mode. `/plan <goal>` switches and submits the goal.
+- `Shift+Tab` cycles the approval modes (`Default` → `Auto-Edit` → `Plan`).
+- `gemini --approval-mode=plan` starts a session in Plan Mode.
+
+Approving the plan exits Plan Mode and starts implementation. Gemini writes the plan to
+`~/.gemini/tmp/<project>/<session-id>/plans/` by default, outside the repository. That
+file is a working draft, not a spec. If the work needs a spec, it still goes in `specs/`.
+Plan Mode is on by default and can be turned off with the `general.plan.enabled`
+setting. Leave it on in this repository.
+
+Antigravity is not covered here. These commands were checked for Gemini CLI only.
+
 ## Build & Test Commands
 
 ```bash

@@ -76,6 +76,7 @@ function handleCors(req: NextRequest): NextResponse | null {
       return new NextResponse(null, {
         status: 204,
         headers: {
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank Origin header is unset; falls back to the wildcard CORS default
           'Access-Control-Allow-Origin': origin || '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',

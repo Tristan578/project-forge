@@ -1,9 +1,13 @@
 //! Scene import/export and asset loading systems.
+//!
+//! `apply_scene_load` is compiled in EVERY build: an exported game hands its
+//! scene to the runtime engine through `load_scene` and nothing else (#10195).
+//! The rest of the import/export surface is editor-only.
 
 // Payload ceilings for the editor-only import paths. Each is read from exactly
 // one `#[cfg(not(feature = "runtime"))]` system below, so the constants carry
-// the same gate — a `runtime` build never parses a scene, a glTF blob, or a
-// texture blob handed in from the shell.
+// the same gate — a `runtime` build never parses a glTF blob or a texture blob
+// handed in from the shell. (A scene it does parse; see `apply_scene_load`.)
 /// Maximum byte length of a glTF base64 payload (~50 MB decoded, 1.33× overhead).
 #[cfg(not(feature = "runtime"))]
 pub const MAX_GLTF_BASE64_LEN: usize = 67_500_000;
@@ -13,50 +17,55 @@ pub const MAX_TEXTURE_BASE64_LEN: usize = 67_500_000;
 
 use bevy::prelude::*;
 
-// `apply_gltf_scene_spawn` is the only system in this file that survives a
-// `runtime` build, and `EntityType` is the only name it needs from `core`.
-use crate::core::pending_commands::EntityType;
+// What the two always-compiled systems need: `apply_gltf_scene_spawn` takes
+// `EntityType`; `apply_scene_load` takes the resources a scene file writes
+// and the snapshot type it spawns from (#10195).
+use crate::core::{
+    asset_manager::AssetRegistry,
+    audio::AudioBusConfig,
+    custom_wgsl::CustomWgslSource,
+    entity_factory,
+    entity_id::EntityId,
+    environment::EnvironmentSettings,
+    history::{EntitySnapshot as HistEntitySnapshot, HistoryStack},
+    input::InputMap,
+    pending_commands::{EntityType, PendingCommands},
+    post_processing::PostProcessingSettings,
+    scene_file::{self, SceneName},
+    selection::{Selection, SelectionChangedEvent},
+    tileset::TilesetRegistry,
+};
+use super::events;
 
 // Everything else here feeds the editor-only scene/asset I/O systems, all of
 // which already carry `#[cfg(not(feature = "runtime"))]`.
 #[cfg(not(feature = "runtime"))]
 use crate::core::{
     animation_clip::AnimationClipData,
-    asset_manager::{AssetRef, AssetRegistry},
-    audio::{AudioBusConfig, AudioData, AudioEnabled},
+    asset_manager::AssetRef,
+    audio::{AudioData, AudioEnabled},
     csg::CsgMeshData,
-    custom_wgsl::CustomWgslSource,
-    entity_factory,
-    entity_id::{EntityId, EntityName, EntityVisible},
-    environment::EnvironmentSettings,
+    entity_id::{EntityName, EntityVisible},
     game_camera::{GameCameraData, ActiveGameCamera},
     game_components::GameComponents,
-    history::{EntitySnapshot as HistEntitySnapshot, HistoryStack, TransformSnapshot},
-    input::InputMap,
+    history::TransformSnapshot,
     lighting::{LightData, LightType},
     lod::LodData,
     material::MaterialData,
     particles::{ParticleData, ParticleEnabled},
-    pending_commands::{self, PendingCommands},
+    pending_commands,
     physics::{JointData, PhysicsData, PhysicsEnabled},
     physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d},
-    post_processing::PostProcessingSettings,
     procedural_mesh::ProceduralMeshData,
     reverb_zone::{ReverbZoneData, ReverbZoneEnabled},
-    scene_file::{self, SceneName},
     scripting::ScriptData,
-    selection::{Selection, SelectionChangedEvent},
     shader_effects::ShaderEffectData,
     skeletal_animation2d::SkeletalAnimation2d,
     skeleton2d::{SkeletonData2d, SkeletonEnabled2d},
     sprite::SpriteData,
     terrain::{TerrainData, TerrainMeshData},
     tilemap::{TilemapData, TilemapEnabled},
-    tileset::TilesetRegistry,
 };
-
-#[cfg(not(feature = "runtime"))]
-use super::events;
 
 /// System that processes scene export requests.
 #[cfg(not(feature = "runtime"))]
@@ -315,7 +324,11 @@ pub(super) fn apply_scene_export(
 }
 
 /// System that processes scene load requests.
-#[cfg(not(feature = "runtime"))]
+///
+/// Compiled and registered in EVERY build, including `runtime`: the exporters
+/// hand an exported game's scene to the engine through `load_scene` and there
+/// is no other boot path, so a `runtime` build that waived this drain queued
+/// the scene, answered `Ok`, and rendered its default scene forever (#10195).
 pub(super) fn apply_scene_load(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,

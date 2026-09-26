@@ -226,7 +226,7 @@ export default function AdaptiveMusicInspector() {
             <label className="text-xs text-zinc-400 w-16 capitalize">{stem}</label>
             <input
               type="text"
-              value={stems[stem] || ''}
+              value={stems[stem] ?? ''}
               onChange={(e) => handleStemChange(stem, e.target.value)}
               placeholder="Asset ID"
               className="flex-1 px-2 py-1 bg-zinc-800 border border-zinc-600 rounded text-xs text-zinc-200"

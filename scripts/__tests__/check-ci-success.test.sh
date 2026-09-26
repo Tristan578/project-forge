@@ -84,6 +84,10 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 #      Defaults false so every fixture that does not touch apps/design or
 #      packages/ui keeps the design gate's success/skip as a legitimate
 #      path-filter skip; set true to exercise the design anti-tamper arm.
+#   $29 actionlint.result (default success) — the workflow linter (#8719).
+#      Mapped to needs-ci like actions-pin-check, so every fixture with
+#      needs-ci=true must keep this success; set skipped with $1=true to
+#      exercise its anti-tamper arm.
 #
 # `needs-mcp`, `needs-docs` and `needs-any-code` are hardcoded in the object below
 # rather than parameterised — they are constant for essentially every fixture, and
@@ -92,7 +96,7 @@ fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 # `command-parity`, `build-nextjs`, `test-e2e-ui`, `test-e2e-api` and `test-e2e-auth` are hardcoded to success for
 # the same reason and overridden with jq in the #9437 cases at the end.
 mk() {
-  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}" bvt="${27:-success}" pp="${28:-success}"
+  local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}" bvt="${27:-success}" pp="${28:-success}" alr="${29:-success}"
   jq -nc \
     --arg nci "$nci" --arg ndeps "$ndeps" --arg ls "$ls" --arg lst "$lst" \
     --arg qg "$qg" --arg ht "$ht" --arg nagentic "$nagentic" --arg as "$as" \
@@ -100,7 +104,7 @@ mk() {
     --arg nghaw "$nghaw" --arg glr "$glr" --arg nhooks "$nhooks" --arg te2ej "$te2ej" --arg nweb "$nweb" \
     --arg nskills "$nskills" --arg sl "$sl" --arg napi "$napi" --arg ors "$ors" --arg apc "$apc" \
     --arg te2es "$te2es" --arg nengine "$nengine" --arg dig "$dig" --arg ndesign "$ndesign" \
-    --arg bvt "$bvt" --arg pp "$pp" '
+    --arg bvt "$bvt" --arg pp "$pp" --arg alr "$alr" '
     {
       "ci-gate":              { result: "success", outputs: { "needs-ci": $nci, "needs-deps": $ndeps, "needs-agentic": $nagentic, "needs-onboarding": $nonboarding, "needs-codex": $ncodex, "needs-ghaw": $nghaw, "needs-hooks": $nhooks, "needs-web": $nweb, "needs-engine": $nengine, "needs-skills": $nskills, "needs-api": $napi, "needs-design": $ndesign, "needs-docs": "false", "needs-mcp": "false", "needs-any-code": "true", "needs-observatory": "false" } },
       "quality-gates":        { result: $qg },
@@ -121,6 +125,7 @@ mk() {
       "skills-lint":          { result: $sl },
       "openapi-route-sync":   { result: $ors },
       "actions-pin-check":    { result: $apc },
+      "actionlint":           { result: $alr },
       "test-e2e-ui":          { result: "success" },
       "test-e2e-api":         { result: "success" },
       "test-e2e-auth":        { result: "success" },
@@ -586,6 +591,22 @@ rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "pin-check failure fails (exit 1)"; else fail "pin-check failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "actions-pin-check"; then pass "the failing pin-check gate is named"; else fail "failing pin-check gate not named"; fi
 
+# --- 43b. TAMPER: actionlint skipped while needs-ci=true → exit 1 --------------
+# The workflow linter (#8719) is gated on needs-ci like the pin-check, so a PR
+# editing any workflow file SHOULD run it; an `if: false` skip is the same
+# unwiring vector. Every other needs-ci gate is held success so the skipped
+# linter is the SOLE tamper. 29th mk arg: actionlint=skipped, with needs-ci=true.
+res="$(run_verify "$(mk true true success success success success true success true success true success true success false success false false success false success success success false success false success success skipped)")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "actionlint skipped while needs-ci=true fails (exit 1)"; else fail "tamper (actionlint) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "actionlint tamper is flagged as a possible unwiring"; else fail "actionlint tamper message missing"; fi
+if echo "$out" | grep -q "actionlint ("; then pass "the unwired actionlint gate is named"; else fail "unwired actionlint gate not named"; fi
+
+# --- 43c. actionlint legit-skips (needs-ci=false) → exit 0 ---------------------
+res="$(run_verify "$(mk false false skipped skipped success success false skipped false skipped false skipped false skipped false success false false skipped false skipped skipped success false success false success success skipped)")"
+rc="${res%%|*}"
+if [ "$rc" = "0" ]; then pass "actionlint legit-skip (needs-ci=false) passes (exit 0)"; else fail "actionlint legit skip should exit 0, got $rc"; fi
+
 # --- 44. TAMPER: test-e2e-engine-smoke skipped while needs-web=true → exit 1 ----
 # The engine-smoke gate (#8602) is self-defending: it is the ONLY per-PR job that
 # boots the real WASM engine (load -> spawn -> play -> export under SwiftShader
@@ -1026,6 +1047,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   obs_runs="$(grep -E "^[[:space:]]*['\"]?run['\"]?:" <<<"$obs_block")"
   obs_expected_runs="$(cat <<'RUNS'
         run: npm ci
+        run: bash scripts/check-native-bindings.sh
         run: npx tsc --noEmit -p tools/observatory/tsconfig.json
         run: npx vitest run --config tools/observatory/vitest.config.ts
 RUNS
@@ -1066,9 +1088,10 @@ RUNS
   # satisfies the containment grep above — the only per-PR run of the UI suite
   # for a packages/ui-only PR is dead, and this pin reads green. On the
   # `pull_request` path GitHub runs the PR's OWN workflow file, so the mutation
-  # takes effect in the very run that should have caught it. actionlint flags
-  # duplicate keys, but it is not wired into this repo's CI — this count is the
-  # backstop (#9031). Scope it to the STEP so sibling steps' legitimate `run:`
+  # takes effect in the very run that should have caught it. actionlint (the
+  # required `actionlint` job, #8719) flags duplicate keys, but it runs from
+  # this same PR-controlled file — this count is the independent backstop
+  # (#9031). Scope it to the STEP so sibling steps' legitimate `run:`
   # keys are not counted.
   dig_test_step="$(awk '
     !f && /^      - name:/ && index($0, "Test @spawnforge/ui") {f=1; print; next}

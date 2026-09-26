@@ -1,7 +1,7 @@
 # Database Backup & Restore Procedures
 
 > **Last updated:** 2026-03-17
-> **Owner:** Engineering
+> **Owner:** Project owner
 > **Review cadence:** Quarterly
 
 This document covers the full lifecycle of SpawnForge's Neon PostgreSQL backup strategy: how backups work, how to restore them, how to verify they are working, and how to export user data for GDPR compliance.
@@ -339,7 +339,7 @@ pg_dump "$DATABASE_URL" \
   --file="spawnforge-pre-$(date +%Y%m%d-%H%M%S).sql"
 ```
 
-Store in a team-accessible location (not developer laptops).
+The dump is a plaintext copy of user data (see § 7). Store it in a durable, access-controlled location that is not a developer laptop, and delete it once the migration is confirmed.
 
 ---
 
@@ -416,9 +416,10 @@ For the Right to Erasure (`DELETE /api/user/delete`), confirm the cascading dele
 ## 8. Related Documents
 
 - [Backup & Recovery Strategy](./operations/backup-recovery.md) — high-level strategy and asset backup
-- [Production Support Runbook](./production-support.md) — incident response, service runbooks, escalation
+- [Incident Response](./operations/incident-response.md) — the response process: severity, first response, resolution
+- [Production Support Runbook](./production-support.md) — service runbooks, alert thresholds, security incident playbook
 - [Monitoring Setup](./operations/monitoring-setup.md) — health checks, alerting configuration
-- [Incident Runbook](./operations/incident-runbook.md) — P0/P1 response process
+- [Incident Runbook](./operations/incident-runbook.md) — recovery and rollback procedures
 
 ---
 
@@ -427,6 +428,6 @@ For the Right to Erasure (`DELETE /api/user/delete`), confirm the cascading dele
 | Situation | Contact |
 |-----------|---------|
 | Neon platform issue (not user error) | [Neon Support](https://support.neon.tech) — include project ID and branch name |
-| Data loss suspected | Engineering on-call (PagerDuty) |
-| GDPR data request | Engineering + Legal |
-| Billing data discrepancy | Engineering + Finance |
+| Data loss suspected | Project owner — see `docs/operations/incident-response.md` (no on-call rotation or paging; see `docs/decisions/2026-09-24-no-paging-or-on-call.md`) |
+| GDPR data request | Project owner (no separate legal contact is documented in this repository) |
+| Billing data discrepancy | Project owner (no separate finance contact is documented in this repository) |

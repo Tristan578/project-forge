@@ -17,6 +17,8 @@ import { postProcess } from '@/lib/generate/postProcess';
 
 const mockUpdateJob = vi.fn();
 const mockJobs: Record<string, Record<string, unknown>> = {};
+/** Mirrors generationStore.durableCompletionEnabled for the DB-first fast path (#8892). */
+const mockDurable = { enabled: false };
 const {
   mockFetchBalance,
   mockShowSuccess,
@@ -40,7 +42,7 @@ vi.mock('@/stores/generationStore', () => ({
       // could exercise a state transition after mount. Snapshot it per read.
       selector({ jobs: { ...mockJobs }, updateJob: mockUpdateJob }),
     {
-      getState: () => ({ jobs: mockJobs }),
+      getState: () => ({ jobs: mockJobs, durableCompletionEnabled: mockDurable.enabled }),
     },
   ),
 }));
@@ -171,6 +173,7 @@ describe('useGenerationPolling', () => {
     mockProcessFailedRefunds.mockResolvedValue(undefined);
     // Clear jobs
     Object.keys(mockJobs).forEach(k => delete mockJobs[k]);
+    mockDurable.enabled = false;
   });
 
   afterEach(() => {
@@ -1000,6 +1003,53 @@ describe('useGenerationPolling', () => {
     });
   });
 
+  // The tier gate (#7715) and the auth layer write a CODE in `error` and the
+  // sentence in `message`. The existing-shape body (sentence in `error`) is
+  // pinned by the test above; these two pin the other shape.
+  async function giveUpWith(body: unknown): Promise<void> {
+    mockJobs['t3'] = makeJob('t3', { usageId: 'usage-t3' });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return { ok: false, status: 403, json: () => Promise.resolve(body) } as Response;
+    });
+    renderHook(() => useGenerationPolling());
+    for (let i = 0; i < 101; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+    }
+  }
+
+  function failureTexts(): string[] {
+    const stored = mockUpdateJob.mock.calls
+      .map((c: unknown[]) => (c[1] as Record<string, unknown>).error)
+      .filter((e): e is string => typeof e === 'string');
+    const toasted = mockShowPersistentError.mock.calls.map((c: unknown[]) => c[0] as string);
+    return [...stored, ...toasted];
+  }
+
+  it('surfaces the sentence in `message`, not the code in `error`, when the status route refuses on tier', async () => {
+    const SENTENCE = 'This feature requires the Starter plan';
+    await giveUpWith({ error: 'TIER_REQUIRED', message: SENTENCE, currentTier: 'starter', requiredTier: 'hobbyist' });
+
+    expect(mockShowPersistentError).toHaveBeenCalledWith(SENTENCE, { id: `generation-failed:${SENTENCE}` });
+    const texts = failureTexts();
+    expect(texts.length).toBeGreaterThan(0);
+    expect(texts.some((t) => t.includes('TIER_REQUIRED'))).toBe(false);
+  });
+
+  it('never shows a bare code when the body carries no sentence at all', async () => {
+    await giveUpWith({ error: 'TIER_REQUIRED' });
+
+    const expected = `Generation timed out. ${RETRY_GUIDANCE}`;
+    expect(mockShowPersistentError).toHaveBeenCalledWith(expected, { id: `generation-failed:${expected}` });
+    const texts = failureTexts();
+    expect(texts.length).toBeGreaterThan(0);
+    expect(texts.some((t) => t.includes('TIER_REQUIRED'))).toBe(false);
+  });
+
   it('toasts the provider failure reason when the status route reports failed', async () => {
     const PROVIDER_MESSAGE = 'The 3D model provider rejected the prompt.';
     mockJobs['t3'] = makeJob('t3', { usageId: 'usage-t3' });
@@ -1483,6 +1533,123 @@ describe('useGenerationPolling', () => {
     );
     expect(timedOut).toBe(false);
     fetchSpy.mockRestore();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Durable completion (#8892): rows the QStash callback finished with no tab open
+  // ---------------------------------------------------------------------------
+  it('imports a hydrated completed job from its DB row without starting a poll loop', async () => {
+    // autoPlace false: the model branch then records the result without a download.
+    mockJobs['done'] = makeJob('done', { status: 'completed', progress: 100, dbId: 'db-done', needsCompletionSync: true, autoPlace: false, durable: true });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const u = String(url);
+      if (u === '/api/jobs/db-done' && (!init || !init.method)) {
+        return { ok: true, status: 200, json: async () => ({ status: 'completed', resultUrl: 'https://cdn.example.com/tower.glb', resultMeta: null, errorMessage: null }) } as Response;
+      }
+      if (u === '/api/jobs/db-done' && init?.method === 'PATCH') {
+        return { ok: true, status: 200, json: async () => ({ updated: true }) } as Response;
+      }
+      throw new Error(`unexpected fetch ${u} ${init?.method ?? 'GET'}`);
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // The row was read once and reflected; the provider status route was never asked.
+    expect(fetchSpy.mock.calls.map(([u, i]) => `${(i as RequestInit | undefined)?.method ?? 'GET'} ${String(u)}`)).toEqual([
+      'GET /api/jobs/db-done',
+      'PATCH /api/jobs/db-done',
+    ]);
+    expect(mockUpdateJob).toHaveBeenCalledWith('done', expect.objectContaining({ status: 'completed', resultUrl: 'https://cdn.example.com/tower.glb' }));
+    expect(mockUpdateJob).toHaveBeenCalledWith('done', { needsCompletionSync: false });
+    expect(JSON.parse(String((fetchSpy.mock.calls[1][1] as RequestInit).body))).toEqual({ imported: true });
+    // No timer: a terminal job is not polled.
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('refunds and fails a hydrated failed job from its DB row, with the server message', async () => {
+    mockJobs['lost'] = makeJob('lost', { status: 'failed', dbId: 'db-lost', needsCompletionSync: true, usageId: 'usage-lost', durable: true });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const u = String(url);
+      if (u === '/api/jobs/db-lost' && !init?.method) {
+        return { ok: true, status: 200, json: async () => ({ status: 'failed', resultUrl: null, resultMeta: null, errorMessage: 'The provider rejected this prompt. Try a different description.' }) } as Response;
+      }
+      if (u.includes('refund')) return { ok: true, status: 200, json: async () => ({}) } as Response;
+      if (u === '/api/jobs/db-lost' && init?.method === 'PATCH') return { ok: true, status: 200, json: async () => ({ updated: true }) } as Response;
+      throw new Error(`unexpected fetch ${u}`);
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('refund'))).toBe(true);
+    expect(mockUpdateJob).toHaveBeenCalledWith('lost', { status: 'failed', error: 'The provider rejected this prompt. Try a different description.' });
+    expect(mockShowPersistentError).toHaveBeenCalledWith('The provider rejected this prompt. Try a different description.', expect.anything());
+    expect(mockUpdateJob).toHaveBeenCalledWith('lost', { needsCompletionSync: false });
+  });
+
+  it('keeps needsCompletionSync when the row read fails, so a later load retries', async () => {
+    mockJobs['flaky'] = makeJob('flaky', { status: 'completed', dbId: 'db-flaky', needsCompletionSync: true, durable: true });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({}) } as Response));
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(mockUpdateJob).not.toHaveBeenCalledWith('flaky', { needsCompletionSync: false });
+    expect(mockUpdateJob).not.toHaveBeenCalledWith('flaky', expect.objectContaining({ status: 'completed' }));
+  });
+
+  it('reads a durable job\'s own row before the provider status route when durable completion is enabled', async () => {
+    mockDurable.enabled = true;
+    mockJobs['dur'] = makeJob('dur', { durable: true, dbId: 'db-dur', autoPlace: false });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url);
+      if (u === '/api/jobs/db-dur') {
+        return { ok: true, status: 200, json: async () => ({ status: 'completed', resultUrl: 'https://cdn.example.com/dur.glb', resultMeta: null, errorMessage: null }) } as Response;
+      }
+      throw new Error(`provider status route must not be asked: ${u}`);
+    });
+
+    const { unmount } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0][0])).toBe('/api/jobs/db-dur');
+    expect(mockUpdateJob).toHaveBeenCalledWith('dur', expect.objectContaining({ status: 'completed', resultUrl: 'https://cdn.example.com/dur.glb' }));
+    // Settled from the row: the 30 s safety loop is torn down.
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('falls through to the provider status route when the row is still in flight or unreadable', async () => {
+    mockDurable.enabled = true;
+    mockJobs['dur2'] = makeJob('dur2', { durable: true, dbId: 'db-dur2' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url);
+      if (u === '/api/jobs/db-dur2') return { ok: true, status: 200, json: async () => ({ status: 'processing', resultUrl: null, resultMeta: null, errorMessage: null }) } as Response;
+      return { ok: true, status: 200, json: async () => ({ jobId: 'job-dur2', status: 'processing', progress: 42 }) } as Response;
+    });
+
+    const { unmount } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(fetchSpy.mock.calls.map(([u]) => String(u))).toEqual(['/api/jobs/db-dur2', '/api/generate/model/status?jobId=job-dur2']);
+    expect(mockUpdateJob).toHaveBeenCalledWith('dur2', { status: 'processing', progress: 42 });
+    unmount();
+  });
+
+  it('does not read the DB row for durable jobs when durable completion is disabled', async () => {
+    mockDurable.enabled = false;
+    mockJobs['dur3'] = makeJob('dur3', { durable: true, dbId: 'db-dur3' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      mockFetchResponse({ jobId: 'job-dur3', status: 'processing', progress: 10 }),
+    );
+    const { unmount } = renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(fetchSpy.mock.calls.map(([u]) => String(u))).toEqual(['/api/generate/model/status?jobId=job-dur3']);
+    unmount();
   });
 
   it('clears all timers on unmount', async () => {

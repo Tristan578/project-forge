@@ -244,6 +244,7 @@ export function SceneSettings() {
             <label htmlFor={fieldId('skybox')} className="w-20 shrink-0 text-xs text-zinc-400">Skybox<InfoTooltip term="skybox" /></label>
             <select
               id={fieldId('skybox')}
+              // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank skybox preset is not a member of the preset enum; treated as unset
               value={environment.skyboxAssetId ? '__custom__' : (environment.skyboxPreset || 'none')}
               onChange={(e) => {
                 const value = e.target.value;
@@ -269,6 +270,7 @@ export function SceneSettings() {
           </div>
 
           {/* Skybox Brightness (shown when skybox active) */}
+          {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is a skybox configured at all); ?? cannot substitute this OR */}
           {(environment.skyboxPreset || environment.skyboxAssetId) && (
             <div className="flex items-center gap-2">
               <label htmlFor={fieldId('skybox-brightness')} className="w-20 shrink-0 text-xs text-zinc-400">Brightness<InfoTooltip term="skyboxBrightness" /></label>
@@ -289,6 +291,7 @@ export function SceneSettings() {
           )}
 
           {/* IBL Intensity (shown when skybox active) */}
+          {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is a skybox configured at all); ?? cannot substitute this OR */}
           {(environment.skyboxPreset || environment.skyboxAssetId) && (
             <div className="flex items-center gap-2">
               <label htmlFor={fieldId('ibl-intensity')} className="w-20 shrink-0 text-xs text-zinc-400">IBL<InfoTooltip term="ibl" /></label>
@@ -309,6 +312,7 @@ export function SceneSettings() {
           )}
 
           {/* IBL Rotation (shown when skybox active) */}
+          {/* eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- used only for its truthiness (is a skybox configured at all); ?? cannot substitute this OR */}
           {(environment.skyboxPreset || environment.skyboxAssetId) && (
             <div className="flex items-center gap-2">
               <label htmlFor={fieldId('ibl-rotation')} className="w-20 shrink-0 text-xs text-zinc-400">Rotation<InfoTooltip term="skyboxRotation" /></label>

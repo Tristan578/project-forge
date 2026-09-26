@@ -3,6 +3,7 @@ export const maxDuration = 120; // API_MAX_DURATION_BATCH_S
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { withApiMiddleware } from '@/lib/api/middleware';
+import { panelTierGateResponse } from '@/lib/api/panelTierGate';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
@@ -41,6 +42,16 @@ async function POST_impl(request: NextRequest) {
     validate: voiceBatchSchema,
   });
   if (mid.error) return mid.error;
+
+  // Per-panel tier gate (#7715): the same check `createGenerationHandler`
+  // runs for POST /api/generate/voice (panel 'generate-sound'), BEFORE any
+  // provider key is resolved — this route calls `resolveApiKey` directly.
+  // This is the CREATE (balance-aware) variant, not the poll one: a batch
+  // starts new provider work and deducts `items.length *
+  // voice_batch_cost_per_item` tokens, so a starter with nothing left to
+  // spend is refused here just as `POST /api/generate/voice` refuses it.
+  const tierDenied = panelTierGateResponse('generate-sound', mid.authContext!.user);
+  if (tierDenied) return tierDenied;
 
   // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
   const aggRl = await aggregateGenerationRateLimit(mid.userId!);

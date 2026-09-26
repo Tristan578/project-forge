@@ -85,7 +85,7 @@ describe('perf fixture registry', () => {
     expect(dynamic.length).toBeGreaterThanOrEqual(256);
     expect(sprites.some((e) => (e.physics2dData as { body_type: string } | undefined)?.body_type === 'Static')).toBe(true);
     // No 3D content hides in the 2D workload.
-    expect(entities.some((e) => e.materialData || e.physicsData)).toBe(false);
+    expect(entities.some((e) => e.materialData ?? e.physicsData)).toBe(false);
   });
 
   it('the 3D fixture is lit PBR meshes under 3D physics over a fixed ground', () => {
@@ -99,7 +99,7 @@ describe('perf fixture registry', () => {
     );
     expect(dynamic.length).toBeGreaterThanOrEqual(216);
     expect(meshes.every((e) => e.materialData)).toBe(true);
-    expect(entities.some((e) => e.spriteData || e.physics2dData)).toBe(false);
+    expect(entities.some((e) => e.spriteData ?? e.physics2dData)).toBe(false);
   });
 
   it('unknown and unregistered identities stay unrecognized', () => {

@@ -162,7 +162,9 @@ export function parsePaginationParams(
   searchParams: URLSearchParams,
   { defaultLimit = 20, maxLimit = 100 }: { defaultLimit?: number; maxLimit?: number } = {}
 ): { limit: number; offset: number } {
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `limit` query param is the same as an omitted one, not a distinct value
   const rawLimit = parseInt(searchParams.get('limit') || String(defaultLimit), 10);
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- a blank `offset` query param is the same as an omitted one, not a distinct value
   const rawOffset = parseInt(searchParams.get('offset') || '0', 10);
 
   const limit = Math.max(1, Math.min(Number.isFinite(rawLimit) ? rawLimit : defaultLimit, maxLimit));

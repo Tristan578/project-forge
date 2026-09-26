@@ -329,6 +329,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Typecheck Observatory
         run: npx tsc --noEmit -p tools/observatory/tsconfig.json
 
@@ -415,6 +424,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Install docs dependencies
         run: cd apps/docs && npm install
 
@@ -469,6 +487,15 @@ jobs:
 
       - run: npm ci
 
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       # Same key as quality-gates' ui-cache-typecheck / ui-cache-test-web —
       # whichever job builds packages/ui first warms the cache for the others.
       - name: Cache @spawnforge/ui build
@@ -517,10 +544,13 @@ jobs:
   # `.claude/hooks/` inherited 62 failing assertions that had nothing to do with
   # its change.
   #
-  # So the trade is explicit: cheap PRs, and whoever next edits a hook pays the
-  # accumulated debt. If that becomes the common case, the fix is a scheduled
-  # run (5 min/week) rather than moving to every-PR — see #9606 for the
-  # discussion.
+  # So the gate stays, but it is no longer the only thing running these suites:
+  # `.github/workflows/hook-tests-scheduled.yml` runs them every Monday, and
+  # opens a tracking issue if they fail. That is roughly 5 minutes a week to
+  # bound the blast radius — rot is found by the schedule rather than by
+  # whoever happens to edit a hook months later. Do not remove one without
+  # reconsidering the other; together they are the reason a skipped run here is
+  # safe to ignore.
   hook-tests:
     name: Hook Tests
     needs: [ci-gate]
@@ -911,6 +941,85 @@ jobs:
       - name: Reject a committed permissive Codex config profile
         run: bash scripts/check-codex-config-safety.sh
 
+  # ---- actionlint ----
+  # Lints ci.yml, cd.yml and quality-gates.yml for shellcheck findings in embedded
+  # `run:` blocks and for GitHub Actions expression errors (#8719). A ratchet:
+  # the pre-existing findings were cleaned in the PR that added this job, so any
+  # NEW finding in these files fails the PR. Gated on needs-ci (which already
+  # fires on ^\.github/workflows/) and wired into the required ci-success
+  # aggregate, so it is required when it runs and skips cleanly otherwise.
+  #
+  # Scoped to the three named files on purpose, NOT `.github/workflows/*.yml`:
+  # that glob also matches the gh-aw `*.lock.yml` files (compiler-generated,
+  # un-editable, guarded by gh-aw Lock Sync) and the other workflows still carry
+  # out-of-scope findings. Widening the gate is its own change.
+  #
+  # actionlint is NOT on the runner image (unlike jq and shellcheck), so it is
+  # installed pinned to a fixed version — an unpinned install could surface new
+  # checks from a future release and break the ratchet on a PR that changed
+  # nothing. actionlint uses the runner's preinstalled shellcheck for SCxxxx.
+  # The release tarball is downloaded directly and verified against a sha256
+  # PINNED below (taken from the release's actionlint_<ver>_checksums.txt and
+  # cross-checked by hashing the asset independently) before it is extracted
+  # or executed; a mismatch fails the job. Bumping ACTIONLINT_VERSION means
+  # bumping ACTIONLINT_SHA256 in the same edit — the upstream
+  # download-actionlint.bash script is NOT used, because it fetches from a
+  # mutable tag and performs no integrity check of the tarball.
+  #
+  # Step-level parallel keys (`background:` / `wait:` / `wait-all:` /
+  # `cancel:`, GitHub changelog 2026-06-25) are NOT understood by any released
+  # actionlint (rhysd/actionlint#694 is open; 1.7.11 reports `unexpected key
+  # "background"` plus `step must run script with "run" section or run action
+  # with "uses" section` for a bare `- wait:` step). Adopting them in these
+  # three files under #8861 therefore hard-fails this required gate. Path
+  # forward: bump the pinned actionlint once #694 ships. Do NOT paper over it
+  # with -ignore — the second message is generic and would also hide a
+  # genuinely malformed step.
+  #
+  # `jobs.<id>.result` inside a workflow_call `outputs.<name>.value`
+  # (quality-gates.yml) is valid, documented reusable-workflow syntax that
+  # actionlint's expression checker does not model. It is suppressed by the
+  # EXACT message via -ignore so a genuine typo elsewhere (whose message names a
+  # different property) still fails.
+  actionlint:
+    name: actionlint
+    needs: [ci-gate]
+    if: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Install actionlint (pinned)
+        env:
+          ACTIONLINT_VERSION: "1.7.11"
+          # sha256 of actionlint_1.7.11_linux_amd64.tar.gz. Must change together
+          # with ACTIONLINT_VERSION.
+          ACTIONLINT_SHA256: "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a"
+        run: |
+          set -euo pipefail
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "${RUNNER_TEMP}/${tarball}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
+          # Fail closed: sha256sum -c exits non-zero on a mismatch, and set -e
+          # stops the step before anything from the tarball is extracted or run.
+          (cd "${RUNNER_TEMP}" && echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum -c -)
+          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}" actionlint
+          "${RUNNER_TEMP}/actionlint" -version
+          shellcheck --version
+
+      - name: Lint workflow files
+        run: |
+          "${RUNNER_TEMP}/actionlint" \
+            -ignore 'property "result" is not defined' \
+            .github/workflows/ci.yml \
+            .github/workflows/cd.yml \
+            .github/workflows/quality-gates.yml
+
   # ---- gh-aw Lock Sync ----
   # Fails the PR when a GitHub Agentic Workflow source (.github/workflows/*.md) or
   # an injected action pin (.github/aw/) changed without recompiling its generated
@@ -1164,6 +1273,9 @@ jobs:
         run: |
           bash scripts/__tests__/install-vercel-cli.test.sh
           node --test scripts/__tests__/validate-coverage-artifact.test.mjs scripts/__tests__/install-rust-cli.test.mjs
+
+      - name: Verify scheduled hook-test contracts
+        run: node --test scripts/__tests__/hook-tests-scheduled.test.mjs
 
       - name: Run ci-success verifier test suite
         run: bash scripts/__tests__/check-ci-success.test.sh
@@ -1441,7 +1553,7 @@ jobs:
           evicted_pr="$(printf '%s\n' "$out" | sed -n 's/^evicted_pr=//p' | tr '\n' ' ' | sed 's/ *$//')"
           if [ -n "$evicted_pr" ]; then
             echo "evicted_pr=${evicted_pr}" >> "$GITHUB_OUTPUT"
-            # shellcheck disable=SC2086 -- a space-separated list, split on purpose
+            # shellcheck disable=SC2086 # a space-separated list, split on purpose
             for p in $evicted_pr; do
               echo "Reclaimed the preview database of #${p} to make room: the Neon branch allowance was full." >> "$GITHUB_STEP_SUMMARY"
             done
@@ -1479,7 +1591,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           # One notice per evicted PR (the output is space-separated).
-          # shellcheck disable=SC2086 -- a space-separated list, split on purpose
+          # shellcheck disable=SC2086 # a space-separated list, split on purpose
           for pr in $EVICTED_PR; do
             gh pr comment "$pr" --repo "$REPO" \
               --body "**Preview database reclaimed** — the Neon branch allowance was full, so this PR's preview branch (the least recently built) was deleted to make room for #${PR_NUMBER}. The existing preview URL will fail on database access until the next push to this PR rebuilds it."
@@ -1970,11 +2082,15 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: npx next build
 
+      # VERCEL_GIT_COMMIT_SHA reaches the `next start` webServer (it inherits
+      # this step's env), so /api/health reports this run's commit instead of
+      # 'local' (#10157). Runtime-only: nothing reads it at build time.
       - name: Run strict interactive-journey gate
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
           E2E_STRICT_STORES: 'true'
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
         run: npx playwright test --config playwright.journey.config.ts
 
       - name: Upload journey report
@@ -1988,10 +2104,11 @@ jobs:
   # Engine smoke gate (#8602 F10). The FIRST per-PR job that actually boots the
   # WASM engine: it builds ONLY the WebGL2 variant, serves it same-origin, and
   # runs the curated `@engine-smoke` set under ANGLE/SwiftShader software WebGL2
-  # — two specs: `engine-smoke.spec.ts` (load -> spawn -> inspect -> play -> stop
-  # -> export, the breadth check) and `pipeline-live-engine.spec.ts` (the real
+  # — three specs: `engine-smoke.spec.ts` (load -> spawn -> inspect -> play -> stop
+  # -> export, the breadth check), `pipeline-live-engine.spec.ts` (the real
   # game-creation pipeline -> real Play button -> engineMode === 'play', the
-  # depth check). NOT `--disable-gpu`,
+  # depth check) and `journey-evidence-canary.spec.ts` (a /dev release journey
+  # whose evidence record the post-run check requires, #10157). NOT `--disable-gpu`,
   # which leaves wgpu with no GL context and hangs `init_engine` (the exact reason
   # every other CI Playwright config can only run store-less @ui/@journey specs).
   #
@@ -2188,7 +2305,7 @@ jobs:
           SKIP_ENV_VALIDATION: 'true'
         run: npx next build
 
-      # Runs the curated @engine-smoke set (two specs — see the job comment
+      # Runs the curated @engine-smoke set (three specs — see the job comment
       # above), under SwiftShader software WebGL2. Launch flags and testMatch
       # live in playwright.engine.config.ts, which also carries the 90s DEFAULT
       # per-test budget (E2E_TIMEOUT_ENGINE_FULL_MS) that engine-smoke.spec.ts
@@ -2200,10 +2317,19 @@ jobs:
       # configure call, not this workflow. The editor fixture's load() seeds
       # localStorage['forge:preferred-backend'] = 'webgl2' so loadWasm never
       # probes WebGPU, which SwiftShader cannot drive.
+      #
+      # Journey evidence (#10157). The `next start` webServer inherits this
+      # step's env, so VERCEL_GIT_COMMIT_SHA makes /api/health report this
+      # run's commit rather than 'local'; the journey fixture records that
+      # alongside GITHUB_SHA (on a pull_request event, the merge ref) and the
+      # PR head, which GitHub expands to '' on push and dispatch runs.
       - name: Run engine smoke gate
+        id: engine-smoke-run
         working-directory: web
         env:
           SKIP_ENV_VALIDATION: 'true'
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npx playwright test --config playwright.engine.config.ts
 
       - name: Upload engine-smoke report
@@ -2213,6 +2339,35 @@ jobs:
           name: e2e-engine-smoke-report
           path: web/playwright-report/
           retention-days: 14
+
+      # One record per @release-journey test plus every attempt's trace and
+      # video, written by e2e/lib/journeyEvidenceReporter.ts. Uploaded before
+      # the check below so a failing check still leaves the evidence to read.
+      # if-no-files-found: error — an absent directory means the reporter
+      # never ran, which must not upload as an empty success. Both evidence
+      # steps skip only when the Playwright step itself never ran (an earlier
+      # step failed and the job is already red), so they add no second error.
+      - name: Upload journey evidence
+        if: ${{ !cancelled() && steps.engine-smoke-run.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: journey-evidence
+          path: web/journey-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      # The post-run check: exactly one valid record per journey-tagged test
+      # the run selected (never zero), every attempt's trace and video present,
+      # GITHUB_SHA and the PR head equal to this run's, and /api/health's
+      # commit equal to GITHUB_SHA's first 8 characters. A journey test whose
+      # record was never attached fails the job here even though Playwright
+      # reported it green. Rules: web/e2e/lib/journeyEvidenceCheck.ts.
+      - name: Check journey evidence
+        if: ${{ !cancelled() && steps.engine-smoke-run.outcome != 'skipped' }}
+        working-directory: web
+        env:
+          JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npx tsx scripts/check-journey-evidence.ts journey-evidence --min-journeys 1 --expect-github-sha "$GITHUB_SHA" --expect-pr-head-sha "$JOURNEY_PR_HEAD_SHA"
 
   # Cross-browser E2E (#9610). firefox, webkit and the two mobile projects had
   # been declared in playwright.config.ts for months and executed by nothing:
@@ -2477,6 +2632,7 @@ jobs:
       - taskboard-onboarding-guard
       - codex-config-guard
       - ghaw-lock-sync
+      - actionlint
       - openapi-route-sync
       - actions-pin-check
       # Unconditional jobs, asserted by `check_unconditional` rather than mapped
