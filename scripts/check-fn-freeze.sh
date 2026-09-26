@@ -41,12 +41,17 @@
 # line is still the body; the word after fi, done or esac is in command
 # position, so `h() { if true; then :; fi }` closes too; a trailing comment
 # is not part of the line: the thirty-second and thirty-third board rounds),
-# and otherwise at the first later line that
-# starts with `}` at column 0. A multi-line body whose brace closes anywhere
-# else (an indented `}`), or never, is reported as `close`: the freeze rule
-# cannot tie it to a freeze line (thirty-fifth board round: such a body
-# stayed open until a later function column-0 brace, and that function and
-# its freeze were misreported). A definition whose body is anything else — a subshell
+# and otherwise where the lexer sees the brace of its group close in command
+# position on a later line, which must be a line that starts with `}` at
+# column 0. A multi-line body whose brace closes anywhere else (an indented
+# `}`), or never, is reported as `close`: the freeze rule cannot tie it to a
+# freeze line (thirty-fifth board round: such a body stayed open until a
+# later function column-0 brace, and that function and its freeze were
+# misreported). A column-0 brace that closes only a group nested in the
+# body does not end it, and code after the closing brace on its line is top
+# level (thirty-sixth round: the first column-0 brace ended the definition,
+# and code after a closing brace was read as still inside it). A definition
+# whose body is anything else — a subshell
 # `( )`, a bare `if`/`while`/`case` — is reported as `unsupported` and fails
 # the gate, so a helper the derivation cannot follow is never a helper it
 # silently forgot (the sixth board round found `name()` with the brace on
@@ -69,8 +74,8 @@
 # `al"ias"`, `\a\l\i\a\s`, `$'alias'` and its escaped forms (octal, hex,
 # `\u`, `\U`, a NUL ending the value), a backslash line continuation in the
 # middle of the statement, and anything in front of the word (`builtin`,
-# `command`, `time -p`, `X="1"`, `X+=1`, `a[0]=1`, `!`, `if`) are all the
-# same word, and so
+# `command`, `time -p`, `X="1"`, `X+=1`, `a[0]=1`, `a[b[0]]=1`, `!`, `if`)
+# are all the same word, and so
 # is a word spelled around an expansion that can be empty (`ali$()as`,
 # `ali${x:+Q}as`, `DEBU$1G`): every command name and argument is also judged
 # with its expansions removed (see end_word), an ANSI-C string decoded, a
@@ -230,13 +235,43 @@ derive_file() {
     # the command after each, even when it refuses the subscript). Only
     # NAME= was recognised until the thirty-fifth board round, so in
     # X+=2 alias fail=: the word X+=2 was read as the command word and the
-    # alias went unreported. One pattern, read by every site that skips or
-    # strips an assignment word.
-    BEGIN { ASSIGN = "^[A-Za-z_][A-Za-z0-9_]*(\\[[^]]*\\])?\\+?=" }
+    # alias went unreported. The subscript is matched by bracket depth, not
+    # by a pattern, because it nests (thirty-sixth round: a[b[2]]=1 ended a
+    # pattern at its first closing bracket). One function, called by every
+    # site that skips or strips an assignment word.
+    function is_assign(s,   i, n, dep, c) {
+      if (s !~ /^[A-Za-z_]/) return 0
+      n = length(s); i = 2
+      while (i <= n && substr(s, i, 1) ~ /[A-Za-z0-9_]/) i++
+      if (substr(s, i, 1) == "[") {
+        dep = 0
+        for (; i <= n; i++) {
+          c = substr(s, i, 1)
+          if (c == "[") dep++
+          else if (c == "]" && --dep == 0) break
+        }
+        i++
+      }
+      if (substr(s, i, 1) == "+") i++
+      return substr(s, i, 1) == "="
+    }
     function flush_def() {
       pending_name = def_name; pending_def = def_line; pending_end = NR
       def_name = ""
       bs = def_bs
+    }
+    # The group of the open definition closed in command position: the
+    # definition ends HERE, mid-line, so the rest of its line is lexed as top
+    # level (thirty-sixth board round: ending it only once the whole line was
+    # lexed left a definition after the brace on that line, as in
+    # `  }; bar() { :; }`, neither derived nor reported). closed_name and
+    # closed_line keep what was closed for the close report.
+    # closed_col0: the line the group closed on starts with its brace at
+    # column 0, the one place a multi-line body may close.
+    function close_def() {
+      closed_name = def_name; closed_line = def_line; grp_closed = 1
+      closed_col0 = (lex_text ~ /^\}/)
+      flush_def()
     }
     # Advance the lexer over one line, updating the quote state (q), the
     # context stack (d, st_q[]) and the heredoc queue (hd_n, hd_term[]).
@@ -247,7 +282,7 @@ derive_file() {
     # (`\a\l\i\a\s`), and whitespace or a control operator ends the word. The
     # alias rule is then a check on the WORDS of a statement: the COMMAND
     # word is the first word that is not an assignment (`X="1"`, `X+=1`,
-    # `a[0]=1`: see ASSIGN) and not one
+    # `a[0]=1`: see is_assign) and not one
     # of the words bash lets stand in front of a command (`builtin`,
     # `command`, `time`, `-p`, `!`, `if`/`then`/`else`/`do`/`while`/..., `{`).
     # When that word is `alias`, every later `NAME=` word in the statement is
@@ -518,11 +553,11 @@ derive_file() {
       # set or trap statement) that is not a verdict, so it is a violation. An
       # assignment word before the command name is not brace-expanded by
       # bash at all, so its value is never judged.
-      if (bx_trunc && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && w ~ ASSIGN))
+      if (bx_trunc && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && is_assign(w)))
         printf "%s\t%s\t%d\t%d\tbrace\n", file, w, NR, NR
       # The same positions, for a parameter expansion whose TEXT bash splits
       # into fields (see pexp); a trap action is text, judged by check_trap.
-      if (px_split && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && w ~ ASSIGN) && !(in_trap && !trap_has_action && w !~ /^-/))
+      if (px_split && (!cmd_seen || in_alias || in_shopt || in_trap || in_set) && !(!cmd_seen && is_assign(w)) && !(in_trap && !trap_has_action && w !~ /^-/))
         printf "%s\t%s\t%d\t%d\tsplit\n", file, w, NR, NR
       if (!cmd_seen) {
         # `case WORD` ended its line without `in`: the first word of a later
@@ -549,11 +584,11 @@ derive_file() {
           # The brace group of the open definition closed here, in command
           # position, as bash reads it (see the definition rule): on its own
           # line, on the line its brace opened on, or on a later body line.
-          if (def_name != "" && d == 0 && bs == def_bs) grp_closed = 1
+          if (def_name != "" && d == 0 && bs == def_bs) close_def()
         }
         if ((!rq && w ~ /^(!|if|then|elif|else|do|while|until|coproc|\{|\})$/) ||
             w ~ /^(builtin|command|time|-p)$/ ||
-            w ~ ASSIGN) { w = ""; return }
+            is_assign(w)) { w = ""; return }
         if (!rq && w == "case") { bs++; bk[bs] = "c" }
         # fi, done and esac end a compound command, and the word after one is
         # in command position again: in h() { if true; then :; fi } the brace
@@ -648,8 +683,10 @@ derive_file() {
           ns = split(a, segs, /[;&|]+/)
           for (k = 1; k <= ns; k++) {
             seg = segs[k]; sub(/^[[:space:]]+/, "", seg)
-            while (seg ~ (ASSIGN "[^[:space:]]*[[:space:]]+"))
-              sub(ASSIGN "[^[:space:]]*[[:space:]]+", "", seg)
+            while (seg ~ /[[:space:]]/) {
+              if (!is_assign(seg)) break
+              sub(/^[^[:space:]]*[[:space:]]+/, "", seg)
+            }
             nw = split(seg, tw, /[[:space:]]+/)
             cw = tw[1]
             if ((cw == "command" || cw == "builtin") && nw > 1) cw = tw[2]
@@ -827,6 +864,7 @@ derive_file() {
       # word and the two words before it carry over (`alias \` + `fail=:`,
       # or `al\` + `ias`, are one statement to bash).
       carry = cont; cont = 0
+      lex_text = line
       if (q == "" && !carry) { cmd_seen = 0; cmd_word = ""; nwords = 0; in_alias = 0; in_shopt = 0; in_trap = 0; in_function = 0; sflag = ""; in_set = 0; oflag = ""; set_end = 0; w = ""; wq = 0; trap_action = ""; trap_sigs = ""; trap_has_action = 0 }
       # Where the code of this line ends: at its trailing comment, or at the
       # end of the line. The definition rules read the body of a definition
@@ -1059,33 +1097,32 @@ derive_file() {
           # command position, as on the definition line (thirty-fifth board
           # round: the old test, a code part ending in a brace, missed a
           # group followed by more code and closed one ending in an argument).
-          # grp_closed needs no reset here or below: it is cleared where every
-          # definition opens, and a close always ends the definition.
+          # The close itself ends the definition (close_def), so nothing is
+          # left to do here once the line is lexed.
           lex_line(line)
-          if (grp_closed) flush_def()
           next
         }
         printf "%s\t%s\t%d\t%d\tunsupported\n", file, def_name, def_line, NR
         brace_pending = 0; def_name = ""
       }
 
-      # Inside a multi-line definition: the column-0 closing brace ends it.
-      # Whatever follows that brace on the same line runs at top level, so it
-      # is lexed like any other top-level text once the body is closed (the
-      # twelfth board round hid `alias fail=:` after `};` on that line).
-      # A body line on which the group closes anywhere but at column 0 is a
-      # close violation: the freeze rule ties a multi-line definition to the
-      # line after a column-0 brace, and without this the definition stayed
-      # open until the next such brace, which belonged to a later function,
-      # so that function and its freeze were misreported (thirty-fifth board
-      # round). The definition ends there, so what follows is judged again.
+      # Inside a multi-line definition, the lexer alone decides where it
+      # ends: where the brace of its group closes in command position, as
+      # bash reads it (close_def). What follows that brace on the same line
+      # runs at top level and is lexed as such (the twelfth board round hid
+      # `alias fail=:` after `};` there). A close anywhere but a `}` at
+      # column 0 is a close violation, since the freeze rule ties a
+      # multi-line definition to the line after that brace (thirty-fifth
+      # round). A column-0 brace that closes only a group nested in the body
+      # no longer ends the definition (thirty-sixth round: it did, and the
+      # rest of the body, a redefinition included, was read as top level).
+      # grp_closed needs no reset here: it is cleared where every definition
+      # opens, and a close always ends the definition, so it is set after
+      # this lex only when the group closed on this line.
       if (def_name != "") {
-        if (line ~ /^\}/ && !pat) { flush_def(); lex_line(substr(line, 2)); next }
         lex_line(line)
-        if (grp_closed) {
-          printf "%s\t%s\t%d\t%d\tclose\n", file, def_name, def_line, NR
-          flush_def()
-        }
+        if (grp_closed && !closed_col0)
+          printf "%s\t%s\t%d\t%d\tclose\n", file, closed_name, closed_line, NR
         next
       }
 
@@ -1123,10 +1160,7 @@ derive_file() {
         body = (code_end > opener + 1) ? substr(line, opener + 1, code_end - opener - 1) : ""
         sub(/^[[:space:]]+/, "", body); sub(/[[:space:]]+$/, "", body)
         if (body == "") { brace_pending = 1; next }
-        if (body ~ /^\{/) {
-          if (grp_closed) flush_def()
-          next
-        }
+        if (body ~ /^\{/) next
         printf "%s\t%s\t%d\t%d\tunsupported\n", file, name, NR, NR
         def_name = ""
         next

@@ -21,7 +21,7 @@ failed=0
 
 pass() { echo "  PASS: $1"; passed=$((passed + 1)); }
 readonly -f pass
-fail() { echo "  FAIL: $1"; failed=$((failed + 1)); }
+fail() { echo "  FAIL: $1"; if [ -n "${2:-}" ]; then printf '%s\n' "$2" | sed 's/^/    /'; fi; failed=$((failed + 1)); }
 readonly -f fail
 
 [ -f "$GATE" ] || { echo "gate script not found: $GATE"; exit 1; }
@@ -2073,6 +2073,83 @@ if grep -q "^alias fail=':'$" <<<"$assign_bash" && grep -q "^alias f1=':'$" <<<"
   pass "30w-b. in this bash an append or subscripted prefix still runs the command after it"
 else
   fail "30w-b. the prefix-assignment probe did not reproduce in this bash (got '$assign_bash')"
+fi
+
+# ---- 30x. the lexer alone decides where a definition ends -------------------
+# Thirty-sixth board round. security and architect: a column-0 brace that
+# closes only a group nested in the body (line 6) ended foo, so the rest of
+# its body, the nested fail() on line 8 included, was read as top level and
+# the real closing brace and freeze were misreported; bash closes foo on
+# line 9. ux: the definition ended only once its whole closing line was
+# lexed, so a definition after the brace on that line (baz on line 13, quux
+# on line 15 after a brace-line group) was neither derived nor reported. Now
+# the definition ends where its brace closes, mid-line, and the rest of the
+# line is judged as top level: baz and quux are shape. 30x-b runs the
+# fixture in bash.
+d_lexclose="$(mkfixture lexer-close <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+foo() {
+{
+  echo "inner"
+}
+echo "after inner group"
+fail() { :; }
+}
+readonly -f foo
+bar() {
+  :
+  }; baz() { :; }
+qux()
+{ :; }; quux() { :; }
+FIX
+)"
+out_lexclose="$(run_gate "$d_lexclose")"
+expect_rc "30x. a definition ends where its brace closes, not at the first column-0 brace" 1 "$out_lexclose" \
+  "5 violation(s)" "fixture.test.sh:13: 'baz()'" \
+  "fixture.test.sh:11: bar() closes on line 13, but not with a '}' at column 0" \
+  "fixture.test.sh:11: bar() is not frozen — add 'readonly -f bar' on line 14" \
+  "fixture.test.sh:15: 'quux()'" "fixture.test.sh:14: qux() is not frozen — add 'readonly -f qux' on line 16"
+if grep -Eq "fixture.test.sh:(3|8|10):|foo\(\)" <<<"$out_lexclose"; then
+  fail "30x-c. a column-0 brace that closes a nested group does not end the definition" "$out_lexclose"
+else
+  pass "30x-c. a column-0 brace that closes a nested group does not end the definition"
+fi
+lexclose_bash="$(bash "$d_lexclose/fixture.test.sh" 2>&1; echo "rc=$?")"
+if [ "$lexclose_bash" = "rc=0" ]; then
+  pass "30x-b. the fixture is valid bash (the nested group and both mid-line closes parse)"
+else
+  fail "30x-b. the fixture did not run cleanly in this bash (got '$lexclose_bash')"
+fi
+
+# ---- 30y. a prefix assignment may carry a nested subscript ------------------
+# Thirty-sixth board round (security, architect): the assignment pattern read
+# a subscript up to its first closing bracket, so a[b[2]]=1 was taken for the
+# command word and the alias after it passed, while bash warns about the
+# subscript and still binds the alias (30y-b). The subscript is now matched
+# by bracket depth, at every site: lines 3 to 5 and 9 (names holding digits)
+# are reported, and line 8, an assignment value, is not.
+d_nestsub="$(mkfixture nested-subscript <<'FIX'
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+a[b[2]]=1 alias fail=:
+a[b[c[0]]]+=1 shopt -s expand_aliases
+trap 'a[b[0]]=1 cleanup' EXIT
+cleanup() { exit 0; }
+readonly -f cleanup
+a[b[0]]={0..99}{0..9} true
+x2[y3[0]]=1 alias f2=:
+FIX
+)"
+out_nestsub="$(run_gate "$d_nestsub")"
+expect_rc "30y. a prefix assignment with a nested subscript is skipped to the command word" 1 "$out_nestsub" \
+  "4 violation(s)" "fixture.test.sh:3: 'alias fail=:'" "fixture.test.sh:4: 'shopt -s expand_aliases'" \
+  "fixture.test.sh:5: 'trap cleanup ... EXIT" "fixture.test.sh:9: 'alias f2=:'"
+nestsub_bash="$(bash -c 'shopt -s expand_aliases; a[b[2]]=1 alias fail=: 2>/dev/null; alias' 2>&1)"
+if grep -q "^alias fail=':'$" <<<"$nestsub_bash"; then
+  pass "30y-b. in this bash a nested-subscript prefix still runs the command after it"
+else
+  fail "30y-b. the nested-subscript probe did not reproduce in this bash (got '$nestsub_bash')"
 fi
 
 # ---- 30r. inside double quotes a backslash escapes only five characters -----

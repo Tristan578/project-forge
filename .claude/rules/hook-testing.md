@@ -192,7 +192,11 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   statement's command word, and when
   it is `alias` reports every later `NAME=` word, or `expand_aliases` after
   `shopt` plus an `s` flag — so `\alias`, `"alias"`, `\a\l\i\a\s`,
-  `alias nothing fail=:` and anything in front of the word are all caught.
+  `alias nothing fail=:` and anything in front of the word are all caught:
+  `builtin`, `command`, and a prefix assignment in every form bash accepts
+  there (`X="1" alias`, `X+=1 alias`, `a[0]=1 alias`, `a[b[0]]=1 alias`;
+  rounds thirty-five and thirty-six added the last three, which the gate had
+  read as the command word).
   Every command name and argument is also judged with its expansions
   removed, because each can expand to nothing (`$()`, `$(true)`, backticks,
   `${x:+Q}`, an unset `$1`), so `ali$()as`, `ali${x:+Q}as` and `shopt -$()s
@@ -265,7 +269,10 @@ it cannot lex to EOF. Rules that follow from `readonly -f` itself:
   command position, so `h() { if true; then :; fi }` closes on its line
   (round thirty-three). A multi-line body whose brace closes anywhere but
   column 0 (an indented `}`), or never, is reported as `close` (round
-  thirty-five). A subshell body or a
+  thirty-five). Where a definition ends is where the lexer sees its brace
+  close, so a column-0 `}` that closes only a group nested in the body does
+  not end it, and code after the closing brace on its line is top level
+  (round thirty-six). A subshell body or a
   bare compound body is reported as `unsupported` — the gate never skips a
   definition it cannot follow.
 - Every function at true top level (outside any function body, subshell,

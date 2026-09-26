@@ -1016,7 +1016,15 @@ was replaced with this one (round twenty-nine).
   only `NAME=` was skipped as a prefix assignment, so `X+=2 alias fail=:` and
   `a[0]=1 alias f1=:` (bash binds both) read the assignment as the command
   word and passed; one pattern now covers `NAME=`, `NAME+=` and a subscript,
-  at every site that skips or strips an assignment word.
+  at every site that skips or strips an assignment word. The thirty-sixth
+  found that fix half done three ways. A column-0 `}` still ended a
+  definition by its position alone, so one closing a group nested in the
+  body ended it early and the rest of the body, a redefinition included,
+  was read as top level; a definition closed by the lexer ended only once
+  its whole line was lexed, so `  }; bar() { :; }` hid `bar`; and the
+  pattern stopped a subscript at its first closing bracket, so
+  `a[b[2]]=1 alias fail=:` passed. The lexer alone now ends a definition,
+  at the brace, mid-line, and the subscript is matched by bracket depth.
   No files,
   nothing derived from them, or a file the
   lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
