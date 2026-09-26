@@ -378,8 +378,9 @@ if [ -f "$CI_YML" ]; then
   # file, so the mutation takes effect in the very run that should have caught
   # it. Count the key at ITS OWN indent level first (4 spaces = job level; a
   # deeper-indented step `if:` is legitimate and must not be counted) and
-  # require exactly one. actionlint flags duplicate keys, but it is not wired
-  # into this repo's CI — this pin is the backstop (#9031).
+  # require exactly one. actionlint (the `actionlint` job, #8719) flags
+  # duplicate keys, but it runs from this same PR-controlled file — this pin
+  # is the independent backstop (#9031).
   oa_if_count="$(grep -cE '^    ["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$oa_block" || true)"
   if [ "$oa_if_count" -ne 1 ]; then
     fail "openapi-route-sync job has $oa_if_count job-level if: keys (expected exactly 1) — missing or duplicated (YAML keeps the last duplicate key, so an appended constant-false if: unwires the gate while the original if: line still greps as present)"
