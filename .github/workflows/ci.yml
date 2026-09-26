@@ -625,7 +625,12 @@ jobs:
     # every PR rather than one. The delta against main's ~22 minutes is mostly
     # runner variance rather than any single suite, which is the argument for
     # headroom rather than for hunting a culprit.
-    timeout-minutes: 45
+    # Raised from 45 to 60 (#10285): the job took 41:22 on 2026-09-26 (job
+    # 108460157387, a PR head carrying the 175-case function-freeze suite),
+    # under 4 minutes short of 45. Main measured 36:53, 36:54 and 39:04 on
+    # 2026-09-24. Suites only grow and runner variance spans minutes, so 60
+    # leaves about 19 minutes; re-measure before trusting it again.
+    timeout-minutes: 60
     permissions:
       contents: read
     defaults:
