@@ -25,7 +25,9 @@ RULES_DIR="$HERE/../../rules"
 pass=0
 fail=0
 ok() { pass=$((pass + 1)); echo "  ok    $1"; }
+readonly -f ok
 bad() { fail=$((fail + 1)); echo "  FAIL  $1"; }
+readonly -f bad
 
 OUT="$(bash "$HOOK" 2>/dev/null)"
 RC=$?
