@@ -626,15 +626,16 @@ jobs:
     # Raised from 45 to 60 (#10285): on 2026-09-24 main measured 36:54 with
     # 66 suites, then 36:53 and 39:04 with 70, against about 22 on 2026-09-15.
     # That growth is not runner variance. The job runs every bash suite one
-    # after another under Git Bash, where process spawns are slow. In a 41:22
-    # run on 2026-09-26 (job 108460157387, on the final head of #10229, which
-    # added the 71st suite, check-fn-freeze), check-ci-success alone took
-    # 553 s, and check-fn-freeze took 92 s at 175 cases against about 8 s on
-    # Linux. Earlier heads of #10229 measured check-fn-freeze at 44 s with 144
-    # cases (job 108440510702) and 52 s with 151 (job 108446401974, whole job
-    # 30:38), so re-measure it from this job after the suite changes. 60 is
-    # headroom while #10290 finds and cuts where the time goes; raise it again
-    # only with that issue's measurements, not in its place.
+    # after another under Git Bash, where process spawns are slow. #10229
+    # added the 71st suite, check-fn-freeze, and its case count grew across
+    # that PR's heads. In a 41:22 run of the final head on 2026-09-26 (job
+    # 108460157387), check-ci-success alone took 553 s, and check-fn-freeze
+    # took 92 s at 175 cases against about 8 s on Linux. Earlier heads
+    # measured it at 44 s with 144 cases (job 108440510702) and 52 s with 151
+    # (job 108446401974, whole job 30:38), so re-measure it from this job
+    # after the suite changes. 60 is headroom while #10290 finds and cuts
+    # where the time goes; raise it again only with that issue's
+    # measurements, not in its place.
     timeout-minutes: 60
     permissions:
       contents: read
