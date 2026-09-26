@@ -204,6 +204,30 @@ describe('PATCH /api/jobs/[id]', () => {
     expect(set).toHaveBeenCalledWith(expect.objectContaining({ resultUrl, imported: 1 }));
   });
 
+  it('never downgrades imported: imported:false is ignored, imported:true latches (#8892)', async () => {
+    // Two unordered client PATCHes race on a settled durable row. If the
+    // imported:false one lands last, an unconditional write would reset the
+    // row to imported = 0 and the list route would resurface it on every load.
+    const set = vi.fn().mockReturnThis();
+    vi.mocked(getDb).mockReturnValue({
+      select: vi.fn(() => ({ from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'sync-job' }]) })),
+      update: vi.fn(() => ({ set, where: vi.fn().mockResolvedValue(undefined) })),
+    } as never);
+    const { PATCH } = await import('./route');
+    const patch = (body: Record<string, unknown>) =>
+      PATCH(new NextRequest('http://localhost/api/jobs/sync-job', { method: 'PATCH', body: JSON.stringify(body) }), { params: Promise.resolve({ id: 'sync-job' }) });
+
+    expect((await patch({ status: 'failed', errorMessage: 'Provider rejected the prompt', imported: false })).status).toBe(200);
+    expect((await patch({ imported: true })).status).toBe(200);
+
+    expect(set).toHaveBeenCalledTimes(2);
+    const [downgrade, latch] = set.mock.calls.map((c) => c[0] as Record<string, unknown>);
+    // The status still lands; only the imported downgrade is dropped.
+    expect(downgrade).toMatchObject({ status: 'failed', errorMessage: 'Provider rejected the prompt' });
+    expect(Object.prototype.hasOwnProperty.call(downgrade, 'imported')).toBe(false);
+    expect(latch).toMatchObject({ imported: 1 });
+  });
+
   it('returns one owned inline artifact and constrains the ownership query', async () => {
     const resultUrl = 'data:image/png;base64,' + 'A'.repeat(4096);
     const where = vi.fn().mockReturnThis();
@@ -212,11 +236,41 @@ describe('PATCH /api/jobs/[id]', () => {
     const { GET } = await import('./route');
     const response = await GET(new NextRequest('http://localhost/api/jobs/sync-job'), { params: Promise.resolve({ id: 'sync-job' }) });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ resultUrl });
+    expect(await response.json()).toMatchObject({ resultUrl });
     // Both the requested id and authenticated internal user must constrain SQL.
     const condition = JSON.stringify(where.mock.calls[0][0]);
     expect(condition).toContain('sync-job');
     expect(condition).toContain('user_1');
+  });
+
+  it('returns the whole owned row in the list shape, for durable-completion sync (#8892)', async () => {
+    const now = new Date('2026-09-23T12:00:00Z');
+    const row = {
+      id: 'sync-job', providerJobId: 'pj-1', provider: 'meshy', type: 'texture', prompt: 'wood',
+      parameters: { durable: true }, status: 'completed', progress: 100, errorMessage: null,
+      resultUrl: 'https://cdn.example.com/x.png', resultMeta: { albedo: 'https://cdn.example.com/a.png' },
+      imported: 0, tokenCost: 5, tokenUsageId: 'usage-1', entityId: null,
+      createdAt: now, updatedAt: now, completedAt: now,
+    };
+    vi.mocked(getDb).mockReturnValue({ select: vi.fn(() => ({ from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([row]) })) } as never);
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/jobs/sync-job'), { params: Promise.resolve({ id: 'sync-job' }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      id: 'sync-job', providerJobId: 'pj-1', provider: 'meshy', type: 'texture', prompt: 'wood',
+      parameters: { durable: true }, status: 'completed', progress: 100, errorMessage: null,
+      resultUrl: 'https://cdn.example.com/x.png', resultMeta: { albedo: 'https://cdn.example.com/a.png' },
+      imported: false, tokenCost: 5, tokenUsageId: 'usage-1', entityId: null,
+      createdAt: now.toISOString(), updatedAt: now.toISOString(), completedAt: now.toISOString(),
+    });
+  });
+
+  it('returns a failed row with resultUrl null instead of treating "no artifact" as an invalid one', async () => {
+    vi.mocked(getDb).mockReturnValue({ select: vi.fn(() => ({ from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'sync-job', status: 'failed', resultUrl: null, errorMessage: 'Provider rejected the prompt', imported: 0 }]) })) } as never);
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/jobs/sync-job'), { params: Promise.resolve({ id: 'sync-job' }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: 'failed', resultUrl: null, errorMessage: 'Provider rejected the prompt', imported: false });
   });
 
   it("does not return another user's or missing artifact", async () => {
