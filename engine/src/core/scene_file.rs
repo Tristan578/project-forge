@@ -538,5 +538,90 @@ mod validation_tests {
                 serde_json::json!(10.0)
             );
         }
+
+        #[test]
+        fn sparse_mixed_materials_across_multiple_entities_round_trip_independently() {
+            // Regression guard for the index-based matching in
+            // `serialize_scene_file` (`entities.get_mut(index)`) and
+            // `parse_scene_file` (`decoded_attenuation: Vec<(usize, f32)>`).
+            // Not every entity carries `material_data` — the loops must skip
+            // those by entity index, not by "the next material found" — and
+            // a non-finite value on one entity must never leak onto a
+            // neighboring entity's slot.
+            //
+            // Entity 0: no material_data at all (sparse).
+            // Entity 1: finite material — must pass through untouched.
+            // Entity 2: NEG_INFINITY — must decode back to NEG_INFINITY, not
+            //   entity 1's or entity 3's value.
+            // Entity 3: NaN — must decode back to NaN, not leak into a
+            //   neighboring slot.
+            let mut without_material = entity("no-material", None);
+            without_material.material_data = None;
+
+            let mut finite = entity("finite", Some("no-material"));
+            let mut finite_material = MaterialData::default();
+            finite_material.attenuation_distance = 10.0;
+            finite.material_data = Some(finite_material);
+
+            let mut neg_infinity = entity("neg-infinity", Some("no-material"));
+            let mut neg_infinity_material = MaterialData::default();
+            neg_infinity_material.attenuation_distance = f32::NEG_INFINITY;
+            neg_infinity.material_data = Some(neg_infinity_material);
+
+            let mut nan = entity("nan", Some("no-material"));
+            let mut nan_material = MaterialData::default();
+            nan_material.attenuation_distance = f32::NAN;
+            nan.material_data = Some(nan_material);
+
+            let scene_file = build_scene_file(
+                "Recovery",
+                &EnvironmentSettings::default(),
+                &GlobalAmbientLight::default(),
+                &InputMap::default(),
+                HashMap::new(),
+                &PostProcessingSettings::default(),
+                &AudioBusConfig::default(),
+                vec![without_material, finite, neg_infinity, nan],
+                None,
+                None,
+            );
+
+            let json = serialize_scene_file(&scene_file)
+                .expect("serialize a scene with sparse, mixed materials");
+            let parsed = parse_scene_file(&json)
+                .expect("a scene with sparse, mixed materials must load");
+
+            assert!(
+                parsed.entities[0].material_data.is_none(),
+                "an entity with no material_data must stay that way"
+            );
+            assert_eq!(
+                parsed.entities[1]
+                    .material_data
+                    .as_ref()
+                    .expect("entity 1 must keep its material_data")
+                    .attenuation_distance,
+                10.0,
+                "a finite value must not be disturbed by a neighbor's patch"
+            );
+            assert_eq!(
+                parsed.entities[2]
+                    .material_data
+                    .as_ref()
+                    .expect("entity 2 must keep its material_data")
+                    .attenuation_distance,
+                f32::NEG_INFINITY,
+                "entity 2's own value must not be swapped with entity 3's"
+            );
+            assert!(
+                parsed.entities[3]
+                    .material_data
+                    .as_ref()
+                    .expect("entity 3 must keep its material_data")
+                    .attenuation_distance
+                    .is_nan(),
+                "entity 3's own value must not be swapped with entity 2's"
+            );
+        }
     }
 }
