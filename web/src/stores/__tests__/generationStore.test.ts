@@ -53,6 +53,7 @@ describe('generationStore', () => {
     useGenerationStore.setState({
       jobs: {},
       hydrated: false,
+      durableCompletionEnabled: false,
     });
   });
 
@@ -574,6 +575,49 @@ describe('generationStore', () => {
       expect(jobs[0].prompt).toBe('A castle');
       expect(jobs[0].dbId).toBe('srv-1');
       expect(state.hydrated).toBe(true);
+    });
+
+    it('marks a webhook-finished terminal row for completion sync and records the durability flag (#8892)', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          durableCompletionEnabled: true,
+          jobs: [
+            {
+              id: 'srv-done', providerJobId: 'prov-done', provider: 'meshy', type: 'model',
+              prompt: 'A tower', status: 'completed', progress: 100, imported: false,
+              parameters: { durable: true }, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:01:00Z',
+            },
+            {
+              id: 'srv-failed', providerJobId: 'prov-failed', provider: 'meshy', type: 'model',
+              prompt: 'A moat', status: 'failed', progress: 0, imported: false,
+              parameters: { durable: true }, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:01:00Z',
+            },
+            {
+              id: 'srv-live', providerJobId: 'prov-live', provider: 'meshy', type: 'model',
+              prompt: 'A gate', status: 'processing', progress: 40,
+              parameters: { durable: true }, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:01:00Z',
+            },
+          ],
+        }),
+      } as Response);
+
+      await useGenerationStore.getState().hydrateFromServer();
+
+      const state = useGenerationStore.getState();
+      expect(state.durableCompletionEnabled).toBe(true);
+      // Hydrated already 'downloading' — the state the completion sync puts it
+      // in — so the status indicator never flips completed -> downloading.
+      expect(state.jobs['hydrated_srv-done']).toEqual(expect.objectContaining({ status: 'downloading', needsCompletionSync: true, dbId: 'srv-done' }));
+      expect(state.jobs['hydrated_srv-failed']).toEqual(expect.objectContaining({ status: 'failed', needsCompletionSync: true }));
+      // A live job is polled, not synced: the key is absent, not false.
+      expect(state.jobs['hydrated_srv-live']).not.toHaveProperty('needsCompletionSync');
+    });
+
+    it('leaves durableCompletionEnabled false when the server omits it', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ jobs: [] }) } as Response);
+      await useGenerationStore.getState().hydrateFromServer();
+      expect(useGenerationStore.getState().durableCompletionEnabled).toBe(false);
     });
 
     it('should set hydrated=true when no active jobs', async () => {

@@ -17,8 +17,15 @@
  * the query string.
  */
 
-/** Billing tab — plan, payment method, token packs. */
+/** Billing tab — plan and payment method. It sells no token packs. */
 export const SETTINGS_BILLING_HREF = '/settings?tab=billing';
+
+/**
+ * Tokens tab — balance and the token packs (`TokenDashboard`). Every "buy
+ * tokens" exit goes here: the Billing tab's only purchase is a plan upgrade,
+ * so a "Buy tokens" link to it landed where tokens cannot be bought (#6831).
+ */
+export const SETTINGS_TOKENS_HREF = '/settings?tab=tokens';
 
 /** API Keys tab (BYOK). Note the slug is `keys`, not `api-keys`. */
 export const SETTINGS_KEYS_HREF = '/settings?tab=keys';

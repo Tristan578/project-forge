@@ -5,7 +5,13 @@ import type { DocIndex, DocEntry, TopicMeta } from './loader.js';
 /**
  * Helper to build a test DocIndex from simple doc specs.
  */
-function makeDocIndex(docs: Array<{ path: string; title: string; content: string; tags?: string[] }>): DocIndex {
+function makeDocIndex(docs: Array<{
+  path: string;
+  title: string;
+  content: string;
+  tags?: string[];
+  sections?: DocEntry['sections'];
+}>): DocIndex {
   const docsMap = new Map<string, DocEntry>();
   const metaMap = new Map<string, TopicMeta>();
 
@@ -14,7 +20,7 @@ function makeDocIndex(docs: Array<{ path: string; title: string; content: string
       path: d.path,
       title: d.title,
       content: d.content,
-      sections: [],
+      sections: d.sections ?? [],
     });
 
     if (d.tags) {
@@ -141,6 +147,37 @@ describe('search', () => {
   });
 
   describe('Result Shape', () => {
+    it('names the matching section when one contains a query term', () => {
+      const docIndex = makeDocIndex([
+        {
+          path: 'physics',
+          title: 'Physics',
+          content: '# Physics\n\n## Colliders\n\nAdd a collider to an entity.',
+          sections: [{ heading: 'Colliders', level: 2, content: 'Add a collider to an entity.' }],
+        },
+      ]);
+      const termIndex = buildIndex(docIndex);
+      const results = search('collider', docIndex, termIndex);
+
+      expect(results).toHaveLength(1);
+      expect(results[0]).toHaveProperty('matchSection', 'Colliders');
+    });
+
+    it('omits matchSection entirely when only the title matches', () => {
+      const docIndex = makeDocIndex([
+        { path: 'export', title: 'Exporting Games', content: 'Build a standalone bundle.' },
+      ]);
+      const termIndex = buildIndex(docIndex);
+      const results = search('exporting', docIndex, termIndex);
+
+      expect(results).toHaveLength(1);
+      // The key is absent, not present with `undefined`: with
+      // exactOptionalPropertyTypes those are different results, and only the
+      // absent form survives JSON.stringify without a literal null/undefined.
+      expect(results[0]).not.toHaveProperty('matchSection');
+      expect(Object.keys(results[0])).not.toContain('matchSection');
+    });
+
     it('should include path, title, score, and snippet', () => {
       const docIndex = makeDocIndex([
         { path: 'export', title: 'Exporting Games', content: 'Export your game as standalone HTML' },

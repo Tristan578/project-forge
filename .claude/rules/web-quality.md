@@ -32,6 +32,13 @@ CI runs `npx eslint --max-warnings 0`. Fix immediately, never defer.
 - **useState prev-value pattern:** `const [prev, setPrev] = useState(prop); if (prev !== prop) { setPrev(prop); setDerived(compute(prop)); }` — NOT useRef during render
 - **No setState in effects** — Use `useMemo` or `useState` prev-value for derived state
 
+## TypeScript: `exactOptionalPropertyTypes`
+- **On in:** `apps/docs`, `mcp-server`, `packages/ui` (each package's own `tsconfig.json`; CI type-checks each with `npx tsc --noEmit`). **Off in `web/`** — enabling it there measured 320 errors across 165 files on 2026-09-23, so that migration is its own issue, #10230 (#7592 covered the three small packages).
+- **What it rejects:** assigning `undefined` to a property declared `prop?: T`. Under the flag "key absent" and "key present, value `undefined`" are different types, so forwarding a maybe-undefined value (`<TreeItem onSelect={onSelect} />`, `{ min: opts.min }`) no longer compiles.
+- **Pattern — omit the key instead of passing `undefined`:** `...(x !== undefined && { x })`, in JSX props or object literals (e.g. `packages/ui/src/composites/TreeView.tsx`, `Vec3Input.tsx`, `mcp-server/src/docs/search.ts`). Compare against `undefined`, not truthiness, so `0`, `''` and `false` still forward.
+- **Widening to `prop?: T | undefined` is for types that really carry `undefined`** — e.g. a test double mirroring Node's `socket.remoteAddress`. Don't widen, or cast with `as`, just to silence an error in our own props: that switches the check off for that field. The one sanctioned cast is third-party type variance neither side owns (the MCP SDK `Transport` in `mcp-server/src/transport/http.ts`, tracked for removal in #10278), with a comment saying why.
+- **Vendored copy:** after changing `packages/ui/src/`, run `bash apps/design/scripts/sync-vendored-ui.sh` and commit the regenerated `apps/design/vendored/spawnforge-ui/` files.
+
 ## Next.js Constraints
 - **Import boundary:** A production build CANNOT import above its Vercel `rootDirectory` (`web/` for the app, `apps/docs/` for the docs site). Shared data must be copied inside each deploy root
 - **MCP manifest — THREE copies:** source at `mcp-server/manifest/commands.json`, copies at `web/src/data/commands.json` and `apps/docs/data/commands.json` (one per deploy root). All three must stay identical; `apps/docs/scripts/check-manifest-sync.ts` enforces it in CI and `bash .claude/tools/validate-mcp.sh sync` checks it locally

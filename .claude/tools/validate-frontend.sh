@@ -36,6 +36,20 @@ run_tsc() {
   else
     fail "TypeScript: type errors found"
   fi
+  # The two frontend workspaces outside web/ carry their own tsconfig (with
+  # exactOptionalPropertyTypes), and web's tsc never reads them. CI checks
+  # both (packages/ui through its `tsc` build in quality-gates.yml and cd.yml,
+  # apps/docs in ci.yml), so checking only web reported a clean tree CI rejects.
+  local ws
+  for ws in packages/ui apps/docs; do
+    echo ""
+    echo "--- TypeScript ($ws) ---"
+    if (cd "$PROJECT_ROOT/$ws" && npx tsc --noEmit 2>&1); then
+      pass "TypeScript ($ws): no type errors"
+    else
+      fail "TypeScript ($ws): type errors found"
+    fi
+  done
 }
 
 run_test() {

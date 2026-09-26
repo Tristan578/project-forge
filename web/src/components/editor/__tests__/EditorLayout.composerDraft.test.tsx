@@ -24,6 +24,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { useGenerationStore } from '@/stores/generationStore';
+import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useResponsiveLayout, getLayoutConfig } from '@/hooks/useResponsiveLayout';
 import { offerCustomizeWithAi, customizeDraftFor } from '@/lib/chat/customizeWithAi';
 
@@ -128,6 +129,10 @@ beforeEach(() => {
   }
   useChatStore.setState({ composerDraft: '', sendMessage, rightPanelTab: 'inspector' });
   useWorkspaceStore.setState({ chatOverlayOpen: false });
+  // The offer fires after a template has loaded, which is also when onboarding
+  // completes; EditorLayout renders the real OnboardingGate (#6831), and a
+  // fresh store would put the welcome wizard (and its focus trap) on screen.
+  useOnboardingStore.setState({ isNewUser: false, onboardingCompleted: true });
 });
 
 afterEach(() => {

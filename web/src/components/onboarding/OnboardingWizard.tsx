@@ -12,12 +12,23 @@ import { TEMPLATE_REGISTRY } from '@/data/templates';
 import { offerCustomizeWithAi } from '@/lib/chat/customizeWithAi';
 
 export interface OnboardingWizardProps {
+  /**
+   * The user finished onboarding on the spot: blank canvas, tour, a template
+   * that loaded, or a dismissal. The caller (OnboardingGate) is the ONE writer
+   * of the completed flag; this wizard never marks onboarding complete itself
+   * (#6831).
+   */
   onComplete: () => void;
   /**
    * Opens the quick-start dialog (PF-1215). The "Build with AI" path used to do
    * nothing but switch the right panel to chat and hope the user typed something
    * the intent classifier recognised; it now hands the user the real control.
-   * Optional so the wizard still renders standalone in tests and stories.
+   *
+   * Picking AI does NOT call `onComplete` when this is provided: onboarding is
+   * complete only once the AI run produces a game, and a run that fails or is
+   * abandoned brings the wizard back (owner decision on #6831). The caller
+   * decides that. Optional so the wizard still renders standalone in tests and
+   * stories, where the AI path falls back to `onComplete`.
    */
   onStartAi?: () => void;
 }
@@ -73,7 +84,6 @@ const GENERIC_TEMPLATE_ERROR = 'Could not load that template. Please try again.'
 
 export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProps) {
   const selectPath = useOnboardingStore((s) => s.selectPath);
-  const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
   const startTutorial = useOnboardingStore((s) => s.startTutorial);
   // Select the RESULT, not the function. `canUseAI` is a stable store action,
   // so selecting it never re-rendered the wizard when `tier`, `activeFeatures`
@@ -119,11 +129,10 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
       if (e.key === 'Escape') {
         e.preventDefault();
         if (templateLoading) return;
-        completeOnboarding();
         onComplete();
       }
     },
-    [completeOnboarding, onComplete, templateLoading]
+    [onComplete, templateLoading]
   );
 
   useEffect(() => {
@@ -136,21 +145,18 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
       selectPath(path);
 
       if (path === 'ai') {
-        completeOnboarding();
         setRightPanelTab('chat');
-        onComplete();
-        onStartAi?.();
+        if (onStartAi) onStartAi();
+        else onComplete();
         return;
       }
 
       if (path === 'blank') {
-        completeOnboarding();
         onComplete();
         return;
       }
 
       if (path === 'tour') {
-        completeOnboarding();
         startTutorial('first-scene');
         onComplete();
         return;
@@ -161,14 +167,14 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
         return;
       }
     },
-    [selectPath, completeOnboarding, setRightPanelTab, startTutorial, onComplete, onStartAi]
+    [selectPath, setRightPanelTab, startTutorial, onComplete, onStartAi]
   );
 
   // Load the chosen template through the store, and complete onboarding only
   // once it has landed. This used to be a no-op that completed onboarding and
   // returned: a user who picked "Platformer" got a blank scene (#10156).
   //
-  // Ordering matters: `completeOnboarding()` makes OnboardingGate unmount this
+  // Ordering matters: `onComplete()` makes OnboardingGate unmount this
   // wizard, so it must come AFTER the load settles or a failure has nowhere to
   // show. On failure the wizard stays up, says what went wrong, and re-enables
   // the cards. The analytics pair mirrors TemplateGallery, with this surface
@@ -195,10 +201,9 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
 
       trackEvent(AnalyticsEvent.TEMPLATE_USED, { templateId });
       trackEvent(AnalyticsEvent.TEMPLATE_APPLIED, { templateId, source: 'onboarding' });
-      completeOnboarding();
       onComplete();
     },
-    [completeOnboarding, onComplete]
+    [onComplete]
   );
 
   return (
@@ -224,10 +229,7 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
             </p>
           </div>
           <button
-            onClick={() => {
-              completeOnboarding();
-              onComplete();
-            }}
+            onClick={onComplete}
             disabled={templateLoading}
             className="flex h-7 w-7 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:cursor-wait disabled:opacity-50 disabled:hover:bg-transparent"
             aria-label="Dismiss and start with blank canvas"

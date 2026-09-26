@@ -67,8 +67,8 @@ Claude Code only: Codex does not read `.mcp.json`.
 
 ## Validation Tools (`.claude/tools/`)
 - `validate-rust.sh` — Architecture boundaries, bridge isolation, unsafe audit
-- `validate-frontend.sh` — ESLint, TypeScript, vitest
-- `validate-mcp.sh` — Manifest sync, MCP tests, AI parity audit
+- `validate-frontend.sh` — ESLint, TypeScript (web, packages/ui, apps/docs), vitest
+- `validate-mcp.sh` — Manifest sync, MCP type-check + tests, AI parity audit
 - `validate-tests.sh` — Test inventory, coverage report
 - `validate-docs.sh` — Documentation integrity, version refs
 - `dx-audit.sh` — Cross-IDE consistency, tool health, onboarding check

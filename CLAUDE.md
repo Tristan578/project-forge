@@ -24,9 +24,9 @@ cd web && npm install && npm run dev
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # Other suites
-cd packages/ui && npx vitest run       # UI library
-cd apps/docs && npx vitest run         # Docs scripts
-cd mcp-server && npx vitest run        # MCP server
+cd packages/ui && npx tsc --noEmit && npx vitest run   # UI library
+cd apps/docs && npx tsc --noEmit && npx vitest run     # Docs scripts
+cd mcp-server && npx tsc --noEmit && npx vitest run    # MCP server (vitest does not type-check)
 cd web && npx playwright test          # E2E (needs WASM)
 ```
 
@@ -41,7 +41,7 @@ Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_K
 
 Optional feature flags (defaults noted below):
 - `NEXT_PUBLIC_USE_DEEP_GENERATION=true` — route GDD, world builder, and cutscene generators to Opus 5 (`AI_MODEL_DEEP`) instead of Sonnet 5 (`AI_MODEL_PRIMARY`). See `docs/decisions/2026-05-01-opus-deep-tier.md` (including the 2026-09-02 Claude 5 addendum). Any value other than the exact string `"true"` leaves the flag off.
-- `QSTASH_TOKEN` + `QSTASH_CURRENT_SIGNING_KEY` + `QSTASH_NEXT_SIGNING_KEY` — Upstash QStash credentials for durable server-side generation callbacks (PF-906). Set all three in Vercel (Production + Preview), plus `NEXT_PUBLIC_APP_URL` to your public origin, to enable. Leave any unset and the feature is fully dormant — the client-side poller remains the only completion path. Runbook: `docs/guides/qstash-setup.md`.
+- `QSTASH_TOKEN` + `QSTASH_CURRENT_SIGNING_KEY` + `QSTASH_NEXT_SIGNING_KEY` — Upstash QStash credentials for durable server-side generation callbacks (PF-906). Set all three in Vercel (Production + Preview), plus `NEXT_PUBLIC_APP_URL` to your public origin, to enable. Leave any unset and the feature is fully dormant — the client-side poller remains the only completion path. When set, `GET /api/jobs` reports `durableCompletionEnabled: true`, durable jobs read their own row (`GET /api/jobs/[id]`) before the provider status route, and a job the callback finished while no tab was open is returned by `?status=active` (terminal, `imported = 0`) and imported/refunded by `useGenerationPolling`'s completion-sync effect on the next load (#8892). Runbook: `docs/guides/qstash-setup.md`.
 - `ANTHROPIC_WIF_FEDERATION_RULE_ID` + `ANTHROPIC_WIF_ORGANIZATION_ID` + `ANTHROPIC_WIF_SERVICE_ACCOUNT_ID` (optional `ANTHROPIC_WIF_WORKSPACE_ID`) — Anthropic Workload Identity Federation for the platform Anthropic key (#8858): the direct-backend chat client, and `getPlatformKey('anthropic')` in `web/src/lib/keys/resolver.ts`, exchange the Vercel OIDC token for a short-lived Bearer token (`web/src/lib/ai/wifCredential.ts`) instead of using the static key. Set all three to enable. Leave ANY of them unset and the feature is fully dormant — no network call, and `ANTHROPIC_API_KEY` stays the sole path; a partial set logs a startup warning. A failed exchange is reported to Sentry and falls back to `ANTHROPIC_API_KEY`, so keep that key set: it is the fallback, and the capability-availability tables in `web/src/lib/config/providers.ts` and `directBackend.getApiKey()` still read it (running federation-only is out of scope). The names are this app's, not the Anthropic SDKs' `ANTHROPIC_FEDERATION_RULE_ID` family. Runbook: `docs/guides/anthropic-wif-setup.md`.
 - `POSTHOG_PERSONAL_API_KEY` + `NEXT_PUBLIC_POSTHOG_KEY` — enables the local PostHog flag evaluator (`web/src/lib/flags/posthogFlags.ts`, PF-971 / #8952): a `deep-generation-tier` flag that overrides `NEXT_PUBLIC_USE_DEEP_GENERATION` (see the addendum in `docs/decisions/2026-05-01-opus-deep-tier.md`), and per-provider kill switches named `provider-kill-switch-<provider>` (e.g. `provider-kill-switch-elevenlabs`) that `createGenerationHandler` checks before token deduction. Both vars must be set to activate; omitting either (or both) keeps the evaluator dormant — `getBooleanFlag()` returns the caller's default with zero network I/O. Only a safe subset of PostHog targeting is evaluated locally (full rollout, 0% rollout, or a single `tier` exact-match filter); anything else falls back to the default with a one-time warn log.
 - `BILLING_METERS_ENABLED=true` — reports confirmed generation token usage to the Stripe `generation_tokens` billing meter for revenue reconciliation (PF-977/PF-978, #8969/#8970). Requires the meter to exist in Stripe first — run `web/scripts/provision-billing-meter.ts` once per mode (test, then live) before flipping this on in that mode. Any value other than the exact string `"true"` leaves reporting fully dormant — `web/src/lib/billing/meterEvents.ts`'s `isBillingMetersEnabled()` returns `false` and `reportGenerationUsage()` no-ops immediately. Runbook: `docs/guides/billing-meters-setup.md`.
@@ -49,6 +49,7 @@ Optional feature flags (defaults noted below):
 - `NEXT_PUBLIC_MCP_BRIDGE=true` — lets a **production** build attach the editor tab to the local MCP relay (#9293). Outside production the bridge is available without the flag; in either case it is inert until the tab is opened with `?mcp=<token>` AND the person approves the in-tab consent prompt. Any value other than the exact string `"true"` leaves it off in production. The gate is `mcpBridgeEnabled()` in `web/src/lib/mcp/bridgeOptIn.ts`, and it must read `process.env.NEXT_PUBLIC_MCP_BRIDGE` as a **literal member expression** — Next.js only substitutes fully-qualified `process.env.NEXT_PUBLIC_*`, so an aliased or injected `env` object reads `{}` in the browser and the gate fails OPEN. A test pins the source shape because no runtime test can see this.
 - `NEXT_PUBLIC_MCP_RELAY_URL` — overrides the relay the editor dials (default `ws://127.0.0.1:3001/api/mcp/ws`). Same literal-member-expression rule.
 - `MCP_RELAY_TOKEN` (≥32 chars, required), `MCP_RELAY_PORT`, `MCP_RELAY_EDITOR_ORIGINS` — server-side, read by `npm run relay` in `mcp-server/`. Never set in Vercel: the relay is loopback-only. Setup: `docs/guides/mcp-server-setup.md`.
+- `NEXT_PUBLIC_SCRIPT_ISOLATION=sandboxed-origin` — opt-in isolation boundary for editor game scripts (#8700); **default off** (`revoke`, today's same-origin worker). **Do not enable it for production users until it works in WebKit/Safari:** CI (run 35997735154; re-measured in run 36007182328, WebKit job 107658645036, head 8b7869d8, after the spec stopped answering the frame's `blob:` worker load with a fake body, which ruled the harness out) shows the sandboxed transport running scripts in Chromium and Firefox and NOT in WebKit, where the worker fails to start with a `worker-error`, so it fails closed — Play stops with the "can't run in this browser" creator message (`SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE`, which offers no retry) and nothing is sent — and a Safari user cannot run game scripts at all. The spec asserts that fail-closed path in WebKit. Only the exact strings `sandboxed-origin` and `ast` are recognised; unset, empty, `true`, `TRUE`, `1` or anything else stays `revoke`. `sandboxed-origin` runs the same `scriptWorker.ts` as a `blob:` worker inside a `sandbox="allow-scripts"` iframe whose own CSP, delivered in the srcdoc, is `connect-src 'none'` with no script host. The frame has an opaque origin, so it cannot read the app's cookies or storage (`document.cookie` and `localStorage` are unavailable to it), and the policy refuses every network request, so no request leaves the frame for any credential to ride on. `ast` is reserved — not implemented — and runs the sandboxed transport with a plain-language notice in the script console (the mode and issue go to the devtools). A sandbox that fails to start stops Play with one creator-facing message chosen by the host's boot reason: a worker the browser refused (`worker-error`, the WebKit shape) gets `SCRIPT_SANDBOX_UNSUPPORTED_MESSAGE`; a build shipped without the bundled worker (`not-bundled`) gets `SCRIPT_SANDBOX_UNAVAILABLE_MESSAGE`, also with no retry; a boot timeout or a failed worker-source load gets `SCRIPT_SANDBOX_START_FAILED_MESSAGE` (press Play again / reload). `SANDBOX_BOOT_TIMEOUT_MS` must stay below the runner's `WATCHDOG_TIMEOUT_MS` (asserted in `useScriptRunner.test.ts`). Read only in `getScriptIsolationMode()` (`web/src/lib/scripting/sandboxConfig.ts`) as a literal member expression, pinned by `sandboxConfig.test.ts`. The worker ships as text: `web/scripts/sandbox-worker-loader.cjs` replaces `scriptWorkerSource.bundle.ts` at build time under both webpack and Turbopack (`next.config.ts`; wiring pinned by `sandboxWorkerLoader.test.ts`).
 - `CRON_SECRET` — activates the synthetic health monitor. `isAuthorizedCron()` in `web/src/app/api/cron/health-monitor/route.ts` fails **closed**: with the variable unset every scheduled invocation is answered `401`, which is the state production was in when last checked (2026-09-05, #9118). Earlier 401s have a different cause - see the runbook. Setting it is an owner-only action with an evidence checklist. Runbook: `docs/guides/health-monitor-cron.md`.
 
 Always-on protections & observability (not env-gated):
@@ -94,6 +95,7 @@ creator's scripts by design — the sandbox below is the only control there.
 | Per-frame command cap | `MAX_COMMANDS_PER_FRAME` | `scriptSecurity.test.ts` |
 | Loop watchdog | `loopGuards.ts` | `loopGuards.test.ts`, `loopWatchdog.test.ts` |
 | Source size cap (512 KiB) | `MAX_SCRIPT_SOURCE_BYTES` | `scriptWorker.ts` |
+| Sandboxed origin — **opt-in, off by default, not for production until WebKit works** (`NEXT_PUBLIC_SCRIPT_ISOLATION=sandboxed-origin`) | `sandboxOrigin.ts`, `buildSandboxFrameContentSecurityPolicy()` in `csp.ts` | `sandboxOrigin.test.ts`, `sandboxConfig.test.ts`, `sandboxWorkerLoader.test.ts`, `e2e/tests/script-sandbox-isolation.spec.ts` |
 
 There is **no rate limiter**. Earlier comments claimed one; it has never existed.
 
@@ -101,7 +103,24 @@ There is **no rate limiter**. Earlier comments claimed one; it has never existed
 `(0).constructor.constructor('return fetch')()` still resolves. This is stated
 in `sandboxGlobals.ts` and documented (not prevented) by the
 "nested Function constructor limitation" test in `scriptSandbox.test.ts`. Real
-containment requires a different execution substrate — tracked at #8700.
+containment requires a different execution substrate — tracked at #8700. That
+substrate now exists behind a flag: under `NEXT_PUBLIC_SCRIPT_ISOLATION=
+sandboxed-origin` the escape still reaches a live `fetch`, but the frame's CSP
+refuses every request, independent of `revokeNetworkGlobals()`, so no request
+leaves the frame for any credential to ride on; and the frame's origin is opaque
+(`null`), so it cannot read the app's cookies or storage. The refused requests
+and the `null` origin are asserted in Chromium and Firefox by
+`e2e/tests/script-sandbox-isolation.spec.ts` (CI run 35997735154 showed both
+running scripts through the frame). It does **not** run scripts in
+WebKit/Safari: the worker fails to start (re-measured in run 36007182328 with
+the frame's real `blob:` worker load passed through, so the test harness is
+not the cause), so the transport fails closed (Play
+stops with the creator message, nothing is sent), which the same spec asserts
+in WebKit. That makes it a boundary for Chromium and Firefox only, and the flag
+must stay off for production users until WebKit support exists. With the flag
+unset — the default — the table above is still the whole story. The sandbox attribute must stay
+exactly `allow-scripts` (adding `allow-same-origin` hands back the editor's
+origin) and the CSP must stay in the srcdoc (a route header cannot reach it).
 
 **Suppression.** GitHub does not honour `// lgtm[...]` or `// codeql[...]`
 comments unless the language's `AlertSuppression.ql` runs alongside the analysis

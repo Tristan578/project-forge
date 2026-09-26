@@ -19,6 +19,7 @@ import {
   sanitizeChatInput,
   sanitizeSystemPrompt,
   sanitizeToolText,
+  sanitizeSceneContext,
   validateBodySize,
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
@@ -39,6 +40,7 @@ import {
 } from '@/lib/ai/toolApprovalSignature';
 import { MCP_COMMAND_COUNT, MCP_CATEGORY_COUNT } from '@/lib/mcp/manifestStats';
 import { isPremiumModel, AI_MODEL_DEEP, AI_MODEL_PRIMARY } from '@/lib/ai/models';
+import { insertSceneContextMessage, buildTrailingSceneContextMessage } from '@/lib/ai/cachedContext';
 import { isDeepTierEnabled } from '@/lib/ai/deepTier';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
 import { isCommandAvailable } from '@/lib/config/providers';
@@ -659,6 +661,14 @@ async function POST_impl(request: NextRequest) {
   // Only deduct tokens / check tier when using the direct (platform key) path.
   const chatRoute = resolveChatRoute(model);
   const usingDirectBackend = !chatRoute || chatRoute.backendId === 'direct';
+  // Mid-conversation system messages (#8859): on the direct backend with the
+  // premium model, the scene context leaves the leading prefix and goes in as a
+  // `role: "system"` entry immediately BEFORE the latest user turn, so an
+  // entity edit no longer invalidates the cached history. The gateway path flattens instruction blocks to a plain string
+  // (no cache controls at all), and the non-premium models are not documented
+  // for mid-conversation system messages, so both keep the leading embed.
+  const canUseMidConversationSystem =
+    usingDirectBackend && isPremiumModel(chatRoute?.modelId ?? model);
 
   if (usingDirectBackend) {
     try {
@@ -768,13 +778,21 @@ async function POST_impl(request: NextRequest) {
     { text: effectiveSystemPrompt, tier: 'long' },
   ];
 
-  if (sceneContext && typeof sceneContext === 'string') {
-    // sceneContext is client-supplied structured data (engine scene state).
-    // Strip control characters (security) but do NOT apply the 10k system
-    // prompt length cap — scene context for complex scenes can legitimately
-    // be 50k+ chars. The total input budget (MAX_INPUT_CHARS = 2M) at
-    // step 5b is the real size guard for the entire conversation.
-    const sanitizedContext = sceneContext.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  if (sceneContext && typeof sceneContext === 'string' && !canUseMidConversationSystem) {
+    // Leading-prefix embed, kept for every path that cannot use a
+    // mid-conversation system message (gateway backend, non-premium models).
+    // On the premium direct path the scene goes in just before the latest
+    // user turn instead — see `messagesForAgent` below.
+    // sceneContext is client-supplied and user-authored (entity names, script
+    // text, whatever a .forge file or modified client sends), so it goes
+    // through the SAME `sanitizeSceneContext` the premium placement uses:
+    // NFKC, control characters stripped, `&` `<` `>` and angle lookalikes
+    // escaped, otherwise verbatim (nothing redacted — see the function for
+    // why). No 10k system-prompt length cap — scene
+    // context for complex scenes can legitimately be 50k+ chars. The total
+    // input budget (MAX_INPUT_CHARS = 2M) at step 5b is the real size guard
+    // for the entire conversation.
+    const sanitizedContext = sanitizeSceneContext(sceneContext);
     // Prepend a per-user nonce so the cached prefix is unique per user even
     // under the shared platform Anthropic API key. Anthropic's prompt cache
     // is scoped to API key / org granularity, so without this two users with
@@ -844,6 +862,17 @@ async function POST_impl(request: NextRequest) {
 
   // 8. Convert messages
   const modelMessages = buildModelMessages(messages);
+  // 8a. Mid-conversation scene context (#8859). Same escaping + nonce as the
+  // leading embed, plus data framing (and an annotation when the scene text
+  // resembles instructions), inserted immediately BEFORE the latest
+  // user turn — never after it, so the highest-recency slot stays the user's
+  // own message and user-authored scene text cannot pose as the last word.
+  // Null (and `messagesForAgent === modelMessages`) whenever the leading embed
+  // is the one in effect.
+  const sceneMessage = canUseMidConversationSystem
+    ? buildTrailingSceneContextMessage(sceneContext, auth.ctx.user.id)
+    : null;
+  const messagesForAgent = insertSceneContextMessage(modelMessages, sceneMessage);
 
   // 8b. Bind every approved approval to the input the user actually approved.
   //
@@ -888,7 +917,7 @@ async function POST_impl(request: NextRequest) {
   let resumeProducedToolCalls = false;
   try {
     const result = await agent.stream({
-      messages: modelMessages,
+      messages: messagesForAgent,
       onStepFinish: async ({ usage, toolCalls }) => {
         // Tracks whether the turn did any real work, for the paused-turn
         // refund below. A denial resume that only narrates "I didn't do that"

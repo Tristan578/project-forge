@@ -96,15 +96,15 @@ describe('TokenDepletedModal', () => {
     expect(pushMock).toHaveBeenCalledExactlyOnceWith('/pricing');
   });
 
-  // Asserted as a literal, not as SETTINGS_BILLING_HREF: the point of the test
+  // Asserted as a literal, not as SETTINGS_TOKENS_HREF: the point of the test
   // is that the destination is a real, reachable URL, and importing the same
   // constant the component uses would make it pass for any value.
-  it('navigates to the billing tab on /settings when Buy Token Pack is clicked', () => {
+  it('navigates to the Tokens tab on /settings, where the packs are, when Buy Token Pack is clicked', () => {
     mockChatState.showTokenDepletedModal = true;
     render(<TokenDepletedModal />);
     fireEvent.click(screen.getByTestId('buy-token-pack-button'));
     expect(mockChatState.setShowTokenDepletedModal).toHaveBeenCalledWith(false);
-    expect(pushMock).toHaveBeenCalledExactlyOnceWith('/settings?tab=billing');
+    expect(pushMock).toHaveBeenCalledExactlyOnceWith('/settings?tab=tokens');
   });
 
   it('navigates to the API-keys tab on /settings when BYOK is clicked', () => {
