@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@/test/utils/componentTestUtils';
 import { TutorialOverlay } from '../TutorialOverlay';
 import { HelpMenu } from '../HelpMenu';
+import { PlayControls } from '../PlayControls';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore, setCommandDispatcher } from '@/stores/editorStore';
 import { TUTORIAL_CAPABILITIES, TUTORIALS } from '@/data/tutorials';
@@ -366,6 +367,71 @@ describe('capabilities tour blocks the controls it points at (#10171)', () => {
       reached = document.activeElement === play;
     }
     expect(reached).toBe(true);
+  });
+
+  // Blocking is the capabilities tour's opt-in, not a rule inferred from a step
+  // having no actionRequired. The older tutorials end on a highlight-only card
+  // that says "Press Stop" while the engine is still in play mode (their
+  // press-play step auto-advances on entering it); blocking there would leave
+  // the user unable to do what the card asks.
+  it("an older tutorial's closing 'Press Stop' card lets the real Stop button and Tab through", async () => {
+    const user = userEvent.setup();
+    const stop = vi.fn();
+    const originalStop = useEditorStore.getState().stop;
+    useEditorStore.setState({ engineMode: 'play', stop });
+    try {
+      render(
+        <>
+          <PlayControls />
+          <TutorialOverlay />
+        </>,
+      );
+      const steps = TUTORIALS.find((t) => t.id === 'first-scene')!.steps;
+      const last = steps.length - 1;
+      expect(steps[last]!.id).toBe('congratulations');
+      expect(steps[last]!.actionRequired).toBeUndefined();
+      expect(steps[last]!.description).toContain('Press Stop');
+      act(() => {
+        useOnboardingStore.setState({ activeTutorial: 'first-scene', tutorialStep: last });
+      });
+
+      expect(screen.getByTestId('tutorial-backdrop').className).toContain('pointer-events-none');
+      expect(screen.getByTestId('tutorial-bubble').getAttribute('aria-modal')).toBeNull();
+
+      const stopButton = screen.getByRole('button', { name: 'Stop' });
+      expect(stopButton).not.toBeDisabled();
+      await user.click(stopButton);
+      expect(stop).toHaveBeenCalledTimes(1);
+
+      let reached = false;
+      for (let i = 0; i < 8 && !reached; i++) {
+        await user.tab();
+        reached = document.activeElement === stopButton;
+      }
+      expect(reached).toBe(true);
+    } finally {
+      useEditorStore.setState({ engineMode: 'edit', stop: originalStop });
+    }
+  });
+
+  it('no step of any other tutorial blocks the page', () => {
+    render(<TutorialOverlay />);
+    const others = TUTORIALS.filter((t) => t.id !== 'capabilities');
+    expect(others.length).toBeGreaterThan(0);
+    let checked = 0;
+    for (const t of others) {
+      for (let i = 0; i < t.steps.length; i++) {
+        act(() => {
+          useOnboardingStore.setState({ activeTutorial: t.id, tutorialStep: i });
+        });
+        expect(screen.getByTestId('tutorial-backdrop').className, `${t.id}:${t.steps[i]!.id}`).toContain(
+          'pointer-events-none',
+        );
+        expect(screen.getByTestId('tutorial-bubble').getAttribute('aria-modal')).toBeNull();
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(others.length);
   });
 });
 

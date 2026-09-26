@@ -38,6 +38,18 @@ export interface TutorialFlow {
    * sets this to false and leaves the checklist alone (#10171). Default: true.
    */
   completesOnboarding?: boolean;
+  /**
+   * Whether this tutorial's highlight-only steps (those without an
+   * `actionRequired`) block the page: backdrop takes the pointer, clicks
+   * outside the bubble are stopped, Tab is trapped and the bubble is
+   * `aria-modal`. Opt-in, set only by a tour that promises it changes nothing,
+   * so a stray click on a highlighted control cannot break that promise
+   * (#10171). Every other tutorial stays non-modal: their closing cards say
+   * "Press Stop" while the engine is still in play mode, and a blocked page
+   * would leave the user unable to do it. Steps with an `actionRequired` never
+   * block, even here. Default: false.
+   */
+  blocksPage?: boolean;
 }
 
 // Tutorial 1: Your First Scene
@@ -327,6 +339,8 @@ export const TUTORIAL_PHYSICS: TutorialFlow = {
 // dispatches a command, calls AI or changes the scene; the user only reads
 // and presses Next. That is the whole contract: a curious creator can see
 // where AI building, playing and exporting live before spending tokens.
+// `blocksPage: true` makes that hold even against a stray click or Tab onto a
+// highlighted control; no other tutorial sets it.
 //
 // Targets are dedicated data-testids, not labels: `aria-label="Play"` also
 // matches the Adaptive Music inspector's preview button, and a paused editor
@@ -345,6 +359,7 @@ export const TUTORIAL_CAPABILITIES: TutorialFlow = {
   persona: 'beginner',
   tags: ['Overview', 'Essential'],
   completesOnboarding: false,
+  blocksPage: true,
   steps: [
     {
       id: 'intro',

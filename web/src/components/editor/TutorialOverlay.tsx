@@ -233,12 +233,15 @@ export function TutorialOverlay() {
   // Early return after all hooks
   if (!activeTutorialId || !tutorial || !currentStep) return null;
 
-  // A step that asks the user to DO something (actionRequired) lets the page
-  // through: the click on the highlighted control is the step. Every other
-  // step only points, so it blocks the page, or the "What can SpawnForge do?"
-  // tour's promise that it spends nothing would be one stray click on the
-  // highlighted Quick Start, Play or Export away from false (#10171).
-  const blocksPage = !currentStep.actionRequired;
+  // Blocking is an explicit opt-in on the tutorial (`blocksPage`), set only by
+  // the "What can SpawnForge do?" tour: its promise that it spends nothing
+  // would otherwise be one stray click on the highlighted Quick Start, Play or
+  // Export away from false (#10171). It is NOT inferred from a step lacking an
+  // actionRequired: the older tutorials end on such a step ("Press Stop to
+  // return to Edit Mode") while the engine is still playing, and must leave
+  // the Stop button reachable, exactly as before. A step that asks the user to
+  // DO something never blocks: the click on the real control is the step.
+  const blocksPage = tutorial.blocksPage === true && !currentStep.actionRequired;
   const pointerEvents = blocksPage ? 'pointer-events-auto' : 'pointer-events-none';
 
   return (
@@ -411,7 +414,7 @@ interface TutorialBubbleProps {
   actionCompleted: boolean;
   isLastStep: boolean;
   highlightRect: DOMRect | null;
-  /** Highlight-only step: the page behind is blocked and focus stays in the bubble. */
+  /** The tutorial opts in to blocking and this step only points: the page behind is blocked and focus stays in the bubble. */
   blocksPage: boolean;
   onNext: () => void;
   onSkip: () => void;
@@ -478,7 +481,7 @@ function TutorialBubble({
     else dialogRef.current?.focus();
   }, [stepKey]);
 
-  // A highlight-only step blocks the page. The backdrop and ring already take
+  // A blocking step (see blocksPage above) blocks the page. The backdrop and ring already take
   // the pointer; this also covers a control stacked above them and the
   // keyboard. Anything aimed outside the bubble is stopped in the capture
   // phase, before React or the engine sees it: a click (including the one
