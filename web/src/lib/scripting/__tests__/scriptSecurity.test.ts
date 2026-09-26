@@ -1447,6 +1447,28 @@ describe('Script Sandbox Security: Memory Limit Detection', () => {
     expect(memError).toBeDefined();
   });
 
+  it('a tick stopped by the memory guard still ends with tick_done', () => {
+    // The memory guard leaves the tick early; the tick still returned, so the
+    // runner's watchdog must still hear about it (#10286).
+    sendToWorker({ type: 'set_limits', memoryLimitMb: 1 });
+    sendToWorker({
+      type: 'init',
+      scripts: [{ entityId: 'mem-hog', enabled: true, source: `function onUpdate() {}` }],
+      entities: { 'mem-hog': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { 'mem-hog': { name: 'MemHog', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    const originalPerformance = (globalThis as Record<string, unknown>).performance;
+    vi.stubGlobal('performance', { now: () => 0, memory: { usedJSHeapSize: 2 * 1024 * 1024 } });
+    sendToWorker({ type: 'tick', dt: 0.016, elapsed: 0.016, entities: {} });
+    vi.stubGlobal('performance', originalPerformance);
+
+    expect(getMessages('error').some(e => typeof e.message === 'string' && e.message.includes('memory limit exceeded'))).toBe(true);
+    expect(postedMessages[postedMessages.length - 1]).toEqual({ type: 'tick_done' });
+    expect(getMessages('tick_done')).toHaveLength(1);
+  });
+
   it('memory error message includes heap usage and limit', () => {
     sendToWorker({ type: 'set_limits', memoryLimitMb: 1 });
 
