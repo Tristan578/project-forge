@@ -9,6 +9,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import type { TemplateLoadResult } from '@/stores/slices/sceneSlice';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import { TEMPLATE_REGISTRY } from '@/data/templates';
+import { offerCustomizeWithAi } from '@/lib/chat/customizeWithAi';
 
 export interface OnboardingWizardProps {
   /**
@@ -194,6 +195,10 @@ export function OnboardingWizard({ onComplete, onStartAi }: OnboardingWizardProp
         setTemplateError(result.error);
         return;
       }
+      // Offer to make the starter theirs via a pre-filled chat draft (#10172).
+      // Only on success: a failed load has nothing to customise.
+      offerCustomizeWithAi(TEMPLATE_REGISTRY.find((t) => t.id === templateId)?.name ?? templateId);
+
       trackEvent(AnalyticsEvent.TEMPLATE_USED, { templateId });
       trackEvent(AnalyticsEvent.TEMPLATE_APPLIED, { templateId, source: 'onboarding' });
       onComplete();

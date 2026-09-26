@@ -162,6 +162,12 @@ interface ChatState {
   showEntityPicker: boolean;
   entityPickerFilter: string;
   pendingEntityRefs: Record<string, string>; // @DisplayName → entity ID for current input
+  /**
+   * Text waiting to be placed in the composer (#10172). `ChatInput` adopts a
+   * non-empty draft once, after any text the user already typed, and clears it.
+   * Never sent automatically: the user reviews the token estimate and sends.
+   */
+  composerDraft: string;
   conversations: Conversation[];
   activeConversationId: string | null;
   /** Non-null while a turn is parked on a server-side tool approval (PF-8860). */
@@ -195,6 +201,7 @@ interface ChatState {
   setEntityPickerFilter: (filter: string) => void;
   addEntityRef: (displayName: string, entityId: string) => void;
   clearEntityRefs: () => void;
+  setComposerDraft: (text: string) => void;
   createConversation: (name?: string) => string;
   switchConversation: (conversationId: string) => void;
   deleteConversation: (conversationId: string) => void;
@@ -871,6 +878,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showEntityPicker: false,
   entityPickerFilter: '',
   pendingEntityRefs: {},
+  composerDraft: '',
   conversations: [],
   activeConversationId: null,
   pausedTurnState: null,
@@ -1404,6 +1412,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ pendingEntityRefs: refs });
   },
   clearEntityRefs: () => set({ pendingEntityRefs: {} }),
+  setComposerDraft: (text) => set({ composerDraft: text }),
 
   createConversation: (name?: string) => {
     const { messages, conversations, activeConversationId } = get();

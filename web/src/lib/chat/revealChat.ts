@@ -1,9 +1,12 @@
 /**
  * Bring the chat into view on whichever layout is mounted.
  *
- * Two surfaces show the chat, and each layout renders only one of them:
+ * Two surfaces show the chat:
  * - the compact drawer renders whichever `rightPanelTab` is selected
- *   (`RightPanelTabs` / `RightPanelContent` mount only inside it);
+ *   (`RightPanelTabs` / `RightPanelContent` mount only inside it). The drawer
+ *   keeps its children mounted while closed, and this does not open it, so on
+ *   compact a hidden chat panel mounts alongside the overlay (see
+ *   `ChatInput`'s `draftTarget`);
  * - the desktop dockview has no chat panel at all, so `rightPanelTab` renders
  *   nothing there and `ChatOverlay` is the only chat surface.
  *

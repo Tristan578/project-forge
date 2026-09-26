@@ -331,7 +331,9 @@ function ChatOverlay() {
         </div>
         <div className="flex-1 overflow-hidden">
           <Suspense fallback={<div className="p-4 text-zinc-400">Loading chat...</div>}>
-            <ChatPanel />
+            {/* The overlay is what revealChat() always opens, so it is the one
+                composer that takes a "Customize with AI" draft (#10172). */}
+            <ChatPanel draftTarget />
           </Suspense>
         </div>
       </div>

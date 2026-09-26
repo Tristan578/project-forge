@@ -30,6 +30,13 @@ vi.mock('@/lib/analytics/posthog', async (importOriginal) => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }));
 
+// The toast's own behaviour (draft + reveal, never a send) is pinned in
+// customizeWithAi.test.ts; here only WHEN the gallery offers it (#10172).
+const mockOfferCustomizeWithAi = vi.fn();
+vi.mock('@/lib/chat/customizeWithAi', () => ({
+  offerCustomizeWithAi: (...args: unknown[]) => mockOfferCustomizeWithAi(...args),
+}));
+
 vi.mock('@/data/templates', () => ({
   TEMPLATE_REGISTRY: [
     {
@@ -193,6 +200,15 @@ describe('TemplateGallery', () => {
       expect(mockTrackEvent).not.toHaveBeenCalled();
     });
 
+    it('offers no "Customize with AI" for a load that failed', async () => {
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
+      await screen.findByRole('alert');
+
+      expect(mockOfferCustomizeWithAi).not.toHaveBeenCalled();
+    });
+
     it('clears the error when the retry succeeds', async () => {
       render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
       fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
@@ -221,6 +237,16 @@ describe('TemplateGallery', () => {
         source: 'gallery',
       });
       expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('offers "Customize with AI" once, naming the template that loaded', async () => {
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click((await screen.findByText('Platformer')).closest('button')!);
+
+      await waitFor(() => expect(mockOnClose).toHaveBeenCalled());
+      expect(mockOfferCustomizeWithAi).toHaveBeenCalledTimes(1);
+      expect(mockOfferCustomizeWithAi).toHaveBeenCalledWith('Platformer');
     });
 
     it('blocks a second selection while a load is in flight', async () => {

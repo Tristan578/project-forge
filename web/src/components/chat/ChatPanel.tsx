@@ -56,7 +56,8 @@ function StreamingIndicator({ messages, loopIteration }: { messages: { role: str
   );
 }
 
-export function ChatPanel() {
+/** `draftTarget`: see `ChatInput` — only the chat overlay's panel sets it. */
+export function ChatPanel({ draftTarget = false }: { draftTarget?: boolean } = {}) {
   const messages = useChatStore((s) => s.messages);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const error = useChatStore((s) => s.error);
@@ -176,7 +177,7 @@ export function ChatPanel() {
       </div>
 
       {/* Input */}
-      <ChatInput />
+      <ChatInput draftTarget={draftTarget} />
     </div>
   );
 }
