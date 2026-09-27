@@ -402,7 +402,7 @@ export function createGenerationHandler<TParams, TResult>(
       // their otherwise-successful generation.
       await bindProviderJob(userId, resolvedProvider, providerJobId);
     } catch (err) {
-      captureException(err, { route, action: 'job_ownership_bind' });
+      captureException(err, { route, action: 'job_ownership_bind', providerJobId, userId });
     }
   }
 

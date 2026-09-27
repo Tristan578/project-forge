@@ -227,10 +227,18 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
       expect(mockBindProviderJob).not.toHaveBeenCalled();
     });
 
-    it('never fails the request when the bind write throws (bindProviderJob itself swallows and reports)', async () => {
+    it('never fails the request when the bind write throws (bindProviderJob itself swallows and reports), and reports enough to identify the job and user', async () => {
       mockBindProviderJob.mockRejectedValueOnce(new Error('db down'));
       const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
       expect(res.status).toBe(200);
+      expect(mockCapture).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({
+          action: 'job_ownership_bind',
+          providerJobId: 'task-123',
+          userId: 'user-1',
+        }),
+      );
     });
 
     it('still binds when QStash is unconfigured — ownership binding does not depend on the durable-callback feature flag', async () => {

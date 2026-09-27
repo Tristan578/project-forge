@@ -53,7 +53,7 @@ export async function bindProviderJob(
         .onConflictDoNothing()
     );
   } catch (err) {
-    captureException(err, { action: 'bind_provider_job', provider });
+    captureException(err, { action: 'bind_provider_job', provider, providerJobId, userId });
   }
 }
 
@@ -87,7 +87,7 @@ export async function verifyProviderJobOwner(
     );
     return rows.length > 0 && rows[0].userId === userId;
   } catch (err) {
-    captureException(err, { action: 'verify_provider_job_owner', provider });
+    captureException(err, { action: 'verify_provider_job_owner', provider, providerJobId, userId });
     return false;
   }
 }

@@ -76,6 +76,8 @@ describe('jobOwnership', () => {
       expect(mockCaptureException.mock.calls[0][1]).toMatchObject({
         action: 'bind_provider_job',
         provider: 'meshy',
+        providerJobId: 'task-abc',
+        userId: 'user-1',
       });
     });
   });
@@ -118,6 +120,8 @@ describe('jobOwnership', () => {
       expect(mockCaptureException.mock.calls[0][1]).toMatchObject({
         action: 'verify_provider_job_owner',
         provider: 'meshy',
+        providerJobId: 'task-abc',
+        userId: 'user-1',
       });
     });
 
