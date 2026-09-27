@@ -16,18 +16,24 @@ import {
   SIGNED_OUT_MESSAGE,
 } from '@/stores/slices/orchestratorSlice';
 import { SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
+import { signInHrefReturningTo } from '@/lib/navigation/authRoutes';
 
-/** Clerk's sign-in page (`app/sign-in`), public in `proxy.ts`. */
-const SIGN_IN_HREF = '/sign-in';
-
-/** The follow-up an orchestrator error names, as a link, or null when it names none. */
-export function orchestratorErrorAction(error: string): { label: string; href: string } | null {
+/**
+ * The follow-up an orchestrator error names, as a link, or null when it names
+ * none. `returnTo` is where sign-in should bring the user back to (the editor
+ * path they were building in); without it they land on the dashboard and have
+ * to find their project again.
+ */
+export function orchestratorErrorAction(
+  error: string,
+  returnTo?: string | null,
+): { label: string; href: string } | null {
   if (error === INSUFFICIENT_TOKENS_MESSAGE) return { label: 'Buy tokens', href: SETTINGS_TOKENS_HREF };
   // The message tells the user to check their balance, since the hold may or
   // may not have been taken; give them the way to.
   if (error === RESERVATION_UNCONFIRMED_MESSAGE) return { label: 'Check balance', href: SETTINGS_TOKENS_HREF };
   // Building again is refused until they do, so the way to is right here.
-  if (error === SIGNED_OUT_MESSAGE) return { label: 'Sign in', href: SIGN_IN_HREF };
+  if (error === SIGNED_OUT_MESSAGE) return { label: 'Sign in', href: signInHrefReturningTo(returnTo) };
   return null;
 }
 
@@ -48,7 +54,11 @@ export function errorReportsShortBalance(error: string | null): boolean {
  * classes.
  */
 export function OrchestratorErrorNotice({ error, className }: { error: string; className?: string }) {
-  const action = orchestratorErrorAction(error);
+  // Only ever rendered for a client-side error, so `window` is present; the
+  // guard keeps a server render from throwing if that ever changes.
+  const returnTo =
+    typeof window === 'undefined' ? null : `${window.location.pathname}${window.location.search}`;
+  const action = orchestratorErrorAction(error, returnTo);
   return (
     <div role="alert" className={className}>
       {error}

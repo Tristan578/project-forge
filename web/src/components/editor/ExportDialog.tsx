@@ -55,6 +55,9 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isExporting) {
+        // Consumed, so window-level listeners (the tutorial overlay's Escape =
+        // skip) know this key closed a dialog and was not meant for them.
+        e.preventDefault();
         onClose();
         return;
       }

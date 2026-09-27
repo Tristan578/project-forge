@@ -257,6 +257,78 @@ describe('TutorialOverlay', () => {
     expect(mockSkipTutorial).not.toHaveBeenCalled();
   });
 
+  // Arrows ARE the interaction on these controls: they change a slider's value
+  // or a radio group's selection, and must not also step the tour.
+  it.each([
+    ['a range input', () => Object.assign(document.createElement('input'), { type: 'range' })],
+    ['a radio input', () => Object.assign(document.createElement('input'), { type: 'radio' })],
+    ['a role=slider widget', () => {
+      const el = document.createElement('div');
+      el.setAttribute('role', 'slider');
+      el.tabIndex = 0;
+      return el;
+    }],
+    ['a tab inside a tablist', () => {
+      const list = document.createElement('div');
+      list.setAttribute('role', 'tablist');
+      const tab = document.createElement('button');
+      tab.setAttribute('role', 'tab');
+      list.appendChild(tab);
+      return tab;
+    }],
+  ])('leaves the arrow keys to %s', (_case, make) => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    const control = make();
+    document.body.appendChild(control.closest('[role="tablist"]') ?? control);
+    try {
+      fireEvent.keyDown(control, { key: 'ArrowLeft' });
+      fireEvent.keyDown(control, { key: 'ArrowRight' });
+      expect(mockRetreatTutorial).not.toHaveBeenCalled();
+      expect(mockCompleteTutorial).not.toHaveBeenCalled();
+      // Escape is not theirs, so it still skips the tour.
+      fireEvent.keyDown(control, { key: 'Escape' });
+      expect(mockSkipTutorial).toHaveBeenCalledOnce();
+    } finally {
+      (control.closest('[role="tablist"]') ?? control).remove();
+    }
+  });
+
+  // A tour step can point at a control that opens its own dialog (Export).
+  // That dialog's keys are its own: Escape closes it, not the tour.
+  it('ignores keys from inside another dialog', () => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    const other = document.createElement('div');
+    other.setAttribute('role', 'dialog');
+    const inside = document.createElement('button');
+    other.appendChild(inside);
+    document.body.appendChild(other);
+    try {
+      for (const key of ['Escape', 'ArrowLeft', 'ArrowRight']) fireEvent.keyDown(inside, { key });
+      expect(mockSkipTutorial).not.toHaveBeenCalled();
+      expect(mockRetreatTutorial).not.toHaveBeenCalled();
+      expect(mockCompleteTutorial).not.toHaveBeenCalled();
+    } finally {
+      other.remove();
+    }
+  });
+
+  it('still takes keys from inside its own bubble', () => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    fireEvent.keyDown(screen.getByRole('button', { name: /^(Next|Complete)$/ }), { key: 'Escape' });
+    expect(mockSkipTutorial).toHaveBeenCalledOnce();
+  });
+
+  // On an action step Next is disabled, so focus goes to the dialog itself:
+  // a keyboard user still lands in the tour, not on the page behind it.
+  it('focuses the dialog when Next is disabled on an action step', () => {
+    setupStore({ tutorialStep: 1 });
+    render(<TutorialOverlay />);
+    expect(document.activeElement).toBe(screen.getByRole('dialog'));
+  });
+
   it('still steps with the arrows from a button, and ignores modified or consumed keys', () => {
     setupStore({ tutorialStep: 2 });
     render(<TutorialOverlay />);
@@ -394,16 +466,28 @@ describe('TutorialOverlay bubble placement', () => {
     expect(b.maxHeight).toBe(1100 - b.bottom - GAP - EDGE);
   });
 
-  it('puts a right step beside its target when it fits', () => {
+  // Beside the target, vertically centred on it within a 380px budget:
+  // 300 + 20 - 190 = 130, and max-height is the room from there down.
+  it('puts a right step beside its target, centred on it', () => {
     const b = place('right', { left: 100, top: 300, width: 40, height: 40 }, { w: 1024, h: 768 });
     expect(b.left).toBe(b.right + GAP);
-    expect(b.top).toBeGreaterThanOrEqual(EDGE);
-    expect(b.top + b.maxHeight).toBeLessThanOrEqual(768 - EDGE);
+    expect(b.top).toBe(130);
+    expect(b.maxHeight).toBe(768 - EDGE - 130);
   });
 
-  it('puts a left step beside its target when it fits', () => {
+  it('puts a left step beside its target, centred on it', () => {
     const b = place('left', { left: 600, top: 300, width: 40, height: 40 }, { w: 1024, h: 768 });
     expect(b.left + b.width).toBe(600 - GAP);
+    expect(b.top).toBe(130);
+    expect(b.maxHeight).toBe(768 - EDGE - 130);
+  });
+
+  // Centring on a target near the bottom would run past the viewport, so the
+  // budget is pulled up to end at the bottom margin: 768 - 16 - 380 = 372.
+  it('keeps a side step on screen when its target is near the bottom', () => {
+    const b = place('right', { left: 100, top: 700, width: 40, height: 40 }, { w: 1024, h: 768 });
+    expect(b.top).toBe(372);
+    expect(b.maxHeight).toBe(380);
   });
 
   // No room beside the target on a phone: clamping alone would slide the

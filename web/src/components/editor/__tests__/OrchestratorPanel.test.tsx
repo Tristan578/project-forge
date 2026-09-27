@@ -417,6 +417,7 @@ describe('OrchestratorPanel', () => {
     render(<OrchestratorPanel />);
 
     expect(screen.getByRole('alert').textContent).toContain(SIGNED_OUT_MESSAGE);
+    expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toMatch(/^\/sign-in(\?|$)/);
     expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
     expect(screen.getAllByRole('link', { name: /buy tokens/i })).toHaveLength(1);
   });
