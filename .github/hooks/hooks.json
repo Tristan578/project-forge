@@ -19,7 +19,7 @@
         "timeoutSec": 5
       }
     ],
-    "postToolUse": [
+    "agentStop": [
       {
         "type": "command",
         "bash": "bash .claude/hooks/on-stop.sh",
