@@ -26,7 +26,7 @@ export interface TutorialStep {
   instruction: string;
   triggerCondition: string;
   completionCondition: string;
-  hint?: string;
+  hint?: string | undefined;
 }
 
 export interface TutorialPlan {

@@ -14,15 +14,15 @@ export type TaskAssignee = 'user' | 'ai';
 export interface EditorTask {
   id: string;
   title: string;
-  description?: string;
+  description?: string | undefined;
   status: TaskStatus;
   assignee: TaskAssignee;
   createdAt: number;
   updatedAt: number;
   /** 0-100 progress indicator, primarily for AI tasks */
-  progress?: number;
+  progress?: number | undefined;
   /** Completion message set when the task is done */
-  result?: string;
+  result?: string | undefined;
 }
 
 interface TaskState {

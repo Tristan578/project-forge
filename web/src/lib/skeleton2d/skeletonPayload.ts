@@ -167,21 +167,21 @@ export interface SourceSkin2d {
 export interface SourceAttachment2d {
   type?: string;
   textureId?: string;
-  offset?: readonly number[];
-  rotation?: number;
-  scale?: readonly number[];
-  vertices?: readonly (readonly number[])[];
-  uvs?: readonly (readonly number[])[];
-  triangles?: readonly number[];
-  weights?: readonly { bones?: readonly string[]; weights?: readonly number[] }[];
+  offset?: readonly number[] | undefined;
+  rotation?: number | undefined;
+  scale?: readonly number[] | undefined;
+  vertices?: readonly (readonly number[])[] | undefined;
+  uvs?: readonly (readonly number[])[] | undefined;
+  triangles?: readonly number[] | undefined;
+  weights?: readonly { bones?: readonly string[]; weights?: readonly number[] }[] | undefined;
 }
 
 export interface SourceIkConstraint2d {
   name?: string;
-  boneChain?: readonly string[];
-  targetEntityId?: string | number;
-  bendDirection?: number;
-  mix?: number;
+  boneChain?: readonly string[] | undefined;
+  targetEntityId?: string | number | undefined;
+  bendDirection?: number | undefined;
+  mix?: number | undefined;
 }
 
 const BLEND_MODES: readonly WireBlendMode2d[] = ['normal', 'additive', 'multiply', 'screen'];

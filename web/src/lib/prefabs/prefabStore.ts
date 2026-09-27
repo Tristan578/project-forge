@@ -36,12 +36,12 @@ export interface PrefabSnapshot {
     rotation: [number, number, number];
     scale: [number, number, number];
   };
-  material?: MaterialData;
-  light?: LightData;
-  physics?: PhysicsData;
-  script?: ScriptData;
-  audio?: AudioData;
-  particle?: ParticleData;
+  material?: MaterialData | undefined;
+  light?: LightData | undefined;
+  physics?: PhysicsData | undefined;
+  script?: ScriptData | undefined;
+  audio?: AudioData | undefined;
+  particle?: ParticleData | undefined;
 }
 
 export interface Prefab {

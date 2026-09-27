@@ -12,7 +12,7 @@ import type { LoopPoint } from './audioTypes';
  */
 export function detectLoopPoints(
   buffer: AudioBuffer,
-  options?: { maxResults?: number; minLoopDuration?: number }
+  options?: { maxResults?: number | undefined; minLoopDuration?: number | undefined }
 ): LoopPoint[] {
   const maxResults = options?.maxResults ?? 5;
   const minLoopDurationSec = options?.minLoopDuration ?? 0.5;

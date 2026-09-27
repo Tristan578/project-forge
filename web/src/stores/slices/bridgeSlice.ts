@@ -72,7 +72,7 @@ export interface BridgeOperationInfo {
   operationName: string;
   status: 'running' | 'completed' | 'failed';
   startedAt: number;
-  error?: string;
+  error?: string | undefined;
 }
 
 export interface BridgeSlice {

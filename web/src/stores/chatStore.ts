@@ -65,7 +65,7 @@ export interface ToolCallStatus {
    */
   status: ToolCallStatusName;
   result?: unknown;
-  error?: string;
+  error?: string | undefined;
   undoable: boolean;
   /**
    * Set when the server blocks this call (and retained after the decision, so
@@ -73,7 +73,7 @@ export interface ToolCallStatus {
    * and throws `InvalidToolApprovalError` for one it never issued, so a
    * decision whose call has no `approvalId` is dropped rather than sent.
    */
-  approvalId?: string;
+  approvalId?: string | undefined;
   /**
    * The HMAC the server stamped on the `tool-approval-request` chunk. Carried
    * back verbatim on the resume so `/api/chat` can prove the (approvalId,
@@ -81,7 +81,7 @@ export interface ToolCallStatus {
    * rebuilds the approval history, so without this a modified client could
    * approve a narrow call and resume with a wider one.
    */
-  approvalSignature?: string;
+  approvalSignature?: string | undefined;
 }
 
 /** A tool call the server blocked pending the user's explicit approval. */
@@ -91,7 +91,7 @@ export interface ApprovalRequiredTool {
   input: Record<string, unknown>;
   approvalId: string;
   /** See `ToolCallStatus.approvalSignature`. */
-  approvalSignature?: string;
+  approvalSignature?: string | undefined;
 }
 
 /** One user decision on a blocked call, as handed to `resumeAfterApproval`. */
@@ -119,13 +119,13 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  images?: string[];
-  toolCalls?: ToolCallStatus[];
+  images?: string[] | undefined;
+  toolCalls?: ToolCallStatus[] | undefined;
   thinking?: string;
   tokenCost?: number;
   timestamp: number;
   feedback?: 'positive' | 'negative' | null;
-  entityRefs?: Record<string, string>; // @DisplayName → entity ID
+  entityRefs?: Record<string, string> | undefined; // @DisplayName → entity ID
 }
 
 export type ChatModel = typeof AI_MODEL_PRIMARY | typeof AI_MODEL_FAST | typeof AI_MODEL_PREMIUM;
@@ -291,7 +291,7 @@ async function streamOneTurn(
   // are buffered here and resolved once, after the whole turn has streamed.
   const bufferedToolInputs = new Map<string, { name: string; input: Record<string, unknown> }>();
   /** toolCallId → the approval the server issued, signature included. */
-  const gatedApprovalIds = new Map<string, { approvalId: string; signature?: string }>();
+  const gatedApprovalIds = new Map<string, { approvalId: string; signature?: string | undefined }>();
 
   /**
    * Set only by a terminal `finish` chunk. The drain executes NOTHING without
@@ -1570,7 +1570,7 @@ useChatStore.subscribe((state, prevState) => {
 // We keep the latest pending write args and flush them via requestIdleCallback
 // (with a 2 s deadline) or setTimeout(0) as a fallback.
 // ---------------------------------------------------------------------------
-let _pendingSaveArgs: { conversations: Conversation[]; activeId?: string | null } | null = null;
+let _pendingSaveArgs: { conversations: Conversation[]; activeId?: string | null | undefined } | null = null;
 let _saveScheduled = false;
 
 // Per-project save debouncing — coalesces rapid saveConversation() calls so

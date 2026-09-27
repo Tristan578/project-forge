@@ -13,7 +13,7 @@ import { ConversationList } from './ConversationList';
 // Static prompts are replaced by dynamic SuggestionChips
 
 /** Streaming status indicator with descriptive text based on current activity */
-function StreamingIndicator({ messages, loopIteration }: { messages: { role: string; toolCalls?: { name: string; status: string }[] }[]; loopIteration: number }) {
+function StreamingIndicator({ messages, loopIteration }: { messages: { role: string; toolCalls?: { name: string; status: string }[] | undefined }[]; loopIteration: number }) {
   // Find the active tool being executed
   const statusText = useMemo(() => {
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');

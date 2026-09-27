@@ -48,7 +48,7 @@ const EMOTION_LABELS: Record<EmotionType, string> = {
 
 interface PacingChartProps {
   curve: PacingCurve;
-  templateCurve?: PacingCurve;
+  templateCurve?: PacingCurve | undefined;
   width: number;
   height: number;
 }

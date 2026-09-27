@@ -79,9 +79,9 @@ export interface NormalizedProviderStatus {
   /** 0–100. */
   progress: number;
   /** Single result artifact URL (model glb, skybox image, music audio, sprite image). */
-  resultUrl?: string;
+  resultUrl?: string | undefined;
   /** Map of PBR texture URLs (texture type only). */
-  resultMeta?: Record<string, string>;
+  resultMeta?: Record<string, string> | undefined;
   /**
    * True when the provider reported success but produced no artifact (#8757):
    * the job is mapped to `failed` so the user is refunded rather than stuck.

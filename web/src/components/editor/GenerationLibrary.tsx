@@ -198,7 +198,7 @@ function EntryRow({
 }: {
   entry: HistoryEntry;
   onRemove: () => void;
-  onRegenerate?: () => void;
+  onRegenerate?: (() => void) | undefined;
   formatDate: (ts: number) => string;
 }) {
   return (

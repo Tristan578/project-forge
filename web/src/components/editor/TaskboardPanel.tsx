@@ -323,7 +323,7 @@ interface ColumnProps {
   onDragStart: (e: DragEvent<HTMLDivElement>, id: string) => void;
   onDragEnd: () => void;
   onRemove: (id: string) => void;
-  onClearCompleted?: () => void;
+  onClearCompleted?: (() => void) | undefined;
   onAdd: (title: string, assignee: TaskAssignee) => void;
 }
 

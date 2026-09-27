@@ -269,7 +269,7 @@ export interface GenerationHandlerConfig<TParams, TResult> {
      */
     providerJobId: (result: TResult) => string | null;
     /** Initial callback delay in seconds (defaults to DEFAULT_CALLBACK_DELAY_SECONDS). */
-    estimatedSeconds?: number;
+    estimatedSeconds?: number | undefined;
   };
 }
 

@@ -530,7 +530,10 @@ describe('withEgressGuard — a response with nothing to redact is returned UNTO
     const handler = withEgressGuard(async () =>
       new Response(`boom ${SECRET}`, {
         status: status as number,
-        headers: contentType ? { 'content-type': contentType as string } : undefined,
+        // DOM's ResponseInit doesn't accept an explicit `undefined` for
+        // `headers` under exactOptionalPropertyTypes; conditional spread
+        // omits the key for the no-content-type cases.
+        ...(contentType ? { headers: { 'content-type': contentType as string } } : {}),
       }));
 
     const text = await (await handler()).text();

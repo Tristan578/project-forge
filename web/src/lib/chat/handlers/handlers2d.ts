@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { ToolHandler, ExecutionResult } from './types';
 import { zEntityId, zVec2, zVec4, parseArgs, ownEntry } from './types';
 import { defaultPhysics2dData } from '@/lib/physics/physics2dPayload';
+import { omitUndefinedValues } from '@/lib/utils/omitUndefined';
 import type {
   SpriteData,
   Camera2dData,
@@ -364,7 +365,16 @@ const project2dHandlers: Record<string, ToolHandler> = {
         args,
       );
       if (p.error) return p.error;
-      const settings: Partial<Grid2dSettings> = p.data;
+      // Conditional spread (not `p.data` directly): `setGrid2d` merges this
+      // object over the existing settings via `{ ...state.grid2d, ...settings }`,
+      // so an explicit `undefined` key here would overwrite a real value
+      // instead of preserving it — the omitted-vs-undefined distinction is
+      // real for THIS object, unlike most optional fields in this codebase.
+      const settings: Partial<Grid2dSettings> = {
+        ...(p.data.enabled !== undefined ? { enabled: p.data.enabled } : {}),
+        ...(p.data.size !== undefined ? { size: p.data.size } : {}),
+        ...(p.data.snapToGrid !== undefined ? { snapToGrid: p.data.snapToGrid } : {}),
+      };
       ctx.store.setGrid2d(settings);
       return { success: true, result: { message: 'Grid 2D settings updated' } };
     } catch (err) {
@@ -1054,7 +1064,11 @@ const physics2dHandlers: Record<string, ToolHandler> = {
       // `Object.prototype` — truthy, so the `??` fallback never fires and the merge
       // below builds a near-empty full-replace payload (PF-1167).
       const existing = ownEntry(ctx.store.physics2d, entityId) ?? defaultPhysics2dData();
-      const data: Physics2dData = { ...existing, ...physicsArgs };
+      // omitUndefinedValues, not a bare spread: zod types every `.optional()`
+      // field as `T | undefined` even though it never actually emits the key
+      // when absent, and a literal `undefined` here would overwrite a real
+      // value on `existing` instead of leaving it alone.
+      const data: Physics2dData = { ...existing, ...omitUndefinedValues(physicsArgs) };
       ctx.store.setPhysics2d(entityId, data, true);
       return { success: true, result: { message: `Set 2D physics on entity ${entityId}` } };
     } catch (err) {

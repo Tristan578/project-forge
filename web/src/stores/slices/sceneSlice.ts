@@ -4,6 +4,7 @@
 
 import { StateCreator, StoreApi } from 'zustand';
 import type { CompletionMode, GameComponentData, SceneGraph, SceneTransitionConfig, TerrainDataState } from './types';
+import type { LoosePartial } from '@/lib/types/looseOptional';
 import { DEFAULT_TRANSITION } from './types';
 import {
   loadProjectScenes,
@@ -230,7 +231,7 @@ export interface SceneSlice {
    * @returns Whether the engine accepted a new scene.
    * @throws The original dispatch error; prefab rollback may remain partial.
    */
-  newScene: (opts?: { completionMode?: CompletionMode }) => boolean;
+  newScene: (opts?: { completionMode?: CompletionMode | undefined }) => boolean;
   /**
    * Is the engine's command dispatcher attached to this slice yet?
    *
@@ -269,7 +270,7 @@ export interface SceneSlice {
    * guard on the result. Do NOT read `primaryId` after calling this; it is not
    * updated until the engine emits SELECTION_CHANGED.
    */
-  spawnTerrain: (terrainData?: Partial<TerrainDataState>, name?: string) => string | undefined;
+  spawnTerrain: (terrainData?: LoosePartial<TerrainDataState>, name?: string) => string | undefined;
   /** Dispatch updated terrain parameters for an entity. */
   updateTerrain: (entityId: string, terrainData: TerrainDataState) => void;
   /** Dispatch a terrain brush operation at a local position. */
@@ -367,7 +368,7 @@ export interface SceneSlice {
  * module (which imports the store back). Only an explicit `success: false` is a
  * rejection — every test double and every pre-PF-1098 caller returns nothing.
  */
-type DispatchResult = { success: boolean; error?: string } | void;
+type DispatchResult = { success: boolean; error?: string | undefined } | void;
 
 let dispatchCommand: ((command: string, payload: unknown) => DispatchResult) | null = null;
 

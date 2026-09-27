@@ -4,7 +4,7 @@ export interface SearchResult {
   path: string;
   title: string;
   score: number;
-  matchSection?: string;
+  matchSection?: string | undefined;
   snippet: string;
 }
 

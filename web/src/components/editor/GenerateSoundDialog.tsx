@@ -15,7 +15,7 @@ import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
 interface GenerateSoundDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  entityId?: string;
+  entityId?: string | undefined;
 }
 
 type SoundType = 'sfx' | 'voice';

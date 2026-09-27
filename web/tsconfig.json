@@ -34,6 +34,11 @@
     // Before enabling: fix these files to use explicit bounds checks or non-null assertions (!)
     // where array access is guaranteed safe (e.g., after length checks, Map.get with existence guard).
     "noUncheckedIndexedAccess": false,
+    // PF-10230 (follow-up to #7592, which enabled this in apps/docs,
+    // mcp-server and packages/ui): catches `{ prop: undefined }` written into
+    // a type declaring `prop?: T` at compile time instead of surfacing later
+    // as a runtime "key present with undefined" defect.
+    "exactOptionalPropertyTypes": true,
     "incremental": true,
     // Resolve @spawnforge/ui from TS source (via "development" export condition)
     // so tsc works in clean checkouts where packages/ui hasn't been built yet.

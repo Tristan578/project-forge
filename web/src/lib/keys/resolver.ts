@@ -29,7 +29,7 @@ export interface ResolvedKey {
    */
   key: string;
   metered: boolean;
-  usageId?: string;
+  usageId?: string | undefined;
 }
 
 export class ApiKeyError extends Error {

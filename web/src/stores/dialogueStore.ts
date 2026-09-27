@@ -35,8 +35,8 @@ export interface TextNode extends BaseNode {
 
 export interface ChoiceNode extends BaseNode {
   type: 'choice';
-  speaker?: string;
-  text?: string;
+  speaker?: string | undefined;
+  text?: string | undefined;
   choices: DialogueChoice[];
 }
 

@@ -6,7 +6,7 @@ const { metricCalls } = vi.hoisted(() => ({
     kind: 'count' | 'gauge' | 'distribution';
     name: string;
     value: number;
-    options?: { unit?: string; attributes?: Record<string, unknown> };
+    options?: { unit?: string; attributes?: Record<string, unknown> } | undefined;
   }>,
 }));
 
