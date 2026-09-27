@@ -148,6 +148,19 @@
     ".codex/agents/ux-reviewer.toml": "58eca48f212dc7e1b4863be6ff56111b3a8661d739b30d64b961a143c889187e",
     ".codex/agents/validator.toml": "0e9b5c6332244c33bd9fa037eaee4242656d985180aae6176707b13dd7d05313",
     ".codex/hook-conditions.json": "cb505996d50de4425ef499adf0c3e6be65b67ac080009edf253893aa7cbe98ec",
-    ".codex/hooks.json": "9ccf584ccc0b58fa8062b031560bfb417ce7bc3a8b86255b558e17415cd797e7"
+    ".codex/hooks.json": "9ccf584ccc0b58fa8062b031560bfb417ce7bc3a8b86255b558e17415cd797e7",
+    ".gemini/agents/builder.md": "7ac29ab546494ccfa3bb789e3758d0bef8830e71629b54818dda397cc0a1ae04",
+    ".gemini/agents/code-reviewer.md": "c0a05f9cfefa71d8388a3d8dc99e5ab84d509ea2c826c27213c8c2b2d90a718a",
+    ".gemini/agents/docs-guardian.md": "88b6b088cfeb0c7c0de1a8bf4489f7fe3f4f6d423deaf2ba1ae47a15948923ce",
+    ".gemini/agents/docs-maintainer.md": "ef00635378bf2086e0cceb05cadf10e33518a465598fbbc992667fcff47c4550",
+    ".gemini/agents/dx-guardian.md": "0dc135928ffb9f9244402912400e40d7ddb9e5012f6bf0c52bea52bc720f3d86",
+    ".gemini/agents/infra-devops.md": "d21b42fb0388241fc7c732765de40f64dcece78432d1782e1f7de42fbffa1d26",
+    ".gemini/agents/planner.md": "49dc78b25f674190ca6c66ad8a92607a6c9e4cd017da106ee73f0362b46deab1",
+    ".gemini/agents/rust-engine.md": "74847c9679acf93f0f5aa3024e42c65bdcfd4139f213727a140632f1b6203c49",
+    ".gemini/agents/security-reviewer.md": "e7555b22101bd73f63509eb9dff72e30f8c4fd004df10c04b17ad3e4e30fb035",
+    ".gemini/agents/test-reviewer.md": "39f44178506eb20f90041941ccf19b14b52bb49024ed0a3d8b373da577fe0b28",
+    ".gemini/agents/test-writer.md": "2052d02f23b004c0f69b61bfd1da1c3890cdf6e20a58ef14198b1604949f6f81",
+    ".gemini/agents/ux-reviewer.md": "e4ca7107e23d7e59bc0592c4649923fc73d11bbbb56c9130929fe74dfe740168",
+    ".gemini/agents/validator.md": "57c675680593551bdb6457f399555106281ad16a714ac0b750bad4c02aeede8b"
   }
 }

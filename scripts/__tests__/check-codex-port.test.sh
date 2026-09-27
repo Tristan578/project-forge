@@ -1243,6 +1243,65 @@ gen "$F" --check; expect_rc 2 "a manifest field of the wrong type is exit 2"
 F="$(mkfix)"; printf 'not json at all' > "$F/.claude/settings.json"
 gen "$F" --check; expect_rc 2 "an unparseable settings.json is exit 2"
 
+echo "== generator: Gemini agents (#8768) =="
+F="$(mkfix)"; gen "$F" --write; expect_rc 0 "--write succeeds with the Gemini target"
+GA="$F/.gemini/agents/demo.md"
+if [ -f "$GA" ] && [ "$(head -n 1 "$GA")" = "---" ] && grep -qx 'name: demo' "$GA"; then
+  ok "a Gemini agent starts with frontmatter carrying its name"
+else
+  bad "Gemini agent missing or malformed: $(head -n 5 "$GA" 2>&1)"
+fi
+if grep -qxF 'description: "Fixture agent with \"quotes\" in its description"' "$GA"; then
+  ok "the description is a quoted YAML scalar with its inner quotes escaped"
+else
+  bad "description not quoted correctly: $(grep -n '^description' "$GA")"
+fi
+FRONT="$(awk '/^---$/{n++; next} n==1' "$GA")"
+if grep -qE '^(model|effort|tools|hooks|memory|skills|mcpServers):' <<<"$FRONT"; then
+  bad "a Claude-only key leaked into Gemini frontmatter: $FRONT"
+else
+  ok "Claude-only frontmatter (model/effort/tools/hooks/…) is dropped"
+fi
+if grep -qF 'A regex like `\bfoo\b` must survive.' "$GA"; then
+  ok "the body survives byte-for-byte, backslashes included"
+else
+  bad "the body was altered: $(grep -n 'regex' "$GA")"
+fi
+if grep -qF 'A subagent cannot start another subagent here' "$GA"; then
+  ok "the preface states what does not hold under Gemini"
+else
+  bad "the Gemini preface is missing"
+fi
+
+F="$(mkfix)"; file_replace "$F/.claude/agents/demo.md" 'effort: high' 'effort: high|maxTurns: 25'
+gen "$F" --write
+if grep -qx 'max_turns: 25' "$F/.gemini/agents/demo.md"; then
+  ok "maxTurns is carried as Gemini's max_turns"
+else
+  bad "maxTurns was not carried: $(head -n 6 "$F/.gemini/agents/demo.md")"
+fi
+F="$(mkfix)"; file_replace "$F/.claude/agents/demo.md" 'effort: high' 'effort: high|maxTurns: lots'
+gen "$F" --check; expect_rc 2 "a maxTurns that is not a positive integer stops the generator"
+expect_out 'maxTurns "lots"' "…naming the value"
+
+# A key must be ported or explained for Gemini, or the generator refuses.
+F="$(mkfix)"; json_set "$F/tools/agentic-sync/port.json" geminiAgents.droppedFrontmatterKeys '{}'
+gen "$F" --check; expect_rc 2 "an unexplained frontmatter key stops the Gemini port"
+expect_out 'geminiAgents.droppedFrontmatterKeys' "…naming where to explain it"
+
+F="$(mkfix)"; json_set "$F/tools/agentic-sync/port.json" geminiAgents '"nope"'
+gen "$F" --check; expect_rc 2 "a malformed geminiAgents manifest section is exit 2"
+
+F="$(mkfix)"; gen "$F" --write
+printf 'tampered\n' >> "$F/.gemini/agents/demo.md"
+gen "$F" --check; expect_rc 1 "a hand-edited Gemini agent is drift"
+expect_out ".gemini/agents/demo.md" "…and names the file"
+
+F="$(mkfix)"; gen "$F" --write
+printf -- '---\nname: rogue\ndescription: x\n---\n' > "$F/.gemini/agents/rogue.md"
+gen "$F" --check; expect_rc 1 "a hand-added file in .gemini/agents is drift"
+expect_out "extra:    .gemini/agents/rogue.md" "…and is named"
+
 echo "== generator: agents — every branch that decides what Codex is told =="
 F="$(mkfix)"; gen "$F" --write
 if grep -qx 'model_reasoning_effort = "high"' "$F/.codex/agents/demo.toml"; then

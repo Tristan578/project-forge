@@ -11,7 +11,12 @@
     "handAuthored": {
       "code-architect": "the Architect reviewer is the feature-dev:code-architect PLUGIN agent; there is no .claude/agents source file to generate from"
     },
-    "reasoningEffort": ["minimal", "low", "medium", "high"],
+    "reasoningEffort": [
+      "minimal",
+      "low",
+      "medium",
+      "high"
+    ],
     "droppedFrontmatterKeys": {
       "model": "a Claude model alias (sonnet, opus); omitted so the agent inherits the Codex session's model",
       "memory": "Claude Code agent memory scope; Codex has no per-agent memory",
@@ -21,6 +26,20 @@
       "mcpServers": "per-agent MCP server selection; Codex agents see the session's servers",
       "maxTurns": "Claude Code turn cap; no Codex key",
       "hooks": "agent-scoped Claude Code hooks (e.g. block-writes.sh on the read-only reviewers). Codex has no agent-scoped hooks, so that enforcement is ABSENT for Codex agents — recorded in the support matrix"
+    }
+  },
+  "geminiAgents": {
+    "_README": "Gemini CLI subagents, generated from the SAME agents.source as the Codex agents: .gemini/agents/<name>.md with name, description and (from maxTurns) max_turns. Schema: google-gemini/gemini-cli v0.61.0 docs/core/subagents.md. There is no hand-authored code-architect here: under Gemini the Architect reviewer seat has no agent file, and adding one is a separate decision.",
+    "target": ".gemini/agents",
+    "droppedFrontmatterKeys": {
+      "model": "a Claude model alias (sonnet, opus); omitted so the agent inherits the Gemini session's model",
+      "effort": "Claude reasoning effort; Gemini subagents have no equivalent key",
+      "memory": "Claude Code agent memory scope; Gemini has no per-agent memory",
+      "isolation": "Claude Code worktree isolation; Gemini has no equivalent key",
+      "tools": "a Claude Code tool ALLOW-LIST in Claude tool names. Gemini's `tools` takes Gemini tool names, and no verified mapping exists yet, so the agent inherits the session's tools and a read-only reviewer is read-only by instruction only",
+      "skills": "skills preloaded under Claude Code; under Gemini the agent reads a skill from .agents/skills by name",
+      "mcpServers": "per-agent MCP selection by Claude server name; Gemini's per-agent `mcpServers` takes inline server definitions, not references, so the agent sees the session's servers",
+      "hooks": "agent-scoped Claude Code hooks (e.g. block-writes.sh on the read-only reviewers). Gemini has no agent-scoped hooks, so that enforcement is ABSENT for Gemini agents"
     }
   },
   "hooks": {
@@ -47,7 +66,10 @@
       "SubagentStop",
       "Stop"
     ],
-    "matcherlessEvents": ["UserPromptSubmit", "Stop"],
+    "matcherlessEvents": [
+      "UserPromptSubmit",
+      "Stop"
+    ],
     "toolAliases": {
       "Edit": "apply_patch",
       "Write": "apply_patch",

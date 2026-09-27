@@ -265,7 +265,11 @@ function loadManifest() {
     need(k, str, 'a non-empty string');
   }
   for (const k of ['hooks.supportedEvents', 'hooks.matcherlessEvents', 'agents.reasoningEffort']) need(k, strs, 'an array of strings');
-  for (const k of ['skills.independent', 'agents.handAuthored', 'agents.droppedFrontmatterKeys', 'hooks.toolAliases', 'hooks.unsupportedEvents', 'hooks.skipScripts', 'hooks.droppedHandlerKeys']) {
+  // Checked after the Codex fields, so a manifest missing everything still names
+  // the first of those.
+  need('geminiAgents', isObj, 'an object');
+  need('geminiAgents.target', str, 'a non-empty string');
+  for (const k of ['skills.independent', 'agents.handAuthored', 'agents.droppedFrontmatterKeys', 'geminiAgents.droppedFrontmatterKeys', 'hooks.toolAliases', 'hooks.unsupportedEvents', 'hooks.skipScripts', 'hooks.droppedHandlerKeys']) {
     need(k, isObj, 'an object');
   }
   need('hooks.patchTimeoutFactor', (v) => Number.isInteger(v) && v >= 1, 'a positive integer');
@@ -394,6 +398,69 @@ function planAgents(m, plan) {
   }
   for (const name of Object.keys(handAuthored)) {
     if (!existsExact(`${target}/${name}.toml`)) die(`handAuthored agent ${target}/${name}.toml is missing`);
+  }
+  return files.length;
+}
+
+// --- 2b. Gemini CLI agents ---------------------------------------------------
+
+// Gemini CLI reads project subagents from `.gemini/agents/*.md`: YAML
+// frontmatter (`name` and `description` required; `max_turns` optional) and a
+// Markdown body that becomes the agent's system prompt. Verified against
+// google-gemini/gemini-cli v0.61.0, docs/core/subagents.md. Same sources as the
+// Codex agents, so the two cannot disagree about what a role says.
+const GEMINI_NAME = /^[a-z0-9_-]+$/;
+
+function renderGeminiAgent(rel, m) {
+  const { fm, body } = parseAgent(rel, readFileSync(abs(rel), 'utf8'), m);
+  if (!GEMINI_NAME.test(fm.name)) {
+    die(`${rel}: name "${fm.name}" is not a Gemini agent name (lowercase letters, numbers, hyphens, underscores)`);
+  }
+  // Every other key must be carried or explicitly dropped for Gemini, so a key
+  // added to a Claude agent tomorrow cannot vanish here without a decision.
+  for (const k of Object.keys(fm)) {
+    if (k === 'name' || k === 'description' || k === 'maxTurns') continue;
+    if (!Object.hasOwn(m.geminiAgents.droppedFrontmatterKeys, k)) {
+      die(`${rel}: frontmatter key "${k}" is neither ported to Gemini nor explained in port.json geminiAgents.droppedFrontmatterKeys`);
+    }
+  }
+  const front = ['---', `name: ${fm.name}`, `description: ${JSON.stringify(fm.description)}`];
+  if (fm.maxTurns !== undefined) {
+    if (!/^[1-9]\d*$/.test(fm.maxTurns)) die(`${rel}: maxTurns "${fm.maxTurns}" is not a positive integer`);
+    front.push(`max_turns: ${fm.maxTurns}`);
+  }
+  front.push('---');
+  const preface =
+    `This role is generated from \`${rel}\`. Paths under \`.claude/\` are real ` +
+    `repository paths shared by every assistant — read them as written. Where the ` +
+    `text names a Claude Code tool (Read, Grep, Glob, Bash, Edit, Write), use your own ` +
+    `equivalent. Three things this text may assume do NOT hold under Gemini CLI. ` +
+    `(1) Hooks scoped to this one agent, and its Claude tool allow-list, are not carried ` +
+    `over: where it says a command "will be blocked" or that the role is read-only, nothing ` +
+    `will stop you — keep the rule yourself. (2) A subagent cannot start another subagent ` +
+    `here; where the text says to dispatch an agent, do that work yourself or report that ` +
+    `it is needed. (3) An MCP server it tells you to use may not be configured in this ` +
+    `session; if it is not, say so rather than skipping the step silently.`;
+  const text = [
+    ...front,
+    '',
+    `<!-- GENERATED from ${rel} by tools/agentic-sync/port.mjs — do not edit. Edit the source, then run: node tools/agentic-sync/port.mjs --write -->`,
+    '',
+    preface,
+    '',
+    body,
+    '',
+  ].join('\n');
+  return { name: fm.name, text };
+}
+
+function planGeminiAgents(m, plan) {
+  const { source } = m.agents;
+  const { target } = m.geminiAgents;
+  const files = readdirSync(abs(source)).filter((f) => f.endsWith('.md')).sort();
+  for (const f of files) {
+    const { name, text } = renderGeminiAgent(`${source}/${f}`, m);
+    plan.set(`${target}/${name}.md`, { content: Buffer.from(text, 'utf8') });
   }
   return files.length;
 }
@@ -709,6 +776,9 @@ function extraFiles(m, plan) {
     if (!existsExact(dir)) continue;
     for (const rel of walk(dir, INDEX_MODES)) if (!plan.has(rel)) extra.push(rel);
   }
+  if (existsExact(m.geminiAgents.target)) {
+    for (const rel of walk(m.geminiAgents.target, INDEX_MODES)) if (!plan.has(rel)) extra.push(rel);
+  }
   if (existsExact(m.agents.target)) {
     for (const rel of walk(m.agents.target, INDEX_MODES)) {
       const name = posix.basename(rel).replace(/\.toml$/, '');
@@ -757,6 +827,7 @@ function ownedByGenerator(m, rel) {
   return (
     rel.startsWith(`${m.skills.target}/`) ||
     rel.startsWith(`${m.agents.target}/`) ||
+    rel.startsWith(`${m.geminiAgents.target}/`) ||
     rel === m.hooks.target ||
     rel === m.hooks.conditions
   );
@@ -1122,6 +1193,7 @@ function main() {
   const plan = new Map();
   const skills = planSkills(m, modes, plan);
   const agents = planAgents(m, plan);
+  const geminiAgents = planGeminiAgents(m, plan);
   const hooks = planHooks(m, plan);
 
   const sha = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -1290,7 +1362,7 @@ function main() {
     );
   }
   console.log(
-    `codex-port: ${skills} skills, ${agents} agents, ${hooks.ported} hooks ported ` +
+    `codex-port: ${skills} skills, ${agents} agents (+${geminiAgents} Gemini), ${hooks.ported} hooks ported ` +
       `(${hooks.skipped.length} skipped by name, ${hooks.unsupported.length} on events Codex lacks).`,
   );
   // A NOTE, not a problem: nothing is wrong with the source, and the residue is a
