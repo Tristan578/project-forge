@@ -50,13 +50,28 @@ describe('orchestratorErrorAction', () => {
     });
   });
 
-  // Anything but a same-origin path would be an open redirect.
-  it.each([undefined, null, '', 'https://evil.example/', '//evil.example/x'])(
-    'falls back to plain sign-in for return path %s',
-    (returnTo) => {
-      expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, returnTo)?.href).toBe('/sign-in');
-    },
-  );
+  // Anything that resolves off this origin would be an open redirect. The last
+  // three start with '/' but a browser's URL parser reads them as another host:
+  // it treats '\' as '/' and drops tabs and newlines.
+  it.each([
+    undefined,
+    null,
+    '',
+    'https://evil.example/',
+    '//evil.example/x',
+    '/\\evil.example/x',
+    '/\t/evil.example/x',
+    '/\n/evil.example/x',
+  ])('falls back to plain sign-in for return path %j', (returnTo) => {
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, returnTo)?.href).toBe('/sign-in');
+  });
+
+  // The MCP relay token must not be copied into a second URL.
+  it('drops the mcp relay token from the return path and keeps the rest', () => {
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, '/editor/p1?mcp=secret-token&tab=scene')?.href).toBe(
+      '/sign-in?redirect_url=%2Feditor%2Fp1%3Ftab%3Dscene',
+    );
+  });
 
   // Their own sentence carries the next step; a token link would mislead.
   it.each([PLAN_REJECTED_MESSAGE, RATE_LIMITED_MESSAGE, ACCOUNT_BLOCKED_MESSAGE, ENGINE_NOT_READY_MESSAGE])(
