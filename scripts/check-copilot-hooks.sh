@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# check-copilot-hooks.sh — keep the GitHub Copilot CLI hook files honest.
+#
+# WHAT IT GUARDS (#8769)
+# `.github/hooks/*.json` is Copilot CLI's repository hook config. It is
+# hand-authored, and it drifted: `on-stop.sh` (a worktree-safety commit plus a
+# GitHub taskboard sync, meant to run ONCE when the agent finishes) was wired to
+# `postToolUse`, which fires after EVERY tool call. Nothing noticed, because a
+# hook on the wrong event still runs and exits 0. This gate fails a PR when:
+#   1. a hook file is not valid JSON, or lacks `"version": 1` and a `hooks` object;
+#   2. it names an event Copilot does not document (a typo, or a Claude/Codex
+#      event name such as `Stop` or `UserPromptSubmit`, is silently never run);
+#   3. an end-of-turn script is wired to anything but an end-of-turn event;
+#   4. a hook command references a `.claude/hooks/*.sh` script that does not exist.
+#
+# SOURCE OF THE EVENT LIST
+# docs.github.com/en/copilot/reference/hooks-configuration (read 2026-09-26):
+# sessionStart, sessionEnd, userPromptSubmitted, userPromptTransformed,
+# preToolUse, postToolUse, postToolUseFailure, agentStop, subagentStart,
+# subagentStop, errorOccurred, preCompact, permissionRequest, notification.
+# Add an event here only after it appears in that reference.
+#
+# TEST SEAM (hermetic): COPILOT_HOOKS_DIR=<dir> scans that directory instead of
+# .github/hooks, and COPILOT_HOOKS_REPO_ROOT=<dir> resolves referenced scripts
+# against it. Exit 0 = clean, 1 = a violation (each one printed), 2 = no node.
+set -uo pipefail
+
+ROOT="${COPILOT_HOOKS_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+DIR="${COPILOT_HOOKS_DIR:-$ROOT/.github/hooks}"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "::error::node not found — cannot check the Copilot hook files"
+  exit 2
+fi
+
+node - "$DIR" "$ROOT" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const [dir, root] = process.argv.slice(2);
+
+const EVENTS = new Set([
+  'sessionStart', 'sessionEnd', 'userPromptSubmitted', 'userPromptTransformed',
+  'preToolUse', 'postToolUse', 'postToolUseFailure', 'agentStop', 'subagentStart',
+  'subagentStop', 'errorOccurred', 'preCompact', 'permissionRequest', 'notification',
+]);
+// Scripts with end-of-turn semantics, and the events that mean "end of turn".
+const END_OF_TURN_SCRIPTS = ['on-stop.sh'];
+const END_OF_TURN_EVENTS = new Set(['agentStop', 'sessionEnd']);
+
+const problems = [];
+let files = [];
+try {
+  files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+} catch {
+  problems.push(`${dir}: cannot read the hook directory`);
+}
+// A gate that scans nothing passes vacuously (lessons-learned #9).
+if (files.length === 0 && problems.length === 0) problems.push(`${dir}: no hook files found`);
+
+let handlers = 0;
+for (const file of files) {
+  const where = path.join(path.basename(dir), file);
+  let doc;
+  try {
+    doc = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+  } catch (e) {
+    problems.push(`${where}: not valid JSON (${e.message})`);
+    continue;
+  }
+  if (doc.version !== 1) problems.push(`${where}: "version" must be 1`);
+  if (!doc.hooks || typeof doc.hooks !== 'object' || Array.isArray(doc.hooks)) {
+    problems.push(`${where}: missing a "hooks" object`);
+    continue;
+  }
+  for (const [event, list] of Object.entries(doc.hooks)) {
+    if (!EVENTS.has(event)) {
+      problems.push(`${where}: "${event}" is not a documented Copilot hook event, so it never runs`);
+    }
+    if (!Array.isArray(list)) {
+      problems.push(`${where}: "${event}" must be an array of handlers`);
+      continue;
+    }
+    for (const h of list) {
+      handlers += 1;
+      const commands = [h && h.bash, h && h.powershell].filter((c) => typeof c === 'string');
+      for (const cmd of commands) {
+        for (const script of END_OF_TURN_SCRIPTS) {
+          if (cmd.includes(script) && !END_OF_TURN_EVENTS.has(event)) {
+            problems.push(
+              `${where}: ${script} runs at the end of a turn, but is wired to "${event}"` +
+                ` — use one of: ${[...END_OF_TURN_EVENTS].join(', ')}`,
+            );
+          }
+        }
+        for (const m of cmd.matchAll(/\.claude\/hooks\/[A-Za-z0-9._-]+\.sh/g)) {
+          if (!fs.existsSync(path.join(root, m[0]))) {
+            problems.push(`${where}: "${event}" runs ${m[0]}, which does not exist`);
+          }
+        }
+      }
+    }
+  }
+}
+
+if (problems.length) {
+  // A handler's bash and powershell commands usually match; report each once.
+  for (const p of new Set(problems)) console.log(`::error::${p}`);
+  process.exit(1);
+}
+console.log(`✓ Copilot hook files are valid: ${files.length} file(s), ${handlers} handler(s).`);
+NODE
