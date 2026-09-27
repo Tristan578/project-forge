@@ -261,6 +261,8 @@ assert_output "the hand-written Codex config fires agentic" ".codex/config.toml"
 assert_output "the generator fires agentic" "tools/agentic-sync/port.mjs" agentic true
 assert_output "the gate script fires agentic" "scripts/check-codex-port.sh" agentic true
 assert_output "the gate's suite fires agentic" "scripts/__tests__/check-codex-port.test.sh" agentic true
+assert_output "the Copilot hook gate fires agentic" "scripts/check-copilot-hooks.sh" agentic true
+assert_output "the Copilot hook gate's suite fires agentic" "scripts/__tests__/check-copilot-hooks.test.sh" agentic true
 assert_output ".mcp.json fires agentic (MCP parity)" ".mcp.json" agentic true
 assert_output "a hook SCRIPT the surface names fires agentic" ".claude/hooks/block-main-commits.sh" agentic true
 assert_output "a rule file the agents name fires agentic" ".claude/rules/lessons-learned.md" agentic true

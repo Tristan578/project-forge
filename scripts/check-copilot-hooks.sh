@@ -7,22 +7,27 @@
 # GitHub taskboard sync, meant to run ONCE when the agent finishes) was wired to
 # `postToolUse`, which fires after EVERY tool call. Nothing noticed, because a
 # hook on the wrong event still runs and exits 0. This gate fails a PR when:
-#   1. a hook file is not valid JSON, or lacks `"version": 1` and a `hooks` object;
-#   2. it names an event Copilot does not document (a typo, or a Claude/Codex
-#      event name such as `Stop` or `UserPromptSubmit`, is silently never run);
+#   1. a hook file is not valid JSON, lacks `"version": 1` (this repo's files
+#      all declare it), or lacks a `hooks` object whose values are arrays;
+#   2. it names an event that is neither a documented Copilot event nor one of
+#      its documented PascalCase aliases — an unknown name is silently ignored;
 #   3. an end-of-turn script is wired to anything but an end-of-turn event;
-#   4. a hook command references a `.claude/hooks/*.sh` script that does not exist.
+#   4. a hook command runs a repository-relative `*.sh` that does not exist.
+# Every documented way a handler names what it runs is read: `bash`,
+# `powershell`, `command` (the cross-platform fallback) and `exec` + `args`.
 #
-# SOURCE OF THE EVENT LIST
-# docs.github.com/en/copilot/reference/hooks-configuration (read 2026-09-26):
-# sessionStart, sessionEnd, userPromptSubmitted, userPromptTransformed,
-# preToolUse, postToolUse, postToolUseFailure, agentStop, subagentStart,
-# subagentStop, errorOccurred, preCompact, permissionRequest, notification.
-# Add an event here only after it appears in that reference.
+# SOURCE: docs.github.com/en/copilot/reference/hooks-configuration (read
+# 2026-09-26). Events: sessionStart, sessionEnd, userPromptSubmitted,
+# userPromptTransformed, preToolUse, postToolUse, postToolUseFailure, agentStop,
+# subagentStart, subagentStop, errorOccurred, preCompact, permissionRequest,
+# notification. PascalCase aliases ("VS Code compatible"): SessionStart,
+# SessionEnd, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure,
+# Stop (= agentStop), SubagentStop, ErrorOccurred, PreCompact, Notification.
+# Add a name only after it appears in that reference.
 #
-# TEST SEAM (hermetic): COPILOT_HOOKS_DIR=<dir> scans that directory instead of
-# .github/hooks, and COPILOT_HOOKS_REPO_ROOT=<dir> resolves referenced scripts
-# against it. Exit 0 = clean, 1 = a violation (each one printed), 2 = no node.
+# TEST SEAMS (hermetic): COPILOT_HOOKS_DIR=<dir> scans that directory instead of
+# .github/hooks; COPILOT_HOOKS_REPO_ROOT=<dir> resolves referenced scripts
+# against it. Exit 0 = clean, 1 = a violation (each printed once), 2 = no node.
 set -uo pipefail
 
 ROOT="${COPILOT_HOOKS_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
@@ -42,10 +47,25 @@ const EVENTS = new Set([
   'sessionStart', 'sessionEnd', 'userPromptSubmitted', 'userPromptTransformed',
   'preToolUse', 'postToolUse', 'postToolUseFailure', 'agentStop', 'subagentStart',
   'subagentStop', 'errorOccurred', 'preCompact', 'permissionRequest', 'notification',
+  // Documented PascalCase aliases.
+  'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
+  'PostToolUseFailure', 'Stop', 'SubagentStop', 'ErrorOccurred', 'PreCompact', 'Notification',
 ]);
 // Scripts with end-of-turn semantics, and the events that mean "end of turn".
 const END_OF_TURN_SCRIPTS = ['on-stop.sh'];
-const END_OF_TURN_EVENTS = new Set(['agentStop', 'sessionEnd']);
+const END_OF_TURN_EVENTS = new Set(['agentStop', 'Stop', 'sessionEnd', 'SessionEnd']);
+// A repository-relative shell script: `.claude/hooks/x.sh`, `./scripts/x.sh`.
+// Absolute paths and anything with a variable in it are not ours to resolve.
+const SCRIPT_REF = /(?:^|[\s'"=(])((?:\.\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.sh)(?=$|[\s'");])/g;
+
+function commandsOf(h) {
+  if (!h || typeof h !== 'object') return [];
+  const out = ['bash', 'powershell', 'command'].map((k) => h[k]).filter((c) => typeof c === 'string');
+  if (typeof h.exec === 'string') {
+    out.push([h.exec, ...(Array.isArray(h.args) ? h.args.filter((a) => typeof a === 'string') : [])].join(' '));
+  }
+  return out;
+}
 
 const problems = [];
 let files = [];
@@ -74,7 +94,7 @@ for (const file of files) {
   }
   for (const [event, list] of Object.entries(doc.hooks)) {
     if (!EVENTS.has(event)) {
-      problems.push(`${where}: "${event}" is not a documented Copilot hook event, so it never runs`);
+      problems.push(`${where}: "${event}" is not a documented Copilot hook event or alias, so it never runs`);
     }
     if (!Array.isArray(list)) {
       problems.push(`${where}: "${event}" must be an array of handlers`);
@@ -82,7 +102,8 @@ for (const file of files) {
     }
     for (const h of list) {
       handlers += 1;
-      const commands = [h && h.bash, h && h.powershell].filter((c) => typeof c === 'string');
+      const commands = commandsOf(h);
+      if (commands.length === 0) problems.push(`${where}: a "${event}" handler names nothing to run`);
       for (const cmd of commands) {
         for (const script of END_OF_TURN_SCRIPTS) {
           if (cmd.includes(script) && !END_OF_TURN_EVENTS.has(event)) {
@@ -92,9 +113,9 @@ for (const file of files) {
             );
           }
         }
-        for (const m of cmd.matchAll(/\.claude\/hooks\/[A-Za-z0-9._-]+\.sh/g)) {
-          if (!fs.existsSync(path.join(root, m[0]))) {
-            problems.push(`${where}: "${event}" runs ${m[0]}, which does not exist`);
+        for (const m of cmd.matchAll(SCRIPT_REF)) {
+          if (!fs.existsSync(path.join(root, m[1]))) {
+            problems.push(`${where}: "${event}" runs ${m[1]}, which does not exist`);
           }
         }
       }

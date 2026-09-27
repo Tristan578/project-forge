@@ -30,8 +30,10 @@ cd engine && cargo build --target wasm32-unknown-unknown --release --features we
 
 Copilot CLI loads the repository's `.mcp.json`, the same file Claude Code uses, so
 there is nothing to copy. It reads it only after you confirm folder trust on the
-first launch in this checkout, and in prompt mode (`-p`) only when
-`GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP` is set. Servers such as `neon`,
+first launch in this checkout. Prompt mode (`-p`) loads them too once the
+folder is trusted. `GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP=true` loads them in
+an UNTRUSTED folder, which skips the trust check — `.mcp.json` runs commands, so
+set it per invocation and only in a checkout you trust, never globally. Servers such as `neon`,
 `sentry`, `stripe` and `upstash` need the credentials named in their `env` block
 (see `.env.local`). Copilot's documentation does not say whether it expands
 `${VAR}` inside `env` values. If one of those servers starts but cannot
@@ -57,7 +59,7 @@ give yours a different name.
 
 ### TypeScript (web/, mcp-server/)
 - Strict mode. Never use `any`. Avoid `as` casts.
-- All chat handler arguments MUST be validated before use, and the convention is Zod: `z.object(...)` with `.parse()`/`.safeParse()`, or the shared `parseArgs(schema, args)` helper in `web/src/lib/chat/handlers/types.ts`, which is itself `schema.safeParse(args)`. Both paths are Zod. A few older handlers (`get_entity_details` in `entityHandlers.ts`, `pixelArtHandlers.ts`) still use manual `typeof` checks; new handlers must use a Zod schema. Never trust `args` directly.
+- All chat handler arguments MUST be validated before use, and the convention is Zod: `z.object(...)` with `.parse()`/`.safeParse()`, or the shared `parseArgs(schema, args)` helper in `web/src/lib/chat/handlers/types.ts`, which is itself `schema.safeParse(args)`. Both paths are Zod. Not every handler does this yet: some older ones read `args` with casts or `typeof` checks (for example most of `compoundHandlers.ts`, `set_audio` in `audioEntityHandlers.ts`, `get_entity_details` and `pixelArtHandlers.ts`). New handlers must use a Zod schema, and a handler you touch should gain one. Never trust `args` directly.
 - Use named exports. Prefer `const` over `let`. Never use `var`.
 - Tailwind CSS for all styling. No inline styles or CSS modules.
 
