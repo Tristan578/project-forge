@@ -17,8 +17,13 @@
  * file at build time where `npm ci` installs devDependencies. Keeping it out
  * of `dependencies` keeps its transitive `@vercel/routing-utils` (which pins
  * an exact, advisory-bearing `path-to-regexp@6.1.0`) off the production
- * dependency graph; the root `package.json` `overrides` block additionally
- * forces that nested copy to the patched 6.3.0 (GHSA-9wv6-86v2-598j).
+ * dependency graph; the root `package.json` `overrides` entry
+ * `"path-to-regexp@6.1.0": "6.3.0"` retires that nested copy to the patched
+ * 6.x line (GHSA-9wv6-86v2-598j). npm propagates overrides along dependency
+ * edges and never through workspace links, so the same `@vercel/config`
+ * range is ALSO declared in the root `package.json` devDependencies purely
+ * to carry that override into the subtree — keep both declarations on the
+ * same range.
  *
  * Preserved values and why each one is load-bearing:
  * - `installCommand` reaches ABOVE the deploy root (`cd ..`) because of the
