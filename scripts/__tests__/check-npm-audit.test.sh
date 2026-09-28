@@ -3225,6 +3225,7 @@ OUTPUTS_EOF
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
+            scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh'
     if grep -qE "^[[:space:]]*[\"']?if[\"']?[[:space:]]*:" <<<"$lst_shck_blk"; then
       fail "self-defense shellcheck step carries a step-level if: — lint coverage can be skipped while its needle still greps as present"
@@ -3402,7 +3403,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=664
+readonly SELF_EXEC_EXPECTED_DROP=669
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3759,6 +3760,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
+            scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
       - name: Run lockfile gate test suite
         run: bash scripts/__tests__/check-lockfile-sync.test.sh
@@ -3872,6 +3874,10 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/check-pin-strength.test.sh
       - name: Run pin-strength gate
         run: bash scripts/check-pin-strength.sh
+      - name: Run function-freeze gate test suite
+        run: bash scripts/__tests__/check-fn-freeze.test.sh
+      - name: Run function-freeze gate
+        run: bash scripts/check-fn-freeze.sh
 STEPS_EOF
 readonly expected_steps_3
 assert_steps_block "${lst_block:-}" "ci.yml lockfile-sync-tests job steps:" "${expected_steps_3%$'\n'}"

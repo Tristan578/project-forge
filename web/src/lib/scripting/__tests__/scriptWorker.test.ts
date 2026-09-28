@@ -103,15 +103,40 @@ describe('scriptWorker', () => {
     expect(types).toContain('log');
   });
 
-  it('does not post init_done for anything but init (a tick stays silent)', async () => {
+  it('does not post init_done for a tick; the tick ends with tick_done instead', async () => {
     const handler = await setupWorker();
     await handler(initMsg([{ entityId: 'e1', enabled: true, source: 'function onUpdate() { forge.log("tick"); }' }]));
     mockPostMessage.mockClear();
 
     await handler({ data: { type: 'tick', dt: 0.016 } });
 
-    // The tick ran (it logged) and said nothing else.
-    expect(mockPostMessage.mock.calls.map((c) => (c[0] as { type: string }).type)).toEqual(['log']);
+    // The tick ran (it logged), then acknowledged itself, and said nothing else.
+    expect(mockPostMessage.mock.calls.map((c) => (c[0] as { type: string }).type)).toEqual(['log', 'tick_done']);
+  });
+
+  // The runner arms a 5 s watchdog on each tick and clears it only when the
+  // worker posts something. A script that never calls forge.* made a tick
+  // post nothing, so Play stopped after 5 s as a "possible infinite loop"
+  // (#10286). Every tick that returns now says so.
+  it('posts exactly one tick_done per tick, even for a script that posts nothing', async () => {
+    const handler = await setupWorker();
+    await handler(initMsg([{ entityId: 'quiet', enabled: true, source: 'var n = 0; function onUpdate() { n += 1; }' }]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'tick', dt: 0.016 } });
+    await handler({ data: { type: 'tick', dt: 0.016 } });
+
+    expect(mockPostMessage.mock.calls.map((c) => c[0])).toEqual([{ type: 'tick_done' }, { type: 'tick_done' }]);
+  });
+
+  it('posts tick_done even when no script is loaded', async () => {
+    const handler = await setupWorker();
+    await handler(initMsg([]));
+    mockPostMessage.mockClear();
+
+    await handler({ data: { type: 'tick', dt: 0.016 } });
+
+    expect(mockPostMessage.mock.calls.map((c) => c[0])).toEqual([{ type: 'tick_done' }]);
   });
 
   it('reports compilation errors for syntax issues during init', async () => {

@@ -97,7 +97,7 @@ Commands that are **not** undoable: scene export/load, play/stop/pause/resume, q
 
 ## Physics Commands (3D)
 
-**Rust-side:** `PhysicsData` + `PhysicsEnabled` ECS components, Rapier3D integration. `RapierConfiguration` is a Component (not Resource) in bevy_rapier3d 0.33.
+**Rust-side:** `PhysicsData` + `PhysicsEnabled` ECS components, Rapier3D integration. `RapierConfiguration` is a Component (not Resource) in bevy_rapier3d 0.35.
 
 | Command | Description | Undo |
 |---------|-------------|------|

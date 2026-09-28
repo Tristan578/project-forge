@@ -28,7 +28,7 @@
 | Game components | 13 drag-and-drop behaviors |
 | Test suite | 14,200+ tests |
 | Rendering | WebGPU primary, WebGL2 fallback |
-| Engine | Bevy 0.18, Rust/WASM |
+| Engine | Bevy 0.19, Rust/WASM |
 
 A source-available, AI-native 2D/3D game engine for the browser. Editor operations are JSON commands through `handle_command()`, and 380 of them (304 public) are published in the MCP manifest for the [Model Context Protocol](https://modelcontextprotocol.io/). Registration is not the same as a working feature: which capabilities are proven, implemented but unverified, partial or unavailable through the editor UI, the in-app AI, game scripts and external MCP is recorded per capability in [docs/capability-matrix.md](docs/capability-matrix.md). As of 2026-09-15, external MCP agents can attach only to local builds ([#9722](https://github.com/Tristan578/project-forge/issues/9722)) and platform-key asset generation is unavailable in production ([#9117](https://github.com/Tristan578/project-forge/issues/9117)). Build games by conversation, by code, or by hand — within those limits.
 
@@ -56,7 +56,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Documentation System** — 28+ structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features on demand
 
 ### 3D Engine
-- **WebGPU Rendering** — Primary rendering via WebGPU (wgpu 27) with automatic WebGL2 fallback for older browsers
+- **WebGPU Rendering** — Primary rendering via WebGPU (wgpu 29) with automatic WebGL2 fallback for older browsers
 - **PBR Materials** — Physically-based rendering with metallic/roughness workflow, UV transforms, clearcoat, transmission/IOR, parallax mapping, texture support, alpha modes, and 56 material presets across 9 categories
 - **Shader Node Editor** — Visual WGSL shader creation with 30+ node types, live material preview, and save/load
 - **Quality Presets** — Low/Medium/High/Ultra rendering presets that batch-configure MSAA, shadows, bloom, sharpening, and particle density
@@ -299,7 +299,7 @@ Claude Code also has three **subagents** (`.claude/agents/`):
 cd project-forge
 # Copilot reads .github/hooks/hooks.json and .github/copilot-instructions.md
 ```
-Hooks trigger on session start (pull), prompt submit (ticket gate), and post-tool-use (validate + push). Skills available in `.github/skills/` and `.agents/skills/`. Prompts for manual sync in `.github/prompts/`.
+Hooks trigger on session start (pull), prompt submit (ticket gate), and post-tool-use (validate + push). Skills available in `.github/skills/` and `.agents/skills/`; manual sync is the `sync-pull` and `sync-push` skills.
 
 </details>
 
@@ -506,7 +506,7 @@ project-forge/
 │   │   ├── github-sync-config.json #  GitHub Project metadata
 │   │   └── github-project-map.json #  Ticket ↔ GitHub item mapping
 │   ├── rules/                   #   Architecture & quality rules
-│   │   ├── bevy-api.md          #     Bevy 0.18 API patterns
+│   │   ├── bevy-api.md          #     Bevy 0.19 API patterns
 │   │   ├── entity-snapshot.md   #     ECS snapshot patterns
 │   │   ├── web-quality.md       #     ESLint & React patterns
 │   │   ├── library-apis.md      #     Third-party library APIs
@@ -526,8 +526,7 @@ project-forge/
 │   ├── hooks/hooks.json         #   Hook wiring (sessionStart, promptSubmit, postToolUse)
 │   ├── copilot-instructions.md  #   Copilot guidance (agentic-sync target)
 │   ├── instructions/review.instructions.md  # PR review criteria
-│   ├── skills/                  #   kanban, sync-push, sync-pull
-│   └── prompts/                 #   sync-push.prompt.md, sync-pull.prompt.md
+│   └── skills/                  #   kanban, sync-push, sync-pull
 ├── .gemini/                     # Gemini CLI (+ Antigravity model config)
 │   └── settings.json            #   Hooks + model (gemini-3.1-pro-preview)
 ├── .agents/                     # Shared skills (Codex CLI + Copilot + Gemini CLI); the project skills here are GENERATED mirrors of .claude/skills/ — never hand-edit them
@@ -618,7 +617,7 @@ Contributions are welcome! Here's how to get involved.
 
 | Layer | Technology |
 |-------|-----------|
-| Engine | Bevy 0.18, wgpu 27, bevy_rapier3d 0.33, bevy_hanabi 0.18, bevy_panorbit_camera 0.34, csgrs 0.20, noise 0.9 |
+| Engine | Bevy 0.19, wgpu 29, bevy_rapier3d/2d 0.35, bevy_hanabi 0.19, bevy_panorbit_camera 0.35, csgrs 0.20, noise 0.9 |
 | Frontend | Next.js 16, React 19, Zustand 5, Tailwind CSS, React Flow |
 | Auth | Clerk |
 | Payments | Stripe |

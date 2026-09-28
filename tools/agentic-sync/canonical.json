@@ -18,13 +18,13 @@
       "Next.js": "16.3.5",
       "React": "19.3.0",
       "wasm-bindgen": "0.2.127",
-      "Bevy": "0.18"
+      "Bevy": "0.19"
     },
     "versionsNote": "wasm-bindgen must match Cargo.lock exactly",
     "coverageThresholds": {
-      "statements": 85,
-      "branches": 77,
-      "functions": 80,
+      "statements": 86,
+      "branches": 78,
+      "functions": 81,
       "lines": 87
     },
     "quickValidation": "cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run"

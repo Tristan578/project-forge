@@ -40,6 +40,7 @@ require() {
     exit 1
   fi
 }
+readonly -f require
 require "$PYTHON"
 
 if [ ! -f "$MODULE" ]; then
@@ -56,6 +57,7 @@ m = importlib.import_module('github_project_sync')
 $1
 " 2>&1
 }
+readonly -f run_py
 
 assert_out() {
   local desc="$1" expected="$2" actual="$3"
@@ -66,6 +68,7 @@ assert_out() {
     FAILURES=$((FAILURES + 1))
   fi
 }
+readonly -f assert_out
 
 # --------------------------------------------------------------- importable
 out="$(run_py "print('imported')")"
