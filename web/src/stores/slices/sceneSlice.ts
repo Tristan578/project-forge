@@ -27,7 +27,7 @@ import {
 } from '@/lib/scenes/sceneManager';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
-import { emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
+import { boundEngineError, emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
 import { applyCheckpointScene, captureCheckpointScene } from '@/lib/scenes/checkpointRecovery';
 import {
   loadPrefabInstances,
@@ -417,8 +417,10 @@ export function setSceneDispatcher(
     const response = dispatchCommand('validate_scene', { json });
     if (response?.success === true) return { valid: true };
     // Keep the engine's own text (it names the field that failed) so the
-    // AI `validate_scene` tool can relay it instead of a generic sentence.
-    return { valid: false, reason: response?.error ?? null };
+    // AI `validate_scene` tool can relay it instead of a generic sentence —
+    // bounded, because serde_json embeds the whole offending value and this
+    // scene may be a stranger's (remix boundary).
+    return { valid: false, reason: response?.error == null ? null : boundEngineError(response.error) };
   } : null);
   const pending = deferredSceneLoad;
   deferredSceneLoad = null;
@@ -779,8 +781,10 @@ function dispatchSceneLoad(
       rollbackMode();
       // The engine's `error` names what it refused (`Invalid scene file: …
       // attenuationDistance must be …`); it is the only place that text
-      // exists, so it rides along for the lockout reason (#10267).
-      return { accepted: false, error: response.error ?? null };
+      // exists, so it rides along for the lockout reason (#10267) — bounded,
+      // because serde_json embeds the whole offending value and a remixed
+      // scene is a stranger's input; the field-naming head is what survives.
+      return { accepted: false, error: response.error == null ? null : boundEngineError(response.error) };
     }
     return { accepted: true };
   } catch (error) {

@@ -131,6 +131,35 @@ describe('sceneSlice', () => {
       expect(store.getState().sceneLoadError?.reason).not.toContain('the engine failed while loading it');
     });
 
+    // Round 3 (security): serde_json embeds the ENTIRE offending value in
+    // `invalid type: string "…"`, and a remixed scene is a stranger's input,
+    // so the relayed text is bounded at BOTH capture points — a scene cannot
+    // dictate the size of the non-dismissible notice or the model's tool input.
+    it('caps a multi-KiB engine refusal in the lockout reason, keeping the head and a visible marker', async () => {
+      const { MAX_ENGINE_ERROR_CHARS, ENGINE_ERROR_TRUNCATED } = await import('@/lib/scenes/sceneValidation');
+      const hostile = `Invalid scene file: invalid type: string "${'A'.repeat(64 * 1024)}", expected f32`;
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: hostile })));
+      expect(store.getState().loadScene(JSON.stringify(sceneFixture('Hostile')))).toBe(false);
+      const reason = store.getState().sceneLoadError?.reason ?? '';
+      const prefix = 'This scene could not be opened: the engine refused to load it. ';
+      expect(reason.length).toBe(prefix.length + MAX_ENGINE_ERROR_CHARS);
+      expect(reason.startsWith(`${prefix}Invalid scene file: invalid type: string "AAAA`)).toBe(true);
+      expect(reason.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+    });
+
+    it('caps a multi-KiB validate_scene refusal handed to the scene validator', async () => {
+      const { validateSceneFile, MAX_ENGINE_ERROR_CHARS, ENGINE_ERROR_TRUNCATED } = await import('@/lib/scenes/sceneValidation');
+      const hostile = `Invalid scene file: invalid type: string "${'A'.repeat(64 * 1024)}", expected f32`;
+      setSceneDispatcher(vi.fn((command: string) =>
+        command === 'validate_scene' ? { success: false, error: hostile } : { success: true }));
+      const verdict = validateSceneFile(sceneFixture('Hostile'));
+      expect(verdict.valid).toBe(false);
+      const reason = verdict.valid ? '' : verdict.reason ?? '';
+      expect(reason.length).toBe(MAX_ENGINE_ERROR_CHARS);
+      expect(reason.startsWith('Invalid scene file: invalid type: string "AAAA')).toBe(true);
+      expect(reason.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+    });
+
     it('falls back to the constant sentence when the engine refuses without a reason', () => {
       setSceneDispatcher(vi.fn(() => ({ success: false })));
       expect(store.getState().loadScene(JSON.stringify(sceneFixture('Silently refused')))).toBe(false);

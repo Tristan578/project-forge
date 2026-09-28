@@ -12,6 +12,34 @@ import { CURRENT_FORMAT_VERSION } from '@/lib/sceneFile';
  */
 export type SceneValidation = { valid: true } | { valid: false; reason: string | null };
 
+/** Longest engine error text the editor will store or relay. */
+export const MAX_ENGINE_ERROR_CHARS = 512;
+/** Appended when an engine error is cut, so a reader knows text is missing. */
+export const ENGINE_ERROR_TRUNCATED = ' … [truncated]';
+
+/**
+ * Cap an engine refusal before it is stored or shown.
+ *
+ * serde_json embeds the ENTIRE offending value in `invalid type: string "…"`,
+ * and `sceneData` crosses the remix trust boundary unvalidated (only scripts
+ * are quarantined), so a stranger's scene could otherwise dictate the size of
+ * the non-dismissible `SceneLoadErrorNotice`, a toast, or the tool-error text
+ * fed back to the model. The head of the text — where `Invalid scene file:`
+ * and the field name live — is what survives.
+ *
+ * @param error The engine's error text, verbatim.
+ * @param max Maximum length of the RETURNED string, marker included.
+ * @returns `error` unchanged when it fits, else its head plus the marker.
+ */
+export function boundEngineError(error: string, max = MAX_ENGINE_ERROR_CHARS): string {
+  if (error.length <= max) return error;
+  let head = error.slice(0, Math.max(0, max - ENGINE_ERROR_TRUNCATED.length));
+  // Never end on the high half of a surrogate pair: that is not a character.
+  const last = head.charCodeAt(head.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
+  return head + ENGINE_ERROR_TRUNCATED;
+}
+
 type SceneValidator = (json: string) => SceneValidation;
 let engineValidator: SceneValidator | null = null;
 
@@ -63,16 +91,23 @@ export function isValidSceneFile(value: unknown): boolean {
 /** Validate like [`isValidSceneFile`], keeping the engine's own reason for a refusal.
  *
  * @param value Untrusted parsed scene data to check without mutation.
- * @returns `{ valid: true }`, or `{ valid: false, reason }` where `reason` is the engine's error text, or `null` when the envelope failed, no decoder is attached, or the decoder threw.
+ * @returns `{ valid: true }`, or `{ valid: false, reason }` where `reason` is the engine's error text (or `ENVELOPE_REFUSAL` when the browser-side envelope check failed first), and `null` only when no decoder is attached or it threw.
  */
 export function validateSceneFile(value: unknown): SceneValidation {
-  if (!isSceneFileEnvelope(value) || !engineValidator) return { valid: false, reason: null };
+  // A failed envelope is a real refusal with a real reason — never confuse it
+  // with "no decoder attached", which is the only thing `null` means.
+  if (!isSceneFileEnvelope(value)) return { valid: false, reason: ENVELOPE_REFUSAL };
+  if (!engineValidator) return { valid: false, reason: null };
   try {
     return engineValidator(JSON.stringify(value));
   } catch {
     return { valid: false, reason: null };
   }
 }
+
+/** The browser-side envelope check's reason; the engine's own decoder never ran. */
+export const ENVELOPE_REFUSAL =
+  'Invalid scene file: the envelope (formatVersion, metadata, environment, ambientLight, entities with finite transforms) is missing or malformed';
 
 /** Produce an empty scene using the same required fields as the engine.
  *
