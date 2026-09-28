@@ -273,9 +273,14 @@ export function filterCameraNumerics(
   }
   // A GDD-spelled key only fills a field the translator's own names left unset,
   // so an explicit `topDownHeight` always beats an aliased `altitude`.
-  for (const [alias, { field, convert }] of Object.entries(GDD_CONFIG_KEY_ALIASES)) {
+  for (const [alias, entry] of Object.entries(GDD_CONFIG_KEY_ALIASES)) {
+    const { field, convert } = entry;
     if (out[field] !== undefined) continue;
     if (!Object.hasOwn(obj, alias)) continue;
+    // Domain first, in the GDD's unit, then the engine's policy on the
+    // converted value — the same two checks in the same order as
+    // `classifyCameraConfigKeys`, so what one drops the other names.
+    if (aliasDomainRejection(entry, obj[alias]) !== null) continue;
     const val = convertAliasedValue(obj[alias], convert);
     if (isSendableCameraValue(field, val)) out[field] = val;
   }
@@ -311,6 +316,35 @@ interface GddConfigAlias {
   field: NumericCameraField;
   /** GDD unit -> engine unit. The identity function where the two agree. */
   convert: (value: number) => number;
+  /**
+   * The range a value must lie in IN THE GDD's UNIT, checked before `convert`.
+   *
+   * The engine-side policy on `field` judges the CONVERTED value, and a
+   * conversion can carry a nonsensical input into a range the engine accepts:
+   * `smoothing: 5` — five times "close the whole gap this frame" — converts to
+   * damping 300, which the engine reads as a legal, very snappy rate, so the
+   * step reported `applied: true` for a value that had no meaning where it was
+   * written. `null` states, rather than leaves implicit, that every finite
+   * number is meaningful in the GDD unit and the engine-side policy is the
+   * whole check.
+   */
+  domain: CameraValuePolicy | null;
+}
+
+/**
+ * Why this GDD-unit value is outside its alias's domain, or `null` if it is not.
+ *
+ * Only a finite number can be out of range; anything else passes through to
+ * {@link cameraValueRejection}'s own `typeof`/`Number.isFinite` guard so it is
+ * reported with the ordinary "not a finite number" reason rather than a
+ * range one. Shared by {@link filterCameraNumerics} and
+ * {@link classifyCameraConfigKeys} for the same reason `cameraValueRejection`
+ * is: a value one drops must be a value the other names.
+ */
+function aliasDomainRejection(alias: GddConfigAlias, raw: unknown): string | null {
+  if (!alias.domain) return null;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  return alias.domain.accepts(raw) ? null : alias.domain.reason;
 }
 
 function identityConversion(value: number): number {
@@ -354,8 +388,22 @@ const GDD_SMOOTHING_REFERENCE_DELTA_SECONDS = 1 / 60;
  *
  * Sign and magnitude are otherwise untouched — a negative `smoothing` yields a
  * negative `damping`, which `cameraValueRejection` still refuses for the exact
- * same reason a hand-authored negative `followSmoothing` is refused (PF-1166),
- * and an oversized one is still absorbed by the engine's own `.min(1.0)`.
+ * same reason a hand-authored negative `followSmoothing` is refused (PF-1166).
+ *
+ * The UPPER end is not left to the engine. A per-frame fraction above 1 has
+ * no meaning — there is no "close 500% of the gap" — but converted it becomes
+ * damping 300, a rate the engine's `.min(1.0)` saturates into an exact snap
+ * and accepts without complaint, so the step would report `applied: true` for
+ * a value that was nonsense where it was written. That is what the alias's
+ * `domain` (see {@link GDD_CONFIG_KEY_ALIASES}) refuses BEFORE this runs.
+ *
+ * Nothing on the producer side pins this unit. The GDD decomposer types every
+ * system's `config` as `z.record(z.string(), z.unknown())` and its prompt
+ * shows only a `{ "gravity": 20 }` example (`decomposer.ts`), so no schema
+ * or prompt tells the model what `smoothing` means — the 0..1 convention is
+ * inferred from this module's own fixtures. The domain check is the
+ * consumer-side stand-in for that missing contract; a per-category config
+ * schema on the producer is the real one.
  */
 function convertGddSmoothingToDamping(smoothing: number): number {
   return smoothing / GDD_SMOOTHING_REFERENCE_DELTA_SECONDS;
@@ -409,8 +457,19 @@ function convertGddSmoothingToDamping(smoothing: number): number {
  * happens.
  */
 const GDD_CONFIG_KEY_ALIASES: Record<string, GddConfigAlias> = {
-  altitude: { field: 'topDownHeight', convert: identityConversion },
-  smoothing: { field: 'followSmoothing', convert: convertGddSmoothingToDamping },
+  altitude: { field: 'topDownHeight', convert: identityConversion, domain: null },
+  smoothing: {
+    field: 'followSmoothing',
+    convert: convertGddSmoothingToDamping,
+    // A per-frame lerp fraction lives in 0..1. Only the upper bound is stated
+    // here: a negative one converts to a negative rate that `followSmoothing`'s
+    // own policy already refuses, with the reason that names the actual
+    // hazard (divergence), and 0 is a frozen follow — legal in both units.
+    domain: {
+      accepts: (value) => value <= 1,
+      reason: 'must not exceed 1 (a 0..1 per-frame lerp fraction)',
+    },
+  },
 };
 
 /**
@@ -460,7 +519,12 @@ export function classifyCameraConfigKeys(raw: unknown): CameraConfigReport {
     // scale, and the two helpers sharing `cameraValueRejection` is what keeps
     // them from disagreeing about what "sendable" means.
     const value = alias ? convertAliasedValue(obj[key], alias.convert) : obj[key];
-    const reason = cameraValueRejection(field, value);
+    // The alias's GDD-unit domain is judged on the RAW value and takes
+    // precedence: a `smoothing: 5` is wrong where it was written, and reporting
+    // the converted 300 as fine (which the engine would accept) tells the
+    // author nothing was wrong.
+    const reason =
+      (alias ? aliasDomainRejection(alias, obj[key]) : null) ?? cameraValueRejection(field, value);
     if (reason !== null) {
       report.unusable.push({ key, reason });
       continue;

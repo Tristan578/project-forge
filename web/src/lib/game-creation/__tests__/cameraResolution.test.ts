@@ -262,6 +262,57 @@ describe('filterCameraNumerics', () => {
       expect(filterCameraNumerics({ smoothing: 0 })).toEqual({ followSmoothing: 0 });
     });
 
+    /**
+     * The conversion's domain is checked on the GDD side, before scaling. A
+     * per-frame lerp fraction above 1 has no meaning, but scaled it becomes a
+     * damping the engine happily accepts (5 -> 300, an exact snap under
+     * `.min(1.0)`), so without this the step reported `applied: true` for a
+     * value that was nonsense where it was written (review-board finding on
+     * #10295). Nothing on the producer side pins the unit — the decomposer types
+     * `config` as `z.record(z.string(), z.unknown())` — so this is the contract.
+     */
+    describe('refuses a smoothing outside the 0..1 per-frame fraction', () => {
+      const REASON = 'must not exceed 1 (a 0..1 per-frame lerp fraction)';
+
+      it.each([1.001, 1.5, 5, 60])('drops and reports smoothing %s', (smoothing) => {
+        expect(filterCameraNumerics({ smoothing })).toEqual({});
+        expect(classifyCameraConfigKeys({ smoothing })).toEqual({
+          unknown: [],
+          unusable: [{ key: 'smoothing', reason: REASON }],
+          overridden: [],
+        });
+      });
+
+      it('keeps exactly 1 — "close the whole gap each frame" is the top of the range', () => {
+        expect(filterCameraNumerics({ smoothing: 1 })).toEqual({ followSmoothing: 60 });
+        expect(classifyCameraConfigKeys({ smoothing: 1 })).toEqual({
+          unknown: [],
+          unusable: [],
+          overridden: [],
+        });
+      });
+
+      it('reports the domain, not the converted value, even when an explicit followSmoothing also applies', () => {
+        // Out of domain is "wrong", not "lost to a better spelling": the author
+        // needs to fix the number, not delete a duplicate.
+        expect(filterCameraNumerics({ smoothing: 5, followSmoothing: 2 })).toEqual({
+          followSmoothing: 2,
+        });
+        expect(classifyCameraConfigKeys({ smoothing: 5, followSmoothing: 2 })).toEqual({
+          unknown: [],
+          unusable: [{ key: 'smoothing', reason: REASON }],
+          overridden: [],
+        });
+      });
+
+      it('does not apply to the engine-unit followSmoothing field itself', () => {
+        // 300 is a legal (snappy) rate in the ENGINE's unit; only the GDD
+        // spelling carries the 0..1 domain.
+        expect(filterCameraNumerics({ followSmoothing: 300 })).toEqual({ followSmoothing: 300 });
+        expect(classifyCameraConfigKeys({ followSmoothing: 300 }).unusable).toEqual([]);
+      });
+    });
+
     it('drops a non-numeric smoothing value with the ordinary reason', () => {
       // The conversion function is never called on a non-number: the shared
       // finite check runs first, so the report reads "not a finite number"
