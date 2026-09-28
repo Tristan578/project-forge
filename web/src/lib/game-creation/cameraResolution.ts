@@ -467,7 +467,10 @@ const GDD_CONFIG_KEY_ALIASES: Record<string, GddConfigAlias> = {
     // hazard (divergence), and 0 is a frozen follow — legal in both units.
     domain: {
       accepts: (value) => value <= 1,
-      reason: 'must not exceed 1 (a 0..1 per-frame lerp fraction)',
+      // Read inside the executor's own "key (reason)" parentheses, by an
+      // author who may not know the word "lerp" — so no nested parens and no
+      // jargon.
+      reason: 'must be between 0 and 1 — the fraction of the gap to close each frame',
     },
   },
 };

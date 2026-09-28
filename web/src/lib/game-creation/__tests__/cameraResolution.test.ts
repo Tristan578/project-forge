@@ -272,7 +272,7 @@ describe('filterCameraNumerics', () => {
      * `config` as `z.record(z.string(), z.unknown())` — so this is the contract.
      */
     describe('refuses a smoothing outside the 0..1 per-frame fraction', () => {
-      const REASON = 'must not exceed 1 (a 0..1 per-frame lerp fraction)';
+      const REASON = 'must be between 0 and 1 — the fraction of the gap to close each frame';
 
       it.each([1.001, 1.5, 5, 60])('drops and reports smoothing %s', (smoothing) => {
         expect(filterCameraNumerics({ smoothing })).toEqual({});
