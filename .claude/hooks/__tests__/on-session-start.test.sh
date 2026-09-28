@@ -89,6 +89,24 @@ expect() {
 }
 readonly -f expect
 
+# assert_no_raw_start <case> <result> — the hook's EMITTED guidance must never
+# tell an operator to run the taskboard binary by hand (#9995 / #10291): a raw
+# `taskboard start` lets the binary fall back to its own default database path,
+# which is the divergence the runtime launcher exists to close. This is an
+# occurrence check on the live output (a whole-word `taskboard start`, whatever
+# precedes it), not a containment check on the hook's source, so a comment or a
+# re-worded banner cannot satisfy it (lessons-learned #16). The launcher line
+# `taskboard-launch.mjs start` never matches: its hyphen breaks the word.
+assert_no_raw_start() {
+  local desc="$1" res="$2" out="${2#*|}"
+  if grep -qE '(^|[^-[:alnum:]_])taskboard start' <<<"$out"; then
+    bad "$desc — emitted guidance still prescribes a raw 'taskboard start': $out"
+  else
+    ok "$desc"
+  fi
+}
+readonly -f assert_no_raw_start
+
 echo "=== on-session-start.sh tests ==="
 set_dx absent
 
@@ -110,9 +128,13 @@ expect "2e. no DX line when tools/dx-audit.sh is absent" "$res" 0 "~DX AUDIT"
 expect "3. server down + auto-start succeeds continues to the status flow" \
   "$(run_hook STUB_API_AVAILABLE=0 STUB_AUTO_START=1)" 0 \
   "Server not running" "STUB-AUTO-START-CALLED" "Server started on http://localhost:3010" "TASKBOARD STATUS"
+res="$(run_hook STUB_API_AVAILABLE=0 STUB_AUTO_START=0)"
 expect "3b. server down + auto-start fails prints the FAILED TO START banner and exits 0 without the status flow" \
-  "$(run_hook STUB_API_AVAILABLE=0 STUB_AUTO_START=0)" 0 \
+  "$res" 0 \
   "TASKBOARD FAILED TO START" "~TASKBOARD STATUS" "~STUB-SYNC-FROM-GITHUB-RAN"
+expect "3c. the FAILED TO START banner's manual remedy is the runtime launcher" \
+  "$res" 0 "node .claude/hooks/taskboard-launch.mjs start"
+assert_no_raw_start "3d. the FAILED TO START banner never prescribes a raw 'taskboard start'" "$res"
 
 # ---- 4. stale, active-with-issues, consistency reports -----------------------
 expect "4. stale in-progress tickets are reported with an ACTION REQUIRED line" \

@@ -55,9 +55,11 @@ if ! tb_api_available; then
 ╠══════════════════════════════════════════════════════════════╣
 ║  Could not auto-start the taskboard server.                  ║
 ║                                                              ║
-║  Start manually (NO --db flag — use OS default):             ║
+║  Start manually through the launcher. It resolves and        ║
+║  passes the shared database path itself; never start the     ║
+║  binary by hand:                                             ║
 ║    cd project-forge                                          ║
-║    taskboard start --port 3010                               ║
+║    node .claude/hooks/taskboard-launch.mjs start             ║
 ║                                                              ║
 ║  ALL work MUST be tracked. You CANNOT proceed without it.    ║
 ╚══════════════════════════════════════════════════════════════╝

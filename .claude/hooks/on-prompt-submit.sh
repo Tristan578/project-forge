@@ -16,7 +16,7 @@ INPUT=$(cat)
 # If taskboard API isn't available, warn but don't block
 if ! tb_api_available; then
     echo "[TASKBOARD] Server not reachable. Start it before doing development work."
-    echo "  taskboard start --port 3010    # NO --db flag — use OS default"
+    echo "  node .claude/hooks/taskboard-launch.mjs start    # resolves + passes the shared DB path; never start the binary by hand"
     exit 0
 fi
 
@@ -24,7 +24,7 @@ fi
 BOARD_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(len(c.get('tickets',[])) for c in d.get('columns',[])) or len(d.get('tickets',[])))" 2>/dev/null || echo "0")
 if [ "$BOARD_COUNT" = "0" ]; then
     echo "[TASKBOARD WARNING] Board has 0 tickets — wrong DB path or sync needed."
-    echo "  Kill and restart: pkill taskboard && taskboard start --port 3010"
+    echo "  Kill and restart: pkill taskboard && node .claude/hooks/taskboard-launch.mjs start"
     echo "  Then sync: python3 .claude/hooks/github_project_sync.py pull"
 fi
 

@@ -31,12 +31,15 @@ The orchestrator (main Claude session) owns ALL ticket lifecycle transitions. Su
 
 ### Before dispatching any agent (orchestrator steps)
 
-1. Ensure taskboard is running and has data. Go through `taskboard_runtime.py`,
+1. Ensure taskboard is running and has data. Go through the runtime launcher,
    never a raw `taskboard start` — a raw start lets the binary fall back to
    its own default database path, which can silently diverge from the one
-   the MCP server and `github_project_sync.py` resolve (#9995):
+   the MCP server and `github_project_sync.py` resolve (#9995). The launcher
+   is the same entry point `.mcp.json` dials for the MCP server, and it
+   finds a Python 3 for you (`python3` is not a valid executable name on
+   Windows CPython), so it is the one documented start on every OS:
    ```bash
-   python3 .claude/hooks/taskboard_runtime.py start   # resolves + verifies the ONE shared database
+   node .claude/hooks/taskboard-launch.mjs start   # resolves + verifies the ONE shared database
    # Verify board has tickets (0 = wrong DB path)
    curl -s http://taskboard.localhost:1355/api/board | python3 -c "import json,sys; c=len(json.load(sys.stdin).get('tickets',[])); print(f'{c} tickets')"
    ```
