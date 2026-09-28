@@ -54,7 +54,9 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 [ -f "$HELPER" ] || { echo "compiler-version helper not found: $HELPER"; exit 1; }
@@ -80,6 +82,7 @@ make_ghaw_repo() {
   )
   echo "$repo"
 }
+readonly -f make_ghaw_repo
 
 # Run the gate inside $repo with a given compile stub; echo "<exit>|<output>".
 run_gate() {
@@ -88,6 +91,7 @@ run_gate() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate
 
 # True iff the working tree under .github/workflows/ is clean (no modified,
 # deleted, or untracked files). Used to prove drift detection is non-destructive.
@@ -95,6 +99,7 @@ workflows_clean() {
   local repo="$1"
   [ -z "$(cd "$repo" && git status --porcelain -- .github/workflows/)" ]
 }
+readonly -f workflows_clean
 
 echo "=== check-ghaw-lock-sync.sh tests ==="
 
@@ -315,6 +320,7 @@ run_helper() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_helper
 
 # 8a. Single committed lock recording a version → that version, verbatim.
 repo="$(make_ghaw_repo)"

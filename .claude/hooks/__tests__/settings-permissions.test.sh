@@ -48,6 +48,7 @@ assert_jq() {
     printf '  FAIL %s\n' "$desc"
   fi
 }
+readonly -f assert_jq
 
 echo "settings.json permissions"
 
@@ -188,12 +189,14 @@ docs_name_governed_paths() {
   done <<<"$governed"
   [ "$problems" -eq 0 ]
 }
+readonly -f docs_name_governed_paths
 
 # indent_detail <text> — print <text> under a FAIL row, every line indented.
 # Parameter expansion, not `sed 's/^/<pad>/' <<<"$text"`: that form is SC2001, and
 # this file is in CI's "Shellcheck all hooks" scope.
 # Callers pass `$(...)` output, which has its trailing newlines stripped.
 indent_detail() { printf '       %s\n' "${1//$'\n'/$'\n'       }"; }
+readonly -f indent_detail
 
 # The FAIL detail printer must keep EVERY line and indent each one under its
 # row. Assert the exact bytes (lesson 11), on a multi-line input, so a printer
@@ -225,6 +228,7 @@ docs_case() {
     [ -n "$out" ] && indent_detail "$out"
   fi
 }
+readonly -f docs_case
 
 # The backticks below are Markdown code spans, in fixture text and in the
 # expected messages — literal on purpose, never a command substitution.
@@ -277,6 +281,7 @@ docs_case "docs check: a missing SANDBOX.md fails closed" fail 'missing or unrea
   "$D/settings.json" "$D/does-not-exist.md" "$D/contrib-good.md"
 rm -rf "$DOCS_TMPROOT"
 }
+readonly -f docs_selftests
 docs_selftests
 
 # Real check: the committed docs against the settings file under test.
@@ -401,6 +406,7 @@ seam_not_wired() {
   stripped="$(grep -v '^[[:space:]]*#' <<<"$hits")"
   [ -z "$stripped" ]
 }
+readonly -f seam_not_wired
 
 # --- Hermetic self-tests for seam_not_wired(): exercise the helper directly
 #     against synthetic fixture directories (created OUTSIDE the repo tree via
@@ -630,6 +636,7 @@ fi
 run_selftest_child() {
   SETTINGS_PERMISSIONS_FILE="$1" bash "${BASH_SOURCE[0]}" --selftest-child
 }
+readonly -f run_selftest_child
 
 if [ "${1:-}" != "--selftest-child" ] && [ -z "${SETTINGS_PERMISSIONS_SELFTEST:-}" ]; then
   # child_rejects <fixture> <expect_substr> — 0 (true) iff the re-exec'd child
