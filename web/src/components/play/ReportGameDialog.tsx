@@ -9,6 +9,7 @@ import {
   REPORT_DETAILS_MAX_LENGTH,
   type GameReportReason,
 } from '@/lib/config/moderation';
+import { signInHrefReturningToPlay } from '@/lib/navigation/authRoutes';
 
 interface ReportGameDialogProps {
   gameId: string;
@@ -114,7 +115,7 @@ export function ReportGameDialog({
   if (!isAuthenticated) {
     return (
       <a
-        href={`/sign-in?redirect_url=/play/${encodeURIComponent(userId)}/${encodeURIComponent(slug)}`}
+        href={signInHrefReturningToPlay(userId, slug)}
         className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
         title="Sign in to report this game"
         aria-label="Sign in to report this game"

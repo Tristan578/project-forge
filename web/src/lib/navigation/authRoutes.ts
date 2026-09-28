@@ -57,3 +57,12 @@ function parseOnProbeOrigin(value: string): URL | null {
   }
   return url.origin === PROBE_ORIGIN ? url : null;
 }
+
+/**
+ * Sign-in that returns to a published game's play page (`app/play/[userId]/[slug]`).
+ * Both segments are user-supplied and encoded here; the guard above is what
+ * keeps a crafted slug from turning the return path into another origin.
+ */
+export function signInHrefReturningToPlay(userId: string, slug: string): string {
+  return signInHrefReturningTo(`/play/${encodeURIComponent(userId)}/${encodeURIComponent(slug)}`);
+}
