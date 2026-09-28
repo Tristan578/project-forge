@@ -1,6 +1,6 @@
 // Web Worker for sandboxed script execution.
 // Receives: init (scripts + entity states), tick (dt + states), stop
-// Sends: commands (engine commands), log (console output), error (runtime errors), ui (HUD updates)
+// Sends: commands, log, error, script_timeout, ui, the forge API's async_request / scene_* / ui_* / camera_* / dialogue_* / game_* messages, and init_done / tick_done (init or a tick finished; the watchdog's liveness signal)
 
 import { injectLoopGuards } from './loopGuards';
 import { SHADOWED_GLOBALS } from './sandboxGlobals';
@@ -1481,6 +1481,18 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
 
 const MAX_COMMANDS_PER_FRAME = 100;
 
+/**
+ * Says that a tick returned. The runner arms a 5 s watchdog on every tick and
+ * clears it only when the worker posts something, so a script that never
+ * calls forge.* made every tick silent and Play stopped as a "possible
+ * infinite loop" (#10286). A tick that never returns still posts nothing,
+ * which is exactly what the watchdog is there to catch. The runner ignores
+ * the message; it is not a command.
+ */
+function postTickDone() {
+  (self as unknown as Worker).postMessage({ type: 'tick_done' });
+}
+
 function flushCommands() {
   if (pendingCommands.length > MAX_COMMANDS_PER_FRAME) {
     (self as unknown as Worker).postMessage({
@@ -1693,6 +1705,7 @@ self.onmessage = (e: MessageEvent) => {
       if (heapMb >= 0 && heapMb > memoryLimitMb) {
         terminateDueToMemory(heapMb);
         flushCommands();
+        postTickDone();
         break;
       }
 
@@ -1736,6 +1749,7 @@ self.onmessage = (e: MessageEvent) => {
       }
 
       flushCommands();
+      postTickDone();
       break;
     }
 

@@ -119,7 +119,7 @@ jobs:
           # .transform-gizmo-fork is a PATH DEPENDENCY of the engine
           # (engine/Cargo.toml: path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"),
           # so it compiles into every shipped WASM binary. It is a local patch we
-          # maintain for Bevy 0.18, not merely vendored code. Matching only
+          # maintain for Bevy 0.19, not merely vendored code. Matching only
           # '^engine/' meant a PR editing just the fork set engine=false, skipped
           # Quality Gates / WASM Build entirely, and was first compiled by CD on
           # main AFTER merge -- so a fork edit that failed to build reddened main
@@ -620,12 +620,23 @@ jobs:
     needs: [ci-gate]
     if: ${{ needs.ci-gate.outputs.needs-hooks == 'true' || needs.ci-gate.outputs.needs-ci == 'true' }}
     runs-on: windows-latest
-    # Raised from 30 after review measured 26:52 on this branch — ~3 minutes
-    # of headroom on a job that is in ci-success's needs:, so a tip-over blocks
-    # every PR rather than one. The delta against main's ~22 minutes is mostly
-    # runner variance rather than any single suite, which is the argument for
-    # headroom rather than for hunting a culprit.
-    timeout-minutes: 45
+    # The job is in ci-success's needs:, so a tip-over blocks every PR rather
+    # than one. Raised from 30 to 45 after review measured 26:52 on a branch,
+    # about 3 minutes of headroom; main then took about 22 minutes.
+    # Raised from 45 to 60 (#10285): on 2026-09-24 main measured 36:54 with
+    # 66 suites, then 36:53 and 39:04 with 70, against about 22 on 2026-09-15.
+    # That growth is not runner variance. The job runs every bash suite one
+    # after another under Git Bash, where process spawns are slow. #10229
+    # added the 71st suite, check-fn-freeze, and its case count grew across
+    # that PR's heads. In a 41:22 run of the final head on 2026-09-26 (job
+    # 108460157387), check-ci-success alone took 553 s, and check-fn-freeze
+    # took 92 s at 175 cases against about 8 s on Linux. Earlier heads
+    # measured it at 44 s with 144 cases (job 108440510702) and 52 s with 151
+    # (job 108446401974, whole job 30:38), so re-measure it from this job
+    # after the suite changes. 60 is headroom while #10290 finds and cuts
+    # where the time goes; raise it again only with that issue's
+    # measurements, not in its place.
+    timeout-minutes: 60
     permissions:
       contents: read
     defaults:
@@ -1265,6 +1276,7 @@ jobs:
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
+            scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
 
       - name: Run lockfile gate test suite
@@ -1435,6 +1447,19 @@ jobs:
         # suite-wiring pair above: the gate's own suite runs first so a broken
         # gate is distinguishable from a genuine finding.
         run: bash scripts/check-pin-strength.sh
+
+      - name: Run function-freeze gate test suite
+        run: bash scripts/__tests__/check-fn-freeze.test.sh
+
+      - name: Run function-freeze gate
+        # Every function a bash self-defense suite defines must be frozen with
+        # `readonly -f` directly after its definition (PF-1076 / #9125): a
+        # bash function resolves by name at call time, so one inserted
+        # `fail() { :; }` otherwise turns every FAIL into silence and the suite
+        # exits 0 having checked nothing. Same pairing as the two gates above:
+        # the gate's own suite runs first so a broken gate is distinguishable
+        # from a genuine finding.
+        run: bash scripts/check-fn-freeze.sh
 
   # ---- Preview Deployment (PR only) ----
   # Deploys a Vercel preview for every PR so reviewers can test changes without

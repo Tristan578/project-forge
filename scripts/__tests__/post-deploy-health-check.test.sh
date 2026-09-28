@@ -27,7 +27,9 @@ SCRIPT="$HERE/../post-deploy-health-check.sh"
 PASS=0
 FAIL=0
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "script not found: $SCRIPT"; exit 1; }
 
@@ -53,8 +55,10 @@ run_with() {
   rm -rf "$tmp"
   printf '%s\n---RC---%s' "$out" "$rc"
 }
+readonly -f run_with
 
 rc_of() { local r="${1#*---RC---}"; printf '%s' "$r"; }
+readonly -f rc_of
 
 echo "=== the engine gate must fail on a reported engine failure ==="
 
@@ -188,6 +192,7 @@ e2e() {
     bash "$SCRIPT" "${URL:-https://www.example.test}" 2>&1
   )
 }
+readonly -f e2e
 
 HEALTHY='{"status":"ok","commit":"abcdef12","services":[{"name":"Engine CDN","status":"up"}]}'
 

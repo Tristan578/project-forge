@@ -84,7 +84,7 @@ pub(super) fn apply_environment_updates(
     mut pending: ResMut<PendingCommands>,
     mut settings: ResMut<EnvironmentSettings>,
     camera_query: Query<Entity, With<camera::EditorCamera>>,
-    mut skybox_query: Query<&mut bevy::core_pipeline::Skybox>,
+    mut skybox_query: Query<&mut bevy::light::Skybox>,
 ) {
     for update in pending.environment_updates.drain(..) {
         if let Some(v) = update.skybox_brightness { settings.skybox_brightness = v; }
@@ -153,8 +153,8 @@ pub(super) fn apply_set_skybox_requests(
 
             // Apply to camera
             if let Ok(camera_entity) = camera_query.single() {
-                commands.entity(camera_entity).insert(bevy::core_pipeline::Skybox {
-                    image: handle,
+                commands.entity(camera_entity).insert(bevy::light::Skybox {
+                    image: Some(handle),
                     brightness: settings.skybox_brightness,
                     ..Default::default()
                 });
@@ -168,8 +168,8 @@ pub(super) fn apply_set_skybox_requests(
             // Look up the asset handle from the global texture registry
             if let Some(handle) = texture_handles.0.get(&asset_id) {
                 if let Ok(camera_entity) = camera_query.single() {
-                    commands.entity(camera_entity).insert(bevy::core_pipeline::Skybox {
-                        image: handle.clone(),
+                    commands.entity(camera_entity).insert(bevy::light::Skybox {
+                        image: Some(handle.clone()),
                         brightness: settings.skybox_brightness,
                         ..Default::default()
                     });
@@ -201,7 +201,7 @@ pub(super) fn apply_remove_skybox_requests(
 
         // Remove Skybox component from camera
         if let Ok(camera_entity) = camera_query.single() {
-            commands.entity(camera_entity).remove::<bevy::core_pipeline::Skybox>();
+            commands.entity(camera_entity).remove::<bevy::light::Skybox>();
         }
 
         tracing::info!("Removed skybox");
@@ -215,7 +215,7 @@ pub(super) fn apply_update_skybox_requests(
     mut pending: ResMut<PendingCommands>,
     mut settings: ResMut<EnvironmentSettings>,
     camera_query: Query<Entity, With<camera::EditorCamera>>,
-    mut skybox_query: Query<&mut bevy::core_pipeline::Skybox>,
+    mut skybox_query: Query<&mut bevy::light::Skybox>,
     _commands: Commands,
 ) {
     for request in pending.update_skybox_requests.drain(..) {
@@ -329,8 +329,8 @@ pub(super) fn apply_custom_skybox_requests(
 
         // Apply to camera
         if let Ok(camera_entity) = camera_query.single() {
-            commands.entity(camera_entity).insert(bevy::core_pipeline::Skybox {
-                image: handle,
+            commands.entity(camera_entity).insert(bevy::light::Skybox {
+                image: Some(handle),
                 brightness: settings.skybox_brightness,
                 rotation: bevy::math::Quat::IDENTITY,
             });
@@ -421,7 +421,7 @@ pub(super) fn apply_shader_updates(
         // Check if entity already has ExtendedMaterial
         if let Ok((_, _, ext_handle)) = ext_mat_query.get(entity) {
             // Update existing extended material
-            if let Some(ext_mat) = ext_materials.get_mut(ext_handle) {
+            if let Some(mut ext_mat) = ext_materials.get_mut(ext_handle) {
                 ext_mat.extension = ForgeShaderExtension::from(&update.shader_data);
             }
         } else if let Ok((_, _, std_handle, _mat_data)) = std_mat_query.get(entity) {
@@ -469,7 +469,7 @@ pub(super) fn apply_shader_removals(
         let none_data = ShaderEffectData { shader_type: "none".to_string(), ..Default::default() };
 
         if let Ok((_, _, ext_handle)) = ext_mat_query.get(entity) {
-            if let Some(ext_mat) = ext_materials.get_mut(ext_handle) {
+            if let Some(mut ext_mat) = ext_materials.get_mut(ext_handle) {
                 ext_mat.extension.shader_type = 0;
             }
         }
@@ -491,7 +491,7 @@ pub(super) fn sync_extended_material_data(
     texture_handles: Res<crate::core::asset_manager::TextureHandleMap>,
 ) {
     for (data, handle) in query.iter() {
-        if let Some(ext_mat) = ext_materials.get_mut(handle) {
+        if let Some(mut ext_mat) = ext_materials.get_mut(handle) {
             crate::core::material::apply_material_data_to_standard(&mut ext_mat.base, data, &texture_handles);
         }
     }
@@ -657,7 +657,7 @@ pub(super) fn apply_apply_custom_shader_requests(
 
         // Ensure entity has a ForgeMaterial (upgrade from StandardMaterial if needed).
         if let Ok((_, _, ext_handle)) = ext_mat_query.get(entity) {
-            if let Some(ext_mat) = ext_materials.get_mut(ext_handle) {
+            if let Some(mut ext_mat) = ext_materials.get_mut(ext_handle) {
                 // Reset shader_type to 0 so built-in effect early-returns are skipped,
                 // allowing the custom_slot dispatch block to execute.
                 ext_mat.extension.shader_type = 0;
@@ -778,7 +778,7 @@ pub(super) fn sync_custom_wgsl_uniforms(
 ) {
     let t = time.elapsed_secs();
     for (shader_data, handle) in shader_query.iter() {
-        if let Some(mat) = custom_materials.get_mut(handle) {
+        if let Some(mut mat) = custom_materials.get_mut(handle) {
             mat.extension.time = t;
             if let Some(data) = shader_data {
                 mat.extension.user_color = Vec4::new(
@@ -801,7 +801,7 @@ pub(super) fn sync_forge_shader_time(
 ) {
     let t = time.elapsed_secs();
     for handle in query.iter() {
-        if let Some(mat) = materials.get_mut(handle) {
+        if let Some(mut mat) = materials.get_mut(handle) {
             mat.extension.time = t;
         }
     }

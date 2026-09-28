@@ -10,6 +10,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
 import { getCanvasKeyMap, eventToKeyCombo } from '@/lib/workspace/keybindings';
 import { InitOverlay } from './InitOverlay';
+import { RenderErrorNotice } from './RenderErrorNotice';
 import { ViewPresetButtons } from './ViewPresetButtons';
 import { UICanvasOverlay } from './ui-builder/UICanvasOverlay';
 import { UIRuntimeRenderer } from './ui-builder/UIRuntimeRenderer';
@@ -162,6 +163,9 @@ export function CanvasArea() {
 
       {/* Initialization overlay with progress and error handling */}
       <InitOverlay />
+
+      {/* GPU render errors (#8887): skipped, or the viewport stopped drawing */}
+      <RenderErrorNotice />
 
       {/* Camera preset buttons */}
       {isReady && (
