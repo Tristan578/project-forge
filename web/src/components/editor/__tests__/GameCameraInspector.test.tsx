@@ -153,19 +153,27 @@ describe('GameCameraInspector', () => {
       expect(input).toHaveAttribute('min', '0');
     });
 
-    it.each(ALL_MODES.filter((m) => MODE_READS_DAMPING[m]))(
-      'seeds the engine default follow rate when switching to %s',
+    it.each(ALL_MODES)(
+      'a switch to %s seeds followSmoothing iff the engine reads damping there',
       (mode) => {
-        setupStore({ primaryGameCamera: { ...baseGameCamera, mode: 'orbital', targetEntity: 'hero' } });
+        // Start somewhere else, or the <select> sees no change and fires nothing.
+        const from: GameCameraMode = mode === 'fixed' ? 'orbital' : 'fixed';
+        setupStore({ primaryGameCamera: { mode: from, targetEntity: 'hero' } });
         render(<GameCameraInspector />);
         fireEvent.change(screen.getByRole('combobox'), { target: { value: mode } });
-        // Full-object assertion: the seed is what the row then displays, so a
-        // mode seeded without it would show the default while dispatching
-        // nothing — indistinguishable in the panel from a mode that has none.
         const dispatched = mockSetGameCamera.mock.calls.at(-1)?.[1] as GameCameraData;
         expect(dispatched.mode).toBe(mode);
         expect(dispatched.targetEntity).toBe('hero');
-        expect(dispatched.followSmoothing).toBe(ENGINE_CAMERA_DEFAULTS.followSmoothing);
+        // Presence is asserted for EVERY mode, not the value for the follow
+        // ones only: a non-follow mode seeded with a follow rate would dispatch
+        // a `damping` the panel offers no control for, and a follow mode left
+        // unseeded would show the default while dispatching nothing — the two
+        // drift directions `ModeDefaults` pins at compile time, checked here at
+        // the dispatch the user actually gets.
+        expect(Object.hasOwn(dispatched, 'followSmoothing')).toBe(MODE_READS_DAMPING[mode]);
+        if (MODE_READS_DAMPING[mode]) {
+          expect(dispatched.followSmoothing).toBe(ENGINE_CAMERA_DEFAULTS.followSmoothing);
+        }
       },
     );
 
