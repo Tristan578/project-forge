@@ -1,0 +1,5 @@
+---
+"web": patch
+---
+
+Bump `@sentry/nextjs` and `@sentry/profiling-node` from 10.75.0 to 11.0.0 together (Sentry ships them as a matched pair; `sentry-regressions.test.ts` pins both to the same declared range and the same locked version, so neither could bump alone). The three `Sentry.init` configs (server, edge, client) are migrated to the v11 option surface: `dataCollection.queryParams` is renamed `urlQueryParams` (still opted out, so the exhaustive F03/F04 PII opt-out is unchanged); `enableLogs` is removed because v11 has no such option — logs ship whenever `Sentry.logger.*` is called, which makes the `beforeSendLog: scrubSentryLog` pin the only control on that pipeline; and `streamGenAiSpans` plus `vercelAIIntegration({ enableTruncation })` are removed because v11 always streams gen_ai spans and never truncates them (prompt/completion content is still withheld by `dataCollection.genAI`). The regression suite now pins that no config carries `enableLogs` at all. The root lockfile is regenerated for the new transitive dependency set.
