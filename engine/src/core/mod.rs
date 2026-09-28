@@ -55,6 +55,7 @@ pub mod post_processing;
 pub mod procedural_mesh;
 pub mod project_type;
 pub mod quality;
+pub mod render_errors;
 pub mod reparent;
 pub mod reverb_zone;
 /// Native `App` schedule smoke test for B0002-class (Res+ResMut of the same

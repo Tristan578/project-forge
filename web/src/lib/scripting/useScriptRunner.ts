@@ -554,6 +554,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
             // (see scriptWorker.ts). Nothing to do here beyond the watchdog
             // clear above: it is not a command, a log, or an error.
             break;
+          case 'tick_done':
+            // The worker finished a tick. Its whole job is the watchdog clear
+            // above: a script that never calls forge.* posts nothing else, and
+            // without this Play stopped after 5 s (#10286).
+            break;
         }
       };
 
