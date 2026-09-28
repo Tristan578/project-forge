@@ -10,6 +10,7 @@ import { SpriteClient } from '@/lib/generate/spriteClient';
 import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -91,7 +92,7 @@ describe('GET /api/generate/sprite-sheet/status', () => {
       const res = await GET(makeRequest('replicate-pred-123'));
 
       expect(res.status).toBe(404);
-      expect((await res.json()).error).toBe('Job not found');
+      expect((await res.json()).error).toBe(JOB_NOT_FOUND_MESSAGE);
       expect(resolveApiKey).not.toHaveBeenCalled();
       expect(SpriteClient).not.toHaveBeenCalled();
     });

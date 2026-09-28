@@ -9,6 +9,7 @@ import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 const mockGetTextureStatus = vi.hoisted(() => vi.fn());
 
@@ -84,7 +85,7 @@ describe('GET /api/generate/texture/status', () => {
       const data = await res.json();
 
       expect(res.status).toBe(404);
-      expect(data.error).toBe('Job not found');
+      expect(data.error).toBe(JOB_NOT_FOUND_MESSAGE);
       expect(resolveApiKey).not.toHaveBeenCalled();
       expect(mockGetTextureStatus).not.toHaveBeenCalled();
     });

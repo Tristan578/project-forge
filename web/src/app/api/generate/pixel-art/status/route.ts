@@ -10,6 +10,7 @@ import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 // Async status endpoint for pixel-art generation. The POST /generate/pixel-art
 // route returns status:'pending' + jobId=predictionId for the DEFAULT Replicate
@@ -52,7 +53,7 @@ async function GET_impl(request: NextRequest) {
   // `src/lib/generate/jobOwnership.ts`.
   const isOwner = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.pixel_art, jobId);
   if (!isOwner) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+    return NextResponse.json({ error: JOB_NOT_FOUND_MESSAGE }, { status: 404 });
   }
 
   // Poll Replicate for prediction status

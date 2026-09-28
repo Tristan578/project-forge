@@ -11,6 +11,7 @@ import { MeshyClient } from '@/lib/generate/meshyClient';
 import { panelTierGateResponse, panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -93,7 +94,7 @@ describe('GET /api/generate/skybox/status', () => {
       const res = await GET(makeRequest('someone-elses-job'));
 
       expect(res.status).toBe(404);
-      expect((await res.json()).error).toBe('Job not found');
+      expect((await res.json()).error).toBe(JOB_NOT_FOUND_MESSAGE);
       expect(resolveApiKey).not.toHaveBeenCalled();
       expect(MeshyClient).not.toHaveBeenCalled();
     });

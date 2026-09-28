@@ -10,6 +10,7 @@ import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 const mockGetReplicateStatus = vi.hoisted(() => vi.fn());
 
@@ -102,7 +103,7 @@ describe('GET /api/generate/sprite/status', () => {
       const data = await res.json();
 
       expect(res.status).toBe(404);
-      expect(data.error).toBe('Job not found');
+      expect(data.error).toBe(JOB_NOT_FOUND_MESSAGE);
       expect(resolveApiKey).not.toHaveBeenCalled();
       expect(mockGetReplicateStatus).not.toHaveBeenCalled();
     });

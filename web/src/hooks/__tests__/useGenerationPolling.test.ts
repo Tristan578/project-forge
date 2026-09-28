@@ -135,6 +135,9 @@ import { useGenerationPolling } from '../useGenerationPolling';
 // Imported, not retyped: the guidance sentence is the catalogue's, and a test
 // that hardcoded it would pass while the two drifted apart.
 import { RETRY_GUIDANCE } from '@/lib/generate/retryGuidance';
+// The real 404 sentence the status routes send (#10262), so the terminal-404
+// tests prove the route's wording is what reaches the person.
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1169,6 +1172,95 @@ describe('useGenerationPolling', () => {
       status: 'processing',
       progress: 25,
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 404 from a status route is TERMINAL (#10262)
+  //
+  // The only 404 a status route sends is its ownership refusal: the polled job
+  // id is not bound to this account. Nothing about polling again changes that,
+  // and the two legitimate owners who hit it (a job in flight when the
+  // ownership table shipped; a job whose bind write failed) were, before this,
+  // indistinguishable from a transient 500 — retried every 3 s for five
+  // minutes, then refunded with the raw string in an indefinite toast.
+  // ---------------------------------------------------------------------------
+  it('stops polling and refunds on the FIRST 404 from a status route, showing the route sentence', async () => {
+    mockJobs['nf1'] = makeJob('nf1', { usageId: 'usage-nf1' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: () => Promise.resolve({ error: JOB_NOT_FOUND_MESSAGE }),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    // Refunded immediately — not after the five-minute cap.
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/generate/refund',
+      expect.objectContaining({ method: 'POST', body: expect.stringContaining('usage-nf1') }),
+    );
+    // Failed with the route's own sentence, verbatim, in the store and the toast.
+    expect(mockUpdateJob).toHaveBeenCalledWith('nf1', { status: 'failed', error: JOB_NOT_FOUND_MESSAGE });
+    expect(mockShowPersistentError).toHaveBeenCalledWith(JOB_NOT_FOUND_MESSAGE, {
+      id: `generation-failed:${JOB_NOT_FOUND_MESSAGE}`,
+    });
+
+    // And polling STOPPED: several more intervals produce no further status read.
+    const statusReads = () =>
+      fetchSpy.mock.calls.filter((c) => typeof c[0] === 'string' && (c[0] as string).includes('/status')).length;
+    expect(statusReads()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000 * 5); });
+    expect(statusReads()).toBe(1);
+    fetchSpy.mockRestore();
+  });
+
+  it('attaches the next step to the 404 fallback when the body carries no sentence', async () => {
+    // A 404 whose body is not a status-route JSON (an HTML error page, an
+    // empty body) still ends the job; the fallback gets RETRY_GUIDANCE like
+    // the timeout fallback does, never a bare code.
+    mockJobs['nf2'] = makeJob('nf2', { usageId: 'usage-nf2' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      return { ok: false, status: 404, json: () => Promise.reject(new Error('not json')) } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    const expected = `Generation job not found. ${RETRY_GUIDANCE}`;
+    expect(mockUpdateJob).toHaveBeenCalledWith('nf2', { status: 'failed', error: expected });
+    expect(mockShowPersistentError).toHaveBeenCalledWith(expected, { id: `generation-failed:${expected}` });
+    expect(fetchSpy).toHaveBeenCalledWith('/api/generate/refund', expect.objectContaining({ method: 'POST' }));
+    fetchSpy.mockRestore();
+  });
+
+  it('still treats a 500 as transient — only 404 is terminal', async () => {
+    // Guards the boundary of the new branch: a 500 with the same body shape
+    // must keep polling exactly as before (#9736), not be swept into the
+    // terminal path.
+    mockJobs['tr1'] = makeJob('tr1', { usageId: 'usage-tr1' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => ({
+      ok: false,
+      status: 500,
+      json: () => Promise.resolve({ error: 'Could not read the 3D Model generation status. Please try again.' }),
+    } as Response));
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).not.toHaveBeenCalledWith('/api/generate/refund', expect.anything());
+    expect(mockShowPersistentError).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   // ---------------------------------------------------------------------------

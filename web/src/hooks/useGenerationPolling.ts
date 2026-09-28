@@ -112,6 +112,8 @@ export function useGenerationPolling() {
    * Keeping the last message here is what actually puts the route's sentence in
    * front of the person. Polling still CONTINUES on a non-OK read — a single
    * 500 is usually transient — so this only surfaces once the job gives up.
+   * The one exception is a 404, which is the status route's ownership refusal
+   * (#10262) and is handled as terminal at the read site, never through here.
    */
   const lastStatusErrorRef = useRef<Record<string, string>>({});
 
@@ -265,6 +267,25 @@ export function useGenerationPolling() {
           // the user and is the only place that says what actually went wrong.
           const body: unknown = await response.json().catch(() => null);
           const message = statusErrorText(body);
+
+          // A 404 is TERMINAL, not transient (#10262). The only 404 a status
+          // route sends is its ownership refusal: the polled job id is not
+          // bound to this account, and nothing about polling again changes
+          // that. Two legitimate owners hit it too — a job in flight when the
+          // ownership table shipped (no binding row) and a job whose bind
+          // write failed — and before this branch both were indistinguishable
+          // from a 500, so the poller retried every 3 s for five minutes
+          // before refunding. Stop now, refund now, and show the route's
+          // sentence (it carries its own next step; the fallback gets one
+          // appended, like the timeout below).
+          if (response.status === 404) {
+            await triggerRefund(id);
+            failJob(id, message ?? withRetryGuidance('Generation job not found'));
+            delete lastStatusErrorRef.current[id];
+            stopPolling(id);
+            return;
+          }
+
           if (message) lastStatusErrorRef.current[id] = message;
           throw new Error(`Status check failed: ${response.status}`);
         }
