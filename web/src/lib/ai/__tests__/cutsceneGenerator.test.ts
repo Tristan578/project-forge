@@ -10,7 +10,9 @@ import {
   type CutsceneGenerationOptions,
 } from '../cutsceneGenerator';
 import { getKeyframePayloadFields } from '@/lib/cutscene/keyframePayload';
+import { MODE_READS_DAMPING } from '@/lib/game/gameCameraPayload';
 import { CUTSCENE_TRACK_TYPES } from '@/stores/cutsceneStore';
+import type { GameCameraMode } from '@/stores/slices/types';
 
 // ============================================================================
 // buildCutscenePrompt
@@ -64,6 +66,43 @@ describe('buildCutscenePrompt', () => {
     const result = buildCutscenePrompt(base);
     expect(result).toContain('"tracks"');
     expect(result).toContain('"keyframes"');
+  });
+
+  /**
+   * The camera schema the model is shown is a hand-written mirror of the field
+   * table in `keyframePayload.ts`, and the two are edited together. It listed
+   * `followSmoothing` under thirdPersonFollow only, so the model was never told
+   * a side-scroller or top-down keyframe could carry a follow rate — although
+   * the engine reads `damping` in all three arms (review-board finding on
+   * #10295). Driven by `MODE_READS_DAMPING`, the payload module's own table,
+   * so the prompt cannot drift from the wire without failing here.
+   */
+  describe('camera schema names followSmoothing for every following mode', () => {
+    const prompt = buildCutscenePrompt(base);
+
+    /** The `<mode>: "field", "field"` line of the camera payload schema. */
+    function modeLine(mode: string): string {
+      const m = new RegExp(`^\\s*${mode}: (.*)$`, 'm').exec(prompt);
+      expect(m, `no "${mode}:" schema line in the prompt`).not.toBeNull();
+      return m![1]!;
+    }
+
+    const modes = Object.keys(MODE_READS_DAMPING) as GameCameraMode[];
+
+    it('finds a schema line for every mode (guards against a vacuous sweep)', () => {
+      expect(modes.length).toBe(6);
+      for (const mode of modes) modeLine(mode);
+    });
+
+    it.each(modes)('%s lists followSmoothing iff the engine reads damping there', (mode) => {
+      const listed = modeLine(mode).includes('"followSmoothing"');
+      expect(listed).toBe(MODE_READS_DAMPING[mode]);
+    });
+
+    it('describes followSmoothing as a per-second rate shared by the following modes', () => {
+      expect(prompt).toMatch(/"followSmoothing" is the follow rate for EVERY following mode/);
+      expect(prompt).toMatch(/rate per second, higher = snappier/);
+    });
   });
 });
 
