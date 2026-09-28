@@ -20,14 +20,13 @@ The Game Camera component lets you define exactly how the camera behaves when yo
 ## Camera Modes
 
 ### 3rd Person Follow
-Follows the target entity from behind and above. The camera smoothly lags to reduce jitter.
+Follows the target entity from behind and above. The camera eases toward the target each frame rather than snapping to it.
 
 | Property | Description |
 |---|---|
 | Distance | How far behind the target the camera sits |
 | Height | How high above the target the camera floats |
-| Look Ahead | How far ahead of the target the camera looks (0 = center on target) |
-| Smoothing | Follow lag in frames (higher = slower, smoother) |
+| Smoothing | Follow rate per second (see [Smoothing](#smoothing) below) |
 
 ### First Person
 Attaches the camera directly to the target entity, creating a first-person view.
@@ -43,20 +42,23 @@ Positions the camera at a fixed distance along the Z axis, tracking the target o
 | Property | Description |
 |---|---|
 | Distance | Camera distance along the depth axis |
-| Height | Vertical offset above the target |
+| Smoothing | Follow rate per second (see [Smoothing](#smoothing) below) |
 
 ### Top Down
-Looks straight down (or at an angle) from directly above the target.
+Looks straight down from directly above the target.
 
 | Property | Description |
 |---|---|
 | Height | Camera altitude above the target |
-| Angle | Tilt angle in degrees (90 = perfectly vertical) |
+| Smoothing | Follow rate per second (see [Smoothing](#smoothing) below) |
 
 ### Fixed
 The camera position is controlled entirely by the entity's Transform. Use the transform gizmo to position and rotate the camera exactly where you want it in the scene.
 
 No additional properties — position and rotation come from the entity's Transform.
+
+### Smoothing
+Every mode that follows a target — 3rd Person Follow, Side Scroller and Top Down — shares one **Smoothing** parameter. It is a **rate per second**, not a lag: each frame the camera moves toward the target by `min(smoothing × frameTime, 1)` of the remaining distance. So **higher is snappier** — at the default of 5 the camera closes roughly 8% of the gap per frame at 60fps, at 20 it closes about a third, and at 60 or above it tracks the target exactly. **Lower is floatier**; 0 freezes the camera where it is. Negative values are refused.
 
 ### Orbital
 The camera orbits around the target at a fixed distance, with optional auto-rotation.
@@ -88,6 +90,6 @@ forge.camera.setProperty("followSmoothing", 10);
 
 ## Tips
 
-- For a classic platformer feel, use **3rd Person Follow** with a Distance of 8-12, Height of 3, and a Smoothing value of 8-10 to keep the camera from jerking on quick direction changes.
+- For a classic platformer feel, use **3rd Person Follow** with a Distance of 8-12 and a Height of 3. Leave Smoothing at the default 5, or drop it to 3-4 for a floatier camera that trails quick direction changes instead of tracking them exactly; raise it toward 10 only if the camera feels sluggish.
 - Camera shake is great for impacts, explosions, or screen-edge feedback. Keep intensity below 0.3 and duration under 0.5 seconds for subtlety.
 - Combine **Orbital** mode with an auto-rotate speed of 30-60 for a cinematic presentation camera during menus or loading screens.
