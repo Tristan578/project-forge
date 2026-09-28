@@ -30,6 +30,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOOKS_DIR="$(cd "$HERE/.." && pwd)"
 MODULE="$HOOKS_DIR/github_project_sync.py"
 FAILURES=0
+# This suite imports taskboard_sync_test from __tests__; without this it is the
+# one that leaves __tests__/__pycache__ behind in every checkout (#10291).
+export PYTHONDONTWRITEBYTECODE=1
 
 require() {
   if ! command -v "$1" >/dev/null 2>&1; then
