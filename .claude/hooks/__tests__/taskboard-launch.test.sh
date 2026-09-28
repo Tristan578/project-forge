@@ -20,7 +20,9 @@ command -v node >/dev/null 2>&1 || { echo "FAIL node is required to run this sui
 pass=0
 fail=0
 ok()  { echo "  PASS: $1"; pass=$((pass + 1)); }
+readonly -f ok
 bad() { echo "  FAIL: $1"; fail=$((fail + 1)); }
+readonly -f bad
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -34,6 +36,7 @@ run_launcher() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_launcher
 
 echo "=== taskboard-launch.mjs tests ==="
 
