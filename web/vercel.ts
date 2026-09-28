@@ -12,6 +12,14 @@
  * property fails `tsc --noEmit` instead of silently misconfiguring the
  * deploy — that's the whole point of this migration (see the issue body).
  *
+ * `@vercel/config` is a devDependency on purpose: the only import below is
+ * `import type`, which is erased at compile time, and Vercel evaluates this
+ * file at build time where `npm ci` installs devDependencies. Keeping it out
+ * of `dependencies` keeps its transitive `@vercel/routing-utils` (which pins
+ * an exact, advisory-bearing `path-to-regexp@6.1.0`) off the production
+ * dependency graph; the root `package.json` `overrides` block additionally
+ * forces that nested copy to the patched 6.3.0 (GHSA-9wv6-86v2-598j).
+ *
  * Preserved values and why each one is load-bearing:
  * - `installCommand` reaches ABOVE the deploy root (`cd ..`) because of the
  *   single-root lockfile (`package-lock.json` lives at the repo root, not
