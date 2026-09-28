@@ -196,11 +196,39 @@ if [ "$rc" = "0" ]; then pass "path with spaces → gate 0 (quoting holds)"; els
 #    check-npm-audit.test.sh's quality-gates/ci.yml/cd.yml sections). The gate
 #    is only real if CI actually invokes it; a PR that unwires an invocation,
 #    adds continue-on-error, or drops the self-defense registration must fail
-#    here. cd.yml (the deploy path) is derived the same way as ci.yml and
-#    quality-gates.yml, not hand-listed (#10222).
-CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
-QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
-CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
+#    here. WHICH workflows are read is a glob over .github/workflows/*.yml, not
+#    a list: the same rationale that derives the job set applies one level up.
+#    The derivation read ci.yml alone (#10200), then a hand list of three
+#    (#10222, first cut) — a fourth workflow gaining a vitest job would have
+#    sat outside the pin exactly as cd.yml's test-web and test-mcp did.
+WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
+
+# Per-workflow floors: the jobs KNOWN to load a native binding today, one line
+# per workflow that has any. A floor is a self-test of the derivation (see
+# assert_gate_wired), never the set under test, so this is the one place a
+# job name is typed. A workflow with no floor is still swept: every job it
+# derives is checked, and only the zero-derived vacuity check is waived —
+# schema-drift.yml carries the gate but derives nothing (`npm run db:drift`
+# loads no binding) and engine-cdn-test.yml's `npm test` is `node --test`.
+floor_jobs() {
+  case "$1" in
+    ci.yml)
+      echo "build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-crossbrowser docs-e2e observatory-tests docs-internal-gate design-internal-gate" ;;
+    # quality-gates.yml runs no `next build` line of its own: lighthouse-delta
+    # builds through web's `npm run build`, test-web and test-mcp run vitest,
+    # and editor-boot's Playwright config starts `next dev` (#10200).
+    quality-gates.yml)
+      echo "test-web test-mcp editor-boot lighthouse-delta" ;;
+    # cd.yml (the deploy path) has the same shape: test-web and test-mcp run
+    # vitest directly, and e2e builds Next.js itself (`npx next build`) before
+    # its own Playwright run. e2e already carried the gate; test-web and
+    # test-mcp did not (#10222).
+    cd.yml)
+      echo "test-web test-mcp e2e" ;;
+    *) echo "" ;;
+  esac
+}
+FLOORED_WORKFLOWS="ci.yml quality-gates.yml cd.yml"
 
 # WHICH jobs need a native binding is DERIVED from the workflow text, never
 # typed out. This list was hand-maintained twice and wrong both times: first
@@ -448,10 +476,15 @@ job_wiring_defects() {
 # 14. EVERY job that loads a native binding must invoke the gate, where
 #     "every" is the derived set above rather than a list someone keeps in
 #     step with the workflow. $1 = workflow text, $2 = its label, $3.. = the
-#     jobs known to need the gate today. That floor is a self-test of the
-#     derivation, NOT the set under test (lesson 9 — a sweep over zero jobs
-#     reads as zero defects): a new job is checked without being added here,
-#     and a job missing from it is still checked if it loads a binding.
+#     jobs known to need the gate today (may be none). That floor is a
+#     self-test of the derivation, NOT the set under test (lesson 9 — a sweep
+#     over zero jobs reads as zero defects): a new job is checked without
+#     being added here, and a job missing from it is still checked if it
+#     loads a binding. The zero-derived vacuity check applies only when a
+#     floor is given: a floored workflow deriving nothing means the
+#     derivation broke, while an unfloored one deriving nothing is simply a
+#     workflow that loads no binding (schema-drift.yml, engine-cdn-test.yml).
+#     Unresolvable rows fail in either case — an unknown is never "no".
 assert_gate_wired() {
   local text="$1" label="$2" derived unresolved derived_jobs floor_ok job defects defect
   shift 2
@@ -463,18 +496,24 @@ assert_gate_wired() {
       fail "$label job ${job} runs ${what} in '${dir}', which cannot be resolved — cannot tell whether it loads a native binding, so it cannot be left out of the pin"
     done <<<"$unresolved"
   fi
-  if [ -z "$derived_jobs" ]; then
-    fail "the derivation found ZERO native-binding jobs in $label — the sweep below would check nothing and pass"
-  fi
-  floor_ok=1
-  for job in "$@"; do
-    if ! grep -qxF "$job" <<<"$derived_jobs"; then
-      fail "the derivation does not recognise $label job ${job} as loading a native binding — either it stopped building, testing or serving Next.js/vitest (drop it from this floor) or the derivation regressed and 'every such job' no longer holds"
-      floor_ok=0
+  if [ "$#" -eq 0 ]; then
+    if [ -n "$derived_jobs" ]; then
+      pass "$label: $(grep -c '' <<<"$derived_jobs") native-binding job(s) derived with no floor declared — each is checked below"
     fi
-  done
-  if [ "$floor_ok" = 1 ]; then
-    pass "$label: the derivation recognises all $# known native-binding jobs ($(grep -c '' <<<"$derived_jobs") derived)"
+  else
+    if [ -z "$derived_jobs" ]; then
+      fail "the derivation found ZERO native-binding jobs in $label, which has a floor of $# — the sweep below would check nothing and pass"
+    fi
+    floor_ok=1
+    for job in "$@"; do
+      if ! grep -qxF "$job" <<<"$derived_jobs"; then
+        fail "the derivation does not recognise $label job ${job} as loading a native binding — either it stopped building, testing or serving Next.js/vitest (drop it from this floor) or the derivation regressed and 'every such job' no longer holds"
+        floor_ok=0
+      fi
+    done
+    if [ "$floor_ok" = 1 ]; then
+      pass "$label: the derivation recognises all $# known native-binding jobs ($(grep -c '' <<<"$derived_jobs") derived)"
+    fi
   fi
   while IFS= read -r job; do
     [ -n "$job" ] || continue
@@ -513,25 +552,56 @@ assert_unwiring_caught() {
   fi
 }
 
-if [ -f "$CI_YML" ] && [ -f "$QG_YML" ] && [ -f "$CD_YML" ]; then
-  ci="$(cat "$CI_YML")"
-  qg="$(cat "$QG_YML")"
-  cdwf="$(cat "$CD_YML")"
+# The sweep itself. Every *.yml under .github/workflows/ is read — the gh-aw
+# *.lock.yml compilations included, since they are workflows GitHub runs — and
+# each is graded against its floor (if any). The floored three must all be
+# present: a floor whose file is missing would otherwise never be evaluated,
+# and the derivation's self-test would vanish without a FAIL (lesson 9).
+workflow_files=()
+for wf_path in "$WORKFLOWS_DIR"/*.yml; do
+  [ -f "$wf_path" ] && workflow_files+=("$wf_path")
+done
+floored_missing=0
+for wf_label in $FLOORED_WORKFLOWS; do
+  if [ ! -f "$WORKFLOWS_DIR/$wf_label" ]; then
+    fail "floored workflow $wf_label not found under $WORKFLOWS_DIR — its floor cannot be evaluated"
+    floored_missing=1
+  fi
+done
 
-  assert_gate_wired "$ci" ci.yml \
-    build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-crossbrowser docs-e2e \
-    observatory-tests docs-internal-gate design-internal-gate
-  # quality-gates.yml runs no `next build` line of its own: lighthouse-delta
-  # builds through web's `npm run build`, test-web and test-mcp run vitest,
-  # and editor-boot's Playwright config starts `next dev` (#10200).
-  assert_gate_wired "$qg" quality-gates.yml \
-    test-web test-mcp editor-boot lighthouse-delta
-  # cd.yml (the deploy path, outside ci.yml/quality-gates.yml's own PR-time
-  # coverage) has the same shape: test-web and test-mcp run vitest directly,
-  # and e2e builds Next.js itself (`npx next build`) before its own Playwright
-  # run. e2e already carried the gate; test-web and test-mcp did not (#10222).
-  assert_gate_wired "$cdwf" cd.yml \
-    test-web test-mcp e2e
+if [ "${#workflow_files[@]}" -gt 0 ] && [ "$floored_missing" = 0 ]; then
+  ci="$(cat "$WORKFLOWS_DIR/ci.yml")"
+  qg="$(cat "$WORKFLOWS_DIR/quality-gates.yml")"
+  cdwf="$(cat "$WORKFLOWS_DIR/cd.yml")"
+
+  # 15 rides along: no continue-on-error may shadow any gate invocation — it
+  #    would swallow the non-zero exit and pass the job on a dropped binding.
+  #    Windowed to the invocation lines so legitimate continue-on-error
+  #    elsewhere in a workflow does not false-positive. Checked only where an
+  #    invocation exists (schema-drift.yml carries one outside any derived
+  #    job, so this is broader than the derived set), and the count of such
+  #    workflows must be non-zero or the check ran over nothing.
+  invoking_workflows=0
+  for wf_path in "${workflow_files[@]}"; do
+    wf_label="${wf_path##*/}"
+    wf_text="$(cat "$wf_path")"
+    read -r -a floor <<<"$(floor_jobs "$wf_label")"
+    assert_gate_wired "$wf_text" "$wf_label" ${floor[@]+"${floor[@]}"}
+
+    native_windows="$(grep -v '^[[:space:]]*#' <<<"$wf_text" | grep -B3 -A1 'bash scripts/check-native-bindings.sh' || true)"
+    [ -n "$native_windows" ] || continue
+    invoking_workflows=$((invoking_workflows + 1))
+    if grep -q 'continue-on-error' <<<"$native_windows"; then
+      fail "a $wf_label native-bindings gate step has continue-on-error — gate exit code would be ignored"
+    else
+      pass "$wf_label: no continue-on-error shadows any native-bindings gate invocation"
+    fi
+  done
+  if [ "$invoking_workflows" -gt 0 ]; then
+    pass "swept ${#workflow_files[@]} workflow file(s) under .github/workflows; $invoking_workflows invoke the gate"
+  else
+    fail "swept ${#workflow_files[@]} workflow file(s) and none invokes scripts/check-native-bindings.sh — the continue-on-error check ran over nothing"
+  fi
 
   # The regression from #8632: test-e2e-crossbrowser loses its gate. The
   # hand-typed list did not contain that job, so this exact mutation left the
@@ -630,24 +700,6 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ] && [ -f "$CD_YML" ]; then
     fail "derivation: \`playwright test\` against a missing config was not reported unresolvable (got: ${unresolvable:-nothing})"
   fi
 
-  # 15. No continue-on-error may shadow any gate invocation — it would swallow
-  #     the non-zero exit and pass the job on a dropped binding. Windowed to
-  #     the invocation lines so legitimate continue-on-error elsewhere in a
-  #     workflow does not false-positive.
-  for wf_label in ci.yml quality-gates.yml cd.yml; do
-    case "$wf_label" in
-      ci.yml) wf_text="$ci" ;;
-      quality-gates.yml) wf_text="$qg" ;;
-      *) wf_text="$cdwf" ;;
-    esac
-    native_windows="$(grep -v '^[[:space:]]*#' <<<"$wf_text" | grep -B3 -A1 'bash scripts/check-native-bindings.sh' || true)"
-    if grep -q 'continue-on-error' <<<"$native_windows"; then
-      fail "a $wf_label native-bindings gate step has continue-on-error — gate exit code would be ignored"
-    else
-      pass "$wf_label: no continue-on-error shadows any native-bindings gate invocation"
-    fi
-  done
-
   # 16. Self-defense registration: the lockfile-sync-tests (CI Self-Defense
   #     Tests) job must shellcheck the gate + this suite AND run this suite,
   #     so a PR that neuters either fails a required check.
@@ -663,7 +715,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ] && [ -f "$CD_YML" ]; then
     fail "self-defense job does not run scripts/__tests__/check-native-bindings.test.sh"
   fi
 else
-  fail "workflow files not found at $CI_YML / $QG_YML / $CD_YML — structural assertions cannot run"
+  fail "no workflow files under $WORKFLOWS_DIR, or a floored workflow is missing — structural assertions cannot run"
 fi
 
 # ── @rolldown: the second native binding, and the reason this gate is a list ──
