@@ -415,8 +415,14 @@ export function blendGameCameraData(
  * `top-down` with `smoothing`). An object with `satisfies`, not a `Set`, so a
  * mode added to the union has to be classified here rather than defaulting to
  * "does not follow".
+ *
+ * Exported because it is the ONE answer to "which modes have a follow rate":
+ * `GameCameraInspector` renders its Smoothing row and seeds the default from
+ * this table, and the cutscene generator's prompt is pinned against it, so
+ * neither surface can drift from the wire the way the inspector did while it
+ * kept its own `mode === 'thirdPersonFollow'` guard.
  */
-const MODE_READS_DAMPING = {
+export const MODE_READS_DAMPING = {
   thirdPersonFollow: true,
   sideScroller: true,
   topDown: true,
@@ -710,7 +716,10 @@ export function parseGameCameraWire(payload: Record<string, unknown>): GameCamer
   // The exact inverse of the builder's single `damping` write site. If this read
   // covered fewer modes than that write, a side-scroller camera's `damping`
   // would land in `engineParams` on the way in and be re-emitted from there on
-  // the way out — preserved, but invisible to the inspector's Smoothing field.
+  // the way out — preserved, but not in `followSmoothing`, which is the field
+  // the inspector's Smoothing row (rendered for every mode in this table)
+  // displays and edits. The row would show the engine default over a value
+  // that was in fact set.
   if (MODE_READS_DAMPING[mode]) {
     const damping = wireNum(payload, 'damping');
     if (damping !== undefined) data.followSmoothing = damping;

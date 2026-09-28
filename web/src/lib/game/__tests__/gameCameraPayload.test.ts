@@ -486,8 +486,10 @@ describe('gameCameraPayload', () => {
         });
 
         // The read side is the exact inverse: a `damping` the engine reports
-        // for this mode is the authoring field, not an opaque `engineParams`
-        // entry the inspector's Smoothing control cannot see.
+        // for this mode lands in `followSmoothing` — the field the inspector's
+        // Smoothing row (rendered for every mode in `MODE_READS_DAMPING`)
+        // displays and edits — not in an opaque `engineParams` entry that row
+        // never reads.
         it('parses damping back into followSmoothing, not engineParams', () => {
           const parsed = parseGameCameraWire({ mode, targetEntity: 'player-1', damping: 3 });
           expect(parsed).toEqual({ mode, targetEntity: 'player-1', followSmoothing: 3 });
@@ -557,8 +559,9 @@ describe('gameCameraPayload', () => {
           targetEntity: 'player-1',
           sideScrollerDistance: 15,
           // Both follow modes own `damping` too. Without this on the fixture
-          // the round trip could not tell a parser that maps it back from one
-          // that quietly parks it in `engineParams`.
+          // the round trip could not tell a parser that maps it back into
+          // `followSmoothing` (what the inspector's Smoothing row edits for
+          // these modes) from one that quietly parks it in `engineParams`.
           followSmoothing: 0.9,
         },
         topDown: {
@@ -737,8 +740,13 @@ describe('gameCameraPayload', () => {
     // completeness check, not translated by a switch case.
     const GENERIC_FIELDS: readonly (keyof GameCameraData)[] = ['mode', 'targetEntity', 'engineParams'];
 
-    // Every remaining field, paired with the one mode whose engine variant
-    // reads it. Read straight from the switch statement in the module.
+    // Every remaining field, paired with A mode whose engine variant reads it —
+    // enough to prove the field is read at all, which is this guard's job. It
+    // is not a claim of exclusivity: `followSmoothing` reaches the wire for
+    // every mode in `MODE_READS_DAMPING` (thirdPersonFollow, sideScroller,
+    // topDown), and its complete mode set is pinned against the Rust arms by
+    // 'followSmoothing is emitted for exactly the arms that read "damping"'
+    // below. The rest are read by exactly the one mode listed.
     const FIELD_MODE: Record<NumericCameraField, GameCameraMode> = {
       followDistance: 'thirdPersonFollow',
       followHeight: 'thirdPersonFollow',

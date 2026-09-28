@@ -12,6 +12,7 @@ import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import {
   acceptsNegative,
   ENGINE_CAMERA_DEFAULTS,
+  MODE_READS_DAMPING,
   readCameraFieldValue,
   type NumericCameraField,
 } from '@/lib/game/gameCameraPayload';
@@ -30,25 +31,51 @@ import {
  * the engine's 0.1 — that field is DEGREES of yaw per pixel of mouse delta
  * (`fp_state.yaw -= delta.dx * sensitivity`), so 0.1 turns a 900-pixel sweep
  * through 90° and 2 turns it through 1800°: five full rotations, unusable.
+ *
+ * `followSmoothing` is seeded for every mode in `MODE_READS_DAMPING` rather
+ * than listed per mode: the engine reads `damping` in all three follow arms,
+ * and this table used to seed it for `thirdPersonFollow` alone — the same
+ * one-mode-only shape the payload builder had (Sentry finding on #10295).
  */
+const FOLLOW_DEFAULTS: Partial<GameCameraData> = {
+  followSmoothing: ENGINE_CAMERA_DEFAULTS.followSmoothing,
+};
+
 const MODE_DEFAULTS: Record<GameCameraMode, Partial<GameCameraData>> = {
   thirdPersonFollow: {
     followDistance: ENGINE_CAMERA_DEFAULTS.followDistance,
     followHeight: ENGINE_CAMERA_DEFAULTS.followHeight,
-    followSmoothing: ENGINE_CAMERA_DEFAULTS.followSmoothing,
+    ...FOLLOW_DEFAULTS,
   },
   firstPerson: {
     firstPersonHeight: ENGINE_CAMERA_DEFAULTS.firstPersonHeight,
     firstPersonMouseSensitivity: ENGINE_CAMERA_DEFAULTS.firstPersonMouseSensitivity,
   },
-  sideScroller: { sideScrollerDistance: ENGINE_CAMERA_DEFAULTS.sideScrollerDistance },
-  topDown: { topDownHeight: ENGINE_CAMERA_DEFAULTS.topDownHeight },
+  sideScroller: {
+    sideScrollerDistance: ENGINE_CAMERA_DEFAULTS.sideScrollerDistance,
+    ...FOLLOW_DEFAULTS,
+  },
+  topDown: {
+    topDownHeight: ENGINE_CAMERA_DEFAULTS.topDownHeight,
+    ...FOLLOW_DEFAULTS,
+  },
   fixed: {},
   orbital: {
     orbitalDistance: ENGINE_CAMERA_DEFAULTS.orbitalDistance,
     orbitalAutoRotateSpeed: ENGINE_CAMERA_DEFAULTS.orbitalAutoRotateSpeed,
   },
 };
+
+// The seed and the row are gated by the same table, so neither can outlive the
+// other. A mode in `MODE_READS_DAMPING` without the seed would dispatch no
+// `damping` on a mode switch (fine — omission is the engine default) but a
+// mode with the seed and no row would dispatch a value the user cannot see.
+for (const mode of Object.keys(MODE_DEFAULTS) as GameCameraMode[]) {
+  const seeded = Object.hasOwn(MODE_DEFAULTS[mode], 'followSmoothing');
+  if (seeded !== MODE_READS_DAMPING[mode]) {
+    throw new Error(`MODE_DEFAULTS.${mode} disagrees with MODE_READS_DAMPING about followSmoothing`);
+  }
+}
 
 /**
  * Parse a number input, keeping the previous value when the field cannot hold
@@ -308,8 +335,6 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
           <>
             <NumberParamRow label="Distance" term="gameCameraFollowDist" field="followDistance" camera={primaryGameCamera} onChange={handleParamChange} />
             <NumberParamRow label="Height" term="gameCameraFollowHeight" field="followHeight" camera={primaryGameCamera} onChange={handleParamChange} />
-            {/* min=0: the engine refuses a negative follow rate outright (PF-1166). */}
-            <NumberParamRow label="Smoothing" term="gameCameraSmoothing" field="followSmoothing" camera={primaryGameCamera} onChange={handleParamChange} />
           </>
         )}
 
@@ -333,6 +358,20 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
             <NumberParamRow label="Distance" term="gameCameraOrbitalDist" field="orbitalDistance" camera={primaryGameCamera} onChange={handleParamChange} />
             <NumberParamRow label="Auto Rotate" term="gameCameraAutoRotate" field="orbitalAutoRotateSpeed" camera={primaryGameCamera} onChange={handleParamChange} />
           </>
+        )}
+
+        {/*
+          Smoothing is a follow rate, and every mode that FOLLOWS reads it — the
+          engine's `damping`, in the thirdPersonFollow, sideScroller and topDown
+          arms alike. Gated by the payload module's own table rather than a
+          second hand-written mode list: this row sat inside the
+          thirdPersonFollow block above, so a side-scroller or top-down author
+          had no control for a value the engine was reading all along.
+          `min={0}` (via `acceptsNegative`): the engine refuses a negative rate
+          outright (PF-1166).
+        */}
+        {MODE_READS_DAMPING[primaryGameCamera.mode] && (
+          <NumberParamRow label="Smoothing" term="gameCameraSmoothing" field="followSmoothing" camera={primaryGameCamera} onChange={handleParamChange} />
         )}
 
         {primaryGameCamera.mode === 'fixed' && (
