@@ -403,6 +403,49 @@ export function blendGameCameraData(
 }
 
 /**
+ * The modes whose engine arm reads `damping` — every one that FOLLOWS a target.
+ *
+ * `GameCameraMode::from_flat` calls `flat_damping(params, "damping", 5.0)` in
+ * its `thirdPersonFollow`, `sideScroller` AND `topDown` arms, and all three
+ * follow systems step with `follow_lerp_factor(damping, delta)`. The builder
+ * used to translate `followSmoothing` in the `thirdPersonFollow` case only, so
+ * a side-scroller or top-down camera silently kept the engine's 5.0 whatever
+ * the author set — and PF-1134's GDD `smoothing` -> `followSmoothing`
+ * conversion made that reachable from a real fixture (`cozy-farming.json` is
+ * `top-down` with `smoothing`). An object with `satisfies`, not a `Set`, so a
+ * mode added to the union has to be classified here rather than defaulting to
+ * "does not follow".
+ */
+const MODE_READS_DAMPING = {
+  thirdPersonFollow: true,
+  sideScroller: true,
+  topDown: true,
+  firstPerson: false,
+  orbital: false,
+  fixed: false,
+} as const satisfies Record<GameCameraMode, boolean>;
+
+/**
+ * Read `followSmoothing` as a dispatchable `damping`, or `undefined` to omit it.
+ *
+ * One helper for the three follow modes, so the mapping cannot drift between
+ * them the way it already did once (see {@link MODE_READS_DAMPING}).
+ *
+ * `num` proves finiteness; `isWireValue` adds the engine's sign policy, so the
+ * two write paths into `damping` — this mapping and the `engineParams`
+ * passthrough in {@link buildSetGameCameraPayload} — cannot disagree about
+ * what the engine will take. Omission is how the builder says "engine default"
+ * (PF-1126), so a refused rate keeps the rest of the full-replace command
+ * intact rather than losing mode/targetEntity/offset to a hard reject. The
+ * signal a human or the AI can act on lives at the input surfaces instead:
+ * `min={0}` on the inspector field, and a non-negative schema on the chat tool.
+ */
+function followDamping(data: Partial<GameCameraData>): number | undefined {
+  const smoothing = num(data, 'followSmoothing');
+  return smoothing !== undefined && isWireValue('damping', smoothing) ? smoothing : undefined;
+}
+
+/**
  * Build a `set_game_camera` payload in the engine's own vocabulary.
  *
  * Use this instead of spreading a store object into the dispatch. A `satisfies
@@ -446,18 +489,9 @@ export function buildSetGameCameraPayload(
           -(distance ?? DEFAULT_FOLLOW_DISTANCE),
         ];
       }
-      // `num` proves finiteness; `isWireValue` adds the engine's sign policy, so
-      // the two write paths into `damping` — this mapping and the `engineParams`
-      // passthrough below — cannot disagree about what the engine will take.
-      // Omission is how this builder says "engine default" (PF-1126), so a
-      // refused rate keeps the rest of this full-replace command intact rather
-      // than losing mode/targetEntity/offset to a hard reject. The signal a human
-      // or the AI can act on lives at the input surfaces instead: `min={0}` on
-      // the inspector field, and a non-negative schema on the chat tool.
-      const smoothing = num(data, 'followSmoothing');
-      if (smoothing !== undefined && isWireValue('damping', smoothing)) {
-        payload.damping = smoothing;
-      }
+      // `followSmoothing` -> `damping` is written below the switch, for every
+      // mode in `MODE_READS_DAMPING`, not here: it used to live in this arm
+      // alone, and the other two follow modes silently dropped it.
       break;
     }
     case 'firstPerson': {
@@ -498,6 +532,14 @@ export function buildSetGameCameraPayload(
     case 'fixed':
       // Position comes from the camera entity's own transform.
       break;
+  }
+
+  // One write site for `damping`, gated by the mode table rather than repeated
+  // per arm — three copies of the same three lines is how the side-scroller and
+  // top-down arms came to lack it in the first place.
+  if (MODE_READS_DAMPING[data.mode]) {
+    const damping = followDamping(data);
+    if (damping !== undefined) payload.damping = damping;
   }
 
   // Re-emit engine parameters this authoring vocabulary cannot express, so a
@@ -630,8 +672,8 @@ export function parseGameCameraWire(payload: Record<string, unknown>): GameCamer
         if (typeof y === 'number' && Number.isFinite(y)) data.followHeight = y;
         if (typeof z === 'number' && Number.isFinite(z)) data.followDistance = -z;
       }
-      const damping = wireNum(payload, 'damping');
-      if (damping !== undefined) data.followSmoothing = damping;
+      // `damping` -> `followSmoothing` is read below the switch for every mode
+      // in `MODE_READS_DAMPING`, mirroring the builder.
       break;
     }
     case 'firstPerson': {
@@ -663,6 +705,15 @@ export function parseGameCameraWire(payload: Record<string, unknown>): GameCamer
     }
     case 'fixed':
       break;
+  }
+
+  // The exact inverse of the builder's single `damping` write site. If this read
+  // covered fewer modes than that write, a side-scroller camera's `damping`
+  // would land in `engineParams` on the way in and be re-emitted from there on
+  // the way out — preserved, but invisible to the inspector's Smoothing field.
+  if (MODE_READS_DAMPING[mode]) {
+    const damping = wireNum(payload, 'damping');
+    if (damping !== undefined) data.followSmoothing = damping;
   }
 
   // Keep the wire parameters this authoring vocabulary has no field for. Twelve

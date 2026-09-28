@@ -279,6 +279,37 @@ describe('cameraSetupExecutor', () => {
     expect(result.output?.warning).toBeUndefined();
   });
 
+  it('sends the converted smoothing as damping for a top-down GDD camera (Sentry finding on #10295)', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    // The exact camera system from `__fixtures__/cozy-farming.json`. The GDD
+    // conversion produced `followSmoothing: 3` for it, and then the payload
+    // builder dropped that on the floor because it translated `followSmoothing`
+    // in the thirdPersonFollow arm only — so the fixture's one smoothing
+    // setting reached the engine as nothing while the step reported applied.
+    const result = await cameraSetupExecutor.execute(
+      {
+        cameraMode: 'top-down',
+        cameraConfig: { altitude: 15, tilt: 30, smoothing: 0.05 },
+        targetEntityId: 'p',
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'topDown',
+      targetEntity: 'p',
+      height: 15,
+      // 0.05 / (1/60) = 3 — see `convertGddSmoothingToDamping`.
+      damping: 3,
+    });
+    // `tilt` still has no engine parameter; only it may be reported.
+    expect(result.output?.warning).toContain('tilt');
+    expect(result.output?.warning).not.toContain('smoothing');
+  });
+
   it('reports a real field carrying a value that cannot be sent', async () => {
     const { ctx } = makeCtx(CAMERA_NODE);
 

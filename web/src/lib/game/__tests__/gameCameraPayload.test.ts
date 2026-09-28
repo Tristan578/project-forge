@@ -70,6 +70,7 @@ describe('gameCameraPayload', () => {
         mode: 'sideScroller',
         targetEntity: 'player-1',
         sideScrollerDistance: 15,
+        followSmoothing: 0.9,
       });
 
       expect(payload).toEqual({
@@ -77,6 +78,9 @@ describe('gameCameraPayload', () => {
         mode: 'sideScroller',
         targetEntity: 'player-1',
         zOffset: 15,
+        // The engine's `sideScroller` arm reads `damping` exactly as
+        // `thirdPersonFollow` does; this used to be dropped here.
+        damping: 0.9,
       });
     });
 
@@ -85,6 +89,7 @@ describe('gameCameraPayload', () => {
         mode: 'topDown',
         targetEntity: 'player-1',
         topDownHeight: 20,
+        followSmoothing: 0.9,
       });
 
       expect(payload).toEqual({
@@ -92,6 +97,7 @@ describe('gameCameraPayload', () => {
         mode: 'topDown',
         targetEntity: 'player-1',
         height: 20,
+        damping: 0.9,
       });
     });
 
@@ -172,8 +178,12 @@ describe('gameCameraPayload', () => {
       const cases: Array<{ mode: GameCameraMode; expectedKeys: (keyof SetGameCameraPayload)[] }> = [
         { mode: 'thirdPersonFollow', expectedKeys: ['entityId', 'mode', 'targetEntity', 'offset', 'damping'] },
         { mode: 'firstPerson', expectedKeys: ['entityId', 'mode', 'targetEntity', 'eyeHeight', 'mouseSensitivity'] },
-        { mode: 'sideScroller', expectedKeys: ['entityId', 'mode', 'targetEntity', 'zOffset'] },
-        { mode: 'topDown', expectedKeys: ['entityId', 'mode', 'targetEntity', 'height'] },
+        // `damping` is read by every FOLLOWING mode's engine arm, not only
+        // thirdPersonFollow's — so it belongs on these two as well, and its
+        // absence from firstPerson/orbital/fixed below is what proves the
+        // mapping is gated by mode rather than emitted unconditionally.
+        { mode: 'sideScroller', expectedKeys: ['entityId', 'mode', 'targetEntity', 'zOffset', 'damping'] },
+        { mode: 'topDown', expectedKeys: ['entityId', 'mode', 'targetEntity', 'height', 'damping'] },
         { mode: 'orbital', expectedKeys: ['entityId', 'mode', 'targetEntity', 'radius', 'autoRotateSpeed', 'autoRotate'] },
         { mode: 'fixed', expectedKeys: ['entityId', 'mode', 'targetEntity'] },
       ];
@@ -435,6 +445,56 @@ describe('gameCameraPayload', () => {
       });
     });
 
+    // Sentry finding on #10295: `followSmoothing` -> `damping` was translated in
+    // the thirdPersonFollow arm only. The engine reads `damping` in all three
+    // follow arms (`flat_damping(params, "damping", 5.0)` in `from_flat`'s
+    // thirdPersonFollow, sideScroller and topDown cases), so a side-scroller or
+    // top-down camera silently kept the 5.0 default whatever the author set —
+    // and PF-1134's GDD `smoothing` conversion made that reachable from the
+    // `cozy-farming.json` fixture, which is `top-down` with `smoothing: 0.05`.
+    describe.each(['sideScroller', 'topDown'] as const)(
+      'followSmoothing reaches the wire as damping in %s',
+      (mode) => {
+        const base = { mode, targetEntity: 'player-1' } as const;
+        const expectedBase = { entityId: 'cam-1', mode, targetEntity: 'player-1' } as const;
+
+        it('emits a positive followSmoothing as damping', () => {
+          const payload = buildSetGameCameraPayload('cam-1', { ...base, followSmoothing: 3 });
+          expect(payload).toEqual({ ...expectedBase, damping: 3 });
+        });
+
+        // Same reason as the thirdPersonFollow case: `damping` is a rate, so 0
+        // is "frozen", a real authored value, not an unset one.
+        it('preserves followSmoothing: 0 instead of dropping it as falsy', () => {
+          const payload = buildSetGameCameraPayload('cam-1', { ...base, followSmoothing: 0 });
+          expect(payload).toEqual({ ...expectedBase, damping: 0 });
+        });
+
+        // `flat_damping` hard-rejects a negative rate in EVERY arm that reads
+        // it, and `set_game_camera` is full-replace — so the same screen that
+        // protects thirdPersonFollow has to protect these two (PF-1166).
+        it('drops a negative followSmoothing, keeping the rest of the command', () => {
+          const payload = buildSetGameCameraPayload('cam-1', { ...base, followSmoothing: -3 });
+          expect(payload).toEqual(expectedBase);
+          expect(payload).not.toHaveProperty('damping');
+        });
+
+        it.each([NaN, Infinity, -Infinity])('drops a non-finite followSmoothing (%s)', (bad) => {
+          const payload = buildSetGameCameraPayload('cam-1', { ...base, followSmoothing: bad });
+          expect(payload).toEqual(expectedBase);
+          expect(payload).not.toHaveProperty('damping');
+        });
+
+        // The read side is the exact inverse: a `damping` the engine reports
+        // for this mode is the authoring field, not an opaque `engineParams`
+        // entry the inspector's Smoothing control cannot see.
+        it('parses damping back into followSmoothing, not engineParams', () => {
+          const parsed = parseGameCameraWire({ mode, targetEntity: 'player-1', damping: 3 });
+          expect(parsed).toEqual({ mode, targetEntity: 'player-1', followSmoothing: 3 });
+        });
+      },
+    );
+
     it('does not read values off the prototype chain (Object.hasOwn guard)', () => {
       // A field on the prototype, not an own property. If `num()` ever
       // regressed to a bare `data[key]` read, this value would leak through.
@@ -496,11 +556,16 @@ describe('gameCameraPayload', () => {
           mode: 'sideScroller',
           targetEntity: 'player-1',
           sideScrollerDistance: 15,
+          // Both follow modes own `damping` too. Without this on the fixture
+          // the round trip could not tell a parser that maps it back from one
+          // that quietly parks it in `engineParams`.
+          followSmoothing: 0.9,
         },
         topDown: {
           mode: 'topDown',
           targetEntity: 'player-1',
           topDownHeight: 20,
+          followSmoothing: 0.9,
         },
         fixed: {
           // `fov` has no authoring field, so it exercises the preservation bag:
@@ -1022,6 +1087,45 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
       expect(rustNonNegativeKeys.size).toBeGreaterThan(0);
       expect([...rustNonNegativeKeys].sort())
         .toEqual([...NON_NEGATIVE_WIRE_KEYS].sort());
+    });
+  });
+
+  // The builder's mode table for `damping` (`MODE_READS_DAMPING`) is a mirror
+  // of WHICH `from_flat` arms call `flat_damping(params, "damping", …)`. It is
+  // not exported, so it is pinned through behaviour: for every mode, "does
+  // followSmoothing reach the wire" must equal "does this arm read damping".
+  // Before the Sentry finding on #10295 the TS side said yes for one mode and
+  // the Rust side for three, and nothing here noticed.
+  describe('followSmoothing is emitted for exactly the arms that read "damping"', () => {
+    const rustDampingModes = Object.entries(arms)
+      .filter(([, arm]) => /flat_\w+\(params, "damping"/.test(arm))
+      .map(([mode]) => mode)
+      .sort();
+
+    it('finds the readers at all (guards against a silently vacuous scan)', () => {
+      expect(rustDampingModes.length).toBeGreaterThan(0);
+    });
+
+    it('matches the Rust arms mode for mode', () => {
+      const tsDampingModes = (Object.keys(arms) as GameCameraMode[])
+        .filter((mode) =>
+          Object.hasOwn(
+            buildSetGameCameraPayload('cam-1', { mode, targetEntity: null, followSmoothing: 7 }),
+            'damping',
+          ),
+        )
+        .sort();
+      expect(tsDampingModes).toEqual(rustDampingModes);
+    });
+
+    // `ENGINE_CAMERA_DEFAULTS.followSmoothing` stands in for the omitted key in
+    // ALL of those arms, so it has to equal each arm's own literal, not just
+    // thirdPersonFollow's (which `SCALAR_SOURCES` below pins).
+    it('every arm that reads damping shares the one default the UI mirrors', () => {
+      for (const mode of rustDampingModes) {
+        expect(rustDefault(arms[mode]!, 'damping'), mode)
+          .toBe(ENGINE_CAMERA_DEFAULTS.followSmoothing);
+      }
     });
   });
 

@@ -532,10 +532,12 @@ describe('autoPolishExecutor', () => {
 
     expect(result.success).toBe(true);
     expect(result.output?.fixesApplied).toContain('Configured camera as sideScroller');
-    // `GameCameraData` has no side-scroller damping field, so the 0.8 smoothing
-    // the 3D branch gets is simply not expressible here — the camera takes the
-    // engine's default of 5. Asserted in full so that gap stays visible rather
-    // than reappearing as a silently-dropped key.
+    // No `damping` here for the same reason as the 3D case above: the executor
+    // sends no `followSmoothing` at all, so the camera takes the engine's
+    // default of 5. (`followSmoothing` DOES reach the wire for sideScroller —
+    // `buildSetGameCameraPayload` maps it for every follow mode since the
+    // Sentry finding on #10295 — it is simply not authored by this step.)
+    // Asserted in full so a stray key cannot reappear silently.
     expect(ctx.dispatchCommand).toHaveBeenCalledWith('set_game_camera', {
       entityId: 'cam2d',
       mode: 'sideScroller',
