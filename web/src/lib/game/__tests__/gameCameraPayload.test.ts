@@ -11,6 +11,7 @@ import {
   NUMERIC_CAMERA_FIELDS,
   TRANSLATED_CAMERA_FIELDS,
   GAME_CAMERA_WIRE_KEYS,
+  MODE_READS_DAMPING,
   NON_NEGATIVE_WIRE_KEYS,
   type SetGameCameraPayload,
   type NumericCameraField,
@@ -1100,10 +1101,13 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
 
   // The builder's mode table for `damping` (`MODE_READS_DAMPING`) is a mirror
   // of WHICH `from_flat` arms call `flat_damping(params, "damping", …)`. It is
-  // not exported, so it is pinned through behaviour: for every mode, "does
-  // followSmoothing reach the wire" must equal "does this arm read damping".
-  // Before the Sentry finding on #10295 the TS side said yes for one mode and
-  // the Rust side for three, and nothing here noticed.
+  // exported — the inspector renders its Smoothing row from it and the
+  // cutscene prompt is pinned to it — so it is pinned twice here: the table
+  // itself against the Rust arms, and the builder's BEHAVIOUR against them,
+  // because a table that is right and a builder that ignores it look the same
+  // to every consumer of the table. Before the Sentry finding on #10295 the TS
+  // side said yes for one mode and the Rust side for three, and nothing here
+  // noticed.
   describe('followSmoothing is emitted for exactly the arms that read "damping"', () => {
     const rustDampingModes = Object.entries(arms)
       .filter(([, arm]) => /flat_\w+\(params, "damping"/.test(arm))
@@ -1112,6 +1116,14 @@ describe('ENGINE_CAMERA_DEFAULTS matches GameCameraMode::from_flat', () => {
 
     it('finds the readers at all (guards against a silently vacuous scan)', () => {
       expect(rustDampingModes.length).toBeGreaterThan(0);
+    });
+
+    it('MODE_READS_DAMPING names exactly the Rust arms that read damping', () => {
+      expect(
+        (Object.keys(MODE_READS_DAMPING) as GameCameraMode[])
+          .filter((m) => MODE_READS_DAMPING[m])
+          .sort(),
+      ).toEqual(rustDampingModes);
     });
 
     it('matches the Rust arms mode for mode', () => {
