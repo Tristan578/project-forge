@@ -57,9 +57,6 @@ The camera position is controlled entirely by the entity's Transform. Use the tr
 
 No additional properties — position and rotation come from the entity's Transform.
 
-### Smoothing
-Every mode that follows a target — 3rd Person Follow, Side Scroller and Top Down — shares one **Smoothing** parameter. It is a **rate per second**, not a lag: each frame the camera moves toward the target by `min(smoothing × frameTime, 1)` of the remaining distance. So **higher is snappier** — at the default of 5 the camera closes roughly 8% of the gap per frame at 60fps, at 20 it closes about a third, and at 60 or above it tracks the target exactly. **Lower is floatier**; 0 freezes the camera where it is. Negative values are refused.
-
 ### Orbital
 The camera orbits around the target at a fixed distance, with optional auto-rotation.
 
@@ -67,6 +64,11 @@ The camera orbits around the target at a fixed distance, with optional auto-rota
 |---|---|
 | Distance | Orbit radius from the target |
 | Auto Rotate | Degrees per second of automatic orbit (0 = no auto-rotation) |
+
+## Shared parameters
+
+### Smoothing
+Every mode that follows a target — 3rd Person Follow, Side Scroller and Top Down — shares one **Smoothing** parameter. It is a **rate per second**, not a lag: each frame the camera moves toward the target by `min(smoothing × frameTime, 1)` of the remaining distance. So **higher is snappier** — at the default of 5 the camera closes roughly 8% of the gap per frame at 60fps, at 20 it closes about a third, and at 60 or above it tracks the target exactly. **Lower is floatier**; 0 freezes the camera where it is. Negative values are refused. First Person, Fixed and Orbital do not follow, so they have no Smoothing.
 
 ## Script API
 
