@@ -50,9 +50,12 @@ describe('orchestratorErrorAction', () => {
     });
   });
 
-  // Anything that resolves off this origin would be an open redirect. The last
-  // three start with '/' but a browser's URL parser reads them as another host:
-  // it treats '\' as '/' and drops tabs and newlines.
+  // Anything that resolves off this origin would be an open redirect. The
+  // middle three start with '/' but a browser's URL parser reads them as
+  // another host: it treats '\' as '/' and drops tabs and newlines. The last
+  // two parse ON this origin, yet their pathname collapses to '//evil.example'
+  // (a '..' segment eats the one before it), which Clerk would then resolve as
+  // a protocol-relative URL — so the emitted value is checked, not the input.
   it.each([
     undefined,
     null,
@@ -62,14 +65,29 @@ describe('orchestratorErrorAction', () => {
     '/\\evil.example/x',
     '/\t/evil.example/x',
     '/\n/evil.example/x',
+    '/..//evil.example/x',
+    '/a/..//evil.example',
   ])('falls back to plain sign-in for return path %j', (returnTo) => {
     expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, returnTo)?.href).toBe('/sign-in');
+  });
+
+  // The fragment is part of where they were (a deep link into a panel).
+  it('carries the hash of the return path', () => {
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, '/editor/p1#scene')?.href).toBe(
+      '/sign-in?redirect_url=%2Feditor%2Fp1%23scene',
+    );
   });
 
   // The MCP relay token must not be copied into a second URL.
   it('drops the mcp relay token from the return path and keeps the rest', () => {
     expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, '/editor/p1?mcp=secret-token&tab=scene')?.href).toBe(
       '/sign-in?redirect_url=%2Feditor%2Fp1%3Ftab%3Dscene',
+    );
+  });
+
+  it('leaves no dangling ? when the token was the only query parameter', () => {
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, '/editor/p1?mcp=tok')?.href).toBe(
+      '/sign-in?redirect_url=%2Feditor%2Fp1',
     );
   });
 

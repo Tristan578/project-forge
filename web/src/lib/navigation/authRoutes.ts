@@ -28,18 +28,32 @@ const NEVER_CARRIED_PARAMS = ['mcp'];
  * `/` and drops tabs and newlines, so `/\evil.example` and `/<TAB>/evil.example`
  * are caught as well as `//evil.example`. Anything that leaves the origin falls
  * back to plain sign-in rather than becoming an open redirect.
+ *
+ * The check runs on what is EMITTED, not only on the input. `/..//evil.example`
+ * parses on this origin (a path is not a host) yet its pathname collapses to
+ * `//evil.example`, and Clerk resolves that protocol-relative `redirect_url`
+ * to `https://evil.example`. Re-parsing the emitted value catches every input
+ * that normalises to a different origin, whatever the route there.
  */
 export function signInHrefReturningTo(returnTo: string | null | undefined): string {
   if (!returnTo || !returnTo.startsWith('/')) return SIGN_IN_HREF;
-  let url: URL;
-  try {
-    url = new URL(returnTo, PROBE_ORIGIN);
-  } catch {
-    return SIGN_IN_HREF;
-  }
-  if (url.origin !== PROBE_ORIGIN) return SIGN_IN_HREF;
+  const url = parseOnProbeOrigin(returnTo);
+  if (!url) return SIGN_IN_HREF;
   for (const param of NEVER_CARRIED_PARAMS) url.searchParams.delete(param);
   // The parsed form, not the raw input: what is carried is exactly the path
-  // the check above approved.
-  return `${SIGN_IN_HREF}?redirect_url=${encodeURIComponent(`${url.pathname}${url.search}${url.hash}`)}`;
+  // the check above approved, and it is approved a second time as emitted.
+  const carried = `${url.pathname}${url.search}${url.hash}`;
+  if (!parseOnProbeOrigin(carried)) return SIGN_IN_HREF;
+  return `${SIGN_IN_HREF}?redirect_url=${encodeURIComponent(carried)}`;
+}
+
+/** The parsed `value` when a browser would keep it on this origin, else null. */
+function parseOnProbeOrigin(value: string): URL | null {
+  let url: URL;
+  try {
+    url = new URL(value, PROBE_ORIGIN);
+  } catch {
+    return null;
+  }
+  return url.origin === PROBE_ORIGIN ? url : null;
 }
