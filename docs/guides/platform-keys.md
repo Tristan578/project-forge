@@ -28,9 +28,14 @@ resolver and returns a static terminal `failed` response) and the QStash
 `STATUS_CHECK_OPERATION`. That call skips the tier and balance checks (the job
 was paid for at creation, and the route's `panelTierGateResponseForPoll` is its
 tier control: it admits a `starter` at `hobbyist` only when the account has
-held tokens, `monthlyTokens > 0 || addonTokens > 0`, and it does not check that
-the `jobId` belongs to the caller), but a missing platform key still throws
-there too. For a capability that can never be provisioned,
+held tokens, `monthlyTokens > 0 || addonTokens > 0`). The tier gate is not an
+ownership check. That decision is `verifyProviderJobOwner` in
+`web/src/lib/generate/jobOwnership.ts` (#10262): every status route that
+resolves a key calls it after `panelTierGateResponseForPoll` and before
+`resolveApiKey`, and answers 404 for a `jobId` not bound to the caller, so the
+platform key is never resolved for another user's job (`music/status` is the
+exception noted above — it resolves nothing). A missing platform key still
+throws at that resolver call too. For a capability that can never be provisioned,
 three more layers keep it from reaching that point:
 
 | Layer | Where | Effect |
