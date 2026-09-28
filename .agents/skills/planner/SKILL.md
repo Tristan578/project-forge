@@ -43,7 +43,7 @@ What user problem does this solve? Why does it matter for the product?
 ### Rust Changes (engine/)
 Reference patterns from /rust-engine skill:
 - Components, commands, pending queues, bridge systems
-- Bevy 0.18 APIs, Rapier 0.33 patterns
+- Bevy 0.19 APIs, Rapier 0.35 patterns
 
 ### Web Changes (web/src/)
 Reference patterns from /frontend skill:

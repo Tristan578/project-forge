@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { Send, Square, Paperclip, Mic, MicOff, Brain, Shield } from 'lucide-react';
 import { useChatStore, type ChatModel } from '@/stores/chatStore';
 import { AI_MODEL_PRIMARY, AI_MODEL_FAST, AI_MODEL_PREMIUM } from '@/lib/ai/models';
@@ -24,7 +24,21 @@ const MODEL_OPTIONS: ModelOption[] = [
   { value: AI_MODEL_PREMIUM, label: 'Opus 5 (Pro)', requiresPro: true },
 ];
 
-export function ChatInput() {
+interface ChatInputProps {
+  /**
+   * This composer receives a pending "Customize with AI" draft (#10172) and
+   * takes focus for it. Exactly one mounted composer may set this. The compact
+   * layout mounts TWO at once: the right drawer keeps its children mounted while
+   * closed (it only slides off-screen), so a `rightPanelTab = 'chat'` switch
+   * mounts a hidden composer alongside the overlay's visible one. `revealChat()`
+   * opens the overlay on every layout, so the overlay is the one target;
+   * deciding by a prop, not by which effect runs last, keeps the draft out of
+   * the hidden textarea and focus off it regardless of mount order.
+   */
+  draftTarget?: boolean;
+}
+
+export function ChatInput({ draftTarget = false }: ChatInputProps = {}) {
   const [text, setText] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [isRecording, setIsRecording] = useState(false);
@@ -50,6 +64,38 @@ export function ChatInput() {
   const pendingEntityRefs = useChatStore((s) => s.pendingEntityRefs);
   const addEntityRef = useChatStore((s) => s.addEntityRef);
   const clearEntityRefs = useChatStore((s) => s.clearEntityRefs);
+  // A composer that is not the draft target always reads '', so it never
+  // adopts, clears, or focuses for a draft meant for the visible composer.
+  const composerDraft = useChatStore((s) => (draftTarget ? s.composerDraft : ''));
+  const setComposerDraft = useChatStore((s) => s.setComposerDraft);
+
+  // Adopt a pending draft (#10172) during render, not in an effect, so the
+  // draft is on screen in the same paint. `adoptedDraft` starts at '' so a
+  // draft set while no composer was mounted is picked up on mount. A draft goes
+  // AFTER whatever the user already typed, on its own line: it never replaces
+  // their words.
+  const [adoptedDraft, setAdoptedDraft] = useState('');
+  if (composerDraft !== adoptedDraft) {
+    setAdoptedDraft(composerDraft);
+    if (composerDraft) {
+      setText((prev) => (prev ? `${prev}\n${composerDraft}` : composerDraft));
+    }
+  }
+
+  // Consume the draft so a later mount does not apply it again, then put the
+  // caret at the end of it so the user can finish the sentence. The store write
+  // is to an external store, and focus is a DOM side effect: both belong here.
+  useEffect(() => {
+    if (!composerDraft) return;
+    setComposerDraft('');
+    const el = textareaRef.current;
+    if (el) {
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    }
+  }, [composerDraft, setComposerDraft]);
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
