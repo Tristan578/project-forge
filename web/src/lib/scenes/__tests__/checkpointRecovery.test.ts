@@ -48,7 +48,38 @@ describe('checkpoint engine confirmation', () => {
       }));
       return true;
     }, () => true);
-    await expect(pending).rejects.toThrow('invalid scene');
+    // The readback failed the browser-side envelope check, and the message
+    // says so — this path is where #10267's bug class surfaces first, so a
+    // hedged "invalid, or validation unavailable" constant is not enough.
+    await expect(pending).rejects.toThrow(
+      'The engine returned a scene that failed validation: Invalid scene file: the envelope',
+    );
+  });
+
+  function readbackOf(json: string): Promise<unknown> {
+    return captureCheckpointScene((requestId) => {
+      window.dispatchEvent(new CustomEvent(SCENE_EXPORTED_EVENT, { detail: { json, requestId } }));
+      return true;
+    });
+  }
+
+  it("names the decoder's own reason when the engine returns a scene its decoder refuses", async () => {
+    // An envelope-valid scene the (real) decoder still refuses — #10267's
+    // shape exactly: the engine exported it, then its own loader says no.
+    // The envelope check is strictly stronger than the fixture validator, so
+    // the refusal has to come from a validator that answers like the engine.
+    const reason = 'Invalid scene file: attenuationDistance must be null or a finite, non-negative number, got -1 at line 1 column 900';
+    setSceneValidator(() => ({ valid: false, reason }));
+    await expect(readbackOf(JSON.stringify(sceneFixture('Decoder refuses')))).rejects.toThrow(
+      `The engine returned a scene that failed validation: ${reason}`,
+    );
+  });
+
+  it('says validation is unavailable only when no decoder is attached', async () => {
+    setSceneValidator(null);
+    await expect(readbackOf(JSON.stringify(sceneFixture('No decoder')))).rejects.toThrow(
+      'Scene validation is unavailable. Reload the editor and try again.',
+    );
   });
 
   it('cleans up after a dispatcher throws so later exports cannot complete the request', async () => {

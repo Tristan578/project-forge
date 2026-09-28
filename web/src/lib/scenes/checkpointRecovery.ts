@@ -4,7 +4,7 @@
  */
 import { newSceneExportRequestId, SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import type { SceneFileData } from './sceneManager';
-import { isValidSceneFile } from './sceneValidation';
+import { validateSceneFile } from './sceneValidation';
 
 /** Emitted after the engine applies a scene and the editor adopts its metadata. */
 export const SCENE_LOADED_EVENT = 'forge:scene-loaded';
@@ -35,7 +35,15 @@ export function captureCheckpointScene(requestExport: ExportRequest, timeoutMs =
       if (detail?.requestId !== requestId) return;
       try {
         const data: unknown = JSON.parse(detail.json);
-        if (!isValidSceneFile(data)) throw new Error('The engine returned an invalid scene, or scene validation is unavailable. Reload the editor and try again.');
+        // This is where #10267's bug class surfaces first — the engine wrote a
+        // scene its own decoder then refuses — so the reason (which names the
+        // field) must reach the person, not a hedged constant.
+        const verdict = validateSceneFile(data);
+        if (!verdict.valid) {
+          throw new Error(verdict.reason
+            ? `The engine returned a scene that failed validation: ${verdict.reason}`
+            : 'Scene validation is unavailable. Reload the editor and try again.');
+        }
         finish(undefined, data as SceneFileData);
       } catch (error) {
         finish(error instanceof Error ? error : new Error('The scene could not be read.'));
