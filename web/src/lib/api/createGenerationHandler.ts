@@ -391,7 +391,11 @@ export function createGenerationHandler<TParams, TResult>(
     try {
       providerJobId = jobIdForOwnership(result);
     } catch (err) {
-      captureException(err, { route, action: 'job_ownership_extract' });
+      // No providerJobId here by definition — extracting it is what threw —
+      // but the user is known, and an extractor that throws leaves THEIR job
+      // unbound (so their own next poll answers 404). Report enough to find
+      // them, matching the bind-failure catch below.
+      captureException(err, { route, action: 'job_ownership_extract', userId });
       return;
     }
     if (!providerJobId) return;

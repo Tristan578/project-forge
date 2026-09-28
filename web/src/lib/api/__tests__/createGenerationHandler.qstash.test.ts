@@ -241,6 +241,23 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
       );
     });
 
+    it('never binds and never fails the request when the ownership extractor throws, and reports the user it left unbound', async () => {
+      // The generic extractor-throws test below only asserts SOME capture
+      // happened — the QStash extract site captures too, so it could not see
+      // this catch losing the userId. There is no providerJobId to report
+      // (extracting it is what threw), but the user whose job is now unbound
+      // is in scope and is what an on-call engineer needs to find them.
+      const handler = makeAsyncHandler({ providerJobId: () => { throw new Error('bad result shape'); } });
+      const res = await handler(makeRequest({ prompt: 'a castle' }));
+
+      expect(res.status).toBe(200);
+      expect(mockBindProviderJob).not.toHaveBeenCalled();
+      expect(mockCapture).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ action: 'job_ownership_extract', userId: 'user-1' }),
+      );
+    });
+
     it('still binds when QStash is unconfigured — ownership binding does not depend on the durable-callback feature flag', async () => {
       mockConfigured.mockReturnValue(false);
       await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
