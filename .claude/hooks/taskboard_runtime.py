@@ -47,16 +47,36 @@ def api(path):
         return json.load(response)
 
 
-def verify_database(path, projects=None):
-    """Read-only preflight: never create/migrate a different or corrupt DB."""
+def require_database(path):
+    """The shared database must already exist; nothing here may create one.
+
+    The taskboard binary's OpenAt() does MkdirAll + create-on-open, so handing
+    it `--db <path>` for a path that does not exist would silently mint an
+    EMPTY database. That empty board then reads as "0 tickets", and the
+    session-start hook's remedy for 0 tickets is a GitHub pull — which
+    github_project_sync.py's header names as a duplicate-issue hazard.
+    Checked BEFORE the binary is spawned, so the only outcome on a host with
+    no database is this error, never a new file.
+    """
     path = Path(path)
     if not path.is_file():
         raise RuntimeError('Taskboard database is missing: ' + str(path))
+    return path
+
+
+def verify_database(path, projects=None):
+    """Read-only preflight: never create/migrate a different or corrupt DB."""
+    path = require_database(path)
     conn = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)
     try:
         if conn.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
             raise RuntimeError('Taskboard database integrity check failed; restore a backup before sync')
         actual = {row[0] for row in conn.execute('SELECT id FROM projects')}
+        if not actual:
+            # An empty identity set matches an empty API answer, so the
+            # comparison below would pass vacuously — exactly what a freshly
+            # created empty database produces (lessons-learned #11). Refuse it.
+            raise RuntimeError('Taskboard database has no projects; refusing to treat an empty identity set as a match. Restore the shared database (#9995)')
         expected = {p['id'] for p in (api('/projects') if projects is None else projects)}
         if actual != expected:
             raise RuntimeError('Taskboard API/database identity mismatch; restart all clients through taskboard_runtime.py')
@@ -88,7 +108,12 @@ def ensure_running():
         # match default_db()'s platform-specific fallback above. Passing
         # --db unconditionally makes default_db() the ONLY path the server
         # can open, closing exactly the divergence #9995 reported.
-        args = [binary(), 'start', '--port', '3010', '--db', str(default_db())]
+        #
+        # The file must exist BEFORE the spawn: the binary creates a missing
+        # --db path on open (see require_database), and an empty board is
+        # the one state every downstream check would wave through.
+        db = require_database(default_db())
+        args = [binary(), 'start', '--port', '3010', '--db', str(db)]
         subprocess.run(args, env=runtime_env(), check=True, stdout=sys.stderr)
         for _ in range(20):
             try:

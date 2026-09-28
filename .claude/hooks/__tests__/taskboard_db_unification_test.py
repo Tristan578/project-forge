@@ -16,6 +16,7 @@ regression this ticket describes were reintroduced.
 """
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,30 @@ from unittest.mock import patch
 HOOKS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HOOKS_DIR))
 import taskboard_runtime as runtime  # noqa: E402
+
+
+def _plant_default_db(env, config_root):
+    """Point default_db()'s PLATFORM fallback (TASKBOARD_DB unset) at
+    `config_root` and create the database file there.
+
+    ensure_running() refuses to spawn the binary for a database that does not
+    exist (see MissingDatabaseIsNeverCreated), so a test that wants to observe
+    the spawn arguments must give it a real file — without reaching for
+    TASKBOARD_DB, because the case under test is precisely "no override set".
+    Each platform's own config-root variable is redirected, so default_db()'s
+    real branch for this host still runs.
+    """
+    env.pop('TASKBOARD_DB', None)
+    if sys.platform == 'win32':
+        env['APPDATA'] = str(config_root)
+    elif sys.platform == 'darwin':
+        env['HOME'] = str(config_root)
+    else:
+        env['XDG_CONFIG_HOME'] = str(config_root)
+    expected = runtime.default_db(environ=env, home=config_root)
+    expected.parent.mkdir(parents=True, exist_ok=True)
+    expected.touch()
+    return expected
 
 
 def _run_py(script, env_overrides=None):
@@ -62,26 +87,31 @@ class HttpStartupAlwaysPassesExplicitPath(unittest.TestCase):
             captured['args'] = args
             return subprocess.CompletedProcess(args, 0)
 
-        # Only override TASKBOARD_DB; keep the REAL environment (HOME/
-        # APPDATA/etc.) intact so default_db()'s platform logic runs for
-        # real, exactly as it would for a real client. Compute the expected
-        # path from this SAME env dict, inside the patched context, rather
-        # than calling default_db() again afterwards against the restored
-        # (unpatched) os.environ — the two would silently disagree whenever
-        # taskboard_db is set, defeating the assertion.
+        # Keep the REAL environment intact except for the ONE variable each
+        # case is about, so default_db()'s platform logic runs for real,
+        # exactly as it would for a real client — but with its result
+        # redirected into a temp root where the database file can exist
+        # (ensure_running() refuses to spawn for a missing file). Compute the
+        # expected path from this SAME env dict, inside the patched context,
+        # rather than calling default_db() again afterwards against the
+        # restored (unpatched) os.environ — the two would silently disagree
+        # whenever taskboard_db is set, defeating the assertion.
         env = dict(os.environ)
-        if taskboard_db is None:
-            env.pop('TASKBOARD_DB', None)
-        else:
-            env['TASKBOARD_DB'] = taskboard_db
+        with tempfile.TemporaryDirectory() as tmp:
+            if taskboard_db is None:
+                _plant_default_db(env, Path(tmp))
+            else:
+                explicit = Path(tmp) / taskboard_db
+                explicit.touch()
+                env['TASKBOARD_DB'] = str(explicit)
 
-        with patch.object(runtime, 'binary', return_value='FAKE_TASKBOARD_BIN'), \
-             patch.object(runtime, 'api', side_effect=[OSError('not running'), [{'id': 'p1'}]]), \
-             patch.object(runtime.subprocess, 'run', side_effect=fake_run), \
-             patch.object(runtime, 'verify_database', return_value=None), \
-             patch.dict(runtime.os.environ, env, clear=True):
-            runtime.ensure_running()
-            expected = runtime.default_db()
+            with patch.object(runtime, 'binary', return_value='FAKE_TASKBOARD_BIN'), \
+                 patch.object(runtime, 'api', side_effect=[OSError('not running'), [{'id': 'p1'}]]), \
+                 patch.object(runtime.subprocess, 'run', side_effect=fake_run), \
+                 patch.object(runtime, 'verify_database', return_value=None), \
+                 patch.dict(runtime.os.environ, env, clear=True):
+                runtime.ensure_running()
+                expected = runtime.default_db()
         return captured['args'], expected
 
     def test_db_flag_present_without_taskboard_db_env(self):
@@ -91,9 +121,77 @@ class HttpStartupAlwaysPassesExplicitPath(unittest.TestCase):
         self.assertEqual(args[args.index('--db') + 1], str(expected))
 
     def test_db_flag_present_with_taskboard_db_env(self):
-        args, expected = self._captured_start_args(str(Path(tempfile.gettempdir()) / 'explicit.db'))
+        args, expected = self._captured_start_args('explicit.db')
         self.assertIn('--db', args)
         self.assertEqual(args[args.index('--db') + 1], str(expected))
+
+
+class MissingDatabaseIsNeverCreated(unittest.TestCase):
+    """Security finding on #10291: the taskboard binary's OpenAt() does
+    MkdirAll + create-on-open, so passing `--db <path>` for a path that does
+    not exist would silently mint an EMPTY board. Before --db was pinned this
+    host raised `Taskboard database is missing`; that must remain the only
+    outcome — no spawn, no file, no directory.
+    """
+
+    def test_start_refuses_before_spawning_and_creates_nothing(self):
+        spawned = []
+
+        def fake_run(args, **kwargs):
+            spawned.append(args)
+            return subprocess.CompletedProcess(args, 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # Both the file AND its parent are absent, so a MkdirAll-style
+            # side effect is observable as well as a bare create-on-open.
+            absent = Path(tmp) / 'never-created' / 'taskboard.db'
+            env = dict(os.environ)
+            env['TASKBOARD_DB'] = str(absent)
+            with patch.object(runtime, 'binary', return_value='FAKE_TASKBOARD_BIN'), \
+                 patch.object(runtime, 'api', side_effect=OSError('not running')), \
+                 patch.object(runtime.subprocess, 'run', side_effect=fake_run), \
+                 patch.dict(runtime.os.environ, env, clear=True):
+                with self.assertRaisesRegex(RuntimeError, 'database is missing'):
+                    runtime.ensure_running()
+            self.assertEqual(spawned, [], 'the binary must not be spawned for a missing database')
+            self.assertFalse(absent.exists(), 'no database file may be created')
+            self.assertFalse(absent.parent.exists(), 'no database directory may be created')
+
+
+class EmptyIdentitySetIsRefused(unittest.TestCase):
+    """verify_database() compares the database's project ids with the API's.
+    Two empty sets are equal, so a freshly created empty database "matched"
+    an empty API answer and every downstream check passed vacuously
+    (lessons-learned #11). An empty identity set is now a refusal, not a match.
+    """
+
+    def _database(self, tmp, project_ids):
+        path = Path(tmp) / 'taskboard.db'
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute('CREATE TABLE projects(id TEXT PRIMARY KEY, name TEXT)')
+            conn.executemany('INSERT INTO projects(id, name) VALUES(?, ?)', [(p, p) for p in project_ids])
+            conn.commit()
+        finally:
+            conn.close()
+        return path
+
+    def test_empty_database_is_refused_even_when_the_api_agrees(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._database(tmp, [])
+            with self.assertRaisesRegex(RuntimeError, 'no projects'):
+                runtime.verify_database(path, projects=[])
+
+    def test_populated_database_matching_the_api_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._database(tmp, ['p1'])
+            self.assertEqual(runtime.verify_database(path, projects=[{'id': 'p1'}]), path)
+
+    def test_populated_database_diverging_from_the_api_still_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._database(tmp, ['p1'])
+            with self.assertRaisesRegex(RuntimeError, 'identity mismatch'):
+                runtime.verify_database(path, projects=[{'id': 'p2'}])
 
 
 class McpCommandAlwaysPassesExplicitPath(unittest.TestCase):
