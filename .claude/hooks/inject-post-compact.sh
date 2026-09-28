@@ -93,7 +93,7 @@ echo ""
 for rule in "${RULES[@]}"; do
   rel="${rule#"$REPO_ROOT"/}"
   case "$(basename "$rule")" in
-    bevy-api.md)        hint="Bevy 0.18 API, 0.16->0.18 migration, ECS limits, library APIs" ;;
+    bevy-api.md)        hint="Bevy 0.19 API, 0.16->0.19 migration, ECS limits, library APIs" ;;
     entity-snapshot.md) hint="EntityType, EntitySnapshot, history, selection events" ;;
     web-quality.md)     hint="ESLint rules, React patterns, Next.js constraints" ;;
     library-apis.md)    hint="csgrs, noise, terrain, texture pipeline, particles" ;;

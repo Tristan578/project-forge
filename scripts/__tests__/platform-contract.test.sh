@@ -15,7 +15,9 @@ LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/platform.sh"
 PASS=0
 FAIL=0
 ok()  { echo "  ok: $1"; PASS=$((PASS + 1)); }
+readonly -f ok
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f bad
 
 if [ ! -f "$LIB" ]; then
   echo "FAIL library not found: $LIB"
@@ -35,6 +37,7 @@ run_case() {
     eval "$@"
   ' _ "$LIB" "$snippet" 2>&1
 }
+readonly -f run_case
 
 # Assert a captured transcript contains (has) or does not contain (lacks) a
 # fixed string. Written as if/else rather than `A && B || C`: the chained form
@@ -47,6 +50,7 @@ has() {
     bad "$desc — no '$needle' in: $text"
   fi
 }
+readonly -f has
 lacks() {
   local desc="$1" needle="$2" text="$3"
   if printf '%s' "$text" | grep -qF -- "$needle"; then
@@ -55,6 +59,7 @@ lacks() {
     ok "$desc"
   fi
 }
+readonly -f lacks
 
 echo "=== platform_name reports a platform this repo has a policy for ==="
 name="$(run_case "" 'platform_name')"

@@ -136,7 +136,7 @@ bash .claude/tools/validate-all.sh              # Run everything
 ## Detailed Reference
 
 - `.claude/CLAUDE.md` — Full project constitution
-- `.claude/rules/bevy-api.md` — Bevy 0.18 API patterns
+- `.claude/rules/bevy-api.md` — Bevy 0.19 API patterns
 - `.claude/rules/entity-snapshot.md` — ECS snapshot patterns
 - `.claude/rules/web-quality.md` — ESLint & React patterns
 - `.claude/rules/library-apis.md` — Third-party library APIs

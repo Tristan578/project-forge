@@ -765,7 +765,8 @@ Both bypasses now report the degate.
 
 This freezes the functions **this file** defines. It does not extend to the other
 ~17 bash suites under `scripts/__tests__/`, which remain rebindable by one
-inserted line — that sweep is tracked separately (#9123) rather than scope-crept here. It
+inserted line — that sweep was tracked separately (#9125, landed as the section
+below) rather than scope-crept here. It
 does not close `declare -n` aliasing or `eval` on a runtime-assembled name (round
 39's bound still stands). And a NEW function added later without a freeze is
 unprotected until the drift check notices it — which it will, because the check
@@ -794,3 +795,397 @@ success clause, and the exact complete `if:` line. Red mutations verified each
 new failure path: removing the job, removing the whole `needs:` or `if:` key,
 removing `security` from `needs:`, replacing the condition with `!= 'failure'`,
 and appending `|| true` all make the suite exit nonzero.
+
+## Sweep (PF-1076 / #9125): every suite, one derived gate
+
+Round 40 froze the 20 functions of this suite and named its honest bound: the
+other bash suites stayed rebindable by one inserted line. This section is that
+bound closed.
+
+### Measured before
+
+For every scanned suite that defines a `fail`/`bad` helper (the gate's own
+`--list` derivation picks them), the helper was neutered with `fail() { :; }`
+directly after its definition, or after its freeze where one already existed,
+and a forced `fail "..."` was called on the next line: the generic stand-in
+for "a real failure after the rebind", which is what a degated gate produces.
+Measured on main at `a525ca4a`, where 52 of the 72 scanned files define such
+a helper, and on this branch, which adds the gate's own suite:
+
+| tree | exit 0 (green while neutered) | exit non-zero |
+|---|---|---|
+| main at `a525ca4a` | **46** | 6, already frozen on main (`check-npm-audit.test.sh`, round 40, and five hook suites) |
+| this branch | 0 | **53** |
+
+The other 20 scanned files (helpers named `check`, `assert_*` or `ok`, or no
+functions at all) were frozen by the same sweep; they were not individually
+neutered, because the derivation below covers them by construction rather
+than by measurement. An earlier version of this table read 45 of 46 on the
+sweep's first base; that count could not be reproduced from the tree, so it
+was replaced with this one (round twenty-nine).
+
+### What changed
+
+- `readonly -f <name>` directly after every top-level definition: 349 new
+  freezes, 369 in total, 68 files scanned at the time of the sweep (later
+  merges from main brought the live derivation to 399 across 73; `--list`
+  gives the current figure) (64 of them define something; the 20
+  from round 40 included). Those are the GATE's numbers — `bash
+  scripts/check-fn-freeze.sh --list | wc -l` — and the only ones this guide
+  cites. A raw `grep -c 'readonly -f'` reads higher (about 400 on this branch)
+  because it also counts the freeze lines inside `check-fn-freeze.test.sh`'s
+  heredoc fixtures and this guide's own examples, which are text, not freezes.
+- `scripts/check-fn-freeze.sh`, a DERIVED gate. The round-40 drift check
+  compared two lists of file text inside one suite; a per-suite copy of that
+  would be 60 restated subjects (lesson #18). Instead one awk lexer walks each
+  file — single, double and `$'` quotes, backslashes, `$( )` contexts (a `$(`
+  inside double quotes opens a fresh quoting context, as bash does), comments,
+  heredoc bodies — and emits every column-0 definition with its closing line.
+  The rule is shape, not text: the very next line must be `readonly -f <name>`,
+  and the shapes are bash's — `name ( ) {` with space inside the parens is a
+  definition too (the fifth board round found an adjacent-only `()` left such
+  a helper invisible, so unfrozen and unreported), the brace may open on the
+  next line, a one-liner's trailing comment is not part of its body (both from
+  the sixth round, both invisible before), and an array literal `NAME=( ... )`
+  holds words that never run — but a `$( )` inside one runs, and is read as
+  code (also the sixth round). A body the derivation cannot follow (a subshell,
+  a bare compound command) is reported as `unsupported`: the gate fails on a
+  definition it cannot see the end of rather than forgetting it.
+  A freeze anywhere else is a stray (before its definition it cannot bind; after
+  a blank line it leaves a window; inside a quoted program or a heredoc fixture
+  it is text, not a statement). Only a `<<-` heredoc has its leading tabs
+  stripped before the terminator is matched, as bash does; a plain `<<` ends at
+  a column-0 delimiter and nowhere else (the review board found the first cut
+  stripping unconditionally, which closed a plain heredoc early on a
+  tab-indented body line and reported a correct suite as two violations). And
+  because `readonly -f` freezes the FUNCTION binding only, an `alias NAME=` or
+  `shopt -s expand_aliases` in command position of executable text is a
+  violation in its own right (below), and so are `trap ... DEBUG` and
+  `shopt -s extdebug`: with extdebug on, a DEBUG trap that returns non-zero
+  makes bash skip the next command, so a two-line literal neuters every
+  `fail` call without touching its binding (seventh board round), and so is a
+  function named after a bash builtin (`compgen -b`, derived at run time) or an
+  `enable` command: `readonly() { return 0; }` makes every later freeze a no-op
+  and `exit() { return 0; }` makes the final verdict one (eighth board round),
+  and so is a trap on EXIT, ERR, RETURN or 0 whose action exits or execs,
+  directly or through a function the same file defines — `trap 'exit 0' EXIT`
+  replaces the `exit 1` the suite reached (ninth round), and so does
+  `cleanup() { exit 0; }` + `trap cleanup EXIT` (tenth round); signal traps
+  and cleanup traps whose functions never exit are fine. A top-level
+  definition the freeze rule cannot see — indented with nothing enclosing it,
+  after another command or a closing brace, second on a line (even with the
+  same name as the first), a dashed name — is reported as `shape` (eleventh
+  round: one space of indentation made a neutering redefinition invisible;
+  twelfth: the text after a closing brace was never read);
+  nesting is counted by command word, so a helper inside an `if` arm stays out
+  of scope as before, and only an unquoted reserved word in command position
+  counts (twelfth round: a `"{"` case pattern held the count one level high and
+  hid every later top-level definition). The thirteenth round found three more
+  ways into the same state, each fixed in the case-pattern lexer: an extglob
+  group's own `)` (`@(a|b)|do)`) ended the pattern early, a pattern's optional
+  leading `(` had to be told apart from a group, and `in` written on the line
+  after `case WORD` never opened the pattern state. The fourteenth found a
+  fourth: a command substitution in the case word (`case "$(cmd)" in`) reset
+  the statement, so a `$( )`, `$(( ))` or `$[ ]` now resumes the statement it
+  sits in. A file whose only row is a violation reports that violation rather
+  than "nothing derived". The fifteenth found two more: five of the nine
+  substitution openers were unpinned (each now has a case), and a word
+  spelled around a substitution that expands to nothing (`ali$()as`,
+  `DEBU$()G`) is the guarded word to bash, so a word is also judged with its
+  substitutions removed. The sixteenth widened that to every expansion that
+  can be empty (`${x:+Q}`, an unset `$1`, a `$( )` holding only a comment in
+  a trap action), in every guarded position (the `-s` flag, a trap's signal
+  words and action, the body of a function a trap calls), with `$NAME` kept
+  as `${NAME}` so quote removal cannot move its end (`ali$x"as"`). The
+  seventeenth found that an ANSI-C quoted string was copied escape by escape
+  instead of decoded, so `$'\141lias'` read as `141lias`; its octal, hex,
+  `\u`, `\U`, named and control escapes are now decoded as bash does, and a
+  NUL ends its value. The eighteenth found three more static spellings, each
+  reproduced in bash 5.2: a control escape is the operand's upper case AND
+  31 for ANY operand, so `\c ` and a control backtick are NUL as `\c@` is
+  (the decoder knew only the letters and `@[\]^_`); a `$"..."` locale string
+  was read as a variable; and brace expansion runs before a command is looked
+  up, so `al{i,}as`, `{a..a}lias` and `alias {x,fail=:}` define an alias.
+  A word is now judged as every word its brace groups expand to. The
+  nineteenth found that the 64-word enumeration cap passed a guarded word at
+  position 65; an expansion cut short by the cap or by the 8-level nesting
+  bound, in a command name or an alias, shopt, set or trap statement (set
+  joined the list in the twenty-sixth), is now a `brace` violation, and a
+  numeric range (`trap 'exit 0' {0..0}`) is pinned.
+  The twenty-first found that bash reads a numeric trap signal as an
+  optionally signed decimal after leading blanks, so `00`, `+0` and `' 00'`
+  are all signal 0 (EXIT); the gate now stores each numeric signal as its
+  value. The twenty-second added the minus sign (`-0`, `-00`, `' -0'`). The
+  twenty-third found the trailing side: bash's legal_number() takes any
+  whitespace before the number but also a space or tab after it, so
+  `'0 '` is 0 too. sig_word now models that parser exactly, checked in
+  bash for every whitespace class on each side. The twenty-fourth found two
+  things. Posix mode turns `expand_aliases` on as a side effect, so
+  `set -o posix` passed a gate that refused `shopt -s expand_aliases`; it
+  is now the same violation (below). And the fixture never used a tab,
+  form feed or carriage return as the blank before a zero, so dropping any
+  of them from sig_word passed the suite. Both fixtures are now also run
+  line by line in bash, and each line must be reported exactly when bash
+  says it has the effect. The twenty-fifth found two lexer paths that
+  bypassed the new rules. An array literal (`POSIXLY_CORRECT=(1)`, or a name
+  inside an element such as `x=(${POSIXLY_CORRECT:=1})`) was skipped to its
+  closing paren without reaching the word checks. And a command substitution
+  inside a set statement (`set -o $() posix`) dropped the set state, which
+  the substitution stack saved for shopt, alias and trap but not for set.
+  Both are now judged, and both are fixture lines of the bash-parity case.
+  The twenty-sixth found the array state itself was not carried across a
+  substitution: `x=(${POSIXLY_CORRECT:=1} $(y=(b)))` reset the outer
+  literal's text at the inner one. It is now saved with the rest, and an
+  array report names the array as written (`x=(...)`) rather than
+  rebuilding its text out of order. It also found that text written inside
+  a parameter expansion was discarded as if it were a value: `${n:-alias}`,
+  `${HOME:+alias}`, `${x/*/alias}` and `trap '${n:-exit} 0' EXIT` all bind
+  in bash. Such text is now judged both with and without it (pexp rewrites
+  the group as a brace alternation), in words and in trap actions; text
+  holding a blank, which bash splits into several words, is a `split`
+  violation in a guarded position.
+  The twenty-seventh found the brace matching itself was not quote-aware:
+  `: ${x:-"}"}; shopt -s expand_aliases` closed the group at the quoted
+  brace, and the stray quote then swallowed the real statement. One
+  matcher (brace_close) now skips single, double and ANSI-C quoted text and
+  escaped characters, for the lexer and pexp alike. It also found a
+  replacement pattern can hide its boundary (`${x/a\/b/alias}`,
+  `${x/"a/b"/alias}`), so every text after a slash is now a candidate; and
+  an array report now names the line where the array opens.
+  The twenty-eighth found two more boundaries drawn by parsing: a bracket
+  inside a nested expansion in an array subscript
+  (`${a[${y:-0]0}]:-alias fail=:}`) cut the subscript short and dropped the
+  operand, and a brace inside a command substitution in an operand ended
+  the group early. The operand is no longer parsed at all: every suffix of
+  the group after a `-`, `=`, `+` or `/` is a candidate, a superset that
+  holds the true text whatever the name, subscript or operator looks like,
+  and the brace matcher skips `$( )` and backtick spans as bash does. A
+  comma in an operand stays text (bash keeps it), which is what stops it
+  inventing a candidate. The same round's Windows run (job 107713633065)
+  found the one place the two bashes CI runs under disagree: after a
+  numeric trap signal, Linux bash 5.2 takes only a space or tab, but the
+  Git Bash on the Windows runner also takes a newline, so
+  `trap 'exit 0' $'0\n'` fired as an EXIT trap there and the gate, modelled
+  on Linux, let it through. The gate now reads any whitespace after the
+  digits as a blank, a superset of both. The suite's cross-check still runs
+  every fixture line in the bash running it: a trap that fires must be
+  reported on every platform, and the only lines it lets the gate report
+  while this bash rejects them are a zero followed by an escaped newline,
+  vertical tab, form feed or carriage return, picked out from the line text
+  and counted so the exemption cannot quietly widen or vanish.
+  The twenty-ninth found the brace matcher helper for `$( )` reading an
+  ANSI-C string as a plain single quote, so an escaped quote inside one
+  ended it and the stray quote swallowed a later `alias`; it now shares the
+  brace matcher quote model, nested substitutions included. The thirtieth
+  found that a group is read one line at a time while bash lets its closing
+  brace sit on a later line: `shopt -s ${x:-expand_aliases` with the `}` on
+  the next line enabled alias expansion with the gate green. An unquoted
+  group left open at the end of its line is now a `multiline` violation
+  wherever it stands, since the text past the line end cannot be judged;
+  a quoted one is judged whole, because a quote carries across lines.
+  The thirty-second found where a one-line definition ends. The gate had
+  called a definition line a one-liner when its code ended in a brace, so
+  `noop() { :; }; true` stayed open until a later column-0 brace and the
+  definitions in between were never derived (a real, unfrozen `evil()` read
+  as frozen), while `f() { echo }`, whose brace is only an argument, was
+  closed although bash reads the next line as its body, freeze included. A
+  definition now closes where the lexer sees its brace in command position,
+  and `function NAME {` puts that brace in command position as `NAME()`
+  does. The same round found the double-quote branch dropping every
+  backslash, while bash keeps one before anything but a dollar, backtick,
+  double quote, backslash or newline: `"al\ias"` is the command `al\ias`.
+  That only ever reported too much, never too little, but the gate claims to
+  tokenise as bash does, so it now keeps the backslash where bash does.
+  The thirty-third found the same close missed one more way: the lexer read
+  the word after `fi`, `done` or `esac` as an argument, so the brace in
+  `h() { if true; then :; fi }` closed nothing, `h` stayed open, and an
+  unfrozen redefinition of `fail` after it was never derived (bash accepts
+  the brace there and closes the group). All three now leave the next word
+  in command position, where the brace closes `h`. The same round found the
+  scope rule hiding too much: nesting was counted alike for every compound,
+  so a helper defined inside a bare `{ ...; }` group was never derived and
+  never had to be frozen, although the group runs once and unconditionally,
+  as top level does. Each nesting level now records what opened it (a
+  function body, a bare group, or a conditional or repeated compound), and
+  only a bare group is transparent. The thirty-fifth found two more. A
+  multi-line body whose brace closed off column 0 stayed open until the next
+  column-0 brace, which belonged to a later function, so that function was
+  misreported (its own freeze called stray) and the missing freeze was put on
+  the wrong line; the lexer now sees the group close on any body line, and
+  off column 0, or at the end of the file, that is a `close` violation. And
+  only `NAME=` was skipped as a prefix assignment, so `X+=2 alias fail=:` and
+  `a[0]=1 alias f1=:` (bash binds both) read the assignment as the command
+  word and passed; one pattern now covers `NAME=`, `NAME+=` and a subscript,
+  at every site that skips or strips an assignment word. The thirty-sixth
+  found that fix half done three ways. A column-0 `}` still ended a
+  definition by its position alone, so one closing a group nested in the
+  body ended it early and the rest of the body, a redefinition included,
+  was read as top level; a definition closed by the lexer ended only once
+  its whole line was lexed, so `  }; bar() { :; }` hid `bar`; and the
+  pattern stopped a subscript at its first closing bracket, so
+  `a[b[2]]=1 alias fail=:` passed. The lexer alone now ends a definition,
+  at the brace, mid-line, and the subscript is matched by bracket depth.
+  The thirty-seventh found the depth scan one spelling short, the way every
+  earlier enumeration of this grammar was: a quoted `]` (`a["x]"]=1`) left
+  the dequoted word unbalanced, and bash also reads a subscript across
+  blanks (`a[1 + 1]=5 alias fail=:` binds), which the lexer splits into
+  several words. So the subscript is no longer parsed at all. A word that
+  starts `NAME[` and holds `]=` or `]+=` is an assignment (this can only
+  over-report), a command word starting `NAME[` with more words after it is
+  a new `subscript` violation, and in an EXIT, ERR, RETURN or 0 trap every
+  word of the action is judged as a possible call rather than the one the
+  gate took for its command word. The thirty-eighth found the lexer read a
+  redirection only as a word break, so the target of a leading one
+  (`>/tmp/x alias fail=:`, `<<<x alias fail=:`), an fd prefix (`2>`) or the
+  2 after `>&` (which ended the statement at its `&`) was taken for the
+  command word and the alias passed. A redirection operator and its target
+  are now skipped as bash skips them, a substitution in the target is still
+  lexed as the command it is, and `<(` and `>(` stay process substitutions.
+  A trap action's words are split at `<` and `>` too, so
+  `trap 'cleanup>/dev/null' EXIT` names `cleanup` (it was one word that
+  named nothing). The thirty-ninth found that `<(` and `>(`, lexed as a
+  plain subshell, ended the statement they sat in: in `alias <(true) fail=:`
+  the words after the process substitution were never judged, while bash
+  binds the alias. A process substitution is now lexed like `$( )`, as part
+  of its word, and the statement resumes when it closes. The same round
+  split the `trap` report: a DEBUG trap or extdebug line is told to delete
+  the line, and only an EXIT, ERR, RETURN or 0 action is told how to change
+  its action. The fortieth found the same gap one construct over: a
+  backtick span was read as word text, so a `;`, `&`, `|` or blank inside
+  it ended the enclosing statement (``alias `true;true` fail=:`` passed);
+  it is now lexed like `$( )` too. And the report split routed on label
+  text, so an EXIT action that began with three dots got the DEBUG message;
+  a DEBUG trap or extdebug now carries its own `debug` status. The
+  forty-first found two report defects. A label built from a trap action
+  holding a tab or a newline split its TSV row, so the report counted a
+  violation it did not print: every row is now written through one `emit`
+  that turns those characters into `?`, and the suite checks, for every
+  case, that each counted violation prints its own line. And the `debug`
+  message said to delete "this line", which for a statement continued
+  across lines (a backslash, an open quote) left half of it behind or joined
+  the next statement into it; it now names the whole statement. The same
+  round found the fail-closed rule at the end of a file covered only an open
+  heredoc or quote: a file ending inside a backtick span, a `$( )`, an
+  arithmetic context, a subshell or an array literal exited 0, and every
+  definition after the opener went unjudged. Each is now a parse error
+  (exit 2) naming what stayed open. The forty-second found that every parse
+  error named the file's last line, which says nothing about where the
+  construct opened. Each opener now records its line: a quote, including
+  one interrupted by a `$( )` that holds a quote of its own; a heredoc; a
+  substitution, arithmetic context or subshell; and an array literal. The
+  report reads `file:line: … opened here is still open at end of file`. The
+  gate header's exit-code line now names the parse error as well. The
+  forty-third found that only the outermost substitution frame was named, so
+  a backtick left open inside an outer `$( )` was reported as the `$( )`,
+  at the wrong line and as the wrong kind. Naming only the innermost would
+  hide the outer one the same way, so every construct still open now gets
+  its own row, outermost first: each frame's interrupted array literal and
+  quote, the frame itself, then what is open at the innermost level. The
+  forty-fourth found a `)` closed whatever frame was innermost, a backtick
+  span or `$[ ]` included, although bash closes those only on a backtick
+  and a `]`. So in ``$(echo `echo inner)`` the open backtick was never
+  reported, and a valid ``X=`echo a)` `` failed as a parse error. To both,
+  a `)` is now text. The same round found a heredoc body was read on the
+  next line whatever was open. bash holds the body back until a quote,
+  `$( )`, backtick, `$(( ))`, `$[ ]` or `(( ))` opened after the `<<`
+  closes; a `( )` subshell or an array literal holds nothing back. So in
+  `cat <<EOF $(` the command inside the substitution was skipped as body
+  text, and a file bash runs was reported as unparseable. Each queued
+  heredoc now records the depth it was lexed at, and a body is read only
+  when nothing that holds it back is open above that depth.
+  No files,
+  nothing derived from them, or a file the
+  lexer cannot carry to EOF → exit 2, never a pass over the visible prefix.
+- `scripts/__tests__/check-fn-freeze.test.sh` produces every reportable state
+  from a fixture, runs the gate on the real tree behind a 300-function floor
+  with per-directory contribution asserted over the directory list READ FROM
+  THE GATE (a hand-copied three-entry list stayed green with the fourth
+  directory dropped; the derived list follows a rename and a floor of four
+  catches a drop), carries the round-40 effect probe, proves in this bash that
+  an alias really does take a frozen name (so the alias rule guards a measured
+  bypass), and reproduces the neuter on an unfrozen copy (exit 0) and its
+  refusal on a frozen one (exit non-zero) so the measurement above is re-run on
+  every PR.
+
+### What the first cut got wrong, and why the gate lexes
+
+The first sweep matched `^name() {` and `^function name() {` at column 0 with
+heredoc bodies skipped. It froze `function flush() {` inside
+`NEXT_BUILD_JOBS_AWK='...'` in `check-native-bindings.test.sh` — an awk function,
+column 0, inside a single-quoted string — and the suite's derivation went to
+zero jobs. It also placed three freezes inside heredoc fixtures written from
+within helpers, because the scan stopped tracking heredoc openers once inside a
+function body. Both were found by running every suite, not by the gate, which
+at that point could not see them. The lexer is the fix: line-level
+classification applies only to a line that STARTS outside a quoted region, and
+a freeze found inside one is reported as a stray instead of being invisible.
+
+### Honest bound
+
+The freeze protects the binding, not the counter the helper writes.
+`check-skills.test.sh` assigned `FAILED=0` after defining `fail()`, so a failure
+recorded between the two was reset; the counter now initialises first, and the
+rule is stated in `.claude/rules/hook-testing.md`. A write to the counter is
+outside the gate by any route: a plain `FAILED=0` before the summary, an
+arithmetic reset, or a trap action that runs one (`set -o functrace` with
+`trap 'FAILED=0' RETURN` resets it after every function return, round thirty).
+Banning one route would not close the others, since the counter is an
+ordinary variable the suite itself must write; review and the effect probe,
+not this gate, are what catch it.
+
+A bash `alias` is resolved before functions once `shopt -s expand_aliases` is
+on, and `readonly -f` says nothing about it: measured on this bash (5.2), a
+fully frozen `fail()` followed by `shopt -s expand_aliases; alias fail=:` and
+a forced failure exits 0 — the same silent pass as the pre-sweep neuter, from
+two inserted lines the first cut of the gate could not see (the review board's
+security seat found it). The gate now reports either spelling in command
+position of executable text as a violation; a self-defense suite has no use
+for aliases. The rule is on the WORD, not on text: the lexer tokenises
+executable text the way bash does before a command lookup — quotes removed
+and joined, each backslash escaping the next character, a trailing backslash
+joining the next line — finds the COMMAND word of each statement (the first
+word that is not an assignment or one of the words bash lets stand in front of
+a command), and when it is `alias` reports every later `NAME=` word in the
+statement, and when it is `shopt` with an `s` flag reports a later
+`expand_aliases`. That is one case for every spelling the board found across
+three rounds (`\alias`, `builtin alias`, `command alias`, then `X="1" alias`,
+then `\a\l\i\a\s`, `"alias"`, `al"ias"`, `$'alias'` and `alias \` + `fail=:`,
+then `alias nothing fail=:` and `shopt -s nocasematch expand_aliases`), where
+the two prefix lists and the next-word rule that preceded it were each defeated
+by the next spelling (the same treadmill round 39 documents for assignment
+keywords) — while `echo alias fail=:`, the word as an argument, stays text. What stays open
+is a word assembled at run time — a variable value or a command output
+(`$x`, `$(...)`) that must contribute text to spell the word (text written
+inside a parameter expansion, a default, alternate or replacement, is
+judged both ways since round twenty-six), `eval`, a `source` of a file
+the suite wrote — and `declare -n`, which aliases a variable, not a
+function. Posix mode is the same violation as `shopt -s expand_aliases`,
+because it turns that option on (measured in bash 5.2: `set -o posix`, then
+`shopt -p expand_aliases` prints `-s`; round twenty-four). The gate reports
+a `set` statement with an `o` flag cluster before `posix`, until `--` or `-`
+ends its options; `shopt -s -o posix`; and any word naming
+`POSIXLY_CORRECT`. bash enters posix mode on any assignment to that
+variable, from more positions than a list would stay complete for: a prefix
+(`POSIXLY_CORRECT=1 :` counts), `export`, `declare`, `printf -v`, `read`, a
+default expansion, and also arithmetic and `for`. So the rule is on the
+name, text included, not on a list of sinks. Nested definitions are
+deliberately unfrozen. And removing BOTH a definition and its freeze still satisfies the
+gate, as it did the round-40 drift check — the effect probe and the neuter
+reproduction are what prove a surviving freeze is in force.
+
+### What else moved
+
+`lockfile-sync-tests` gained a shellcheck entry and two steps (suite, then
+gate), mirrored in this suite's step-block and shellcheck pins;
+`SELF_EXEC_EXPECTED_DROP` moved 658 → 663 with the heredoc payload at the time of
+the sweep, to 665 when a later merge brought main's own 2 (round
+twenty-nine), and to 669 when the round-45 merge brought main's next 4
+(main had 664; 669 is the value in the suite now). Shellcheck
+clean on every touched file. At the time of the sweep, all 67 suites under the
+scanned directories (54 in `scripts/__tests__`, 12 in `.claude/hooks/__tests__`,
+1 in `.claude/tools/__tests__`; `scripts/__tests__/lib` holds a sourced helper,
+not a suite) exited 0 on the frozen tree. Later merges from main added suites,
+so the live figure differs; `bash scripts/check-fn-freeze.sh --list` derives the
+current one. No
+workflow was degated for the measurement; the neuter-plus-forced-failure stand-in
+replaced per-gate degating.
