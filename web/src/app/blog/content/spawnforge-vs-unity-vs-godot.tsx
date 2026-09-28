@@ -88,7 +88,7 @@ export default function SpawnForgeVsUnityVsGodot() {
 
       <h2>Rendering</h2>
       <p>
-        <strong>SpawnForge:</strong> WebGPU (via wgpu 27) with automatic WebGL2 fallback. PBR
+        <strong>SpawnForge:</strong> WebGPU (via wgpu 29) with automatic WebGL2 fallback. PBR
         materials, GPU particles, skeletal animation, post-processing. Optimized for browser
         delivery.
       </p>

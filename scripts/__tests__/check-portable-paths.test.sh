@@ -69,6 +69,7 @@ make_repo() {
   ) >/dev/null 2>&1
   printf '%s' "$dir"
 }
+readonly -f make_repo
 
 # add_file <repo> <relative path> <content>
 add_file() {
@@ -80,6 +81,7 @@ add_file() {
   mkdir -p "$dir/$(dirname -- "$rel")"
   printf '%s\n' "$body" > "$dir/$rel"
 }
+readonly -f add_file
 
 # run_case <name> <expected exit> <repo dir> [min files]
 run_case() {
@@ -96,6 +98,7 @@ run_case() {
     echo "$out" | sed 's/^/         /' | head -6
   fi
 }
+readonly -f run_case
 
 echo "check-portable-paths decision logic"
 

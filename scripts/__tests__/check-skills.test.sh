@@ -17,9 +17,11 @@ linter="$repo_root/scripts/check-skills.sh"
 command -v awk >/dev/null 2>&1 || { echo "awk required"; exit 1; }
 [ -f "$linter" ] || { echo "linter not found at $linter"; exit 1; }
 
-pass() { echo "  PASS: $1"; }
-fail() { echo "  FAIL: $1"; FAILED=1; }
 FAILED=0
+pass() { echo "  PASS: $1"; }
+readonly -f pass
+fail() { echo "  FAIL: $1"; FAILED=1; }
+readonly -f fail
 
 # Scratch tree, cleaned on exit.
 work="$(mktemp -d -t check-skills-test.XXXXXX)"
@@ -40,6 +42,7 @@ mkskill() {
     echo "$body"
   } > "$work/$dir/SKILL.md"
 }
+readonly -f mkskill
 
 # run_lint [args...] — run the linter against the temp tree, capture stdout+stderr
 # in $out, echo the exit code. No baseline unless a test sets one.
@@ -48,6 +51,7 @@ run_lint() {
     bash "$linter" "$@" >"$out" 2>&1
   echo $?
 }
+readonly -f run_lint
 
 # The scratch tree is a real git repo, because executability is judged by the
 # git INDEX mode (see is_executable in check-skills.sh) rather than by the
@@ -61,6 +65,7 @@ reset_tree() {
   ( cd "$work" && git init -q && git config user.email t@t.t && git config user.name t )
   BASELINE=""
 }
+readonly -f reset_tree
 
 # stage_with_mode <path-under-$work> <+x|-x> — record the file in the index with
 # the given executable mode, and PROVE the index took it. Without that proof a
@@ -78,6 +83,7 @@ stage_with_mode() {
   fi
   return 0
 }
+readonly -f stage_with_mode
 
 # --- 1. A fully valid skill passes (exit 0) -----------------------------------
 reset_tree

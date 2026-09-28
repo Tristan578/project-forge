@@ -83,6 +83,7 @@ digest_of() {
   fi
   printf '%s' "$d"
 }
+readonly -f digest_of
 
 # Prove the resolved tool actually discriminates before relying on it: equal
 # bytes must agree, different bytes must not. Without this a digest that is
@@ -102,7 +103,9 @@ rm -f "$_p1" "$_p2"
 PASS=0
 FAIL=0
 ok()  { echo "  ok: $1"; PASS=$((PASS + 1)); }
+readonly -f ok
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f bad
 SKIP=0
 # skip <reason> - a case the HOST cannot represent, not one we chose not to run.
 # Only ever reachable behind a capability PROBE (never an OS-name check), and
@@ -113,6 +116,7 @@ skipped() {
   SKIP=$((SKIP + 1))
   if [ "${CI:-}" = "true" ]; then bad "skipped in CI: $1"; fi
 }
+readonly -f skipped
 # Shared platform contract (#9611): probe_skip_absent_on names a platform whose
 # HOST cannot close the gap, so the CI upgrade above is suppressed only there.
 # shellcheck source=scripts/__tests__/lib/platform.sh
@@ -151,11 +155,13 @@ JSON
   printf 'top\n<!-- AGENTIC-SYNC:START -->\nstale\n<!-- AGENTIC-SYNC:END -->\nbottom\n' > "$root/sub/copilot.md"
   echo "$root"
 }
+readonly -f make_fixture
 
 run_gen() { # <root> <mode...>  → runs the real generator against the fixture root
   local root="$1"; shift
   AGENTIC_SYNC_ROOT="$root" node "$GEN" "$@"
 }
+readonly -f run_gen
 
 # =============================================================================
 echo "== generator: file existence =="
@@ -256,6 +262,7 @@ structural_case() { # <label> <json>
   if [ "$rc" -ne 0 ]; then ok "structural reject: $label → exit non-zero"; else bad "structural reject: $label must NOT read as in-sync"; fi
   rm -rf "$ROOT"
 }
+readonly -f structural_case
 structural_case "empty object (no markerId)"      '{}'
 structural_case "missing markerId"                '{"facts":{},"targets":["AGENTS.md"]}'
 structural_case "empty markerId"                  '{"markerId":"","facts":{},"targets":["AGENTS.md"]}'

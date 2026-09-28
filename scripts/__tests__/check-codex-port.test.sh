@@ -44,8 +44,11 @@ done
 
 PASS=0; FAIL=0; SKIP=0
 ok()   { PASS=$((PASS + 1)); echo "  ok    $1"; }
+readonly -f ok
 bad()  { FAIL=$((FAIL + 1)); echo "  FAIL  $1"; }
+readonly -f bad
 skip() { SKIP=$((SKIP + 1)); echo "  skip  $1"; }
+readonly -f skip
 
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -55,21 +58,25 @@ gen() {
   OUT="$(CODEX_PORT_ROOT="$1" node "$GEN" "$2" 2>&1)"
   RC=$?
 }
+readonly -f gen
 
 # expect_rc <want> <label>
 expect_rc() {
   if [ "$RC" -eq "$1" ]; then ok "$2 (exit $1)"; else bad "$2 — wanted exit $1, got $RC: $OUT"; fi
 }
+readonly -f expect_rc
 
 # expect_out <fixed-string> <label> — the failure must NAME the thing.
 expect_out() {
   if grep -qF -- "$1" <<<"$OUT"; then ok "$2"; else bad "$2 — output lacks '$1': $OUT"; fi
 }
+readonly -f expect_out
 
 # expect_no_out <fixed-string> <label> — and must NOT say the wrong thing.
 expect_no_out() {
   if grep -qF -- "$1" <<<"$OUT"; then bad "$2 — output contains '$1': $OUT"; else ok "$2"; fi
 }
+readonly -f expect_no_out
 
 # mkfix — build a minimal but complete source tree; echoes its path.
 mkfix() {
@@ -128,6 +135,7 @@ AGENT
 SETTINGS
   echo "$d"
 }
+readonly -f mkfix
 
 # json_get <file> <dotted.path> — jq-free JSON probe. Walks the path; prints a
 # string as-is and anything else as JSON. Two suffixes cover what the cases
@@ -145,6 +153,7 @@ json_get() {
     process.stdout.write(typeof v === "string" ? v : JSON.stringify(v) ?? "undefined");
   ' "$1" "$2"
 }
+readonly -f json_get
 
 # json_set <file> <dotted.path> <json-value> — jq-free, and evaluates no code.
 json_set() {
@@ -159,6 +168,7 @@ json_set() {
     fs.writeFileSync(file, JSON.stringify(doc));
   ' "$1" "$2" "$3"
 }
+readonly -f json_set
 
 # lock_set <fixture> <path> <json-value> — write one entry of the lock's `generated` map.
 lock_set() {
@@ -170,6 +180,7 @@ lock_set() {
     fs.writeFileSync(file, JSON.stringify(l));
   ' "$1/tools/agentic-sync/port.lock.json" "$2" "$3"
 }
+readonly -f lock_set
 
 # file_replace <file> <from> <to> — literal, first occurrence; `|` in <to> is a
 # newline. (Not sed: BSD sed has no newline in a replacement, and this suite
@@ -183,6 +194,7 @@ file_replace() {
     fs.writeFileSync(file, s.replace(from, to.split("|").join("\n")));
   ' "$1" "$2" "$3"
 }
+readonly -f file_replace
 
 echo "== generator: write, check, idempotence =="
 F="$(mkfix)"
@@ -674,6 +686,7 @@ mcp_launch() {
   printf '{"mcpServers":{"alpha":{"command":"%s","args":%s}}}\n' "$1" "$2" > "$F/.mcp.json"
   printf '[mcp_servers.alpha]\ncommand = "%s"\nargs = %s\n%sdefault_tools_approval_mode = "prompt"\n' "$1" "$2" "$cwd_line" > "$F/.codex/config.toml"
 }
+readonly -f mcp_launch
 LAUNCH_ROWS=0
 while IFS='|' read -r LABEL COMMAND ARGS CWD NEEDLE; do
   [ -n "$LABEL" ] || continue
@@ -837,6 +850,7 @@ dead_ref() {
   gen "$F" --check
   if [ "$RC" -eq 1 ] && grep -qF -- "$2" <<<"$OUT"; then ok "$3"; else bad "$3 — exit $RC, wanted '$2' in: $OUT"; fi
 }
+readonly -f dead_ref
 # live_ref <text> <label> — must NOT be reported.
 live_ref() {
   F="$(mkfix)"
@@ -845,6 +859,7 @@ live_ref() {
   gen "$F" --check
   if [ "$RC" -eq 0 ]; then ok "$2"; else bad "$2 — reported a live or non-repo path: $OUT"; fi
 }
+readonly -f live_ref
 # shellcheck disable=SC2016  # these are literal fixture text; nothing here should expand
 {
   dead_ref 'Run "$ROOT/.Codex/rules/x.md".'                                  'unresolved path .Codex/rules/x.md' 'a dead path after $ROOT/ is caught'
@@ -1582,6 +1597,7 @@ fi
 echo "== the wrapper: exit codes are the contract, and CI ignores the node override =="
 # The generator reads CODEX_PORT_ROOT; the wrapper locates node and the generator.
 wrap() { OUT="$(env -u CI "$@" bash "$WRAPPER" 2>&1)"; RC=$?; }
+readonly -f wrap
 F="$(mkfix)"; gen "$F" --write
 wrap CODEX_PORT_ROOT="$F"; expect_rc 0 "wrapper: an in-sync tree is exit 0"
 printf '\nedit\n' >> "$F/.claude/skills/alpha/SKILL.md"
@@ -1656,15 +1672,20 @@ adapt() {
   RC=$?
   ERR="$(cat "$ERR_FILE")"
 }
+readonly -f adapt
 # out_get <dotted.path> — read a field of the adapter's JSON stdout.
 out_get() { printf '%s' "$OUT" > "$H/out.json"; json_get "$H/out.json" "$1"; }
+readonly -f out_get
 # patch_payload <event> <patch-with-\n-escapes> — a Codex apply_patch payload.
 patch_payload() {
   printf '{"cwd":"%s","hook_event_name":"%s","tool_name":"apply_patch","tool_input":{"command":"%s"}}' "$CWD_NATIVE" "$1" "$2"
 }
+readonly -f patch_payload
 # bash_payload <event> <command> — a Codex Bash payload.
 bash_payload() { printf '{"hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" "$2"; }
+readonly -f bash_payload
 runs() { grep -c "^$1=" "$LOG" 2>/dev/null || true; }
+readonly -f runs
 
 PATCH='*** Begin Patch\n*** Add File: web/src/new.ts\n+export const a = 1;\n*** Update File: web/src/old.ts\n@@\n-const b = 1;\n+const b = 2;\n*** Delete File: web/src/gone.ts\n*** End Patch\n'
 PAYLOAD="$(patch_payload PreToolUse "$PATCH")"
@@ -2229,8 +2250,10 @@ echo "== adapter: Codex's SECOND edit channel — a patch carried in a shell com
 # whose text has a `*** Add|Update|Delete File:` line either has every such path
 # inspected or is blocked; a command with none is ordinary. See carriedPatch().
 carried_payload() { printf '{"cwd":"%s","hook_event_name":"%s","tool_name":"Bash","tool_input":{"command":"%s"}}' "$CWD_NATIVE" "$1" "$2"; }
+readonly -f carried_payload
 # heredoc <prefix> <patch-body-with-\n-escapes> — the plain heredoc form, behind an optional prefix.
 heredoc() { printf '%s' "${1}apply_patch <<'EOF'\n*** Begin Patch\n${2}\n*** End Patch\nEOF"; }
+readonly -f heredoc
 # Files the patches below UPDATE must exist: an update of a file that is not
 # there is how the adapter detects a base directory it cannot see.
 mkdir -p "$TMP_ROOT/protected" "$TMP_ROOT/docs" "$TMP_ROOT/web/src/lib"
@@ -2743,6 +2766,7 @@ adapt_path() {
   RC=$?
   ERR="$(cat "$ERR_FILE")"
 }
+readonly -f adapt_path
 # The control first: the same call with the PATH left alone runs the script, so a
 # block below is the missing jq and not a bash this helper failed to start.
 rm -f "$LOG"
