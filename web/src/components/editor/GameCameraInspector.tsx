@@ -36,12 +36,25 @@ import {
  * than listed per mode: the engine reads `damping` in all three follow arms,
  * and this table used to seed it for `thirdPersonFollow` alone — the same
  * one-mode-only shape the payload builder had (Sentry finding on #10295).
+ *
+ * Agreement with that table is enforced by {@link ModeDefaults} at compile
+ * time, in both directions: a follow mode missing the seed fails the
+ * required `followSmoothing`, and a non-follow mode carrying one fails the
+ * `never`. A module-scope runtime check did this first, and a `throw` at
+ * import time in a `'use client'` bundle turns table drift into a blank
+ * inspector for every user rather than a red `tsc` for the one who drifted it.
  */
-const FOLLOW_DEFAULTS: Partial<GameCameraData> = {
+type ModeDefaults = {
+  [M in GameCameraMode]: (typeof MODE_READS_DAMPING)[M] extends true
+    ? Partial<GameCameraData> & { followSmoothing: number }
+    : Partial<GameCameraData> & { followSmoothing?: never };
+};
+
+const FOLLOW_DEFAULTS: { followSmoothing: number } = {
   followSmoothing: ENGINE_CAMERA_DEFAULTS.followSmoothing,
 };
 
-const MODE_DEFAULTS: Record<GameCameraMode, Partial<GameCameraData>> = {
+const MODE_DEFAULTS: ModeDefaults = {
   thirdPersonFollow: {
     followDistance: ENGINE_CAMERA_DEFAULTS.followDistance,
     followHeight: ENGINE_CAMERA_DEFAULTS.followHeight,
@@ -65,17 +78,6 @@ const MODE_DEFAULTS: Record<GameCameraMode, Partial<GameCameraData>> = {
     orbitalAutoRotateSpeed: ENGINE_CAMERA_DEFAULTS.orbitalAutoRotateSpeed,
   },
 };
-
-// The seed and the row are gated by the same table, so neither can outlive the
-// other. A mode in `MODE_READS_DAMPING` without the seed would dispatch no
-// `damping` on a mode switch (fine — omission is the engine default) but a
-// mode with the seed and no row would dispatch a value the user cannot see.
-for (const mode of Object.keys(MODE_DEFAULTS) as GameCameraMode[]) {
-  const seeded = Object.hasOwn(MODE_DEFAULTS[mode], 'followSmoothing');
-  if (seeded !== MODE_READS_DAMPING[mode]) {
-    throw new Error(`MODE_DEFAULTS.${mode} disagrees with MODE_READS_DAMPING about followSmoothing`);
-  }
-}
 
 /**
  * Parse a number input, keeping the previous value when the field cannot hold
