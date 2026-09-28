@@ -6,10 +6,17 @@ import { ArrowLeft, Maximize, Minimize, Loader2, RotateCw } from 'lucide-react';
 import { ShareButtons } from './ShareButtons';
 import { RemixButton } from './RemixButton';
 import { ReportGameDialog } from './ReportGameDialog';
+import { PlayRenderErrorNotice } from './PlayRenderErrorNotice';
 import { withTimeout } from '@/lib/async/withTimeout';
 import { describeOrigin, isCdnOrigin, loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
 import { loadSceneWhenReady, refusalOf, settleDelay, SceneLoadCancelled } from '@/lib/engine/playSceneLoad';
 import { addBreadcrumb, captureException, captureMessage, setTag } from '@/lib/monitoring/sentry-client';
+import {
+  RENDER_ERROR_CLASS_LABEL,
+  RENDER_ERROR_EVENT,
+  parseRenderErrorReport,
+  type RenderErrorReport,
+} from '@/lib/engine/renderErrorWire';
 import {
   ENGINE_GLOBAL_TIMEOUT_MS,
   PLAY_GAME_FETCH_TIMEOUT_MS,
@@ -56,6 +63,13 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   // Only offered when the failure happened BEFORE init_engine ran. Re-entering
   // init_engine on an already-initialized Bevy app is not a supported restart.
   const [canRetry, setCanRetry] = useState(false);
+  // Engine render errors (#8887). Same rules as the editor's store: a
+  // `stopped` notice is sticky and a later `continued` cannot replace it, and
+  // repeated skips are counted in one note rather than stacked.
+  const [renderError, setRenderError] = useState<{ notice: RenderErrorReport | null; skippedCount: number }>({
+    notice: null,
+    skippedCount: 0,
+  });
   // shareUrl must come from the browser — window.location.href is undefined
   // during SSR, so reading it at render time causes a hydration mismatch
   // (server: '', client: actual URL). An empty string also throws in addUtm's
@@ -83,6 +97,9 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
   // unmount during it RESOLVES the wait (and `cancelledRef` then returns)
   // instead of leaving initEngine suspended with the runtime in its closure.
   const initAbortRef = useRef<AbortController | null>(null);
+  // The backend of the build that loaded, for render-error reports. Derived
+  // from the engine-pkg path the loader used, which names it.
+  const engineBackendRef = useRef<'webgpu' | 'webgl2' | 'unknown'>('unknown');
 
   // Reset on mount, not just on unmount: StrictMode double-mounts in dev, and a
   // latch that only ever sets `true` would leave the second mount permanently
@@ -158,6 +175,47 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
     setClickToStart(false);
     setEngineState('loading');
 
+    // A GPU error the engine reported. It did not quit (see
+    // `engine/src/core/render_errors.rs`): it either skipped a frame or stopped
+    // drawing, and a player must be told either way — the frozen, unexplained
+    // canvas is what this replaces. The raw wgpu text goes to Sentry and the
+    // collapsed details, never the headline.
+    const handleRenderError = (data: unknown) => {
+      const report = parseRenderErrorReport(data);
+      if (!report) {
+        console.warn('[SpawnForge Play] RENDER_ERROR payload was unreadable; no notice shown.', data);
+        captureException(new Error('RENDER_ERROR payload was unreadable'), {
+          surface: 'play',
+          phase: 'render',
+          source: 'render_error_handler',
+          userId,
+          slug,
+        });
+        return;
+      }
+      captureException(
+        new Error(`Engine render error: ${RENDER_ERROR_CLASS_LABEL[report.errorClass]} (${report.outcome})`),
+        {
+          surface: 'play',
+          phase: 'render',
+          source: 'render_error_handler',
+          errorClass: report.errorClass,
+          outcome: report.outcome,
+          occurrence: report.occurrence,
+          detail: report.detail,
+          engineBackend: engineBackendRef.current,
+          userId,
+          slug,
+        },
+      );
+      if (cancelledRef.current) return;
+      setRenderError((prev) => {
+        if (report.outcome === 'stopped') return { ...prev, notice: report };
+        if (prev.notice?.outcome === 'stopped') return prev;
+        return { notice: report, skippedCount: prev.skippedCount + 1 };
+      });
+    };
+
     try {
       // ONE deadline across the whole sequence. Bounding each await separately
       // would let a slow-but-not-hung load spend the full budget twice over and
@@ -184,6 +242,11 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
           },
           onOriginUsed: (basePath) => {
             setTag('wasm.source', isCdnOrigin(basePath) ? 'cdn' : 'same-origin');
+            engineBackendRef.current = basePath.includes('engine-pkg-webgpu')
+              ? 'webgpu'
+              : basePath.includes('engine-pkg-webgl2')
+                ? 'webgl2'
+                : 'unknown';
           },
         }),
         ENGINE_GLOBAL_TIMEOUT_MS,
@@ -192,7 +255,7 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
 
       if (cancelledRef.current) return;
 
-      // Set up event callback for input state tracking
+      // Engine events: input state for scripts, and render errors (#8887).
       runtime.set_event_callback(function (eventPayload: unknown) {
         try {
           const payload =
@@ -203,6 +266,8 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
           if (payload?.type === 'INPUT_STATE_CHANGED') {
             (window as unknown as Record<string, unknown>).__forgeInputState =
               payload.data ?? payload;
+          } else if (payload?.type === RENDER_ERROR_EVENT) {
+            handleRenderError(payload.payload);
           }
         } catch {
           // ignore parse errors
@@ -292,6 +357,10 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       );
     }
   }, [gameData, userId, slug]);
+
+  const dismissRenderError = useCallback(() => {
+    setRenderError((prev) => (prev.notice?.outcome === 'stopped' ? prev : { ...prev, notice: null }));
+  }, []);
 
   const retryEngine = useCallback(() => {
     initStartedRef.current = false;
@@ -460,6 +529,14 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
             <Loader2 aria-hidden="true" size={32} className="mb-3 animate-spin text-zinc-400" />
             <p className="text-sm text-zinc-400">Starting engine...</p>
           </div>
+        )}
+
+        {renderError.notice && (
+          <PlayRenderErrorNotice
+            notice={renderError.notice}
+            skippedCount={renderError.skippedCount}
+            onDismiss={dismissRenderError}
+          />
         )}
       </div>
     </div>

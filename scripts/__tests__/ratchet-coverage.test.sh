@@ -33,6 +33,7 @@ check() {
     echo "FAIL: $desc (expected '$expected', got '$actual')"
   fi
 }
+readonly -f check
 
 # ---------------------------------------------------------------------------
 # Fixture builders
@@ -54,6 +55,7 @@ export default defineConfig({
 });
 EOF
 }
+readonly -f write_config
 
 write_summary() {
   # write_summary <dir> <statements> <branches> <functions> <lines>
@@ -62,6 +64,7 @@ write_summary() {
     '{total: {statements: {pct: $s}, branches: {pct: $b}, functions: {pct: $f}, lines: {pct: $l}}}' \
     > "$1/coverage-summary.json"
 }
+readonly -f write_summary
 
 fresh_root() {
   # fresh_root <aggregate statements/branches/functions/lines>
@@ -71,6 +74,7 @@ fresh_root() {
   printf "export default { test: { environment: 'node' } };\n" > "$ROOT/web/vitest.config.node.ts"
   cp "$ROOT/web/vitest.config.node.ts" "$ROOT/child-before.ts"
 }
+readonly -f fresh_root
 
 read_thresholds() {
   # read_thresholds <config-path> → "s/b/f/l"
@@ -81,6 +85,7 @@ read_thresholds() {
   l=$(sed -nE 's/.*lines:[[:space:]]*([0-9]+).*/\1/p' "$1" | head -1)
   echo "$s/$b/$f/$l"
 }
+readonly -f read_thresholds
 
 # Require unchanged child bytes, including non-threshold project settings.
 check_child_unchanged() {
@@ -88,6 +93,7 @@ check_child_unchanged() {
   cmp -s "$ROOT/child-before.ts" "$ROOT/web/vitest.config.node.ts" && changed=0
   check "$1" 0 "$changed"
 }
+readonly -f check_child_unchanged
 
 run_ratchet() {
   # run_ratchet <root> [extra env as k=v ...]
@@ -99,6 +105,7 @@ run_ratchet() {
   ( cd "$root" && env -u GITHUB_ACTIONS -u GITHUB_REF RATCHET_PROJECT_ROOT="$root" "$@" \
       bash "$SCRIPT" web/coverage >"$root/ratchet.log" 2>&1 )
 }
+readonly -f run_ratchet
 
 # ---------------------------------------------------------------------------
 # 1. Coverage exceeds aggregate thresholds → root config is bumped to floored actuals

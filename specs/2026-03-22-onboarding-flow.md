@@ -80,6 +80,8 @@ Sign-in / /dev page load
 3. After user stops play mode, show contextual tip: "Try changing a material color"
 4. Show OnboardingChecklist
 
+**Customise step (added 2026-09-24, #10172).** When a template loads successfully, from the wizard or the TemplateGallery, a toast offers "Customize with AI". Its action puts "Change this <template name> so that " into the chat composer (`chatStore.composerDraft`, adopted once by `ChatInput` after any text the user typed) and reveals the chat with `revealChat()`. It never sends: the user finishes the sentence and sees the token estimate before anything is spent. A failed load offers nothing.
+
 **Path 2C: Blank Canvas** (target: first entity within 60 seconds)
 1. Dismiss wizard immediately
 2. Show contextual tip toast after 3 seconds: "Right-click the canvas to add your first entity"

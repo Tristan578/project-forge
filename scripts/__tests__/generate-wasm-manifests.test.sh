@@ -7,7 +7,9 @@ SCRIPT="$SCRIPT_DIR/generate-wasm-manifests.sh"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 # A temp dir whose path every process in this suite can resolve.
 #
@@ -28,6 +30,7 @@ mktemp_d_native() {
     printf '%s\n' "$d"
   fi
 }
+readonly -f mktemp_d_native
 
 setup_fixture() {
   local tmpdir
@@ -38,8 +41,10 @@ setup_fixture() {
   echo "fake js content"   > "$variant_dir/forge_engine.js"
   echo "$tmpdir"
 }
+readonly -f setup_fixture
 
 cleanup() { rm -rf "$1"; }
+readonly -f cleanup
 
 echo "=== generate-wasm-manifests.sh tests ==="
 

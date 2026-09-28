@@ -42,7 +42,9 @@ CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 
@@ -69,6 +71,7 @@ make_repo() {
   )
   echo "$repo"
 }
+readonly -f make_repo
 
 # Build a throwaway git repo whose committed lockfile carries package nodes with
 # platform metadata (os/cpu/libc) — the shape some npm versions rewrite. Echoes
@@ -102,6 +105,7 @@ make_repo_platform() {
   )
   echo "$repo"
 }
+readonly -f make_repo_platform
 
 # Stage a jq filter as a FILE in $1 and echo a regen stub that applies it to the
 # lockfile. Staging the program (rather than inlining it in the stub string)
@@ -112,6 +116,7 @@ jq_regen() {
   printf '%s\n' "$filter" > "$repo/.filter.jq"
   echo 'jq -f .filter.jq package-lock.json > .regen.json && mv .regen.json package-lock.json'
 }
+readonly -f jq_regen
 
 # Write a stub `npm ls --json` report into $1 carrying the given problem
 # strings, and echo the consistency-stub command that emits it. Staging the
@@ -123,6 +128,7 @@ ls_report() {
   jq -nc '{name: "root", version: "0.0.0", problems: $ARGS.positional}' --args "$@" > "$repo/.ls-report.json"
   echo 'cat .ls-report.json'
 }
+readonly -f ls_report
 
 # Run the gate inside $repo with a given regenerate stub; echo "<exit>|<output>".
 # $3 stubs the stage-1 consistency command and defaults to a problem-free `npm
@@ -141,6 +147,7 @@ run_gate() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate
 
 echo "=== check-lockfile-sync.sh tests ==="
 

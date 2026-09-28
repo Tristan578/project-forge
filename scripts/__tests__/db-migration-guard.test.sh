@@ -50,7 +50,9 @@ RUNBOOK="$REPO_ROOT/docs/operations/deploy-migration-rollback.md"
 FAILURES=0
 
 pass() { echo "  PASS: $1"; }
+readonly -f pass
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
+readonly -f fail
 
 [ -f "$SCRIPT" ] || { echo "gate script not found: $SCRIPT"; exit 1; }
 
@@ -66,6 +68,7 @@ trap 'exit 130' INT
 # "unexpected EOF while looking for matching `)'" at PARSE time — i.e. the whole
 # suite fails to load, not just that case.
 fixture() { cat > "$TMPDIR_T/$1"; }
+readonly -f fixture
 
 # Run the gate; echo "<exit>|<output>". $3, if given, is the value of
 # ALLOW_DESTRUCTIVE_MIGRATION for that single invocation.
@@ -79,6 +82,7 @@ run_gate() {
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
+readonly -f run_gate
 
 # assert_verdict <label> <mode> <file> <expected-rc> <expected-verdict> [allow]
 assert_verdict() {
@@ -98,6 +102,7 @@ assert_verdict() {
     fail "$label should print verdict=$want_verdict; got: $(grep -F 'verdict=' <<<"$out" | tr '\n' ' ')"
   fi
 }
+readonly -f assert_verdict
 
 echo "=== db-migration-guard.sh: plan classification ==="
 
