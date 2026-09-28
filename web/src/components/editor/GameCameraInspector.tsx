@@ -326,7 +326,12 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
             type="text"
             value={primaryGameCamera.targetEntity ?? ''}
             onChange={(e) => handleParamChange({ targetEntity: e.target.value || null })}
-            placeholder="(follow selected)"
+            // Not "(follow selected)": nothing fills a blank target with the
+            // editor selection. The engine resolves `target_entity: None` to no
+            // target and skips every follow arm, so a blank field is a camera
+            // that never moves in every mode but Fixed (see
+            // `cameraModeNeedsTarget`).
+            placeholder="entity id (required to follow)"
             className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
               focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-400"
           />

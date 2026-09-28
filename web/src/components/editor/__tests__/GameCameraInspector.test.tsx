@@ -192,6 +192,22 @@ describe('GameCameraInspector', () => {
     });
   });
 
+  /**
+   * The Target ID placeholder read "(follow selected)" for as long as the
+   * panel existed, and it was never true: nothing substitutes the editor
+   * selection for a blank target, the engine skips every follow arm without
+   * one, and every mode but Fixed never moves. The tooltip and the docs were
+   * corrected with it (review-board round 4 on #10295); this pins the
+   * placeholder's half.
+   */
+  it('does not promise that a blank Target ID follows the selection', () => {
+    setupStore();
+    render(<GameCameraInspector />);
+    const target = screen.getByLabelText('Target ID') as HTMLInputElement;
+    expect(target.placeholder).not.toMatch(/selected|selection/i);
+    expect(target.placeholder).toMatch(/required/);
+  });
+
   it('renders Test Shake button', () => {
     setupStore();
     render(<GameCameraInspector />);

@@ -13,7 +13,7 @@ The Game Camera component lets you define exactly how the camera behaves when yo
 3. Click **Add Game Camera** if no camera is configured yet.
 4. Set **Active** to true to make this the primary camera for play mode.
 5. Choose a **Mode** from the dropdown.
-6. Set a **Target ID** if you want the camera to follow a specific entity (leave blank to follow whichever entity is currently selected at runtime).
+6. Set **Target ID** to the ID of the entity the camera should follow. Every mode except **Fixed** needs one — with it blank, the camera keeps its mode but never moves.
 7. Adjust the mode-specific parameters that appear below.
 8. Click **Test Shake** to preview a camera shake effect in the editor.
 

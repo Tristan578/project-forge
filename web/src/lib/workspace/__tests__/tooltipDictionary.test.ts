@@ -26,6 +26,21 @@ describe('TOOLTIP_DICTIONARY', () => {
     expect(missing, 'terms the panel shows a (?) for that have no definition').toEqual([]);
   });
 
+  /**
+   * The first draft of this tooltip said a blank Target ID makes the camera
+   * "follow whichever object is selected". Nothing does that: the engine
+   * resolves a missing target to none and skips every follow arm
+   * (`game_camera.rs`), `cameraModeNeedsTarget` lists five of six modes as
+   * inert without one, and `cameraSetupExecutor` already warns "it will not
+   * move". The inspector placeholder and the docs say the same thing now, and
+   * this pins the tooltip's half (review-board round 4 on #10295).
+   */
+  it('does not promise that a blank camera target follows the selection', () => {
+    const tooltip = TOOLTIP_DICTIONARY['gameCameraTarget']!;
+    expect(tooltip).not.toMatch(/selected|selection/i);
+    expect(tooltip).toMatch(/will not move/);
+  });
+
   it('should be a non-empty record', () => {
     const keys = Object.keys(TOOLTIP_DICTIONARY);
     expect(keys.length).toBeGreaterThan(50);
