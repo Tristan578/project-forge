@@ -1,7 +1,10 @@
 //! Material, lighting, and environment command handlers.
 
 use serde::Deserialize;
-use crate::core::material::{MaterialData, MaterialAlphaMode, ParallaxMethod};
+use crate::core::material::{
+    invalid_attenuation_distance, is_valid_attenuation_distance, MaterialAlphaMode, MaterialData,
+    ParallaxMethod,
+};
 use crate::core::lighting::LightData;
 use crate::core::shader_effects::ShaderEffectData;
 use crate::core::post_processing::{
@@ -146,7 +149,21 @@ fn handle_update_material(payload: serde_json::Value) -> super::CommandResult {
     if let Some(v) = data.diffuse_transmission { mat.diffuse_transmission = v; }
     if let Some(v) = data.ior { mat.ior = v; }
     if let Some(v) = data.thickness { mat.thickness = v; }
-    if let Some(v) = data.attenuation_distance { mat.attenuation_distance = v; }
+    if let Some(v) = data.attenuation_distance {
+        // Same predicate `parse_scene_file` applies on reload (#10267). Without
+        // it a negative or non-finite value sent over the MCP relay, from a
+        // script, or from devtools was stored verbatim by `apply_material_updates`,
+        // exported into the scene, and then refused by every subsequent load —
+        // a scene that could be written but never reopened. `apply_material_updates`
+        // is the only writer; a reject here is a reject before it runs.
+        if !is_valid_attenuation_distance(v) {
+            return Err(format!(
+                "update_material: {}",
+                invalid_attenuation_distance(v)
+            ));
+        }
+        mat.attenuation_distance = v;
+    }
     if let Some(v) = data.attenuation_color { mat.attenuation_color = v; }
 
     let update = MaterialUpdate {
@@ -715,6 +732,76 @@ mod tests {
             "alphaMode": "blend"
         }));
         assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // #10267: the live command must refuse exactly what `parse_scene_file`
+    // cannot reload, or a value accepted here is persisted, exported, and
+    // then locks the scene out of every subsequent load.
+
+    #[test]
+    fn update_material_accepts_a_finite_non_negative_attenuation_distance() {
+        for value in [0.0, 4.5, 10.0] {
+            let result = run(
+                "update_material",
+                json!({
+                    "entityId": "entity-1",
+                    "attenuationDistance": value
+                }),
+            );
+            // Reached the queue (not a validation error), then "not initialized"
+            // because no PendingCommands resource exists under native test.
+            assert!(result.unwrap_err().contains("not initialized"), "{value}");
+        }
+    }
+
+    #[test]
+    fn update_material_rejects_what_parse_scene_file_cannot_reload() {
+        use crate::core::material::MaterialData;
+        // Every explicit number the loader refuses, spelled as the command wire
+        // would carry it. `1e300` parses as f64, narrows to +inf as f32.
+        for literal in ["-1", "-0.5", "1e300"] {
+            let payload: serde_json::Value = serde_json::from_str(&format!(
+                r#"{{"entityId":"entity-1","attenuationDistance":{literal}}}"#
+            ))
+            .unwrap();
+            let err = run("update_material", payload).expect_err(&format!(
+                "attenuationDistance {literal} must be refused live"
+            ));
+            assert!(
+                err.starts_with("update_material: attenuationDistance"),
+                "the error must name the command and the field: {err}"
+            );
+            assert!(
+                !err.contains("not initialized"),
+                "{literal} reached the queue instead of being refused: {err}"
+            );
+
+            // The SAME literal is refused by the loader's deserializer, so the
+            // two domains are equal: nothing accepted live is unloadable.
+            let material_json = serde_json::to_string(&MaterialData::default())
+                .unwrap()
+                .replace(
+                    "\"attenuationDistance\":null",
+                    &format!("\"attenuationDistance\":{literal}"),
+                );
+            assert!(material_json.contains(literal), "{material_json}");
+            serde_json::from_str::<MaterialData>(&material_json)
+                .expect_err(&format!("the loader must also refuse {literal}"));
+        }
+    }
+
+    #[test]
+    fn update_material_treats_a_null_attenuation_distance_as_absent() {
+        // `null` on the command wire is "not provided" (Option<f32> → None), so
+        // the default (infinity) stands and the update still reaches the queue.
+        let result = run(
+            "update_material",
+            json!({
+                "entityId": "entity-1",
+                "attenuationDistance": null
+            }),
+        );
         assert!(result.unwrap_err().contains("not initialized"));
     }
 

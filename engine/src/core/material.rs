@@ -32,8 +32,11 @@ fn default_attenuation_color() -> [f32; 3] { [1.0, 1.0, 1.0] }
 /// Accepted inputs, and nothing else:
 /// - `null` → `f32::INFINITY`: the on-disk spelling of the default, both
 ///   before and after this fix. The wire format is deliberately UNCHANGED, so
-///   a scene written by this engine still loads on a rolled-back one (or a
-///   lagging CDN prefix), and every scene saved before the fix loads here.
+///   this introduces NO NEW incompatibility in either direction: every scene
+///   saved before the fix loads here, finite values load on both engines,
+///   and a rolled-back engine (or a lagging CDN prefix) fails on a
+///   default-material scene exactly as it always failed on its own output —
+///   it never loaded those, and nothing written here makes that worse.
 /// - a finite, non-negative JSON number, integer- or float-formatted (`5`
 ///   and `5.0` are different `serde_json` number variants; both must work).
 ///
@@ -50,17 +53,41 @@ fn default_attenuation_color() -> [f32; 3] { [1.0, 1.0, 1.0] }
 /// `QUERY_ENTITY_DETAILS` events emit and what the web side contracts as
 /// `attenuationDistance: number | null` — this attribute changes only what
 /// the struct ACCEPTS, never what it emits.
+///
+/// The predicate is [`is_valid_attenuation_distance`], shared with the live
+/// `update_material` command so the domain the engine accepts live is the
+/// domain a saved scene reloads — a value this deserializer refuses must
+/// never have been writable in the first place.
 fn deserialize_attenuation_distance<'de, D>(deserializer: D) -> Result<f32, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     match Option::<f32>::deserialize(deserializer)? {
         None => Ok(f32::INFINITY),
-        Some(value) if value.is_finite() && value >= 0.0 => Ok(value),
-        Some(value) => Err(serde::de::Error::custom(format!(
-            "attenuationDistance must be null or a finite, non-negative number, got {value}"
+        Some(value) if is_valid_attenuation_distance(value) => Ok(value),
+        Some(value) => Err(serde::de::Error::custom(invalid_attenuation_distance(
+            value,
         ))),
     }
+}
+
+/// The ONE definition of an EXPLICIT `attenuation_distance` number the engine
+/// accepts: finite and non-negative. The default, `f32::INFINITY` ("no
+/// attenuation"), is reachable only by OMISSION — a `null`/missing key in a
+/// scene file, an absent field on `update_material` — never as a number, so
+/// a value that narrows to `inf` (JSON `1e300`, a JS `Infinity`) fails here
+/// too. The scene-file deserializer and the `update_material` command share
+/// this predicate rather than each restating the rule (#10267): a value that
+/// fails it is refused at BOTH boundaries, because the loader cannot reload
+/// what the live path would otherwise persist.
+pub(crate) fn is_valid_attenuation_distance(value: f32) -> bool {
+    value.is_finite() && value >= 0.0
+}
+
+/// The error both boundaries report for a value `is_valid_attenuation_distance`
+/// refuses. Names the field so the person (or model) that sent it can find it.
+pub(crate) fn invalid_attenuation_distance(value: f32) -> String {
+    format!("attenuationDistance must be null or a finite, non-negative number, got {value}")
 }
 
 /// Serializable parallax mapping method (mirror of Bevy's `ParallaxMappingMethod`).
