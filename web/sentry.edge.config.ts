@@ -43,22 +43,23 @@ if (DSN) {
     dataCollection: {
       userInfo: false,
       cookies: false,
-      queryParams: false,
+      urlQueryParams: false,
       httpHeaders: { request: false, response: false },
       httpBodies: [],
       genAI: { inputs: false, outputs: false },
       stackFrameVariables: false,
     },
-    enableLogs: true,
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryEvent,
     // Sentry Logs bypass beforeSend/scrubSentryEvent — scrub them on their own
-    // pipeline so a stray Sentry.logger.* call can't leak secrets/PII (see
-    // sentry.server.config.ts for the full rationale).
+    // pipeline so a stray Sentry.logger.* call can't leak secrets/PII. @sentry
+    // v11 has no `enableLogs` switch: logs ship whenever the logger is called,
+    // so this pin is unconditional (see sentry.server.config.ts for the full
+    // rationale).
     beforeSendLog: scrubSentryLog,
-    // Metrics are a THIRD pipeline, and `enableMetrics` defaults to ON — the SDK
-    // stamps user.id/email/name onto every metric, so this hook is what keeps
-    // them inside the F03/F04 posture (see sentry.server.config.ts for the full
+    // Metrics are a THIRD pipeline with no enable flag either — the SDK stamps
+    // user.id/email/name onto every metric, so this hook is what keeps them
+    // inside the F03/F04 posture (see sentry.server.config.ts for the full
     // rationale).
     beforeSendMetric: scrubSentryMetric,
   });

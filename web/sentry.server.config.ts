@@ -59,41 +59,35 @@ if (DSN) {
     // Migrated off the deprecated `sendDefaultPii: false` (removed in @sentry v11)
     // to the `dataCollection` framework. This object MUST stay exhaustive: as soon
     // as ANY `dataCollection` key is present, every OMITTED field falls back to
-    // Sentry's permissive DEFAULTS (cookies/queryParams/headers/genAI all on), so a
-    // partial object would silently re-enable PII. Every field below is opted out —
-    // equivalent-or-stricter than the legacy false path, notably
+    // Sentry's permissive DEFAULTS (cookies/urlQueryParams/headers/genAI all on),
+    // so a partial object would silently re-enable PII. Every field below is opted
+    // out — equivalent-or-stricter than the legacy false path, notably
     // `stackFrameVariables: false`, which the legacy path resolved to `true`.
+    // (`queryParams` was renamed `urlQueryParams` in @sentry v11.)
     dataCollection: {
       userInfo: false,
       cookies: false,
-      queryParams: false,
+      urlQueryParams: false,
       httpHeaders: { request: false, response: false },
       httpBodies: [],
       genAI: { inputs: false, outputs: false },
       stackFrameVariables: false,
     },
-    enableLogs: true,
-    // 10.61 flipped `streamGenAiSpans` ON by default (gen_ai prompt/completion spans
-    // streamed as separate untruncated v2 envelope items). Pin it OFF to preserve the
-    // pre-bump behavior and keep span volume/cost flat — opting in is a deliberate
-    // observability decision to make alongside the dedicated LLM-observability work,
-    // not a silently-inherited upstream default.
-    streamGenAiSpans: false,
+    // @sentry v11 removed `streamGenAiSpans`: gen_ai spans are always streamed as
+    // separate envelope items now, which is the documented upstream default.
     beforeSend: scrubSentryEvent,
     beforeSendTransaction: scrubSentryEvent,
-    // `enableLogs` routes Sentry.logger.* through a SEPARATE pipeline that
+    // Sentry.logger.* travels through a SEPARATE pipeline that
     // beforeSend/beforeSendTransaction (and thus scrubSentryEvent) never touch.
     // scrubSentryLog closes that channel so a stray log call can't ship a
-    // prompt/BYOK key/PII unredacted. `enableLogs` defaults to false on the
-    // installed @sentry/core 10.70.0 but flips to TRUE from 10.71.0 onward
-    // (client.js `?? true`), and web/package.json's `^10.70.0` range will pull
-    // that in — so this pin is unconditional for every init, exactly like
-    // beforeSendMetric below. Keep it wired regardless of whether this file
-    // still carries an explicit `enableLogs: true` line.
+    // prompt/BYOK key/PII unredacted. @sentry v11 removed the `enableLogs`
+    // option entirely — logs ship whenever Sentry.logger.* is called, with no
+    // opt-in line to gate them — so this pin is unconditional for every init,
+    // exactly like beforeSendMetric below.
     beforeSendLog: scrubSentryLog,
     // Metrics (PF-1053) are a THIRD pipeline, touched by neither beforeSend nor
-    // beforeSendLog — and unlike logs they are ON BY DEFAULT (`enableMetrics`
-    // defaults to true), so there is no opt-in line gating them.
+    // beforeSendLog. Like logs, v11 has no enable flag for them: any
+    // `Sentry.metrics.*` call ships immediately, so nothing gates them either.
     //
     // The SDK copies the active scope's user.id / user.email / user.name onto
     // EVERY metric's attributes, unconditionally, BEFORE this hook runs
@@ -127,7 +121,11 @@ if (DSN) {
       // had no import sites, so it could never produce a span — a named
       // observability source that reads as coverage and is not (#9632). The
       // regression suite pins it absent.
-      Sentry.vercelAIIntegration({ enableTruncation: true }),
+      // No options: @sentry v11 removed `enableTruncation` — gen_ai spans are
+      // always streamed and never truncated. Prompt/completion CONTENT is still
+      // withheld by `dataCollection.genAI: { inputs: false, outputs: false }`
+      // above, so what streams is the span metadata (model, tokens, latency).
+      Sentry.vercelAIIntegration(),
       // Auto-collects runtime health metrics: RSS, heap, CPU, event loop.
       // Enabled on Vercel production + preview only.
       ...(process.env.VERCEL_ENV === 'production' || process.env.VERCEL_ENV === 'preview'

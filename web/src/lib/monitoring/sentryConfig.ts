@@ -449,7 +449,9 @@ export function configureSentryFingerprinting(): void {
 export const scrubSentryEvent = scrubEvent;
 
 /**
- * `beforeSendLog` hook for every Sentry.init that sets `enableLogs: true`.
+ * `beforeSendLog` hook for every Sentry.init (server, edge, client). Since
+ * @sentry v11 there is no `enableLogs` switch — logs ship whenever
+ * `Sentry.logger.*` is called — so this hook is wired unconditionally.
  *
  * Sentry Logs (`Sentry.logger.*`) travel through a SEPARATE delivery pipeline
  * from events — `beforeSend` / `beforeSendTransaction` (and therefore

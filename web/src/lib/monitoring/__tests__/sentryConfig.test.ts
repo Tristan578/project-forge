@@ -731,7 +731,7 @@ describe('scrubString — false-positive & linearity guards (audit review)', () 
 
 // ---------------------------------------------------------------------------
 // scrubSentryLog — beforeSendLog hook
-// Sentry Logs (enableLogs) bypass beforeSend / scrubEvent entirely, so the log
+// Sentry Logs (`Sentry.logger.*`) bypass beforeSend / scrubEvent entirely, so the log
 // body + structured attributes must be scrubbed on their own pipeline.
 // ---------------------------------------------------------------------------
 
