@@ -232,6 +232,7 @@ floor_jobs() {
     *) echo "" ;;
   esac
 }
+readonly -f floor_jobs
 FLOORED_WORKFLOWS="ci.yml quality-gates.yml cd.yml"
 
 # WHICH jobs need a native binding is DERIVED from the workflow text, never
