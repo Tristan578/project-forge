@@ -4,7 +4,15 @@
  */
 import { CURRENT_FORMAT_VERSION } from '@/lib/sceneFile';
 
-type SceneValidator = (json: string) => boolean;
+/**
+ * The engine decoder's verdict. `reason` is the engine's own error text
+ * (e.g. `Invalid scene file: … attenuationDistance must be …`), or `null`
+ * when the engine refused without saying why, was unavailable, or threw —
+ * so a caller can show the person WHAT was wrong instead of a constant.
+ */
+export type SceneValidation = { valid: true } | { valid: false; reason: string | null };
+
+type SceneValidator = (json: string) => SceneValidation;
 let engineValidator: SceneValidator | null = null;
 
 /** Attach the non-mutating validate_scene command; null disables validation.
@@ -49,11 +57,20 @@ export function isSceneFileEnvelope(value: unknown): boolean {
  * @returns True only when the envelope and attached Rust decoder accept it; false when validation is unavailable or throws.
  */
 export function isValidSceneFile(value: unknown): boolean {
-  if (!isSceneFileEnvelope(value) || !engineValidator) return false;
+  return validateSceneFile(value).valid;
+}
+
+/** Validate like [`isValidSceneFile`], keeping the engine's own reason for a refusal.
+ *
+ * @param value Untrusted parsed scene data to check without mutation.
+ * @returns `{ valid: true }`, or `{ valid: false, reason }` where `reason` is the engine's error text, or `null` when the envelope failed, no decoder is attached, or the decoder threw.
+ */
+export function validateSceneFile(value: unknown): SceneValidation {
+  if (!isSceneFileEnvelope(value) || !engineValidator) return { valid: false, reason: null };
   try {
     return engineValidator(JSON.stringify(value));
   } catch {
-    return false;
+    return { valid: false, reason: null };
   }
 }
 

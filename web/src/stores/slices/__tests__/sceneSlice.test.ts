@@ -115,6 +115,43 @@ describe('sceneSlice', () => {
       else expect(store.getState().sceneLoadError).toEqual(prior);
     });
 
+    // #10267: the engine's `error` names the field a scene failed on
+    // (`Invalid scene file: … attenuationDistance must be …`). It used to be
+    // discarded at `dispatchSceneLoad`, leaving the person with only the
+    // constant sentence; the lockout reason now carries it.
+    it('records the engine\'s own error in the rejection lockout reason', () => {
+      const engineError = 'Invalid scene file: attenuationDistance must be null or a finite, non-negative number, got -1 at line 1 column 900';
+      setSceneDispatcher(vi.fn(() => ({ success: false, error: engineError })));
+      expect(store.getState().loadScene(JSON.stringify(sceneFixture('Bad material')))).toBe(false);
+      expect(store.getState().sceneLoadError?.reason).toBe(
+        `This scene could not be opened: the engine refused to load it. ${engineError}`,
+      );
+      // Still a clean REJECTION, not a throw: a later recovery must not treat
+      // the viewport as wrecked because a reason was appended.
+      expect(store.getState().sceneLoadError?.reason).not.toContain('the engine failed while loading it');
+    });
+
+    it('falls back to the constant sentence when the engine refuses without a reason', () => {
+      setSceneDispatcher(vi.fn(() => ({ success: false })));
+      expect(store.getState().loadScene(JSON.stringify(sceneFixture('Silently refused')))).toBe(false);
+      expect(store.getState().sceneLoadError?.reason).toBe(
+        'This scene could not be opened: the engine refused to load it.',
+      );
+    });
+
+    it('hands the engine\'s validate_scene error to the scene validator', async () => {
+      const { validateSceneFile } = await import('@/lib/scenes/sceneValidation');
+      const engineError = 'Invalid scene file: attenuationDistance must be null or a finite, non-negative number, got -1';
+      setSceneDispatcher(vi.fn((command: string) =>
+        command === 'validate_scene' ? { success: false, error: engineError } : { success: true }));
+      expect(validateSceneFile(sceneFixture('Bad material'))).toEqual({ valid: false, reason: engineError });
+      setSceneDispatcher(vi.fn((command: string) =>
+        command === 'validate_scene' ? { success: false } : { success: true }));
+      expect(validateSceneFile(sceneFixture('Silently refused'))).toEqual({ valid: false, reason: null });
+      setSceneDispatcher(vi.fn(() => ({ success: true })));
+      expect(validateSceneFile(sceneFixture('Accepted'))).toEqual({ valid: true });
+    });
+
     it('keeps the original throw lockout when a later direct load is cleanly rejected', () => {
       const failure = new Error('viewport may be wrecked');
       setSceneDispatcher((command) => {
