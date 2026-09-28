@@ -5,6 +5,8 @@
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 
 // Insert chain: insert().values().onConflictDoNothing()
 const mockOnConflictDoNothing = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
@@ -130,9 +132,17 @@ describe('jobOwnership', () => {
 
       await verifyProviderJobOwner('user-1', 'replicate', 'pred-123');
 
-      expect(mockSelect).toHaveBeenCalled();
-      expect(mockSelectFrom).toHaveBeenCalled();
-      expect(mockSelectWhere).toHaveBeenCalled();
+      // Render the real drizzle predicate handed to `.where()` (the schema is
+      // not mocked here) and assert BOTH columns with BOTH values. The prior
+      // form asserted only that select/from/where/limit were called, which a
+      // lookup missing either predicate — or keyed on the wrong column — would
+      // satisfy just as well (lessons-learned #11).
+      expect(mockSelectWhere).toHaveBeenCalledTimes(1);
+      const predicate = (mockSelectWhere.mock.calls[0] as unknown[])[0] as SQL;
+      const { sql, params } = new PgDialect().sqlToQuery(predicate);
+      expect(sql).toContain('"provider_job_owners"."provider" = $1');
+      expect(sql).toContain('"provider_job_owners"."provider_job_id" = $2');
+      expect(params).toEqual(['replicate', 'pred-123']);
       expect(mockSelectLimit).toHaveBeenCalledWith(1);
     });
   });
