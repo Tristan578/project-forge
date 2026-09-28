@@ -277,6 +277,24 @@ export const TOOLTIP_DICTIONARY: Record<string, string> = {
   gcTargetScore: 'The score needed to win the game',
   gcGoalId: 'The ID of the object the player must reach to win',
 
+  // ── Game Camera ──
+  // Every `term` the GameCameraInspector references. The panel rendered a (?)
+  // for each of these and `InfoTooltip` returned null for all of them, so
+  // twelve controls shipped with no help at all; a test now scans the panel's
+  // source for `term="…"` and fails on any key missing here.
+  gameCameraActive: 'Makes this the camera the game looks through — only one camera can be active at a time',
+  gameCameraMode: 'How the camera follows the action — behind the player, first-person, side-on, top-down, fixed, or orbiting',
+  gameCameraTarget: 'The object the camera follows — leave blank to follow whichever object is selected',
+  gameCameraFollowDist: 'How far behind the target the camera sits',
+  gameCameraFollowHeight: 'How high above the target the camera floats — a negative value looks up from below',
+  gameCameraSmoothing: 'How fast the camera catches up to its target, per second — higher is snappier, lower is floatier, 0 freezes it',
+  gameCameraFPHeight: 'Eye height above the character\'s feet — about 1.7 for a person-sized character',
+  gameCameraMouseSens: 'How far the view turns per pixel of mouse movement, in degrees — small values like 0.1 feel normal',
+  gameCameraSideScrollDist: 'How far back from the action the camera sits along the depth axis',
+  gameCameraTopDownHeight: 'How high above the target the camera hovers',
+  gameCameraOrbitalDist: 'How far from the target the camera circles',
+  gameCameraAutoRotate: 'How fast the camera circles on its own, in degrees per second — 0 stops it, a negative value circles the other way',
+
   // ── Script ──
   script: 'Custom code that runs on this object during gameplay',
   scriptEnabled: 'Whether this script is active during play mode',

@@ -1,7 +1,31 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { TOOLTIP_DICTIONARY } from '../tooltipDictionary';
 
 describe('TOOLTIP_DICTIONARY', () => {
+  /**
+   * `InfoTooltip` returns null for a term the dictionary lacks, so a panel can
+   * reference a dozen terms and render no help at all with nothing failing.
+   * `GameCameraInspector` did exactly that (review-board finding on #10295):
+   * every one of its twelve `term="gameCamera…"` props was unknown. Scanning
+   * the source rather than listing the terms here means a term added to the
+   * panel without a definition fails on its own, with no test to remember.
+   */
+  it('defines every term GameCameraInspector references', () => {
+    const source = readFileSync(
+      join(__dirname, '..', '..', '..', 'components', 'editor', 'GameCameraInspector.tsx'),
+      'utf8',
+    );
+    const terms = [...source.matchAll(/\bterm="([^"]+)"/g)].map((m) => m[1]!);
+    // Non-vacuous: the panel has a dozen (?) icons, so a scan that finds none
+    // is a broken scan, not a panel with nothing to define.
+    expect(terms.length).toBeGreaterThanOrEqual(10);
+
+    const missing = [...new Set(terms)].filter((term) => !TOOLTIP_DICTIONARY[term]);
+    expect(missing, 'terms the panel shows a (?) for that have no definition').toEqual([]);
+  });
+
   it('should be a non-empty record', () => {
     const keys = Object.keys(TOOLTIP_DICTIONARY);
     expect(keys.length).toBeGreaterThan(50);
