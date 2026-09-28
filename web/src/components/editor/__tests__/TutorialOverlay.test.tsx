@@ -294,6 +294,27 @@ describe('TutorialOverlay', () => {
     }
   });
 
+  // An input that takes no keys of its own (the keep-free side of the input
+  // branch): arrows and Escape there are still the tour's.
+  it.each([
+    ['a checkbox input', 'checkbox'],
+    ['a button input', 'button'],
+    ['a submit input', 'submit'],
+  ])('keeps its keys while focus is on %s', (_case, type) => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    const control = Object.assign(document.createElement('input'), { type });
+    document.body.appendChild(control);
+    try {
+      fireEvent.keyDown(control, { key: 'ArrowLeft' });
+      fireEvent.keyDown(control, { key: 'Escape' });
+    } finally {
+      control.remove();
+    }
+    expect(mockRetreatTutorial).toHaveBeenCalledOnce();
+    expect(mockSkipTutorial).toHaveBeenCalledOnce();
+  });
+
   // A tour step can point at a control that opens its own dialog (Export).
   // That dialog's keys are its own: Escape closes it, not the tour.
   it('ignores keys from inside another dialog', () => {
