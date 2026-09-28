@@ -1922,7 +1922,8 @@
             }
           },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
@@ -1988,7 +1989,8 @@
             }
           },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
@@ -2197,7 +2199,8 @@
         "responses": {
           "200": { "description": "Job status with equirectangular image URL in resultUrl", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationStatus" } } } },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
@@ -2246,7 +2249,8 @@
         "responses": {
           "200": { "description": "Job status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationStatus" } } } },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
