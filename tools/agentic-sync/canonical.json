@@ -12,7 +12,7 @@
       },
       "apiBaseUrl": "http://localhost:3010/api",
       "webUrl": "http://localhost:3010",
-      "startCommand": "taskboard start --port 3010"
+      "startCommand": "node .claude/hooks/taskboard-launch.mjs start"
     },
     "versions": {
       "Next.js": "16.3.5",

@@ -471,13 +471,13 @@ go install github.com/tcarac/taskboard@latest
 **Start:**
 ```bash
 cd project-forge
-taskboard start --port 3010
+node .claude/hooks/taskboard-launch.mjs start   # never start the binary by hand — see "Database" below
 ```
 
 - **Web UI:** http://localhost:3010
 - **API:** http://localhost:3010/api
 - **Project ID:** `01KMM9ZA6SBZ7RKJZJTZS9VR4R` (prefix: PF)
-- **Database:** OS-default path (`~/Library/Application Support/taskboard/` on macOS) — do **not** pass `--db`, which points the board at an empty local copy instead of the shared store.
+- **Database:** resolved by the launcher — `TASKBOARD_DB` if set, else the OS config directory (`%APPDATA%\taskboard\taskboard.db` on Windows, `~/Library/Application Support/taskboard/taskboard.db` on macOS, `$XDG_CONFIG_HOME/taskboard/taskboard.db` on Linux) — and passed to the binary explicitly, so the HTTP server, the MCP server and the GitHub sync all open the same file. Never start the binary by hand and never pass your own `--db`: a stray `--db` points the board at an empty local copy instead of the shared store.
 
 Tools with hook support auto-start the taskboard on session start. Ticket state is shared across contributors via the GitHub Projects sync (`.claude/hooks/github_project_sync.py`), not a committed database.
 

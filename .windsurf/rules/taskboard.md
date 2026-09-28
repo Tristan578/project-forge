@@ -17,7 +17,7 @@ This is enforced by hooks. All three contributors monitor progress via the share
 ## Taskboard Setup
 
 **Binary**: tcarac/taskboard (install via `go install github.com/tcarac/taskboard@latest`)
-**Start**: `cd project-forge && taskboard start --port 3010`
+**Start**: `cd project-forge && node .claude/hooks/taskboard-launch.mjs start` (the launcher resolves and passes the shared DB path itself; never start the binary by hand)
 **Project ID**: `01KMM9ZA6SBZ7RKJZJTZS9VR4R` (prefix: PF)
 
 The session hooks will auto-start the server if the binary is found.

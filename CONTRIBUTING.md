@@ -77,8 +77,10 @@ Three rules flow from this architecture:
 All work requires a ticket before any code is written. The taskboard is the single source of truth.
 
 ```bash
-# Start the taskboard server (auto-started by Claude Code hooks)
-taskboard start --port 3010
+# Start the taskboard server (auto-started by Claude Code hooks). The launcher
+# resolves the shared database path and passes it to the binary itself —
+# never start the binary by hand.
+node .claude/hooks/taskboard-launch.mjs start
 ```
 
 - Web UI: http://localhost:3010
@@ -334,10 +336,13 @@ silently onboarding the next contributor against a broken board:
     The gate's output names each problem and the recipe for its kind.
 - **`taskboard-onboarding-guard`** (`scripts/check-taskboard-onboarding-hygiene.sh`)
   — greps the **whole tree** and fails on a known-dead taskboard ULID *or* a
-  taskboard start command carrying the forbidden `--db` flag (which points the
-  board at a throwaway local `.claude/taskboard.db` copy and shows zero tickets —
-  always use `taskboard start --port 3010`, letting it use the OS-default DB
-  path). Both gates are wired into the required **CI Success** aggregate.
+  taskboard start command carrying the forbidden relative `--db` path (a hand-typed
+  `--db .claude/taskboard.db` points the board at a throwaway local copy and shows
+  zero tickets). The fix is never to drop `--db` and start the binary by hand: go
+  through `node .claude/hooks/taskboard-launch.mjs start`, which resolves the
+  shared database path (an absolute path the tripwire's regex does not match) and
+  passes it to the binary itself. Both gates are wired into the required
+  **CI Success** aggregate.
 
 ## Machine-local absolute paths
 
