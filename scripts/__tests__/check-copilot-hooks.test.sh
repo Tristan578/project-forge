@@ -89,6 +89,17 @@ expect_fail per-tool-alias \
   '{"version":1,"hooks":{"PostToolUse":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
   'wired to "PostToolUse"' \
   "on-stop.sh on the PostToolUse alias fails"
+# Unwired (or renamed along with its hook entry): the wrong-event rule above
+# then matches nothing, so the gate must fail on that rather than pass. The
+# fixture is otherwise valid, so this rule is the only thing that can report.
+mkcase unwired '{"version":1,"hooks":{"sessionStart":[{"type":"command","bash":"bash .claude/hooks/on-session-start.sh"}]}}'
+run unwired
+if [ "$RC" -eq 1 ] && grep -qF 'no hook runs on-stop.sh on an end-of-turn event' <<<"$OUT" \
+  && [ "$(grep -c '::error::' <<<"$OUT")" -eq 1 ]; then
+  pass "on-stop.sh wired to no end-of-turn event fails (unwired or renamed), and is the only error"
+else
+  fail "on-stop.sh unwired (rc=$RC): $OUT"
+fi
 
 # ---- events
 expect_fail unknown-event \
@@ -105,6 +116,15 @@ expect_fail missing-repo-script \
   '{"version":1,"hooks":{"postToolUse":[{"type":"command","bash":"./scripts/arch-check-renamed.sh"}]}}' \
   './scripts/arch-check-renamed.sh, which does not exist' \
   "a missing ./scripts script fails"
+# A handler's command runs in its `cwd`: resolve the script there, not at the
+# root. Both directions, so neither a root-only nor a cwd-only lookup passes.
+expect_fail cwd-miss \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}],"postToolUse":[{"type":"command","bash":"./scripts/arch-check.sh","cwd":"web"}]}}' \
+  './scripts/arch-check.sh, which does not exist' \
+  "a script that exists at the root but not under the handler's cwd fails"
+expect_pass cwd-hit \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}],"postToolUse":[{"type":"command","bash":"./arch-check.sh","cwd":"scripts"}]}}' \
+  "a script resolved under the handler's cwd passes"
 expect_fail nothing-to-run \
   '{"version":1,"hooks":{"sessionStart":[{"type":"command"}]}}' \
   'handler names nothing to run' \

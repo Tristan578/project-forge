@@ -11,8 +11,11 @@
 #      all declare it), or lacks a `hooks` object whose values are arrays;
 #   2. it names an event that is neither a documented Copilot event nor one of
 #      its documented PascalCase aliases — an unknown name is silently ignored;
-#   3. an end-of-turn script is wired to anything but an end-of-turn event;
-#   4. a hook command runs a repository-relative `*.sh` that does not exist.
+#   3. an end-of-turn script is wired to anything but an end-of-turn event, OR
+#      is not wired to an end-of-turn event at all — unwiring or renaming it
+#      would otherwise leave rule 3 matching nothing and passing (#9, #18);
+#   4. a hook command runs a relative `*.sh` that does not exist, resolved
+#      against the handler's `cwd` (repository-relative, default `.`).
 # Every documented way a handler names what it runs is read: `bash`,
 # `powershell`, `command` (the cross-platform fallback) and `exec` + `args`.
 #
@@ -78,6 +81,8 @@ try {
 if (files.length === 0 && problems.length === 0) problems.push(`${dir}: no hook files found`);
 
 let handlers = 0;
+// End-of-turn scripts seen on an end-of-turn event, across every file.
+const wiredAtEnd = new Set();
 for (const file of files) {
   const where = path.join(path.basename(dir), file);
   let doc;
@@ -102,11 +107,16 @@ for (const file of files) {
     }
     for (const h of list) {
       handlers += 1;
+      // A handler's commands run in its `cwd`, which is repository-relative.
+      const base = path.resolve(root, h && typeof h.cwd === 'string' ? h.cwd : '.');
       const commands = commandsOf(h);
       if (commands.length === 0) problems.push(`${where}: a "${event}" handler names nothing to run`);
       for (const cmd of commands) {
         for (const script of END_OF_TURN_SCRIPTS) {
-          if (cmd.includes(script) && !END_OF_TURN_EVENTS.has(event)) {
+          if (!cmd.includes(script)) continue;
+          if (END_OF_TURN_EVENTS.has(event)) {
+            wiredAtEnd.add(script);
+          } else {
             problems.push(
               `${where}: ${script} runs at the end of a turn, but is wired to "${event}"` +
                 ` — use one of: ${[...END_OF_TURN_EVENTS].join(', ')}`,
@@ -114,11 +124,25 @@ for (const file of files) {
           }
         }
         for (const m of cmd.matchAll(SCRIPT_REF)) {
-          if (!fs.existsSync(path.join(root, m[1]))) {
+          if (!fs.existsSync(path.resolve(base, m[1]))) {
             problems.push(`${where}: "${event}" runs ${m[1]}, which does not exist`);
           }
         }
       }
+    }
+  }
+}
+
+// Rule 3 checks only the handlers that name an end-of-turn script. If none
+// does — the script was unwired, or renamed along with its hook entry — that
+// rule matched nothing, so fail rather than pass having checked nothing.
+if (files.length > 0) {
+  for (const script of END_OF_TURN_SCRIPTS) {
+    if (!wiredAtEnd.has(script)) {
+      problems.push(
+        `${path.basename(dir)}: no hook runs ${script} on an end-of-turn event (${[...END_OF_TURN_EVENTS].join(', ')})` +
+          ' — wire it, or if it was renamed, update END_OF_TURN_SCRIPTS in scripts/check-copilot-hooks.sh',
+      );
     }
   }
 }
