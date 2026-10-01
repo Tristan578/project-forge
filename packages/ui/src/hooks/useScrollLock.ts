@@ -4,12 +4,13 @@ import { useEffect } from 'react';
 // (not a boolean) is required because dialogs can stack: closing an inner
 // dialog must not release the lock while an outer one is still open. The
 // lock is applied only on the 0 -> 1 transition and released only on the
-// 1 -> 0 transition, so `previousOverflow` -- the value that was on
-// `document.documentElement` before the FIRST lock in the stack -- is
-// captured once and restored once, regardless of how many dialogs opened
-// or closed in between.
+// 1 -> 0 transition, so the inline values that were on
+// `document.documentElement` before the FIRST lock in the stack are captured
+// once and restored once, regardless of how many dialogs opened or closed in
+// between.
 let lockCount = 0;
 let previousOverflow: string | null = null;
+let previousPaddingRight: string | null = null;
 
 /**
  * Locks page scroll for as long as `locked` is true, ref-counted so stacked
@@ -21,14 +22,40 @@ let previousOverflow: string | null = null;
  * editor routes because setting it on `body` leaks into viewport/visual
  * viewport sizing on public pages. Reintroducing a `body`-targeted lock here
  * would reopen that exact bug.
+ *
+ * Hiding the root overflow also removes a classic (non-overlay) scrollbar,
+ * which widens the layout and shifts the page content sideways. The width the
+ * scrollbar occupied is measured before locking and added to the root's
+ * `padding-right`, so the content stays where it was. Overlay scrollbars
+ * (macOS, mobile) measure 0 and get no padding.
+ *
+ * `document` is only touched inside the effect, so this is safe to import and
+ * render on the server.
  */
 export function useScrollLock(locked: boolean): void {
   useEffect(() => {
     if (!locked) return;
 
     if (lockCount === 0) {
-      previousOverflow = document.documentElement.style.overflow;
-      document.documentElement.style.overflow = 'hidden';
+      const root = document.documentElement;
+      // Measured BEFORE hiding overflow: once hidden, the scrollbar is gone
+      // and the gap reads 0. `clientWidth` excludes the scrollbar, so the
+      // difference is exactly the width it occupies.
+      const scrollbarWidth = window.innerWidth - root.clientWidth;
+
+      previousOverflow = root.style.overflow;
+      previousPaddingRight = root.style.paddingRight;
+      root.style.overflow = 'hidden';
+
+      // `root.clientWidth > 0` excludes environments without layout (jsdom,
+      // a `display: none` root), where the subtraction is meaningless.
+      if (scrollbarWidth > 0 && root.clientWidth > 0) {
+        const computed = Number.parseFloat(
+          window.getComputedStyle(root).paddingRight
+        );
+        const basePadding = Number.isFinite(computed) ? computed : 0;
+        root.style.paddingRight = `${basePadding + scrollbarWidth}px`;
+      }
     }
     lockCount += 1;
 
@@ -36,10 +63,12 @@ export function useScrollLock(locked: boolean): void {
       lockCount -= 1;
       if (lockCount <= 0) {
         lockCount = 0;
-        document.documentElement.style.overflow = previousOverflow ?? '';
+        const root = document.documentElement;
+        root.style.overflow = previousOverflow ?? '';
+        root.style.paddingRight = previousPaddingRight ?? '';
         previousOverflow = null;
+        previousPaddingRight = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `locked` is the only reactive input; the module-level counter is intentionally not a dependency.
   }, [locked]);
 }

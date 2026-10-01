@@ -105,3 +105,79 @@ describe('useScrollLock', () => {
     expect(document.documentElement.style.overflow).toBe('auto');
   });
 });
+
+describe('useScrollLock scrollbar compensation', () => {
+  const root = document.documentElement;
+  const innerWidthDescriptor = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+
+  // jsdom has no layout, so the viewport and the root's client box are faked
+  // to model a page with a classic (space-taking) scrollbar.
+  function setViewport(innerWidth: number, clientWidth: number) {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: innerWidth });
+    Object.defineProperty(root, 'clientWidth', { configurable: true, get: () => clientWidth });
+  }
+
+  beforeEach(() => {
+    root.style.overflow = '';
+    root.style.paddingRight = '';
+  });
+
+  afterEach(() => {
+    if (innerWidthDescriptor) {
+      Object.defineProperty(window, 'innerWidth', innerWidthDescriptor);
+    }
+    // Remove the instance override so Element.prototype's getter is used again.
+    delete (root as unknown as Record<string, unknown>).clientWidth;
+    root.style.overflow = '';
+    root.style.paddingRight = '';
+  });
+
+  it('pads the root by the scrollbar width while locked, then restores it', () => {
+    setViewport(1024, 1009);
+    const { unmount } = render(<LockConsumer locked />);
+    expect(root.style.overflow).toBe('hidden');
+    expect(root.style.paddingRight).toBe('15px');
+    unmount();
+    expect(root.style.paddingRight).toBe('');
+  });
+
+  it('adds to an existing padding-right and restores the original value, not empty string', () => {
+    root.style.paddingRight = '8px';
+    setViewport(1024, 1007);
+    const { unmount } = render(<LockConsumer locked />);
+    expect(root.style.paddingRight).toBe('25px');
+    unmount();
+    expect(root.style.paddingRight).toBe('8px');
+  });
+
+  it('adds no padding for an overlay scrollbar that takes no width', () => {
+    setViewport(1024, 1024);
+    const { unmount } = render(<LockConsumer locked />);
+    expect(root.style.overflow).toBe('hidden');
+    expect(root.style.paddingRight).toBe('');
+    unmount();
+  });
+
+  it('adds no padding when the root has no layout box (clientWidth 0)', () => {
+    setViewport(1024, 0);
+    const { unmount } = render(<LockConsumer locked />);
+    expect(root.style.paddingRight).toBe('');
+    unmount();
+  });
+
+  it('stacked dialogs: keeps the padding until the last lock releases and does not re-measure', () => {
+    setViewport(1024, 1009);
+    const outer = render(<LockConsumer locked />);
+    expect(root.style.paddingRight).toBe('15px');
+
+    // A second lock must not stack another scrollbar width on top.
+    const inner = render(<LockConsumer locked />);
+    expect(root.style.paddingRight).toBe('15px');
+
+    inner.unmount();
+    expect(root.style.paddingRight).toBe('15px');
+
+    outer.unmount();
+    expect(root.style.paddingRight).toBe('');
+  });
+});
