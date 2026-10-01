@@ -194,6 +194,115 @@ class EmptyIdentitySetIsRefused(unittest.TestCase):
                 runtime.verify_database(path, projects=[{'id': 'p2'}])
 
 
+class FirstRunInitIsTheOnlyCreator(unittest.TestCase):
+    """start/mcp/sync refuse a missing database and an empty identity set, so
+    a new machine needs ONE explicit way to get a board, or the documented
+    "start, then pull" recipe can never succeed. `init` is that way, and it
+    must refuse every state where creating or adopting could fork a board.
+    """
+
+    def _fake_binary(self, spawned, state):
+        """A stand-in for `taskboard start --db <path>`: create-on-open with a
+        minimal schema, after which the 'server' serves THAT file's projects."""
+
+        real_run = subprocess.run
+
+        def fake_run(args, **kwargs):
+            if args[0] != 'FAKE_TASKBOARD_BIN':
+                return real_run(args, **kwargs)  # repo_root()'s git call
+            spawned.append(args)
+            db = Path(args[args.index('--db') + 1])
+            db.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(db)
+            try:
+                conn.execute('CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, name TEXT, prefix TEXT, description TEXT)')
+                conn.execute('CREATE TABLE IF NOT EXISTS tickets(id TEXT PRIMARY KEY, project_id TEXT)')
+                conn.commit()
+            finally:
+                conn.close()
+            state['db'] = db
+            return subprocess.CompletedProcess(args, 0)
+
+        def fake_api(path):
+            if 'db' not in state:
+                raise OSError('not running')
+            conn = sqlite3.connect(state['db'])
+            try:
+                return [{'id': row[0]} for row in conn.execute('SELECT id FROM projects')]
+            finally:
+                conn.close()
+
+        return fake_run, fake_api
+
+    def _run_init(self, env, state):
+        spawned = []
+        fake_run, fake_api = self._fake_binary(spawned, state)
+        with patch.object(runtime, 'binary', return_value='FAKE_TASKBOARD_BIN'), \
+             patch.object(runtime, 'api', side_effect=fake_api), \
+             patch.object(runtime.subprocess, 'run', side_effect=fake_run), \
+             patch.dict(runtime.os.environ, env, clear=True):
+            try:
+                return runtime.init_database(), spawned
+            except RuntimeError as exc:
+                return exc, spawned
+
+    def test_init_creates_binds_and_verifies_on_a_new_machine(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / 'fresh' / 'taskboard.db'
+            env = dict(os.environ)
+            env['TASKBOARD_DB'] = str(db)
+            result, spawned = self._run_init(env, {})
+            self.assertNotIsInstance(result, RuntimeError, str(result))
+            self.assertEqual(len(spawned), 1)
+            self.assertEqual(spawned[0][spawned[0].index('--db') + 1], str(db.resolve()))
+            conn = sqlite3.connect(db)
+            try:
+                bound = conn.execute('SELECT project_id FROM taskboard_repository_projects').fetchall()
+                projects = conn.execute('SELECT id FROM projects').fetchall()
+            finally:
+                conn.close()
+            self.assertEqual(len(bound), 1, 'init must bind this repository to exactly one project')
+            self.assertEqual([p[0] for p in projects], [bound[0][0]])
+            # The board init produced is one every other client accepts.
+            self.assertEqual(runtime.verify_database(db, projects=[{'id': bound[0][0]}]), db)
+
+    def test_init_refuses_a_populated_database(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / 'taskboard.db'
+            conn = sqlite3.connect(db)
+            try:
+                conn.execute('CREATE TABLE projects(id TEXT PRIMARY KEY, name TEXT)')
+                conn.execute("INSERT INTO projects VALUES('p1', 'existing')")
+                conn.commit()
+            finally:
+                conn.close()
+            env = dict(os.environ)
+            env['TASKBOARD_DB'] = str(db)
+            result, spawned = self._run_init(env, {})
+            self.assertIsInstance(result, RuntimeError)
+            self.assertIn('already exists', str(result))
+            self.assertEqual(spawned, [], 'init must not start a server over a populated board')
+
+    def test_init_refuses_while_a_server_is_already_running(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / 'never-created' / 'taskboard.db'
+            env = dict(os.environ)
+            env['TASKBOARD_DB'] = str(db)
+            # A server answering on ANOTHER database: init cannot tell which.
+            elsewhere = Path(tmp) / 'elsewhere.db'
+            conn = sqlite3.connect(elsewhere)
+            try:
+                conn.execute('CREATE TABLE projects(id TEXT PRIMARY KEY)')
+                conn.commit()
+            finally:
+                conn.close()
+            result, spawned = self._run_init(env, {'db': elsewhere})
+            self.assertIsInstance(result, RuntimeError)
+            self.assertIn('already running', str(result))
+            self.assertEqual(spawned, [])
+            self.assertFalse(db.parent.exists(), 'no database directory may be created')
+
+
 class McpCommandAlwaysPassesExplicitPath(unittest.TestCase):
     """The MCP server: `taskboard_runtime.py mcp` opens its own connection —
     it does not talk to the already-verified HTTP server — so it is the

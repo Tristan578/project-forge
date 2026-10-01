@@ -56,11 +56,12 @@ def require_database(path):
     session-start hook's remedy for 0 tickets is a GitHub pull — which
     github_project_sync.py's header names as a duplicate-issue hazard.
     Checked BEFORE the binary is spawned, so the only outcome on a host with
-    no database is this error, never a new file.
+    no database is this error, never a new file. A genuinely new machine
+    creates its board with the explicit `init` command (init_database).
     """
     path = Path(path)
     if not path.is_file():
-        raise RuntimeError('Taskboard database is missing: ' + str(path))
+        raise RuntimeError('Taskboard database is missing: ' + str(path) + '. On a new machine run `node .claude/hooks/taskboard-launch.mjs init` once; if your board lives elsewhere, set TASKBOARD_DB to it')
     return path
 
 
@@ -76,7 +77,7 @@ def verify_database(path, projects=None):
             # An empty identity set matches an empty API answer, so the
             # comparison below would pass vacuously — exactly what a freshly
             # created empty database produces (lessons-learned #11). Refuse it.
-            raise RuntimeError('Taskboard database has no projects; refusing to treat an empty identity set as a match. Restore the shared database (#9995)')
+            raise RuntimeError('Taskboard database has no projects; refusing to treat an empty identity set as a match. Restore the shared database, or stop the server and run `node .claude/hooks/taskboard-launch.mjs init` to bind this repository (#9995)')
         expected = {p['id'] for p in (api('/projects') if projects is None else projects)}
         if actual != expected:
             raise RuntimeError('Taskboard API/database identity mismatch; restart all clients through taskboard_runtime.py')
@@ -112,24 +113,70 @@ def ensure_running():
         # The file must exist BEFORE the spawn: the binary creates a missing
         # --db path on open (see require_database), and an empty board is
         # the one state every downstream check would wave through.
-        db = require_database(default_db())
-        args = [binary(), 'start', '--port', '3010', '--db', str(db)]
-        subprocess.run(args, env=runtime_env(), check=True, stdout=sys.stderr)
-        for _ in range(20):
-            try:
-                projects = api('/projects')
-                break
-            except (OSError, ValueError):
-                time.sleep(0.25)
-        else:
-            raise RuntimeError('Taskboard did not become available')
+        projects = _spawn_server(require_database(default_db()))
     verify_database(default_db(), projects)
+
+
+def _spawn_server(db):
+    args = [binary(), 'start', '--port', '3010', '--db', str(db)]
+    subprocess.run(args, env=runtime_env(), check=True, stdout=sys.stderr)
+    for _ in range(20):
+        try:
+            return api('/projects')
+        except (OSError, ValueError):
+            time.sleep(0.25)
+    raise RuntimeError('Taskboard did not become available')
+
+
+def _project_count(db):
+    conn = sqlite3.connect(db.resolve().as_uri() + '?mode=ro', uri=True)
+    try:
+        return conn.execute('SELECT COUNT(*) FROM projects').fetchone()[0]
+    except sqlite3.Error as exc:
+        raise RuntimeError('Not a taskboard database: ' + str(db) + ' (' + str(exc) + ')') from exc
+    finally:
+        conn.close()
+
+
+def init_database():
+    """First-run bootstrap: the ONLY path allowed to create the shared database.
+
+    start/mcp/sync refuse a missing file (require_database) and an empty
+    identity set (verify_database), so without this a new machine has no way
+    to get a board at all — the documented "start, then pull" recipe would
+    fail at its first step. init is explicit and refuses every state in which
+    creating or adopting could hide or fork an existing board:
+      - a database at default_db() that already holds a project;
+      - a server already answering, which is open on SOME database (possibly
+        another one) and would be mistaken for this one.
+    It then starts the binary on default_db() (which creates the file), binds
+    this repository's project so the identity set is non-empty, and runs the
+    normal verify_database() so the API is proven to serve this exact file.
+    """
+    db = default_db()
+    if db.exists() and _project_count(db):
+        raise RuntimeError('Taskboard database already exists and is populated: ' + str(db) + '; use start')
+    try:
+        api('/projects')
+    except (OSError, ValueError):
+        pass
+    else:
+        raise RuntimeError('A taskboard server is already running; stop it so init can start one on ' + str(db))
+    _spawn_server(db)
+    import taskboard_sync
+    config = json.loads((repo_root() / '.claude/hooks/github-sync-config.json').read_text())
+    with taskboard_sync.connect(db) as conn:
+        taskboard_sync.bind_project(conn, config)
+    return verify_database(db)
 
 
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else 'doctor'
     if command == 'db-path':
         print(default_db())
+        return
+    if command == 'init':
+        print(json.dumps({'database': str(init_database()), 'integrity': 'ok', 'apiIdentity': 'matched'}))
         return
     ensure_running()
     if command == 'mcp':
@@ -150,7 +197,7 @@ def main():
     elif command in ('doctor', 'start'):
         print(json.dumps({'database': str(default_db()), 'integrity': 'ok', 'apiIdentity': 'matched'}))
     else:
-        raise RuntimeError('Expected start, mcp, identity, doctor or db-path')
+        raise RuntimeError('Expected init, start, mcp, identity, doctor or db-path')
 
 
 if __name__ == '__main__':

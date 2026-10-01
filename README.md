@@ -472,6 +472,7 @@ go install github.com/tcarac/taskboard@latest
 ```bash
 cd project-forge
 node .claude/hooks/taskboard-launch.mjs start   # never start the binary by hand — see "Database" below
+# First run on a new machine: `init` instead of `start` creates the shared database once
 ```
 
 - **Web UI:** http://localhost:3010

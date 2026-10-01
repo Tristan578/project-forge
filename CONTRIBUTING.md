@@ -79,7 +79,8 @@ All work requires a ticket before any code is written. The taskboard is the sing
 ```bash
 # Start the taskboard server (auto-started by Claude Code hooks). The launcher
 # resolves the shared database path and passes it to the binary itself —
-# never start the binary by hand.
+# never start the binary by hand. On a new machine, run `init` once instead of
+# `start`: it is the only command that creates the shared database.
 node .claude/hooks/taskboard-launch.mjs start
 ```
 

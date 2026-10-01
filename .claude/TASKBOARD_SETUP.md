@@ -10,7 +10,9 @@ Portable project management via [tcarac/taskboard](https://github.com/tcarac/tas
 #    Or download a release binary from GitHub
 
 # 2. Start the server through the launcher — it resolves the ONE shared DB path
-#    and passes it to the binary itself (never start the binary by hand)
+#    and passes it to the binary itself (never start the binary by hand).
+#    FIRST run on this machine only: use `init` instead of `start` — it is the
+#    one command allowed to create the shared database.
 node .claude/hooks/taskboard-launch.mjs start
 
 # 3. Open the web UI
@@ -20,7 +22,7 @@ node .claude/hooks/taskboard-launch.mjs start
 python3 .claude/hooks/github_project_sync.py pull
 ```
 
-**IMPORTANT:** Never start the binary by hand and never pass your own `--db` — least of all `--db .claude/taskboard.db`, which creates an empty local copy and makes agents see 0 tickets. The launcher (`taskboard-launch.mjs` → `taskboard_runtime.py`) resolves the shared path — `TASKBOARD_DB` if set, else the OS config directory: `%APPDATA%\taskboard\taskboard.db` on Windows, `~/Library/Application Support/taskboard/taskboard.db` on macOS, `$XDG_CONFIG_HOME/taskboard/taskboard.db` on Linux — and passes it explicitly, so the HTTP server, the MCP server and `github_project_sync.py` all open the same file (#9995). It refuses to start when that file does not exist rather than creating an empty one.
+**IMPORTANT:** Never start the binary by hand and never pass your own `--db` — least of all `--db .claude/taskboard.db`, which creates an empty local copy and makes agents see 0 tickets. The launcher (`taskboard-launch.mjs` → `taskboard_runtime.py`) resolves the shared path — `TASKBOARD_DB` if set, else the OS config directory: `%APPDATA%\taskboard\taskboard.db` on Windows, `~/Library/Application Support/taskboard/taskboard.db` on macOS, `$XDG_CONFIG_HOME/taskboard/taskboard.db` on Linux — and passes it explicitly, so the HTTP server, the MCP server and `github_project_sync.py` all open the same file (#9995). It refuses to start when that file does not exist rather than creating an empty one; on a new machine, `node .claude/hooks/taskboard-launch.mjs init` creates it once, binds this repository's project, and refuses if a populated database already exists or a server is already running.
 
 ## What's in the DB
 
@@ -46,5 +48,5 @@ The `kanban` skill (`.claude/skills/kanban/SKILL.md`) enforces ticket-driven wor
 To use on another machine:
 1. Clone the repo
 2. Install the taskboard binary
-3. Run `node .claude/hooks/taskboard-launch.mjs start` (the launcher resolves and passes the DB path; never start the binary by hand)
+3. Run `node .claude/hooks/taskboard-launch.mjs init` once (creates the shared database at the resolved path; afterwards always `start`, never the binary by hand)
 4. Run `python3 .claude/hooks/github_project_sync.py pull` to populate from GitHub
