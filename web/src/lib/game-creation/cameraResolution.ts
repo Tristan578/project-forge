@@ -397,6 +397,16 @@ const GDD_SMOOTHING_REFERENCE_DELTA_SECONDS = 1 / 60;
  * a value that was nonsense where it was written. That is what the alias's
  * `domain` (see {@link GDD_CONFIG_KEY_ALIASES}) refuses BEFORE this runs.
  *
+ * Exactly 0 is refused there too. Under the per-frame convention it means
+ * "close none of the gap" and converts to damping 0, which the engine runs as
+ * a frozen follow: a camera that never moves while the step reports
+ * `applied: true`. But no contract tells the producer that convention, and
+ * read as plain English `smoothing: 0` means "no smoothing" — a rigid, instant
+ * follow, the opposite extreme. A generated design never wants a following
+ * camera that does not follow (that is the `fixed` mode), so the value with
+ * the worst failure under a misreading is reported and the engine keeps its
+ * default instead.
+ *
  * Nothing on the producer side pins this unit. The GDD decomposer types every
  * system's `config` as `z.record(z.string(), z.unknown())` and its prompt
  * shows only a `{ "gravity": 20 }` example (`decomposer.ts`), so no schema
@@ -461,16 +471,19 @@ const GDD_CONFIG_KEY_ALIASES: Record<string, GddConfigAlias> = {
   smoothing: {
     field: 'followSmoothing',
     convert: convertGddSmoothingToDamping,
-    // A per-frame lerp fraction lives in 0..1. Only the upper bound is stated
-    // here: a negative one converts to a negative rate that `followSmoothing`'s
-    // own policy already refuses, with the reason that names the actual
-    // hazard (divergence), and 0 is a frozen follow — legal in both units.
+    // A per-frame lerp fraction lives in (0, 1]. A negative one is left to
+    // `followSmoothing`'s own policy, which refuses the negative rate it
+    // converts to with the reason that names the actual hazard (divergence).
+    // Exactly 0 (and -0, which `!==` treats the same) is refused HERE: it
+    // converts to a frozen follow, the opposite of what "no smoothing" means
+    // in plain English — see `convertGddSmoothingToDamping`.
     domain: {
-      accepts: (value) => value <= 1,
+      accepts: (value) => value !== 0 && value <= 1,
       // Read inside the executor's own "key (reason)" parentheses, by an
       // author who may not know the word "lerp" — so no nested parens and no
       // jargon.
-      reason: 'must be between 0 and 1 — the fraction of the gap to close each frame',
+      reason:
+        'must be above 0 and at most 1 — the fraction of the gap to close each frame; 0 would never move the camera',
     },
   },
 };

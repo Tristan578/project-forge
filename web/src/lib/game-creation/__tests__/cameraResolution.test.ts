@@ -258,10 +258,6 @@ describe('filterCameraNumerics', () => {
       });
     });
 
-    it('keeps an exact 0 smoothing', () => {
-      expect(filterCameraNumerics({ smoothing: 0 })).toEqual({ followSmoothing: 0 });
-    });
-
     /**
      * The conversion's domain is checked on the GDD side, before scaling. A
      * per-frame lerp fraction above 1 has no meaning, but scaled it becomes a
@@ -271,8 +267,9 @@ describe('filterCameraNumerics', () => {
      * #10295). Nothing on the producer side pins the unit — the decomposer types
      * `config` as `z.record(z.string(), z.unknown())` — so this is the contract.
      */
-    describe('refuses a smoothing outside the 0..1 per-frame fraction', () => {
-      const REASON = 'must be between 0 and 1 — the fraction of the gap to close each frame';
+    describe('refuses a smoothing outside the (0, 1] per-frame fraction', () => {
+      const REASON =
+        'must be above 0 and at most 1 — the fraction of the gap to close each frame; 0 would never move the camera';
 
       it.each([1.001, 1.5, 5, 60])('drops and reports smoothing %s', (smoothing) => {
         expect(filterCameraNumerics({ smoothing })).toEqual({});
@@ -281,6 +278,29 @@ describe('filterCameraNumerics', () => {
           unusable: [{ key: 'smoothing', reason: REASON }],
           overridden: [],
         });
+      });
+
+      /**
+       * Converted, 0 is damping 0 — a frozen follow the engine accepts — so the
+       * step used to report `applied: true` for a camera that never moves. Read
+       * as plain English, `smoothing: 0` means the opposite ("no smoothing", a
+       * rigid follow), and nothing tells the producer which reading is meant.
+       * `-0` is listed because `Object.is` would separate it from `0` and a
+       * `value > 0` style rewrite must not let it through as damping `-0`.
+       */
+      it.each([0, -0])('drops and reports smoothing %s instead of freezing the camera', (smoothing) => {
+        expect(filterCameraNumerics({ smoothing })).toEqual({});
+        expect(classifyCameraConfigKeys({ smoothing })).toEqual({
+          unknown: [],
+          unusable: [{ key: 'smoothing', reason: REASON }],
+          overridden: [],
+        });
+      });
+
+      it('keeps the smallest positive smoothing — only exact 0 is the frozen case', () => {
+        // 0.001 * 60 is 0.060000000000000005 in binary floating point.
+        expect(filterCameraNumerics({ smoothing: 0.001 }).followSmoothing).toBeCloseTo(0.06, 12);
+        expect(classifyCameraConfigKeys({ smoothing: 0.001 }).unusable).toEqual([]);
       });
 
       it('keeps exactly 1 — "close the whole gap each frame" is the top of the range', () => {

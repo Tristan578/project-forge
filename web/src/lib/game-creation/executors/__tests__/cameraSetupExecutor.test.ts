@@ -327,6 +327,28 @@ describe('cameraSetupExecutor', () => {
     expect(result.output?.warning).not.toContain('no parameter for');
   });
 
+  it('does not freeze a follow camera for a GDD smoothing of 0 (PF-1134)', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    // Converted, `smoothing: 0` is `damping: 0`, which the engine runs as a
+    // follow that never moves. It is refused at the GDD domain instead, so no
+    // `damping` is sent (the engine keeps its default of 5) and the author is
+    // told why.
+    const result = await cameraSetupExecutor.execute(
+      { cameraMode: 'top-down', cameraConfig: { altitude: 15, smoothing: 0 }, targetEntityId: 'p' },
+      ctx,
+    );
+
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'topDown',
+      targetEntity: 'p',
+      height: 15,
+    });
+    expect(result.output?.warning).toContain('smoothing (must be above 0 and at most 1');
+    expect(result.output?.warning).toContain('0 would never move the camera');
+  });
+
   it('reports a value the range policy refuses, naming the range as the reason', async () => {
     const { ctx, dispatch } = makeCtx(CAMERA_NODE);
 
