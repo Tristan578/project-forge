@@ -528,8 +528,10 @@ describe('F03/F04 (#8778): Sentry dataCollection opt-out must stay exhaustive', 
   }
 
   // A field is opted out when its value is `false`, an empty array, or an
-  // object whose every member is `false`.
-  const OPT_OUT_VALUE = /^(?:false|\[\]|\{\s*(?:\w+:\s*false\s*,?\s*)+\})$/;
+  // object whose every member is `false`. Members are comma-delimited inside the
+  // repetition so each whitespace run has exactly one way to match (CodeQL
+  // js/redos flagged the earlier `(?:\w+:\s*false\s*,?\s*)+` form).
+  const OPT_OUT_VALUE = /^(?:false|\[\]|\{\s*\w+:\s*false(?:\s*,\s*\w+:\s*false)*\s*(?:,\s*)?\})$/;
 
   it('derives a non-empty field list from the installed DataCollection type', async () => {
     const fields = await installedDataCollectionFields();
