@@ -224,7 +224,7 @@ const nextConfig: NextConfig = {
       // These match only .wasm files within each engine-pkg directory.
       // NOTE: In production, WASM is served by the R2 CDN at engine.spawnforge.ai
       // (infra/engine-cdn/worker.js sets COEP/COOP). These headers are the local
-      // fallback for dev server and any non-CDN paths. vercel.ts header entries
+      // fallback for dev server and any non-CDN paths. vercel.json header entries
       // for engine-pkg were removed since R2 CDN is the canonical source.
       {
         source: "/engine-pkg-webgl2/:file*.wasm",
