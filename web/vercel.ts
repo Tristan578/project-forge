@@ -12,9 +12,18 @@
  * property fails `tsc --noEmit` instead of silently misconfiguring the
  * deploy — that's the whole point of this migration (see the issue body).
  *
- * `@vercel/config` is a devDependency on purpose: the only import below is
- * `import type`, which is erased at compile time, and Vercel evaluates this
- * file at build time where `npm ci` installs devDependencies. Keeping it out
+ * IMPORTS MUST STAY TYPE-ONLY. This file can be evaluated BEFORE any
+ * install: `vercel deploy` in `.github/workflows/cd.yml` compiles it on the
+ * GitHub runner (Vercel CLI `compileVercelConfig`: esbuild with
+ * `packages: "external"`, then a forked `node` import), and the
+ * `deploy-staging` job runs no `npm ci` before that step; a remote build
+ * likewise has to read it to learn the very `installCommand` it declares.
+ * `import type` is erased by esbuild and costs nothing; a VALUE import — e.g.
+ * the `routes` helpers from `@vercel/config/v1` — fails every deploy with
+ * "Cannot find package '@vercel/config'". `vercelConfig.test.ts` pins this.
+ *
+ * `@vercel/config` is a devDependency on purpose: it is only ever needed for
+ * `tsc --noEmit` and editor types, never at evaluation time. Keeping it out
  * of `dependencies` keeps its transitive `@vercel/routing-utils` (which pins
  * an exact, advisory-bearing `path-to-regexp@6.1.0`) off the production
  * dependency graph; the root `package.json` `overrides` entry
@@ -29,8 +38,8 @@
  * - `installCommand` reaches ABOVE the deploy root (`cd ..`) because of the
  *   single-root lockfile (`package-lock.json` lives at the repo root, not
  *   `web/`). Do not "simplify" this to a plain `npm ci` — that breaks every
- *   build. See root CLAUDE.md gotchas -> "Three generated-artifact sync
- *   gates".
+ *   build. See the root CLAUDE.md gotcha on the generated-artifact sync
+ *   gates (the single-root lockfile is the first of them).
  * - `git.deploymentEnabled: false` disables Vercel's own git-push deploys.
  *   Deploys are driven by `.github/workflows/cd.yml` instead. Losing this
  *   starts double-deploying every push to `main`.

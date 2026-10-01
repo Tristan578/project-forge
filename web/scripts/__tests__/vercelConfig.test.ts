@@ -10,8 +10,48 @@
  * Each assertion below was mutated (value flipped/altered) and confirmed to
  * turn this suite red before being restored — see the PR description.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { config } from '../../vercel';
+
+/**
+ * Every module reference in `web/vercel.ts`, and whether it survives esbuild
+ * as a runtime load. Parsed with the TypeScript compiler rather than grepped,
+ * so a commented-out line, a string literal or a multi-line import cannot
+ * fool it (lessons-learned #16/#18).
+ */
+function moduleReferences(source: string): { specifier: string; typeOnly: boolean }[] {
+  const file = ts.createSourceFile('vercel.ts', source, ts.ScriptTarget.Latest, true);
+  const refs: { specifier: string; typeOnly: boolean }[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      // A bare `import 'x'` has no clause and always loads at runtime.
+      refs.push({
+        specifier: node.moduleSpecifier.text,
+        typeOnly: node.importClause?.isTypeOnly === true,
+      });
+    } else if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      refs.push({ specifier: node.moduleSpecifier.text, typeOnly: node.isTypeOnly });
+    } else if (ts.isImportEqualsDeclaration(node)) {
+      refs.push({ specifier: node.moduleReference.getText(file), typeOnly: node.isTypeOnly });
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+    ) {
+      refs.push({ specifier: node.arguments[0]?.getText(file) ?? '', typeOnly: false });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return refs;
+}
 
 describe('vercel.ts config', () => {
   it('keeps the single-root-lockfile install command intact', () => {
@@ -43,5 +83,17 @@ describe('vercel.ts config', () => {
         schedule: '*/15 * * * *',
       },
     ]);
+  });
+
+  it('imports nothing at runtime, so it evaluates before any npm install', () => {
+    // The Vercel CLI compiles this file on the CD runner (esbuild,
+    // `packages: "external"`) before `vercel deploy`, and deploy-staging runs
+    // no `npm ci` first. A value import such as `routes` from
+    // `@vercel/config/v1` would fail every deploy with "Cannot find package".
+    const refs = moduleReferences(readFileSync(join(__dirname, '../../vercel.ts'), 'utf8'));
+    // Vacuity guard: the typed `VercelConfig` import must be found, or this
+    // walk is inspecting nothing and the assertion below proves nothing.
+    expect(refs).toContainEqual({ specifier: '@vercel/config/v1', typeOnly: true });
+    expect(refs.filter((r) => !r.typeOnly)).toEqual([]);
   });
 });
