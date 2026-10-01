@@ -31,8 +31,9 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }))
 import {
   bindProviderJob,
   verifyProviderJobOwner,
-  findProviderJobOwnerId,
+  findOtherProviderJobOwnerId,
 } from '../jobOwnership';
+import { PROVIDERS } from '@/lib/db/schema';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 const mockCaptureException = vi.mocked(captureException);
@@ -150,19 +151,19 @@ describe('jobOwnership', () => {
   // -------------------------------------------------------------------
   // findProviderJobOwnerId
   // -------------------------------------------------------------------
-  describe('findProviderJobOwnerId', () => {
-    it('returns the owning userId when a binding exists', async () => {
-      mockSelectLimit.mockResolvedValueOnce([{ userId: 'user-1' }]);
+  describe('findOtherProviderJobOwnerId', () => {
+    it('returns the other owner when the job is bound to a different user', async () => {
+      mockSelectLimit.mockResolvedValueOnce([{ userId: 'someone-else' }]);
 
-      const result = await findProviderJobOwnerId('meshy', 'task-abc');
+      const result = await findOtherProviderJobOwnerId('task-abc', 'user-1');
 
-      expect(result).toBe('user-1');
+      expect(result).toBe('someone-else');
     });
 
-    it('returns null when no binding exists', async () => {
+    it('returns null when no foreign binding exists', async () => {
       mockSelectLimit.mockResolvedValueOnce([]);
 
-      const result = await findProviderJobOwnerId('meshy', 'task-abc');
+      const result = await findOtherProviderJobOwnerId('task-abc', 'user-1');
 
       expect(result).toBeNull();
     });
@@ -170,7 +171,30 @@ describe('jobOwnership', () => {
     it('propagates a lookup failure rather than silently treating it as unbound', async () => {
       mockSelectLimit.mockRejectedValueOnce(new Error('db down'));
 
-      await expect(findProviderJobOwnerId('meshy', 'task-abc')).rejects.toThrow('db down');
+      await expect(findOtherProviderJobOwnerId('task-abc', 'user-1')).rejects.toThrow('db down');
+    });
+
+    // The lookup must not be scoped to a caller-reported provider: POST
+    // /api/jobs receives `provider` from the client, which is not the
+    // binding's namespace (sprite binds under 'replicate' but reports 'sdxl').
+    // Render the real predicate and assert it spans EVERY provider the type
+    // admits, matches the job id, and excludes the caller in SQL.
+    it('spans every provider, matches the job id, and excludes the caller', async () => {
+      mockSelectLimit.mockResolvedValueOnce([]);
+
+      await findOtherProviderJobOwnerId('pred-123', 'user-1');
+
+      expect(mockSelectWhere).toHaveBeenCalledTimes(1);
+      const predicate = (mockSelectWhere.mock.calls[0] as unknown[])[0] as SQL;
+      const { sql, params } = new PgDialect().sqlToQuery(predicate);
+      const n = PROVIDERS.length;
+      expect(n).toBeGreaterThan(0);
+      const placeholders = PROVIDERS.map((_, i) => `$${i + 1}`).join(', ');
+      expect(sql).toContain(`"provider_job_owners"."provider" in (${placeholders})`);
+      expect(sql).toContain(`"provider_job_owners"."provider_job_id" = $${n + 1}`);
+      expect(sql).toContain(`"provider_job_owners"."user_id" <> $${n + 2}`);
+      expect(params).toEqual([...PROVIDERS, 'pred-123', 'user-1']);
+      expect(mockSelectLimit).toHaveBeenCalledWith(1);
     });
   });
 });

@@ -21,9 +21,9 @@
  * so by the time a caller can ever see a job id, it is already bound.
  */
 import 'server-only';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import { getDb, queryWithResilience } from '@/lib/db/client';
-import { providerJobOwners, type Provider } from '@/lib/db/schema';
+import { PROVIDERS, providerJobOwners, type Provider } from '@/lib/db/schema';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
@@ -93,11 +93,22 @@ export async function verifyProviderJobOwner(
 }
 
 /**
- * Whether ANY binding exists for a `(provider, providerJobId)` pair,
- * regardless of who owns it. Used by `POST /api/jobs` (#10262) to refuse a
- * client-reported job row whose `providerJobId` is already bound to a
- * DIFFERENT user — distinct from `verifyProviderJobOwner`, which answers
- * "is this caller the owner" for a status poll.
+ * The owner of `providerJobId` when that owner is NOT `userId`, else `null`
+ * (unbound, or bound only to `userId`). Used by `POST /api/jobs` (#10262) to
+ * refuse a client-reported job row whose `providerJobId` is already bound to a
+ * DIFFERENT user — distinct from `verifyProviderJobOwner`, which answers "is
+ * this caller the owner" for a status poll.
+ *
+ * Keyed on `providerJobId` across EVERY provider, never on a caller-reported
+ * one: `POST /api/jobs` receives `provider` from the client, and that value is
+ * not the binding's namespace (the sprite route binds an SDXL job under
+ * `replicate` while its client reports `sdxl`), so a provider-scoped lookup
+ * missed the honest case and let any caller skip the check by sending another
+ * string. The `IN (PROVIDERS)` predicate covers every value `bindProviderJob`
+ * can write (its `provider` is typed `Provider`, derived from that list) and
+ * keeps the lookup on the `(provider, provider_job_id)` unique index rather
+ * than a sequential scan. Excluding `userId` in SQL means a row bound to the
+ * caller can never mask a row bound to someone else.
  *
  * Unlike `verifyProviderJobOwner`, this function does NOT catch a lookup
  * failure itself — there is no try/catch here, and a DB error propagates
@@ -111,9 +122,9 @@ export async function verifyProviderJobOwner(
  * would silently reopen the ownership-spoofing hole this function exists to
  * close.
  */
-export async function findProviderJobOwnerId(
-  provider: string,
+export async function findOtherProviderJobOwnerId(
   providerJobId: string,
+  userId: string,
 ): Promise<string | null> {
   const rows = await queryWithResilience(() =>
     getDb()
@@ -121,8 +132,9 @@ export async function findProviderJobOwnerId(
       .from(providerJobOwners)
       .where(
         and(
-          eq(providerJobOwners.provider, provider),
+          inArray(providerJobOwners.provider, [...PROVIDERS]),
           eq(providerJobOwners.providerJobId, providerJobId),
+          ne(providerJobOwners.userId, userId),
         ),
       )
       .limit(1)

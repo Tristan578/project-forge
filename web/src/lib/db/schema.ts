@@ -890,7 +890,11 @@ export type ProviderJobOwner = typeof providerJobOwners.$inferSelect;
 export type NewProviderJobOwner = typeof providerJobOwners.$inferInsert;
 
 export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
-export type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno' | 'openai' | 'replicate' | 'removebg';
+// The runtime list `Provider` is derived from, so a query that must cover every
+// provider a row can carry (`findOtherProviderJobOwnerId`, #10262) reads the
+// same set the type admits rather than a second copy of it.
+export const PROVIDERS = ['anthropic', 'meshy', 'hyper3d', 'elevenlabs', 'suno', 'openai', 'replicate', 'removebg'] as const;
+export type Provider = (typeof PROVIDERS)[number];
 export type { ApiKeyScope } from '@/lib/config/scopes';
 export type AssetCategory = 'model_3d' | 'sprite' | 'texture' | 'audio' | 'script' | 'prefab' | 'template' | 'shader' | 'animation';
 export type AssetStatus = 'draft' | 'pending_review' | 'published' | 'rejected' | 'removed';

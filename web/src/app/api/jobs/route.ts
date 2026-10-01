@@ -9,7 +9,8 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
-import { findProviderJobOwnerId } from '@/lib/generate/jobOwnership';
+import { findOtherProviderJobOwnerId } from '@/lib/generate/jobOwnership';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +34,8 @@ const createJobSchema = z.object({
  * Optional resultUrl preserves an inline synchronous artifact: HTTP URL at
  * most 2000 chars or non-empty PNG data URL at most 4 MiB characters.
  * Returns HTTP 201 {job:{id}}; auth/rate/validation errors use middleware,
- * and persistence failures return a fixed 500 response.
+ * a providerJobId bound to another account returns 404 (#10262), and
+ * persistence failures return a fixed 500 response.
  */
 async function POST_impl(req: NextRequest) {
   try {
@@ -55,9 +57,18 @@ async function POST_impl(req: NextRequest) {
     // otherwise surface a stranger's job in this caller's own `GET /api/jobs`
     // list (their id, but bound provider/providerJobId belonging to another
     // account). Bound-to-this-user and never-bound are both accepted.
-    const existingOwnerId = await findProviderJobOwnerId(provider, providerJobId);
-    if (existingOwnerId && existingOwnerId !== mid.userId) {
-      return redactedJson({ error: 'This job belongs to another account' }, { status: 409 });
+    //
+    // Keyed on providerJobId ALONE, never on the reported `provider`: that
+    // field is client-supplied and is not the binding's namespace (sprite
+    // reports 'sdxl' for a job bound under 'replicate'), so scoping by it let
+    // any caller skip this check by changing one string.
+    //
+    // Refused with the SAME 404 and sentence the status routes send for a job
+    // that is not the caller's: a distinct "belongs to another account" (409)
+    // was the one response anywhere that confirmed a foreign job id exists.
+    const otherOwnerId = await findOtherProviderJobOwnerId(providerJobId, mid.userId!);
+    if (otherOwnerId) {
+      return redactedJson({ error: JOB_NOT_FOUND_MESSAGE }, { status: 404 });
     }
 
     const [job] = await queryWithResilience(() =>

@@ -52,7 +52,7 @@ vi.mock('@/lib/auth/api-auth', () => ({
 }));
 
 vi.mock('@/lib/generate/jobOwnership', () => ({
-  findProviderJobOwnerId: vi.fn(),
+  findOtherProviderJobOwnerId: vi.fn(),
 }));
 
 vi.mock('@/lib/rateLimit', () => ({
@@ -64,7 +64,8 @@ import { POST, GET } from '../route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
-import { findProviderJobOwnerId } from '@/lib/generate/jobOwnership';
+import { findOtherProviderJobOwnerId } from '@/lib/generate/jobOwnership';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 const mockInsertReturning = vi.fn();
 const mockSelectFrom = vi.fn();
@@ -108,7 +109,7 @@ describe('/api/jobs', () => {
     // #10262: no existing binding by default, so POST creates the row as
     // before. Tests that exercise the "already bound to someone else" branch
     // override this per-test.
-    vi.mocked(findProviderJobOwnerId).mockResolvedValue(null);
+    vi.mocked(findOtherProviderJobOwnerId).mockResolvedValue(null);
   });
 
   // ── POST ──────────────────────────────────────────────────────────────
@@ -247,10 +248,12 @@ describe('/api/jobs', () => {
     // one claiming someone else's already-bound providerJobId, surfacing a
     // stranger's job in the caller's own GET /api/jobs list.
     describe('job ownership (#10262)', () => {
-      it('returns 409 without inserting when providerJobId is already bound to a different user', async () => {
+      // 404 with the status routes' sentence, not a 409 naming "another
+      // account": the response must not confirm that a foreign job id exists.
+      it('returns 404 without inserting when providerJobId is already bound to a different user', async () => {
         mockAuth(true);
         const { insertChain } = setupDb();
-        vi.mocked(findProviderJobOwnerId).mockResolvedValue('someone-else');
+        vi.mocked(findOtherProviderJobOwnerId).mockResolvedValue('someone-else');
 
         const req = new NextRequest('http://localhost/api/jobs', {
           method: 'POST',
@@ -265,16 +268,19 @@ describe('/api/jobs', () => {
         const response = await POST(req);
         const body = await response.json();
 
-        expect(response.status).toBe(409);
-        expect(body.error).toBe('This job belongs to another account');
+        expect(response.status).toBe(404);
+        expect(body.error).toBe(JOB_NOT_FOUND_MESSAGE);
+        expect(JSON.stringify(body)).not.toMatch(/another account/i);
         expect(insertChain.values).not.toHaveBeenCalled();
       });
 
+      // The lookup excludes the caller in SQL (pinned in jobOwnership.test.ts),
+      // so a job bound only to THIS user resolves to null here.
       it('allows creating a row for a providerJobId already bound to THIS SAME user', async () => {
         mockAuth(true);
         setupDb();
         mockInsertReturning.mockResolvedValueOnce([{ id: 'job-abc' }]);
-        vi.mocked(findProviderJobOwnerId).mockResolvedValue('user-123');
+        vi.mocked(findOtherProviderJobOwnerId).mockResolvedValue(null);
 
         const req = new NextRequest('http://localhost/api/jobs', {
           method: 'POST',
@@ -289,20 +295,48 @@ describe('/api/jobs', () => {
         const response = await POST(req);
 
         expect(response.status).toBe(201);
-        expect(findProviderJobOwnerId).toHaveBeenCalledWith('meshy', 'j-1');
+        expect(findOtherProviderJobOwnerId).toHaveBeenCalledWith('j-1', 'user-123');
       });
 
-      // findProviderJobOwnerId deliberately does NOT catch a lookup failure
+      // The reported `provider` is client-supplied and is not the binding's
+      // namespace: the sprite route binds an SDXL job under 'replicate' while
+      // its client reports 'sdxl'. The lookup must not depend on it, or the
+      // honest sprite case is never checked and any caller skips the 404 by
+      // sending another string.
+      it('refuses a foreign-bound job whatever provider string the client reports', async () => {
+        mockAuth(true);
+        const { insertChain } = setupDb();
+        vi.mocked(findOtherProviderJobOwnerId).mockResolvedValue('someone-else');
+
+        const req = new NextRequest('http://localhost/api/jobs', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerJobId: 'pred-1',
+            provider: 'sdxl',
+            type: 'sprite',
+            prompt: 'A knight',
+          }),
+        });
+
+        const response = await POST(req);
+
+        expect(response.status).toBe(404);
+        expect(insertChain.values).not.toHaveBeenCalled();
+        expect(findOtherProviderJobOwnerId).toHaveBeenCalledTimes(1);
+        expect(findOtherProviderJobOwnerId).toHaveBeenCalledWith('pred-1', 'user-123');
+      });
+
+      // findOtherProviderJobOwnerId deliberately does NOT catch a lookup failure
       // (see its doc comment and jobOwnership.test.ts's "propagates a lookup
       // failure" case) — it rejects, relying on this route's outer try/catch
       // to turn that into a fixed 500 and skip the insert. That fail-closed
       // behavior at the route level is the actual security property #10262
       // is about, so it must be exercised here, not just at the DB-insert
       // failure ("returns 500 on DB error") which never touches this path.
-      it('returns 500 without inserting when findProviderJobOwnerId itself rejects', async () => {
+      it('returns 500 without inserting when findOtherProviderJobOwnerId itself rejects', async () => {
         mockAuth(true);
         const { insertChain } = setupDb();
-        vi.mocked(findProviderJobOwnerId).mockRejectedValueOnce(new Error('db down'));
+        vi.mocked(findOtherProviderJobOwnerId).mockRejectedValueOnce(new Error('db down'));
 
         const req = new NextRequest('http://localhost/api/jobs', {
           method: 'POST',
