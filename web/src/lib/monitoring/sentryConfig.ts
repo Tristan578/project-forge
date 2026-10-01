@@ -166,7 +166,9 @@ function fingerprintEvent(event: Event): Event {
 //
 // `scrubEvent` is wired as both `beforeSend` and `beforeSendTransaction` in every
 // Sentry.init (server, edge, client). It always returns the (mutated) event — the
-// goal is to keep the error for debugging, just without the secrets.
+// goal is to keep the error for debugging, just without the secrets. Under
+// @sentry v11's default span streaming `beforeSendTransaction` is never called;
+// spans go through `beforeSendSpan` → `scrubSentrySpan` (below) instead.
 
 /**
  * Key names whose values are redacted wholesale, regardless of their content.
@@ -283,19 +285,55 @@ function scrubUrlString(input: string): string {
   }
 }
 
-const URL_SPAN_ATTRIBUTE_KEYS = ['url.full', 'http.url'] as const;
+/**
+ * Span attributes that hold a URL (or, for the legacy `http.target`, a
+ * path-plus-query). The query and fragment are stripped, then the remainder is
+ * scrubbed. `http.target` was replaced in @sentry v11 by `url.path` +
+ * `url.query`; it is kept so a v10-shaped attribute set by hand is still
+ * covered.
+ */
+const URL_SPAN_ATTRIBUTE_KEYS = ['url.full', 'http.url', 'http.target'] as const;
 
-/** Scrub attributes attached to root and non-root transaction spans in place. */
+/**
+ * Span attributes that hold ONLY the query string or fragment. Their whole
+ * content is the part {@link scrubUrlString} strips from a full URL, so they are
+ * replaced outright: a query such as `token=abc123` is credential-shaped by
+ * name alone, which no value pattern can recognise.
+ */
+const QUERY_SPAN_ATTRIBUTE_KEYS = ['url.query', 'http.query', 'url.fragment', 'http.fragment'] as const;
+
+/**
+ * Apply `fn` to an attribute's string payload. Span attributes are either a
+ * primitive or an attribute object (`{ value, unit }` / `{ value, type }`);
+ * both spellings carry the same text, so both are rewritten.
+ */
+function mapAttributeString(value: unknown, fn: (input: string) => string): unknown {
+  if (typeof value === 'string') return fn(value);
+  if (value && typeof value === 'object' && typeof (value as { value?: unknown }).value === 'string') {
+    const obj = value as { value: string };
+    obj.value = fn(obj.value);
+    return obj;
+  }
+  return value;
+}
+
+/**
+ * Scrub span attributes in place: transaction-span `data` (static lifecycle)
+ * and streamed-span `attributes` (the @sentry v11 default) carry the same keys.
+ */
 function scrubSpanData(data: Record<string, unknown> | undefined): void {
   if (!data) return;
 
   for (const key of URL_SPAN_ATTRIBUTE_KEYS) {
-    const value = data[key];
-    if (typeof value === 'string') data[key] = scrubUrlString(value);
+    if (key in data) data[key] = mapAttributeString(data[key], scrubUrlString);
+  }
+  for (const key of QUERY_SPAN_ATTRIBUTE_KEYS) {
+    if (key in data) data[key] = mapAttributeString(data[key], (q) => (q === '' ? q : REDACTED));
   }
 
   for (const key of Object.keys(data)) {
     if ((URL_SPAN_ATTRIBUTE_KEYS as readonly string[]).includes(key)) continue;
+    if ((QUERY_SPAN_ATTRIBUTE_KEYS as readonly string[]).includes(key)) continue;
     data[key] = SENSITIVE_KEY_RE.test(key) ? REDACTED : deepScrub(data[key]);
   }
 }
@@ -569,6 +607,57 @@ function scrubMetric<T extends { name?: unknown; attributes?: Record<string, unk
  */
 export const scrubSentryMetric = scrubMetric;
 
+/**
+ * Scrub a streamed span before transmission (@sentry v11).
+ *
+ * v11 made span streaming the default (`traceLifecycle: 'stream'`). Spans are
+ * sent in batches as they finish, no transaction event is built, and
+ * `beforeSendTransaction` (so {@link scrubEvent}'s span and `contexts.trace`
+ * passes) is never called. Without this hook every span name and attribute
+ * would leave the process unscrubbed: URLs with their query strings, header
+ * attributes, DB statements and error text. This is a FOURTH pipeline, after
+ * events, logs and metrics.
+ *
+ * The span shape is `StreamedSpanJSON`: `name` (was `description`),
+ * `attributes` (was `data`, now carrying `sentry.op` too) and optional
+ * `links[].attributes`. The redaction is the same as on the transaction path:
+ * {@link scrubSpanData} strips URL queries and redacts sensitive keys, and
+ * {@link scrubString} runs on the name. `user.name` / `user.username` are
+ * redacted for parity with {@link scrubLog} and {@link scrubMetric}.
+ *
+ * `beforeSendSpan` cannot drop a span (returning `null` is a no-op upstream),
+ * so this always returns the same span object, mutated in place. It is generic
+ * so it stays a drop-in for `BeforeSendStreamedSpanCallback`.
+ */
+function scrubStreamedSpan<
+  T extends {
+    name?: unknown;
+    attributes?: Record<string, unknown>;
+    links?: Array<{ attributes?: Record<string, unknown> }>;
+  },
+>(span: T): T {
+  if (typeof span.name === 'string') {
+    span.name = scrubString(span.name) as T['name'];
+  }
+  if (span.attributes) {
+    scrubSpanData(span.attributes);
+    for (const key of ['user.name', 'user.username']) {
+      if (key in span.attributes) span.attributes[key] = REDACTED;
+    }
+  }
+  for (const link of span.links ?? []) {
+    scrubSpanData(link.attributes);
+  }
+  return span;
+}
+
+/**
+ * `beforeSendSpan` hook for every Sentry.init (server, edge, client). Re-exported
+ * under a stable name, like {@link scrubSentryEvent}, {@link scrubSentryLog} and
+ * {@link scrubSentryMetric}.
+ */
+export const scrubSentrySpan = scrubStreamedSpan;
+
 // Export helpers for unit testing
 export {
   fingerprintEvent,
@@ -583,6 +672,7 @@ export {
   isGenerationError,
   scrubEvent,
   scrubLog,
+  scrubStreamedSpan,
   scrubString,
   deepScrub,
 };

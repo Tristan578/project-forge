@@ -5,6 +5,7 @@ import {
   scrubSentryEvent,
   scrubSentryLog,
   scrubSentryMetric,
+  scrubSentrySpan,
 } from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
@@ -60,9 +61,24 @@ if (DSN) {
       httpBodies: [],
       genAI: { inputs: false, outputs: false },
       stackFrameVariables: false,
+      // Also default-ON in @sentry v11 and absent until now: bound DB query
+      // parameters / write payloads / result rows, GraphQL documents and
+      // variables, and queue task arguments.
+      databaseQueryData: false,
+      graphQL: { document: false, variables: false },
+      queues: false,
     },
     beforeSend: scrubSentryEvent,
+    // @sentry v11 streams spans by default, so no transaction event is built
+    // and beforeSendTransaction is NOT called; streamed spans are scrubbed by
+    // beforeSendSpan instead. Each hook runs in exactly one lifecycle: an
+    // unwrapped beforeSendSpan is ignored under `traceLifecycle: 'static'`,
+    // which on Node and Edge can also be switched on by the
+    // SENTRY_TRACE_LIFECYCLE=static env var with no code change. Keeping both
+    // wired means spans are scrubbed in either lifecycle. Pinned by
+    // sentry-regressions.test.ts.
     beforeSendTransaction: scrubSentryEvent,
+    beforeSendSpan: scrubSentrySpan,
     // Sentry Logs bypass beforeSend/scrubSentryEvent — scrub them on their own
     // pipeline so a stray Sentry.logger.* call can't leak secrets/PII. @sentry
     // v11 has no `enableLogs` switch: logs ship whenever the logger is called,

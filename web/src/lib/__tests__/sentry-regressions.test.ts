@@ -469,19 +469,110 @@ describe('F03/F04 (#8778): Sentry dataCollection opt-out must stay exhaustive', 
     'instrumentation-client.ts',
   ] as const;
 
-  // Every privacy-relevant dataCollection field with its required opt-out
-  // literal. Missing any of these → Sentry's permissive default silently
-  // re-enables that data class.
-  const REQUIRED_OPT_OUTS = [
-    'userInfo: false',
-    'cookies: false',
-    // `queryParams` was renamed `urlQueryParams` in @sentry v11.
-    'urlQueryParams: false',
-    'httpHeaders: { request: false, response: false }',
-    'httpBodies: []',
-    'genAI: { inputs: false, outputs: false }',
-    'stackFrameVariables: false',
-  ] as const;
+  // The field list is DERIVED from the installed SDK, not restated here
+  // (lessons-learned #18). A hand-written list is what let @sentry v11's
+  // default-ON `databaseQueryData`, `graphQL` and `queues` go unset in every
+  // config while this suite stayed green. Reading the installed
+  // `DataCollection` interface means a field Sentry adds in a future version
+  // fails here until each config opts out of it.
+  //
+  // Fields that are not a data class Sentry collects about a user or request,
+  // with the reason. Each one must still exist in the installed interface (the
+  // vacuity guard below), so a renamed field cannot hide behind a stale entry.
+  const NOT_A_DATA_CLASS: Record<string, string> = {
+    frameContextLines:
+      'a line COUNT of our own source around each frame, not user data; the lines are scrubbed by scrubStacktraceFrames',
+  };
+
+  async function installedDataCollectionFields(): Promise<string[]> {
+    const fs = await import('fs');
+    const path = await import('path');
+    const { createRequire } = await import('module');
+    const req = createRequire(path.resolve(process.cwd(), 'package.json'));
+    const corePkg = req.resolve('@sentry/core/package.json');
+    const nextjsPkg = req.resolve('@sentry/nextjs/package.json');
+    const coreVersion = JSON.parse(fs.readFileSync(corePkg, 'utf-8')).version;
+    const nextjsVersion = JSON.parse(fs.readFileSync(nextjsPkg, 'utf-8')).version;
+    // The @sentry/core read here must be the one @sentry/nextjs runs on.
+    expect(coreVersion, '@sentry/core resolved from web/ is not the version @sentry/nextjs ships with').toBe(
+      nextjsVersion,
+    );
+    const dts = fs.readFileSync(
+      path.join(path.dirname(corePkg), 'build', 'types', 'types', 'datacollection.d.ts'),
+      'utf-8',
+    );
+    const body = dts.match(/export interface DataCollection \{([\s\S]*?)\n\}/)?.[1];
+    expect(body, 'could not find `export interface DataCollection` in the installed @sentry/core').toBeDefined();
+    return [...(body ?? '').matchAll(/^ {4}(\w+)\?:/gm)].map((m) => m[1]);
+  }
+
+  /** `key: value` pairs written directly inside a config's dataCollection block. */
+  function configuredDataCollection(content: string): Map<string, string> {
+    const start = content.indexOf('dataCollection: {');
+    expect(start, 'no dataCollection block').toBeGreaterThanOrEqual(0);
+    const open = content.indexOf('{', start);
+    let depth = 0;
+    let end = -1;
+    for (let i = open; i < content.length; i++) {
+      if (content[i] === '{') depth++;
+      else if (content[i] === '}' && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+    expect(end, 'unterminated dataCollection block').toBeGreaterThan(open);
+    const block = content.slice(open + 1, end);
+    const fields = new Map<string, string>();
+    for (const m of block.matchAll(/^ {6}(\w+):\s*(.+?),?\s*$/gm)) fields.set(m[1], m[2]);
+    return fields;
+  }
+
+  // A field is opted out when its value is `false`, an empty array, or an
+  // object whose every member is `false`.
+  const OPT_OUT_VALUE = /^(?:false|\[\]|\{\s*(?:\w+:\s*false\s*,?\s*)+\})$/;
+
+  it('derives a non-empty field list from the installed DataCollection type', async () => {
+    const fields = await installedDataCollectionFields();
+    // Vacuity guard: a parse that matched nothing would make every config check
+    // below pass. The v11 interface has 11 fields; known ones must be found.
+    expect(fields.length).toBeGreaterThanOrEqual(11);
+    for (const known of ['userInfo', 'cookies', 'urlQueryParams', 'databaseQueryData', 'queues', 'graphQL']) {
+      expect(fields).toContain(known);
+    }
+    for (const exempt of Object.keys(NOT_A_DATA_CLASS)) {
+      expect(fields, `exemption "${exempt}" no longer exists in DataCollection; remove it`).toContain(exempt);
+    }
+  });
+
+  it.each(CONFIG_FILES)(
+    '%s opts out of every data class in the installed DataCollection type',
+    async (file) => {
+      const required = (await installedDataCollectionFields()).filter((f) => !(f in NOT_A_DATA_CLASS));
+      const configured = configuredDataCollection(await readConfig(file));
+      expect(configured.size, `${file}: parsed no fields from dataCollection`).toBeGreaterThan(0);
+      for (const field of required) {
+        const value = configured.get(field);
+        expect(
+          value,
+          `${file} does not set dataCollection.${field}; an omitted field falls back to Sentry's permissive default`,
+        ).toBeDefined();
+        expect(value, `${file} sets dataCollection.${field} to "${value}", which is not an opt-out`).toMatch(
+          OPT_OUT_VALUE,
+        );
+      }
+    },
+  );
+
+  it.each(CONFIG_FILES)(
+    '%s sets no dataCollection field the installed SDK does not define',
+    async (file) => {
+      // A renamed field (v11 `queryParams` → `urlQueryParams`) leaves the old
+      // key in place doing nothing while the new one falls back to its default.
+      const known = new Set(await installedDataCollectionFields());
+      const unknown = [...configuredDataCollection(await readConfig(file)).keys()].filter((k) => !known.has(k));
+      expect(unknown, `${file} sets dataCollection keys the SDK ignores`).toEqual([]);
+    },
+  );
 
   // Any of these literals inside a config means a field was flipped back ON.
   // (None collide with unrelated config: the AI integration uses
@@ -520,19 +611,6 @@ describe('F03/F04 (#8778): Sentry dataCollection opt-out must stay exhaustive', 
   });
 
   it.each(CONFIG_FILES)(
-    '%s opts out of every PII-relevant dataCollection field',
-    async (file) => {
-      const content = await readConfig(file);
-      for (const field of REQUIRED_OPT_OUTS) {
-        expect(
-          content,
-          `${file} is missing an exhaustive opt-out: "${field}" — a dropped field re-enables PII via Sentry defaults`,
-        ).toContain(field);
-      }
-    },
-  );
-
-  it.each(CONFIG_FILES)(
     '%s never flips a dataCollection field back on',
     async (file) => {
       const content = await readConfig(file);
@@ -560,6 +638,73 @@ describe('F03/F04 (#8778): Sentry dataCollection opt-out must stay exhaustive', 
       expect(content).toContain('beforeSend: scrubSentryEvent');
     },
   );
+});
+
+describe('@sentry v11 span streaming: beforeSendSpan: scrubSentrySpan is required in every init', () => {
+  /**
+   * @sentry v11 made span streaming the default. No transaction event is built,
+   * so `beforeSendTransaction: scrubSentryEvent` is never called, and without a
+   * `beforeSendSpan` every span name and attribute ships unscrubbed: URLs with
+   * query strings, header attributes, error text. v11 also ignores a
+   * `beforeSendSpan` that does not match the configured lifecycle. A plain
+   * function runs only under `'stream'`. So two things are pinned: the hook is
+   * wired as an EXECUTABLE line (anchored, comments stripped, counted, per
+   * lessons-learned #16), and no config switches the lifecycle in code.
+   * `beforeSendTransaction` stays wired as well, because Node and Edge can be
+   * switched to `'static'` by the SENTRY_TRACE_LIFECYCLE env var, and then that
+   * hook is the one that runs.
+   */
+  const CONFIG_FILES = [
+    'sentry.server.config.ts',
+    'sentry.edge.config.ts',
+    'instrumentation-client.ts',
+  ] as const;
+
+  function stripComments(src: string): string {
+    return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  }
+
+  async function readConfig(file: string): Promise<string> {
+    const fs = await import('fs');
+    const path = await import('path');
+    return stripComments(fs.readFileSync(path.resolve(process.cwd(), file), 'utf-8'));
+  }
+
+  function countLines(content: string, line: RegExp): number {
+    return [...content.matchAll(line)].length;
+  }
+
+  it.each(CONFIG_FILES)('%s wires beforeSendSpan: scrubSentrySpan exactly once', async (file) => {
+    const content = await readConfig(file);
+    expect(
+      countLines(content, /^ {4}beforeSendSpan: scrubSentrySpan,$/gm),
+      `${file} must route streamed spans through scrubSentrySpan; beforeSendTransaction is a no-op under @sentry v11 span streaming`,
+    ).toBe(1);
+    // A second, different beforeSendSpan key later in the object would win.
+    expect(countLines(content, /^\s*beforeSendSpan\s*:/gm), `${file} sets beforeSendSpan more than once`).toBe(1);
+  });
+
+  it.each(CONFIG_FILES)('%s keeps beforeSendTransaction: scrubSentryEvent for the static lifecycle', async (file) => {
+    const content = await readConfig(file);
+    expect(countLines(content, /^ {4}beforeSendTransaction: scrubSentryEvent,$/gm)).toBe(1);
+  });
+
+  it.each(CONFIG_FILES)('%s does not set traceLifecycle or wrap the span hook', async (file) => {
+    // `traceLifecycle: 'static'` makes v11 ignore the unwrapped scrubSentrySpan,
+    // and withStaticSpan(...) makes it ignored under the default 'stream'.
+    const content = await readConfig(file);
+    expect(content).not.toMatch(/\btraceLifecycle\b/);
+    expect(content).not.toMatch(/\bwithStaticSpan\b/);
+  });
+
+  it('scrubSentrySpan is exported by sentryConfig and actually scrubs', async () => {
+    const { scrubSentrySpan } = await import('@/lib/monitoring/sentryConfig');
+    const span = scrubSentrySpan({
+      name: 'GET /x',
+      attributes: { 'url.full': 'https://a.example/x?token=leakme' },
+    });
+    expect(JSON.stringify(span)).not.toContain('leakme');
+  });
 });
 
 describe('Sentry Logs scrubber gap: beforeSendLog: scrubSentryLog is required unconditionally', () => {
