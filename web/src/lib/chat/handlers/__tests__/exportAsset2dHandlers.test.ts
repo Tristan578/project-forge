@@ -1062,6 +1062,16 @@ describe('handlers2d project and camera commands', () => {
       const { result } = await invoke2d('set_grid_2d', {});
       expect(result.success).toBe(true);
     });
+
+    it('never forwards an explicit undefined key (setGrid2d spreads it over existing settings)', async () => {
+      const { result, store } = await invoke2d('set_grid_2d', { size: 16, enabled: undefined });
+      expect(result.success).toBe(true);
+      expect(store.setGrid2d).toHaveBeenCalledTimes(1);
+      const settings = vi.mocked(store.setGrid2d).mock.calls[0]?.[0];
+      // Own keys, not toEqual: toEqual treats `{ enabled: undefined }` as `{}`.
+      expect(Object.keys(settings ?? {})).toEqual(['size']);
+      expect(settings).toStrictEqual({ size: 16 });
+    });
   });
 });
 

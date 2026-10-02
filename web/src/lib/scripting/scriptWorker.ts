@@ -157,7 +157,7 @@ let uiDirty = false;
 interface PendingAsyncRequest {
   resolve: (data: unknown) => void;
   reject: (error: Error) => void;
-  // | undefined (PF-10230): asyncRequest()'s own onProgress parameter is
+  // | undefined (#10230): asyncRequest()'s own onProgress parameter is
   // already `| undefined`, and every read of this field below is a `?.()`
   // optional call — the omitted-vs-undefined distinction was never
   // meaningful here. Unrelated to this file's Function(...) sandbox sink;
