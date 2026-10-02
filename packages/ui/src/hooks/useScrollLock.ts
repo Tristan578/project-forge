@@ -29,6 +29,12 @@ let previousPaddingRight: string | null = null;
  * `padding-right`, so the content stays where it was. Overlay scrollbars
  * (macOS, mobile) measure 0 and get no padding.
  *
+ * The padding only moves IN-FLOW content. An element with `position: fixed`
+ * anchored to the right edge (e.g. web's `CookieConsent` banner, `right-4`) is
+ * positioned against the viewport, which widens when the scrollbar goes, so it
+ * still shifts right by the scrollbar width while the lock is held. This hook
+ * does not compensate for that.
+ *
  * `document` is only touched inside the effect, so this is safe to import and
  * render on the server.
  */

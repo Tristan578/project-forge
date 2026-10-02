@@ -111,10 +111,18 @@ describe('useScrollLock scrollbar compensation', () => {
   const innerWidthDescriptor = Object.getOwnPropertyDescriptor(window, 'innerWidth');
 
   // jsdom has no layout, so the viewport and the root's client box are faked
-  // to model a page with a classic (space-taking) scrollbar.
+  // to model a page with a classic (space-taking) scrollbar. The fake follows
+  // the lock the way a real browser does: once the root's overflow is hidden
+  // the scrollbar is gone and `clientWidth` reads the full viewport width, so
+  // an implementation that measures AFTER hiding overflow sees a 0 gap here
+  // too, exactly as it would in production.
   function setViewport(innerWidth: number, clientWidth: number) {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: innerWidth });
-    Object.defineProperty(root, 'clientWidth', { configurable: true, get: () => clientWidth });
+    Object.defineProperty(root, 'clientWidth', {
+      configurable: true,
+      get: () =>
+        root.style.overflow === 'hidden' && clientWidth > 0 ? innerWidth : clientWidth,
+    });
   }
 
   beforeEach(() => {

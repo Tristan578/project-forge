@@ -112,6 +112,44 @@ afterEach(() => {
   _resetQuickStartGateOwner();
 });
 
+/** A class list that makes an element a scroll container or bounds its height. */
+const SCROLLER_CLASS = /(^|\s)(overflow-(y-)?(auto|scroll)|max-h-\S+)(\s|$)/;
+
+/**
+ * Asserts a gate's action button stays reachable inside the Dialog: walking
+ * up from it to the dialog panel, the ONLY scroll container / height bound is
+ * the Dialog body, and the button sits in a `sticky bottom-0` footer whose
+ * nearest scroll container is that body (so it pins to the body's visible
+ * bottom edge rather than scrolling away with the summary).
+ */
+function expectActionsReachable(button: HTMLElement) {
+  const dialog = screen.getByRole('dialog');
+  expect(dialog.contains(button)).toBe(true);
+  const body = dialog.querySelector('[data-dialog-body]');
+  expect(body).not.toBeNull();
+
+  const scrollers: Element[] = [];
+  let node: HTMLElement | null = button.parentElement;
+  while (node && node !== dialog) {
+    if (SCROLLER_CLASS.test(node.getAttribute('class') ?? '')) scrollers.push(node);
+    node = node.parentElement;
+  }
+  expect(node).toBe(dialog);
+  expect(scrollers).toEqual([body]);
+  // ...and no second bounded scroller anywhere else in the body either (e.g.
+  // the gate's own summary box beside the footer): one scroll, not two.
+  const inside = Array.from(body?.querySelectorAll('*') ?? []);
+  expect(inside.length).toBeGreaterThan(0);
+  const nested = inside.filter((el) => SCROLLER_CLASS.test(el.getAttribute('class') ?? ''));
+  expect(nested.map((el) => el.outerHTML.slice(0, 120))).toEqual([]);
+
+  const footer = button.closest('[data-testid="approval-gate-footer"]');
+  expect(footer).not.toBeNull();
+  expect(footer?.classList.contains('sticky')).toBe(true);
+  expect(footer?.classList.contains('bottom-0')).toBe(true);
+  expect(body?.contains(footer as Node)).toBe(true);
+}
+
 /** Walks the dialog from the type cards to the prompt step. */
 async function pickPlatformer() {
   // `useDialogA11y`'s open effect defers the dialog's initial focus with a
@@ -280,14 +318,16 @@ describe('QuickStartDialog', () => {
     expect(resolveGate).toHaveBeenCalledWith('approved');
   });
 
-  // PF-1215 round 2 (4/5): a second `max-h-[45vh] overflow-y-auto` wrapper
-  // around the whole ApprovalGateDialog used to clip the Approve/Cancel row
-  // along with the scroll body -- the outer, SMALLER bound always engaged
-  // before ApprovalGateDialog's own inner max-h-[50vh] region could, so the
-  // inner bound was dead code and the buttons scrolled out of view again,
-  // the exact failure the inner region exists to prevent. Approve must not
-  // sit inside ANY scrollable-bounded ancestor between it and the dialog.
-  it('never nests the approval gate action row inside a scroll-bounded container', async () => {
+  // PF-1215 round 2 (4/5), then PR #10294: a bounded scroller nested inside
+  // another lets the OUTER scroll carry the inner box's Approve/Cancel row out
+  // of view on a short viewport. Round 2 removed a `max-h-[45vh]` wrapper here;
+  // #10294 made the Dialog body itself a scroller, so the gate's own
+  // max-h-[50vh] box became the nested one. The rule now: exactly ONE scroll
+  // container between Approve and the dialog -- the Dialog body -- and the
+  // action row is sticky to that container's bottom edge so it stays in view.
+  // (jsdom has no layout, so this pins the structure that keeps the row
+  // reachable rather than measuring a rendered viewport.)
+  it('keeps the approval gate actions reachable: one scroller (the Dialog body), actions sticky to it', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
     await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
@@ -303,12 +343,9 @@ describe('QuickStartDialog', () => {
     });
     rerender(<QuickStartDialog open onClose={vi.fn()} />);
 
-    const approveButton = screen.getByRole('button', { name: 'Approve' });
-    let node: HTMLElement | null = approveButton.parentElement;
-    while (node && node !== document.body) {
-      expect(node.className).not.toContain('overflow-y-auto');
-      node = node.parentElement;
-    }
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    expect(screen.getByText('Generate assets?')).toBeTruthy();
+    expectActionsReachable(approve);
   });
 
   it('reaches the submit button by keyboard from the prompt field', async () => {
@@ -564,6 +601,16 @@ describe('QuickStartDialog', () => {
       // The review's own Cancel is the way out; a second "Stop" beside it
       // would be two controls for one action.
       expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    });
+
+    it('keeps "Build it" and its cost reachable: one scroller (the Dialog body), footer sticky to it', async () => {
+      await reachPlanReview();
+      const build = screen.getByRole('button', { name: 'Build it' });
+      expectActionsReachable(build);
+      // The cost rides in the same sticky footer: a cost the user has to
+      // scroll to find is not a cost they confirmed.
+      const footer = build.closest('[data-testid="approval-gate-footer"]');
+      expect(footer?.contains(screen.getByText('Estimated token cost'))).toBe(true);
     });
 
     it('puts focus on "Build it" so the confirmation is one keypress away', async () => {

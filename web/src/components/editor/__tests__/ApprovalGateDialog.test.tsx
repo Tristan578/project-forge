@@ -194,4 +194,66 @@ describe('ApprovalGateDialog', () => {
       expect(cost.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
   });
+
+  // PR #10294: the @spawnforge/ui Dialog body is now a scroller of its own, so
+  // inside it the gate must not bring a second bounded scroller (nested
+  // scrolling carries the inner box's buttons out of view on a short
+  // viewport). In 'parent' mode the summary flows into the enclosing scroll
+  // and the cost + buttons stick to its bottom edge.
+  describe("scrollContainer='parent'", () => {
+    const SCROLLER = /(^|\s)(overflow-(y-)?(auto|scroll)|max-h-\S+)(\s|$)/;
+
+    function renderParentMode() {
+      return render(
+        <ApprovalGateDialog
+          gate={makeGate({
+            sceneSummaries: [{ name: 'Level 1', entityCount: 3, systemDescriptions: [] }],
+          })}
+          onApprove={vi.fn()}
+          onCancel={vi.fn()}
+          scrollContainer="parent"
+        >
+          <p>Estimated token cost 340</p>
+        </ApprovalGateDialog>,
+      );
+    }
+
+    it('brings no scroll box, max-height bound or region of its own', () => {
+      const { container } = renderParentMode();
+      // Non-vacuous: the gate rendered and the summary is in it.
+      expect(screen.getByText('Level 1')).toBeInTheDocument();
+      const elements = Array.from(container.querySelectorAll<HTMLElement>('*'));
+      expect(elements.length).toBeGreaterThan(5);
+      for (const el of elements) {
+        expect(el.getAttribute('class') ?? '', `bounded scroller: ${el.outerHTML.slice(0, 80)}`).not.toMatch(SCROLLER);
+      }
+      expect(screen.queryByTestId('approval-gate-scroll')).toBeNull();
+      expect(screen.queryByRole('region')).toBeNull();
+      expect(screen.getByTestId('approval-gate-summary')).not.toHaveAttribute('tabindex');
+    });
+
+    it('pins the cost and both buttons in a sticky footer after the summary', () => {
+      renderParentMode();
+      const footer = screen.getByTestId('approval-gate-footer');
+      expect(footer.classList.contains('sticky')).toBe(true);
+      expect(footer.classList.contains('bottom-0')).toBe(true);
+      // An opaque background, so the summary scrolling underneath is hidden.
+      expect(footer.className).toContain('bg-[var(--sf-bg-surface)]');
+      for (const node of [
+        screen.getByText('Estimated token cost 340'),
+        screen.getByRole('button', { name: 'Approve' }),
+        screen.getByRole('button', { name: 'Cancel' }),
+      ]) {
+        expect(footer.contains(node)).toBe(true);
+      }
+      const summary = screen.getByTestId('approval-gate-summary');
+      expect(summary.contains(screen.getByText('Level 1'))).toBe(true);
+      expect(summary.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("leaves the default 'own' mode footer unpinned", () => {
+      render(<ApprovalGateDialog gate={makeGate()} onApprove={vi.fn()} onCancel={vi.fn()} />);
+      expect(screen.getByTestId('approval-gate-footer').classList.contains('sticky')).toBe(false);
+    });
+  });
 });

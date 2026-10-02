@@ -1,9 +1,46 @@
-import { type ReactNode } from "react";
+import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { cn } from "../utils/cn";
-import { useDialogA11y } from "../hooks/useDialogA11y";
+import { SCROLL_REGION_ATTR, useDialogA11y } from "../hooks/useDialogA11y";
 import { useScrollLock } from "../hooks/useScrollLock";
 import { Z_INDEX } from "../tokens";
 import { ScrollArea } from "./ScrollArea";
+
+/**
+ * Whether the scroll container's content is taller than its box, re-measured
+ * whenever either the box (viewport resize) or the content (async content,
+ * a phase change) resizes. Without `ResizeObserver` (jsdom, very old
+ * engines) it measures once.
+ */
+function useOverflowsVertically(
+  scrollerRef: RefObject<HTMLElement | null>,
+  contentRef: RefObject<HTMLElement | null>,
+  active: boolean
+): boolean {
+  const [overflows, setOverflows] = useState(false);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!active || !scroller) return;
+    // 1px of slack absorbs sub-pixel rounding between the two integer reads.
+    const measure = () =>
+      setOverflows(scroller.scrollHeight - scroller.clientHeight > 1);
+    if (typeof ResizeObserver === "undefined") {
+      measure();
+      return () => setOverflows(false);
+    }
+    // A ResizeObserver reports every observed element once on observe(), so
+    // this also takes the initial measurement.
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    if (contentRef.current) observer.observe(contentRef.current);
+    return () => {
+      observer.disconnect();
+      setOverflows(false);
+    };
+  }, [active, scrollerRef, contentRef]);
+
+  return active && overflows;
+}
 
 export interface DialogProps {
   open: boolean;
@@ -30,6 +67,14 @@ export function Dialog({
     onClose,
   });
   useScrollLock(open);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const bodyContentRef = useRef<HTMLDivElement | null>(null);
+  const hasBody = Boolean(children);
+  const bodyOverflows = useOverflowsVertically(
+    bodyRef,
+    bodyContentRef,
+    open && hasBody
+  );
 
   if (!open) return null;
 
@@ -50,7 +95,9 @@ export function Dialog({
         className={cn(
           "fixed",
           "w-full max-w-md",
-          "max-h-[85vh]",
+          // dvh, not vh: on mobile `vh` is the toolbar-hidden height, so an
+          // 85vh panel can run under the browser's visible URL bar.
+          "max-h-[85dvh]",
           "rounded-[var(--sf-radius-xl)]",
           "border border-[var(--sf-border)]",
           "bg-[var(--sf-bg-surface)] text-[var(--sf-text)]",
@@ -81,10 +128,32 @@ export function Dialog({
             past the viewport) and carries `[overscroll-behavior:contain]`,
             which stops a drag that hits the end of this list from chaining
             into the (locked) document behind it (PF-1032 / #9052 acceptance
-            criterion 5). */}
-        {children && (
-          <ScrollArea className="min-h-0 flex-1 px-6 py-3 text-sm">
-            {children}
+            criterion 5).
+
+            While the content overflows, the body is also a labelled,
+            focusable region so a keyboard user can Tab to it and scroll it
+            with the arrow keys (WCAG 2.1.1); a mouse wheel is otherwise the
+            only way to reach the text below the fold. SCROLL_REGION_ATTR keeps
+            initial focus on the first real control rather than this box.
+            When nothing overflows it is a plain container and no extra Tab
+            stop. Consumers should NOT nest a second bounded scroller inside
+            this one: a box that scrolls inside a box that scrolls can carry
+            its own content (and buttons) out of view. */}
+        {hasBody && (
+          <ScrollArea
+            ref={bodyRef}
+            data-dialog-body=""
+            className="min-h-0 flex-1 px-6 py-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]"
+            {...(bodyOverflows
+              ? {
+                  tabIndex: 0,
+                  role: "region",
+                  "aria-labelledby": titleProps.id,
+                  [SCROLL_REGION_ATTR]: "",
+                }
+              : {})}
+          >
+            <div ref={bodyContentRef}>{children}</div>
           </ScrollArea>
         )}
         {/* Actions */}

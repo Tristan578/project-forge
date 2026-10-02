@@ -1,8 +1,10 @@
-import { type HTMLAttributes, type CSSProperties } from "react";
+import { type HTMLAttributes, type CSSProperties, type Ref } from "react";
 import { cn } from "../utils/cn";
 
 export interface ScrollAreaProps extends HTMLAttributes<HTMLDivElement> {
   height?: string;
+  /** The scroll container element (React 19 ref-as-prop). */
+  ref?: Ref<HTMLDivElement>;
 }
 
 export function ScrollArea({
@@ -10,6 +12,7 @@ export function ScrollArea({
   height,
   style,
   children,
+  ref,
   ...props
 }: ScrollAreaProps) {
   const computedStyle: CSSProperties = {
@@ -19,6 +22,7 @@ export function ScrollArea({
 
   return (
     <div
+      ref={ref}
       className={cn(
         "overflow-auto",
         // Stop a drag that hits the end of this container from chaining

@@ -31,6 +31,7 @@ export function ApprovalGateDialog({
   cancelVariant = 'ghost',
   cancelRef,
   approveDisabled = false,
+  scrollContainer = 'own',
   children,
 }: {
   gate: ApprovalGate;
@@ -65,6 +66,22 @@ export function ApprovalGateDialog({
   /** Disables approve, e.g. while the confirmed action is already starting. */
   approveDisabled?: boolean;
   /**
+   * Who scrolls a long summary.
+   *
+   * `'own'` (default; the orchestrator panel): the summary is bounded to its
+   * own `max-h-[50vh]` keyboard-reachable scroll region, with the cost and
+   * the buttons below it.
+   *
+   * `'parent'`: the gate sits inside a container that already scrolls — the
+   * `@spawnforge/ui` `Dialog` body, in the quick-start dialog. A second
+   * bounded scroller there would nest one scroll box in another, and on a
+   * short viewport the outer one carries the inner box's buttons out of view.
+   * So the summary is not bounded and flows into the parent's single scroll,
+   * and the cost + buttons are `sticky bottom-0`: pinned to the parent's
+   * visible bottom edge while the summary scrolls behind them.
+   */
+  scrollContainer?: 'own' | 'parent';
+  /**
    * Extra content between the scrollable summary and the buttons — the plan
    * review's token cost. Outside the scroll region on purpose: a cost the user
    * has to scroll to find is not a cost they confirmed.
@@ -80,6 +97,7 @@ export function ApprovalGateDialog({
   }, [autoFocus, gate.id]);
 
   const headingId = `approval-gate-heading-${gate.id}`;
+  const ownScroll = scrollContainer === 'own';
 
   return (
     <div className="rounded-[var(--sf-radius-md)] border border-[var(--sf-warning)] bg-[var(--sf-bg-surface)] p-4">
@@ -100,21 +118,23 @@ export function ApprovalGateDialog({
 
       {/*
        * A large plan (many scenes / many generated assets) has no natural
-       * height limit, and this box sits inside a modal that does not scroll
-       * itself — without a bound here the Approve/Reject row below gets
-       * pushed off the bottom of the dialog with no way to reach it.
+       * height limit. In 'own' mode (the orchestrator panel) nothing above
+       * this box bounds it, so it bounds itself — without that the
+       * Approve/Reject row below gets pushed out of reach.
        *
        * tabIndex + role="region" + aria-labelledby make the region itself
        * keyboard-reachable: without them a keyboard-only user has no way to
        * move focus into this box and scroll it (a mouse wheel/trackpad is
        * the only path to the content below the fold).
+       *
+       * In 'parent' mode the enclosing scroller (the Dialog body) already
+       * does both jobs — it is bounded and becomes a labelled, focusable
+       * region while it overflows — so this box is plain content.
        */}
       <div
-        data-testid="approval-gate-scroll"
-        className="mb-3 max-h-[50vh] overflow-y-auto pr-1"
-        tabIndex={0}
-        role="region"
-        aria-labelledby={headingId}
+        data-testid={ownScroll ? 'approval-gate-scroll' : 'approval-gate-summary'}
+        className={ownScroll ? 'mb-3 max-h-[50vh] overflow-y-auto pr-1' : 'mb-3'}
+        {...(ownScroll ? { tabIndex: 0, role: 'region', 'aria-labelledby': headingId } : {})}
       >
         {/* Scene summaries */}
         {displayData.sceneSummaries && displayData.sceneSummaries.length > 0 && (
@@ -161,22 +181,32 @@ export function ApprovalGateDialog({
         )}
       </div>
 
-      {children && <div className="mb-3">{children}</div>}
+      {/*
+       * In 'parent' mode this footer sticks to the parent scroller's bottom
+       * edge (bg so the summary scrolling underneath stays hidden), so the
+       * cost and the buttons stay in view however long the summary is.
+       */}
+      <div
+        data-testid="approval-gate-footer"
+        className={cn(!ownScroll && 'sticky bottom-0 bg-[var(--sf-bg-surface)] pt-2')}
+      >
+        {children && <div className="mb-3">{children}</div>}
 
-      <div className="flex gap-2">
-        <Button
-          ref={approveRef}
-          type="button"
-          size="sm"
-          onClick={onApprove}
-          disabled={approveDisabled}
-          className="flex-1"
-        >
-          {approveLabel}
-        </Button>
-        <Button ref={cancelRef} type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
-          {cancelLabel}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            ref={approveRef}
+            type="button"
+            size="sm"
+            onClick={onApprove}
+            disabled={approveDisabled}
+            className="flex-1"
+          >
+            {approveLabel}
+          </Button>
+          <Button ref={cancelRef} type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
+            {cancelLabel}
+          </Button>
+        </div>
       </div>
     </div>
   );

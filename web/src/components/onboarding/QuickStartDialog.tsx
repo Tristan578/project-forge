@@ -561,6 +561,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               cancelLabel={discardArmed ? 'Discard it' : 'Discard plan'}
               cancelVariant={discardArmed ? 'destructive' : 'ghost'}
               cancelRef={discardRef}
+              scrollContainer="parent"
               autoFocus
             >
               {reviewError && (
@@ -582,20 +583,22 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             </ApprovalGateDialog>
           )}
 
-          {/* A gate_assets list is as long as the plan makes it. ApprovalGateDialog
-              already bounds its own scrollable body to max-h-[50vh] and renders
-              Approve/Cancel OUTSIDE that scroll region, so those buttons are never
-              pushed off-screen. A second `max-h-[45vh] overflow-y-auto` wrapper
-              here previously clipped the WHOLE dialog (heading, description, and
-              action row included) to a bound smaller than the inner one — the
-              outer scrollbar always engaged first, the inner max-h-[50vh] region
-              could never reach its own limit, and the buttons scrolled out of
-              view again inside the outer box (round 2 review, 4/5 agreement). */}
+          {/* A gate_assets list is as long as the plan makes it. The Dialog body
+              is the ONE scroller here: it is capped below the viewport and turns
+              into a focusable region while it overflows. Both gates therefore
+              use scrollContainer="parent", which drops ApprovalGateDialog's own
+              max-h-[50vh] scroll box and pins its cost + Approve/Cancel row to
+              the body's visible bottom edge (sticky). Nesting any second bounded
+              scroller in this body (the gate's own box, or the
+              `max-h-[45vh] overflow-y-auto` wrapper that round 2 review removed)
+              lets the outer scroll carry the inner box's buttons out of view on
+              a short viewport. */}
           {pendingGate && (
             <ApprovalGateDialog
               gate={pendingGate}
               onApprove={() => resolveGate('approved')}
               onCancel={() => resolveGate('rejected')}
+              scrollContainer="parent"
               autoFocus
             />
           )}
