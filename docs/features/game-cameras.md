@@ -13,7 +13,7 @@ The Game Camera component lets you define exactly how the camera behaves when yo
 3. Click **Add Game Camera** if no camera is configured yet.
 4. Set **Active** to true to make this the primary camera for play mode.
 5. Choose a **Mode** from the dropdown.
-6. Set **Target ID** to the ID of the entity the camera should follow. Every mode except **Fixed** needs one — with it blank, the camera keeps its mode but never moves.
+6. Set **Target ID** to the ID of the entity the camera should track. Every mode except **Fixed** tracks a target and needs one — with it blank, the camera keeps its mode but never moves.
 7. Adjust the mode-specific parameters that appear below.
 8. Click **Test Shake** to preview a camera shake effect in the editor.
 
@@ -68,7 +68,7 @@ The camera orbits around the target at a fixed distance, with optional auto-rota
 ## Shared parameters
 
 ### Smoothing
-Every mode that follows a target — 3rd Person Follow, Side Scroller and Top Down — shares one **Smoothing** parameter. It is a **rate per second**, not a lag: each frame the camera moves toward the target by `min(smoothing × frameTime, 1)` of the remaining distance. So **higher is snappier** — at the default of 5 the camera closes roughly 8% of the gap per frame at 60fps, at 20 it closes about a third, and at 60 or above it tracks the target exactly. **Lower is floatier**; 0 freezes the camera where it is. Negative values are refused. First Person, Fixed and Orbital do not follow, so they have no Smoothing.
+Every mode that eases toward its target — 3rd Person Follow, Side Scroller and Top Down — shares one **Smoothing** parameter. It is a **rate per second**, not a lag: each frame the camera moves toward the target by `min(smoothing × frameTime, 1)` of the remaining distance. So **higher is snappier** — at the default of 5 the camera closes roughly 8% of the gap per frame at 60fps, at 20 it closes about a third, and at 60 or above it tracks the target exactly. **Lower is floatier**; 0 freezes the camera where it is. Negative values are refused. First Person rides on its target and Orbital circles it; both snap to it rather than easing toward it. Fixed ignores the target. So none of the three has Smoothing.
 
 ## Script API
 

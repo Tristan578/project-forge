@@ -345,18 +345,43 @@ describe('cameraSetupExecutor', () => {
       targetEntity: 'p',
       height: 15,
     });
+    expect(result.output?.warning).toContain(
+      'smoothing (must be above 0 and at most 1 — the share of the gap closed each frame;',
+    );
+    expect(result.output?.warning).toContain(
+      'the engine default is kept unless followSmoothing is set)',
+    );
+  });
+
+  it('still sends an explicit followSmoothing when the GDD smoothing beside it is refused', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    // The refusal reason says "the engine default is kept unless
+    // followSmoothing is set". This is the "unless": a refused alias does not
+    // take a sendable engine spelling of the same field down with it.
+    const result = await cameraSetupExecutor.execute(
+      { cameraMode: 'top-down', cameraConfig: { smoothing: 5, followSmoothing: 3 }, targetEntityId: 'p' },
+      ctx,
+    );
+
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'topDown',
+      targetEntity: 'p',
+      damping: 3,
+    });
     expect(result.output?.warning).toContain('smoothing (must be above 0 and at most 1');
-    expect(result.output?.warning).toContain('0 would never move the camera');
   });
 
   it('reports a value the range policy refuses, naming the range as the reason', async () => {
     const { ctx, dispatch } = makeCtx(CAMERA_NODE);
 
-    // A negative follow damping is the PF-1166 defect: the engine computes
-    // `t = (damping * delta).min(1.0)` and lerps by it, so `t` is capped above
-    // but never below — a negative rate extrapolates AWAY from the target and
-    // compounds ~16x per second at 60fps. It used to be accepted here, sent, and
-    // reported as applied.
+    // A negative follow damping is the PF-1166 defect: when the engine's lerp
+    // factor was `(damping * delta).min(1.0)`, capped above but not below, a
+    // negative rate extrapolated AWAY from the target ~16x per second at 60fps.
+    // The engine now clamps the factor to [0, 1] (a frozen camera) and refuses a
+    // negative `damping` at the wire, failing the whole command. It used to be
+    // accepted here, sent, and reported as applied.
     const result = await cameraSetupExecutor.execute(
       {
         cameraMode: 'follow',

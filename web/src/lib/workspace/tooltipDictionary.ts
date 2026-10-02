@@ -283,11 +283,14 @@ export const TOOLTIP_DICTIONARY: Record<string, string> = {
   // twelve controls shipped with no help at all; a test now scans the panel's
   // source for `term="…"` and fails on any key missing here.
   gameCameraActive: 'Makes this the camera the game looks through — only one camera can be active at a time',
-  gameCameraMode: 'How the camera follows the action — behind the player, first-person, side-on, top-down, fixed, or orbiting',
+  gameCameraMode: 'How the camera frames the action — behind the player, first-person, side-on, top-down, fixed, or orbiting',
   // Nothing substitutes the editor selection for a blank target: the engine
-  // resolves a missing target to none and skips every follow arm, so the
-  // camera keeps its mode and never moves. Only Fixed works without one.
-  gameCameraTarget: 'The ID of the object the camera follows — every mode except Fixed needs one and will not move without it',
+  // resolves a missing target to none and skips every arm that reads it, so
+  // the camera keeps its mode and never moves. Only Fixed works without one.
+  // "Tracks", not "follows": First Person and Orbital use the target too but
+  // do not ease toward it, and the guide reserves "follow" for the three
+  // modes with Smoothing (docs/features/game-cameras.md).
+  gameCameraTarget: 'The ID of the object the camera tracks — every mode except Fixed needs one and will not move without it',
   gameCameraFollowDist: 'How far behind the target the camera sits',
   gameCameraFollowHeight: 'How high above the target the camera floats — a negative value looks up from below',
   gameCameraSmoothing: 'How fast the camera catches up to its target, per second — higher is snappier, lower is floatier, 0 freezes it',

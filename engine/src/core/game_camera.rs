@@ -254,21 +254,25 @@ fn flat_range(params: &serde_json::Value, key: &str) -> Result<Option<(f32, f32)
 
 /// Read a follow damping rate, rejecting a negative one.
 ///
-/// The follow systems compute `t = (damping * delta).min(1.0)` and then
-/// `translation.lerp(target, t)`. `t` is capped ABOVE but never below, so a
-/// negative damping is a negative lerp factor, which extrapolates AWAY from the
-/// target every frame and compounds: at 60fps with `damping = -3`, `t` is
-/// -0.048, the camera-to-target gap grows by ~4.8% per frame — roughly 16x per
-/// second — and the camera is somewhere unreachable within two seconds.
+/// The follow systems compute `t = follow_lerp_factor(damping, delta)` — which
+/// clamps `damping * delta` to `0.0..=1.0` — and then
+/// `translation.lerp(target, t)`. Before that floor existed `t` was
+/// `(damping * delta).min(1.0)`, capped above but not below, so a negative
+/// damping was a negative lerp factor that extrapolated AWAY from the target
+/// and compounded: at 60fps with `damping = -3` the gap grew ~4.8% per frame,
+/// roughly 16x per second. The floor turns that into `t = 0.0`, a camera frozen
+/// where it is — survivable, but still not anything the caller asked for.
 ///
-/// Unlike an inverted `pitchClamp` this does not panic, which is exactly why it
-/// has to be caught here: it produces a plausible-looking scene that is simply
-/// unplayable, and `dispatchCommand` returns void, so this error message is the
-/// only signal a caller who typed a minus sign will ever get.
+/// Neither outcome panics, which is exactly why a negative rate has to be
+/// caught here: it produces a plausible-looking scene whose camera is dead, and
+/// `dispatchCommand` returns void, so this error message is the only signal a
+/// caller who typed a minus sign will ever get. (`follow_lerp_factor`'s floor
+/// still matters for `.forge` scene files, which never pass through here.)
 ///
 /// Exactly `0.0` is legal — a frozen follow, pinned by a test below. No upper
-/// bound is needed because `.min(1.0)` already saturates a too-large rate into
-/// "snap to the target", which is a coherent outcome rather than a broken one.
+/// bound is needed because the clamp's ceiling already saturates a too-large
+/// rate into "snap to the target", which is a coherent outcome rather than a
+/// broken one.
 fn flat_damping(params: &serde_json::Value, key: &str, default: f32) -> Result<f32, String> {
     let value = flat_f32(params, key, default)?;
     if value < 0.0 {
@@ -1210,11 +1214,11 @@ mod from_flat_tests {
 
     #[test]
     fn negative_damping_is_rejected_on_every_variant_that_reads_it() {
-        // `t = (damping * delta).min(1.0)` is capped above but not below, so a
-        // negative rate is a negative lerp factor: the camera extrapolates AWAY
-        // from its target and the gap compounds — ~16x per second at 60fps with
-        // -3. There is no framing that describes, and nothing downstream can
-        // tell it apart from a rate the caller meant, so the wire is the place.
+        // `follow_lerp_factor` floors a negative rate's factor at 0.0, so the
+        // camera freezes where it is (before the floor it extrapolated AWAY from
+        // its target, ~16x per second at 60fps with -3). Neither is a framing
+        // anyone asks for, and nothing downstream can tell it apart from a rate
+        // the caller meant, so the wire is the place to refuse it.
         for mode in ["thirdPersonFollow", "sideScroller", "topDown"] {
             let err = GameCameraMode::from_flat(mode, &json!({"damping": -3.0}))
                 .expect_err(&format!("{} must refuse a negative damping", mode));
@@ -1229,8 +1233,9 @@ mod from_flat_tests {
 
     #[test]
     fn a_large_damping_is_accepted_because_the_follow_saturates_it() {
-        // The floor is not a general range policy. `.min(1.0)` already turns a
-        // too-large rate into "snap to the target", which is coherent, so
+        // The floor is not a general range policy. `follow_lerp_factor`'s 1.0
+        // ceiling already turns a too-large rate into "snap to the target",
+        // which is coherent, so
         // refusing one would substitute this module's taste for the author's.
         let mode = GameCameraMode::from_flat("topDown", &json!({"damping": 10_000.0})).unwrap();
         match mode {

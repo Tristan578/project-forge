@@ -176,20 +176,22 @@ export function resolveCameraEntityId(nodes: readonly CameraCandidateNode[]): st
  * the range policy exists to prevent.
  *
  * `followSmoothing` is the one field where a sign is not a preference. The
- * engine follows with `t = (damping * delta).min(1.0)` and then
- * `translation.lerp(target, t)`: `t` is capped ABOVE but never below, so a
- * negative damping produces a negative lerp factor, which extrapolates AWAY from
- * the target every frame and compounds geometrically. At 60fps with damping -3,
- * `t` is -0.048 and the camera-to-target gap multiplies by ~1.048 per frame —
- * about 16x per second, so the camera is somewhere unreachable within two
- * seconds and never comes back. There is no framing that describes.
+ * engine follows with `t = follow_lerp_factor(damping, delta)`, which clamps
+ * `damping * delta` to [0, 1], and then `translation.lerp(target, t)`. Before
+ * that floor `t` was `(damping * delta).min(1.0)`, capped above but not below,
+ * so a negative damping extrapolated AWAY from the target and compounded — at
+ * 60fps with damping -3 the gap grew about 16x per second (PF-1166). With the
+ * floor a negative damping is a camera frozen where it is. Neither is a framing
+ * anyone authors, and the engine's `flat_damping` now refuses a negative rate
+ * outright — taking the whole full-replace `set_game_camera` command with it,
+ * which is why it must be dropped here rather than sent.
  *
  * Exactly 0.0 stays legal: it is a frozen follow, the engine has a test pinning
  * that it survives `from_flat`, and it is reachable by other means.
  *
- * No upper bound is needed for the same reason the lower one is: `.min(1.0)`
- * already saturates a too-large damping into "snap to the target", which is a
- * coherent outcome. The asymmetry is the engine's, not an omission here.
+ * No upper bound is needed: the clamp's 1.0 ceiling already saturates a
+ * too-large damping into "snap to the target", which is a coherent outcome. The
+ * asymmetry is the engine's, not an omission here.
  */
 interface CameraValuePolicy {
   accepts: (value: number) => boolean;
@@ -367,12 +369,15 @@ const GDD_SMOOTHING_REFERENCE_DELTA_SECONDS = 1 / 60;
  * Convert the GDD's authored `smoothing` into the engine's `followSmoothing`
  * (wire name `damping`).
  *
- * The GDD's `smoothing` is authored as the fraction of the remaining
- * camera-to-target gap that should close on ONE rendered frame — the familiar
+ * The GDD's `smoothing` is read as the fraction of the remaining
+ * camera-to-target gap that should close on ONE rendered frame (inferred from
+ * this module's fixtures; the producer does not pin it — see the last
+ * paragraph) — the familiar
  * `Vector3.Lerp(current, target, smoothing)`-per-frame authoring convention,
  * where the value is called "smoothing" despite bigger meaning SNAPPIER, not
  * more smoothed. The engine instead stores a rate and multiplies by whatever
- * `delta` the frame actually took: `t = (damping * delta).min(1.0)`. Both
+ * `delta` the frame actually took: `t = damping * delta`, clamped to [0, 1]
+ * (`follow_lerp_factor` in `game_camera.rs`). Both
  * quantities move the SAME direction — bigger closes more of the gap per
  * frame — so this is a pure rescale, not a sign flip or an inversion, and
  * inverting `t = damping * delta` at the reference frame time above gives
@@ -392,7 +397,7 @@ const GDD_SMOOTHING_REFERENCE_DELTA_SECONDS = 1 / 60;
  *
  * The UPPER end is not left to the engine. A per-frame fraction above 1 has
  * no meaning — there is no "close 500% of the gap" — but converted it becomes
- * damping 300, a rate the engine's `.min(1.0)` saturates into an exact snap
+ * damping 300, a rate the engine's 1.0 ceiling saturates into an exact snap
  * and accepts without complaint, so the step would report `applied: true` for
  * a value that was nonsense where it was written. That is what the alias's
  * `domain` (see {@link GDD_CONFIG_KEY_ALIASES}) refuses BEFORE this runs.
@@ -481,9 +486,15 @@ const GDD_CONFIG_KEY_ALIASES: Record<string, GddConfigAlias> = {
       accepts: (value) => value !== 0 && value <= 1,
       // Read inside the executor's own "key (reason)" parentheses, by an
       // author who may not know the word "lerp" — so no nested parens and no
-      // jargon.
+      // jargon. ONE reason covers every refused value (0, -0 and anything
+      // above 1), so it names the domain and what happens next rather than one
+      // cause: a 1.5 is not refused for freezing anything. Why 0 in particular
+      // is refused (it converts to a frozen follow) lives in the comment above
+      // and in the test names, not in text shown for a 5. "Unless
+      // followSmoothing is set" because an explicit engine spelling in the same
+      // config is still sent, and then it, not the default, applies.
       reason:
-        'must be above 0 and at most 1 — the fraction of the gap to close each frame; 0 would never move the camera',
+        'must be above 0 and at most 1 — the share of the gap closed each frame; the engine default is kept unless followSmoothing is set',
     },
   },
 };

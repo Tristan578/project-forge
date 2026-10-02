@@ -41,6 +41,20 @@ describe('TOOLTIP_DICTIONARY', () => {
     expect(tooltip).toMatch(/will not move/);
   });
 
+  /**
+   * One vocabulary across the guide, this tooltip and the inspector
+   * placeholder: every mode but Fixed TRACKS its target, and "follow" is
+   * reserved for the three modes that ease toward it and have Smoothing. The
+   * target tooltip said "the object the camera follows" while the guide said
+   * First Person and Orbital "do not follow" — both true under different
+   * meanings, contradictory side by side (review-board ux finding on #10295).
+   */
+  it('describes the camera target as tracked, not followed', () => {
+    const tooltip = TOOLTIP_DICTIONARY['gameCameraTarget']!;
+    expect(tooltip).toMatch(/\btracks\b/);
+    expect(tooltip).not.toMatch(/follow/i);
+  });
+
   it('should be a non-empty record', () => {
     const keys = Object.keys(TOOLTIP_DICTIONARY);
     expect(keys.length).toBeGreaterThan(50);

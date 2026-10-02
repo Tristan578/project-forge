@@ -298,7 +298,7 @@ describe('gameCameraPayload', () => {
     });
 
     // `damping` is a rate per second, not a 0..1 blend factor — the engine
-    // computes `t = (damping * delta).min(1.0)` — so 0 freezes the camera where
+    // computes `t = damping * delta`, clamped to [0, 1] — so 0 freezes the camera where
     // it stands rather than snapping it to the target. Either way it is a real
     // value the author asked for, and dropping it as falsy would substitute the
     // engine's 5.0 default for it.

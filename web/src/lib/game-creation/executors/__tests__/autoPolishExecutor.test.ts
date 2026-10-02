@@ -492,8 +492,8 @@ describe('autoPolishExecutor', () => {
       // that never moves.
       targetEntity: 'player_id',
       // No `damping`. This used to assert 0.8, sent as a 0..1 smoothing factor —
-      // but the engine's damping is a rate per second (`t = (damping * delta)
-      // .min(1.0)`), so 0.8 ran the follow roughly six times slower than the 5.0
+      // but the engine's damping is a rate per second (`t = damping * delta`,
+      // clamped to [0, 1]), so 0.8 ran the follow roughly six times slower than the 5.0
       // default. Omitting the field is how the payload asks for that default, and
       // it keeps no second copy of the number here to drift from the engine's.
     });

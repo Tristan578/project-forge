@@ -162,12 +162,14 @@ describe('filterCameraNumerics', () => {
 
   describe('range policy', () => {
     /**
-     * The engine follows with `t = (damping * delta).min(1.0)` and then
-     * `translation.lerp(target, t)`. `t` is capped ABOVE but never below, so a
-     * negative damping is a negative lerp factor: the camera extrapolates AWAY
-     * from the target and the gap compounds — ~16x per second at 60fps with -3.
-     * Nothing downstream can tell that from a rate the author meant, and
-     * `dispatchCommand` returns void, so refusing it here is the only signal.
+     * The engine follows with `t = follow_lerp_factor(damping, delta)` — the
+     * product clamped to [0, 1] — and then `translation.lerp(target, t)`. A
+     * negative damping is floored to a frozen camera (before the floor, when
+     * `t` was only capped above, it extrapolated AWAY from the target ~16x per
+     * second at 60fps with -3), and the engine's `flat_damping` refuses it at
+     * the wire, failing the whole command. Nothing downstream can tell that
+     * from a rate the author meant, and `dispatchCommand` returns void, so
+     * refusing it here is the only signal.
      */
     it('refuses a negative followSmoothing', () => {
       expect(filterCameraNumerics({ followSmoothing: -3 })).toEqual({});
@@ -180,8 +182,9 @@ describe('filterCameraNumerics', () => {
     });
 
     it('keeps a very large followSmoothing', () => {
-      // `.min(1.0)` already saturates it into "snap to the target", which is a
-      // coherent outcome — refusing it would be this module's taste, not a bug.
+      // The engine clamps the lerp factor at 1.0, so this saturates into "snap
+      // to the target", a coherent outcome — refusing it would be this
+      // module's taste, not a bug.
       expect(filterCameraNumerics({ followSmoothing: 10_000 })).toEqual({
         followSmoothing: 10_000,
       });
@@ -261,15 +264,17 @@ describe('filterCameraNumerics', () => {
     /**
      * The conversion's domain is checked on the GDD side, before scaling. A
      * per-frame lerp fraction above 1 has no meaning, but scaled it becomes a
-     * damping the engine happily accepts (5 -> 300, an exact snap under
-     * `.min(1.0)`), so without this the step reported `applied: true` for a
+     * damping the engine happily accepts (5 -> 300, an exact snap under the
+     * engine's 1.0 ceiling on the lerp factor), so without this the step reported `applied: true` for a
      * value that was nonsense where it was written (review-board finding on
      * #10295). Nothing on the producer side pins the unit — the decomposer types
      * `config` as `z.record(z.string(), z.unknown())` — so this is the contract.
      */
     describe('refuses a smoothing outside the (0, 1] per-frame fraction', () => {
+      // One reason for every refused value: it names the domain and that the
+      // engine default stands, never a single cause — a 5 freezes nothing.
       const REASON =
-        'must be above 0 and at most 1 — the fraction of the gap to close each frame; 0 would never move the camera';
+        'must be above 0 and at most 1 — the share of the gap closed each frame; the engine default is kept unless followSmoothing is set';
 
       it.each([1.001, 1.5, 5, 60])('drops and reports smoothing %s', (smoothing) => {
         expect(filterCameraNumerics({ smoothing })).toEqual({});

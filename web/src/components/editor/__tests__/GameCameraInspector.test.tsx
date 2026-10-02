@@ -206,6 +206,12 @@ describe('GameCameraInspector', () => {
     const target = screen.getByLabelText('Target ID') as HTMLInputElement;
     expect(target.placeholder).not.toMatch(/selected|selection/i);
     expect(target.placeholder).toMatch(/required/);
+    // Same vocabulary as the guide and the gameCameraTarget tooltip: the target
+    // is TRACKED by every mode but Fixed; "follow" is reserved for the three
+    // modes with Smoothing, so "required to follow" read as not applying to
+    // First Person or Orbital (review-board ux finding on #10295).
+    expect(target.placeholder).toMatch(/\btrack\b/);
+    expect(target.placeholder).not.toMatch(/follow/i);
   });
 
   it('renders Test Shake button', () => {
