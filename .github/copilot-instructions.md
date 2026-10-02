@@ -73,7 +73,7 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 - Start: `node .claude/hooks/taskboard-launch.mjs start`  *(the launcher resolves the shared database path and passes it to the binary itself — never start the binary by hand or pass your own `--db`)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
-**Pinned versions:** Next.js 16.3.5 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*
+**Pinned versions:** Next.js 16.3.8 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*
 
 **Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 81 · lines 87
 
