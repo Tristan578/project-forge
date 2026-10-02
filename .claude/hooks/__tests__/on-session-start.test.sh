@@ -181,11 +181,19 @@ set_dx absent
 # would start it. The assertion is EQUALITY with the override, not success:
 # another candidate on the host (PATH, /usr/local/bin) could make
 # tb_check_installed succeed without the override being read at all.
+#
+# Precedence, not just membership: an executable is also planted at the
+# library's "$_TB_PROJECT_ROOT/../taskboard/taskboard" sibling candidate
+# ($TMP/taskboard/taskboard, next to $TMP/real-repo). With TASKBOARD_BIN anywhere
+# but FIRST in the candidate list, that sibling wins and case 6 goes red; 6c
+# proves the sibling really is a live competitor, so 6 cannot pass vacuously.
 REAL_LIB_DIR="$TMP/real-repo/.claude/hooks"
-mkdir -p "$REAL_LIB_DIR" "$TMP/custom-bin"
+mkdir -p "$REAL_LIB_DIR" "$TMP/custom-bin" "$TMP/taskboard"
 cp "$HERE/../taskboard-state.sh" "$REAL_LIB_DIR/taskboard-state.sh"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/custom-bin/my-taskboard"
 chmod +x "$TMP/custom-bin/my-taskboard"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/taskboard/taskboard"
+chmod +x "$TMP/taskboard/taskboard"
 
 # resolved_bin <TASKBOARD_BIN value> - prints "<tb_check_installed exit>|<TB_BIN>".
 resolved_bin() {
@@ -196,15 +204,22 @@ readonly -f resolved_bin
 
 res="$(resolved_bin "$TMP/custom-bin/my-taskboard")"
 if [ "$res" = "0|$TMP/custom-bin/my-taskboard" ]; then
-  ok "6. tb_check_installed selects the binary TASKBOARD_BIN names"
+  ok "6. tb_check_installed selects the binary TASKBOARD_BIN names, ahead of the ../taskboard sibling"
 else
-  bad "6. TASKBOARD_BIN=$TMP/custom-bin/my-taskboard should be selected, got '$res'"
+  bad "6. TASKBOARD_BIN=$TMP/custom-bin/my-taskboard should be selected ahead of $TMP/taskboard/taskboard, got '$res'"
 fi
 res="$(resolved_bin "$TMP/custom-bin/absent-taskboard")"
 if [ "${res#*|}" != "$TMP/custom-bin/absent-taskboard" ]; then
   ok "6b. a TASKBOARD_BIN that names no executable is not selected"
 else
   bad "6b. a missing TASKBOARD_BIN was selected anyway: '$res'"
+fi
+res="$(resolved_bin "")"
+# The library does not normalise the path, so TB_BIN keeps the "../".
+if [ "$res" = "0|$TMP/real-repo/../taskboard/taskboard" ]; then
+  ok "6c. with TASKBOARD_BIN unset the planted ../taskboard sibling is selected (the precedence fixture is live)"
+else
+  bad "6c. the planted sibling $TMP/taskboard/taskboard should win when TASKBOARD_BIN is unset, got '$res'"
 fi
 
 echo

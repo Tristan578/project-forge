@@ -9,8 +9,8 @@
 # launcher, not a description of it.
 #
 # Hermetic: TASKBOARD_DB points into a temp dir and TASKBOARD_API at a locally
-# refused port, so no server is contacted, no binary is spawned, and the
-# runtime's own pre-spawn guard is what answers.
+# refused port (case 5: a file:// directory in the temp dir), so no server is
+# contacted, no binary is spawned, and the runtime's own guards are what answer.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER="$HERE/../taskboard-launch.mjs"
@@ -29,10 +29,12 @@ trap 'rm -rf "$TMP"' EXIT
 export PYTHONDONTWRITEBYTECODE=1
 
 # run_launcher <subcommand> [VAR=value ...] — prints "<exit>|<output>".
+# TASKBOARD_API defaults to a refused port; it precedes "$@" so a case can
+# override it (env applies assignments left to right, the last one wins).
 run_launcher() {
   local sub="$1" out rc
   shift
-  out="$(env "$@" TASKBOARD_API="http://127.0.0.1:0/api" node "$LAUNCHER" "$sub" 2>&1)"
+  out="$(env TASKBOARD_API="http://127.0.0.1:0/api" "$@" node "$LAUNCHER" "$sub" 2>&1)"
   rc=$?
   printf '%s|%s' "$rc" "$out"
 }
@@ -104,6 +106,33 @@ else
   else
     bad "4b. the refused init modified $populated"
   fi
+fi
+
+# ---- 5. a sqlite error reaches the operator as one [taskboard] line ---------
+#      taskboard_runtime.py's __main__ handler catches sqlite3.Error alongside
+#      RuntimeError/OSError. `doctor` against an API that answers (a file://
+#      directory serving a `projects` document) and a TASKBOARD_DB that is not
+#      a sqlite file makes verify_database()'s PRAGMA raise sqlite3.DatabaseError,
+#      which nothing below __main__ converts. Without that handler the operator
+#      gets a raw traceback. The "not a database" assertion proves the failure
+#      really came from sqlite, so the case cannot pass on some other refusal
+#      (a missing file, an unreachable API) that the handler already covered.
+api_dir="$TMP/file-api"
+mkdir -p "$api_dir" "$TMP/garbage"
+printf '[{"id":"p1"}]' > "$api_dir/projects"
+garbage="$TMP/garbage/taskboard.db"
+printf 'this is not a sqlite database, only enough bytes to fill a header.........................\n' > "$garbage"
+res="$(run_launcher doctor TASKBOARD_DB="$garbage" TASKBOARD_API="file://$api_dir")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" -eq 1 ] && grep -q '^\[taskboard\] ' <<<"$out" && grep -qF "not a database" <<<"$out"; then
+  ok "5. a sqlite3.Error in doctor exits 1 with a '[taskboard] ' line naming the sqlite failure"
+else
+  bad "5. expected exit 1 + a '[taskboard] ' line containing 'not a database', got exit $rc: $out"
+fi
+if ! grep -qF "Traceback" <<<"$out"; then
+  ok "5b. the sqlite failure is reported without a Python traceback"
+else
+  bad "5b. the sqlite failure escaped as a raw traceback: $out"
 fi
 
 echo
