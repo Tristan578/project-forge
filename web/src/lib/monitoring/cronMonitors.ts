@@ -3,16 +3,16 @@ import * as Sentry from '@sentry/nextjs';
 /**
  * Sentry cron (check-in) monitors for Vercel-scheduled routes.
  *
- * Each scheduled route declared under `crons` in `web/vercel.json` is mirrored
+ * Each scheduled route declared under `crons` in `web/vercel.ts` is mirrored
  * here so its handler can be wrapped in `Sentry.withMonitor()`. That tells
  * Sentry to expect a check-in on the given crontab schedule and to alert when a
  * run is missed, errors, or runs long — turning a silent cron failure (Vercel
  * cron failures are otherwise invisible) into a Sentry alert.
  *
- * SOURCE-OF-TRUTH: `web/vercel.json` is what Vercel actually schedules. This
- * registry is the runtime mirror of it; `cronMonitors.test.ts` asserts the two
- * stay in lockstep so adding a Vercel cron without a monitor (or vice versa)
- * fails CI rather than shipping an unmonitored job.
+ * SOURCE-OF-TRUTH: `web/vercel.ts` (`config.crons`) is what Vercel actually
+ * schedules. This registry is the runtime mirror of it; `cronMonitors.test.ts`
+ * asserts the two stay in lockstep so adding a Vercel cron without a monitor
+ * (or vice versa) fails CI rather than shipping an unmonitored job.
  *
  * GUARD: `withCronMonitor` no-ops (runs the handler directly, no check-in) when
  * `SENTRY_DSN` is absent — local dev, CI, and previews without Sentry behave
@@ -22,7 +22,7 @@ import * as Sentry from '@sentry/nextjs';
 export interface CronMonitor {
   /** Vercel cron `path` (e.g. `/api/cron/health-monitor`). */
   readonly path: string;
-  /** Crontab schedule expression (e.g. `*\/15 * * * *`). Mirrors vercel.json. */
+  /** Crontab schedule expression (e.g. `*\/15 * * * *`). Mirrors vercel.ts. */
   readonly schedule: string;
   /**
    * Stable Sentry monitor slug. Kebab-cased, deterministic, and decoupled from
@@ -32,7 +32,7 @@ export interface CronMonitor {
 }
 
 /**
- * The monitor registry. One entry per `crons[]` entry in `web/vercel.json`.
+ * The monitor registry. One entry per `crons[]` entry in `web/vercel.ts`.
  *
  * When you add a Vercel cron, add the matching entry here (the parity test will
  * remind you). Keep `slug` stable across renames — it is the Sentry dashboard
