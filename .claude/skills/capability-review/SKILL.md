@@ -59,7 +59,7 @@ Grouped by the domains the user cares about. This is the **opportunity** lens, n
 ### Infrastructure & Platform
 | Provider | We use | Look for |
 |----------|--------|----------|
-| **Vercel** | Functions, crons, preview deploys | Fluid Compute tuning, **Queues** (beta), **Sandbox**, **AI Gateway**, **BotID**, **Rolling Releases**, ISR, `vercel.ts` config, image optimization, edge config |
+| **Vercel** | Functions, crons, preview deploys, typed `vercel.ts` config | Fluid Compute tuning, **Queues** (beta), **Sandbox**, **AI Gateway**, **BotID**, **Rolling Releases**, ISR, image optimization, edge config |
 | **Cloudflare** | R2 (engine + assets), `engine-cdn` Worker | Workers AI, Vectorize, D1, Hyperdrive, Queues, Images, Cache Reserve, R2 event notifications |
 | **Upstash** | Redis (rate limiting) | **QStash** (durable queues/schedules), **Workflow**, **Vector**, **Search**, daily backups |
 | **Neon** | Postgres + Drizzle | DB **branching** for preview envs, autoscaling, read replicas, **Data API**, Neon Auth, scheduled backups |

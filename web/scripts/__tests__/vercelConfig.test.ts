@@ -7,10 +7,19 @@
  * TypeScript would happily accept a different (wrong) string, boolean, or
  * array here.
  *
- * Each assertion below was mutated (value flipped/altered) and confirmed to
- * turn this suite red before being restored — see the PR description.
+ * Mutation record — each mutation was applied to `web/vercel.ts` (or the
+ * tree), confirmed applied by diff, run against this suite, then restored:
+ * - installCommand: dropped `cd .. && `             -> install-command test red
+ * - git.deploymentEnabled: false -> true             -> git-deploys test red
+ * - framework: 'nextjs' -> 'other'                   -> framework/build test red
+ * - buildCommand: 'npm run build' -> 'next build'    -> framework/build test red
+ * - outputDirectory: '.next' -> 'out'                -> framework/build test red
+ * - regions: ['iad1'] -> ['sfo1']                    -> region test red
+ * - cron schedule: every 15 min -> every 5 min       -> cron test red
+ * - `import type` -> value `import`                  -> type-only-imports test red
+ * - created an empty web/vercel.json                 -> no-vercel.json test red
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
@@ -95,5 +104,16 @@ describe('vercel.ts config', () => {
     // walk is inspecting nothing and the assertion below proves nothing.
     expect(refs).toContainEqual({ specifier: '@vercel/config/v1', typeOnly: true });
     expect(refs.filter((r) => !r.typeOnly)).toEqual([]);
+  });
+
+  it('does not keep a web/vercel.json beside vercel.ts', () => {
+    // Vercel reads exactly ONE project config file (see the vercel.ts
+    // header). A vercel.json restored next to it breaks that invariant, and
+    // the pins above would no longer establish what a deploy is built with.
+    // Vacuity guard: the path must resolve to the directory that holds
+    // vercel.ts, or this existence check is looking in the wrong place.
+    const webRoot = join(__dirname, '../..');
+    expect(existsSync(join(webRoot, 'vercel.ts'))).toBe(true);
+    expect(existsSync(join(webRoot, 'vercel.json'))).toBe(false);
   });
 });
