@@ -263,6 +263,9 @@ assert_output "the gate script fires agentic" "scripts/check-codex-port.sh" agen
 assert_output "the gate's suite fires agentic" "scripts/__tests__/check-codex-port.test.sh" agentic true
 assert_output "the Copilot hook gate fires agentic" "scripts/check-copilot-hooks.sh" agentic true
 assert_output "the Copilot hook gate's suite fires agentic" "scripts/__tests__/check-copilot-hooks.test.sh" agentic true
+# .github/hooks/validation.json runs it, and the gate fails when a wired script
+# is missing: without this, renaming it merges green and breaks the next .github PR.
+assert_output "the script a Copilot hook file runs fires agentic" "scripts/copilot-arch-check.sh" agentic true
 assert_output ".mcp.json fires agentic (MCP parity)" ".mcp.json" agentic true
 assert_output "a hook SCRIPT the surface names fires agentic" ".claude/hooks/block-main-commits.sh" agentic true
 assert_output "a rule file the agents name fires agentic" ".claude/rules/lessons-learned.md" agentic true

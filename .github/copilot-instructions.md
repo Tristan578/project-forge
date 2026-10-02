@@ -30,16 +30,47 @@ cd engine && cargo build --target wasm32-unknown-unknown --release --features we
 
 Copilot CLI loads the repository's `.mcp.json`, the same file Claude Code uses, so
 there is nothing to copy. It reads it only after you confirm folder trust on the
-first launch in this checkout. Prompt mode (`-p`) loads them too once the
-folder is trusted. `GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP=true` loads them in
-an UNTRUSTED folder, which skips the trust check — `.mcp.json` runs commands, so
-set it per invocation and only in a checkout you trust, never globally. Servers such as `neon`,
-`sentry`, `stripe` and `upstash` need the credentials named in their `env` block
-(see `.env.local`). Copilot's documentation does not say whether it expands
-`${VAR}` inside `env` values. If one of those servers starts but cannot
-authenticate, define it in `~/.copilot/mcp-config.json` with the value set
-there. A user-level entry is overridden by a project entry of the same name, so
-give yours a different name.
+first launch in this checkout. Prompt mode (`copilot -p`) cannot show that
+prompt: it loads the servers if the folder is already trusted and skips them if
+it is not. `GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP=true` is a prompt-mode-only
+override that loads them in an untrusted folder anyway. `.mcp.json` runs
+commands, so set it per invocation and only in a checkout you trust, never
+globally. (Sources: github/docs `content/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers.md`
+and the environment-variable table in `content/copilot/reference/copilot-cli-reference/cli-command-reference.md`, at 0b8c768.)
+
+Servers such as `neon`, `sentry`, `stripe` and `upstash` need the credentials
+named in their `env` block. Those values are written as `${VAR}` references,
+and Copilot CLI expands `${VAR}` in a server's `env` from the environment of the
+`copilot` process (`cli-command-reference.md`: `env` "Supports `$VAR`, `${VAR}`,
+and `${VAR:-default}` expansion"; copilot-cli changelog 0.0.340: a value that is
+not a `${VAR}` reference is passed literally). Neither source says Copilot reads
+`.env.local`, so export the variables in the shell you launch `copilot` from.
+Never put a literal key in an MCP config file; a user-level entry in
+`~/.copilot/mcp-config.json` takes the same `${VAR}` form.
+
+## Hooks (Copilot CLI and cloud agent)
+
+Copilot CLI runs hooks from `.github/hooks/*.json` AND from the `hooks` block of
+`.claude/settings.json`, and when one event is wired in both it runs both
+(github/docs `content/copilot/reference/hooks-reference.md`, "Hooks locations",
+at 0b8c768). The Copilot cloud agent reads only `.github/hooks/*.json`. The
+ownership rule is therefore:
+
+- **Copilot CLI:** `.claude/settings.json` owns every event it wires — the same
+  entries Claude Code runs (`SessionStart`, `UserPromptSubmit`, `Stop`, `SessionEnd`, …).
+- **Cloud agent:** `.github/hooks/*.json` owns them, because it reads nothing else.
+
+So a `.github/hooks` handler that runs a script `.claude/settings.json` also
+wires to the same event is cloud-agent-only: a single `bash` field that starts
+with `[ -n "${COPILOT_AGENT_PROMPT+x}" ] || exit 0; `. The cloud agent sets
+`COPILOT_AGENT_PROMPT` for hook scripts ("Cloud agent execution environment" in
+the same reference); Copilot CLI's references do not list it as set, so the
+handler exits 0 there and each script runs once per event on each surface. If
+you export `COPILOT_AGENT_PROMPT` in a local shell, the CLI double run returns. The
+trade-off: a script added to only one of the two files runs on only one surface.
+`scripts/check-copilot-hooks.sh` (CI: Agentic Config Sync) fails a PR that wires
+a script to the same event in both files without that guard. It cannot see
+`.claude/settings.local.json` or your `~/.copilot` hooks.
 
 ## Architecture Rules
 

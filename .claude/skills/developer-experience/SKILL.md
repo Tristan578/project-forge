@@ -110,9 +110,9 @@ Sync skill and tool references across all IDE configuration files:
    node tools/agentic-sync/port.mjs --write
    ```
    Commit what it regenerates together with the source change.
-5. Verify consistency — both gates, which is what CI runs:
+5. Verify consistency — the three gates CI's Agentic Config Sync job runs:
    ```bash
-   bash scripts/check-agentic-sync.sh && bash scripts/check-codex-port.sh
+   bash scripts/check-agentic-sync.sh && bash scripts/check-codex-port.sh && bash scripts/check-copilot-hooks.sh
    ```
 
 ## When to Invoke This Skill

@@ -297,9 +297,10 @@ Claude Code also has three **subagents** (`.claude/agents/`):
 
 ```bash
 cd project-forge
-# Copilot reads .github/hooks/hooks.json and .github/copilot-instructions.md
+# Copilot reads .github/hooks/*.json and .github/copilot-instructions.md
+# (Copilot CLI also runs the hooks in .claude/settings.json)
 ```
-Hooks trigger on session start (pull), prompt submit (ticket gate), and post-tool-use (validate + push). Skills available in `.github/skills/` and `.agents/skills/`; manual sync is the `sync-pull` and `sync-push` skills.
+Hooks trigger on session start (pull), prompt submit (ticket gate), end of turn (`on-stop.sh`: worktree safety commit + GitHub sync), and post-tool-use (architecture check). Which file owns each event for Copilot CLI versus the cloud agent is in the Hooks section of `.github/copilot-instructions.md`. Skills available in `.github/skills/` and `.agents/skills/`; manual sync is the `sync-pull` and `sync-push` skills.
 
 </details>
 

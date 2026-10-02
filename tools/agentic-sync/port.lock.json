@@ -38,7 +38,7 @@
     ".agents/skills/design/references/design-principles.md": "1c30262ab6002336762d1063d2f0bb6e5fc2fe8234121f2a1190d7e4817e8119",
     ".agents/skills/design/references/spec-template.md": "aa017bcf23e50a9513c492072f4958a76901e211ebbe6a9e0b51d9d607c447b9",
     ".agents/skills/design/scripts/validate-spec.sh": "19fd7649f5aa8ea07764a4f10fbbd303f6880a2109d7a547e5675bb2f7608f4d",
-    ".agents/skills/developer-experience/SKILL.md": "e718526ecdcdd62de9dcc12f0d2517b5278821af120e3a61e719a0219a02159a",
+    ".agents/skills/developer-experience/SKILL.md": "5a2b2d227b0192afdeb42be134249ca1e823b4cac35d4fa00e622209cd2ffaac",
     ".agents/skills/developer-experience/references/dx-standards.md": "39240dbeccd7e5e8bbd1635464b2aae3e7c20f7a1d73f294908976fbb4e1468d",
     ".agents/skills/developer-experience/scripts/run-dx-audit.sh": "137977e833e71f8fdeb41f22e1c072ae781fc04d150225ce125daf44a7584882",
     ".agents/skills/dispatch-builder/SKILL.md": "9150a062b11de81993793252ac70984922278f9a45d7d8e4ffaa80e2a9b70054",
