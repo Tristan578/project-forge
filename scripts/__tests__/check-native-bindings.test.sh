@@ -233,7 +233,7 @@ ci.yml: build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey tes
 quality-gates.yml: test-web test-mcp editor-boot lighthouse-delta
 cd.yml: test-web test-mcp e2e
 '
-FLOOR_ROW_RE='^[A-Za-z0-9._-]+\.yml:([[:space:]]+[a-z][a-z0-9_-]*)+[[:space:]]*$'
+FLOOR_ROW_RE='^[A-Za-z0-9._-]+\.ya?ml:([[:space:]]+[a-z][a-z0-9_-]*)+[[:space:]]*$'
 
 # $1 = workflow file name; prints its floor jobs space-separated, or nothing.
 floor_jobs() {
@@ -253,7 +253,7 @@ if [ -z "$floor_rows" ]; then
 else
   while IFS= read -r floor_row; do
     if ! grep -qE "$FLOOR_ROW_RE" <<<"$floor_row"; then
-      fail "NATIVE_BINDING_FLOORS row '${floor_row}' is not '<workflow>.yml: <job> [<job> ...]' — an emptied or mistyped row unfloors its workflow"
+      fail "NATIVE_BINDING_FLOORS row '${floor_row}' is not '<workflow>.yml: <job> [<job> ...]' (or .yaml) — an emptied or mistyped row unfloors its workflow"
     fi
   done <<<"$floor_rows"
   floor_dupes="$(floored_workflows | sort | uniq -d)"
@@ -469,7 +469,7 @@ readonly -f native_binding_jobs
 # an invocation moving to the wrong job (or a job losing its invocation while
 # another keeps two) cannot cancel out in a whole-file count.
 job_wiring_defects() {
-  local job="$1" text job_block job_executable step_block run_count
+  local job="$1" text job_block job_executable step_block run_count job_before_gate
   text="$(cat)"
   job_block="$(awk -v j="  ${job}:" -v hdr="$JOB_HEADER_RE" '$0==j{f=1} f{print} f && $0 ~ hdr && $0!=j{exit}' <<<"$text")"
   if [ -z "$job_block" ]; then
@@ -508,6 +508,23 @@ job_wiring_defects() {
   fi
   if ! grep -qE '^[[:space:]]*run: bash scripts/check-native-bindings\.sh[[:space:]]*$' <<<"$step_block"; then
     echo "native-bindings step does not run 'bash scripts/check-native-bindings.sh' as its whole run: line — neutered, rewritten, or comment-suffixed"
+  fi
+
+  # A gate that runs is still useless in two more shapes, both of which passed
+  # every check above (test seat on #10296). An `if:` on the step can skip it
+  # (`if: false`, or any condition that comes out false) while the job goes on
+  # to load the binding — no gate step has a reason to be conditional, so any
+  # `if:` is refused. And a gate placed AFTER the first step that loads a
+  # binding runs too late: the drop has already surfaced there as the opaque
+  # SWC error or the silent vitest run the gate exists to replace. "Loads a
+  # binding" is the derivation itself, run over the job cut off just before
+  # the gate step, so the two cannot disagree about what a binding step is.
+  if grep -qE '^[[:space:]]*(- )?["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$step_block"; then
+    echo "native-bindings step carries an if: — a condition can skip the gate while the job still loads the binding"
+  fi
+  job_before_gate="$(awk '/^      - name:/ && index($0, "Assert native swc binding survived npm ci") {exit} {print}' <<<"$job_block")"
+  if grep -qxF "$job" <<<"$(native_binding_jobs <<<"$(printf 'jobs:\n%s\n' "$job_before_gate")")"; then
+    echo "native-bindings step runs AFTER a step that already loads a native binding — the drop surfaces there first, as the opaque failure the gate exists to replace"
   fi
 }
 readonly -f job_wiring_defects
@@ -649,15 +666,56 @@ load_controlled_workflow() {
 }
 readonly -f load_controlled_workflow
 
-# The sweep itself. Every *.yml under .github/workflows/ is read — the gh-aw
-# *.lock.yml compilations included, since they are workflows GitHub runs — and
-# each is graded against its floor (if any). Every floored workflow must be
-# present: a floor whose file is missing would otherwise never be evaluated,
-# and the derivation's self-test would vanish without a FAIL (lesson 9).
+# $1 = a workflows directory; prints every workflow file GitHub would run from
+# it, one path per line: *.yml AND *.yaml. GitHub reads both extensions, and
+# a *.yml-only glob let an ungated vitest job saved as zz-new.yaml sweep green
+# while the same job as zz-new.yml went red (test seat on #10296; precedent:
+# scripts/check-suite-wiring.sh).
+list_workflow_files() {
+  local dir="$1" f
+  for f in "$dir"/*.yml "$dir"/*.yaml; do
+    if [ -f "$f" ]; then printf '%s\n' "$f"; fi
+  done
+}
+readonly -f list_workflow_files
+
+# Hermetic: a .yaml workflow is enumerated, and an ungated vitest job in it is
+# graded red by the same assert_gate_wired the sweep uses (run in a subshell
+# so its expected FAIL is captured rather than counted).
+yaml_dir="$TMPDIR_T/yaml-workflows"
+mkdir -p "$yaml_dir"
+printf 'on: push\njobs:\n  gated:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm ci\n      - name: Assert native swc binding survived npm ci\n        run: bash scripts/check-native-bindings.sh\n      - run: npx vitest run\n' >"$yaml_dir/gated.yml"
+printf 'on: push\njobs:\n  zz-vitest:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm ci\n      - run: npx vitest run\n' >"$yaml_dir/zz-new.yaml"
+yaml_listed="$(list_workflow_files "$yaml_dir")"
+if grep -qxF "$yaml_dir/zz-new.yaml" <<<"$yaml_listed" && grep -qxF "$yaml_dir/gated.yml" <<<"$yaml_listed"; then
+  pass "workflow enumeration lists both *.yml and *.yaml"
+else
+  fail "workflow enumeration missed a file (got: ${yaml_listed:-nothing}) — a workflow GitHub runs would sit outside the sweep"
+fi
+yaml_graded=""
+while IFS= read -r wf_path; do
+  [ -n "$wf_path" ] || continue
+  yaml_graded="${yaml_graded}$(assert_gate_wired "$(cat "$wf_path")" "${wf_path##*/}")"$'\n'
+done <<<"$yaml_listed"
+if grep -qF 'FAIL: zz-new.yaml job zz-vitest loads a native binding but does not invoke' <<<"$yaml_graded"; then
+  pass "an ungated vitest job in a .yaml workflow is graded red"
+else
+  fail "an ungated vitest job in a .yaml workflow was not graded red (got: ${yaml_graded:-nothing})"
+fi
+if grep -qF 'FAIL: gated.yml' <<<"$yaml_graded"; then
+  fail "fixture: the gated .yml control was graded red — the .yaml case may be red for the wrong reason"
+fi
+
+# The sweep itself. Every *.yml and *.yaml under .github/workflows/ is read —
+# the gh-aw *.lock.yml compilations included, since they are workflows GitHub
+# runs — and each is graded against its floor (if any). Every floored workflow
+# must be present: a floor whose file is missing would otherwise never be
+# evaluated, and the derivation's self-test would vanish without a FAIL
+# (lesson 9).
 workflow_files=()
-for wf_path in "$WORKFLOWS_DIR"/*.yml; do
-  [ -f "$wf_path" ] && workflow_files+=("$wf_path")
-done
+while IFS= read -r wf_path; do
+  if [ -n "$wf_path" ]; then workflow_files+=("$wf_path"); fi
+done <<<"$(list_workflow_files "$WORKFLOWS_DIR")"
 floored_missing=0
 for wf_label in $(floored_workflows); do
   if [ ! -f "$WORKFLOWS_DIR/$wf_label" ]; then
