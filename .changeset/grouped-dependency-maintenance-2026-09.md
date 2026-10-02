@@ -5,4 +5,4 @@
 "@spawnforge/ui": patch
 ---
 
-Update runtime dependencies for Next.js, AI providers, authentication, storage, rate limiting, analytics, the database client, the MCP SDK, and documentation. Refresh related development and test tooling.
+Update runtime dependencies for AI providers, authentication, storage, rate limiting, analytics, the database client, the MCP SDK, and documentation. Refresh related development and test tooling.
