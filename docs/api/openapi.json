@@ -1923,7 +1923,8 @@
           },
           "400": { "description": "Missing jobId" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal)." }
         }
       }
     },
@@ -1990,7 +1991,8 @@
           },
           "400": { "description": "Missing jobId" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal)." }
         }
       }
     },
@@ -2200,7 +2202,8 @@
           "200": { "description": "Job status with equirectangular image URL in resultUrl", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationStatus" } } } },
           "400": { "description": "Missing jobId" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal)." }
         }
       }
     },
@@ -2250,7 +2253,8 @@
           "200": { "description": "Job status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationStatus" } } } },
           "400": { "description": "Missing jobId" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal)." }
         }
       }
     },

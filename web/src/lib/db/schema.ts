@@ -635,9 +635,10 @@ export const generationJobs = pgTable(
 // Binds a provider job id to the user whose request produced it. Written by
 // `createGenerationHandler` right after the provider returns the job id and
 // BEFORE the response reaches the client (see `lib/generate/jobOwnership.ts`).
-// Every `/api/generate/<type>/status` route resolves a PLATFORM provider key
-// by default, so without this table any signed-in caller could poll ANY
-// job id and read back another user's result. `generation_jobs` cannot serve
+// Every `/api/generate/<type>/status` route that resolves a provider key (all
+// but `music/status`, which resolves none) gets the PLATFORM key by default,
+// so without this table any signed-in caller could poll ANY job id and read
+// back another user's result. `generation_jobs` cannot serve
 // this purpose on its own: its rows are created by the CLIENT, fire-and-forget,
 // with a client-supplied `providerJobId` — a caller can claim someone else's
 // id, and the row can be missing or late relative to the first poll.

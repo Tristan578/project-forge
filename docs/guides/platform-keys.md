@@ -32,9 +32,10 @@ held tokens, `monthlyTokens > 0 || addonTokens > 0`). The tier gate is not an
 ownership check. That decision is `verifyProviderJobOwner` in
 `web/src/lib/generate/jobOwnership.ts` (#10262): every status route that
 resolves a key calls it after `panelTierGateResponseForPoll` and before
-`resolveApiKey`, and answers 404 for a `jobId` not bound to the caller, so the
-platform key is never resolved for another user's job (`music/status` is the
-exception noted above — it resolves nothing). A missing platform key still
+`resolveApiKey`, and answers 404 for a `jobId` not bound to the caller (or 503,
+retryable, when the ownership lookup itself fails), so the platform key is never
+resolved for another user's job (`music/status` is the exception noted above —
+it resolves nothing). A missing platform key still
 throws at that resolver call too. For a capability that can never be provisioned,
 three more layers keep it from reaching that point:
 

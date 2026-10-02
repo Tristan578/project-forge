@@ -205,20 +205,85 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
   // ownership extractor by default — see `jobIdForOwnership` in
   // createGenerationHandler.ts.
   describe('job ownership binding (#10262)', () => {
-    it('binds the resolved provider and extracted job id BEFORE the response is returned', async () => {
-      const callOrder: string[] = [];
+    /**
+     * Drive the handler with `bindProviderJob` held open on a test-controlled
+     * deferred, and report whether the handler's promise settled while the
+     * bind was still pending. The mock records COMPLETION, not invocation:
+     * `maybeBindJobOwnership` calls `bindProviderJob` synchronously before its
+     * first await, so an invocation marker reads 'bind' first even when the
+     * call is fire-and-forget (`void maybeBindJobOwnership(...)`) and the
+     * response leaves before the row exists.
+     */
+    async function runWithBindHeldOpen(handler: (req: NextRequest) => Promise<Response>) {
+      const events: string[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
       mockBindProviderJob.mockImplementation(async () => {
-        callOrder.push('bind');
+        events.push('bind-start');
+        await gate;
+        events.push('bind-complete');
       });
-      const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
-      callOrder.push('response-received');
+      let settled = false;
+      const pending = handler(makeRequest({ prompt: 'a castle' })).then((res) => {
+        settled = true;
+        events.push('response');
+        return res;
+      });
+      let settledWhileBindPending: boolean;
+      try {
+        await vi.waitFor(() => expect(events).toContain('bind-start'));
+        // Give the handler a bounded window to settle while the bind is held
+        // open. Its other dependencies resolve immediately, so a handler that
+        // does not await the bind settles well inside it; one that does cannot
+        // settle at all until `release()`. `waitFor` rejecting = never settled.
+        settledWhileBindPending = await vi
+          .waitFor(() => { if (!settled) throw new Error('not settled'); }, { timeout: 150, interval: 5 })
+          .then(() => true, () => false);
+      } finally {
+        // Always open the gate and restore an inert bind, so a failure here
+        // cannot leave a held promise behind for the next test to hang on.
+        release();
+        mockBindProviderJob.mockImplementation(async () => {});
+      }
+      const res = await pending;
+      return { res, events, settledWhileBindPending };
+    }
+
+    it('binds the resolved provider and extracted job id, and the response waits for the bind to COMPLETE', async () => {
+      const { res, events, settledWhileBindPending } = await runWithBindHeldOpen(makeAsyncHandler());
 
       expect(mockBindProviderJob).toHaveBeenCalledWith('user-1', 'elevenlabs', 'task-123');
-      // Awaited inline (never via after()), unlike the QStash publish above:
-      // the whole point is that the binding exists before the client can ever
-      // see the job id, so it must complete before this call returns at all.
-      expect(callOrder).toEqual(['bind', 'response-received']);
+      // Awaited inline (never via after() or `void`), unlike the QStash publish
+      // above: the binding must exist before the client can ever see the job
+      // id, because a poll can arrive the instant it does.
+      expect(settledWhileBindPending).toBe(false);
+      expect(events).toEqual(['bind-start', 'bind-complete', 'response']);
       expect(res.status).toBe(200);
+    });
+
+    it('cached path, cache MISS: binds before the response, and the response waits for the bind to COMPLETE', async () => {
+      mockCachedGenerate.mockImplementation(async (_op, _params, factory) => {
+        const result = await (factory as () => Promise<ModelResult>)();
+        return { cached: false, result };
+      });
+      const { res, events, settledWhileBindPending } = await runWithBindHeldOpen(makeCachedAsyncHandler());
+
+      expect(res.headers.get('X-Cache')).toBe('MISS');
+      expect(mockBindProviderJob).toHaveBeenCalledTimes(1);
+      expect(mockBindProviderJob).toHaveBeenCalledWith('user-1', 'elevenlabs', 'task-123');
+      expect(settledWhileBindPending).toBe(false);
+      expect(events).toEqual(['bind-start', 'bind-complete', 'response']);
+    });
+
+    it('cached path, cache HIT: binds nothing (no new provider job was issued)', async () => {
+      mockCachedGenerate.mockResolvedValue({
+        cached: true,
+        result: { jobId: 'task-123', provider: 'sdxl', status: 'pending' },
+      });
+      const res = await makeCachedAsyncHandler()(makeRequest({ prompt: 'a castle' }));
+
+      expect(res.headers.get('X-Cache')).toBe('HIT');
+      expect(mockBindProviderJob).not.toHaveBeenCalled();
     });
 
     it('does not bind when the extractor returns null (synchronous result — nothing to poll)', async () => {

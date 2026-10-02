@@ -40,8 +40,9 @@
  *   THIS IS NOT AN OWNERSHIP CHECK, and was never meant to be one — the poll
  *   gate narrows WHO can reach a status route; it does not decide WHICH jobs
  *   they may read. That decision belongs to `verifyProviderJobOwner`
- *   (`@/lib/generate/jobOwnership`, #10262), which every status route calls
- *   right after this gate and before resolving any provider key. Before that
+ *   (`@/lib/generate/jobOwnership`, #10262), which every status route that
+ *   resolves a provider key (all but `music/status`, which resolves none)
+ *   calls right after this gate and before resolving that key. Before that
  *   check existed, `resolveApiKey`'s zero-cost `STATUS_CHECK_OPERATION` skips
  *   its own tier and balance checks, so any account this gate admitted could
  *   poll an arbitrary job id on that route with the platform key — that gap
