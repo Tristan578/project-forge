@@ -266,6 +266,33 @@ describe('proxy auth decision (applyAuthDecision, real matcher)', () => {
     expect(redirectToSignIn).toHaveBeenCalledWith({ returnBackUrl: 'https://spawnforge.ai/dashboard' });
   });
 
+  // `?mcp=` is the MCP relay token (lib/mcp/bridgeOptIn.ts). Handing it to Clerk
+  // as returnBackUrl would copy a credential into the sign-in redirect URL.
+  it.each([
+    ['/editor/p1?mcp=secret-token&tab=scene', 'https://spawnforge.ai/editor/p1?tab=scene'],
+    ['/editor/p1?tab=scene&mcp=secret-token', 'https://spawnforge.ai/editor/p1?tab=scene'],
+    ['/editor/p1?mcp=secret-token', 'https://spawnforge.ai/editor/p1'],
+    ['/editor/p1?mcp=secret-token&mcp=secret-token-2', 'https://spawnforge.ai/editor/p1'],
+  ])('drops the mcp relay token from the sign-in return URL (%s)', async (path, expected) => {
+    redirectToSignIn.mockClear();
+    const res = await applyAuthDecision(unauthed, reqFor(path), isPublicRoute);
+    expect(res.status).toBe(307);
+    expect(redirectToSignIn).toHaveBeenCalledTimes(1);
+    const { returnBackUrl } = redirectToSignIn.mock.calls[0][0];
+    expect(returnBackUrl).toBe(expected);
+    expect(returnBackUrl).not.toContain('secret-token');
+  });
+
+  it('hands Clerk a return URL with no mcp token byte for byte, without re-serialising its query', async () => {
+    redirectToSignIn.mockClear();
+    // URLSearchParams would rewrite this query to `q=a+b&flag=`: proof the
+    // common case is passed through as-is rather than parsed and rebuilt.
+    await applyAuthDecision(unauthed, reqFor('/editor/p1?q=a%20b&flag'), isPublicRoute);
+    expect(redirectToSignIn).toHaveBeenCalledWith({
+      returnBackUrl: 'https://spawnforge.ai/editor/p1?q=a%20b&flag',
+    });
+  });
+
   it('redirects an authenticated user away from the landing page to the dashboard', async () => {
     const res = await applyAuthDecision(authed, reqFor('/'), isPublicRoute);
     expect(res.status).toBe(307);

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { loadPublishedGameMetadata } from '@/lib/play/gameMetadata';
 import { gameNotFoundResponse, gameUnavailableResponse } from '@/lib/play/notFoundDocument';
+import { stripNeverCarriedParams } from '@/lib/navigation/authRoutes';
 import {
   buildPlayContentSecurityPolicy,
   isPlayPath,
@@ -381,7 +382,8 @@ export async function applyAuthDecision(
       if (req.nextUrl.pathname.startsWith('/api/')) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
-      return redirectToSignIn({ returnBackUrl: req.url });
+      // The MCP relay token (`?mcp=`) is not carried into the sign-in flow.
+      return redirectToSignIn({ returnBackUrl: stripNeverCarriedParams(req.url) });
     }
   }
 

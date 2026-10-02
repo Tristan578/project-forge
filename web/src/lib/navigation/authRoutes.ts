@@ -20,8 +20,23 @@ const PROBE_ORIGIN = 'https://return-path.invalid';
 const NEVER_CARRIED_PARAMS = ['mcp'];
 
 /**
- * Sign-in that returns to `returnTo` afterwards, the way `proxy.ts` does with
- * `returnBackUrl` and the play page's links do with `redirect_url`.
+ * `absoluteUrl` with every never-carried parameter removed, for a return URL
+ * handed to the auth flow whole rather than through
+ * {@link signInHrefReturningTo}: `proxy.ts` passes the request URL to Clerk as
+ * `returnBackUrl`. A URL that carries none of them comes back unchanged, byte
+ * for byte, so the common case is not re-serialised.
+ */
+export function stripNeverCarriedParams(absoluteUrl: string): string {
+  const url = new URL(absoluteUrl);
+  if (!NEVER_CARRIED_PARAMS.some((param) => url.searchParams.has(param))) return absoluteUrl;
+  for (const param of NEVER_CARRIED_PARAMS) url.searchParams.delete(param);
+  return url.href;
+}
+
+/**
+ * Sign-in that returns to `returnTo` afterwards, as `redirect_url`: the in-app
+ * counterpart of the `returnBackUrl` that `proxy.ts` hands Clerk. Every in-app
+ * sign-in link with a return path is built here, the play page's included.
  *
  * Only a path that stays on this origin is carried, decided the way a browser
  * decides it: the value is resolved with the URL parser, which treats `\` as
