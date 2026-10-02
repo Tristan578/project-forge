@@ -115,16 +115,16 @@ describe('sceneSlice', () => {
       else expect(store.getState().sceneLoadError).toEqual(prior);
     });
 
-    // #10267: the engine's `error` names the field a scene failed on
-    // (`Invalid scene file: … attenuationDistance must be …`). It used to be
+    // #10267: the engine's `error` says what a scene failed on. It used to be
     // discarded at `dispatchSceneLoad`, leaving the person with only the
-    // constant sentence; the lockout reason now carries it.
-    it('records the engine\'s own error in the rejection lockout reason', () => {
-      const engineError = 'Invalid scene file: attenuationDistance must be null or a finite, non-negative number, got -1 at line 1 column 900';
+    // constant sentence; the lockout reason now carries it, in plain words
+    // (no repeated `Invalid scene file:` prefix, no serde line/column).
+    it('records the engine\'s own error, in plain words, in the rejection lockout reason', () => {
+      const engineError = 'Invalid scene file: invalid type: string "x", expected f32 at line 1 column 900';
       setSceneDispatcher(vi.fn(() => ({ success: false, error: engineError })));
       expect(store.getState().loadScene(JSON.stringify(sceneFixture('Bad material')))).toBe(false);
       expect(store.getState().sceneLoadError?.reason).toBe(
-        `This scene could not be opened: the engine refused to load it. ${engineError}`,
+        'This scene could not be opened: the engine refused to load it. Details: Invalid type: string "x", expected f32.',
       );
       // Still a clean REJECTION, not a throw: a later recovery must not treat
       // the viewport as wrecked because a reason was appended.
@@ -141,9 +141,11 @@ describe('sceneSlice', () => {
       setSceneDispatcher(vi.fn(() => ({ success: false, error: hostile })));
       expect(store.getState().loadScene(JSON.stringify(sceneFixture('Hostile')))).toBe(false);
       const reason = store.getState().sceneLoadError?.reason ?? '';
-      const prefix = 'This scene could not be opened: the engine refused to load it. ';
-      expect(reason.length).toBe(prefix.length + MAX_ENGINE_ERROR_CHARS);
-      expect(reason.startsWith(`${prefix}Invalid scene file: invalid type: string "AAAA`)).toBe(true);
+      // The bound applies to the engine's raw text; the plain rendering then
+      // drops its 20-character `Invalid scene file: ` prefix.
+      const prefix = 'This scene could not be opened: the engine refused to load it. Details: ';
+      expect(reason.length).toBe(prefix.length + MAX_ENGINE_ERROR_CHARS - 'Invalid scene file: '.length);
+      expect(reason.startsWith(`${prefix}Invalid type: string "AAAA`)).toBe(true);
       expect(reason.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
     });
 
@@ -170,7 +172,8 @@ describe('sceneSlice', () => {
 
     it('hands the engine\'s validate_scene error to the scene validator', async () => {
       const { validateSceneFile } = await import('@/lib/scenes/sceneValidation');
-      const engineError = 'Invalid scene file: attenuationDistance must be null or a finite, non-negative number, got -1';
+      // Raw, position included: this is what the AI validate_scene tool relays.
+      const engineError = 'Invalid scene file: missing field `entities` at line 1 column 2';
       setSceneDispatcher(vi.fn((command: string) =>
         command === 'validate_scene' ? { success: false, error: engineError } : { success: true }));
       expect(validateSceneFile(sceneFixture('Bad material'))).toEqual({ valid: false, reason: engineError });

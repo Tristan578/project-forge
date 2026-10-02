@@ -39,6 +39,25 @@ describe('SceneLoadErrorNotice', () => {
     expect(alert.textContent).toContain('Saving is turned off');
   });
 
+  it('wraps a long unbroken token in the reason instead of overflowing the notice', () => {
+    // An engine refusal can quote a scene value verbatim (bounded at 512
+    // characters upstream), and a 500-character token with no break point
+    // would otherwise push the alert past its max-width. jsdom has no layout,
+    // so this pins the two properties that make wrapping possible: the
+    // reason wraps anywhere a word cannot (`break-words`), and neither it nor
+    // its flex-item column refuses to shrink below its content (`min-w-0`).
+    const token = 'A'.repeat(500);
+    mockEditorStore({ reason: `This scene could not be opened: the engine refused to load it. Details: ${token}`, at: 1 });
+
+    render(<SceneLoadErrorNotice />);
+
+    const reason = screen.getByTestId('scene-load-error-reason');
+    expect(reason.textContent).toContain(token);
+    expect(reason.classList.contains('break-words')).toBe(true);
+    expect(reason.classList.contains('min-w-0')).toBe(true);
+    expect(reason.parentElement?.classList.contains('min-w-0')).toBe(true);
+  });
+
   it('renders nothing when no scene load was rejected', () => {
     // Includes the healthy cold open, where `loadScene` returns false purely
     // because the engine dispatcher has not mounted yet. Gating on that boolean

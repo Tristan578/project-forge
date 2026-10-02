@@ -56,9 +56,10 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       return { success: false, error: 'Scene JSON is malformed.' };
     }
     if (verdict.valid) return { success: true, result: { valid: true } };
-    // The engine's reason names the field that failed (e.g. `Invalid scene
-    // file: … attenuationDistance must be …`) — relaying it is what lets the
-    // assistant fix the scene rather than guess (#10267).
+    // The engine's reason names what failed (e.g. `Invalid scene file:
+    // missing field `entities` at line 1 column 2`) — relayed RAW, position
+    // included, because that is what lets the assistant fix the scene rather
+    // than guess (#10267). Creator-facing surfaces use `describeSceneRefusal`.
     return {
       success: false,
       error: verdict.reason

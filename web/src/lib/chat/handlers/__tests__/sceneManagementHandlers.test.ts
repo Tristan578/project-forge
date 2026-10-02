@@ -1333,7 +1333,8 @@ describe('validate_scene', () => {
   it('relays the engine\'s own reason so the assistant can see which field failed (#10267)', async () => {
     // The engine names the field it refused; the tool result must carry that
     // text through, not collapse it to a generic sentence.
-    const reason = 'Invalid scene file: attenuationDistance must be null or a finite, non-negative number, got -1 at line 1 column 900';
+    // Raw, serde position included: the assistant needs it to repair the scene.
+    const reason = 'Invalid scene file: invalid type: string "x", expected f32 at line 1 column 900';
     setSceneValidator(() => ({ valid: false, reason }));
     const { result } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json: JSON.stringify(emptySceneFile('Refused')) });
     expect(result).toEqual({ success: false, error: `Scene validation failed: ${reason}` });

@@ -6,7 +6,7 @@ import { CURRENT_FORMAT_VERSION } from '@/lib/sceneFile';
 
 /**
  * The engine decoder's verdict. `reason` is the engine's own error text
- * (e.g. `Invalid scene file: … attenuationDistance must be …`), or `null`
+ * (e.g. `Invalid scene file: missing field … at line 1 column 2`), or `null`
  * when the engine refused without saying why, was unavailable, or threw —
  * so a caller can show the person WHAT was wrong instead of a constant.
  */
@@ -94,8 +94,10 @@ export function isValidSceneFile(value: unknown): boolean {
  * @returns `{ valid: true }`, or `{ valid: false, reason }` where `reason` is the engine's error text (or `ENVELOPE_REFUSAL` when the browser-side envelope check failed first), and `null` only when no decoder is attached or it threw.
  */
 export function validateSceneFile(value: unknown): SceneValidation {
-  // A failed envelope is a real refusal with a real reason — never confuse it
-  // with "no decoder attached", which is the only thing `null` means.
+  // A failed envelope check is a real refusal with a real reason — never
+  // confuse it with "no decoder attached or it threw", which is all `null`
+  // means here (the attached validator itself may also answer `null` when
+  // the engine refused without saying why).
   if (!isSceneFileEnvelope(value)) return { valid: false, reason: ENVELOPE_REFUSAL };
   if (!engineValidator) return { valid: false, reason: null };
   try {
@@ -105,9 +107,44 @@ export function validateSceneFile(value: unknown): SceneValidation {
   }
 }
 
-/** The browser-side envelope check's reason; the engine's own decoder never ran. */
+/**
+ * The browser-side check's reason when a scene's required top-level parts are
+ * missing or malformed; the engine's own decoder never ran. Raw text, kept as
+ * is for the AI `validate_scene` tool; a creator reads
+ * {@link describeSceneRefusal}'s rendering of it instead.
+ */
 export const ENVELOPE_REFUSAL =
-  'Invalid scene file: the envelope (formatVersion, metadata, environment, ambientLight, entities with finite transforms) is missing or malformed';
+  'Invalid scene file: a required part (formatVersion, metadata, environment, ambientLight, or entities with finite transforms) is missing or malformed';
+
+/** What a creator reads in place of {@link ENVELOPE_REFUSAL}. */
+export const ENVELOPE_REFUSAL_FOR_CREATORS = 'The scene file is incomplete or damaged.';
+
+/** The engine's own prefix; the sentence a creator reads already says the scene failed. */
+const ENGINE_REFUSAL_PREFIX = /^(?:Invalid scene file:\s*)+/;
+/** serde_json's position suffix, which points into JSON nobody edits by hand. */
+const SERDE_POSITION_SUFFIX = /\s+at line \d+ column \d+$/;
+
+/**
+ * Turn an engine or envelope refusal into the text a creator reads.
+ *
+ * Drops the `Invalid scene file:` prefix (the surrounding sentence already
+ * says the scene could not be opened, so keeping it repeats that) and serde's
+ * trailing `at line N column M`, replaces the browser-side envelope refusal
+ * with plain words, and returns one sentence that starts with a capital and
+ * ends with punctuation, so callers can append a next step after it. Only for
+ * text shown to a person: the AI `validate_scene` tool relays the raw reason,
+ * which is what it needs to repair the scene.
+ *
+ * @param reason Raw refusal text, already bounded by {@link boundEngineError}.
+ * @returns Creator-facing text for the same refusal.
+ */
+export function describeSceneRefusal(reason: string): string {
+  if (reason === ENVELOPE_REFUSAL) return ENVELOPE_REFUSAL_FOR_CREATORS;
+  const text = reason.replace(ENGINE_REFUSAL_PREFIX, '').replace(SERDE_POSITION_SUFFIX, '').trim();
+  if (!text) return 'The engine gave no further detail.';
+  const sentence = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?\]]$/.test(sentence) ? sentence : `${sentence}.`;
+}
 
 /** Produce an empty scene using the same required fields as the engine.
  *

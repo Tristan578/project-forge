@@ -27,7 +27,7 @@ import {
 } from '@/lib/scenes/sceneManager';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
-import { boundEngineError, emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
+import { boundEngineError, describeSceneRefusal, emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
 import { applyCheckpointScene, captureCheckpointScene } from '@/lib/scenes/checkpointRecovery';
 import {
   loadPrefabInstances,
@@ -779,9 +779,9 @@ function dispatchSceneLoad(
     if (response?.success === false) {
       rollbackAudio();
       rollbackMode();
-      // The engine's `error` names what it refused (`Invalid scene file: …
-      // attenuationDistance must be …`); it is the only place that text
-      // exists, so it rides along for the lockout reason (#10267) — bounded,
+      // The engine's `error` says what it refused (`Invalid scene file: …
+      // missing field …`); it is the only place that text exists, so it
+      // rides along for the lockout reason (#10267) — bounded,
       // because serde_json embeds the whole offending value and a remixed
       // scene is a stranger's input; the field-naming head is what survives.
       return { accepted: false, error: response.error == null ? null : boundEngineError(response.error) };
@@ -799,13 +799,15 @@ type SceneLoadOutcome = { accepted: true } | { accepted: false; error: string | 
 
 /**
  * The lockout reason for a clean `{ success: false }` rejection: the constant
- * sentence, followed by the engine's own error when it gave one — so the
- * person reads WHICH field the scene failed on, not only that it failed.
- * `isEngineLoadThrewLockout` keys on the THREW prefix, so appending here
- * cannot be mistaken for a throw.
+ * sentence, followed by the engine's reason when it gave one, in the plain
+ * form `describeSceneRefusal` produces (no repeated `Invalid scene file:`
+ * prefix, no serde line/column) — so the person reads WHAT the scene failed
+ * on, not only that it failed. The notice that shows this carries the next
+ * step (reload, or start a new scene). `isEngineLoadThrewLockout` keys on the
+ * THREW prefix, so appending here cannot be mistaken for a throw.
  */
 function engineLoadRejectionReason(error: string | null): string {
-  return error ? `${ENGINE_LOAD_REJECTION} ${error}` : ENGINE_LOAD_REJECTION;
+  return error ? `${ENGINE_LOAD_REJECTION} Details: ${describeSceneRefusal(error)}` : ENGINE_LOAD_REJECTION;
 }
 
 /**

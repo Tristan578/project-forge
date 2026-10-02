@@ -29,24 +29,28 @@ fn default_attenuation_color() -> [f32; 3] { [1.0, 1.0, 1.0] }
 /// rejected every scene carrying a default (untouched) material with
 /// `invalid type: null, expected f32`, and nothing mapped the default back.
 ///
-/// Accepted inputs, and nothing else:
+/// What it reads:
 /// - `null` → `f32::INFINITY`: the on-disk spelling of the default, both
-///   before and after this fix. The wire format is deliberately UNCHANGED, so
-///   this introduces NO NEW incompatibility in either direction: every scene
-///   saved before the fix loads here, finite values load on both engines,
-///   and a rolled-back engine (or a lagging CDN prefix) fails on a
-///   default-material scene exactly as it always failed on its own output —
-///   it never loaded those, and nothing written here makes that worse.
+///   before and after this fix. The wire format is deliberately UNCHANGED.
+///   A rolled-back engine (or a lagging CDN prefix) still refuses a
+///   default-material scene, exactly as it always refused its own output;
+///   nothing written here makes that worse, and nothing here fixes it there.
 /// - a finite, non-negative JSON number, integer- or float-formatted (`5`
-///   and `5.0` are different `serde_json` number variants; both must work).
+///   and `5.0` are different `serde_json` number variants; both must work),
+///   kept as written.
+/// - any OTHER number — negative, or non-finite once narrowed to `f32` (e.g.
+///   `1e300`) — loads as the default, `f32::INFINITY`, with a warning. This
+///   is TOLERANT on purpose: before #10267 the derived `f32` deserializer
+///   loaded these verbatim and `update_material` stored them unchecked, so
+///   scenes carrying them exist. Refusing them here would lock a creator out
+///   of a scene that opened yesterday. The default is the one value whose
+///   meaning ("no attenuation") is well defined; a negative distance has none.
 ///
-/// A negative number, or one that is non-finite once narrowed to `f32` (e.g.
-/// `1e300`), is rejected with a clear error — the same rule
-/// `parse_scene_file` applies to transforms. No string sentinel
-/// (`"Infinity"`, `"-Infinity"`, `"NaN"`) is recognised: scene JSON crosses
-/// the remix / published-play trust boundary, nothing produces those
-/// spellings, and a distance has no meaningful `-Infinity` or `NaN`, so
-/// accepting them would only widen the input domain.
+/// Anything that is not a number or `null` is still refused, as it always
+/// was. No string sentinel (`"Infinity"`, `"-Infinity"`, `"NaN"`) is
+/// recognised: scene JSON crosses the remix / published-play trust boundary,
+/// nothing produces those spellings, and accepting them would only widen the
+/// input domain.
 ///
 /// `Serialize` stays derived on purpose. `null` remains the encoding of
 /// `+Infinity`, which is also what the live `MATERIAL_CHANGED` /
@@ -54,40 +58,45 @@ fn default_attenuation_color() -> [f32; 3] { [1.0, 1.0, 1.0] }
 /// `attenuationDistance: number | null` — this attribute changes only what
 /// the struct ACCEPTS, never what it emits.
 ///
-/// The predicate is [`is_valid_attenuation_distance`], shared with the live
-/// `update_material` command so the domain the engine accepts live is the
-/// domain a saved scene reloads — a value this deserializer refuses must
-/// never have been writable in the first place.
+/// The live `update_material` command stays STRICT about numbers (it refuses
+/// anything [`is_valid_attenuation_distance`] refuses), so nothing written
+/// from now on is a value this function would have to replace on reload.
 fn deserialize_attenuation_distance<'de, D>(deserializer: D) -> Result<f32, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    match Option::<f32>::deserialize(deserializer)? {
-        None => Ok(f32::INFINITY),
-        Some(value) if is_valid_attenuation_distance(value) => Ok(value),
-        Some(value) => Err(serde::de::Error::custom(invalid_attenuation_distance(
-            value,
-        ))),
-    }
+    Ok(match Option::<f32>::deserialize(deserializer)? {
+        None => f32::INFINITY,
+        Some(value) => attenuation_distance_on_load(value),
+    })
 }
 
-/// The ONE definition of an EXPLICIT `attenuation_distance` number the engine
-/// accepts: finite and non-negative. The default, `f32::INFINITY` ("no
-/// attenuation"), is reachable only by OMISSION — a `null`/missing key in a
-/// scene file, an absent field on `update_material` — never as a number, so
-/// a value that narrows to `inf` (JSON `1e300`, a JS `Infinity`) fails here
-/// too. The scene-file deserializer and the `update_material` command share
-/// this predicate rather than each restating the rule (#10267): a value that
-/// fails it is refused at BOTH boundaries, because the loader cannot reload
-/// what the live path would otherwise persist.
+/// The loader's reading of an explicit `attenuationDistance` number: the value
+/// itself when [`is_valid_attenuation_distance`] accepts it, otherwise the
+/// default `f32::INFINITY`, with a warning naming the replaced value.
+fn attenuation_distance_on_load(value: f32) -> f32 {
+    if is_valid_attenuation_distance(value) {
+        return value;
+    }
+    tracing::warn!(
+        "Scene material attenuationDistance {} is not a finite number >= 0; loading it as infinity (no attenuation)",
+        value
+    );
+    f32::INFINITY
+}
+
+/// The ONE definition of an explicit `attenuation_distance` NUMBER the engine
+/// keeps as written: finite and non-negative. The default, `f32::INFINITY`
+/// ("no attenuation"), is never spelled as a number — it is `null` in a scene
+/// file and `null` on `update_material` — so a value that narrows to `inf`
+/// (JSON `1e300`, a JS `Infinity`) fails here too.
+///
+/// Shared by both boundaries (#10267), which differ only in what they do with
+/// a failure: `update_material` refuses it (nothing new gets written), and the
+/// scene loader replaces it with the default (nothing already saved is locked
+/// out) — see [`attenuation_distance_on_load`].
 pub(crate) fn is_valid_attenuation_distance(value: f32) -> bool {
     value.is_finite() && value >= 0.0
-}
-
-/// The error both boundaries report for a value `is_valid_attenuation_distance`
-/// refuses. Names the field so the person (or model) that sent it can find it.
-pub(crate) fn invalid_attenuation_distance(value: f32) -> String {
-    format!("attenuationDistance must be null or a finite, non-negative number, got {value}")
 }
 
 /// Serializable parallax mapping method (mirror of Bevy's `ParallaxMappingMethod`).
@@ -182,7 +191,8 @@ pub struct MaterialData {
     pub thickness: f32,
     // Defaults to `f32::INFINITY`, which the derived `Serialize` writes as
     // `null`. `default = ...` covers a MISSING key; `deserialize_with` is what
-    // reads that `null` (or a finite, non-negative number) back — see
+    // reads that `null` back as infinity, keeps a finite non-negative number,
+    // and loads any other number as infinity with a warning — see
     // `deserialize_attenuation_distance` (#10267). Serialize is left derived so
     // the on-disk `.forge` shape and the live `MATERIAL_CHANGED` /
     // `QUERY_ENTITY_DETAILS` contract (`number | null`) are unchanged.
@@ -395,9 +405,10 @@ mod attenuation_distance_serde_tests {
     #[test]
     fn default_material_serializes_attenuation_distance_as_null() {
         // Pinned on purpose: `null` is what every scene saved before #10267
-        // holds, what a rolled-back engine still accepts, and what the live
-        // MATERIAL_CHANGED / QUERY_ENTITY_DETAILS contract (`number | null`)
-        // expects. Re-attaching a `serialize_with` would turn this red.
+        // holds and what the live MATERIAL_CHANGED / QUERY_ENTITY_DETAILS
+        // contract (`number | null`) expects. (A rolled-back engine still
+        // refuses it, as it always refused its own output.) Re-attaching a
+        // `serialize_with` would turn this red.
         let json = serde_json::to_string(&MaterialData::default()).expect("serialize default");
         assert!(json.contains(NULL_FIELD), "{json}");
     }
@@ -457,38 +468,67 @@ mod attenuation_distance_serde_tests {
         );
     }
 
-    // --- Rejected inputs: null or a finite non-negative number, nothing else ---
+    // --- Tolerated on load: a number the live command refuses loads as the default ---
+    //
+    // Before #10267 the derived `f32` deserializer loaded these verbatim and
+    // `update_material` stored them unchecked, so saved scenes can carry them.
+    // Refusing them would lock a creator out of a scene that used to open.
 
-    fn assert_rejected(literal: &str) {
-        let error = attenuation_from(&default_material_json_with(literal))
-            .expect_err(&format!("attenuationDistance {literal} must be rejected"));
-        assert!(
-            error.to_string().contains("attenuationDistance"),
-            "the error must name the field so a scene author can find it: {error}"
+    #[test]
+    fn negative_number_loads_as_infinity() {
+        for literal in ["-1", "-0.5"] {
+            assert_eq!(
+                attenuation_from(&default_material_json_with(literal)).unwrap_or_else(|e| panic!(
+                    "attenuationDistance {literal} must still load: {e}"
+                )),
+                f32::INFINITY,
+                "{literal}"
+            );
+        }
+    }
+
+    #[test]
+    fn number_that_overflows_f32_loads_as_infinity() {
+        // `1e300` is a legal JSON number and a legal f64, but narrows to
+        // `+inf` as f32. It loads as the default rather than locking the
+        // scene out; the live command still refuses it (commands/material.rs).
+        assert_eq!(
+            attenuation_from(&default_material_json_with("1e300")).unwrap(),
+            f32::INFINITY
         );
     }
 
     #[test]
-    fn negative_number_is_rejected() {
-        // Same rule `parse_scene_file` applies to transforms: a distance is
-        // never negative, and nothing in the product produces one.
-        assert_rejected("-1");
-        assert_rejected("-0.5");
+    fn load_reading_keeps_valid_numbers_and_replaces_the_rest() {
+        // The predicate split, pinned directly: what the live command accepts
+        // is kept as written, what it refuses becomes the default.
+        for value in [0.0_f32, 4.5, 10.0, f32::MAX] {
+            assert!(is_valid_attenuation_distance(value), "{value}");
+            assert_eq!(attenuation_distance_on_load(value), value);
+        }
+        for value in [
+            -1.0_f32,
+            -0.0001,
+            f32::NEG_INFINITY,
+            f32::INFINITY,
+            f32::NAN,
+        ] {
+            assert!(!is_valid_attenuation_distance(value), "{value}");
+            assert_eq!(
+                attenuation_distance_on_load(value),
+                f32::INFINITY,
+                "{value}"
+            );
+        }
     }
 
-    #[test]
-    fn number_that_overflows_f32_is_rejected() {
-        // `1e300` is a legal JSON number and a legal f64, but narrows to
-        // `+inf` as f32 — the only spelling of infinity this field accepts
-        // is `null`, so a value that only becomes non-finite on narrowing is
-        // refused rather than silently promoted to the default.
-        assert_rejected("1e300");
-    }
+    // --- Still refused: anything that is not a number or null ---
 
     #[test]
     fn string_sentinels_are_rejected() {
         // Nothing writes these, and scene JSON crosses the remix /
-        // published-play trust boundary — no domain widening.
+        // published-play trust boundary — no domain widening. The derived
+        // `f32` deserializer refused them before #10267 too.
         for literal in ["\"Infinity\"", "\"-Infinity\"", "\"NaN\"", "\"10\""] {
             let error = attenuation_from(&default_material_json_with(literal))
                 .expect_err(&format!("attenuationDistance {literal} must be rejected"));

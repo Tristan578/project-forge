@@ -438,25 +438,32 @@ mod validation_tests {
         }
 
         #[test]
-        fn negative_attenuation_distance_is_rejected() {
-            // Consistent with "Scene transforms must contain finite numbers":
-            // a scene is refused up front, with the field named, rather than
-            // loaded with a value the renderer cannot mean anything by.
-            let error = parse_scene_file(&default_scene_json_with("-1"))
-                .expect_err("a negative attenuationDistance must be rejected");
-            assert!(error.starts_with("Invalid scene file:"), "{error}");
-            assert!(error.contains("attenuationDistance"), "{error}");
+        fn legacy_negative_or_overflowing_attenuation_distance_loads_as_infinity() {
+            // Before #10267 the engine loaded these verbatim, and
+            // update_material stored them unchecked, so saved scenes can
+            // carry them. Refusing them now would lock a creator out of a
+            // scene that used to open, so the loader reads them as the
+            // default instead (with a warning). `1e300` is finite as f64 but
+            // `+inf` as f32.
+            for literal in ["-1", "-0.5", "1e300"] {
+                let parsed =
+                    parse_scene_file(&default_scene_json_with(literal)).unwrap_or_else(|e| {
+                        panic!("attenuationDistance {literal} must still load: {e}")
+                    });
+                assert_eq!(attenuation_of(&parsed, 0), f32::INFINITY, "{literal}");
+            }
         }
 
         #[test]
-        fn non_finite_and_string_spellings_are_rejected() {
-            // `null` is the ONLY spelling of infinity. `1e300` is finite as
-            // f64 but `+inf` as f32; the string sentinels are never produced
+        fn string_spellings_are_rejected() {
+            // `null` is the ONLY spelling of infinity. The string sentinels
+            // are never produced, the engine refused them before #10267 too,
             // and scene JSON crosses the remix / published-play trust
             // boundary, so none of them may load.
-            for literal in ["1e300", "\"Infinity\"", "\"-Infinity\"", "\"NaN\""] {
-                parse_scene_file(&default_scene_json_with(literal))
+            for literal in ["\"Infinity\"", "\"-Infinity\"", "\"NaN\""] {
+                let error = parse_scene_file(&default_scene_json_with(literal))
                     .expect_err(&format!("attenuationDistance {literal} must be rejected"));
+                assert!(error.starts_with("Invalid scene file:"), "{error}");
             }
         }
 

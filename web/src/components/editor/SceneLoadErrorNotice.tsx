@@ -28,8 +28,11 @@ export function SceneLoadErrorNotice() {
         size={18}
         aria-hidden="true"
       />
-      <div className="flex flex-col gap-2">
-        <p>{sceneLoadError.reason}</p>
+      {/* `min-w-0` lets this column shrink inside the flex row, and
+          `break-words` wraps an unbroken token in the reason (an engine
+          refusal can quote a long scene value) instead of overflowing. */}
+      <div className="flex min-w-0 flex-col gap-2">
+        <p className="min-w-0 break-words" data-testid="scene-load-error-reason">{sceneLoadError.reason}</p>
         <p className="text-[var(--sf-text-secondary)]">
           Saving is turned off because the viewport may be incomplete or corrupted.
           Your stored scene is protected. Reload to try again, or start a new scene to re-enable saving.

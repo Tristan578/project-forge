@@ -8,8 +8,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   boundEngineError,
+  describeSceneRefusal,
   ENGINE_ERROR_TRUNCATED,
   ENVELOPE_REFUSAL,
+  ENVELOPE_REFUSAL_FOR_CREATORS,
   MAX_ENGINE_ERROR_CHARS,
   emptySceneFile,
   setSceneValidator,
@@ -25,7 +27,7 @@ function hostileRefusal(kib: number): string {
 
 describe('boundEngineError', () => {
   it('returns short text unchanged, without a marker', () => {
-    const short = 'Invalid scene file: attenuationDistance must be null or a finite, non-negative number, got -1';
+    const short = 'Invalid scene file: missing field `entities` at line 1 column 2';
     expect(boundEngineError(short)).toBe(short);
   });
 
@@ -58,6 +60,40 @@ describe('boundEngineError', () => {
     const last = head.charCodeAt(head.length - 1);
     expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
     expect(head).toBe('a'.repeat(headLength - 1));
+  });
+});
+
+describe('describeSceneRefusal', () => {
+  it('drops the engine prefix and serde position, and ends the sentence', () => {
+    expect(describeSceneRefusal('Invalid scene file: invalid type: string "x", expected f32 at line 1 column 900'))
+      .toBe('Invalid type: string "x", expected f32.');
+  });
+
+  it('drops a repeated prefix', () => {
+    expect(describeSceneRefusal('Invalid scene file: Invalid scene file: missing field `entities` at line 3 column 14'))
+      .toBe('Missing field `entities`.');
+  });
+
+  it('keeps an engine message that has neither, punctuating it once', () => {
+    expect(describeSceneRefusal('Scene transforms must contain finite numbers'))
+      .toBe('Scene transforms must contain finite numbers.');
+    expect(describeSceneRefusal('Scene hierarchy contains a cycle.')).toBe('Scene hierarchy contains a cycle.');
+  });
+
+  it('replaces the browser-side refusal with plain words', () => {
+    expect(describeSceneRefusal(ENVELOPE_REFUSAL)).toBe(ENVELOPE_REFUSAL_FOR_CREATORS);
+    expect(ENVELOPE_REFUSAL_FOR_CREATORS).not.toMatch(/envelope|Invalid scene file/i);
+  });
+
+  it('leaves a truncation marker readable and does not add a period after it', () => {
+    const bounded = boundEngineError(hostileRefusal(64));
+    const described = describeSceneRefusal(bounded);
+    expect(described.startsWith('Invalid type: string "AAAA')).toBe(true);
+    expect(described.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+  });
+
+  it('says so when nothing is left after stripping', () => {
+    expect(describeSceneRefusal('Invalid scene file: ')).toBe('The engine gave no further detail.');
   });
 });
 
