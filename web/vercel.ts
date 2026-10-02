@@ -8,9 +8,12 @@
  * `vercel.json` declared, verbatim, or the platform silently falls back to
  * defaults for whatever is missing.
  *
- * `@vercel/config/v1` gives us `VercelConfig`, so a typo'd or removed
- * property fails `tsc --noEmit` instead of silently misconfiguring the
- * deploy — that's the whole point of this migration (see the issue body).
+ * `@vercel/config/v1` gives us `VercelConfig`, so a typo'd property or a
+ * wrong-typed value fails `tsc --noEmit` instead of silently misconfiguring
+ * the deploy — that's the whole point of this migration (see the issue
+ * body). A REMOVED property still type-checks, because every `VercelConfig`
+ * field is optional; `scripts/__tests__/vercelConfig.test.ts` is what
+ * catches a removal, by pinning each value.
  *
  * IMPORTS MUST STAY TYPE-ONLY. This file can be evaluated BEFORE any
  * install: `vercel deploy` in `.github/workflows/cd.yml` compiles it on the
