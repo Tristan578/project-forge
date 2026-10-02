@@ -15,13 +15,16 @@ If you discover new work during development, create a separate ticket for it FIR
 
 ## Taskboard Installation
 
-Binary: tcarac/taskboard
+Binary: tcarac/taskboard. `go install github.com/tcarac/taskboard@latest` does not work: v0.6.0 has no main package at the module root, and `cmd/taskboard` embeds a `web/dist` the module does not ship. Use one of:
 ```bash
-go install github.com/tcarac/taskboard@latest
+brew tap tcarac/taskboard && brew install taskboard
+# or: git clone https://github.com/tcarac/taskboard && cd taskboard && make build
 ```
-Or download from: https://github.com/tcarac/taskboard/releases
+Or download a release binary from: https://github.com/tcarac/taskboard/releases
 
-Place in: `../taskboard/`, `~/.local/bin/`, `/usr/local/bin/`, or PATH.
+Place in: `../taskboard/`, `~/.local/bin/`, `/usr/local/bin/`, or PATH (or set TASKBOARD_BIN to it).
+
+First run on a new machine (no taskboard database yet), once, instead of `start`: `node .claude/hooks/taskboard-launch.mjs init`, then `python3 .claude/hooks/github_project_sync.py pull`.
 
 ## Required Ticket Fields
 - **User Story**: Must match regex `As an?\s+.+,\s+I want\s+.+\s+so that\s+.+` (case-insensitive)

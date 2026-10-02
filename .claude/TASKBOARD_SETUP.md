@@ -5,14 +5,22 @@ Portable project management via [tcarac/taskboard](https://github.com/tcarac/tas
 ## Quick Start
 
 ```bash
-# 1. Get the taskboard binary (or build from source)
-#    go install github.com/tcarac/taskboard@latest
-#    Or download a release binary from GitHub
+# 1. Get the taskboard binary. `go install github.com/tcarac/taskboard@latest`
+#    does NOT work (v0.6.0 has no main package at the module root, and
+#    cmd/taskboard embeds a web/dist the module does not ship). Use one of:
+#      brew tap tcarac/taskboard && brew install taskboard
+#      a release binary from https://github.com/tcarac/taskboard/releases
+#      git clone https://github.com/tcarac/taskboard && cd taskboard && make build
+#    Not on PATH? Set TASKBOARD_BIN to the binary.
 
-# 2. Start the server through the launcher — it resolves the ONE shared DB path
-#    and passes it to the binary itself (never start the binary by hand).
-#    FIRST run on this machine only: use `init` instead of `start` — it is the
-#    one command allowed to create the shared database.
+# 2a. FIRST run on a new machine only (no taskboard database yet): init creates
+#     the shared database and binds this repository's project. Run it once,
+#     instead of start.
+node .claude/hooks/taskboard-launch.mjs init
+
+# 2b. Every time after that: start the server through the launcher. It
+#     resolves the ONE shared DB path and passes it to the binary itself
+#     (never start the binary by hand).
 node .claude/hooks/taskboard-launch.mjs start
 
 # 3. Open the web UI

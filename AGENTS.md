@@ -29,17 +29,24 @@ The taskboard (tcarac/taskboard) is the single source of truth for all project w
 
 ### Installation
 ```bash
-# Option 1: Go install
-go install github.com/tcarac/taskboard@latest
+# `go install github.com/tcarac/taskboard@latest` does NOT work (v0.6.0 has no
+# main package at the module root, and cmd/taskboard embeds a web/dist the
+# module does not ship).
+# Option 1: Homebrew
+brew tap tcarac/taskboard && brew install taskboard
 
-# Option 2: Download binary from releases
+# Option 2: Download a release binary from
 # https://github.com/tcarac/taskboard/releases
 # Place in: ../taskboard/, ~/.local/bin/, /usr/local/bin/, or PATH
+# (or set TASKBOARD_BIN to it)
+
+# Option 3: Build from source
+git clone https://github.com/tcarac/taskboard && cd taskboard && make build
 ```
 
 ### Starting the Server
 
-The session start hook auto-starts the server if the binary is found. If it fails, start it manually with the **Start** command in **Canonical Project Facts** below.
+The session start hook auto-starts the server if the binary is found. If it fails, start it manually with the **Start** command in **Canonical Project Facts** below. On a new machine with no taskboard database yet, run the **First run** command there once instead.
 
 <!-- AGENTIC-SYNC:START -->
 <!-- Generated from tools/agentic-sync/canonical.json by tools/agentic-sync/sync.mjs.
@@ -53,6 +60,7 @@ The session start hook auto-starts the server if the binary is found. If it fail
 - Teams: Engineering `01KMR5E36TP59PRQA8GQEWJVM1`, PM `01KMR5E3852BWXAZ219W47CSKS`
 - API: `http://localhost:3010/api` · Web UI: `http://localhost:3010`
 - Start: `node .claude/hooks/taskboard-launch.mjs start`  *(the launcher resolves the shared database path and passes it to the binary itself — never start the binary by hand or pass your own `--db`)*
+- First run on a new machine (no taskboard database yet): `node .claude/hooks/taskboard-launch.mjs init` once, instead of Start  *(the only command that creates the shared database; it refuses when a populated database already exists or a server is already running)*
 - These IDs are board-local; if a query 404s, rediscover with `curl -s http://localhost:3010/api/projects`
 
 **Pinned versions:** Next.js 16.3.8 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*

@@ -12,7 +12,8 @@
       },
       "apiBaseUrl": "http://localhost:3010/api",
       "webUrl": "http://localhost:3010",
-      "startCommand": "node .claude/hooks/taskboard-launch.mjs start"
+      "startCommand": "node .claude/hooks/taskboard-launch.mjs start",
+      "initCommand": "node .claude/hooks/taskboard-launch.mjs init"
     },
     "versions": {
       "Next.js": "16.3.8",

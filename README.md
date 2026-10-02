@@ -462,17 +462,25 @@ python3 .claude/skills/arch-validator/check_arch.py --json     # machine-readabl
 
 All work is tracked on a local [taskboard](https://github.com/tcarac/taskboard) that syncs to GitHub Projects.
 
-**Install:**
+**Install** (`go install github.com/tcarac/taskboard@latest` does not work: v0.6.0 has no main package at the module root, and `cmd/taskboard` embeds a `web/dist` the module does not ship):
 ```bash
-go install github.com/tcarac/taskboard@latest
-# Or download from https://github.com/tcarac/taskboard/releases
+brew tap tcarac/taskboard && brew install taskboard
+# Or download a release binary from https://github.com/tcarac/taskboard/releases
+# Or build from source: git clone https://github.com/tcarac/taskboard && cd taskboard && make build
+# Not on PATH? Set TASKBOARD_BIN to the binary.
 ```
 
-**Start:**
+**First run on a new machine** (no taskboard database yet) — once, instead of `start`:
+```bash
+cd project-forge
+node .claude/hooks/taskboard-launch.mjs init    # the only command that creates the shared database
+python3 .claude/hooks/github_project_sync.py pull
+```
+
+**Start** (every time after that):
 ```bash
 cd project-forge
 node .claude/hooks/taskboard-launch.mjs start   # never start the binary by hand — see "Database" below
-# First run on a new machine: `init` instead of `start` creates the shared database once
 ```
 
 - **Web UI:** http://localhost:3010

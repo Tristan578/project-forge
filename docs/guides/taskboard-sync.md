@@ -7,7 +7,7 @@ node .claude/hooks/taskboard-launch.mjs start
 python3 .claude/hooks/github_project_sync.py pull
 ~~~
 
-On a machine with no taskboard database yet, run `node .claude/hooks/taskboard-launch.mjs init` once instead of `start`. Every other command refuses a missing database and an empty one, so a client can never mint a second, empty board by accident; `init` is the one explicit path that creates the database at the resolved location and binds this repository's project. It refuses when a populated database already exists there or when a server is already running.
+On a machine with no taskboard database yet, run `node .claude/hooks/taskboard-launch.mjs init` once instead of `start`. The launcher's `start`, `mcp`, `identity` and `doctor` commands, and `github_project_sync.py`'s `push`, `pull` and `status`, refuse a missing database and an empty one, so a client can never mint a second, empty board by accident (`db-path` only prints the resolved path and opens nothing); `init` is the one explicit path that creates the database at the resolved location and binds this repository's project. It refuses when a populated database already exists there or when a server is already running.
 
 On Windows use python when python3 is unavailable. The launcher detects either spelling; PYTHON can explicitly select an interpreter. TASKBOARD_BIN selects an installed binary when it is not on PATH. Worktrees resolve the main checkout through git's common directory, not a hard-coded directory name.
 

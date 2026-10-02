@@ -189,6 +189,37 @@ if grep -q "Pinned versions:" "$ROOT/AGENTS.md"; then ok "version list rendered"
 if grep -q "must match Cargo.lock" "$ROOT/AGENTS.md"; then bad "hardcoded wasm-bindgen note leaked when canonical has no versionsNote"; else ok "no version note when canonical omits versionsNote"; fi
 rm -rf "$ROOT"
 
+echo "== generator: taskboard initCommand renders a first-run line only when present =="
+# The first-run `init` command must reach every onboarding target as its own
+# line, not as a comment under Start, and only when canonical.json declares it.
+ROOT="$(make_fixture)"   # fixture canonical has startCommand but NO initCommand
+run_gen "$ROOT" --write >/dev/null 2>&1
+if grep -q "First run on a new machine" "$ROOT/AGENTS.md"; then bad "first-run line rendered although canonical has no initCommand"; else ok "no first-run line when canonical omits initCommand"; fi
+rm -rf "$ROOT"
+ROOT="$(make_fixture)"
+perl -0pi -e 's/("startCommand": "[^"]*")/$1, "initCommand": "FIXTURE-INIT-CMD"/' "$ROOT/tools/agentic-sync/canonical.json"
+if grep -q '"initCommand": "FIXTURE-INIT-CMD"' "$ROOT/tools/agentic-sync/canonical.json"; then
+  run_gen "$ROOT" --write >/dev/null 2>&1
+  if grep -qE '^- First run on a new machine .*`FIXTURE-INIT-CMD`' "$ROOT/AGENTS.md" && grep -qE '^- First run on a new machine .*`FIXTURE-INIT-CMD`' "$ROOT/sub/copilot.md"; then
+    ok "canonical initCommand rendered as its own first-run line in every target"
+  else
+    bad "initCommand from canonical not rendered as a first-run line"
+  fi
+else
+  bad "fixture mutation did not apply: initCommand missing from the fixture canonical"
+fi
+rm -rf "$ROOT"
+# The real canonical must declare it (derived from the file, not restated here),
+# and the real AGENTS.md must carry it on a first-run line.
+real_init="$(node -e 'const c=require(process.argv[1]); process.stdout.write((c.facts.taskboard||{}).initCommand||"")' "$REPO_ROOT/tools/agentic-sync/canonical.json")"
+if [ -z "$real_init" ]; then
+  bad "the real canonical.json declares no facts.taskboard.initCommand"
+elif grep -F -- "- First run on a new machine" "$REPO_ROOT/AGENTS.md" | grep -qF -- "\`$real_init\`"; then
+  ok "the real AGENTS.md carries the first-run line for canonical initCommand ($real_init)"
+else
+  bad "the real AGENTS.md lacks the first-run line for '$real_init' (run node tools/agentic-sync/sync.mjs --write)"
+fi
+
 echo "== generator: a canonical versionsNote is rendered verbatim =="
 ROOT="$(make_fixture)"
 perl -0pi -e 's/("versions": \{ "Next.js": "16.2.0" \},)/$1 "versionsNote": "PIN EXACTLY PER LOCKFILE",/' "$ROOT/tools/agentic-sync/canonical.json"

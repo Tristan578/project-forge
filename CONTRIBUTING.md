@@ -77,10 +77,14 @@ Three rules flow from this architecture:
 All work requires a ticket before any code is written. The taskboard is the single source of truth.
 
 ```bash
-# Start the taskboard server (auto-started by Claude Code hooks). The launcher
+# First run on a new machine (no taskboard database yet), once, instead of
+# start: init is the only command that creates the shared database.
+node .claude/hooks/taskboard-launch.mjs init
+python3 .claude/hooks/github_project_sync.py pull
+
+# Every time after that (auto-started by Claude Code hooks). The launcher
 # resolves the shared database path and passes it to the binary itself —
-# never start the binary by hand. On a new machine, run `init` once instead of
-# `start`: it is the only command that creates the shared database.
+# never start the binary by hand.
 node .claude/hooks/taskboard-launch.mjs start
 ```
 
@@ -276,7 +280,7 @@ green and no surface drifts.
 
 `tools/agentic-sync/canonical.json` is the single source of truth for the synced
 facts. Change the value there — e.g. under `facts.taskboard` (`projectId`, the
-`teams` map, `startCommand`, `apiBaseUrl`) or `facts.coverageThresholds`.
+`teams` map, `startCommand`, `initCommand`, `apiBaseUrl`) or `facts.coverageThresholds`.
 
 > The taskboard has exactly two teams — **Engineering** and **PM**. There is no
 > "Leadership" team; never reintroduce one.
