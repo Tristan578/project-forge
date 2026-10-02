@@ -137,7 +137,7 @@ import { useGenerationPolling } from '../useGenerationPolling';
 import { RETRY_GUIDANCE } from '@/lib/generate/retryGuidance';
 // The real 404 sentence the status routes send (#10262), so the terminal-404
 // tests prove the route's wording is what reaches the person.
-import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
+import { JOB_NOT_FOUND_MESSAGE, JOB_OWNERSHIP_UNAVAILABLE_MESSAGE } from '@/lib/generate/jobNotFound';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1220,10 +1220,10 @@ describe('useGenerationPolling', () => {
     fetchSpy.mockRestore();
   });
 
-  it('attaches the next step to the 404 fallback when the body carries no sentence', async () => {
+  it('uses the routes\' own not-found sentence as the 404 fallback when the body carries none', async () => {
     // A 404 whose body is not a status-route JSON (an HTML error page, an
-    // empty body) still ends the job; the fallback gets RETRY_GUIDANCE like
-    // the timeout fallback does, never a bare code.
+    // empty body) still ends the job, with the SAME constant the routes send —
+    // not the prompt-oriented RETRY_GUIDANCE suffix, and never a bare code.
     mockJobs['nf2'] = makeJob('nf2', { usageId: 'usage-nf2' });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       if (typeof url === 'string' && url.includes('refund')) {
@@ -1235,7 +1235,8 @@ describe('useGenerationPolling', () => {
     renderHook(() => useGenerationPolling());
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
-    const expected = `Generation job not found. ${RETRY_GUIDANCE}`;
+    const expected = JOB_NOT_FOUND_MESSAGE;
+    expect(expected).not.toContain(RETRY_GUIDANCE);
     expect(mockUpdateJob).toHaveBeenCalledWith('nf2', { status: 'failed', error: expected });
     expect(mockShowPersistentError).toHaveBeenCalledWith(expected, { id: `generation-failed:${expected}` });
     expect(fetchSpy).toHaveBeenCalledWith('/api/generate/refund', expect.objectContaining({ method: 'POST' }));
@@ -1258,6 +1259,52 @@ describe('useGenerationPolling', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).not.toHaveBeenCalledWith('/api/generate/refund', expect.anything());
+    expect(mockShowPersistentError).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('keeps polling through a 503 from a FAILED ownership lookup, and completes the job when the lookup recovers', async () => {
+    // A status route answers 503 (not 404) when its ownership lookup itself
+    // failed — a DB blip, or the circuit breaker failing fast during an
+    // outage. That is not a verdict on the job, so it must ride the transient
+    // path: no refund, no toast, and the next successful poll carries on as if
+    // nothing happened. Were it terminal, one outage would fail and refund
+    // every in-flight, correctly bound, paid generation for good.
+    mockJobs['ou1'] = makeJob('ou1', { usageId: 'usage-ou1' });
+    let statusReads = 0;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('refund')) {
+        return new Response('{}', { status: 200 });
+      }
+      statusReads += 1;
+      if (statusReads <= 2) {
+        return {
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ error: JOB_OWNERSHIP_UNAVAILABLE_MESSAGE }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ jobId: 'job-ou1', status: 'processing', progress: 40 }),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    // Two 503s so far: still polling, nothing refunded, nothing shown.
+    expect(statusReads).toBe(2);
+    expect(fetchSpy).not.toHaveBeenCalledWith('/api/generate/refund', expect.anything());
+    expect(mockShowPersistentError).not.toHaveBeenCalled();
+    expect(mockUpdateJob).not.toHaveBeenCalledWith('ou1', expect.objectContaining({ status: 'failed' }));
+
+    // The lookup recovers: the third poll proceeds normally.
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(statusReads).toBe(3);
+    expect(mockUpdateJob).toHaveBeenCalledWith('ou1', { status: 'processing', progress: 40 });
     expect(fetchSpy).not.toHaveBeenCalledWith('/api/generate/refund', expect.anything());
     expect(mockShowPersistentError).not.toHaveBeenCalled();
     fetchSpy.mockRestore();

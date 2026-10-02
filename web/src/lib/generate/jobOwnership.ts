@@ -1,11 +1,17 @@
 /**
  * Provider-job ownership binding (#10262).
  *
- * Every `/api/generate/<type>/status` route calls `resolveApiKey` as a
+ * Every `/api/generate/<type>/status` route that resolves a provider key (all
+ * but `music/status`, which resolves none) calls `resolveApiKey` as a
  * zero-cost status check, which returns the PLATFORM provider key by default.
  * Without an ownership check, ANY signed-in caller admitted past the panel
  * tier gate can poll an arbitrary provider job id — one they never created —
  * and read back its result using the platform's credentials.
+ *
+ * `src/app/api/__tests__/jobOwnershipCoverage.test.ts` is the structural gate:
+ * it parses every status route and fails one that resolves a key without
+ * first refusing a non-`'owner'` result of `verifyProviderJobOwner`, and every
+ * POST route behind such a status route that binds nothing.
  *
  * `generation_jobs` cannot serve as that ownership record on its own: its
  * rows are created by the CLIENT (`generationStore.addJob` -> `POST
@@ -58,20 +64,39 @@ export async function bindProviderJob(
 }
 
 /**
+ * The three answers an ownership lookup can give (#10262).
+ *
+ * - `'owner'`: a binding exists and it is the caller's. The only value that
+ *   lets a status route go on to resolve a key.
+ * - `'not_owner'`: the lookup SUCCEEDED and found no binding for the caller —
+ *   none at all (a legacy job that predates this check, or a bind write that
+ *   itself failed) or one belonging to a different user. Definitive: polling
+ *   again cannot change it, so the route answers a terminal 404.
+ * - `'unverifiable'`: the lookup itself failed (a DB error that outlived
+ *   `queryWithResilience`'s retries, or its circuit breaker failing fast
+ *   during an outage). Still fail-CLOSED — no key is resolved — but NOT a
+ *   verdict about the job, so the route answers a retryable 503 and the
+ *   poller keeps polling. Folding this into `'not_owner'` would turn one DB
+ *   blip into a permanent failure and refund of every in-flight, correctly
+ *   bound, paid generation polled during it.
+ */
+export type JobOwnership = 'owner' | 'not_owner' | 'unverifiable';
+
+/**
  * Verify the caller polling `providerJobId` is the user who created it.
  *
- * Returns `false` — the status route's cue to answer 404, same as "job not
- * found" — both when no binding exists (an unbound legacy job that predates
- * this check, or a bind write that itself failed) and when the binding
- * belongs to a different user. A lookup failure ALSO returns `false`: unlike
- * the write side above, this IS the security decision, so a DB error must
- * fail closed rather than silently letting an unverifiable poll through.
+ * Never throws. A status route must refuse every result other than
+ * `'owner'` BEFORE resolving a key, and map the refusal with
+ * `jobOwnershipRefusal` (`./jobOwnershipResponse.ts`): `'not_owner'` -> 404,
+ * `'unverifiable'` -> 503. Unlike the write side above, this IS the security
+ * decision, so a lookup failure never lets an unverifiable poll through — it
+ * only stops that failure from being reported as a verdict on the job.
  */
 export async function verifyProviderJobOwner(
   userId: string,
   provider: Provider,
   providerJobId: string,
-): Promise<boolean> {
+): Promise<JobOwnership> {
   try {
     const rows = await queryWithResilience(() =>
       getDb()
@@ -85,10 +110,10 @@ export async function verifyProviderJobOwner(
         )
         .limit(1)
     );
-    return rows.length > 0 && rows[0].userId === userId;
+    return rows.length > 0 && rows[0].userId === userId ? 'owner' : 'not_owner';
   } catch (err) {
     captureException(err, { action: 'verify_provider_job_owner', provider, providerJobId, userId });
-    return false;
+    return 'unverifiable';
   }
 }
 

@@ -11,7 +11,7 @@ import { MeshyClient } from '@/lib/generate/meshyClient';
 import { panelTierGateResponse, panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
-import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
+import { JOB_NOT_FOUND_MESSAGE, JOB_OWNERSHIP_UNAVAILABLE_MESSAGE } from '@/lib/generate/jobNotFound';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -53,7 +53,7 @@ describe('GET /api/generate/model/status', () => {
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as unknown as User },
     });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
-    vi.mocked(verifyProviderJobOwner).mockResolvedValue(true);
+    vi.mocked(verifyProviderJobOwner).mockResolvedValue('owner');
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -89,12 +89,26 @@ describe('GET /api/generate/model/status', () => {
   // user's result via the platform key `resolveApiKey` returns by default.
   describe('job ownership (#10262)', () => {
     it('returns 404 without resolving a key when the caller does not own the job', async () => {
-      vi.mocked(verifyProviderJobOwner).mockResolvedValue(false);
+      vi.mocked(verifyProviderJobOwner).mockResolvedValue('not_owner');
 
       const res = await GET(makeRequest('someone-elses-job'));
 
       expect(res.status).toBe(404);
       expect((await res.json()).error).toBe(JOB_NOT_FOUND_MESSAGE);
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
+    // A lookup that failed (DB error, open circuit breaker) is NOT a verdict
+    // on the job: still fail-closed (no key resolved), but 503, which the
+    // poller keeps polling through, never the 404 it treats as terminal.
+    it('returns a retryable 503, not a terminal 404, and resolves no key when the ownership lookup FAILS', async () => {
+      vi.mocked(verifyProviderJobOwner).mockResolvedValue('unverifiable');
+
+      const res = await GET(makeRequest('someone-elses-job'));
+
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe(JOB_OWNERSHIP_UNAVAILABLE_MESSAGE);
       expect(resolveApiKey).not.toHaveBeenCalled();
       expect(MeshyClient).not.toHaveBeenCalled();
     });
@@ -116,7 +130,7 @@ describe('GET /api/generate/model/status', () => {
       const callOrder: string[] = [];
       vi.mocked(verifyProviderJobOwner).mockImplementation(async () => {
         callOrder.push('verifyProviderJobOwner');
-        return true;
+        return 'owner';
       });
       vi.mocked(resolveApiKey).mockImplementation(async () => {
         callOrder.push('resolveApiKey');

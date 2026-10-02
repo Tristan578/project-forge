@@ -10,7 +10,7 @@ import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
-import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
+import { jobOwnershipRefusal } from '@/lib/generate/jobOwnershipResponse';
 
 async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
@@ -41,11 +41,11 @@ async function GET_impl(request: NextRequest) {
   // default, so without this ANY signed-in caller admitted past the tier gate
   // above could poll a job id they never created and read back another user's
   // result. Checked BEFORE any provider key is resolved. See
-  // `src/lib/generate/jobOwnership.ts`.
-  const isOwner = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.texture, jobId);
-  if (!isOwner) {
-    return NextResponse.json({ error: JOB_NOT_FOUND_MESSAGE }, { status: 404 });
-  }
+  // `src/lib/generate/jobOwnership.ts`. A confirmed miss answers a terminal
+  // 404; a lookup that FAILED answers a retryable 503 — both refuse, but only
+  // the first is a verdict on the job (`jobOwnershipRefusal`).
+  const ownership = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.texture, jobId);
+  if (ownership !== 'owner') return jobOwnershipRefusal(ownership);
 
   // 3. Resolve API key (no token deduction for status checks)
   let apiKey: string;

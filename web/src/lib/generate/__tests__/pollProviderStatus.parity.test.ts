@@ -66,7 +66,7 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }))
 // compares; it has its own unit tests (jobOwnership.test.ts) and route tests
 // (each */status/route.test.ts), so it is passed through here.
 vi.mock('@/lib/generate/jobOwnership', () => ({
-  verifyProviderJobOwner: vi.fn(async () => true),
+  verifyProviderJobOwner: vi.fn(async () => 'owner' as const),
 }));
 
 import { pollProviderStatus, type AsyncGenerationType } from '../pollProviderStatus';

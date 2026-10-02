@@ -10,7 +10,7 @@ import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
-import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
+import { jobOwnershipRefusal } from '@/lib/generate/jobOwnershipResponse';
 
 async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
@@ -59,10 +59,11 @@ async function GET_impl(request: NextRequest) {
   // result. Checked BEFORE any provider key is resolved. See
   // `src/lib/generate/jobOwnership.ts`. (The dalle3-sync:/dalle3: branches
   // above never resolve a key or touch the provider, so they need no check.)
-  const isOwner = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.sprite, jobId);
-  if (!isOwner) {
-    return NextResponse.json({ error: JOB_NOT_FOUND_MESSAGE }, { status: 404 });
-  }
+  // A confirmed miss answers a terminal 404; a lookup that FAILED answers a
+  // retryable 503 — both refuse, but only the first is a verdict on the job
+  // (`jobOwnershipRefusal`).
+  const ownership = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.sprite, jobId);
+  if (ownership !== 'owner') return jobOwnershipRefusal(ownership);
 
   // Poll Replicate for prediction status
   let apiKey: string;

@@ -63,9 +63,16 @@ async function POST_impl(req: NextRequest) {
     // reports 'sdxl' for a job bound under 'replicate'), so scoping by it let
     // any caller skip this check by changing one string.
     //
-    // Refused with the SAME 404 and sentence the status routes send for a job
-    // that is not the caller's: a distinct "belongs to another account" (409)
-    // was the one response anywhere that confirmed a foreign job id exists.
+    // Refused with the SAME 404 body the status routes send for a job that is
+    // not the caller's, rather than a distinct 409 naming "another account".
+    // That is NOT oracle-free, and is not claimed to be: an unbound or
+    // own-bound id gets 201 and a foreign-bound id gets 404, so a caller can
+    // still learn that SOME other account has bound a given id. The residual
+    // is accepted because provider job ids are unguessable provider-issued
+    // tokens a caller can only hold if one was leaked to them, and the 404
+    // reveals nothing further: not which account owns the id, and not the
+    // job's status or result (the status routes refuse it). Closing it would
+    // mean accepting the planted row, which is what this check exists to stop.
     const otherOwnerId = await findOtherProviderJobOwnerId(providerJobId, mid.userId!);
     if (otherOwnerId) {
       return redactedJson({ error: JOB_NOT_FOUND_MESSAGE }, { status: 404 });

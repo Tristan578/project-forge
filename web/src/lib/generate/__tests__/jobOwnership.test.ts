@@ -35,6 +35,7 @@ import {
 } from '../jobOwnership';
 import { PROVIDERS } from '@/lib/db/schema';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { queryWithResilience } from '@/lib/db/client';
 
 const mockCaptureException = vi.mocked(captureException);
 
@@ -89,36 +90,40 @@ describe('jobOwnership', () => {
   // verifyProviderJobOwner
   // -------------------------------------------------------------------
   describe('verifyProviderJobOwner', () => {
-    it('returns true when a binding exists for this exact user', async () => {
+    it("returns 'owner' when a binding exists for this exact user", async () => {
       mockSelectLimit.mockResolvedValueOnce([{ userId: 'user-1' }]);
 
       const result = await verifyProviderJobOwner('user-1', 'meshy', 'task-abc');
 
-      expect(result).toBe(true);
+      expect(result).toBe('owner');
     });
 
-    it('returns false when the binding belongs to a DIFFERENT user', async () => {
+    it("returns 'not_owner' when the binding belongs to a DIFFERENT user", async () => {
       mockSelectLimit.mockResolvedValueOnce([{ userId: 'someone-else' }]);
 
       const result = await verifyProviderJobOwner('user-1', 'meshy', 'task-abc');
 
-      expect(result).toBe(false);
+      expect(result).toBe('not_owner');
     });
 
-    it('returns false when no binding exists at all (unbound / legacy job)', async () => {
+    it("returns 'not_owner' when no binding exists at all (unbound / legacy job)", async () => {
       mockSelectLimit.mockResolvedValueOnce([]);
 
       const result = await verifyProviderJobOwner('user-1', 'meshy', 'task-abc');
 
-      expect(result).toBe(false);
+      expect(result).toBe('not_owner');
     });
 
-    it('fails CLOSED (returns false) and reports to Sentry when the lookup itself throws', async () => {
+    // A failed lookup is still fail-CLOSED (it is never 'owner'), but it must
+    // be distinguishable from a confirmed miss: the route maps it to a
+    // retryable 503 instead of the 404 the poller treats as terminal, so a DB
+    // blip cannot permanently fail and refund a correctly bound job.
+    it("fails CLOSED as 'unverifiable' (never 'owner', never 'not_owner') and reports to Sentry when the lookup throws", async () => {
       mockSelectLimit.mockRejectedValueOnce(new Error('db down'));
 
       const result = await verifyProviderJobOwner('user-1', 'meshy', 'task-abc');
 
-      expect(result).toBe(false);
+      expect(result).toBe('unverifiable');
       expect(mockCaptureException).toHaveBeenCalledTimes(1);
       expect(mockCaptureException.mock.calls[0][1]).toMatchObject({
         action: 'verify_provider_job_owner',
@@ -126,6 +131,18 @@ describe('jobOwnership', () => {
         providerJobId: 'task-abc',
         userId: 'user-1',
       });
+    });
+
+    it("answers 'unverifiable' when queryWithResilience fails fast (circuit breaker open) without running the query", async () => {
+      // During an outage the breaker rejects BEFORE the operation runs. That is
+      // the case where folding into 'not_owner' would fail every user's
+      // in-flight poll at once.
+      vi.mocked(queryWithResilience).mockRejectedValueOnce(new Error('circuit open'));
+
+      const result = await verifyProviderJobOwner('user-1', 'meshy', 'task-abc');
+
+      expect(result).toBe('unverifiable');
+      expect(mockSelect).not.toHaveBeenCalled();
     });
 
     it('scopes the lookup to the given provider and providerJobId', async () => {

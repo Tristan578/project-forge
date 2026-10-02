@@ -249,7 +249,10 @@ describe('/api/jobs', () => {
     // stranger's job in the caller's own GET /api/jobs list.
     describe('job ownership (#10262)', () => {
       // 404 with the status routes' sentence, not a 409 naming "another
-      // account": the response must not confirm that a foreign job id exists.
+      // account": the body must not say who, or that it is another account.
+      // This does NOT assert the response is oracle-free — 201 vs 404 still
+      // tells a caller some other account bound the id (accepted residual; see
+      // the comment at the check in route.ts).
       it('returns 404 without inserting when providerJobId is already bound to a different user', async () => {
         mockAuth(true);
         const { insertChain } = setupDb();

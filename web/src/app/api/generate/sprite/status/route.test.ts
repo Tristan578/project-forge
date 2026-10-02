@@ -10,7 +10,7 @@ import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
-import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
+import { JOB_NOT_FOUND_MESSAGE, JOB_OWNERSHIP_UNAVAILABLE_MESSAGE } from '@/lib/generate/jobNotFound';
 
 const mockGetReplicateStatus = vi.hoisted(() => vi.fn());
 
@@ -37,7 +37,7 @@ const makeRequest = (params: Record<string, string>) => {
 describe('GET /api/generate/sprite/status', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(verifyProviderJobOwner).mockResolvedValue(true);
+    vi.mocked(verifyProviderJobOwner).mockResolvedValue('owner');
   });
 
   it('returns 401 if unauthenticated', async () => {
@@ -97,13 +97,30 @@ describe('GET /api/generate/sprite/status', () => {
     it('returns 404 without resolving a key when the caller does not own the job', async () => {
       const user = makeUser();
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-      vi.mocked(verifyProviderJobOwner).mockResolvedValue(false);
+      vi.mocked(verifyProviderJobOwner).mockResolvedValue('not_owner');
 
       const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
       const data = await res.json();
 
       expect(res.status).toBe(404);
       expect(data.error).toBe(JOB_NOT_FOUND_MESSAGE);
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(mockGetReplicateStatus).not.toHaveBeenCalled();
+    });
+
+    // A lookup that failed (DB error, open circuit breaker) is NOT a verdict
+    // on the job: still fail-closed (no key resolved), but 503, which the
+    // poller keeps polling through, never the 404 it treats as terminal.
+    it('returns a retryable 503, not a terminal 404, and resolves no key when the ownership lookup FAILS', async () => {
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(verifyProviderJobOwner).mockResolvedValue('unverifiable');
+
+      const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+      const data = await res.json();
+
+      expect(res.status).toBe(503);
+      expect(data.error).toBe(JOB_OWNERSHIP_UNAVAILABLE_MESSAGE);
       expect(resolveApiKey).not.toHaveBeenCalled();
       expect(mockGetReplicateStatus).not.toHaveBeenCalled();
     });

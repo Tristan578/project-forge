@@ -31,6 +31,7 @@ import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 import { enqueueFailedRefund, processFailedRefunds } from '@/lib/utils/refundQueue';
 import { showPersistentError, showSuccess } from '@/lib/toast';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 import { ESTIMATED_TIMES } from '@/lib/generation/estimatedTimes';
 
 const POLL_INTERVAL_MS = 3000;
@@ -114,6 +115,8 @@ export function useGenerationPolling() {
    * 500 is usually transient — so this only surfaces once the job gives up.
    * The one exception is a 404, which is the status route's ownership refusal
    * (#10262) and is handled as terminal at the read site, never through here.
+   * A 503 from a FAILED ownership lookup is not an exception: it is transient
+   * like a 500 and keeps polling through here.
    */
   const lastStatusErrorRef = useRef<Record<string, string>>({});
 
@@ -269,18 +272,24 @@ export function useGenerationPolling() {
           const message = statusErrorText(body);
 
           // A 404 is TERMINAL, not transient (#10262). The only 404 a status
-          // route sends is its ownership refusal: the polled job id is not
-          // bound to this account, and nothing about polling again changes
-          // that. Two legitimate owners hit it too — a job in flight when the
-          // ownership table shipped (no binding row) and a job whose bind
-          // write failed — and before this branch both were indistinguishable
-          // from a 500, so the poller retried every 3 s for five minutes
-          // before refunding. Stop now, refund now, and show the route's
-          // sentence (it carries its own next step; the fallback gets one
-          // appended, like the timeout below).
+          // route sends is its ownership refusal after a lookup that
+          // SUCCEEDED: the polled job id is not bound to this account, and
+          // nothing about polling again changes that. Two legitimate owners
+          // hit it too — a job in flight when the ownership table shipped (no
+          // binding row) and a job whose bind write failed — and before this
+          // branch both were indistinguishable from a 500, so the poller
+          // retried every 3 s for five minutes before refunding. Stop now,
+          // refund now, and show the route's sentence. The fallback, for a
+          // body with no readable sentence, is the SAME constant the routes
+          // send, so both paths read alike.
+          //
+          // A lookup that FAILED is deliberately not a 404: the route answers
+          // 503, which falls through to the transient path below and keeps
+          // polling, so a DB blip never refunds a job the provider is still
+          // finishing.
           if (response.status === 404) {
             await triggerRefund(id);
-            failJob(id, message ?? withRetryGuidance('Generation job not found'));
+            failJob(id, message ?? JOB_NOT_FOUND_MESSAGE);
             delete lastStatusErrorRef.current[id];
             stopPolling(id);
             return;

@@ -204,7 +204,7 @@ vi.mock('@/lib/generate/spriteClient', () => ({ SpriteClient: vi.fn() }));
 // this suite measures, not the ownership decision — it has its own unit
 // tests (jobOwnership.test.ts) and route tests (each */status/route.test.ts).
 vi.mock('@/lib/generate/jobOwnership', () => ({
-  verifyProviderJobOwner: vi.fn(async () => true),
+  verifyProviderJobOwner: vi.fn(async () => 'owner' as const),
 }));
 
 // ---------------------------------------------------------------------------
