@@ -70,14 +70,14 @@ if (DSN) {
     },
     beforeSend: scrubSentryEvent,
     // @sentry v11 streams spans by default, so no transaction event is built
-    // and beforeSendTransaction is NOT called; streamed spans are scrubbed by
-    // beforeSendSpan instead. Each hook runs in exactly one lifecycle: an
-    // unwrapped beforeSendSpan is ignored under `traceLifecycle: 'static'`,
-    // which on Node and Edge can also be switched on by the
-    // SENTRY_TRACE_LIFECYCLE=static env var with no code change. Keeping both
-    // wired means spans are scrubbed in either lifecycle. Pinned by
+    // and spans are scrubbed by beforeSendSpan. Unlike the server and edge
+    // configs, the browser has NO way into the static lifecycle: the
+    // SENTRY_TRACE_LIFECYCLE env var is read only by @sentry/node and
+    // @sentry/vercel-edge, and no config may set `traceLifecycle` in code. So
+    // `beforeSendTransaction` is deliberately NOT set here: it could never
+    // run, and v11's Client.init() would print a console.warn about it in
+    // every user's browser on every page load. Both properties are pinned by
     // sentry-regressions.test.ts.
-    beforeSendTransaction: scrubSentryEvent,
     beforeSendSpan: scrubSentrySpan,
     // Sentry Logs bypass beforeSend/scrubSentryEvent — scrub them on their own
     // pipeline so a stray Sentry.logger.* call can't leak secrets/PII. @sentry

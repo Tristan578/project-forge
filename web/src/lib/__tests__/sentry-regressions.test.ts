@@ -652,9 +652,11 @@ describe('@sentry v11 span streaming: beforeSendSpan: scrubSentrySpan is require
    * function runs only under `'stream'`. So two things are pinned: the hook is
    * wired as an EXECUTABLE line (anchored, comments stripped, counted, per
    * lessons-learned #16), and no config switches the lifecycle in code.
-   * `beforeSendTransaction` stays wired as well, because Node and Edge can be
-   * switched to `'static'` by the SENTRY_TRACE_LIFECYCLE env var, and then that
-   * hook is the one that runs.
+   * `beforeSendTransaction` stays wired on the server and edge configs, because
+   * Node and Edge can be switched to `'static'` by the SENTRY_TRACE_LIFECYCLE
+   * env var, and then that hook is the one that runs. The browser config must
+   * NOT set it: the browser cannot reach `'static'`, so the hook is dead there,
+   * and v11 warns about it on every page load.
    */
   const CONFIG_FILES = [
     'sentry.server.config.ts',
@@ -686,9 +688,28 @@ describe('@sentry v11 span streaming: beforeSendSpan: scrubSentrySpan is require
     expect(countLines(content, /^\s*beforeSendSpan\s*:/gm), `${file} sets beforeSendSpan more than once`).toBe(1);
   });
 
-  it.each(CONFIG_FILES)('%s keeps beforeSendTransaction: scrubSentryEvent for the static lifecycle', async (file) => {
-    const content = await readConfig(file);
-    expect(countLines(content, /^ {4}beforeSendTransaction: scrubSentryEvent,$/gm)).toBe(1);
+  // Only Node and Edge can reach the static lifecycle (SENTRY_TRACE_LIFECYCLE is
+  // read by @sentry/node and @sentry/vercel-edge alone), so only they keep the
+  // transaction hook.
+  const STATIC_CAPABLE_CONFIG_FILES = ['sentry.server.config.ts', 'sentry.edge.config.ts'] as const;
+
+  it.each(STATIC_CAPABLE_CONFIG_FILES)(
+    '%s keeps beforeSendTransaction: scrubSentryEvent for the static lifecycle',
+    async (file) => {
+      const content = await readConfig(file);
+      expect(countLines(content, /^ {4}beforeSendTransaction: scrubSentryEvent,$/gm)).toBe(1);
+    },
+  );
+
+  it('instrumentation-client.ts does not set beforeSendTransaction (dead in the browser, and v11 warns on every page load)', async () => {
+    // The browser cannot enter traceLifecycle 'static', so the hook never runs,
+    // and @sentry/core's maybeWarnAboutIgnoredTransactionOptions() prints a
+    // console.warn at Client.init() whenever it is set under 'stream'.
+    const content = await readConfig('instrumentation-client.ts');
+    // Vacuity guard: the file this asserts against really is the Sentry init.
+    expect(countLines(content, /^ {4}beforeSendSpan: scrubSentrySpan,$/gm)).toBe(1);
+    expect(content).not.toMatch(/\bbeforeSendTransaction\b/);
+    expect(content).not.toMatch(/\bignoreTransactions\b/);
   });
 
   it.each(CONFIG_FILES)('%s does not set traceLifecycle or wrap the span hook', async (file) => {

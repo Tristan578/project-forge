@@ -64,7 +64,10 @@ if (DSN) {
     // which on Node and Edge can also be switched on by the
     // SENTRY_TRACE_LIFECYCLE=static env var with no code change. Keeping both
     // wired means spans are scrubbed in either lifecycle. Pinned by
-    // sentry-regressions.test.ts.
+    // sentry-regressions.test.ts. Cost: under the default 'stream' lifecycle
+    // v11's Client.init() prints one console.warn per init (per isolate here)
+    // saying beforeSendTransaction is ignored. That is expected; the browser
+    // config omits the hook because it cannot reach 'static'.
     beforeSendTransaction: scrubSentryEvent,
     beforeSendSpan: scrubSentrySpan,
     // Sentry Logs bypass beforeSend/scrubSentryEvent — scrub them on their own

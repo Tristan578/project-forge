@@ -164,11 +164,13 @@ function fingerprintEvent(event: Event): Event {
 //          embed emails, IPs, cookies, auth headers, and API keys. This hook
 //          redacts them.
 //
-// `scrubEvent` is wired as both `beforeSend` and `beforeSendTransaction` in every
-// Sentry.init (server, edge, client). It always returns the (mutated) event — the
-// goal is to keep the error for debugging, just without the secrets. Under
-// @sentry v11's default span streaming `beforeSendTransaction` is never called;
-// spans go through `beforeSendSpan` → `scrubSentrySpan` (below) instead.
+// `scrubEvent` is wired as `beforeSend` in every Sentry.init (server, edge,
+// client), and as `beforeSendTransaction` in the server and edge inits only (the
+// browser cannot reach the static lifecycle, so the hook would be dead there).
+// It always returns the (mutated) event — the goal is to keep the error for
+// debugging, just without the secrets. Under @sentry v11's default span
+// streaming `beforeSendTransaction` is never called; spans go through
+// `beforeSendSpan` → `scrubSentrySpan` (below) instead.
 
 /**
  * Key names whose values are redacted wholesale, regardless of their content.
@@ -480,8 +482,9 @@ export function configureSentryFingerprinting(): void {
 }
 
 /**
- * `beforeSend` / `beforeSendTransaction` hook for every Sentry.init (server,
- * edge, client). Strips PII and credentials from the event before transmission.
+ * `beforeSend` hook for every Sentry.init (server, edge, client), and
+ * `beforeSendTransaction` hook for the server and edge inits. Strips PII and
+ * credentials from the event before transmission.
  * Re-exported under a stable name so the init files import a single symbol.
  */
 export const scrubSentryEvent = scrubEvent;
@@ -624,11 +627,24 @@ export const scrubSentryMetric = scrubMetric;
  * {@link scrubSpanData} strips URL queries and redacts sensitive keys, and
  * {@link scrubString} runs on the name. `user.name` / `user.username` are
  * redacted for parity with {@link scrubLog} and {@link scrubMetric}.
+ * `user.ip_address` is redacted outright too: v11 stamps it onto every streamed
+ * span from the scope (`commonSpanAttributes` in @sentry/core captureSpan). It is
+ * not populated today (`dataCollection.userInfo: false`, no `setUser` with an
+ * IP), and the IP value pattern only recognises IPv4, so the key is replaced
+ * wholesale, whatever its value, rather than trusting either fact to hold.
  *
  * `beforeSendSpan` cannot drop a span (returning `null` is a no-op upstream),
  * so this always returns the same span object, mutated in place. It is generic
  * so it stays a drop-in for `BeforeSendStreamedSpanCallback`.
  */
+/**
+ * Scope-user attributes that v11 stamps onto streamed spans and that
+ * {@link SENSITIVE_KEY_RE} does not name. Each is replaced wholesale, whatever
+ * its value (`user.email` is already covered by the key pattern; `user.id` is
+ * kept for correlation, as on logs and metrics).
+ */
+const STREAMED_SPAN_USER_ATTRIBUTE_KEYS = ['user.name', 'user.username', 'user.ip_address'] as const;
+
 function scrubStreamedSpan<
   T extends {
     name?: unknown;
@@ -641,7 +657,7 @@ function scrubStreamedSpan<
   }
   if (span.attributes) {
     scrubSpanData(span.attributes);
-    for (const key of ['user.name', 'user.username']) {
+    for (const key of STREAMED_SPAN_USER_ATTRIBUTE_KEYS) {
       if (key in span.attributes) span.attributes[key] = REDACTED;
     }
   }
@@ -675,4 +691,7 @@ export {
   scrubStreamedSpan,
   scrubString,
   deepScrub,
+  URL_SPAN_ATTRIBUTE_KEYS,
+  QUERY_SPAN_ATTRIBUTE_KEYS,
+  STREAMED_SPAN_USER_ATTRIBUTE_KEYS,
 };
