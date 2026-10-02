@@ -207,33 +207,62 @@ if [ "$rc" = "0" ]; then pass "path with spaces → gate 0 (quoting holds)"; els
 #    sat outside the pin exactly as cd.yml's test-web and test-mcp did.
 WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
 
-# Per-workflow floors: the jobs KNOWN to load a native binding today, one line
-# per workflow that has any. A floor is a self-test of the derivation (see
-# assert_gate_wired), never the set under test, so this is the one place a
-# job name is typed. A workflow with no floor is still swept: every job it
-# derives is checked, and only the zero-derived vacuity check is waived —
-# schema-drift.yml carries the gate but derives nothing (`npm run db:drift`
-# loads no binding) and engine-cdn-test.yml's `npm test` is `node --test`.
+# Per-workflow floors: the jobs KNOWN to load a native binding today, one row
+# per workflow that has any, written `<workflow>: <job> <job> ...`. A floor is
+# a self-test of the derivation (see assert_gate_wired), never the set under
+# test, so this is the one place a job name is typed. A workflow with no floor
+# is still swept: every job it derives is checked, and only the zero-derived
+# vacuity check is waived — schema-drift.yml carries the gate but derives
+# nothing (`npm run db:drift` loads no binding) and engine-cdn-test.yml's
+# `npm test` is `node --test`.
+#   - quality-gates.yml runs no `next build` line of its own: lighthouse-delta
+#     builds through web's `npm run build`, test-web and test-mcp run vitest,
+#     and editor-boot's Playwright config starts `next dev` (#10200).
+#   - cd.yml (the deploy path) has the same shape: test-web and test-mcp run
+#     vitest directly, and e2e builds Next.js itself (`npx next build`) before
+#     its own Playwright run. e2e already carried the gate; test-web and
+#     test-mcp did not (#10222).
+# ONE table, read by both floor_jobs and floored_workflows. The floors used to
+# be a case statement AND a separate list of floored workflows, typed twice
+# with nothing tying them together: deleting cd.yml's case arm left cd.yml
+# listed but silently unfloored, and an arm for a workflow that did not exist
+# was never evaluated (review board on #10296, lesson 18). A row that does not
+# parse, a workflow named twice, or an empty table fails below.
+readonly NATIVE_BINDING_FLOORS='
+ci.yml: build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-crossbrowser docs-e2e observatory-tests docs-internal-gate design-internal-gate
+quality-gates.yml: test-web test-mcp editor-boot lighthouse-delta
+cd.yml: test-web test-mcp e2e
+'
+FLOOR_ROW_RE='^[A-Za-z0-9._-]+\.yml:([[:space:]]+[a-z][a-z0-9_-]*)+[[:space:]]*$'
+
+# $1 = workflow file name; prints its floor jobs space-separated, or nothing.
 floor_jobs() {
-  case "$1" in
-    ci.yml)
-      echo "build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-crossbrowser docs-e2e observatory-tests docs-internal-gate design-internal-gate" ;;
-    # quality-gates.yml runs no `next build` line of its own: lighthouse-delta
-    # builds through web's `npm run build`, test-web and test-mcp run vitest,
-    # and editor-boot's Playwright config starts `next dev` (#10200).
-    quality-gates.yml)
-      echo "test-web test-mcp editor-boot lighthouse-delta" ;;
-    # cd.yml (the deploy path) has the same shape: test-web and test-mcp run
-    # vitest directly, and e2e builds Next.js itself (`npx next build`) before
-    # its own Playwright run. e2e already carried the gate; test-web and
-    # test-mcp did not (#10222).
-    cd.yml)
-      echo "test-web test-mcp e2e" ;;
-    *) echo "" ;;
-  esac
+  awk -v wf="$1:" '$1 == wf { $1 = ""; sub(/^[[:space:]]+/, ""); print; exit }' <<<"$NATIVE_BINDING_FLOORS"
 }
 readonly -f floor_jobs
-FLOORED_WORKFLOWS="ci.yml quality-gates.yml cd.yml"
+
+# Prints every workflow the table floors, one per line, in table order.
+floored_workflows() {
+  awk 'NF { w = $1; sub(/:$/, "", w); print w }' <<<"$NATIVE_BINDING_FLOORS"
+}
+readonly -f floored_workflows
+
+floor_rows="$(grep -v '^[[:space:]]*$' <<<"$NATIVE_BINDING_FLOORS" || true)"
+if [ -z "$floor_rows" ]; then
+  fail "NATIVE_BINDING_FLOORS has no rows — no workflow's derivation is self-tested"
+else
+  while IFS= read -r floor_row; do
+    if ! grep -qE "$FLOOR_ROW_RE" <<<"$floor_row"; then
+      fail "NATIVE_BINDING_FLOORS row '${floor_row}' is not '<workflow>.yml: <job> [<job> ...]' — an emptied or mistyped row unfloors its workflow"
+    fi
+  done <<<"$floor_rows"
+  floor_dupes="$(floored_workflows | sort | uniq -d)"
+  if [ -n "$floor_dupes" ]; then
+    fail "NATIVE_BINDING_FLOORS names $(tr '\n' ' ' <<<"$floor_dupes")more than once — floor_jobs reads only the first row"
+  else
+    pass "NATIVE_BINDING_FLOORS: $(grep -c '' <<<"$floor_rows") well-formed row(s), one per workflow"
+  fi
+fi
 
 # WHICH jobs need a native binding is DERIVED from the workflow text, never
 # typed out. This list was hand-maintained twice and wrong both times: first
@@ -564,9 +593,65 @@ assert_unwiring_caught() {
 }
 readonly -f assert_unwiring_caught
 
+# Reads workflow text on stdin; prints one `job<TAB>value` line per job under
+# `jobs:` that invokes the gate in an executable line. value is that job's
+# JOB-LEVEL continue-on-error (quotes and a trailing comment stripped), or
+# empty when it has none. A job-level `continue-on-error: true` lets the job
+# pass with any step failing, the gate step included, and it sits at the top
+# of the job — nowhere near the invocation, so the windowed check in 15 cannot
+# see it (review board on #10296).
+gate_job_continue_on_error() {
+  awk -v hdr="$JOB_HEADER_RE" '
+    function flush() { if (job != "" && invokes) print job "\t" coe }
+    /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
+    !in_jobs { next }
+    /^[[:space:]]*#/ { next }
+    $0 ~ hdr { flush(); job = $1; sub(/:$/, "", job); invokes = 0; coe = ""; next }
+    /^[^[:space:]]/ { flush(); job = ""; in_jobs = 0; next }
+    /bash scripts\/check-native-bindings\.sh/ { invokes = 1 }
+    /^    ["\047]?continue-on-error["\047]?[[:space:]]*:/ {
+      v = $0
+      sub(/^[^:]*:[[:space:]]*/, "", v)
+      sub(/[[:space:]]+#.*$/, "", v)
+      gsub(/["\047]/, "", v)
+      sub(/[[:space:]]+$/, "", v)
+      coe = (v == "" ? "(empty)" : v)
+    }
+    END { flush() }
+  '
+}
+readonly -f gate_job_continue_on_error
+
+# The one job allowed a job-level continue-on-error while invoking the gate,
+# as `<workflow>:<job>` rows. ci.yml's test-e2e-crossbrowser is non-blocking as
+# a WHOLE job for its first landing (its own comment: the firefox/webkit pass
+# rate is unmeasured, and it sits outside ci-success.needs), so its gate is
+# exactly as blocking as the rest of that job. The exemption is checked in both
+# directions: a row whose job no longer invokes the gate with a job-level
+# continue-on-error fails as stale, so flipping crossbrowser to blocking (which
+# drops the key) has to delete this row too, and the row cannot outlive the
+# reason for it.
+readonly GATE_COE_EXEMPT='
+ci.yml:test-e2e-crossbrowser
+'
+
+# $1 = a workflow the negative controls below mutate, $2 = the variable to load
+# its text into. The workflow must have a NATIVE_BINDING_FLOORS row: a control
+# is only meaningful where the floor has proven the derivation reads that file,
+# and with the controls as the consumer, deleting a row from the table goes
+# red here instead of unflooring the workflow in silence.
+load_controlled_workflow() {
+  local wf="$1" var="$2"
+  if ! grep -qxF "$wf" <<<"$(floored_workflows)"; then
+    fail "the negative controls mutate $wf, but NATIVE_BINDING_FLOORS has no row for it — its derivation would run unfloored"
+  fi
+  printf -v "$var" '%s' "$(cat "$WORKFLOWS_DIR/$wf")"
+}
+readonly -f load_controlled_workflow
+
 # The sweep itself. Every *.yml under .github/workflows/ is read — the gh-aw
 # *.lock.yml compilations included, since they are workflows GitHub runs — and
-# each is graded against its floor (if any). The floored three must all be
+# each is graded against its floor (if any). Every floored workflow must be
 # present: a floor whose file is missing would otherwise never be evaluated,
 # and the derivation's self-test would vanish without a FAIL (lesson 9).
 workflow_files=()
@@ -574,7 +659,7 @@ for wf_path in "$WORKFLOWS_DIR"/*.yml; do
   [ -f "$wf_path" ] && workflow_files+=("$wf_path")
 done
 floored_missing=0
-for wf_label in $FLOORED_WORKFLOWS; do
+for wf_label in $(floored_workflows); do
   if [ ! -f "$WORKFLOWS_DIR/$wf_label" ]; then
     fail "floored workflow $wf_label not found under $WORKFLOWS_DIR — its floor cannot be evaluated"
     floored_missing=1
@@ -582,18 +667,24 @@ for wf_label in $FLOORED_WORKFLOWS; do
 done
 
 if [ "${#workflow_files[@]}" -gt 0 ] && [ "$floored_missing" = 0 ]; then
-  ci="$(cat "$WORKFLOWS_DIR/ci.yml")"
-  qg="$(cat "$WORKFLOWS_DIR/quality-gates.yml")"
-  cdwf="$(cat "$WORKFLOWS_DIR/cd.yml")"
+  load_controlled_workflow ci.yml ci
+  load_controlled_workflow quality-gates.yml qg
+  load_controlled_workflow cd.yml cdwf
 
   # 15 rides along: no continue-on-error may shadow any gate invocation — it
   #    would swallow the non-zero exit and pass the job on a dropped binding.
-  #    Windowed to the invocation lines so legitimate continue-on-error
-  #    elsewhere in a workflow does not false-positive. Checked only where an
-  #    invocation exists (schema-drift.yml carries one outside any derived
-  #    job, so this is broader than the derived set), and the count of such
-  #    workflows must be non-zero or the check ran over nothing.
+  #    Two places can carry it. On the STEP, it sits next to the invocation, so
+  #    that check is windowed to the invocation lines and a legitimate
+  #    continue-on-error elsewhere in a workflow does not false-positive. On
+  #    the JOB, it sits at the top of the job, far from the invocation, so
+  #    every job that invokes the gate is cut out and its own job-level key is
+  #    read; anything but `false` fails. Checked only where an invocation
+  #    exists (schema-drift.yml carries one outside any derived job, so this
+  #    is broader than the derived set); the count of such workflows must be
+  #    non-zero, and each must yield at least one invoking job, or the check
+  #    ran over nothing.
   invoking_workflows=0
+  coe_seen=""
   for wf_path in "${workflow_files[@]}"; do
     wf_label="${wf_path##*/}"
     wf_text="$(cat "$wf_path")"
@@ -606,9 +697,40 @@ if [ "${#workflow_files[@]}" -gt 0 ] && [ "$floored_missing" = 0 ]; then
     if grep -q 'continue-on-error' <<<"$native_windows"; then
       fail "a $wf_label native-bindings gate step has continue-on-error — gate exit code would be ignored"
     else
-      pass "$wf_label: no continue-on-error shadows any native-bindings gate invocation"
+      pass "$wf_label: no step-level continue-on-error shadows any native-bindings gate invocation"
+    fi
+    gate_jobs="$(gate_job_continue_on_error <<<"$wf_text")"
+    if [ -z "$gate_jobs" ]; then
+      fail "$wf_label invokes the gate, but no job under jobs: was found invoking it — the job-level continue-on-error check would run over nothing"
+      continue
+    fi
+    coe_clean=1
+    coe_exempted=0
+    while IFS=$'\t' read -r job coe; do
+      if [ -n "$coe" ] && [ "$coe" != "false" ]; then
+        coe_seen="${coe_seen}${wf_label}:${job}"$'\n'
+        if grep -qxF "${wf_label}:${job}" <<<"$GATE_COE_EXEMPT"; then
+          coe_exempted=$((coe_exempted + 1))
+        else
+          fail "$wf_label job ${job} invokes the native-bindings gate but has job-level continue-on-error: ${coe} — the job passes with the gate red"
+          coe_clean=0
+        fi
+      fi
+    done <<<"$gate_jobs"
+    if [ "$coe_clean" = 1 ]; then
+      pass "$wf_label: none of the $(grep -c '' <<<"$gate_jobs") job(s) invoking the gate has a non-exempt job-level continue-on-error ($coe_exempted exempt)"
     fi
   done
+  # The other direction: every exemption must still describe a job that
+  # invokes the gate under a job-level continue-on-error, or it is stale.
+  while IFS= read -r coe_exempt; do
+    [ -n "$coe_exempt" ] || continue
+    if grep -qxF "$coe_exempt" <<<"$coe_seen"; then
+      pass "continue-on-error exemption ${coe_exempt} still matches a gate-invoking job with a job-level continue-on-error"
+    else
+      fail "continue-on-error exemption ${coe_exempt} is stale — that job no longer invokes the gate under a job-level continue-on-error; delete the row from GATE_COE_EXEMPT"
+    fi
+  done <<<"$GATE_COE_EXEMPT"
   if [ "$invoking_workflows" -gt 0 ]; then
     pass "swept ${#workflow_files[@]} workflow file(s) under .github/workflows; $invoking_workflows invoke the gate"
   else
