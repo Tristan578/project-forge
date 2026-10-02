@@ -486,7 +486,7 @@ node .claude/hooks/taskboard-launch.mjs start   # never start the binary by hand
 - **Web UI:** http://localhost:3010
 - **API:** http://localhost:3010/api
 - **Project ID:** `01KMM9ZA6SBZ7RKJZJTZS9VR4R` (prefix: PF)
-- **Database:** resolved by the launcher — `TASKBOARD_DB` if set, else the OS config directory (`%APPDATA%\taskboard\taskboard.db` on Windows, `~/Library/Application Support/taskboard/taskboard.db` on macOS, `$XDG_CONFIG_HOME/taskboard/taskboard.db` on Linux) — and passed to the binary explicitly, so the HTTP server, the MCP server and the GitHub sync all open the same file. Never start the binary by hand and never pass your own `--db`: a stray `--db` points the board at an empty local copy instead of the shared store.
+- **Database:** resolved by the launcher — `TASKBOARD_DB` if set, else the OS config directory (`%APPDATA%\taskboard\taskboard.db` on Windows, `~/Library/Application Support/taskboard/taskboard.db` on macOS, `$XDG_CONFIG_HOME/taskboard/taskboard.db` on Linux (`~/.config/taskboard/taskboard.db` when `XDG_CONFIG_HOME` is unset; `node .claude/hooks/taskboard-launch.mjs db-path` prints the resolved path)) — and passed to the binary explicitly, so the HTTP server, the MCP server and the GitHub sync all open the same file. Never start the binary by hand and never pass your own `--db`: a stray `--db` points the board at an empty local copy instead of the shared store.
 
 Tools with hook support auto-start the taskboard on session start. Ticket state is shared across contributors via the GitHub Projects sync (`.claude/hooks/github_project_sync.py`), not a committed database.
 
