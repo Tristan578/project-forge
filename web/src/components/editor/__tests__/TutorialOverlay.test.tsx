@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
-import { TutorialOverlay } from '../TutorialOverlay';
+import { TutorialOverlay, ARROW_KEY_ROLES } from '../TutorialOverlay';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 
 vi.mock('@/stores/onboardingStore', () => ({
@@ -262,12 +262,6 @@ describe('TutorialOverlay', () => {
   it.each([
     ['a range input', () => Object.assign(document.createElement('input'), { type: 'range' })],
     ['a radio input', () => Object.assign(document.createElement('input'), { type: 'radio' })],
-    ['a role=slider widget', () => {
-      const el = document.createElement('div');
-      el.setAttribute('role', 'slider');
-      el.tabIndex = 0;
-      return el;
-    }],
     ['a tab inside a tablist', () => {
       const list = document.createElement('div');
       list.setAttribute('role', 'tablist');
@@ -294,6 +288,60 @@ describe('TutorialOverlay', () => {
     }
   });
 
+  // Every arrow-driven ARIA role, listed literally rather than read off
+  // ARROW_KEY_ROLES: a role dropped from the set must turn its own case red,
+  // not quietly remove the case. The equality check below catches the other
+  // direction, a role added to the set with no case here.
+  const ARROW_ROLES = [
+    'slider', 'spinbutton', 'radio', 'radiogroup', 'tab', 'tablist', 'tree', 'treeitem',
+    'listbox', 'option', 'menu', 'menubar', 'menuitem', 'menuitemradio', 'menuitemcheckbox',
+    'grid', 'gridcell', 'combobox',
+  ];
+
+  it('covers exactly the roles the overlay leaves the arrows to', () => {
+    expect(ARROW_ROLES).toHaveLength(18);
+    expect([...ARROW_KEY_ROLES].sort()).toEqual([...ARROW_ROLES].sort());
+  });
+
+  // The widget carries the role itself, so it is the nearest [role] to the key
+  // target: a tab inside a tablist would never reach the tablist role.
+  it.each(ARROW_ROLES)('leaves the arrow keys to a role=%s widget, and Escape still skips', (role) => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    const widget = document.createElement('div');
+    widget.setAttribute('role', role);
+    widget.tabIndex = 0;
+    document.body.appendChild(widget);
+    try {
+      expect(widget.closest('[role]')).toBe(widget);
+      fireEvent.keyDown(widget, { key: 'ArrowLeft' });
+      fireEvent.keyDown(widget, { key: 'ArrowRight' });
+      expect(mockRetreatTutorial).not.toHaveBeenCalled();
+      expect(mockCompleteTutorial).not.toHaveBeenCalled();
+      fireEvent.keyDown(widget, { key: 'Escape' });
+      expect(mockSkipTutorial).toHaveBeenCalledOnce();
+    } finally {
+      widget.remove();
+    }
+  });
+
+  // A role whose arrows are not its own (a button, a link) leaves them to the
+  // tour: having a role is not enough, it has to be one of the set.
+  it.each(['button', 'link'])('keeps the arrow keys on a role=%s element', (role) => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    const el = document.createElement('div');
+    el.setAttribute('role', role);
+    el.tabIndex = 0;
+    document.body.appendChild(el);
+    try {
+      fireEvent.keyDown(el, { key: 'ArrowLeft' });
+    } finally {
+      el.remove();
+    }
+    expect(mockRetreatTutorial).toHaveBeenCalledOnce();
+  });
+
   // An input that takes no keys of its own (the keep-free side of the input
   // branch): arrows and Escape there are still the tour's.
   it.each([
@@ -317,11 +365,11 @@ describe('TutorialOverlay', () => {
 
   // A tour step can point at a control that opens its own dialog (Export).
   // That dialog's keys are its own: Escape closes it, not the tour.
-  it('ignores keys from inside another dialog', () => {
+  it.each(['dialog', 'alertdialog'])('ignores keys from inside another role=%s', (role) => {
     setupStore({ tutorialStep: 2 });
     render(<TutorialOverlay />);
     const other = document.createElement('div');
-    other.setAttribute('role', 'dialog');
+    other.setAttribute('role', role);
     const inside = document.createElement('button');
     other.appendChild(inside);
     document.body.appendChild(other);
