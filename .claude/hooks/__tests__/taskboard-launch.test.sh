@@ -78,6 +78,34 @@ else
   bad "3. expected the probe loop to fall back, got exit $rc: $out"
 fi
 
+# ---- 4. 'init' is forwarded to init_database(), not the start path ----------
+#      A populated database makes init refuse BEFORE any spawn with a message
+#      only init_database() produces ("already exists and is populated"). The
+#      start path would instead try to start a server on it, so this message
+#      proves the launcher forwarded `init` and the runtime dispatched it as
+#      init. Nothing is spawned, so the case is hermetic on every platform.
+PY="$(command -v python3 || command -v python || true)"
+if [ -z "$PY" ]; then
+  bad "4. python is required to plant the populated database fixture"
+else
+  populated="$TMP/populated/taskboard.db"
+  mkdir -p "$TMP/populated"
+  "$PY" -c 'import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); c.execute("CREATE TABLE projects(id TEXT PRIMARY KEY, name TEXT)"); c.execute("INSERT INTO projects VALUES(?, ?)", ("p1", "existing")); c.commit(); c.close()' "$populated"
+  before="$(cksum < "$populated")"
+  res="$(run_launcher init TASKBOARD_DB="$populated")"
+  rc="${res%%|*}"; out="${res#*|}"
+  if [ "$rc" -eq 1 ] && grep -qF "already exists and is populated" <<<"$out"; then
+    ok "4. 'init' is forwarded and refuses a populated database with exit 1"
+  else
+    bad "4. expected exit 1 + 'already exists and is populated', got exit $rc: $out"
+  fi
+  if [ "$(cksum < "$populated")" = "$before" ]; then
+    ok "4b. the refused init left the populated database byte-identical"
+  else
+    bad "4b. the refused init modified $populated"
+  fi
+fi
+
 echo
 echo "taskboard-launch.test.sh: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

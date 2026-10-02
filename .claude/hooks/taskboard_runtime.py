@@ -25,7 +25,8 @@ def default_db(platform=None, environ=None, home=None):
         return Path(env['TASKBOARD_DB']).expanduser().resolve()
     if platform == 'win32':
         # GUI hosts may omit APPDATA. Restore the normal Windows config root
-        # rather than starting a second board under Go's ~/.config fallback.
+        # rather than starting a second board under the binary's ~/.config
+        # fallback (see ensure_running() for where that fallback comes from).
         config = Path(env.get('APPDATA') or home / 'AppData' / 'Roaming')
     elif platform == 'darwin':
         config = home / 'Library' / 'Application Support'
@@ -47,12 +48,25 @@ def api(path):
         return json.load(response)
 
 
+# How to stop a running server, for messages that ask the operator to.
+# `taskboard stop` is the binary's own subcommand (present in tcarac/taskboard
+# v0.6.0, which finds the server through a pid file in its config directory);
+# pkill / Task Manager is the fallback when that does not find it.
+STOP_HINT = 'stop the running server with `taskboard stop` (or `pkill taskboard`; on Windows end taskboard.exe in Task Manager)'
+
+
 def require_database(path):
     """The shared database must already exist; nothing here may create one.
 
-    The taskboard binary's OpenAt() does MkdirAll + create-on-open, so handing
-    it `--db <path>` for a path that does not exist would silently mint an
-    EMPTY database. That empty board then reads as "0 tickets", and the
+    Assumed about the external binary, not enforced by anything here: it
+    creates a missing `--db` path on open. That is what tcarac/taskboard
+    v0.6.0 does (internal/db/db.go OpenAt: os.MkdirAll on the directory, then
+    sql.Open + migrations, which creates the file), but the binary a host has
+    installed may be another version. The guard is correct either way: it
+    refuses BEFORE the spawn, so it never depends on what the binary would
+    have done. If the binary does create on open, handing it `--db <path>`
+    for a path that does not exist would silently mint an EMPTY database.
+    That empty board then reads as "0 tickets", and the
     session-start hook's remedy for 0 tickets is a GitHub pull — which
     github_project_sync.py's header names as a duplicate-issue hazard.
     Checked BEFORE the binary is spawned, so the only outcome on a host with
@@ -77,7 +91,7 @@ def verify_database(path, projects=None):
             # An empty identity set matches an empty API answer, so the
             # comparison below would pass vacuously — exactly what a freshly
             # created empty database produces (lessons-learned #11). Refuse it.
-            raise RuntimeError('Taskboard database has no projects; refusing to treat an empty identity set as a match. Restore the shared database, or stop the server and run `node .claude/hooks/taskboard-launch.mjs init` to bind this repository (#9995)')
+            raise RuntimeError('Taskboard database has no projects; refusing to treat an empty identity set as a match. Restore the shared database, or ' + STOP_HINT + ', then run `node .claude/hooks/taskboard-launch.mjs init` to bind this repository (#9995)')
         expected = {p['id'] for p in (api('/projects') if projects is None else projects)}
         if actual != expected:
             raise RuntimeError('Taskboard API/database identity mismatch; restart all clients through taskboard_runtime.py')
@@ -103,16 +117,21 @@ def ensure_running():
         projects = api('/projects')
     except (OSError, ValueError):
         # Always pass the resolved path explicitly, never conditionally on
-        # TASKBOARD_DB being set. The taskboard binary has its own default
-        # (os.UserConfigDir(), falling back to ~/.config on ANY platform,
-        # Windows included, the moment APPDATA is unset) which does not
-        # match default_db()'s platform-specific fallback above. Passing
+        # TASKBOARD_DB being set. Without --db the binary picks its own
+        # default. In tcarac/taskboard v0.6.0 (internal/db/db.go
+        # DefaultDBPath) that is os.UserConfigDir()/taskboard/taskboard.db,
+        # and when os.UserConfigDir() returns an error (on Windows it does
+        # when %AppData% is empty) the binary itself falls back to
+        # ~/.config/taskboard/taskboard.db, which is not where default_db()
+        # looks. Other versions may differ; that is an assumption about an
+        # external binary, and this code does not depend on it: passing
         # --db unconditionally makes default_db() the ONLY path the server
-        # can open, closing exactly the divergence #9995 reported.
+        # can open, whatever the binary's own default is, closing the
+        # divergence #9995 reported.
         #
-        # The file must exist BEFORE the spawn: the binary creates a missing
-        # --db path on open (see require_database), and an empty board is
-        # the one state every downstream check would wave through.
+        # The file must exist BEFORE the spawn: the binary may create a
+        # missing --db path on open (see require_database), and an empty
+        # board is the one state every downstream check would wave through.
         projects = _spawn_server(require_database(default_db()))
     verify_database(default_db(), projects)
 
@@ -129,13 +148,18 @@ def _spawn_server(db):
 
 
 def _project_count(db):
-    conn = sqlite3.connect(db.resolve().as_uri() + '?mode=ro', uri=True)
+    # connect() is inside the try: a path sqlite cannot open at all (a
+    # directory, say) raises from connect itself, and that must surface as
+    # the same clear refusal rather than a raw sqlite3 traceback.
+    conn = None
     try:
+        conn = sqlite3.connect(db.resolve().as_uri() + '?mode=ro', uri=True)
         return conn.execute('SELECT COUNT(*) FROM projects').fetchone()[0]
     except sqlite3.Error as exc:
-        raise RuntimeError('Not a taskboard database: ' + str(db) + ' (' + str(exc) + ')') from exc
+        raise RuntimeError('Not a taskboard database: ' + str(db) + ' (' + str(exc) + '). Point TASKBOARD_DB at the shared database, or move this path aside and re-run init') from exc
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 def init_database():
@@ -149,19 +173,21 @@ def init_database():
       - a database at default_db() that already holds a project;
       - a server already answering, which is open on SOME database (possibly
         another one) and would be mistaken for this one.
-    It then starts the binary on default_db() (which creates the file), binds
+    It then starts the binary on default_db() (tcarac/taskboard v0.6.0
+    creates the file and its schema on open; whatever another version does,
+    the verify below is what proves the result), binds
     this repository's project so the identity set is non-empty, and runs the
     normal verify_database() so the API is proven to serve this exact file.
     """
     db = default_db()
     if db.exists() and _project_count(db):
-        raise RuntimeError('Taskboard database already exists and is populated: ' + str(db) + '; use start')
+        raise RuntimeError('Taskboard database already exists and is populated: ' + str(db) + '; init is only for a new machine. Use `node .claude/hooks/taskboard-launch.mjs start`')
     try:
         api('/projects')
     except (OSError, ValueError):
         pass
     else:
-        raise RuntimeError('A taskboard server is already running; stop it so init can start one on ' + str(db))
+        raise RuntimeError('A taskboard server is already running, so init cannot tell which database it serves. ' + STOP_HINT[0].upper() + STOP_HINT[1:] + ', then re-run init; it will start one on ' + str(db))
     _spawn_server(db)
     import taskboard_sync
     config = json.loads((repo_root() / '.claude/hooks/github-sync-config.json').read_text())
@@ -176,7 +202,11 @@ def main():
         print(default_db())
         return
     if command == 'init':
-        print(json.dumps({'database': str(init_database()), 'integrity': 'ok', 'apiIdentity': 'matched'}))
+        db = init_database()
+        print(json.dumps({'database': str(db), 'integrity': 'ok', 'apiIdentity': 'matched'}))
+        # stdout stays machine-readable JSON; the next step goes to stderr.
+        print('[taskboard] Initialised ' + str(db) + ' and bound this repository. Next step: run python3 .claude/hooks/github_project_sync.py pull'
+              ' (use python on Windows if python3 is not on PATH) to fill the board from GitHub.', file=sys.stderr)
         return
     ensure_running()
     if command == 'mcp':
@@ -203,6 +233,6 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+    except (RuntimeError, OSError, subprocess.SubprocessError, sqlite3.Error) as exc:
         print('[taskboard] ' + str(exc), file=sys.stderr)
         sys.exit(1)

@@ -21,13 +21,13 @@ if ! tb_check_installed; then
 ╠══════════════════════════════════════════════════════════════╣
 ║  The taskboard binary (tcarac/taskboard) is required.        ║
 ║                                                              ║
-║  Install:                                                    ║
-║    go install github.com/tcarac/taskboard@latest             ║
-║                                                              ║
-║  Or download the binary from:                                ║
+║  Install (`go install` does not work for this module):       ║
+║    brew tap tcarac/taskboard && brew install taskboard       ║
+║  Or download a release binary from:                          ║
 ║    https://github.com/tcarac/taskboard/releases              ║
+║  Or build from source: clone it, then `make build`.          ║
 ║                                                              ║
-║  Place it in one of:                                         ║
+║  Place it in one of (or set TASKBOARD_BIN to it):            ║
 ║    - ../taskboard/taskboard[.exe]  (sibling to project-forge)║
 ║    - ~/.local/bin/taskboard                                  ║
 ║    - /usr/local/bin/taskboard                                ║
@@ -60,6 +60,12 @@ if ! tb_api_available; then
 ║  binary by hand:                                             ║
 ║    cd project-forge                                          ║
 ║    node .claude/hooks/taskboard-launch.mjs start             ║
+║                                                              ║
+║  New machine with no taskboard database yet? Run init        ║
+║  once instead (the only command that creates it), then       ║
+║  pull the tickets from GitHub:                               ║
+║    node .claude/hooks/taskboard-launch.mjs init              ║
+║    python3 .claude/hooks/github_project_sync.py pull         ║
 ║                                                              ║
 ║  ALL work MUST be tracked. You CANNOT proceed without it.    ║
 ╚══════════════════════════════════════════════════════════════╝

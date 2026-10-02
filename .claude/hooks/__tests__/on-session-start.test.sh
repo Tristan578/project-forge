@@ -111,9 +111,17 @@ echo "=== on-session-start.sh tests ==="
 set_dx absent
 
 # ---- 1. not installed -> the install banner and exit 1 -----------------------
+res="$(run_hook STUB_INSTALLED=0)"
 expect "1. taskboard not installed prints the install banner and exits 1" \
-  "$(run_hook STUB_INSTALLED=0)" 1 \
+  "$res" 1 \
   "TASKBOARD NOT INSTALLED" "MANDATORY: Install taskboard" "~TASKBOARD STATUS" "~STUB-SYNC-FROM-GITHUB-RAN"
+# `go install github.com/tcarac/taskboard@latest` fails: v0.6.0 has no main
+# package at the module root, and cmd/taskboard's `//go:embed web/dist` names a
+# directory the module does not ship. The banner must not prescribe it, and it
+# must name the TASKBOARD_BIN override the install check honours.
+expect "1b. the install banner never prescribes the broken 'go install' and names TASKBOARD_BIN" \
+  "$res" 1 \
+  "~go install github.com/tcarac/taskboard" "https://github.com/tcarac/taskboard/releases" "TASKBOARD_BIN"
 
 # ---- 2. installed and running -> the whole status flow, exit 0 ---------------
 res="$(run_hook)"
@@ -135,6 +143,11 @@ expect "3b. server down + auto-start fails prints the FAILED TO START banner and
 expect "3c. the FAILED TO START banner's manual remedy is the runtime launcher" \
   "$res" 0 "node .claude/hooks/taskboard-launch.mjs start"
 assert_no_raw_start "3d. the FAILED TO START banner never prescribes a raw 'taskboard start'" "$res"
+# On a new machine `start` refuses (no database), so the banner must also give
+# the first-run path. tb_auto_start discards the launcher's stdout, so this
+# banner is the only place SessionStart can put that remedy in front of anyone.
+expect "3e. the FAILED TO START banner gives the first-run 'init' and the pull that follows it" \
+  "$res" 0 "node .claude/hooks/taskboard-launch.mjs init" "python3 .claude/hooks/github_project_sync.py pull"
 
 # ---- 4. stale, active-with-issues, consistency reports -----------------------
 expect "4. stale in-progress tickets are reported with an ACTION REQUIRED line" \
@@ -158,6 +171,41 @@ expect "5. a failing tools/dx-audit.sh adds the DX AUDIT line and the hook still
 set_dx 0
 expect "5b. a passing tools/dx-audit.sh adds nothing" "$(run_hook)" 0 "~DX AUDIT"
 set_dx absent
+
+# ---- 6. the REAL install check honours TASKBOARD_BIN --------------------------
+# Every case above runs against a stub library. This one sources the real
+# taskboard-state.sh, from a temp copy so its "../taskboard" sibling candidate
+# points inside $TMP, and reads which binary tb_check_installed settled on.
+# taskboard_runtime.binary() tries TASKBOARD_BIN first, so the install check
+# must too, or a binary off PATH reads as "not installed" while the launcher
+# would start it. The assertion is EQUALITY with the override, not success:
+# another candidate on the host (PATH, /usr/local/bin) could make
+# tb_check_installed succeed without the override being read at all.
+REAL_LIB_DIR="$TMP/real-repo/.claude/hooks"
+mkdir -p "$REAL_LIB_DIR" "$TMP/custom-bin"
+cp "$HERE/../taskboard-state.sh" "$REAL_LIB_DIR/taskboard-state.sh"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/custom-bin/my-taskboard"
+chmod +x "$TMP/custom-bin/my-taskboard"
+
+# resolved_bin <TASKBOARD_BIN value> - prints "<tb_check_installed exit>|<TB_BIN>".
+resolved_bin() {
+  # shellcheck disable=SC2016  # expanded by the child bash, which sources the library first
+  TASKBOARD_BIN="$1" bash -c '. "$1"; tb_check_installed; printf "%s|%s" "$?" "$TB_BIN"' _ "$REAL_LIB_DIR/taskboard-state.sh" 2>/dev/null
+}
+readonly -f resolved_bin
+
+res="$(resolved_bin "$TMP/custom-bin/my-taskboard")"
+if [ "$res" = "0|$TMP/custom-bin/my-taskboard" ]; then
+  ok "6. tb_check_installed selects the binary TASKBOARD_BIN names"
+else
+  bad "6. TASKBOARD_BIN=$TMP/custom-bin/my-taskboard should be selected, got '$res'"
+fi
+res="$(resolved_bin "$TMP/custom-bin/absent-taskboard")"
+if [ "${res#*|}" != "$TMP/custom-bin/absent-taskboard" ]; then
+  ok "6b. a TASKBOARD_BIN that names no executable is not selected"
+else
+  bad "6b. a missing TASKBOARD_BIN was selected anyway: '$res'"
+fi
 
 echo
 echo "on-session-start.test.sh: $pass passed, $fail failed"

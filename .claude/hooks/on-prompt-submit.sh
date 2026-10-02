@@ -17,6 +17,7 @@ INPUT=$(cat)
 if ! tb_api_available; then
     echo "[TASKBOARD] Server not reachable. Start it before doing development work."
     echo "  node .claude/hooks/taskboard-launch.mjs start    # resolves + passes the shared DB path; never start the binary by hand"
+    echo "  New machine with no taskboard database yet: run 'node .claude/hooks/taskboard-launch.mjs init' once instead, then 'python3 .claude/hooks/github_project_sync.py pull'"
     exit 0
 fi
 

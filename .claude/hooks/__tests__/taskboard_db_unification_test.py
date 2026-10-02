@@ -127,11 +127,14 @@ class HttpStartupAlwaysPassesExplicitPath(unittest.TestCase):
 
 
 class MissingDatabaseIsNeverCreated(unittest.TestCase):
-    """Security finding on #10291: the taskboard binary's OpenAt() does
-    MkdirAll + create-on-open, so passing `--db <path>` for a path that does
-    not exist would silently mint an EMPTY board. Before --db was pinned this
-    host raised `Taskboard database is missing`; that must remain the only
-    outcome — no spawn, no file, no directory.
+    """Security finding on #10291: the taskboard binary is ASSUMED to create a
+    missing `--db` path on open (tcarac/taskboard v0.6.0's OpenAt does
+    MkdirAll + sql.Open + migrations; an installed binary may be another
+    version). If it does, passing `--db <path>` for a path that does not exist
+    would silently mint an EMPTY board. The guard does not depend on which is
+    true: it refuses before the spawn. Before --db was pinned this host raised
+    `Taskboard database is missing`; that must remain the only outcome — no
+    spawn, no file, no directory.
     """
 
     def test_start_refuses_before_spawning_and_creates_nothing(self):
@@ -179,8 +182,10 @@ class EmptyIdentitySetIsRefused(unittest.TestCase):
     def test_empty_database_is_refused_even_when_the_api_agrees(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._database(tmp, [])
-            with self.assertRaisesRegex(RuntimeError, 'no projects'):
+            with self.assertRaisesRegex(RuntimeError, 'no projects') as caught:
                 runtime.verify_database(path, projects=[])
+            # The remedy names how to stop the server before init, not only that one must.
+            self.assertIn('taskboard stop', str(caught.exception))
 
     def test_populated_database_matching_the_api_passes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -228,11 +233,26 @@ class FirstRunInitIsTheOnlyCreator(unittest.TestCase):
                 raise OSError('not running')
             conn = sqlite3.connect(state['db'])
             try:
-                return [{'id': row[0]} for row in conn.execute('SELECT id FROM projects')]
+                served = [{'id': row[0]} for row in conn.execute('SELECT id FROM projects')]
             finally:
                 conn.close()
+            # A server that also serves ids this file does not hold: the shape
+            # of an API answering from some OTHER database than the one init
+            # just bound.
+            return served + [{'id': pid} for pid in state.get('extra_ids', [])]
 
         return fake_run, fake_api
+
+    @staticmethod
+    def _taskboard_schema(db):
+        """The same minimal schema the fake binary creates, with no rows."""
+        conn = sqlite3.connect(db)
+        try:
+            conn.execute('CREATE TABLE projects(id TEXT PRIMARY KEY, name TEXT, prefix TEXT, description TEXT)')
+            conn.execute('CREATE TABLE tickets(id TEXT PRIMARY KEY, project_id TEXT)')
+            conn.commit()
+        finally:
+            conn.close()
 
     def _run_init(self, env, state):
         spawned = []
@@ -299,8 +319,107 @@ class FirstRunInitIsTheOnlyCreator(unittest.TestCase):
             result, spawned = self._run_init(env, {'db': elsewhere})
             self.assertIsInstance(result, RuntimeError)
             self.assertIn('already running', str(result))
+            # The refusal must say HOW to stop the server, not only that one runs.
+            self.assertIn('taskboard stop', str(result))
             self.assertEqual(spawned, [])
             self.assertFalse(db.parent.exists(), 'no database directory may be created')
+
+    def test_init_adopts_an_existing_database_with_no_projects(self):
+        # An existing file with the taskboard schema and NO project is not a
+        # board anyone is using: init binds it rather than refusing. This pins
+        # the `_project_count(db)` half of init's guard; with only
+        # `db.exists()` this case would be refused as "already exists".
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / 'taskboard.db'
+            self._taskboard_schema(db)
+            env = dict(os.environ)
+            env['TASKBOARD_DB'] = str(db)
+            result, spawned = self._run_init(env, {})
+            self.assertNotIsInstance(result, RuntimeError, str(result))
+            self.assertEqual(len(spawned), 1)
+            conn = sqlite3.connect(db)
+            try:
+                bound = conn.execute('SELECT project_id FROM taskboard_repository_projects').fetchall()
+            finally:
+                conn.close()
+            self.assertEqual(len(bound), 1, 'init must bind the adopted database to this repository')
+
+    def _assert_refused_as_not_a_database(self, path):
+        env = dict(os.environ)
+        env['TASKBOARD_DB'] = str(path)
+        result, spawned = self._run_init(env, {})
+        # _run_init only catches RuntimeError, so a raw sqlite3 error escapes
+        # and fails this test as an error, which is the defect being pinned.
+        self.assertIsInstance(result, RuntimeError)
+        self.assertIn('Not a taskboard database', str(result))
+        self.assertEqual(spawned, [], 'init must not start a server over a file it cannot read as a board')
+
+    def test_init_refuses_a_zero_byte_file_with_a_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / 'taskboard.db'
+            db.touch()
+            self._assert_refused_as_not_a_database(db)
+            self.assertEqual(db.stat().st_size, 0, 'the refused file must be left untouched')
+
+    def test_init_refuses_a_non_sqlite_file_with_a_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / 'taskboard.db'
+            db.write_bytes(b'this is not a sqlite database, it is a text file\n' * 4)
+            self._assert_refused_as_not_a_database(db)
+
+    def test_init_refuses_a_directory_path_with_a_clear_error(self):
+        # TASKBOARD_DB naming a directory: sqlite raises from connect() itself,
+        # so the guard has to cover the connect, not only the query.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._assert_refused_as_not_a_database(Path(tmp))
+
+    def test_init_fails_when_the_api_does_not_serve_the_bound_database(self):
+        # The post-bind verify_database() is what proves the API serves THIS
+        # file. A server that answers with a project id the file does not hold
+        # must make init fail, not report success.
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / 'fresh' / 'taskboard.db'
+            env = dict(os.environ)
+            env['TASKBOARD_DB'] = str(db)
+            result, spawned = self._run_init(env, {'extra_ids': ['01SOMEOTHERBOARDPROJECT00']})
+            self.assertEqual(len(spawned), 1)
+            self.assertIsInstance(result, RuntimeError)
+            self.assertIn('identity mismatch', str(result))
+
+
+class InitEntryPointRunsBeforeTheStartPath(unittest.TestCase):
+    """`init` is reached through main(), and it has to be dispatched BEFORE
+    ensure_running(): on a new machine ensure_running() refuses the missing
+    database, so an init that ran after it could never succeed.
+    """
+
+    def test_main_init_creates_the_database_prints_json_and_the_next_step(self):
+        import io
+        import json
+        helper = FirstRunInitIsTheOnlyCreator()
+        spawned, state = [], {}
+        fake_run, fake_api = helper._fake_binary(spawned, state)
+        ensure_calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / 'new-machine' / 'taskboard.db'
+            env = dict(os.environ)
+            env['TASKBOARD_DB'] = str(db)
+            out, err = io.StringIO(), io.StringIO()
+            with patch.object(sys, 'argv', ['taskboard_runtime.py', 'init']), \
+                 patch.object(runtime, 'binary', return_value='FAKE_TASKBOARD_BIN'), \
+                 patch.object(runtime, 'api', side_effect=fake_api), \
+                 patch.object(runtime.subprocess, 'run', side_effect=fake_run), \
+                 patch.object(runtime, 'ensure_running', side_effect=lambda: ensure_calls.append(1)), \
+                 patch.object(runtime.sys, 'stdout', out), \
+                 patch.object(runtime.sys, 'stderr', err), \
+                 patch.dict(runtime.os.environ, env, clear=True):
+                runtime.main()
+            self.assertEqual(ensure_calls, [], 'init must not go through ensure_running()')
+            self.assertEqual(len(spawned), 1)
+            self.assertTrue(db.is_file(), 'init must leave a database at the resolved path')
+            report = json.loads(out.getvalue())
+            self.assertEqual(report, {'database': str(db.resolve()), 'integrity': 'ok', 'apiIdentity': 'matched'})
+            self.assertIn('github_project_sync.py pull', err.getvalue(), 'init must tell a human the next step')
 
 
 class McpCommandAlwaysPassesExplicitPath(unittest.TestCase):

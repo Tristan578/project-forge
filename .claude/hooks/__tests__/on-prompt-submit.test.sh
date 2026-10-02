@@ -104,6 +104,10 @@ expect "1. unreachable API warns 'Server not reachable' and exits 0" \
 expect "1b. the unreachable-server remedy is the runtime launcher" \
   "$res" 0 "node .claude/hooks/taskboard-launch.mjs start"
 assert_no_raw_start "1c. the unreachable-server remedy never prescribes a raw 'taskboard start'" "$res"
+# `start` refuses on a machine with no database yet, so the hint must also name
+# the one command that creates it, and the pull that fills it afterwards.
+expect "1d. the unreachable-server hint gives the first-run 'init' and the pull after it" \
+  "$res" 0 "node .claude/hooks/taskboard-launch.mjs init" "python3 .claude/hooks/github_project_sync.py pull"
 
 # ---- 2. board health: the direct curl fails locally -> 0-ticket warning ------
 res="$(run_hook "hello" STUB_API_AVAILABLE=1)"
