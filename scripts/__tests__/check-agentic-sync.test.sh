@@ -200,7 +200,7 @@ ROOT="$(make_fixture)"
 perl -0pi -e 's/("startCommand": "[^"]*")/$1, "initCommand": "FIXTURE-INIT-CMD"/' "$ROOT/tools/agentic-sync/canonical.json"
 if grep -q '"initCommand": "FIXTURE-INIT-CMD"' "$ROOT/tools/agentic-sync/canonical.json"; then
   run_gen "$ROOT" --write >/dev/null 2>&1
-  if grep -qE '^- First run on a new machine .*`FIXTURE-INIT-CMD`' "$ROOT/AGENTS.md" && grep -qE '^- First run on a new machine .*`FIXTURE-INIT-CMD`' "$ROOT/sub/copilot.md"; then
+  if grep -qE '^- First run on a new machine .*FIXTURE-INIT-CMD' "$ROOT/AGENTS.md" && grep -qE '^- First run on a new machine .*FIXTURE-INIT-CMD' "$ROOT/sub/copilot.md"; then
     ok "canonical initCommand rendered as its own first-run line in every target"
   else
     bad "initCommand from canonical not rendered as a first-run line"
