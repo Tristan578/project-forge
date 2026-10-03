@@ -1150,9 +1150,10 @@ fi
 #
 # Nothing is evaluated. The cut must open with exactly NAME=( and close with
 # a column-0 ")", and every line between must be blank, a comment, or plain
-# double-quoted words (no $, backquote or backslash inside, and whitespace or
-# end of line after each closing quote, so `"x"#...` is not taken for a
-# comment). On a body of that shape the elements are exactly the quoted runs
+# double-quoted words (no $, backquote, backslash or # inside, and whitespace
+# or end of line after each closing quote, so `"x"#...` is not taken for a
+# comment and `" #x"` cannot pass for one). GHSA ids and node_modules paths
+# never contain #. On a body of that shape the elements are exactly the quoted runs
 # before any comment, so they are read as text. Two earlier designs evaluated
 # the cut, and both ran code (measured): an indented ")" let the cut run on to
 # the end of check-security-alerts.sh and fire its real fetches, and
@@ -1163,7 +1164,7 @@ array_elements() {
   local file="$1" name="$2" decl body
   decl="$(awk -v n="$name" 'index($0, n "=(") == 1 && length($0) == length(n) + 2 { f = 1 } f { print } f && /^\)$/ { closed = 1; exit } END { exit !closed }' "$file" 2>/dev/null)" || return 2
   body="$(sed '1d;$d' <<<"$decl")"
-  if [ -n "$body" ] && grep -vqE '^[[:space:]]*(#.*)?$|^[[:space:]]*("[^"$`\\]*"([[:space:]]+|$))+(#.*)?$' <<<"$body"; then
+  if [ -n "$body" ] && grep -vqE '^[[:space:]]*(#.*)?$|^[[:space:]]*("[^"$`\\#]*"([[:space:]]+|$))+(#.*)?$' <<<"$body"; then
     return 2
   fi
   local stripped quoted
@@ -1217,6 +1218,10 @@ f="$FIX/lockstep-trailing-comment.sh"
 printf '%s\n' 'ALLOWED_GHSA=(' '  "GHSA-aaaa-aaaa-aaaa" # note with "quotes" in it' '  # "GHSA-cccc-cccc-cccc" commented out' ')' > "$f"
 rc=0; out="$(array_elements "$f" ALLOWED_GHSA)" || rc=$?
 if [ "$rc" = 0 ] && [ "$out" = 'GHSA-aaaa-aaaa-aaaa' ]; then pass "lockstep reader ignores quoted text inside comments"; else fail "lockstep reader read quoted text from a comment (rc=$rc, out=[$out])"; fi
+f="$FIX/lockstep-hash-in-element.sh"
+printf '%s\n' 'ALLOWED_ADVISORIES=(' '  " #x:y" "GHSA-aaaa-aaaa-aaaa:node_modules/a"' ')' > "$f"
+rc=0; out="$(array_elements "$f" ALLOWED_ADVISORIES)" || rc=$?
+if [ "$rc" = 2 ]; then pass "lockstep reader refuses a # inside a quoted element, which a comment strip would misread"; else fail "lockstep reader accepted a # inside a quoted element (rc=$rc, out=[$out]) and may read fewer elements than bash"; fi
 f="$FIX/lockstep-two-per-line.sh"
 printf '%s\n' 'ALLOWED_ADVISORIES=(' '  # two waivers on one line are two waivers' '  "GHSA-aaaa-aaaa-aaaa:node_modules/a" "GHSA-bbbb-bbbb-bbbb:node_modules/b"' ')' > "$f"
 rc=0; out="$(array_elements "$f" ALLOWED_ADVISORIES)" || rc=$?
