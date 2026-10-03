@@ -157,9 +157,9 @@ export function OnboardingChecklist() {
   const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
 
   const tutorialCompleted = useOnboardingStore((s) => s.tutorialCompleted);
-  // Only a hands-on tutorial counts. Finishing the highlight-only
-  // "What can SpawnForge do?" tour used to dismiss this checklist for good,
-  // before the user had done any of it (#10171).
+  // Only a hands-on tutorial counts. Any completed tutorial used to dismiss
+  // this checklist for good, and a highlight-only one such as the
+  // "What can SpawnForge do?" tour teaches none of its tasks (#10171).
   const hasCompletedOnboarding = Object.entries(tutorialCompleted).some(
     ([id, done]) => done && tutorialCompletesOnboarding(id),
   );

@@ -233,6 +233,18 @@ describe('ExportDialog', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  // Consumed, so a window-level listener (the tutorial overlay's Escape =
+  // skip) does not also act on the key that closed this dialog.
+  it('consumes the Escape that closes it', () => {
+    setupStore();
+    render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    act(() => {
+      document.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it('does not close on Escape while exporting', () => {
     setupStore({ isExporting: true });
     const onClose = vi.fn();
