@@ -1,7 +1,75 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import ts from 'typescript';
 import { TOOLTIP_DICTIONARY } from '../tooltipDictionary';
+import { ENGINE_CAMERA_DEFAULTS } from '@/lib/game/gameCameraPayload';
+
+/**
+ * Classify every JSX `term` attribute in a TSX source. A string literal in any
+ * spelling (`term="x"`, `term={"x"}`, `term={'x'}`, a template with no
+ * substitutions) resolves to its value. `term={term}` inside a function
+ * declaration is that component passing its own prop through, reported by the
+ * component's name. Anything else is unresolved, so the caller fails on it
+ * instead of skipping it.
+ */
+function scanTermAttributes(text: string) {
+  const sf = ts.createSourceFile('scan.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const terms: string[] = [];
+  const passThrough: string[] = [];
+  const unresolved: string[] = [];
+
+  const enclosingFunctionName = (node: ts.Node): string | undefined => {
+    for (let n: ts.Node | undefined = node.parent; n; n = n.parent) {
+      if (ts.isFunctionDeclaration(n)) return n.name?.text;
+    }
+    return undefined;
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxAttribute(node) && ts.isIdentifier(node.name) && node.name.text === 'term') {
+      const init = node.initializer;
+      const expr = init && ts.isJsxExpression(init) ? init.expression : init;
+      const owner = enclosingFunctionName(node);
+      if (expr && (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr))) {
+        terms.push(expr.text);
+      } else if (expr && ts.isIdentifier(expr) && expr.text === 'term' && owner) {
+        passThrough.push(owner);
+      } else {
+        unresolved.push(node.getText(sf));
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return { terms, passThrough, unresolved };
+}
+
+describe('scanTermAttributes', () => {
+  // The scanner is the gate below, so prove it can see each spelling and can
+  // report a site it does not understand (lessons-learned #11).
+  it('resolves every literal spelling and names what it cannot resolve', () => {
+    const scan = scanTermAttributes(
+      [
+        'function Row({ term }: { term: string }) { return <InfoTooltip term={term} />; }',
+        'export function P() {',
+        '  const k = "c";',
+        '  return (<>',
+        '    <InfoTooltip term="a" />',
+        "    <InfoTooltip term={'b'} />",
+        '    <InfoTooltip term={"c"} />',
+        '    <InfoTooltip term={`d`} />',
+        '    <InfoTooltip term={k} />',
+        '    <InfoTooltip term={`x${k}`} />',
+        '  </>);',
+        '}',
+      ].join('\n'),
+    );
+    expect(scan.terms).toEqual(['a', 'b', 'c', 'd']);
+    expect(scan.passThrough).toEqual(['Row']);
+    expect(scan.unresolved).toEqual(['term={k}', 'term={`x${k}`}']);
+  });
+});
 
 describe('TOOLTIP_DICTIONARY', () => {
   /**
@@ -17,13 +85,44 @@ describe('TOOLTIP_DICTIONARY', () => {
       join(__dirname, '..', '..', '..', 'components', 'editor', 'GameCameraInspector.tsx'),
       'utf8',
     );
-    const terms = [...source.matchAll(/\bterm="([^"]+)"/g)].map((m) => m[1]!);
-    // Non-vacuous: the panel has a dozen (?) icons, so a scan that finds none
-    // is a broken scan, not a panel with nothing to define.
-    expect(terms.length).toBeGreaterThanOrEqual(10);
+    const scan = scanTermAttributes(source);
 
-    const missing = [...new Set(terms)].filter((term) => !TOOLTIP_DICTIONARY[term]);
+    // A text regex for `term="…"` alone missed `term={"…"}`: two sites
+    // rewritten that way dropped out of the scan while a `>= 10` floor stayed
+    // satisfied, and their undefined terms went unchecked (review-board round
+    // 3 on #10295). Reading the JSX tree classifies every attribute, so a form
+    // the scan cannot resolve is named here instead of skipped.
+    expect(scan.unresolved, 'term= attributes whose value is not a string literal').toEqual([]);
+    // The one non-literal site: NumberParamRow handing its own prop to
+    // InfoTooltip. Its values are the literal `term=` on each row.
+    expect(scan.passThrough).toEqual(['NumberParamRow']);
+    // Cross-check against the raw text, so a `term=` the tree walk did not
+    // classify (a new attribute shape, a parse that lost part of the file)
+    // fails rather than shrinking the scan.
+    const rawSites = source.match(/\bterm=/g)?.length ?? 0;
+    expect(scan.terms.length + scan.passThrough.length).toBe(rawSites);
+    // Exact, not a floor: the panel has twelve (?) icons. A floor below the
+    // real count lets sites fall out of the scan with the test still green.
+    expect(scan.terms).toHaveLength(12);
+
+    const missing = [...new Set(scan.terms)].filter((term) => !TOOLTIP_DICTIONARY[term]);
     expect(missing, 'terms the panel shows a (?) for that have no definition').toEqual([]);
+  });
+
+  /**
+   * The engine places a first-person camera at `target.translation + Y *
+   * eye_height` (`update_first_person` in `game_camera.rs`): above the
+   * target's ORIGIN. The default player is a capsule centred on its origin
+   * (`Capsule3d::new(0.25, 1.0)` spawned at y = 0.75), so "above the feet"
+   * placed the eye 0.75 lower in the reader's head than in the game. The guide
+   * (`docs/features/game-cameras.md`) already says "above the entity origin"
+   * (review-board round 3 on #10295).
+   */
+  it('measures first-person eye height from the target origin, not the feet', () => {
+    const tooltip = TOOLTIP_DICTIONARY['gameCameraFPHeight']!;
+    expect(tooltip).toMatch(/\borigin\b/);
+    expect(tooltip).not.toMatch(/above the \w+'s feet/i);
+    expect(tooltip).toContain(String(ENGINE_CAMERA_DEFAULTS.firstPersonHeight));
   });
 
   /**

@@ -294,7 +294,10 @@ export const TOOLTIP_DICTIONARY: Record<string, string> = {
   gameCameraFollowDist: 'How far behind the target the camera sits',
   gameCameraFollowHeight: 'How high above the target the camera floats — a negative value looks up from below',
   gameCameraSmoothing: 'How fast the camera catches up to its target, per second — higher is snappier, lower is floatier, 0 freezes it',
-  gameCameraFPHeight: 'Eye height above the character\'s feet — about 1.7 for a person-sized character',
+  // Measured from the target's origin: `update_first_person` (game_camera.rs)
+  // adds it to the target's translation. A default capsule is centred on its
+  // origin, so 1.7 puts the eye about 2.45 above the capsule's base.
+  gameCameraFPHeight: 'Eye height above the target\'s origin — its pivot, which is the centre of a default capsule, not its feet. The engine default is 1.7',
   gameCameraMouseSens: 'How far the view turns per pixel of mouse movement, in degrees — small values like 0.1 feel normal',
   gameCameraSideScrollDist: 'How far back from the action the camera sits along the depth axis',
   gameCameraTopDownHeight: 'How high above the target the camera hovers',
