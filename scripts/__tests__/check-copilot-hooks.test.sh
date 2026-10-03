@@ -30,6 +30,13 @@ readonly GUARD="$GUARD_BARE "
 # on-session-start.sh to SessionStart, spelled the way the real file is.
 # shellcheck disable=SC2016
 readonly SETTINGS='{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-stop.sh\""}]}],"SessionStart":[{"hooks":[{"type":"command","command":"bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-session-start.sh\""}]}]}}'
+# As SETTINGS, but Stop's on-stop.sh reference is commented out: only
+# on-session-start.sh is live, so the cross-check still has a script to read.
+# shellcheck disable=SC2016
+readonly SETTINGS_STOP_COMMENTED='{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"true # bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-stop.sh\""}]}],"SessionStart":[{"hooks":[{"type":"command","command":"bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-session-start.sh\""}]}]}}'
+# Hook commands, but nothing on Stop: on-stop.sh is not wired at all.
+# shellcheck disable=SC2016
+readonly SETTINGS_NO_STOP='{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-session-start.sh\""}]}]}}'
 
 echo "=== check-copilot-hooks.sh tests ==="
 
@@ -128,6 +135,14 @@ expect_one_fail unwired \
   '{"version":1,"hooks":{"sessionStart":[{"type":"command","bash":"bash .claude/hooks/on-session-start.sh"}]}}' \
   'no hook runs on-stop.sh on an end-of-turn event' \
   "on-stop.sh wired to no end-of-turn event fails (unwired or renamed), and is the only error"
+# That error names the hooks DIRECTORY, which GitHub cannot annotate: a bare
+# `::error::` with no `file=` (the dir is ../hooks from this case's root).
+if grep -q '^::error::\.\./hooks: no hook runs on-stop\.sh on an end-of-turn event' <<<"$OUT" \
+  && ! grep -qF 'file=' <<<"$OUT"; then
+  pass "the unwired error names the directory without a file= annotation"
+else
+  fail "the unwired error's annotation: $OUT"
+fi
 # Text that merely CONTAINS the name is not a hook running the script.
 expect_one_fail disabled-suffix \
   '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh.disabled"}]}}' \
@@ -169,6 +184,12 @@ expect_fail missing-repo-script \
   '{"version":1,"hooks":{"postToolUse":[{"type":"command","bash":"./scripts/arch-check-renamed.sh"}]}}' \
   './scripts/arch-check-renamed.sh, which does not exist' \
   "a missing ./scripts script fails"
+# Each problem is printed once: bash and powershell naming the same missing
+# script are one problem, not two.
+expect_one_fail missing-script-twice \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}],"sessionStart":[{"type":"command","bash":"bash .claude/hooks/gone.sh","powershell":"bash .claude/hooks/gone.sh"}]}}' \
+  '"sessionStart" runs .claude/hooks/gone.sh, which does not exist' \
+  "a missing script named by both bash and powershell is reported once"
 # A handler's command runs in its `cwd`: resolve the script there, not at the
 # root. Both directions, so neither a root-only nor a cwd-only lookup passes.
 expect_fail cwd-miss \
@@ -237,6 +258,33 @@ expect_one_fail dup-alias-folded \
   '"sessionStart" runs .claude/hooks/on-session-start.sh, which .claude/settings.json also runs on "SessionStart"' \
   "sessionStart and its SessionStart alias count as the same event" \
   "$SETTINGS"
+# Aliases fold on the .github/hooks side too: `Stop` there is the `Stop` that
+# .claude/settings.json wires, whatever spelling either side uses.
+expect_one_fail dup-alias-hooks-side \
+  '{"version":1,"hooks":{"Stop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
+  '"Stop" runs .claude/hooks/on-stop.sh, which .claude/settings.json also runs on "Stop"' \
+  "an unguarded handler on the Stop alias in .github/hooks is a double run too" \
+  "$SETTINGS"
+# A commented-out reference in .claude/settings.json does not run the script,
+# so the unguarded .github/hooks handler is the only one Copilot CLI runs.
+expect_pass settings-commented-ref \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
+  "a commented-out script in .claude/settings.json is not a double run" \
+  "$SETTINGS_STOP_COMMENTED"
+# The other direction: a guarded handler whose script .claude/settings.json
+# does not run on that event never runs under Copilot CLI. It is the only
+# error: rule 3 is satisfied (the handler is on agentStop), and settings.json
+# has a readable script, so only the new check can report.
+expect_one_fail guarded-not-in-settings \
+  "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD}bash .claude/hooks/on-stop.sh\"}]}}" \
+  '"agentStop" handler is cloud-agent-only, but .claude/settings.json does not run .claude/hooks/on-stop.sh on that event' \
+  "a guarded handler for a script .claude/settings.json does not wire to that event fails" \
+  "$SETTINGS_NO_STOP"
+expect_one_fail guarded-other-event \
+  "{\"version\":1,\"hooks\":{\"sessionEnd\":[{\"type\":\"command\",\"bash\":\"${GUARD}bash .claude/hooks/on-stop.sh\"}]}}" \
+  '"sessionEnd" handler is cloud-agent-only, but .claude/settings.json does not run .claude/hooks/on-stop.sh on that event' \
+  "a guarded handler whose script .claude/settings.json wires to a DIFFERENT event (Stop, not sessionEnd) fails" \
+  "$SETTINGS"
 expect_pass dup-other-event \
   '{"version":1,"hooks":{"sessionEnd":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
   "the same script on a DIFFERENT event than .claude/settings.json wires it is not a double run" \
@@ -256,10 +304,17 @@ expect_one_fail settings-bad-json \
 expect_fail bad-json '{"version":1,"hooks":{' 'not valid JSON' "invalid JSON fails"
 expect_fail no-version '{"hooks":{}}' '"version" must be 1' "a missing version fails"
 expect_fail hooks-array '{"version":1,"hooks":[]}' 'missing a "hooks" object' "a hooks array fails"
-expect_fail handler-string \
-  '{"version":1,"hooks":{"agentStop":"bash .claude/hooks/on-stop.sh"}}' \
-  '"agentStop" must be an array of handlers' \
-  "a handler list that is a string fails instead of being read character by character"
+# Exactly two errors: the string itself, and (since nothing then runs
+# on-stop.sh) the unwired rule. Read character by character, each character
+# would also be "a handler that names nothing to run".
+mkcase handler-string '{"version":1,"hooks":{"agentStop":"bash .claude/hooks/on-stop.sh"}}'
+run handler-string
+if [ "$RC" -eq 1 ] && grep -qF '"agentStop" must be an array of handlers' <<<"$OUT" \
+  && ! grep -qF 'names nothing to run' <<<"$OUT" && [ "$ERRORS" -eq 2 ]; then
+  pass "a handler list that is a string fails instead of being read character by character"
+else
+  fail "a handler list that is a string (rc=$RC, $ERRORS error line(s)): $OUT"
+fi
 
 # ---- output: a repository-relative path, annotated on the file
 mkdir -p "$TMP/labels/root/.github/hooks" "$TMP/labels/root/.claude/hooks"
@@ -295,14 +350,14 @@ done
 # ---- running on nothing, or without node
 mkdir -p "$TMP/empty/hooks" "$TMP/empty/root"
 run empty
-if [ "$RC" -eq 1 ] && grep -qF "no hook files found" <<<"$OUT"; then
-  pass "an empty hooks dir fails instead of passing vacuously"
+if [ "$RC" -eq 1 ] && grep -q '^::error::.*no hook files found' <<<"$OUT" && ! grep -qF 'file=' <<<"$OUT"; then
+  pass "an empty hooks dir fails instead of passing vacuously (no file= on a directory)"
 else
   fail "an empty hooks dir (rc=$RC): $OUT"
 fi
 OUT="$(COPILOT_HOOKS_DIR="$TMP/does-not-exist" COPILOT_HOOKS_REPO_ROOT="$TMP/empty/root" bash "$GATE" 2>&1)"; RC=$?
-if [ "$RC" -eq 1 ] && grep -qF "cannot read the hook directory" <<<"$OUT"; then
-  pass "a hooks dir that does not exist fails"
+if [ "$RC" -eq 1 ] && grep -q '^::error::.*cannot read the hook directory' <<<"$OUT" && ! grep -qF 'file=' <<<"$OUT"; then
+  pass "a hooks dir that does not exist fails (no file= on a directory)"
 else
   fail "a missing hooks dir (rc=$RC): $OUT"
 fi

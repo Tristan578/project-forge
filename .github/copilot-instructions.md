@@ -74,7 +74,9 @@ you export `COPILOT_AGENT_PROMPT` in a local shell, the CLI double run returns. 
 trade-off: a script wired only in `.claude/settings.json` never runs on the
 cloud agent, and a guarded handler never runs under Copilot CLI.
 `scripts/check-copilot-hooks.sh` (CI: Agentic Config Sync) fails a PR that wires
-a script to the same event in both files without that guard. It cannot see
+a script to the same event in both files without that guard, and one that
+guards a handler whose script `.claude/settings.json` does not run on that
+event (Copilot CLI would then never run it). It cannot see
 `.claude/settings.local.json`, `.github/copilot/settings.json` or
 `.github/copilot/settings.local.json` (Copilot CLI reads hooks from those too),
 or your `~/.copilot` hooks.

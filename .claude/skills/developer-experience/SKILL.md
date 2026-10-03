@@ -55,7 +55,7 @@ A ticket can be moved to `done` only when:
 2. **Subtasks completed** — every implementation step toggled
 3. **Acceptance criteria verified** — each Given/When/Then confirmed
 4. **Context updated** — `.claude/rules/`, `MEMORY.md`, `CLAUDE.md` reflect any new patterns
-5. **Cross-IDE configs current** — if skills, agents, hooks or tools changed, every provider config is updated AND the generated Codex CLI surface is regenerated (`refresh` below); `bash .claude/tools/dx-audit.sh` runs both sync gates
+5. **Cross-IDE configs current** — if skills, agents, hooks or tools changed, every provider config is updated AND the generated Codex CLI surface is regenerated (`refresh` below); `bash .claude/tools/dx-audit.sh` runs all three gates CI's Agentic Config Sync job runs (step 5 of `refresh` lists them)
 6. **No orphaned artifacts** — no stale feature flags, no dead imports, no TODO comments without tickets
 
 ### 4. Onboarding Smoothness

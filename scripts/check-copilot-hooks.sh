@@ -45,9 +45,13 @@
 #      against the handler's `cwd` (repository-relative, default `.`);
 #   5. a handler runs a script that `.claude/settings.json` also wires to the
 #      same event (aliases folded, so `Stop` = `agentStop`) and is not
-#      cloud-agent-only as defined above. If `.claude/settings.json` has hook
-#      commands but none of them yields a script path, the cross-check would
-#      compare against nothing, so that fails too.
+#      cloud-agent-only as defined above — or, the other direction, a handler
+#      IS cloud-agent-only but runs a script `.claude/settings.json` does not
+#      wire to that event, so Copilot CLI would never run it (and rule 3 would
+#      count an end-of-turn handler that always exits 0 under the CLI). If
+#      `.claude/settings.json` has hook commands but none of them yields a
+#      script path, the cross-check would compare against nothing, so that
+#      fails too.
 # Every documented way a handler names what it runs is read: `bash`,
 # `powershell`, `command` (the cross-platform fallback) and `exec` + `args`.
 # NOT SEEN: `.claude/settings.local.json` (gitignored, per-machine);
@@ -228,12 +232,14 @@ for (const file of files) {
       const commands = commandsOf(h);
       if (commands.length === 0) report(where, `a "${event}" handler names nothing to run`);
       const doubled = new Map(); // repo-relative script -> the settings event that also runs it
+      const runs = new Set(); // repo-relative scripts this handler runs (uncommented, existing)
       for (const cmd of commands) {
         for (const { ref, commented } of scriptRefs(cmd)) {
           const resolved = path.resolve(base, ref);
           const exists = fs.existsSync(resolved);
           if (!exists) report(where, `"${event}" runs ${ref}, which does not exist`);
           if (commented) continue;
+          if (exists) runs.add(rel(resolved));
           const name = path.basename(ref);
           if (END_OF_TURN_SCRIPTS.includes(name)) {
             if (!END_OF_TURN_EVENTS.has(event)) {
@@ -254,7 +260,21 @@ for (const file of files) {
       const cloudOnly =
         typeof h.bash === 'string' && h.bash.startsWith(CLOUD_ONLY_GUARD) &&
         !['powershell', 'command', 'exec'].some((k) => h[k] !== undefined);
-      if (cloudOnly) continue;
+      if (cloudOnly) {
+        // The other direction of the same rule: the guard hands the script to
+        // `.claude/settings.json` under Copilot CLI, so settings.json must run
+        // it on this event, or Copilot CLI never runs it (and rule 3 would
+        // count a handler that, under the CLI, always exits 0).
+        for (const script of runs) {
+          if (doubled.has(script)) continue;
+          report(
+            where,
+            `"${event}" handler is cloud-agent-only, but .claude/settings.json does not run ${script} on that event,` +
+              ' so Copilot CLI never runs it — drop the guard or wire it in .claude/settings.json',
+          );
+        }
+        continue;
+      }
       for (const [script, settingsEvent] of doubled) {
         report(
           where,
