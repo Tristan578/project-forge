@@ -203,6 +203,12 @@ expect_fail nothing-to-run \
   '{"version":1,"hooks":{"sessionStart":[{"type":"command"}]}}' \
   'handler names nothing to run' \
   "a handler with no bash/powershell/command/exec fails"
+expect_pass http-handler \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}],"postToolUse":[{"type":"http","url":"https://example.com/hook"}]}}' \
+  "a documented http handler (a url, no script) passes"
+expect_pass prompt-handler \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}],"postToolUse":[{"type":"prompt","prompt":"Check the last tool call."}]}}' \
+  "a documented prompt handler (a prompt, no script) passes"
 
 # ---- double run: Copilot CLI also runs .claude/settings.json's hooks
 expect_one_fail dup-unguarded \

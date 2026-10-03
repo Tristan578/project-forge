@@ -52,8 +52,9 @@
 #      `.claude/settings.json` has hook commands but none of them yields a
 #      script path, the cross-check would compare against nothing, so that
 #      fails too.
-# Every documented way a handler names what it runs is read: `bash`,
+# Every documented way a command handler names what it runs is read: `bash`,
 # `powershell`, `command` (the cross-platform fallback) and `exec` + `args`.
+# `http` and `prompt` handlers run no script and are not cross-checked.
 # NOT SEEN: `.claude/settings.local.json` (gitignored, per-machine);
 # `.github/copilot/settings.json` and `.github/copilot/settings.local.json`,
 # whose top-level `hooks` Copilot CLI also reads (hooks-reference.md, "Hooks
@@ -230,7 +231,11 @@ for (const file of files) {
       // A handler's commands run in its `cwd`, which is repository-relative.
       const base = path.resolve(root, h && typeof h.cwd === 'string' ? h.cwd : '.');
       const commands = commandsOf(h);
-      if (commands.length === 0) report(where, `a "${event}" handler names nothing to run`);
+      // An `http` handler (posts to its `url`) and a `prompt` handler (hands
+      // its `prompt` to the model) run no script, so they have nothing to
+      // cross-check (hooks-reference.md, "HTTP hooks" and "Prompt hooks").
+      const scriptless = h && (h.type === 'http' || h.type === 'prompt');
+      if (commands.length === 0 && !scriptless) report(where, `a "${event}" handler names nothing to run`);
       const doubled = new Map(); // repo-relative script -> the settings event that also runs it
       const runs = new Set(); // repo-relative scripts this handler runs (uncommented, existing)
       for (const cmd of commands) {
