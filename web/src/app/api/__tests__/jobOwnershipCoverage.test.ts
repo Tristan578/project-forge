@@ -1169,6 +1169,18 @@ function globalInputProblems(b: Bound): string[] {
       && !(ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n && n.parent.name.text === 'url')) {
       problems.push(`${lineOf(sf, n)}: reads import.meta other than import.meta.url (a host object that can load a module)`);
     }
+    // `arguments` outside every non-arrow function is not a local at all: in
+    // the bundled module it is the CommonJS wrapper's argument list, whose
+    // second entry is `require`. The handler-input rule covers `arguments`
+    // only inside the handler, so module scope (and an arrow at module scope)
+    // is reported here.
+    if (ts.isIdentifier(n) && n.text === 'arguments' && !isNamePosition(n) && !isDeclarationName(n)) {
+      let fn: ts.Node | undefined = n.parent;
+      while (fn && fn !== sf && !(ts.isFunctionLike(fn) && !ts.isArrowFunction(fn))) fn = fn.parent;
+      if (!fn || fn === sf) {
+        problems.push(`${lineOf(sf, n)}: reads \`arguments\` at module scope (the bundler's module wrapper arguments, which include require)`);
+      }
+    }
     // A declaration's own name is not a read; every USE of an ambient one is.
     if (ts.isIdentifier(n) && !isNamePosition(n) && !isDeclarationName(n) && n.text !== 'arguments' && n.text !== 'require') {
       const symbol = ts.isShorthandPropertyAssignment(n.parent) && n.parent.name === n
@@ -1946,6 +1958,12 @@ describe('job-id ownership coverage (#10262)', () => {
           + `const { [k]: F } = C;\nconst nh = F('return process')()${FETCH};`), /a computed property name/],
         ['a computed assignment pattern', feed("const k = 'con' + 'structor';\nlet C: any;\nlet F: any;\n"
           + `({ [k]: C } = 0 as any);\n({ [k]: F } = C);\nconst nh = F('return process')()${FETCH};`), /a computed property name/],
+        // Module-level `arguments` is the bundler's CommonJS wrapper argument
+        // list; `[1]` is `require`. Directly, and through a module-scope arrow.
+        ['module-level arguments', mutate(feed("const nh = (A[1] as any)('next/headers');"), HANDLER_OPEN,
+          'const A = arguments as unknown as unknown[];\n$1'), /reads `arguments` at module scope/],
+        ['module-level arguments in an arrow', mutate(feed("const nh = (A()[1] as any)('next/headers');"), HANDLER_OPEN,
+          'const A = (): unknown[] => arguments as unknown as unknown[];\n$1'), /reads `arguments` at module scope/],
         ['import.meta.webpackContext', feed("const nh = (import.meta as any).webpackContext('next', { recursive: true })('./headers.js');"),
           /reads import\.meta other than import\.meta\.url/],
         // `.require` is ALSO a require reference to the module rule; the global
