@@ -122,10 +122,17 @@ expect_one_fail per-tool-alias \
   '{"version":1,"hooks":{"PostToolUse":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
   'wired to "PostToolUse"' \
   "on-stop.sh on the PostToolUse alias fails, with exactly one error"
-expect_pass session-end '{"version":1,"hooks":{"sessionEnd":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
-  "on-stop.sh on sessionEnd passes"
-expect_pass session-end-alias '{"version":1,"hooks":{"SessionEnd":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
-  "on-stop.sh on the documented SessionEnd alias passes"
+# sessionEnd fires once per session, not per turn: allowed as an EXTRA run,
+# never as the per-turn wiring (#10305 review).
+expect_one_fail session-end-only '{"version":1,"hooks":{"sessionEnd":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
+  'no hook runs on-stop.sh on an end-of-turn event' \
+  "on-stop.sh on sessionEnd alone does not satisfy the per-turn wiring"
+expect_one_fail session-end-alias-only '{"version":1,"hooks":{"SessionEnd":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
+  'no hook runs on-stop.sh on an end-of-turn event' \
+  "on-stop.sh on the SessionEnd alias alone does not satisfy the per-turn wiring"
+expect_pass session-end-plus-agent-stop \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}],"sessionEnd":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
+  "on-stop.sh on sessionEnd as well as agentStop passes"
 expect_pass stop-alias '{"version":1,"hooks":{"Stop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
   "on-stop.sh on the documented Stop alias passes"
 # Unwired (or renamed along with its hook entry): the wrong-event rule above
@@ -152,6 +159,47 @@ expect_one_fail commented-out \
   '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"true # bash .claude/hooks/on-stop.sh"}]}}' \
   'no hook runs on-stop.sh on an end-of-turn event' \
   "a commented-out on-stop.sh on agentStop does not count as running it"
+# A path that is only NAMED (echo, test, an exec of something else) runs
+# nothing, so it is not the wiring (#10305 review).
+expect_one_fail echoed \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"echo .claude/hooks/on-stop.sh"}]}}' \
+  'no hook runs on-stop.sh on an end-of-turn event' \
+  "an echoed on-stop.sh path on agentStop does not count as running it"
+expect_one_fail guarded-echo \
+  "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD}echo .claude/hooks/on-stop.sh\"}]}}" \
+  'no hook runs on-stop.sh on an end-of-turn event' \
+  "an echoed on-stop.sh after the cloud-only guard does not count as running it"
+expect_one_fail test-f \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"test -f .claude/hooks/on-stop.sh"}]}}' \
+  'no hook runs on-stop.sh on an end-of-turn event' \
+  "test -f on-stop.sh does not count as running it"
+expect_one_fail exec-echo \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","exec":"echo","args":[".claude/hooks/on-stop.sh"]}]}}' \
+  'no hook runs on-stop.sh on an end-of-turn event' \
+  "exec echo with on-stop.sh as its argument does not count as running it"
+expect_one_fail passed-as-argument \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/xon-stop.sh .claude/hooks/on-stop.sh"}]}}' \
+  'no hook runs on-stop.sh on an end-of-turn event' \
+  "on-stop.sh passed as an argument to another script does not count as running it"
+expect_pass test-then-run \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"[ -f .claude/hooks/on-stop.sh ] && bash .claude/hooks/on-stop.sh"}]}}' \
+  "a test of on-stop.sh followed by running it passes"
+expect_pass exec-bash-args \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","exec":"bash","args":[".claude/hooks/on-stop.sh"]}]}}' \
+  "exec bash with on-stop.sh as its argument runs it"
+expect_pass direct-run \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"FOO=1 exec ./.claude/hooks/on-stop.sh"}]}}' \
+  "on-stop.sh as the command itself (after VAR=value and exec) runs it"
+expect_pass bash-flags \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash -eu .claude/hooks/on-stop.sh"}]}}' \
+  "bash with flags before on-stop.sh runs it"
+# A path that runs nothing is not required to exist.
+expect_pass commented-missing \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh # was: bash scripts/gone.sh"}]}}' \
+  "a commented-out reference to a missing script does not fail the existence check"
+expect_pass echoed-missing \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"echo scripts/gone.sh; bash .claude/hooks/on-stop.sh"}]}}' \
+  "an echoed path to a missing script does not fail the existence check"
 expect_one_fail other-name \
   '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/xon-stop.sh"}]}}' \
   'no hook runs on-stop.sh on an end-of-turn event' \
@@ -206,6 +254,14 @@ expect_fail nothing-to-run \
   '{"version":1,"hooks":{"sessionStart":[{"type":"command"}]}}' \
   'handler names nothing to run' \
   "a handler with no bash/powershell/command/exec fails"
+# A null handler is valid JSON; it is reported, not a crash (#10305 review).
+mkcase null-handler '{"version":1,"hooks":{"agentStop":[null,{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}'
+run null-handler
+if [ "$RC" -eq 1 ] && [ "$ERRORS" -eq 1 ] && grep -qF 'handler names nothing to run' <<<"$OUT"; then
+  pass "a null handler is reported as naming nothing to run, without crashing the gate"
+else
+  fail "a null handler (rc=$RC, $ERRORS error line(s)): $OUT"
+fi
 expect_pass http-handler \
   '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}],"postToolUse":[{"type":"http","url":"https://example.com/hook"}]}}' \
   "a documented http handler (a url, no script) passes"
@@ -303,7 +359,7 @@ expect_one_fail guarded-not-in-settings \
   "a guarded handler for a script .claude/settings.json does not wire to that event fails" \
   "$SETTINGS_NO_STOP"
 expect_one_fail guarded-other-event \
-  "{\"version\":1,\"hooks\":{\"sessionEnd\":[{\"type\":\"command\",\"bash\":\"${GUARD}bash .claude/hooks/on-stop.sh\"}]}}" \
+  "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD}bash .claude/hooks/on-stop.sh\"}],\"sessionEnd\":[{\"type\":\"command\",\"bash\":\"${GUARD}bash .claude/hooks/on-stop.sh\"}]}}" \
   '"sessionEnd" handler is cloud-agent-only, but .claude/settings.json does not run .claude/hooks/on-stop.sh on that event' \
   "a guarded handler whose script .claude/settings.json wires to a DIFFERENT event (Stop, not sessionEnd) fails" \
   "$SETTINGS"
@@ -333,7 +389,7 @@ expect_one_fail settings-copilot-format \
   "a Copilot-format (un-nested) handler in .claude/settings.json is cross-checked" \
   '{"hooks":{"Stop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}'
 expect_pass dup-other-event \
-  '{"version":1,"hooks":{"sessionEnd":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
+  "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD}bash .claude/hooks/on-stop.sh\"}],\"sessionEnd\":[{\"type\":\"command\",\"bash\":\"bash .claude/hooks/on-stop.sh\"}]}}" \
   "the same script on a DIFFERENT event than .claude/settings.json wires it is not a double run" \
   "$SETTINGS"
 expect_one_fail settings-unreadable-scripts \
@@ -380,7 +436,7 @@ if [ "$(grep -c 'win32.relative' "$WINGATE")" -ne 1 ]; then
 fi
 for gate in "$GATE" "$WINGATE"; do
   OUT="$(COPILOT_HOOKS_DIR="$TMP/labels/root/.github/hooks" COPILOT_HOOKS_REPO_ROOT="$TMP/labels/root" bash "$gate" 2>&1)"; RC=$?
-  if [ "$RC" -eq 1 ] && grep -qxF '::error file=.github/hooks/hooks.json::.github/hooks/hooks.json: on-stop.sh runs at the end of a turn, but is wired to "postToolUse" — use one of: agentStop, Stop, sessionEnd, SessionEnd' <<<"$OUT"; then
+  if [ "$RC" -eq 1 ] && grep -qxF '::error file=.github/hooks/hooks.json::.github/hooks/hooks.json: on-stop.sh runs at the end of a turn, but is wired to "postToolUse" — use one of: agentStop, Stop' <<<"$OUT"; then
     pass "errors name the file repository-relative, with '/', as a GitHub file annotation ($(basename "$gate"))"
   else
     fail "error label, $(basename "$gate") (rc=$RC): $OUT"

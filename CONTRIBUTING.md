@@ -334,8 +334,9 @@ silently onboarding the next contributor against a broken board:
     The gate's output names each problem and the recipe for its kind.
   - `scripts/check-copilot-hooks.sh` fails if a Copilot hook file in
     `.github/hooks/` names an event that is not a documented Copilot event or
-    alias; wires `on-stop.sh` to anything but an end-of-turn event, or to no
-    end-of-turn event at all; runs a `*.sh` that does not exist; or runs a
+    alias; wires `on-stop.sh` to anything but `agentStop`/`Stop` (or, as an
+    extra run, `sessionEnd`), or to no `agentStop`/`Stop` handler at all;
+    runs a `*.sh` that does not exist; or runs a
     script on the same event as `.claude/settings.json` without the
     `COPILOT_AGENT_PROMPT` guard (Copilot CLI reads both files and would run it
     twice), or with the guard on a script `.claude/settings.json` does not run

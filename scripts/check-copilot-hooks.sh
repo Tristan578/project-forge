@@ -36,13 +36,19 @@
 #      all declare it), or lacks a `hooks` object whose values are arrays;
 #   2. it names an event that is neither a documented Copilot event nor one of
 #      its documented PascalCase aliases — an unknown name is silently ignored;
-#   3. an end-of-turn script is wired to anything but an end-of-turn event, OR
-#      no handler runs it on an end-of-turn event at all. "Runs it" means a
-#      script reference whose file name is exactly the script, that exists, and
-#      that no `#` comment precedes: `on-stop.sh.disabled` or
-#      `true # bash on-stop.sh` would otherwise count (#9, #18);
+#   3. an end-of-turn script is wired to anything but an end-of-turn event
+#      (`agentStop` / `Stop`; `sessionEnd` is also allowed), OR no handler runs
+#      it on `agentStop` / `Stop` at all. `sessionEnd` never satisfies this: it
+#      fires once per session, so a session killed mid-way commits nothing.
+#      "Runs it" means a script reference whose file name is exactly the
+#      script, that exists, that no `#` comment precedes, and that is in
+#      command position — the command itself, or the argument of `bash`, `sh`,
+#      `source` or `.` (after optional `exec`/`command` and VAR=value). So
+#      `on-stop.sh.disabled`, `true # bash on-stop.sh`, `echo on-stop.sh` and
+#      `test -f on-stop.sh` do not count (#9, #18, #10305 review);
 #   4. a hook command runs a relative `*.sh` that does not exist, resolved
-#      against the handler's `cwd` (repository-relative, default `.`);
+#      against the handler's `cwd` (repository-relative, default `.`). A
+#      commented-out or merely named path runs nothing and is not checked;
 #   5. a handler runs a script that `.claude/settings.json` also wires to the
 #      same event (aliases folded, so `Stop` = `agentStop`) and is not
 #      cloud-agent-only as defined above — or, the other direction, a handler
@@ -110,7 +116,11 @@ const EVENTS = new Set([...CANONICAL, ...Object.keys(ALIASES)]);
 const canonical = (event) => ALIASES[event] || event;
 // Scripts with end-of-turn semantics, and the events that mean "end of turn".
 const END_OF_TURN_SCRIPTS = ['on-stop.sh'];
-const END_OF_TURN_EVENTS = new Set(['agentStop', 'Stop', 'sessionEnd', 'SessionEnd']);
+const END_OF_TURN_EVENTS = new Set(['agentStop', 'Stop']);
+// sessionEnd may ALSO run an end-of-turn script (one last commit on the way
+// out), but it fires once per session, not per turn, so it never satisfies
+// rule 3: a session killed mid-way would have committed nothing.
+const ALSO_ALLOWED_EVENTS = new Set(['sessionEnd', 'SessionEnd']);
 // The prefix that makes a `.github/hooks` handler a no-op outside the cloud agent.
 // It ends at the `;` that terminates the guard, so whatever follows (no space,
 // a space, a newline) is a separate command that runs only when the guard
@@ -138,12 +148,36 @@ function commandsOf(h) {
   return out;
 }
 
-// Script references in a command, each with whether a shell comment precedes it.
+// What may precede a script in its simple command and still RUN it: shell
+// keywords, VAR=value assignments, `exec`/`command`, then nothing (the script
+// is the command) or an interpreter and its flags. Anything else — `echo`,
+// `test -f`, `[ -f`, `cat` — only names the file. A runner not listed here
+// (`timeout 20 bash x.sh`) reads as a mention, which fails loudly: rule 3 or
+// rule 5 then reports the script as not run.
+const KEYWORDS = new Set(['then', 'do', 'else', '!', '{']);
+const LEADERS = new Set(['exec', 'command']);
+const RUNNERS = new Set(['bash', 'sh', 'source', '.']);
+function inCommandPosition(before) {
+  const words = before
+    .split(/;|&&|\|\||\||\n|\(|`/)
+    .pop()
+    .split(/\s+/)
+    .map((w) => w.replace(/^["']+|["']+$/g, ''))
+    .filter(Boolean);
+  while (words.length && KEYWORDS.has(words[0])) words.shift();
+  while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words.shift();
+  while (words.length && LEADERS.has(words[0])) words.shift();
+  if (words.length === 0) return true;
+  return RUNNERS.has(words[0]) && words.slice(1).every((w) => w.startsWith('-'));
+}
+
+// Script references in a command, each with whether the command RUNS it: no
+// shell comment precedes it, and it is in command position (#10305 review).
 function scriptRefs(cmd) {
-  return [...cmd.matchAll(SCRIPT_REF)].map((m) => ({
-    ref: m[1],
-    commented: /(?:^|\s)#/.test(cmd.slice(0, m.index + m[0].length - m[1].length)),
-  }));
+  return [...cmd.matchAll(SCRIPT_REF)].map((m) => {
+    const before = cmd.slice(0, m.index + m[0].length - m[1].length);
+    return { ref: m[1], runs: !/(?:^|\s)#/.test(before) && inCommandPosition(before) };
+  });
 }
 
 // Each problem is printed once. `annotate` is false for a directory, which
@@ -173,8 +207,8 @@ if (fs.existsSync(settingsFile)) {
         for (let cmd of commandsOf(h)) {
           settingsCommands += 1;
           for (const prefix of SETTINGS_ROOT_PREFIXES) cmd = cmd.split(prefix).join('');
-          for (const { ref, commented } of scriptRefs(cmd)) {
-            if (!commented) settingsWired.set(`${canonical(event)}\0${rel(path.resolve(root, ref))}`, event);
+          for (const { ref, runs } of scriptRefs(cmd)) {
+            if (runs) settingsWired.set(`${canonical(event)}\0${rel(path.resolve(root, ref))}`, event);
           }
         }
       }
@@ -239,31 +273,35 @@ for (const file of files) {
       const doubled = new Map(); // repo-relative script -> the settings event that also runs it
       const runs = new Set(); // repo-relative scripts this handler runs (uncommented, existing)
       for (const cmd of commands) {
-        for (const { ref, commented } of scriptRefs(cmd)) {
+        for (const { ref, runs: running } of scriptRefs(cmd)) {
+          // A commented-out or merely named path runs nothing, so it is
+          // neither required to exist nor counted as wiring.
+          if (!running) continue;
           const resolved = path.resolve(base, ref);
           const exists = fs.existsSync(resolved);
           if (!exists) report(where, `"${event}" runs ${ref}, which does not exist`);
-          if (commented) continue;
           if (exists) runs.add(rel(resolved));
           const name = path.basename(ref);
           if (END_OF_TURN_SCRIPTS.includes(name)) {
-            if (!END_OF_TURN_EVENTS.has(event)) {
+            if (END_OF_TURN_EVENTS.has(event)) {
+              if (exists) wiredAtEnd.add(name);
+            } else if (!ALSO_ALLOWED_EVENTS.has(event)) {
               misWired.add(name);
               report(
                 where,
                 `${name} runs at the end of a turn, but is wired to "${event}"` +
                   ` — use one of: ${[...END_OF_TURN_EVENTS].join(', ')}`,
               );
-            } else if (exists) {
-              wiredAtEnd.add(name);
             }
           }
           const also = settingsWired.get(`${canonical(event)}\0${rel(resolved)}`);
           if (also) doubled.set(rel(resolved), also);
         }
       }
+      // `h` may be null or a scalar (valid JSON); it was reported above as
+      // naming nothing to run, and must not crash the gate here.
       const cloudOnly =
-        typeof h.bash === 'string' && h.bash.startsWith(CLOUD_ONLY_GUARD) &&
+        !!h && typeof h === 'object' && typeof h.bash === 'string' && h.bash.startsWith(CLOUD_ONLY_GUARD) &&
         !['powershell', 'command', 'exec'].some((k) => h[k] !== undefined);
       if (cloudOnly) {
         // The other direction of the same rule: the guard hands the script to
