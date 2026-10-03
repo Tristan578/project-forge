@@ -98,7 +98,9 @@
  *   from are whitelisted too, because `next/headers` reads the request with no
  *   handler argument at all: every runtime static import is `next/server` or
  *   resolves (tsc's resolution, so `next/headers.js` and a relative path into
- *   node_modules are caught) to the app's own source under `src/`; there is no
+ *   node_modules are caught) to the app's own source under `src/`, and so is
+ *   every re-export (`export ... from`); nothing imports or re-exports the
+ *   route file itself, which would read back what it exports; there is no
  *   `import()`, no `require` reference and no `import x = require(...)`, since
  *   the gate cannot vet a module named at run time. A module can also be
  *   fetched through a GLOBAL with no import at all
@@ -110,7 +112,12 @@
  *   so `declare const process: any`, `declare global { var process }` or a
  *   type-only import does not make `process` local, and any `declare`
  *   statement is reported outright; an instantiation expression such as
- *   `Reflect.get<object, string>` is a read of `Reflect`), and the path
+ *   `Reflect.get<object, string>` is a read of `Reflect`; `export { x }`
+ *   must name such a local binding; `arguments` outside every non-arrow
+ *   function, the bundler's module-wrapper list, is reported; and so is
+ *   every decorator, whose expression runs outside the scope the checker
+ *   resolves it in, and all JSX markup and `@jsx` pragmas, since a pragma
+ *   comment can compile markup to a call of any global), and the path
  *   from any value to `Function` is closed: no `constructor`, `prototype` or
  *   `__proto__` anywhere in the file, every element access and computed
  *   property name (`const { [k]: F } = fn`) takes a literal name, and
@@ -1040,9 +1047,21 @@ function moduleInputProblems(b: Bound): string[] {
  *   object literal (`const { [k]: F } = fn`), takes a string or number
  *   LITERAL, so a computed name (`x['con' + 'structor']`) cannot rebuild one;
  * - `import.meta` is read only as `import.meta.url` (under webpack,
- *   `import.meta.webpackContext(...)` loads a module by name).
+ *   `import.meta.webpackContext(...)` loads a module by name);
+ * - a value `export { x }` with no module specifier names a binding this
+ *   file creates at run time (otherwise it exports the global, which a
+ *   self-import could read back);
+ * - every decorator is reported outright: the compiler evaluates it outside
+ *   the scope the checker resolves its names in;
+ * - `arguments` outside every non-arrow function (the module wrapper's list,
+ *   whose second entry is `require`) is reported; a read in a function's own
+ *   decorator belongs to the scope around it;
+ * - JSX markup and any `@jsx` / `@jsxFrag` / `@jsxRuntime` /
+ *   `@jsxImportSource` pragma are reported: a pragma comment names the
+ *   function JSX compiles to, which can be any global, and no node carries it.
  *
- * `arguments` and `require` have rules of their own and are not repeated here.
+ * `require` has a rule of its own (the module rule) and is not repeated
+ * here, nor is `arguments` inside the handler (the handler-input rule).
  */
 const ALLOWED_GLOBALS: Readonly<Record<string, 'value' | 'new' | readonly string[]>> = {
   undefined: 'value',
@@ -1146,8 +1165,8 @@ function globalInputProblems(b: Bound): string[] {
   //   renames the inner binding and leaves the read alone. For an unused
   //   class declaration, the production minifier drops the class, keeps the
   //   heritage expression for its side effects, and leaves the read bound to
-  //   the global. (A used one throws in its TDZ, but the checker cannot
-  //   tell which.)
+  //   the global. (In a used one the read binds to the class, or throws if
+  //   it is eager; the checker cannot tell a used class from an unused one.)
   // Such a declaration does not count for that read.
   const bodyHiddenFrom = (read: ts.Node, d: ts.Declaration): boolean => {
     for (let n: ts.Node | undefined = read; n && n !== sf; n = n.parent) {
@@ -1178,17 +1197,30 @@ function globalInputProblems(b: Bound): string[] {
       for (const el of n.exportClause.elements) {
         if (el.isTypeOnly) continue;
         const local = el.propertyName ?? el.name;
-        if (!declaredHere(checker.getExportSpecifierLocalTargetSymbol(el), local)) {
-          problems.push(`${lineOf(sf, el)}: exports '${local.text}', which this file does not bind at run time (the global, read back through an import)`);
+        const target = checker.getExportSpecifierLocalTargetSymbol(el);
+        // A name that is only a type (an interface, a type alias) is elided
+        // by the emitter, so the export reads nothing at run time.
+        if (target && (target.flags & (ts.SymbolFlags.Value | ts.SymbolFlags.Alias)) === 0) continue;
+        if (!declaredHere(target, local)) {
+          problems.push(`${lineOf(sf, el)}: exports '${local.text}', `
+            + (declaredInFile(target) ? 'whose only declarations in this file emit no run-time binding' : 'which this file does not declare')
+            + ' (so the export is the global, which a self-import could read back)');
         }
       }
+    }
+    // JSX compiles to a call of whatever factory a pragma comment names
+    // (`/** @jsx process.getBuiltinModule */` turns `<module />` into
+    // `process.getBuiltinModule('module', null)`), and the global sits in a
+    // comment the checker never sees. No key-resolving route renders markup.
+    if (ts.isJsxElement(n) || ts.isJsxSelfClosingElement(n) || ts.isJsxFragment(n)) {
+      problems.push(`${lineOf(sf, n)}: JSX markup (a pragma comment can compile it to a call of any global; a key-resolving route renders none)`);
     }
     if (isTypePosition(n)) return;
     // A decorator is reported outright: the compiler evaluates it outside
     // the scope the checker resolves its names in (a class expression's own
     // name, a method's `arguments`), and no route uses one.
     if (ts.isDecorator(n)) {
-      problems.push(`${lineOf(sf, n)}: a decorator (its expression runs outside the scope the checker resolves it in)`);
+      problems.push(`${lineOf(sf, n)}: a decorator (a key-resolving route may not use one: it runs outside the scope this gate can analyse; remove it)`);
     }
     if ((ts.isIdentifier(n) || ts.isStringLiteralLike(n)) && FUNCTION_PATH_NAMES.has(n.text)) {
       problems.push(`${lineOf(sf, n)}: names '${n.text}', the path from any value to Function and so to every global`);
@@ -1249,6 +1281,11 @@ function globalInputProblems(b: Bound): string[] {
     }
     ts.forEachChild(n, visit);
   };
+  // The pragma itself, anywhere in the file (it is a comment, so no node
+  // carries it): `@jsx`, `@jsxFrag`, `@jsxRuntime`, `@jsxImportSource`.
+  for (const m of sf.text.matchAll(/@jsx(?:Frag|Runtime|ImportSource)?\b/g)) {
+    problems.push(`line ${sf.getLineAndCharacterOfPosition(m.index ?? 0).line + 1}: a JSX pragma '${m[0]}' (it picks the function JSX compiles to, which can be any global)`);
+  }
   visit(sf);
   return problems;
 }
@@ -1770,7 +1807,10 @@ describe('job-id ownership coverage (#10262)', () => {
       + 'export of @/lib/keys/resolver but the pinned NON_KEY_RESOLVER_EXPORTS (resolveApiKey, '
       + 'resolveByokOrPlatformKey, ...). Such a route also reads nothing else from the outside: it imports '
       + 'only next/server and app source under web/src (no bare package such as zod, no next/headers; no '
-      + 'import(), require, module.require or import =), and reads only the globals in ALLOWED_GLOBALS '
+      + 'import(), require, module.require or import =; no re-export of such a module; no import or re-export of '
+      + 'the route file itself; no `export { x }` of a name the file does not declare; no decorators; no JSX '
+      + 'markup or `@jsx` pragma), and reads '
+      + 'only the globals in ALLOWED_GLOBALS '
       + '(new URL, Object.keys/values/entries, JSON, Math, ... — never process, globalThis, eval or Function), '
       + '(a `declare` does not make a global local, and is itself reported), '
       + 'with no constructor/prototype/__proto__, no computed element access or destructuring key, and no '
@@ -2000,7 +2040,7 @@ describe('job-id ownership coverage (#10262)', () => {
         PROVIDER_CALL,
         'client.$1(other)',
       );
-      const variants: Array<[string, string, RegExp | RegExp[], boolean?]> = [
+      const variants: Array<[string, string, RegExp | RegExp[], boolean?, boolean?]> = [
         ['process.getBuiltinModule', feed(`const nh = process${FETCH};`), /reads the global 'process'/],
         ['globalThis', feed(`const nh = globalThis.process${FETCH};`), /reads the global 'globalThis'/],
         ['a shorthand property', feed(`const box = { process };\nconst nh = box.process${FETCH};`), /reads the global 'process'/],
@@ -2032,13 +2072,18 @@ describe('job-id ownership coverage (#10262)', () => {
         // A global EXPORTED by name and read back through a self-import: the
         // import is the module rule's, the export is this rule's.
         ['a local export of a global, read back', "export { process as hostProcess };\nimport { hostProcess } from './route';\n"
-          + feed(`const nh = (hostProcess as any)${FETCH};`), /exports 'process', which this file does not bind at run time/, true],
+          + feed(`const nh = (hostProcess as any)${FETCH};`), /exports 'process', which this file does not declare \(so the export is the global/, true],
+        // A name declared here only by a kind that emits no binding: the
+        // message says so rather than calling it undeclared.
+        ['an export of a name with no run-time binding', "const enum process { A = 1 }\nexport { process as hp };\nimport { hp } from './route';\n"
+          + feed(`const nh = (hp as any)${FETCH};`), /exports 'process', whose only declarations in this file emit no run-time binding/, true],
         ['a default export of a global, read back', "export { globalThis as default };\nimport hg from './route';\n"
-          + feed(`const nh = (hg as any).process${FETCH};`), /exports 'globalThis', which this file does not bind at run time/, true],
+          + feed(`const nh = (hg as any).process${FETCH};`), /exports 'globalThis', which this file does not declare \(so the export is the global/, true],
         // Any decorator, even one that reads nothing, is reported on its own.
+        // The fixture reads no global, so the decorator is the only problem.
         ['a decorator', mutate(feed('const nh = box;'), HANDLER_OPEN,
-          "const box: any = { headers: async () => new Headers() };\nclass DD { @((f: any) => f) m(): void {} }\nvoid DD;\n$1"),
-        /: a decorator \(its expression runs outside the scope the checker resolves it in\)/],
+          "const box: any = { headers: async () => ({ get: () => null }) };\nclass DD { @((f: any) => f) m(): void {} }\nvoid DD;\n$1"),
+        /: a decorator \(a key-resolving route may not use one: it runs outside the scope this gate can analyse; remove it\)/, false, true],
         ['import.meta.webpackContext', feed("const nh = (import.meta as any).webpackContext('next', { recursive: true })('./headers.js');"),
           /reads import\.meta other than import\.meta\.url/],
         // `.require` is ALSO a require reference to the module rule; the global
@@ -2129,7 +2174,7 @@ describe('job-id ownership coverage (#10262)', () => {
           feed(`const nh = structuredClone<NodeJS.Process>(undefined as unknown as NodeJS.Process)${FETCH};`),
           /reads the global 'structuredClone'/],
       ];
-      for (const [name, mutated, rule, moduleRuleToo] of variants) {
+      for (const [name, mutated, rule, moduleRuleToo, alone] of variants) {
         expect(mutated, `${r.rel} ${name}`).toContain('client.');
         expect(mutated.match(/const other = /g), `${r.rel} ${name}`).toHaveLength(1);
         const analysis = analyseStatusRoute(mutated, r.file);
@@ -2140,6 +2185,24 @@ describe('job-id ownership coverage (#10262)', () => {
         const report = analysis.foreignInputs.join('\n');
         for (const one of Array.isArray(rule) ? rule : [rule]) expect(report, `${r.rel} ${name}`).toMatch(one);
         if (!moduleRuleToo) expect(report, `${r.rel} ${name}`).not.toMatch(MODULE_RULE);
+        // `alone`: the rule under test is the ONLY thing that reports.
+        if (alone) expect(analysis.foreignInputs, `${r.rel} ${name}`).toHaveLength(1);
+      }
+      // A JSX pragma in a .tsx copy of the route: `<module />` compiles to a
+      // call of the factory the comment names, so the global is read with no
+      // identifier in the code. Each factory spelling is reported by BOTH the
+      // markup rule and the pragma rule, pinned separately.
+      const tsxFile = r.file.replace(/\.ts$/, '.tsx');
+      expect(tsxFile).not.toBe(r.file);
+      for (const factory of ['process.getBuiltinModule', 'globalThis.process.getBuiltinModule', 'require']) {
+        const src = `/** @jsxRuntime classic */\n/** @jsx ${factory} */\n`
+          + feed("const m: any = <module />;\nconst nh = m.createRequire(import.meta.url)('next/headers');");
+        const analysis = analyseStatusRoute(src, tsxFile);
+        expect(analysis.unguarded, `${r.rel} @jsx ${factory}`).toEqual([]);
+        const report = analysis.foreignInputs.join('\n');
+        expect(report, `${r.rel} @jsx ${factory}`).toMatch(/: JSX markup \(a pragma comment can compile it to a call of any global/);
+        expect(report, `${r.rel} @jsx ${factory}`).toMatch(/: a JSX pragma '@jsx'/);
+        expect(report, `${r.rel} @jsx ${factory}`).toMatch(/: a JSX pragma '@jsxRuntime'/);
       }
     }
     // ...and the allowed uses stay clean: new URL, Object.values, JSON, a
@@ -2170,6 +2233,33 @@ describe('job-id ownership coverage (#10262)', () => {
         'function pf(process: () => number = () => 1, a: number = process()): number { return a; }', 'void pf;'],
       // A PROPERTY named arguments at module scope is not the wrapper's list.
       ['a module-level property named arguments', 'const meta = { arguments: 1 };\nconst ma = meta.arguments;', 'void ma;'],
+      // TYPE-ONLY exports bind and load nothing: a type re-export of a module
+      // the whitelist refuses, and a type export of a local type, both clean.
+      ['a type-only re-export', "export type { ZodType } from 'zod';", 'void 0;'],
+      ['a type-only export of a local type', 'type GapLocalT = number;\nexport type { GapLocalT };', 'void 0;'],
+      ['an inline type-only export specifier', 'type GapLocalU = number;\nexport { type GapLocalU };', 'void 0;'],
+      ['a type-only star re-export', "export type * from 'zod';", 'void 0;'],
+      // A type-only export of a VALUE name emits nothing either, so even a
+      // global's name is clean there (only the `type` keyword says so).
+      ['a type-only export of a global value', 'export type { process as GapTP };', 'void 0;'],
+      ['an inline type-only export of a global value', 'export { type process as GapTQ };', 'void 0;'],
+      // A value export of a type-only name: the emitter elides it.
+      ['an export of a local interface', 'interface GapIFace { a: number }\nexport { GapIFace };', 'void 0;'],
+      // Re-exports of APP SOURCE pass the module whitelist, in every form.
+      ['a named re-export of app source', "export { verifyProviderJobOwner as gapVpo } from '@/lib/generate/jobOwnership';", 'void 0;'],
+      ['a star re-export of app source', "export * from '@/lib/generate/jobOwnership';", 'void 0;'],
+      ['a namespace re-export of app source', "export * as gapJo from '@/lib/generate/jobOwnership';", 'void 0;'],
+      // Importing ANOTHER route is app source, not a self-import.
+      ['an import of another route', "import { GET as gapOtherGet } from '@/app/api/generate/music/status/route';", 'void gapOtherGet;'],
+      // Value exports of names this file binds at run time.
+      ['an export of a local function', 'function gapLocalFn(): number { return 1; }\nexport { gapLocalFn };', 'void 0;'],
+      ['a default export of a local', 'const gapX = 1;\nexport { gapX as default };', 'void 0;'],
+      ['a string-named export of a local', "const gapY = 1;\nexport { gapY as 'gap-y' };", 'void 0;'],
+      ['an export of a local enum and class', 'enum GapE { A = 1 }\nclass GapK {}\nexport { GapE, GapK };', 'void 0;'],
+      ['an export of an imported binding', 'export { NextResponse as GapNR };', 'void 0;'],
+      // `arguments` inside a function or a method is that function's own.
+      ['arguments in a module-level function', 'function gapArgs(): number { return arguments.length; }', 'void gapArgs;'],
+      ['arguments in a method', 'class GapM { m(): number { return arguments.length; } }', 'void GapM;'],
     ];
     for (const [name, prelude, read] of locals) {
       const src = mutate(mutate(model!.source, POLLED_ID, `$&\n$1${read}`), HANDLER_OPEN, `${prelude}\n$1`);
