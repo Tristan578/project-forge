@@ -14,7 +14,10 @@ CREATE UNIQUE INDEX "uq_provider_job_owners_provider_job" ON "provider_job_owner
 -- and skybox poll meshy; sprite, sprite_sheet and tileset poll replicate.
 -- generation_jobs rows are client-created, so a provider_job_id claimed by more
 -- than one user is ambiguous and left unbound (fail closed), and only rows from
--- the last 24 hours are trusted.
+-- the last 24 hours are trusted. A single claimant IS trusted: a row planted
+-- before this migration for a leaked id binds to the planter. That locks the
+-- real owner out (404 and refund) but discloses nothing the planter could not
+-- already poll before ownership existed.
 INSERT INTO "provider_job_owners" ("provider", "provider_job_id", "user_id")
 SELECT m."provider", gj."provider_job_id", gj."user_id"
 FROM "generation_jobs" gj

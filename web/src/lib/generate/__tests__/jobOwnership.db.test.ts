@@ -52,6 +52,7 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: captureExce
 
 import { createTestHarness, seedUser } from '@/lib/db/__tests__/pgliteHarness';
 import { providerJobOwners } from '@/lib/db/schema';
+import { DB_PROVIDER } from '@/lib/config/providers';
 import { bindProviderJob, findOtherProviderJobOwnerId, verifyProviderJobOwner } from '../jobOwnership';
 
 beforeAll(async () => {
@@ -156,12 +157,16 @@ describe('migration 0015 binds the generations in flight when it runs (#10262)',
     const b = await seedUser(harness().neonSql);
     const c = await seedUser(harness().neonSql);
 
+    // One fresh in-flight row per polled type, so every mapping row is pinned.
     await seedJob(a.id, 'job-model', 'model', 'processing');
+    await seedJob(a.id, 'job-texture', 'texture', 'processing');
     await seedJob(a.id, 'job-skybox', 'skybox', 'pending');
+    await seedJob(b.id, 'job-sprite', 'sprite', 'processing');
     await seedJob(b.id, 'job-sheet', 'sprite_sheet', 'downloading');
+    await seedJob(b.id, 'job-tileset', 'tileset', 'pending');
     // Not bound: finished, too old, a type with no polled status route.
     await seedJob(a.id, 'job-done', 'texture', 'completed');
-    await seedJob(a.id, 'job-old', 'tileset', 'processing', 30);
+    await seedJob(a.id, 'job-old', 'model', 'processing', 30);
     await seedJob(a.id, 'job-sfx', 'sfx', 'processing');
     // Not bound: two users claim the same provider job id, so neither is trusted.
     await seedJob(a.id, 'job-claimed', 'model', 'processing');
@@ -176,11 +181,18 @@ describe('migration 0015 binds the generations in flight when it runs (#10262)',
       `SELECT provider, provider_job_id, user_id::text AS user_id
        FROM provider_job_owners ORDER BY provider_job_id ASC`,
     );
+    // Expected providers come from DB_PROVIDER, the map the status routes
+    // resolve through (model/status uses model3d; texture and skybox use
+    // texture; sprite, sprite-sheet and tileset use sprite), so a change there
+    // turns this red until the migration's VALUES list follows it.
     expect(rows.map((r) => [r.provider, r.provider_job_id, r.user_id])).toEqual([
       ['meshy', 'job-bound', c.id],
-      ['meshy', 'job-model', a.id],
-      ['replicate', 'job-sheet', b.id],
-      ['meshy', 'job-skybox', a.id],
+      [DB_PROVIDER.model3d, 'job-model', a.id],
+      [DB_PROVIDER.sprite, 'job-sheet', b.id],
+      [DB_PROVIDER.texture, 'job-skybox', a.id],
+      [DB_PROVIDER.sprite, 'job-sprite', b.id],
+      [DB_PROVIDER.texture, 'job-texture', a.id],
+      [DB_PROVIDER.sprite, 'job-tileset', b.id],
     ]);
 
     expect(await verifyProviderJobOwner(a.id, 'meshy', 'job-model')).toBe('owner');
