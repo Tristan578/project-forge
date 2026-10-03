@@ -132,11 +132,18 @@ ALLOWED_ADVISORIES=(
   # whose eslint ^7||^8 peer this repo's eslint 9 cannot satisfy.
   # REMOVAL PATH: a braces release that fixes it (micromatch's "^3.0.3" range
   # takes a 3.0.x patch by relock alone), or upstream fast-glob/micromatch, or
-  # @next/eslint-plugin-next, dropping braces from the chain. Then relock and
-  # prune this entry with its comment block, leaving the single line
-  # `# (no waivers in effect)` as the array body (the suite's column-0 body cut
-  # fails closed on an empty body), and update the suite's
-  # expected_allowlist_entries in the same commit.
+  # @next/eslint-plugin-next, dropping braces from the chain. Then relock and,
+  # in ONE commit:
+  #   1. prune this entry with its comment block, leaving the single line
+  #      `# (no waivers in effect)` as the array body (the suite's column-0
+  #      body cut fails closed on an empty body);
+  #   2. prune the same id from ALLOWED_GHSA in scripts/check-security-alerts.sh;
+  #   3. in scripts/__tests__/check-npm-audit.test.sh, set
+  #      expected_allowlist_entries to '' and delete the section-0 braces cases,
+  #      then update SELF_EXEC_EXPECTED_DROP and the expected_openers list
+  #      (their failure messages print the new values);
+  #   4. reword the History paragraph and "The one entry below" above, and the
+  #      matching sentence in .claude/rules/gotchas-build-ci.md.
   # RE-CHECK on every eslint-config-next or next bump: `npm view braces versions`
   # and `npm view @next/eslint-plugin-next@latest dependencies.fast-glob`.
   # Tracking issue: #10323 (warn when a waived advisory becomes fixable).

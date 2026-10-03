@@ -1124,7 +1124,7 @@ allowlist_elements="$(grep -vE '^[[:space:]]*(#|$)' <<<"$allowlist_body" || true
 if [ "$allowlist_elements" = "$expected_allowlist_entries" ]; then
   pass "ALLOWED_ADVISORIES ships exactly the reviewed entry set (braces GHSA-vfj7-8cjw-p6xm pinned to node_modules/braces)"
 else
-  fail "ALLOWED_ADVISORIES differs from the reviewed entry set — expected [$expected_allowlist_entries], got [$allowlist_elements]. Try relocking first ('npm view <pkg> versions' against the advisory's patched range); if a change is genuinely warranted, update this pin deliberately"
+  fail "ALLOWED_ADVISORIES differs from the reviewed entry set — expected [$expected_allowlist_entries], got [$allowlist_elements]. If you just PRUNED an entry, follow the REMOVAL PATH checklist beside it in the gate and update this pin to match (an empty allowlist means an empty reviewed set). If you ADDED or widened one, try relocking first ('npm view <pkg> versions' against the advisory's patched range); if the change is genuinely warranted, update this pin deliberately"
 fi
 gate_ghsa_lines="$(grep -cE '^[[:space:]]*"GHSA-' "$SCRIPT" || true)"
 reviewed_ghsa_lines="$(grep -cE '^[[:space:]]*"GHSA-' <<<"$expected_allowlist_entries" || true)"
