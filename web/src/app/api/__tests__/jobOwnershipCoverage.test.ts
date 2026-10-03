@@ -23,9 +23,14 @@
  * calls a KEY EXPORT of the resolver (or references one, or imports the
  * resolver module in a way the gate cannot follow) is SELECTED. The key
  * exports are DERIVED from `@/lib/keys/resolver`'s source on every run: every
- * exported function except the pinned `NON_KEY_RESOLVER_EXPORTS` (each
- * re-checked to declare a return type naming no key) — `resolveApiKey` and
- * `resolveByokOrPlatformKey` today, and any export added later. "Calls" counts
+ * exported VALUE binding, whatever its initializer (a function, a const alias
+ * `= getPlatformKey`, a call result, a `satisfies`/`as` expression, a
+ * `let`/`var`, `export default` keyed `default`, an export list, a class),
+ * except the pinned `NON_KEY_RESOLVER_EXPORTS` (each re-checked to be a
+ * function declaring a return type naming no key, or a plain error class);
+ * types are not values, and an `export * from` refuses to derive at all —
+ * `resolveApiKey` and `resolveByokOrPlatformKey` today, and any export added
+ * later. "Calls" counts
  * a named import of a key export under ANY local name from ANY specifier
  * (`as resolveKey`, from `@/lib/keys/resolver`, `@/lib/keys/resolver.ts` or a
  * relative path — over-counting only makes the gate stricter). Where the MODULE is what matters
@@ -91,7 +96,15 @@
  *   resolves (tsc's resolution, so `next/headers.js` and a relative path into
  *   node_modules are caught) to the app's own source under `src/`; there is no
  *   `import()`, no `require` reference and no `import x = require(...)`, since
- *   the gate cannot vet a module named at run time. So whatever the route
+ *   the gate cannot vet a module named at run time. A module can also be
+ *   fetched through a GLOBAL with no import at all
+ *   (`process.getBuiltinModule('module').createRequire(...)('next/headers')`),
+ *   so the GLOBALS are whitelisted the same way (`ALLOWED_GLOBALS`: `new URL`,
+ *   `Object.keys/values/entries`, `JSON`, `Math`, ...; never `process`,
+ *   `globalThis`, `global`, `eval`, `Function` or `Reflect`), and the path
+ *   from any value to `Function` is closed: no `constructor`, `prototype` or
+ *   `__proto__` anywhere in the file, and every element access takes a
+ *   literal name. So whatever the route
  *   sends the provider, the only caller-chosen value it can contain is the id
  *   the ownership check ran on. This is a whitelist of the ways IN, not a list
  *   of sinks — the set of sinks is unbounded (#9736).
@@ -139,14 +152,17 @@ const RESOLVE = 'resolveApiKey';
 /** The resolver's uncharged BYOK-or-platform lookup: a key with no tier, balance or charge in front of it. */
 const RESOLVE_BYOK = 'resolveByokOrPlatformKey';
 /**
- * The resolver's exported functions that return NO key, pinned. Every OTHER
- * exported function of the resolver module is treated as key-returning (see
- * `KEY_EXPORTS`), so a new export selects its callers until someone decides
- * here that it returns no key — and each entry is re-checked to still be an
- * exported function whose declared return type names neither `string` nor
- * `ResolvedKey`.
+ * The resolver's exports that return NO key, pinned. Every OTHER exported
+ * value binding of the resolver module — whatever its initializer — is
+ * treated as key-returning (see `KEY_EXPORTS`), so a new export selects its
+ * callers until someone decides here that it returns no key. Each entry is
+ * re-checked, in EVERY declaration of the name, to still be either a function
+ * declaration or a `const` bound straight to a function, with a declared
+ * return type naming neither `string` nor `ResolvedKey`, or an error class
+ * (`extends Error`, a constructor and nothing else, no `return`) — so the pin
+ * cannot be kept by an alias, a call result or a cast of something that does.
  */
-const NON_KEY_RESOLVER_EXPORTS: readonly string[] = ['storeProviderKey', 'deleteProviderKey', 'listConfiguredProviders'];
+const NON_KEY_RESOLVER_EXPORTS: readonly string[] = ['ApiKeyError', 'storeProviderKey', 'deleteProviderKey', 'listConfiguredProviders'];
 /** The one framework module a selected route may import (see `moduleInputProblems`). */
 const NEXT_SERVER_MODULE = 'next/server';
 const SRC_ROOT = path.join(WEB_ROOT, 'src');
@@ -209,47 +225,133 @@ function isAppSourceFile(file: string | undefined): boolean {
 }
 
 export interface ResolverExport {
+  /** The EXPORTED name (`default` for a default export). */
   name: string;
-  /** The declared return type's text, or undefined when none is written (or it is a re-export). */
+  /**
+   * The declared return type's text when the export is a function declaration
+   * or a `const` bound straight to a function or arrow expression (with no
+   * type annotation of its own); otherwise undefined — an alias, a call
+   * result, a wrapped or cast expression, a `let`/`var`, a re-export.
+   */
   returnType: string | undefined;
+  /**
+   * An exported class that `extends Error` and whose only member is a
+   * constructor with no `return` (so `new X()` is that error, nothing else).
+   */
+  errorClass: boolean;
 }
 
 /**
- * The exported FUNCTIONS of the resolver module's source — declarations,
- * `export const f = (...) => ...`, and names in an `export { ... }` list
- * (which may be functions; counted, since over-counting only makes the gate
- * stricter). Classes, interfaces and types are not callable key sources.
+ * EVERY exported value binding of the resolver module's source, whatever its
+ * initializer: a function declaration, every name an `export const/let/var`
+ * binds (`export const k = getPlatformKey`, `= memoize(async () => ...)`,
+ * `= (async () => ...) satisfies F`, a destructuring), `export default`
+ * (keyed `default`), every name in an `export { ... }` list or
+ * `export * as ns`, an exported enum, namespace or `import =`. A key can come
+ * out of any of them, so the derivation does not ask what the value IS
+ * (lessons-learned #21: the ways to build a value are unbounded); over-counting
+ * only makes the gate stricter, and a non-key name is pinned in
+ * `NON_KEY_RESOLVER_EXPORTS`.
+ *
+ * Classes are values and are counted too (a static or instance method can
+ * return a key); `ApiKeyError`, which routes `instanceof`-test, is pinned.
+ * Not counted: interfaces and types, which have no value. `export * from
+ * '...'` adds names this source does not spell, so it THROWS: the gate
+ * refuses to derive rather than derive a subset.
  */
-export function resolverFunctionExports(source: string): ResolverExport[] {
+export function resolverValueExports(source: string): ResolverExport[] {
   const sf = ts.createSourceFile('resolver.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const out: ResolverExport[] = [];
-  const exported = (st: ts.Statement) => ts.canHaveModifiers(st)
-    && (ts.getModifiers(st) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+  const modifiers = (n: ts.Node) => (ts.canHaveModifiers(n) ? ts.getModifiers(n) ?? [] : []);
+  const has = (n: ts.Node, kind: ts.SyntaxKind) => modifiers(n).some((m) => m.kind === kind);
+  const exported = (st: ts.Statement) => has(st, ts.SyntaxKind.ExportKeyword);
+  const exportName = (st: ts.Statement, local: string | undefined) =>
+    (has(st, ts.SyntaxKind.DefaultKeyword) ? 'default' : local ?? 'default');
+  const boundNames = (name: ts.BindingName): string[] => (ts.isIdentifier(name)
+    ? [name.text]
+    : (name.elements as ts.NodeArray<ts.ArrayBindingElement>).flatMap((el) => (ts.isOmittedExpression(el) ? [] : boundNames(el.name))));
+  const errorClass = (c: ts.ClassDeclaration) => {
+    const extendsError = (c.heritageClauses ?? []).some((h) => h.token === ts.SyntaxKind.ExtendsKeyword
+      && h.types.length === 1 && ts.isIdentifier(h.types[0].expression) && h.types[0].expression.text === 'Error');
+    let returns = false;
+    forEachDescendant(c, (n) => { if (ts.isReturnStatement(n)) returns = true; });
+    return extendsError && !returns && c.members.length === 1 && ts.isConstructorDeclaration(c.members[0]);
+  };
+  // Local names with no value, for `export { X }`.
+  const typeLocals = new Set<string>();
   for (const st of sf.statements) {
-    if (ts.isFunctionDeclaration(st) && st.name && exported(st)) {
-      out.push({ name: st.name.text, returnType: st.type?.getText(sf) });
+    if (ts.isInterfaceDeclaration(st) || ts.isTypeAliasDeclaration(st)) typeLocals.add(st.name.text);
+  }
+  const value = (name: string, returnType?: string): ResolverExport => ({ name, returnType, errorClass: false });
+  for (const st of sf.statements) {
+    if (ts.isFunctionDeclaration(st) && exported(st)) {
+      out.push(value(exportName(st, st.name?.text), st.type?.getText(sf)));
+    } else if (ts.isClassDeclaration(st) && exported(st)) {
+      out.push({ ...value(exportName(st, st.name?.text)), errorClass: errorClass(st) });
     } else if (ts.isVariableStatement(st) && exported(st)) {
+      const constList = (st.declarationList.flags & ts.NodeFlags.Const) !== 0;
       for (const d of st.declarationList.declarations) {
-        const init = d.initializer;
-        if (ts.isIdentifier(d.name) && init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
-          out.push({ name: d.name.text, returnType: init.type?.getText(sf) });
-        }
+        let init = d.initializer;
+        while (init && ts.isParenthesizedExpression(init)) init = init.expression;
+        const fn = constList && ts.isIdentifier(d.name) && !d.type && init
+          && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) ? init : undefined;
+        for (const name of boundNames(d.name)) out.push(value(name, fn?.type?.getText(sf)));
       }
-    } else if (ts.isExportDeclaration(st) && !st.isTypeOnly && st.exportClause && ts.isNamedExports(st.exportClause)) {
-      for (const el of st.exportClause.elements) if (!el.isTypeOnly) out.push({ name: el.name.text, returnType: undefined });
+    } else if (ts.isExportAssignment(st)) {
+      // `export default <expr>` (and `export = <expr>`): a value, whatever it is.
+      out.push(value('default'));
+    } else if (ts.isEnumDeclaration(st) || ts.isModuleDeclaration(st) || ts.isImportEqualsDeclaration(st)) {
+      const typeOnly = ts.isImportEqualsDeclaration(st) && st.isTypeOnly;
+      if (exported(st) && !typeOnly && ts.isIdentifier(st.name)) out.push(value(st.name.text));
+    } else if (ts.isExportDeclaration(st) && !st.isTypeOnly) {
+      if (!st.exportClause) {
+        throw new Error(`the resolver re-exports a whole module (${st.getText(sf)}): the gate cannot derive the names it `
+          + 'adds, so it cannot know which return a key. List them in an `export { ... }` instead.');
+      }
+      if (ts.isNamespaceExport(st.exportClause)) {
+        out.push(value(st.exportClause.name.text));
+        continue;
+      }
+      for (const el of st.exportClause.elements) {
+        if (el.isTypeOnly) continue;
+        if (!st.moduleSpecifier && typeLocals.has((el.propertyName ?? el.name).text)) continue;
+        out.push(value(el.name.text));
+      }
     }
   }
   return out;
 }
 
-/** The resolver's key-returning exports: every exported function but the pinned `NON_KEY_RESOLVER_EXPORTS`. */
+/** The resolver's key-returning exports: every exported value binding but the pinned `NON_KEY_RESOLVER_EXPORTS`. */
 export function keyExportsOf(exports: readonly ResolverExport[]): Set<string> {
   return new Set(exports.map((e) => e.name).filter((name) => !NON_KEY_RESOLVER_EXPORTS.includes(name)));
 }
 
+/**
+ * Why a pinned `NON_KEY_RESOLVER_EXPORTS` name can no longer be trusted to
+ * return no key: it is not exported, or ANY declaration of it is neither a
+ * function with a declared non-key return type nor an error class.
+ */
+export function nonKeyPinProblems(exports: readonly ResolverExport[]): string[] {
+  const problems: string[] = [];
+  for (const name of NON_KEY_RESOLVER_EXPORTS) {
+    const declared = exports.filter((e) => e.name === name);
+    if (declared.length === 0) problems.push(`${name}: pinned as a non-key export but not exported`);
+    for (const e of declared) {
+      if (e.errorClass) continue;
+      if (!e.returnType) {
+        problems.push(`${name}: pinned as a non-key export but is not a function declaration or a const function with a declared return type`);
+      } else if (/\bstring\b|ResolvedKey/.test(e.returnType)) {
+        problems.push(`${name}: pinned as a non-key export but its return type (${e.returnType}) can carry a key`);
+      }
+    }
+  }
+  return problems;
+}
+
 const RESOLVER_FILE = canonicalModuleFile(RESOLVER_MODULE);
 if (!RESOLVER_FILE) throw new Error(`${RESOLVER_MODULE} does not resolve: the gate cannot derive the key-returning exports`);
-const RESOLVER_EXPORTS = resolverFunctionExports(readFileSync(RESOLVER_FILE, 'utf8'));
+const RESOLVER_EXPORTS = resolverValueExports(readFileSync(RESOLVER_FILE, 'utf8'));
 /**
  * Every name a key comes out of: derived from the resolver module's exports
  * at run time, so a new key-returning export selects its callers without an
@@ -447,6 +549,10 @@ function isNamePosition(id: ts.Identifier): boolean {
   if (ts.isQualifiedName(p) && p.right === id) return true;
   if (ts.isImportSpecifier(p) || ts.isImportClause(p) || ts.isNamespaceImport(p)) return true;
   if (ts.isLabeledStatement(p) || ts.isBreakOrContinueStatement(p)) return true;
+  if (ts.isExportSpecifier(p) || ts.isMetaProperty(p)) return true;
+  // An intrinsic JSX tag (`<div>`) is a string, not a binding.
+  if ((ts.isJsxOpeningElement(p) || ts.isJsxClosingElement(p) || ts.isJsxSelfClosingElement(p))
+    && p.tagName === id && /^[a-z]/.test(id.text)) return true;
   return false;
 }
 
@@ -661,7 +767,7 @@ function isCallee(node: ts.Node): boolean {
  * lazily imports `listConfiguredProviders` this way. Anything else (a module
  * object kept in a variable, a rest element, a computed key) is untraceable.
  */
-function destructuresWithoutResolve(importCall: ts.CallExpression): boolean {
+function destructuresWithoutResolve(importCall: ts.CallExpression, keys: ReadonlySet<string>): boolean {
   let pattern: ts.BindingName | undefined;
   const awaited = importCall.parent;
   if (ts.isAwaitExpression(awaited) && ts.isVariableDeclaration(awaited.parent)) {
@@ -682,7 +788,7 @@ function destructuresWithoutResolve(importCall: ts.CallExpression): boolean {
   }
   return !!pattern && ts.isObjectBindingPattern(pattern) && pattern.elements.every((el) => {
     const key = el.propertyName ?? el.name;
-    return !el.dotDotDotToken && ts.isIdentifier(key) && !KEY_EXPORTS.has(key.text);
+    return !el.dotDotDotToken && ts.isIdentifier(key) && !keys.has(key.text);
   });
 }
 
@@ -698,9 +804,9 @@ export interface StatusRouteAnalysis {
 }
 
 /** Local names bound by a named import of ANY key export (`KEY_EXPORTS`), from ANY specifier. */
-function importedKeyNames(b: Bound): Set<string> {
+function importedKeyNames(b: Bound, keys: ReadonlySet<string>): Set<string> {
   const out = new Set<string>();
-  for (const name of KEY_EXPORTS) for (const local of importedLocalNames(b, ANY_MODULE, name)) out.add(local);
+  for (const name of keys) for (const local of importedLocalNames(b, ANY_MODULE, name)) out.add(local);
   return out;
 }
 
@@ -747,16 +853,105 @@ function moduleInputProblems(b: Bound): string[] {
   return problems;
 }
 
-export function analyseStatusRoute(source: string, fileName = 'route.ts'): StatusRouteAnalysis {
+/**
+ * The GLOBALS a key-resolving route may read, and how. A module can be
+ * fetched at run time with no import at all — `process.getBuiltinModule(
+ * 'module').createRequire(import.meta.url)('next/headers')`, through
+ * `globalThis`, `eval`, `Function`, `Reflect`, or `(0).constructor.constructor(
+ * 'return process')()` — so, like the module rule, this is a whitelist of the
+ * ways in, not a list of the known escapes (#9736):
+ *
+ * - an identifier that resolves to no declaration in the file (a global) must
+ *   be one of these, used only in the way listed: `'value'` any use; `'new'`
+ *   only as `new X(...)`; a member list only as `X.<member>(...)`;
+ * - no identifier, property name or string anywhere in the file is
+ *   `constructor`, `prototype` or `__proto__` (the path from ANY value to
+ *   `Function`, and so to every global);
+ * - an element access takes a string or number LITERAL, so a computed name
+ *   (`x['con' + 'structor']`) cannot rebuild one.
+ *
+ * `arguments` and `require` have rules of their own and are not repeated here.
+ */
+const ALLOWED_GLOBALS: Readonly<Record<string, 'value' | 'new' | readonly string[]>> = {
+  undefined: 'value',
+  NaN: 'value',
+  Infinity: 'value',
+  JSON: 'value',
+  Math: 'value',
+  Number: 'value',
+  String: 'value',
+  Boolean: 'value',
+  URL: 'new',
+  Error: 'new',
+  // Object.getPrototypeOf / getOwnPropertyDescriptor reach Function: members are listed.
+  Object: ['keys', 'values', 'entries'],
+};
+const FUNCTION_PATH_NAMES = new Set(['constructor', 'prototype', '__proto__']);
+
+/** Is `n` in a TYPE position (erased, so it reads nothing at run time)? */
+function isTypePosition(n: ts.Node): boolean {
+  if (ts.isExpressionWithTypeArguments(n) && ts.isHeritageClause(n.parent)
+    && n.parent.token === ts.SyntaxKind.ExtendsKeyword && ts.isClassLike(n.parent.parent)) return false;
+  return ts.isTypeNode(n) || ts.isInterfaceDeclaration(n) || ts.isTypeAliasDeclaration(n)
+    || ts.isImportDeclaration(n) || ts.isExportDeclaration(n);
+}
+
+function globalInputProblems(b: Bound): string[] {
+  const { sf, checker } = b;
+  const problems: string[] = [];
+  const declaredHere = (s: ts.Symbol | undefined) => !!s?.declarations?.some((d) => d.getSourceFile() === sf);
+  const visit = (n: ts.Node): void => {
+    if (isTypePosition(n)) return;
+    if ((ts.isIdentifier(n) || ts.isStringLiteralLike(n)) && FUNCTION_PATH_NAMES.has(n.text)) {
+      problems.push(`${lineOf(sf, n)}: names '${n.text}', the path from any value to Function and so to every global`);
+    }
+    if (ts.isElementAccessExpression(n)) {
+      const arg = n.argumentExpression;
+      if (!ts.isStringLiteralLike(arg) && !ts.isNumericLiteral(arg)) {
+        problems.push(`${lineOf(sf, n)}: an element access by a computed name (only a string or number literal is readable)`);
+      }
+    }
+    if (ts.isIdentifier(n) && !isNamePosition(n) && n.text !== 'arguments' && n.text !== 'require') {
+      const symbol = ts.isShorthandPropertyAssignment(n.parent) && n.parent.name === n
+        ? checker.getShorthandAssignmentValueSymbol(n.parent)
+        : checker.getSymbolAtLocation(n);
+      if (!declaredHere(symbol)) {
+        const allowed = hasOwn(ALLOWED_GLOBALS, n.text) ? ALLOWED_GLOBALS[n.text] : undefined;
+        const p = n.parent;
+        const ok = allowed === 'value'
+          || (allowed === 'new' && ts.isNewExpression(p) && p.expression === n)
+          || (Array.isArray(allowed) && ts.isPropertyAccessExpression(p) && p.expression === n
+            && allowed.includes(p.name.text) && ts.isCallExpression(p.parent) && p.parent.expression === p);
+        if (!ok) {
+          problems.push(`${lineOf(sf, n)}: reads the global '${n.text}'${allowed ? ' in a way not allowed' : ''} `
+            + '(a global can fetch a module or the request at run time; see ALLOWED_GLOBALS)');
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return problems;
+}
+
+/**
+ * `keys` is the key-export set to select by: `KEY_EXPORTS`, derived from the
+ * real resolver, except where a probe derives it from an EDITED resolver source.
+ */
+export function analyseStatusRoute(
+  source: string,
+  fileName = 'route.ts',
+  keys: ReadonlySet<string> = KEY_EXPORTS,
+): StatusRouteAnalysis {
   const b = bind(fileName, source);
   const { sf } = b;
   // A named import of any key export under ANY local name, from ANY
   // specifier: the name is what gets called, and over-counting only makes the
   // gate stricter. (A specifier that does not resolve to the resolver — an
   // unrelated module, or a relative path in a copy of the tree — still counts.)
-  const resolveNames = importedKeyNames(b);
+  const resolveNames = importedKeyNames(b, keys);
   const out: StatusRouteAnalysis = { keyResolutions: 0, unguarded: [], untraceable: [], foreignInputs: [] };
-  out.foreignInputs.push(...moduleInputProblems(b));
+  out.foreignInputs.push(...moduleInputProblems(b), ...globalInputProblems(b));
   const inputs = new Map<ts.FunctionLikeDeclaration, HandlerInputs>();
 
   for (const statement of sf.statements) {
@@ -777,7 +972,7 @@ export function analyseStatusRoute(source: string, fileName = 'route.ts'): Statu
     }
   }
 
-  const isResolveName = (text: string) => KEY_EXPORTS.has(text) || resolveNames.has(text);
+  const isResolveName = (text: string) => keys.has(text) || resolveNames.has(text);
 
   const visit = (node: ts.Node): void => {
     // `import('@/lib/keys/resolver')` / `require(...)`: a resolver the gate cannot follow.
@@ -787,7 +982,7 @@ export function analyseStatusRoute(source: string, fileName = 'route.ts'): Statu
         || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
       && node.arguments.length > 0 && ts.isStringLiteralLike(node.arguments[0])
       && namesModule(b, node.arguments[0].text, RESOLVER_MODULE)
-      && !destructuresWithoutResolve(node)
+      && !destructuresWithoutResolve(node, keys)
     ) {
       out.untraceable.push(`${lineOf(sf, node)}: a dynamic import of ${RESOLVER_MODULE}`);
     }
@@ -808,7 +1003,7 @@ export function analyseStatusRoute(source: string, fileName = 'route.ts'): Statu
       }
     }
     if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
-      && KEY_EXPORTS.has(node.argumentExpression.text)) {
+      && keys.has(node.argumentExpression.text)) {
       out.untraceable.push(`${lineOf(sf, node)}: ${node.argumentExpression.text} read by element access`);
     }
     if (ts.isCallExpression(node)) {
@@ -817,7 +1012,7 @@ export function analyseStatusRoute(source: string, fileName = 'route.ts'): Statu
       // alias of it, or a namespace (`keys.resolveApiKey`) — is a key
       // resolution. Over-counting only makes the gate stricter.
       const isResolve = (ts.isIdentifier(callee) && isResolveName(callee.text))
-        || (ts.isPropertyAccessExpression(callee) && KEY_EXPORTS.has(callee.name.text));
+        || (ts.isPropertyAccessExpression(callee) && keys.has(callee.name.text));
       if (isResolve) {
         out.keyResolutions += 1;
         const fn = enclosingFunction(node);
@@ -950,15 +1145,15 @@ export const KEY_RESOLVING_EXEMPTIONS: Readonly<Record<string, Exemption>> = {
 const STATUS_ROUTES_RESOLVING_NO_KEY = ['api/generate/music/status/route.ts'];
 
 /** Calls spelled as a key export (or `<x>.<key export>`, or an imported alias of one) in a parsed file. */
-function resolveCalls(b: Bound): ts.CallExpression[] {
+function resolveCalls(b: Bound, keys: ReadonlySet<string>): ts.CallExpression[] {
   const { sf } = b;
-  const names = importedKeyNames(b);
+  const names = importedKeyNames(b, keys);
   const out: ts.CallExpression[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const c = node.expression;
-      if ((ts.isIdentifier(c) && (KEY_EXPORTS.has(c.text) || names.has(c.text)))
-        || (ts.isPropertyAccessExpression(c) && KEY_EXPORTS.has(c.name.text))) {
+      if ((ts.isIdentifier(c) && (keys.has(c.text) || names.has(c.text)))
+        || (ts.isPropertyAccessExpression(c) && keys.has(c.name.text))) {
         out.push(node);
       }
     }
@@ -1002,11 +1197,16 @@ function isExecuteOfGenerationHandler(b: Bound, fn: ts.FunctionLikeDeclaration):
 }
 
 /** The property an exemption's kind promises, re-checked against the source. */
-export function exemptionProblems(kind: ExemptionKind, source: string, fileName = 'route.ts'): string[] {
+export function exemptionProblems(
+  kind: ExemptionKind,
+  source: string,
+  fileName = 'route.ts',
+  keys: ReadonlySet<string> = KEY_EXPORTS,
+): string[] {
   const b = bind(fileName, source);
   const { sf } = b;
   const problems: string[] = [];
-  const calls = resolveCalls(b);
+  const calls = resolveCalls(b, keys);
   if (calls.length === 0) problems.push('resolves no key: the exemption is stale');
 
   if (kind === 'charged-new-operation') {
@@ -1156,17 +1356,18 @@ export interface RouteAudit {
 export function auditKeyResolvingRoutes(
   appRoot: string,
   exemptions: Readonly<Record<string, Exemption>> = KEY_RESOLVING_EXEMPTIONS,
+  keys: ReadonlySet<string> = KEY_EXPORTS,
 ): RouteAudit[] {
   const out: RouteAudit[] = [];
   for (const file of walkRouteFiles(appRoot)) {
     const source = readFileSync(file, 'utf8');
-    const analysis = analyseStatusRoute(source, file);
+    const analysis = analyseStatusRoute(source, file, keys);
     if (analysis.keyResolutions === 0 && analysis.untraceable.length === 0) continue;
     const rel = relTo(appRoot, file);
     const exemption = hasOwn(exemptions, rel) ? exemptions[rel] : undefined;
     const problems = analysis.untraceable.map((w) => `${w} (the gate cannot follow it)`);
     if (exemption) {
-      problems.push(...exemptionProblems(exemption.kind, source, file).map((p) => `exemption (${exemption.kind}): ${p}`));
+      problems.push(...exemptionProblems(exemption.kind, source, file, keys).map((p) => `exemption (${exemption.kind}): ${p}`));
     } else {
       problems.push(...analysis.unguarded.map((w) => `${w}: a provider key is resolved without an ownership refusal ahead of it`));
       problems.push(...analysis.foreignInputs);
@@ -1195,6 +1396,13 @@ const POLLED_ID = /^([ \t]*)const jobId = searchParams\.get\('jobId'\);$/m;
 
 /** Every way in which `audit` is not clean, flattened for one assertion. */
 const problemsOf = (audits: RouteAudit[]): string[] => audits.flatMap((a) => a.problems.map((p) => `${a.rel} ${p}`));
+
+/**
+ * The placeholder names the synthetic fixtures below use (`p`, `op`,
+ * `refuse`, ...), bound by an import from app source so the global rule
+ * (`globalInputProblems`) reads them as bindings, not globals.
+ */
+const FIXTURE_BINDINGS = "import { p, op, refuse, client, flag, meta } from '@/lib/generate/jobOwnershipResponse';\n";
 
 describe('job-id ownership coverage (#10262)', () => {
   const allRels = walkRouteFiles(APP_ROOT).map((f) => relTo(APP_ROOT, f));
@@ -1240,8 +1448,14 @@ describe('job-id ownership coverage (#10262)', () => {
       + 'before the call: `const ownership = await verifyProviderJobOwner(mid.userId!, provider, jobId);` + '
       + "`if (ownership !== 'owner') return jobOwnershipRefusal(ownership);`, where `mid` is this body's "
       + '`await withApiMiddleware(...)`, `jobId` is its one `searchParams.get(\'jobId\')`, and the call resolves '
-      + 'the key for the same `mid.userId!` — or be in KEY_RESOLVING_EXEMPTIONS with a reason. See '
-      + 'src/lib/generate/jobOwnership.ts and .claude/skills/generate-route/SKILL.md Step 4.',
+      + 'the key for the same `mid.userId!` — or be in KEY_RESOLVING_EXEMPTIONS with a reason. A key is any '
+      + 'export of @/lib/keys/resolver but the pinned NON_KEY_RESOLVER_EXPORTS (resolveApiKey, '
+      + 'resolveByokOrPlatformKey, ...). Such a route also reads nothing else from the outside: it imports '
+      + 'only next/server and app source under web/src (no bare package such as zod, no next/headers; no '
+      + 'import(), require, module.require or import =), and reads only the globals in ALLOWED_GLOBALS '
+      + '(new URL, Object.keys/values/entries, JSON, Math, ... — never process, globalThis, eval or Function), '
+      + 'with no constructor/prototype/__proto__ and no computed element access — move anything else into an '
+      + 'app helper under src/lib. See src/lib/generate/jobOwnership.ts and .claude/skills/generate-route/SKILL.md Step 4.',
     ).toEqual([]);
   });
 
@@ -1437,6 +1651,56 @@ describe('job-id ownership coverage (#10262)', () => {
     }
   });
 
+  it('reports each real status route that fetches a module at run time through a GLOBAL, in every spelling', () => {
+    // No import, no import(), no require: the module is reached through a
+    // global. Each variant feeds the provider a request header, and each is
+    // pinned to the global rule — and asserted NOT to be caught by the module
+    // rule — so a variant caught by the wrong rule cannot read as coverage
+    // (lessons-learned #19).
+    const MODULE_RULE = /imports '|a dynamic import\(\)|a require reference|an import-equals require/;
+    const FETCH = ".getBuiltinModule('module').createRequire(import.meta.url)('next/headers')";
+    for (const r of guardedStatus) {
+      expect(analyseStatusRoute(r.source, r.file).foreignInputs, r.rel).toEqual([]);
+      const feed = (lines: string) => mutate(
+        mutate(r.source, POLLED_ID, `$&\n${lines.split('\n').map((l) => `$1${l}`).join('\n')}\n$1const other = (await nh.headers()).get('x-poll-id') ?? jobId;`),
+        PROVIDER_CALL,
+        'client.$1(other)',
+      );
+      const variants: Array<[string, string, RegExp]> = [
+        ['process.getBuiltinModule', feed(`const nh = process${FETCH};`), /reads the global 'process'/],
+        ['globalThis', feed(`const nh = globalThis.process${FETCH};`), /reads the global 'globalThis'/],
+        ['a shorthand property', feed(`const box = { process };\nconst nh = box.process${FETCH};`), /reads the global 'process'/],
+        ['global', feed(`const nh = global.process${FETCH};`), /reads the global 'global'/],
+        ['the Function constructor chain', feed(`const nh = (0).constructor.constructor('return process')()${FETCH};`),
+          /names 'constructor'/],
+        ['a computed member name', feed(`const k = 'con' + 'structor';\nconst nh = (0)[k][k]('return process')()${FETCH};`),
+          /an element access by a computed name/],
+        ['eval', feed(`const nh = eval('process')${FETCH};`), /reads the global 'eval'/],
+        ['Function', feed(`const nh = Function('return process')()${FETCH};`), /reads the global 'Function'/],
+        ['an Object member off the list', feed("const F = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Object.getPrototypeOf(jobId)), 'cons' + 'tructor')!.value;\n"
+          + `const nh = F('return process')()${FETCH};`), /reads the global 'Object' in a way not allowed/],
+      ];
+      for (const [name, mutated, rule] of variants) {
+        expect(mutated, `${r.rel} ${name}`).toContain('client.');
+        expect(mutated.match(/const other = /g), `${r.rel} ${name}`).toHaveLength(1);
+        const analysis = analyseStatusRoute(mutated, r.file);
+        // Still a guarded key resolution: only the global rule stands in the way.
+        expect(analysis.unguarded, `${r.rel} ${name}`).toEqual([]);
+        expect(analysis.untraceable, `${r.rel} ${name}`).toEqual([]);
+        const report = analysis.foreignInputs.join('\n');
+        expect(report, `${r.rel} ${name}`).toMatch(rule);
+        expect(report, `${r.rel} ${name}`).not.toMatch(MODULE_RULE);
+      }
+    }
+    // ...and the allowed uses stay clean: new URL, Object.values, JSON, a
+    // literal index, and a type-position global.
+    const model = guardedStatus.find((a) => a.rel === 'api/generate/model/status/route.ts');
+    expect(model).toBeTruthy();
+    const allowed = mutate(model!.source, POLLED_ID,
+      "$&\n$1const shape: typeof globalThis | undefined = undefined;\n$1void [Object.values({ a: 1 })[0], JSON.stringify(shape), Number('1')];");
+    expect(analyseStatusRoute(allowed, model!.file).foreignInputs).toEqual([]);
+  });
+
   it('SELECTS each real status route that takes its key from ANY key-returning resolver export', () => {
     // resolveByokOrPlatformKey hands back the BYOK key or else the PLATFORM key
     // with no tier, balance or charge in front of it — a status route built on
@@ -1461,26 +1725,121 @@ describe('job-id ownership coverage (#10262)', () => {
     // the routes also import from the resolver is not.
     expect([...KEY_EXPORTS].sort()).toEqual(expect.arrayContaining([RESOLVE, RESOLVE_BYOK]));
     expect(KEY_EXPORTS.has('ApiKeyError')).toBe(false);
-    // Every pinned non-key export is still an exported function whose declared
-    // return type names no key — so the pin cannot hide a key source.
-    const byName = new Map(RESOLVER_EXPORTS.map((e) => [e.name, e]));
+    // Every pinned non-key export is still a function declaring a non-key
+    // return type, or an error class — so the pin cannot hide a key source.
+    expect(nonKeyPinProblems(RESOLVER_EXPORTS)).toEqual([]);
     for (const name of NON_KEY_RESOLVER_EXPORTS) {
-      const declared = byName.get(name);
-      expect(declared, `${name} is pinned as a non-key export but is not an exported function`).toBeTruthy();
-      expect(declared!.returnType, name).toBeTruthy();
-      expect(declared!.returnType, name).not.toMatch(/\bstring\b|ResolvedKey/);
+      expect(RESOLVER_EXPORTS.some((e) => e.name === name), `${name} is exported`).toBe(true);
       expect(KEY_EXPORTS.has(name), `${name} is pinned as a non-key export`).toBe(false);
     }
-    // A NEW export is a key source until someone pins it otherwise — derived,
-    // not restated (lessons-learned #18). Each spelling applied, then counted.
+    // A NEW export is a key source until someone pins it otherwise, WHATEVER
+    // its initializer — derived, not restated (lessons-learned #18). Each
+    // spelling is appended ALONE, asserted applied (absent before, the source
+    // grew), then asserted derived.
     const source = readFileSync(RESOLVER_FILE!, 'utf8');
-    const added = `${source}\nexport async function resolveSecondKey(u: string): Promise<string> { return u; }\n`
-      + 'export const resolveThirdKey = async (u: string) => u;\n'
-      + 'function resolveFourthKey(u: string) { return u; }\nexport { resolveFourthKey };\n';
-    expect(added.length).toBeGreaterThan(source.length);
-    const derived = keyExportsOf(resolverFunctionExports(added));
-    for (const name of ['resolveSecondKey', 'resolveThirdKey', 'resolveFourthKey']) expect(derived.has(name), name).toBe(true);
-    expect(keyExportsOf(resolverFunctionExports(source)).has('resolveSecondKey')).toBe(false);
+    const before = keyExportsOf(resolverValueExports(source));
+    const spellings: Array<[string, string]> = [
+      ['resolveSecondKey', 'export async function resolveSecondKey(u: string): Promise<string> { return u; }'],
+      ['resolveThirdKey', 'export const resolveThirdKey = async (u: string) => u;'],
+      ['resolveFourthKey', 'function resolveFourthKey(u: string) { return u; }\nexport { resolveFourthKey };'],
+      ['resolveListedKey', 'export { getPlatformKey as resolveListedKey };'],
+      ['resolvePlatformKey', 'export const resolvePlatformKey = getPlatformKey;'],
+      ['resolveMemoKey', 'export const resolveMemoKey = memoize(async (u: string) => u);'],
+      ['resolveCheckedKey', 'export const resolveCheckedKey = (async (u: string) => u) satisfies (u: string) => Promise<string>;'],
+      ['resolveCastKey', 'export const resolveCastKey = getPlatformKey as (p: Provider) => Promise<string>;'],
+      ['resolveLetKey', 'export let resolveLetKey = getPlatformKey;'],
+      ['resolveVarKey', 'export var resolveVarKey = getPlatformKey;'],
+      ['resolveFromTable', 'export const { resolveFromTable } = keyTable;'],
+      ['default', 'export default async function (u: string) { return u; }'],
+      ['default', 'export default async function resolveNamedDefault(u: string) { return u; }'],
+      ['default', 'export default getPlatformKey;'],
+      ['keyModule', "export * as keyModule from './platformKeys';"],
+      ['KeyBox', 'export class KeyBox { static get(u: string) { return u; } }'],
+      ['KeyMaker', 'export class KeyMaker { make(u: string) { return u; } }'],
+    ];
+    for (const [name, line] of spellings) {
+      const added = `${source}\n${line}\n`;
+      expect(added.length, line).toBeGreaterThan(source.length);
+      expect(before.has(name), `${name} is not a resolver export before the probe`).toBe(false);
+      expect(keyExportsOf(resolverValueExports(added)).has(name), line).toBe(true);
+    }
+    // ...and a type has no value, so it is not counted.
+    for (const line of ['export interface KeyShape { key: string }', 'export type KeyAlias = string;',
+      'type KeyLocal = string;\nexport { KeyLocal };']) {
+      const derived = keyExportsOf(resolverValueExports(`${source}\n${line}\n`));
+      expect([...derived].sort(), line).toEqual([...before].sort());
+    }
+    // A whole-module re-export adds names the source never spells: refuse to derive.
+    expect(() => resolverValueExports(`${source}\nexport * from './platformKeys';\n`)).toThrow(/re-exports a whole module/);
+  });
+
+  it('re-checks each NON-KEY pin in every declaration, so an alias, a cast or a key-carrying class cannot keep it', () => {
+    const clean = [
+      'export class ApiKeyError extends Error {\n  constructor(public code: string, message: string) { super(message); }\n}',
+      'export async function storeProviderKey(u: string): Promise<void> { void u; }',
+      'export const deleteProviderKey = async (u: string): Promise<void> => { void u; };',
+      'export async function listConfiguredProviders(u: string): Promise<Provider[]> { return [u as Provider]; }',
+    ].join('\n');
+    expect(nonKeyPinProblems(resolverValueExports(clean))).toEqual([]);
+    const variants: Array<[string, RegExp, string]> = [
+      ['a const alias', /^export async function storeProviderKey\(.*$/m, 'export const storeProviderKey = resolveApiKey;'],
+      ['a key return type', /Promise<void> \{ void u; \}$/m, 'Promise<string> { return u; }'],
+      ['a cast', /^export const deleteProviderKey = .*$/m,
+        'export const deleteProviderKey = (async (): Promise<void> => {}) as unknown as (u: string) => Promise<string>;'],
+      ['a let', /^export const deleteProviderKey/m, 'export let deleteProviderKey'],
+      ['a static member', /^export class ApiKeyError extends Error \{$/m,
+        'export class ApiKeyError extends Error {\n  static key(u: string) { return u; }'],
+      ['a constructor that returns', /\{ super\(message\); \}/, '{ super(message); return { key: message }; }'],
+      ['a non-Error base', /extends Error/, 'extends KeyHolder'],
+      ['an unexported pin', /^export async function listConfiguredProviders/m, 'async function listConfiguredProviders'],
+    ];
+    for (const [name, find, replace] of variants) {
+      const mutated = mutate(clean, find, replace);
+      expect(nonKeyPinProblems(resolverValueExports(mutated)), name).not.toEqual([]);
+    }
+  });
+
+  it('SELECTS a route at a path the poller never dials whose key comes from a resolver export that is NOT a function literal', () => {
+    // End to end: the resolver gains `export const resolvePlatformKey =
+    // getPlatformKey;` (a const alias), and the model status route, refusal
+    // deleted, takes its key from it at a path off the STATUS_ENDPOINTS map —
+    // so only the selection rule stands between it and a green gate.
+    const root = mkdtempSync(path.join(tmpdir(), 'job-ownership-alias-export-'));
+    try {
+      const model = guarded.find((a) => a.rel === 'api/generate/model/status/route.ts');
+      expect(model).toBeTruthy();
+      const write = (rel: string, source: string) => {
+        mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+        writeFileSync(path.join(root, rel), source);
+      };
+      write('api/generate/model/route.ts', readFileSync(path.join(APP_ROOT, 'api/generate/model/route.ts'), 'utf8'));
+      const previewRel = 'api/generate/model/preview/route.ts';
+      expect(endpoints).not.toContain(urlOf(previewRel));
+      write(previewRel, mutate(
+        mutate(
+          mutate(model!.source, GUARD_IF, ''),
+          /resolveApiKey\(\s*mid\.userId!,\s*DB_PROVIDER\.model3d,[^)]*\)/,
+          'resolvePlatformKey(DB_PROVIDER.model3d)',
+        ),
+        /^import \{ resolveApiKey, ApiKeyError \} from '@\/lib\/keys\/resolver';$/m,
+        "import { resolvePlatformKey, ApiKeyError } from '@/lib/keys/resolver';",
+      ));
+      const resolver = readFileSync(RESOLVER_FILE!, 'utf8');
+      const edited = `${resolver}\nexport const resolvePlatformKey = getPlatformKey;\n`;
+      expect(edited.length).toBeGreaterThan(resolver.length);
+      const keys = keyExportsOf(resolverValueExports(edited));
+      expect(keys.has('resolvePlatformKey')).toBe(true);
+
+      // Against the real resolver (no such export) nothing is selected: the
+      // red below comes from deriving the edited one.
+      expect(auditKeyResolvingRoutes(root, {}).map((a) => a.rel)).toEqual([]);
+      const found = auditKeyResolvingRoutes(root, {}, keys);
+      expect(found.map((a) => a.rel)).toEqual([previewRel]);
+      expect(found[0].analysis.keyResolutions).toBeGreaterThan(0);
+      expect(found[0].problems.join('\n')).toMatch(/without an ownership refusal/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('SELECTS each real status route whose resolveApiKey is an ALIAS from another spelling of the resolver module', () => {
@@ -1735,7 +2094,8 @@ describe('job-id ownership coverage (#10262)', () => {
   it('parses a .tsx / .jsx status route as JSX, so markup cannot fake the check', () => {
     const imports = "import { resolveApiKey } from '@/lib/keys/resolver';\n"
       + "import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';\n"
-      + "import { withApiMiddleware } from '@/lib/api/middleware';\n";
+      + "import { withApiMiddleware } from '@/lib/api/middleware';\n"
+      + FIXTURE_BINDINGS;
     const head = '  const mid = await withApiMiddleware(request, {});\n'
       + '  const { searchParams } = new URL(request.url);\n'
       + "  const jobId = searchParams.get('jobId');\n";
@@ -1765,7 +2125,8 @@ describe('job-id ownership coverage (#10262)', () => {
   it('reports the shapes a text match would accept', () => {
     const imports = "import { resolveApiKey } from '@/lib/keys/resolver';\n"
       + "import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';\n"
-      + "import { withApiMiddleware } from '@/lib/api/middleware';\n";
+      + "import { withApiMiddleware } from '@/lib/api/middleware';\n"
+      + FIXTURE_BINDINGS;
     const auth = '  const mid = await withApiMiddleware(request, {});\n';
     const head = `${auth}  const { searchParams } = new URL(request.url);\n  const jobId = searchParams.get('jobId');\n`;
     const guard = '  const ownership = await verifyProviderJobOwner(mid.userId!, p, jobId);\n'
@@ -1964,7 +2325,8 @@ describe('job-id ownership coverage (#10262)', () => {
   it('reports `arguments` anywhere in a key-resolving handler, and not a property named arguments', () => {
     const imports = "import { resolveApiKey } from '@/lib/keys/resolver';\n"
       + "import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';\n"
-      + "import { withApiMiddleware } from '@/lib/api/middleware';\n";
+      + "import { withApiMiddleware } from '@/lib/api/middleware';\n"
+      + FIXTURE_BINDINGS;
     const head = '  const mid = await withApiMiddleware(request, {});\n'
       + '  const { searchParams } = new URL(request.url);\n'
       + "  const jobId = searchParams.get('jobId');\n"

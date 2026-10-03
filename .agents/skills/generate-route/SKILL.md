@@ -216,23 +216,40 @@ NOT a job-ownership check; the `verifyProviderJobOwner` refusal after it is.
 
 **The ownership check (#10262).** Write it exactly as above, because
 `src/app/api/__tests__/jobOwnershipCoverage.test.ts` reads its shape from every
-route that calls `resolveApiKey`, at any path:
+route, at any path, that calls or references a KEY EXPORT of
+`@/lib/keys/resolver`: every exported value binding of that module, derived
+from its source on each run (`resolveApiKey`, `resolveByokOrPlatformKey`, and
+any export added later, whatever its initializer), minus the pinned
+`NON_KEY_RESOLVER_EXPORTS` (`ApiKeyError`, `storeProviderKey`,
+`deleteProviderKey`, `listConfiguredProviders`):
 
 - both statements are top-level statements of the handler's own body, ahead of
-  the statement holding `resolveApiKey`, and the verdict is a `const`;
+  the statement holding the key call (`resolveApiKey(...)`), and the verdict is a `const`;
 - test the HIT, `ownership !== 'owner'`. The verdict has three states, and
   `=== 'not_owner'` lets `'unverifiable'` (a failed lookup) through to the
   platform key. `jobOwnershipRefusal` answers `'not_owner'` with a terminal 404
   (the poller fails the job and refunds) and `'unverifiable'` with a retryable
   503 (the poller keeps polling through a DB blip);
 - the user is `mid.userId!` from this body's `withApiMiddleware(...)`, the same
-  one passed to `resolveApiKey`; never a query or body value;
+  one passed to the key call; never a query or body value;
 - `jobId` is the handler's ONLY request input: one `const { searchParams } =
   new URL(request.url)`, one `const jobId = searchParams.get('jobId')`, and the
   provider is sent that `jobId`. A second `searchParams.get(...)`,
-  `request.nextUrl`, `request.json()`, `mid.body`, a route-params argument,
-  `arguments` or `next/headers` is reported, because the provider could then be sent an id
+  `request.nextUrl`, `request.json()`, `mid.body`, a route-params argument or
+  `arguments` is reported, because the provider could then be sent an id
   the check never ran on;
+- a module or a global can read the request with no handler argument, so both
+  are WHITELISTED: every runtime import is `next/server` or app source under
+  `web/src` (a bare package such as `zod`, `next/headers` in any spelling, and
+  any `import()`, `require`, `module.require` or `import x = require(...)` are
+  reported — put that code in a helper under `src/lib` and import the helper),
+  and the only globals read are those in the test's `ALLOWED_GLOBALS` (`new
+  URL(...)`, `Object.keys/values/entries`, `JSON`, `Math`, `Number`, ...;
+  never `process` — not even `process.env` — `globalThis`, `global`, `eval`,
+  `Function` or `Reflect`). `constructor`, `prototype` and `__proto__` may not
+  appear in the file, and an element access takes a literal name (`x[0]`,
+  `x['a']`, never `x[k]`), because each is a path to `Function` and so to every
+  global;
 - import `verifyProviderJobOwner` and `withApiMiddleware` and call them by
   that binding. A local of the same name, in any scope, is rejected.
 
@@ -253,9 +270,13 @@ client never called in either; the check runs with the authenticated user id,
 provider client receives exactly the polled `jobId` when decoy ids
 (`predictionId`, `taskId`, `id`) sit beside it in the query. A route the gate
 should not hold to this shape (a key resolved for a new, token-charged
-operation, or a signed server-to-server callback) goes in the test's
-`KEY_RESOLVING_EXEMPTIONS` with a reason; that is a security decision for
-review, not a way to make the test pass.
+operation, a bundled secondary key resolved inside the `execute` step of a
+charged `createGenerationHandler` generation for its `ctx.userId`, or a signed
+server-to-server callback) goes in the test's `KEY_RESOLVING_EXEMPTIONS` with a
+reason and one of the kinds `charged-new-operation`,
+`bundled-step-of-charged-generation` (today `api/generate/sprite/route.ts`) or
+`qstash-signed-callback`, whose property the test re-checks; that is a
+security decision for review, not a way to make the test pass.
 
 Add tier-gate route tests too: an account below the
 panel's tier (for a creator panel, a starter with or without tokens) gets 403

@@ -9,15 +9,25 @@
  * and read back its result using the platform's credentials.
  *
  * `src/app/api/__tests__/jobOwnershipCoverage.test.ts` is the structural gate:
- * it parses every App Router route file, selects each one that calls
- * `resolveApiKey` (at any path, not only `status/`), and fails one that
+ * it parses every App Router route file and selects each one (at any path,
+ * not only `status/`) that calls or references a KEY EXPORT of
+ * `@/lib/keys/resolver` — every exported value binding of that module
+ * (`resolveApiKey`, `resolveByokOrPlatformKey` today), derived from its
+ * source on each run, minus the pinned non-key names. It fails one that
  * resolves a key without first refusing a non-`'owner'` result of
  * `verifyProviderJobOwner` for the authenticated caller (`withApiMiddleware`'s
  * `userId`, the same user the key is resolved for) on the polled `jobId`, which
- * must be the only value the handler reads from the request — unless the route
- * is a pinned, reasoned exemption (a token-charged new operation, or the
- * QStash-signed callback). It also fails a POST route behind such a route that
- * binds nothing.
+ * must be the only value the handler reads from the request. Because a module
+ * or a global can read the request with no handler argument, such a route may
+ * import only `next/server` and app source under `src/` (no `import()`,
+ * `require` or `import =`) and read only the whitelisted globals (`new URL`,
+ * `Object.keys/values/entries`, ...; no `process`, `globalThis`, `eval`,
+ * `Function`, `constructor` path or computed member name). The exceptions are
+ * pinned, reasoned exemptions whose property the gate re-checks: a
+ * token-charged new operation, a bundled key resolved inside the `execute`
+ * step of a charged `createGenerationHandler` generation (sprite's remove.bg
+ * key), or the QStash-signed callback. It also fails a POST route behind such
+ * a route that binds nothing.
  *
  * `generation_jobs` cannot serve as that ownership record on its own: its
  * rows are created by the CLIENT (`generationStore.addJob` -> `POST
