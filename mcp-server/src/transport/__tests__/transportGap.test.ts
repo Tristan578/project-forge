@@ -61,7 +61,12 @@ import path from 'node:path';
  * and `http.ts` text (served through the same host override), so the shapes
  * that broke an earlier, syntactic derivation stay covered: the members on a
  * base class (M4a), the members on a base interface (M4b), and alias-typed
- * accessors.
+ * accessors. It also drives the oracle's RED paths and the cast checks to
+ * their messages, including three guards the real sources never reach: a non-exactOptional
+ * error inside a cast statement (TS1360 from `(x as Transport) satisfies
+ * Transport`), an error outside every cast statement (a cast hoisted into an
+ * unannotated const), and a cast target that is a project-local `Transport`
+ * declared in a `.ts` module rather than the SDK's `.d.ts`.
  */
 
 const MCP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -82,6 +87,9 @@ const GUIDANCE =
   `Each \`as ${TARGET_INTERFACE}\` cast in ${HTTP_REL} must exist only to bridge the SDK ` +
   `exactOptionalPropertyTypes gap (#10278): removing it must produce exactly one TS2375 ` +
   `(assignment) or TS2379 (argument) error at that site, and nothing else.`;
+
+/** Heads the list of un-cast diagnostics that are not the gap at a cast site. */
+const UNEXPECTED_HEADER = 'diagnostics that are not a TS2375/TS2379 at a cast site:';
 
 function loadConfig(): ts.ParsedCommandLine {
   const parsed = ts.getParsedCommandLineOfConfigFile(TSCONFIG, undefined, {
@@ -395,7 +403,7 @@ function checkGap(
   }
   if (unexpected.length > 0) {
     problems.push(
-      `  diagnostics that are not a TS2375/TS2379 at a cast site:\n` +
+      `  ${UNEXPECTED_HEADER}\n` +
         unexpected.map((r) => `  ${describeRecord(r)}`).join('\n'),
     );
   }
@@ -656,44 +664,124 @@ function indentOf(text: string, pos: number): string {
   return text.slice(text.lastIndexOf('\n', pos - 1) + 1, pos);
 }
 
+const HOISTED = 'castForGapTest';
+
 /**
  * The first argument-position cast, rewritten as `const x: Transport = ... as Transport; connect(x)`.
  * `wrapped` breaks the declaration after `=`, the way a formatter wraps a long line, so the
- * TS2375 lands on the declared name one line above the cast.
+ * TS2375 lands on the declared name one line above the cast. `annotated: false` drops the
+ * `: Transport` annotation, so without the cast nothing checks the declaration and the error
+ * moves to the call. Returns the new text and the (1-based) line of the call.
  */
-function assignmentForm(text: string, wrapped = false): string {
+function assignmentForm(
+  text: string,
+  { wrapped = false, annotated = true }: { wrapped?: boolean; annotated?: boolean } = {},
+): { text: string; callLine: number } {
   const sf = parse(HTTP_TS, text);
   const local = transportLocalName(sf);
   const cast = findCasts(sf).find((c) => ts.isCallExpression(c.parent) && c.parent.arguments.includes(c));
   if (!local || !cast) throw new Error('overlay: no argument-position cast in http.ts');
   const stmt = enclosingStatement(cast);
   const start = stmt.getStart(sf);
-  const call = text.slice(start, cast.getStart(sf)) + 'castForGapTest' + text.slice(cast.end, stmt.end);
-  return applyEdits(text, [
+  const call = text.slice(start, cast.getStart(sf)) + HOISTED + text.slice(cast.end, stmt.end);
+  const out = applyEdits(text, [
     {
       start,
       end: stmt.end,
-      text: `const castForGapTest: ${local} =${wrapped ? `\n${indentOf(text, start)}  ` : ' '}${cast.getText(sf)};\n${indentOf(text, start)}${call}`,
+      text:
+        `const ${HOISTED}${annotated ? `: ${local}` : ''} =${wrapped ? `\n${indentOf(text, start)}  ` : ' '}` +
+        `${cast.getText(sf)};\n${indentOf(text, start)}${call}`,
     },
   ]);
+  const outSf = parse(HTTP_TS, out);
+  const uses: number[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && node.text === HOISTED && ts.isCallExpression(node.parent)) {
+      uses.push(lineOf(outSf, node.getStart(outSf)));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(outSf);
+  if (uses.length !== 1) throw new Error(`overlay: expected exactly one call passing ${HOISTED}, found ${uses.length}`);
+  return { text: out, callLine: uses[0]! };
 }
 
 /**
- * Adds an `as Transport` cast that tsc does not need, on the line after the
- * first cast's statement. Returns the new text and that (1-based) line.
+ * Adds an `as Transport` cast on the line after the first cast's statement, as
+ * `void (<expr>);` where `<expr>` is `wrap` applied to the cast text. By default
+ * the bare cast, which tsc does not need. Returns the new text and that (1-based) line.
  */
-function extraUnneededCast(text: string): { text: string; line: number } {
+function extraCast(
+  text: string,
+  wrap: (cast: string, local: string) => string = (cast) => cast,
+): { text: string; line: number } {
   const sf = parse(HTTP_TS, text);
   const local = transportLocalName(sf);
   const cast = findCasts(sf)[0];
   if (!local || !cast) throw new Error('overlay: no cast in http.ts');
   const stmt = enclosingStatement(cast);
-  const extra = `\n${indentOf(text, stmt.getStart(sf))}void (${cast.expression.getText(sf)} as ${local});`;
+  const expr = wrap(`${cast.expression.getText(sf)} as ${local}`, local);
+  const extra = `\n${indentOf(text, stmt.getStart(sf))}void (${expr});`;
   const out = applyEdits(text, [{ start: stmt.end, end: stmt.end, text: extra }]);
   const line = lineOf(sf, stmt.end) + 1;
   const added = findCasts(parse(HTTP_TS, out)).filter((c) => lineOf(c.getSourceFile(), c.getStart()) === line);
   if (added.length !== 1) throw new Error(`overlay: expected exactly one cast on line ${line}`);
   return { text: out, line };
+}
+
+/**
+ * Points http.ts's `Transport` import at a project-local `.ts` module that
+ * declares its own `interface Transport extends <the SDK's Transport>`: a cast
+ * target tsc accepts that is not the SDK's interface. Returns both overrides.
+ */
+function localTransportTarget(config: ts.ParsedCommandLine, httpText: string): Map<string, string> {
+  const localFile = config.fileNames
+    .map((f) => path.resolve(f))
+    .find((f) => path.dirname(f) === path.dirname(HTTP_TS) && f !== HTTP_TS && f.endsWith('.ts') && !f.endsWith('.d.ts'));
+  if (!localFile) throw new Error(`overlay: no other .ts module next to ${HTTP_REL} to declare a local Transport in`);
+  const sf = parse(HTTP_TS, httpText);
+  const imports = sf.statements.filter(
+    (s): s is ts.ImportDeclaration =>
+      ts.isImportDeclaration(s) &&
+      !!s.importClause?.namedBindings &&
+      ts.isNamedImports(s.importClause.namedBindings) &&
+      s.importClause.namedBindings.elements.some((el) => (el.propertyName ?? el.name).text === TARGET_INTERFACE),
+  );
+  const decl = imports[0];
+  const bindings = decl?.importClause?.namedBindings;
+  if (imports.length !== 1 || !decl || !bindings || !ts.isNamedImports(bindings) || bindings.elements.length !== 1) {
+    throw new Error(`overlay: expected one import binding only \`${TARGET_INTERFACE}\` in ${HTTP_REL}`);
+  }
+  if (!ts.isStringLiteral(decl.moduleSpecifier)) throw new Error('overlay: non-literal module specifier');
+  const sdkSpecifier = decl.moduleSpecifier.text;
+  const localSpecifier = `./${path.basename(localFile).replace(/\.ts$/, '.js')}`;
+  const http = applyEdits(httpText, [
+    { start: decl.moduleSpecifier.getStart(sf), end: decl.moduleSpecifier.end, text: `'${localSpecifier}'` },
+  ]);
+  const local = applyEdits(read(localFile), [
+    {
+      start: read(localFile).length,
+      end: read(localFile).length,
+      text:
+        `\nimport type { ${TARGET_INTERFACE} as GapTestSdkTransport } from '${sdkSpecifier}';\n` +
+        `export interface ${TARGET_INTERFACE} extends GapTestSdkTransport {}\n`,
+    },
+  ]);
+  if (!http.includes(`from '${localSpecifier}'`) || http.includes(`'${sdkSpecifier}'`)) {
+    throw new Error(`overlay: retargeting the \`${TARGET_INTERFACE}\` import did not apply`);
+  }
+  return new Map([
+    [HTTP_TS, http],
+    [localFile, local],
+  ]);
+}
+
+/** The part of a checkGap message under `header`, up to the full diagnostic listing. */
+function sectionOf(message: string, header: string): string {
+  const at = message.indexOf(header);
+  if (at === -1) return '';
+  const end = message.indexOf('All diagnostics of the un-cast program', at);
+  return message.slice(at + header.length, end === -1 ? undefined : end);
 }
 
 /** `x as Transport` -> `x as unknown as Transport` on the first cast. */
@@ -781,22 +869,55 @@ describe('Transport gap check against overlaid sources (#10278)', () => {
   }, 60_000);
 
   it('a cast moved into an assignment (TS2375 instead of TS2379) still passes', () => {
-    const result = checkGap(config, { overrides: new Map([[HTTP_TS, assignmentForm(read(HTTP_TS))]]) });
+    const result = checkGap(config, { overrides: new Map([[HTTP_TS, assignmentForm(read(HTTP_TS)).text]]) });
     expect(result.diagnostics.map((d) => d.code).sort()).toEqual([2375, 2379]);
   }, 60_000);
 
   it('a formatter-wrapped assignment (TS2375 a line above the cast) still passes', () => {
-    const result = checkGap(config, { overrides: new Map([[HTTP_TS, assignmentForm(read(HTTP_TS), true)]]) });
+    const overlay = assignmentForm(read(HTTP_TS), { wrapped: true });
+    const result = checkGap(config, { overrides: new Map([[HTTP_TS, overlay.text]]) });
     expect(result.diagnostics.map((d) => d.code).sort()).toEqual([2375, 2379]);
     const assignment = result.diagnostics.find((d) => d.code === 2375)!;
     expect(result.casts.some((c) => c.line === assignment.line + 1)).toBe(true);
   }, 60_000);
 
   it('an unneeded extra cast -> RED naming the cast line that produced no error', () => {
-    const overlay = extraUnneededCast(read(HTTP_TS));
+    const overlay = extraCast(read(HTTP_TS));
     const message = messageOf(() => checkGap(config, { overrides: new Map([[HTTP_TS, overlay.text]]) }));
     expect(message).toContain(`cast(s) at ${HTTP_REL}:${overlay.line} produced 0 exactOptional error(s) when removed`);
     expect(message).toContain('the cast is not needed for the #10278 gap');
+  }, 60_000);
+
+  // Pins step 5's classification: a diagnostic INSIDE a cast statement counts
+  // as the gap only if it is a TS2375/TS2379. `(x as Transport) satisfies
+  // Transport` compiles; without the cast tsc reports TS1360 at that statement.
+  // Counted as the gap, it would satisfy the one-error-per-cast rule and the
+  // check would pass. (The unexpected listing itself is pinned by the next case.)
+  it('a non-exactOptional error at a cast site (TS1360) is not counted as the gap -> RED', () => {
+    const overlay = extraCast(read(HTTP_TS), (cast, local) => `(${cast}) satisfies ${local}`);
+    const message = messageOf(() => checkGap(config, { overrides: new Map([[HTTP_TS, overlay.text]]) }));
+    expect(message).toContain(`cast(s) at ${HTTP_REL}:${overlay.line} produced 0 exactOptional error(s) when removed`);
+    expect(message).toContain(`${HTTP_REL}:${overlay.line} TS1360: `);
+  }, 60_000);
+
+  // Pins step 5's report of diagnostics outside every cast statement: hoisting
+  // the cast into an unannotated const moves the error to the call that uses it.
+  it('an error outside every cast statement -> RED, listed with its line and code', () => {
+    const overlay = assignmentForm(read(HTTP_TS), { annotated: false });
+    const message = messageOf(() => checkGap(config, { overrides: new Map([[HTTP_TS, overlay.text]]) }));
+    const listed = sectionOf(message, UNEXPECTED_HEADER);
+    expect(listed, 'the message must list the unexpected diagnostics under their header').toContain(
+      `${HTTP_REL}:${overlay.callLine} TS2379: `,
+    );
+  }, 60_000);
+
+  // Pins step 3's target check: the cast must name the SDK's interface, not a
+  // project-local one that tsc also accepts.
+  it('a cast to a project-local `Transport` (not the SDK interface) -> RED naming the line', () => {
+    const line = real().casts[0]!.line;
+    const message = messageOf(() => checkGap(config, { overrides: localTransportTarget(config, read(HTTP_TS)) }));
+    expect(message).toContain(`${HTTP_REL}:${line} `);
+    expect(message).toContain(`the cast target must be the SDK's \`${TARGET_INTERFACE}\` interface; found 'Transport'`);
   }, 60_000);
 
   it('`as unknown as Transport` -> RED naming the line and the operand type', () => {
