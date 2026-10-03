@@ -142,7 +142,7 @@ autoforge/node_modules/
 *.seed
 *.pid.lock
 .cache/
-.claude/hooks/__pycache__/
+.claude/hooks/**/__pycache__/
 
 # Taskboard DB files — use OS default path, never commit
 .claude/taskboard.db

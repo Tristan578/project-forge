@@ -6,4 +6,4 @@ PYTHON="${PYTHON:-$(command -v python3 || command -v python || true)}"
 # No __pycache__ under __tests__: it is untracked noise in every checkout that
 # runs this suite, and .gitignore only learned the nested form with #10291.
 export PYTHONDONTWRITEBYTECODE=1
-"$PYTHON" -m unittest discover -s "$HERE" -p taskboard_sync_test.py -v
+"$PYTHON" -m unittest discover -s "$HERE" -p taskboard_db_unification_test.py -v
