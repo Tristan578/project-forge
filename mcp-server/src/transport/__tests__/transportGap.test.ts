@@ -16,7 +16,7 @@ import path from 'node:path';
  * `get sessionId(): string | undefined`, and the casts are still required.
  * That is why the gap is derived below rather than spelled as `'onclose'`.
  *
- * Nothing here is restated. Every subject is DERIVED at run time
+ * Nothing in the main check is restated. Every subject is DERIVED at run time
  * (lessons-learned #18):
  *  - the compiler options come from the real `mcp-server/tsconfig.json`;
  *  - the cast sites are found by parsing the real `http.ts`;
@@ -64,9 +64,13 @@ import path from 'node:path';
  * (M4a), the members on a base interface (M4b), and alias-typed accessors. It
  * also drives EVERY failure branch of `checkGap` to its message, including the
  * ones the real sources never reach: a baseline that does not compile, no
- * casts found, a cast target or operand that is project-local rather than the
- * SDK's `.d.ts` declaration (each half of both step-3 guards), a nullable
- * operand, compiler options that are themselves an error, a cast nested
+ * casts found, and each way through both step-3 guards. For the cast target:
+ * a project-local interface (the `.d.ts` half), a class declared in a `.d.ts`
+ * (the interface-kind filter), and an intersection alias (no type symbol at
+ * all). For the operand: a project-local subclass (the `.d.ts` half), a value
+ * already typed as the SDK interface (the class-kind filter), and a nullable
+ * operand and `as unknown` (no type symbol). Then compiler options that are
+ * themselves an error, a cast nested
  * in another cast's operand, a statement whose casts produce fewer or more
  * errors than it has casts, a non-exactOptional error inside a cast statement,
  * and an error outside every cast statement.
@@ -816,27 +820,54 @@ const LOCAL_CLASS = 'GapTestLocalTransport';
 const specifierOf = (decl: ts.ImportDeclaration): string => (decl.moduleSpecifier as ts.StringLiteral).text;
 
 /**
- * Points http.ts's `Transport` import at the overlay-only local module, which
- * re-exports the SDK module but declares its own `Transport`: an `interface
- * Transport extends <the SDK's Transport>`, or a `type Transport = <the SDK's
- * Transport> & {...}` (an intersection: a target with no interface declaration
- * at all). Either is a cast target tsc accepts, and passes to `connect`, that is
- * not the SDK's interface. Returns both overrides.
+ * The same overlay-only module as a declaration file, so what it declares is
+ * from a `.d.ts` (the same specifier resolves to it when no `.ts` exists).
  */
-function localTransportTarget(httpText: string, kind: 'interface' | 'alias'): Map<string, string> {
+const LOCAL_DECLARATION_MODULE = path.join(path.dirname(HTTP_TS), 'gapTestLocal.d.ts');
+const LOCAL_DECLARED_CLASS = 'GapTestDeclaredTransport';
+
+type LocalTargetKind = 'interface' | 'alias' | 'declaredClass';
+
+/** What the overlay-only module declares as `Transport`, and which file it is. */
+const LOCAL_TARGETS: Record<LocalTargetKind, { module: string; declaration: string }> = {
+  interface: { module: LOCAL_MODULE, declaration: `export interface ${TARGET_INTERFACE} extends GapTestSdkTransport {}` },
+  alias: {
+    module: LOCAL_MODULE,
+    declaration: `export type ${TARGET_INTERFACE} = GapTestSdkTransport & { readonly gapTestBrand?: never };`,
+  },
+  declaredClass: {
+    module: LOCAL_DECLARATION_MODULE,
+    declaration:
+      'declare const GapTestTransportBase: new () => GapTestSdkTransport;\n' +
+      `export declare class ${LOCAL_DECLARED_CLASS} extends GapTestTransportBase {}\n` +
+      `export { ${LOCAL_DECLARED_CLASS} as ${TARGET_INTERFACE} };`,
+  },
+};
+
+/**
+ * Points http.ts's `Transport` import at the overlay-only local module, which
+ * re-exports the SDK module but declares its own `Transport`:
+ *  - `interface`: an `interface Transport extends <the SDK's Transport>` in a
+ *    `.ts` (an interface, but not from a `.d.ts`);
+ *  - `alias`: a `type Transport = <the SDK's Transport> & {...}` in a `.ts` (an
+ *    intersection: a target with no type symbol at all);
+ *  - `declaredClass`: a class whose instances carry the SDK's `Transport` members,
+ *    declared in a `.d.ts` and exported as `Transport` (from a `.d.ts`, but a
+ *    class, not an interface).
+ * Each is a cast target tsc accepts, and passes to `connect`, that is not the
+ * SDK's interface. Returns both overrides.
+ */
+function localTransportTarget(httpText: string, kind: LocalTargetKind): Map<string, string> {
   const sf = parse(HTTP_TS, httpText);
   const binding = importBinding(sf, TARGET_INTERFACE);
   if (!binding) throw new Error(`overlay: ${sf.fileName} does not import \`${TARGET_INTERFACE}\``);
   const specifier = binding.decl.moduleSpecifier;
   const sdkSpecifier = specifierOf(binding.decl);
-  const declaration =
-    kind === 'interface'
-      ? `export interface ${TARGET_INTERFACE} extends GapTestSdkTransport {}`
-      : `export type ${TARGET_INTERFACE} = GapTestSdkTransport & { readonly gapTestBrand?: never };`;
+  const { module, declaration } = LOCAL_TARGETS[kind];
   return new Map([
     [HTTP_TS, applyEdits(httpText, [{ start: specifier.getStart(sf), end: specifier.end, text: `'${LOCAL_SPECIFIER}'` }])],
     [
-      LOCAL_MODULE,
+      module,
       `import type { ${TARGET_INTERFACE} as GapTestSdkTransport } from '${sdkSpecifier}';\n` +
         `export * from '${sdkSpecifier}';\n${declaration}\n`,
     ],
@@ -967,24 +998,46 @@ describe('Transport gap check against overlaid sources (#10278)', () => {
     expect(message).not.toMatch(/gap is closed/);
   }, 60_000);
 
-  // Step 3, target guard: `!targetDecl?.getSourceFile().isDeclarationFile`.
-  // The interface case fails only the `.d.ts` half; the alias case fails the
-  // "is an interface declaration" half.
+  // Step 3, target guard: `target.getSymbol()?.declarations?.find(ts.isInterfaceDeclaration)`,
+  // then `!targetDecl?.getSourceFile().isDeclarationFile`. One case per way through it:
+  //  - a project-local interface has an interface declaration, not in a `.d.ts`:
+  //    only the `.d.ts` half rejects it;
+  //  - a class declared in a `.d.ts` has a declaration in a `.d.ts`, not an
+  //    interface: only the `.find(ts.isInterfaceDeclaration)` kind filter rejects it;
+  //  - an intersection alias has no type symbol: the `getSymbol()?.` link leaves
+  //    no declaration at all, before any kind filter or file check runs.
   it('a cast to a project-local `Transport` interface (not the SDK interface) -> RED naming the line', () => {
     const message = failWith(localTransportTarget(read(HTTP_TS), 'interface'));
     expect(message).toContain(`${HTTP_REL}:${firstLine()} `);
     expect(message).toContain(`the cast target must be the SDK's \`${TARGET_INTERFACE}\` interface; found 'Transport'`);
   }, 60_000);
 
-  it('a cast to a project-local `Transport` intersection alias (no interface declaration at all) -> RED naming the line', () => {
+  it('a cast to a `Transport` that is a class declared in a `.d.ts` (not an interface) -> RED naming the line, cast and class', () => {
+    const overrides = localTransportTarget(read(HTTP_TS), 'declaredClass');
+    const http = parse(HTTP_TS, overrides.get(HTTP_TS)!);
+    const cast = findCasts(http)[0]!;
+    const message = failWith(overrides);
+    expect(message).toContain(
+      `${HTTP_REL}:${lineOf(http, cast.getStart(http))} \`${cast.getText(http)}\`: ` +
+        `the cast target must be the SDK's \`${TARGET_INTERFACE}\` interface; found '${LOCAL_DECLARED_CLASS}'.`,
+    );
+  }, 60_000);
+
+  it('a cast to a project-local `Transport` intersection alias (no type symbol at all) -> RED naming the line', () => {
     const message = failWith(localTransportTarget(read(HTTP_TS), 'alias'));
     expect(message).toContain(`${HTTP_REL}:${firstLine()} `);
     expect(message).toContain(`the cast target must be the SDK's \`${TARGET_INTERFACE}\` interface; found 'Transport'`);
   }, 60_000);
 
-  // Step 3, operand guard: `!sourceDecl?.getSourceFile().isDeclarationFile`.
-  // The subclass case fails only the `.d.ts` half; `as unknown` fails the
-  // "is a class declaration" half.
+  // Step 3, operand guard: `source.getSymbol()?.declarations?.find(ts.isClassDeclaration)`,
+  // then `!sourceDecl?.getSourceFile().isDeclarationFile`. One case per way through it:
+  //  - a project-local subclass has a class declaration, not in a `.d.ts`: only
+  //    the `.d.ts` half rejects it;
+  //  - a value already typed as the SDK's `Transport` has a declaration in the
+  //    SDK's `.d.ts`, not a class: only the `.find(ts.isClassDeclaration)` kind
+  //    filter rejects it;
+  //  - a nullable operand (a union) and `as unknown` have no type symbol: the
+  //    `getSymbol()?.` link leaves no declaration at all.
   it('a cast whose operand is a project-local subclass of the SDK transport -> RED naming the line and type', () => {
     const overrides = localSubclassSource(read(HTTP_TS), sourceClass());
     // The added import shifts every line, so read the first cast's line off the overlay.
@@ -995,6 +1048,17 @@ describe('Transport gap check against overlaid sources (#10278)', () => {
       `must apply directly to an SDK StreamableHTTPServerTransport value (a class declared in the SDK's .d.ts)`,
     );
     expect(message).toContain(`this operand has type '${LOCAL_CLASS}'`);
+  }, 60_000);
+
+  it('a cast whose operand is already typed as the SDK `Transport` interface (not a class) -> RED naming the line, cast and type', () => {
+    const value = 'gapTestSdkValue';
+    const overlay = insertAfterCast(read(HTTP_TS), ({ local }) => `let ${value}!: ${local}; void (${value} as ${local});`);
+    const message = failWith(new Map([[HTTP_TS, overlay.text]]));
+    expect(message).toContain(
+      `${HTTP_REL}:${overlay.line} \`${value} as ${TARGET_INTERFACE}\`: each \`as ${TARGET_INTERFACE}\` cast must apply ` +
+        `directly to an SDK StreamableHTTPServerTransport value (a class declared in the SDK's .d.ts); ` +
+        `this operand has type '${TARGET_INTERFACE}'.`,
+    );
   }, 60_000);
 
   it('a cast whose operand may be null -> RED at the operand guard, naming the line and the nullable type', () => {
@@ -1419,7 +1483,7 @@ describe('Transport gap check helpers reach every guard (#10278)', () => {
     });
   });
 
-  it('localTransportTarget: points the Transport import at a local module declaring an interface or an alias', () => {
+  it('localTransportTarget: points the Transport import at a local module declaring an interface, an alias, or a class in a .d.ts', () => {
     const http = TOP_LEVEL_CALL_FIXTURE.replace("from 'sdk'", `from '${LOCAL_SPECIFIER}'`);
     const header = "import type { Transport as GapTestSdkTransport } from 'sdk';\nexport * from 'sdk';\n";
     expect([...localTransportTarget(TOP_LEVEL_CALL_FIXTURE, 'interface')]).toEqual([
@@ -1429,6 +1493,15 @@ describe('Transport gap check helpers reach every guard (#10278)', () => {
     expect([...localTransportTarget(TOP_LEVEL_CALL_FIXTURE, 'alias')]).toEqual([
       [HTTP_TS, http],
       [LOCAL_MODULE, `${header}export type Transport = GapTestSdkTransport & { readonly gapTestBrand?: never };\n`],
+    ]);
+    expect([...localTransportTarget(TOP_LEVEL_CALL_FIXTURE, 'declaredClass')]).toEqual([
+      [HTTP_TS, http],
+      [
+        path.join(path.dirname(HTTP_TS), 'gapTestLocal.d.ts'),
+        `${header}declare const GapTestTransportBase: new () => GapTestSdkTransport;\n` +
+          'export declare class GapTestDeclaredTransport extends GapTestTransportBase {}\n' +
+          'export { GapTestDeclaredTransport as Transport };\n',
+      ],
     ]);
   });
 
