@@ -332,6 +332,13 @@ assert_eq "the wait stops where one minimum attempt would still fit" "540" "$(cl
 assert_grep "the error names the holder it gave up on" \
   "still held by PID 2614 (apt-get)" "$TMP/err"
 assert_grep "the final error counts one attempt" "failed after 1 of 5 attempts" "$TMP/err"
+# The progress log fires once per 30s of waiting. Attempt 1 hangs for 300s, so
+# the 540s wait is 240s long: eight lines, 30s through 240s. The count is what
+# fails a progress log that is disabled, doubled or never reset.
+assert_grep "a long wait logs its progress with the holder and the elapsed time" \
+  "still waiting for PID 2614 (apt-get) after 30s" "$TMP/out"
+assert_eq "a 240s wait logs one progress line per 30s (eight)" "8" \
+  "$(grep -cF 'still waiting for' "$TMP/out")"
 
 # The same holder present AT BOOT and outliving the budget ends the run before
 # any attempt, so nothing has set an exit code yet: the script's initial
@@ -402,6 +409,15 @@ assert_grep "an unreadable lock holder is reported, not silently treated as free
   "cannot see the dpkg lock holder" "$TMP/out"
 assert_eq "an unreadable lock holder means fuser is never consulted" "" "$(cat "$TMP/fuser-log")"
 
+# The warning is printed ONCE per run, not once per attempt: every round probes
+# the lock again and would otherwise repeat it. Two queued fast failures make
+# three attempts, so three probes see the same blind spot.
+DPKG_TEST_SUDO_DENY=1 PLAYWRIGHT_TEST_FAIL_SECONDS=0 run_case deps 2 100
+assert_eq "an unreadable lock holder does not block a retried install either" "0" "$?"
+assert_eq "an unreadable lock holder is probed on every attempt (three ran)" "3" "$(cat "$TMP/count")"
+assert_eq "an unreadable lock holder is warned about once, not once per attempt" "1" \
+  "$(grep -cF 'cannot see the dpkg lock holder' "$TMP/out")"
+
 # The same false all-clear from the other door: a host with NO fuser at all.
 # The stub dir always supplies one and so does the host, so this case gets a
 # PATH of its own -- every stub but fuser, plus only the host tools the script
@@ -433,6 +449,13 @@ assert_eq "a host without fuser consults no fuser" "" "$(cat "$TMP/fuser-log")"
 DPKG_LOCK_FILES="$TMP/dpkg/absent-frontend $TMP/dpkg/absent-lock" run_case deps 0
 assert_eq "a host without dpkg lock files still installs" "0" "$?"
 assert_eq "a host without dpkg lock files is not probed" "" "$(cat "$TMP/fuser-log")"
+# ...and it is not a host that CANNOT see the holder: no lock files means the
+# lock is free (status 1), not unknown (status 2), so no warning is due.
+if grep -qF 'cannot see the dpkg lock holder' "$TMP/out"; then
+  fail "a host without dpkg lock files was reported as unable to see the lock holder"
+else
+  pass "a host without dpkg lock files is treated as free, not as unreadable"
+fi
 
 # --- argument and dependency handling ---------------------------------------
 
