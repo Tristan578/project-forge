@@ -13,18 +13,23 @@
 # `.claude/settings.local.json`, and when one event appears in several sources
 # it runs the entries from ALL of them (hooks-reference.md, "Hooks locations";
 # cli-config-dir-reference.md:439). The Copilot cloud agent reads ONLY
-# `.github/hooks/*.json`. So:
-#   - Copilot CLI: `.claude/settings.json` owns every event it wires (it is the
-#     same file Claude Code runs, so Claude Code behaviour is unchanged).
-#   - Cloud agent: `.github/hooks/*.json` owns them, because it reads nothing else.
-# A `.github/hooks` handler that runs a script `.claude/settings.json` also
-# wires to the same event must therefore be cloud-agent-only, or Copilot CLI
-# runs the script twice. Cloud-agent-only means: only a `bash` field (the cloud
-# agent ignores `powershell`, `exec` is CLI-only, and `command` is copied to
-# PowerShell on Windows), and that field starts with CLOUD_ONLY_GUARD, which
-# exits 0 unless COPILOT_AGENT_PROMPT is set. The cloud agent sets that
-# variable for hook scripts (hooks-reference.md, "Cloud agent execution
-# environment"); Copilot CLI's references do not list it.
+# `.github/hooks/*.json`. The rule is per SCRIPT, not per event:
+#   - When one script is wired to the same event in both files, Copilot CLI
+#     uses the `.claude/settings.json` entry (the same one Claude Code runs, so
+#     Claude Code behaviour is unchanged) and the `.github/hooks` handler for
+#     it must be cloud-agent-only, or Copilot CLI runs the script twice.
+#   - A `.github/hooks` handler whose script `.claude/settings.json` does not
+#     wire to that event runs on BOTH surfaces, even when settings.json wires
+#     other scripts to the same event: session-setup.json (`npm ci` on
+#     sessionStart) and validation.json (copilot-arch-check.sh on postToolUse).
+# Cloud-agent-only means: only a `bash` field (the cloud agent ignores
+# `powershell`, `exec` is CLI-only, and `command` is copied to PowerShell on
+# Windows), and that field starts with CLOUD_ONLY_GUARD, which exits 0 unless
+# COPILOT_AGENT_PROMPT is set. The guard ends at its `;`, so what follows it
+# may start with any whitespace or none (`exit 0;bash`, `exit 0; bash`, or a
+# newline). The cloud agent sets that variable for hook scripts
+# (hooks-reference.md, "Cloud agent execution environment"); Copilot CLI's
+# references do not list it.
 #
 # This gate fails a PR when:
 #   1. a hook file is not valid JSON, lacks `"version": 1` (this repo's files
@@ -45,8 +50,12 @@
 #      compare against nothing, so that fails too.
 # Every documented way a handler names what it runs is read: `bash`,
 # `powershell`, `command` (the cross-platform fallback) and `exec` + `args`.
-# NOT SEEN: `.claude/settings.local.json` (gitignored, per-machine), user-level
-# `~/.copilot` hooks and plugins. A double run wired there is outside this gate.
+# NOT SEEN: `.claude/settings.local.json` (gitignored, per-machine);
+# `.github/copilot/settings.json` and `.github/copilot/settings.local.json`,
+# whose top-level `hooks` Copilot CLI also reads (hooks-reference.md, "Hooks
+# locations"; cli-config-dir-reference.md:436) — the first is committed, and
+# none exists in this repository today; user-level `~/.copilot` hooks and
+# plugins. A double run wired there is outside this gate.
 #
 # SOURCE: github/docs at 0b8c768 (2026-10-01; docs.github.com is not reachable
 # from this repo's agent sandboxes), content/copilot/reference/hooks-reference.md
@@ -98,7 +107,11 @@ const canonical = (event) => ALIASES[event] || event;
 const END_OF_TURN_SCRIPTS = ['on-stop.sh'];
 const END_OF_TURN_EVENTS = new Set(['agentStop', 'Stop', 'sessionEnd', 'SessionEnd']);
 // The prefix that makes a `.github/hooks` handler a no-op outside the cloud agent.
-const CLOUD_ONLY_GUARD = '[ -n "${COPILOT_AGENT_PROMPT+x}" ] || exit 0; ';
+// It ends at the `;` that terminates the guard, so whatever follows (no space,
+// a space, a newline) is a separate command that runs only when the guard
+// passed. The error message prints exactly this text, so a handler that starts
+// with what the message says is accepted.
+const CLOUD_ONLY_GUARD = '[ -n "${COPILOT_AGENT_PROMPT+x}" ] || exit 0;';
 // How `.claude/settings.json` anchors its scripts at the repository root.
 const SETTINGS_ROOT_PREFIXES = ['$(git rev-parse --show-toplevel)/', '${CLAUDE_PROJECT_DIR}/', '$CLAUDE_PROJECT_DIR/'];
 // A repository-relative shell script: `.claude/hooks/x.sh`, `./scripts/x.sh`.
@@ -106,8 +119,10 @@ const SETTINGS_ROOT_PREFIXES = ['$(git rev-parse --show-toplevel)/', '${CLAUDE_P
 const SCRIPT_REF = /(?:^|[\s'"=(])((?:\.\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.sh)(?=$|[\s'");])/g;
 
 // Paths print repository-relative (".github/hooks/hooks.json"), never as a
-// bare "hooks/hooks.json" that could be .claude/hooks or .codex/hooks.
-const rel = (p) => path.relative(root, p) || '.';
+// bare "hooks/hooks.json" that could be .claude/hooks or .codex/hooks. Always
+// with `/`: on Windows `path.relative` answers `.github\hooks\hooks.json`, which
+// is not the path GitHub annotates and not the path the messages promise.
+const rel = (p) => path.relative(root, p).split(path.sep).join('/') || '.';
 
 function commandsOf(h) {
   if (!h || typeof h !== 'object') return [];
@@ -245,7 +260,7 @@ for (const file of files) {
           where,
           `"${event}" runs ${script}, which .claude/settings.json also runs on "${settingsEvent}". Copilot CLI` +
             ' reads both files and would run it twice. Make this handler cloud-agent-only: a single "bash" field' +
-            ` (no powershell, command or exec) that starts with: ${CLOUD_ONLY_GUARD.trim()}`,
+            ` (no powershell, command or exec) that starts with: ${CLOUD_ONLY_GUARD}`,
         );
       }
     }

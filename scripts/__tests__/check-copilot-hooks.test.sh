@@ -20,9 +20,12 @@ readonly -f fail
 [ -f "$GATE" ] || { echo "gate script not found: $GATE"; exit 1; }
 
 # The cloud-agent-only prefix the gate requires on a handler that
-# .claude/settings.json also wires (literal text, not expanded here).
+# .claude/settings.json also wires (literal text, not expanded here, and
+# JSON-escaped). GUARD_BARE ends at the guard's `;`; GUARD is the spelling the
+# committed files use, with one space before the command.
 # shellcheck disable=SC2016
-readonly GUARD='[ -n \"${COPILOT_AGENT_PROMPT+x}\" ] || exit 0; '
+readonly GUARD_BARE='[ -n \"${COPILOT_AGENT_PROMPT+x}\" ] || exit 0;'
+readonly GUARD="$GUARD_BARE "
 # A Claude-format .claude/settings.json wiring on-stop.sh to Stop and
 # on-session-start.sh to SessionStart, spelled the way the real file is.
 # shellcheck disable=SC2016
@@ -186,9 +189,38 @@ expect_one_fail dup-unguarded \
   '"agentStop" runs .claude/hooks/on-stop.sh, which .claude/settings.json also runs on "Stop"' \
   "a script wired to the same event in .github/hooks and .claude/settings.json fails (Stop = agentStop)" \
   "$SETTINGS"
+# The message's own advice, taken literally, must pass: derive the guard from
+# what the gate printed (not from GUARD), JSON-escape it, and put the command
+# straight after it with no space.
+PRINTED_GUARD="$(sed -n 's/.*that starts with: //p' <<<"$OUT")"
+if [ -z "$PRINTED_GUARD" ]; then
+  fail "the double-run message names the guard to start with: $OUT"
+else
+  expect_pass dup-guard-from-message \
+    "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${PRINTED_GUARD//\"/\\\"}bash .claude/hooks/on-stop.sh\"}]}}" \
+    "a handler that starts with exactly the guard the message prints passes" \
+    "$SETTINGS"
+fi
 expect_pass dup-guarded \
   "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD}bash .claude/hooks/on-stop.sh\"}]}}" \
   "the same handler made cloud-agent-only (guard prefix, bash field only) passes" \
+  "$SETTINGS"
+# The guard ends at its `;`: no space, or a newline, before the command is the
+# same shell program and must pass too.
+expect_pass dup-guarded-no-space \
+  "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD_BARE}bash .claude/hooks/on-stop.sh\"}]}}" \
+  "a guard followed by the command with no space passes" \
+  "$SETTINGS"
+expect_pass dup-guarded-newline \
+  "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD_BARE}\\nbash .claude/hooks/on-stop.sh\"}]}}" \
+  "a guard followed by a newline and then the command passes" \
+  "$SETTINGS"
+# A pipe is not a separator: `[ … ] || exit 0 | bash x` parses as
+# `[ … ] || (exit 0 | bash x)`, so the script runs exactly when the guard fails.
+expect_one_fail dup-guard-pipe \
+  "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD_BARE%;} | bash .claude/hooks/on-stop.sh\"}]}}" \
+  'also runs on "Stop"' \
+  "a guard joined to the command by a pipe instead of a ';' fails" \
   "$SETTINGS"
 expect_one_fail dup-guarded-powershell \
   "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD}bash .claude/hooks/on-stop.sh\",\"powershell\":\"bash .claude/hooks/on-stop.sh\"}]}}" \
@@ -234,12 +266,31 @@ mkdir -p "$TMP/labels/root/.github/hooks" "$TMP/labels/root/.claude/hooks"
 : > "$TMP/labels/root/.claude/hooks/on-stop.sh"
 printf '%s\n' '{"version":1,"hooks":{"postToolUse":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
   > "$TMP/labels/root/.github/hooks/hooks.json"
-OUT="$(COPILOT_HOOKS_DIR="$TMP/labels/root/.github/hooks" COPILOT_HOOKS_REPO_ROOT="$TMP/labels/root" bash "$GATE" 2>&1)"; RC=$?
-if [ "$RC" -eq 1 ] && grep -qxF '::error file=.github/hooks/hooks.json::.github/hooks/hooks.json: on-stop.sh runs at the end of a turn, but is wired to "postToolUse" — use one of: agentStop, Stop, sessionEnd, SessionEnd' <<<"$OUT"; then
-  pass "errors name the file repository-relative and as a GitHub file annotation"
-else
-  fail "error label (rc=$RC): $OUT"
+# Node on Windows answers path.relative with `\`. WINGATE is the gate with
+# Windows path.relative/path.sep, so Linux CI sees the separator the Windows
+# job sees (#8769: it failed there on `.github\hooks\hooks.json`). The rest of
+# its fs work stays native, so it runs on every platform.
+WINGATE="$TMP/check-copilot-hooks.win32.sh"
+sed "s|^const path = require('path');\$|const path = Object.assign({}, require('path'), { relative: require('path').win32.relative, sep: require('path').win32.sep });|" \
+  "$GATE" > "$WINGATE"
+if [ "$(grep -c 'win32.relative' "$WINGATE")" -ne 1 ]; then
+  fail "could not build the Windows-separator gate: the gate no longer declares 'const path = require('path');' on its own line"
 fi
+for gate in "$GATE" "$WINGATE"; do
+  OUT="$(COPILOT_HOOKS_DIR="$TMP/labels/root/.github/hooks" COPILOT_HOOKS_REPO_ROOT="$TMP/labels/root" bash "$gate" 2>&1)"; RC=$?
+  if [ "$RC" -eq 1 ] && grep -qxF '::error file=.github/hooks/hooks.json::.github/hooks/hooks.json: on-stop.sh runs at the end of a turn, but is wired to "postToolUse" — use one of: agentStop, Stop, sessionEnd, SessionEnd' <<<"$OUT"; then
+    pass "errors name the file repository-relative, with '/', as a GitHub file annotation ($(basename "$gate"))"
+  else
+    fail "error label, $(basename "$gate") (rc=$RC): $OUT"
+  fi
+  OUT="$(COPILOT_HOOKS_DIR="$TMP/dup-unguarded/hooks" COPILOT_HOOKS_REPO_ROOT="$TMP/dup-unguarded/root" bash "$gate" 2>&1)"; RC=$?
+  if [ "$RC" -eq 1 ] && grep -qF '"agentStop" runs .claude/hooks/on-stop.sh, which .claude/settings.json also runs on "Stop"' <<<"$OUT" \
+    && ! grep -qF "\\" <<<"$OUT"; then
+    pass "the double-run message names the script with '/' ($(basename "$gate"))"
+  else
+    fail "double-run script path, $(basename "$gate") (rc=$RC): $OUT"
+  fi
+done
 
 # ---- running on nothing, or without node
 mkdir -p "$TMP/empty/hooks" "$TMP/empty/root"

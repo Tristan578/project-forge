@@ -54,23 +54,30 @@ Copilot CLI runs hooks from `.github/hooks/*.json` AND from the `hooks` block of
 `.claude/settings.json`, and when one event is wired in both it runs both
 (github/docs `content/copilot/reference/hooks-reference.md`, "Hooks locations",
 at 0b8c768). The Copilot cloud agent reads only `.github/hooks/*.json`. The
-ownership rule is therefore:
+rule is per script, not per event:
 
-- **Copilot CLI:** `.claude/settings.json` owns every event it wires — the same
-  entries Claude Code runs (`SessionStart`, `UserPromptSubmit`, `Stop`, `SessionEnd`, …).
-- **Cloud agent:** `.github/hooks/*.json` owns them, because it reads nothing else.
+- **Same script, same event, in both files:** Copilot CLI uses the
+  `.claude/settings.json` entry (the one Claude Code also runs), and the
+  `.github/hooks` handler for that script must be cloud-agent-only.
+- **Any other `.github/hooks` handler** runs on both surfaces, even on an event
+  `.claude/settings.json` also wires for other scripts. `session-setup.json`
+  (`npm ci` on `sessionStart`) and `validation.json` (`copilot-arch-check.sh` on
+  `postToolUse`) are this kind.
 
-So a `.github/hooks` handler that runs a script `.claude/settings.json` also
-wires to the same event is cloud-agent-only: a single `bash` field that starts
-with `[ -n "${COPILOT_AGENT_PROMPT+x}" ] || exit 0; `. The cloud agent sets
+Cloud-agent-only means a single `bash` field that starts with
+`[ -n "${COPILOT_AGENT_PROMPT+x}" ] || exit 0;` followed by the command (a
+space, a newline or nothing after the `;`). The cloud agent sets
 `COPILOT_AGENT_PROMPT` for hook scripts ("Cloud agent execution environment" in
 the same reference); Copilot CLI's references do not list it as set, so the
 handler exits 0 there and each script runs once per event on each surface. If
 you export `COPILOT_AGENT_PROMPT` in a local shell, the CLI double run returns. The
-trade-off: a script added to only one of the two files runs on only one surface.
+trade-off: a script wired only in `.claude/settings.json` never runs on the
+cloud agent, and a guarded handler never runs under Copilot CLI.
 `scripts/check-copilot-hooks.sh` (CI: Agentic Config Sync) fails a PR that wires
 a script to the same event in both files without that guard. It cannot see
-`.claude/settings.local.json` or your `~/.copilot` hooks.
+`.claude/settings.local.json`, `.github/copilot/settings.json` or
+`.github/copilot/settings.local.json` (Copilot CLI reads hooks from those too),
+or your `~/.copilot` hooks.
 
 ## Architecture Rules
 
