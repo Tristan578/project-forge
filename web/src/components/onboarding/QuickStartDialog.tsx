@@ -380,10 +380,15 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // the body. Scrolling a render early left the alert 12px below the body at
   // 375x667 (measured, board round 4). jsdom has no `scrollIntoView`, hence the
   // optional call.
+  //
+  // `open` is a dependency too: closing renders nothing but keeps this
+  // component (and the store's refusal) alive, so on reopen the review starts
+  // at the top with the same refusal below the fold, and the effect must run
+  // again for the newly mounted alert (Devin review on #10294).
   const settledRefusal = startingBuild ? null : reviewError;
   useEffect(() => {
-    if (settledRefusal) reviewErrorRef.current?.scrollIntoView?.({ block: 'nearest' });
-  }, [settledRefusal]);
+    if (open && settledRefusal) reviewErrorRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, settledRefusal]);
 
   // The plan review's "Build it": the first point at which build tokens are
   // spent. Failures land on the store, not as throws (same contract as

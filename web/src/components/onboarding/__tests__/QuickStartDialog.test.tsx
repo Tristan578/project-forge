@@ -846,6 +846,18 @@ describe('QuickStartDialog', () => {
         // The same refusal re-rendered is not scrolled to again.
         rerender(<QuickStartDialog open onClose={vi.fn()} />);
         expect(refusalScrolls()).toHaveLength(1);
+        // Closed and reopened with the refusal still on the store: the review
+        // mounts again at its top, so the alert is brought into view again
+        // (Devin review on #10294). Closed, nothing is scrolled.
+        rerender(<QuickStartDialog open={false} onClose={vi.fn()} />);
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect(refusalScrolls()).toHaveLength(1);
+        rerender(<QuickStartDialog open onClose={vi.fn()} />);
+        await screen.findByRole('alert');
+        expect(refusalScrolls()).toHaveLength(2);
+        const reopened = refusalScrolls()[1] as HTMLElement;
+        expect(reopened.isConnected).toBe(true);
+        expect(within(reopened).getByRole('alert').textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
       } finally {
         delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
       }
