@@ -1064,17 +1064,23 @@ function isTypePosition(n: ts.Node): boolean {
 }
 
 /**
- * Does `d` create a binding AT RUN TIME? An ambient declaration — `declare
- * const process: any`, `declare function eval(...)`, anything inside
- * `declare global { ... }` or `declare module '...' { ... }` — emits nothing, so at
- * run time the name it "declares" is still the real global. Neither does a
- * type-only import (in any spelling), a function signature with no body, or
- * an interface, type alias or type parameter. The last three matter through
- * DECLARATION MERGING: `interface eval {}` plus a bodiless `function eval(...)`
- * is one symbol, which the checker lists for the value read, so without that
- * branch the interface would make `eval` look local. (They also make
- * `export default <local type name>` reported, a harmless false positive: both
- * emitters drop that statement.)
+ * Does `d` create a binding AT RUN TIME? This is an ALLOWLIST: a declaration
+ * counts as local only when it is a kind known to emit a binding, and every
+ * other kind — one nobody has thought of included — leaves the name the real
+ * global, so a read of it is reported. (Board rounds 8-11 each found one more
+ * non-binding kind that a denylist let through: an ambient declaration, a
+ * type-only import, a bodiless signature, then an interface, type alias, type
+ * parameter or uninstantiated namespace MERGED with one of those — one
+ * symbol, which the checker lists for the value read.)
+ *
+ * Nothing in an ambient context counts: `declare const process: any`,
+ * `declare function eval(...)`, anything inside `declare global { ... }` or
+ * `declare module '...' { ... }` emits nothing. Nor does any namespace
+ * (an uninstantiated one emits nothing; no route declares an instantiated
+ * one, so treating every namespace as non-binding costs nothing), a const
+ * enum (SWC, the emitter Next uses, drops it), or `import x = N.T` (elided
+ * when `N.T` is a type). Each of those is at worst a false positive, as is
+ * `export default <local type name>`, which both emitters drop.
  */
 function emitsRuntimeBinding(d: ts.Declaration): boolean {
   // In an ambient context: the declaration, or any node enclosing it (the
@@ -1083,12 +1089,17 @@ function emitsRuntimeBinding(d: ts.Declaration): boolean {
   for (let n: ts.Node | undefined = d; n; n = n.parent) {
     if (ts.canHaveModifiers(n) && (ts.getModifiers(n) ?? []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) return false;
   }
-  if (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d) || ts.isTypeParameterDeclaration(d)) return false;
-  if (ts.isFunctionDeclaration(d) && !d.body) return false;
-  if (ts.isImportSpecifier(d) && (d.isTypeOnly || d.parent.parent.isTypeOnly)) return false;
-  if ((ts.isImportClause(d) && d.isTypeOnly) || (ts.isNamespaceImport(d) && d.parent.isTypeOnly)) return false;
-  if (ts.isImportEqualsDeclaration(d) && d.isTypeOnly) return false;
-  return true;
+  if (ts.isVariableDeclaration(d) || ts.isParameter(d) || ts.isBindingElement(d)) return true;
+  if (ts.isFunctionDeclaration(d) || ts.isFunctionExpression(d)) return d.body !== undefined;
+  if (ts.isClassDeclaration(d) || ts.isClassExpression(d)) return true;
+  if (ts.isEnumDeclaration(d)) return (ts.getCombinedModifierFlags(d) & ts.ModifierFlags.Const) === 0;
+  if (ts.isImportSpecifier(d)) return !d.isTypeOnly && !d.parent.parent.isTypeOnly;
+  if (ts.isImportClause(d)) return !d.isTypeOnly;
+  if (ts.isNamespaceImport(d)) return !d.parent.isTypeOnly;
+  // `import x = require('m')` binds; `import x = N.T` names an entity that
+  // may be a type, which is elided, so it is never taken as a binding.
+  if (ts.isImportEqualsDeclaration(d)) return !d.isTypeOnly && ts.isExternalModuleReference(d.moduleReference);
+  return false;
 }
 
 function globalInputProblems(b: Bound): string[] {
@@ -1924,6 +1935,10 @@ describe('job-id ownership coverage (#10262)', () => {
           ['declare global { var process }', 'declare global { var process: NodeJS.Process }', 'process', `const nh = process${FETCH};`],
           ['declare var globalThis', 'declare var globalThis: any;', 'globalThis', `const nh = globalThis.process${FETCH};`],
           ['declare function eval', 'declare function eval(source: string): any;', 'eval', `const nh = eval('process')${FETCH};`],
+          // `declare` on the declaration ITSELF (not an enclosing statement):
+          // a class, unlike `declare function`, has no other branch that
+          // would also catch it.
+          ['declare class process', 'declare class process {}', 'process', `const nh = (process as any)${FETCH};`],
           ['declare const Reflect', 'declare const Reflect: any;', 'Reflect',
             "const nh = Reflect.get(Reflect.get(Math, 'max'), 'call');"],
         ] as const).map(([name, prelude, global, read]): [string, string, RegExp[]] => [
@@ -1944,12 +1959,20 @@ describe('job-id ownership coverage (#10262)', () => {
           ['a type-only import-equals', "import type process = require('next/server');", 'process', `const nh = process${FETCH};`],
           ['a bodiless function signature', 'function eval(source: string): any;', 'eval', `const nh = eval('process')${FETCH};`],
           // Each type-only declaration MERGED with a non-binding value
-          // declaration: one symbol, so `.some(emitsRuntimeBinding)` would
-          // count the type half as a local binding without its own branch.
+          // declaration: one symbol, so `.some(emitsRuntimeBinding)` sees
+          // both halves, and only the allowlist keeps the type half from
+          // counting as a local binding.
           ['an interface merged with a bodiless signature', 'interface eval { x: 1 }\nfunction eval(source: string): any;', 'eval', `const nh = eval('process')${FETCH};`],
           ['a type alias merged with a bodiless signature', 'type eval = { x: 1 };\nfunction eval(source: string): any;', 'eval', `const nh = eval('process')${FETCH};`],
           ['a type parameter merged with a bodiless signature', "function g<eval>(): any { function eval(source: string): any; return eval('process'); }", 'eval', `const nh = g()${FETCH};`],
           ['an interface merged with a type-only import', "import type { NextRequest as process } from 'next/server';\ninterface process { x: 1 }", 'process', `const nh = process${FETCH};`],
+          // An UNINSTANTIATED namespace (types only, or empty) emits nothing.
+          ['a types-only namespace merged with a bodiless signature', 'namespace eval { export type X = 1 }\nfunction eval(source: string): any;', 'eval', `const nh = eval('process')${FETCH};`],
+          ['an empty namespace merged with a type-only import', "import type { NextRequest as process } from 'next/server';\nnamespace process {}", 'process', `const nh = process${FETCH};`],
+          ['an empty namespace merged with a bodiless signature', 'function process(): void;\nnamespace process {}', 'process', `const nh = (process as any)${FETCH};`],
+          ['a const enum', 'const enum process { A = 1 }', 'process', `const nh = (process as any)${FETCH};`],
+          ['an import-equals of a type entity', 'import process = NodeJS;', 'process', `const nh = (process as any)${FETCH};`],
+          ['an import-equals of a nested type entity', 'import process = NodeJS.Process;', 'process', `const nh = (process as any)${FETCH};`],
         ] as const).map(([name, prelude, global, read]): [string, string, RegExp] => [
           name,
           mutate(feed(read), HANDLER_OPEN, `${prelude}\n$1`),
@@ -1986,6 +2009,23 @@ describe('job-id ownership coverage (#10262)', () => {
       "$&\n$1const shape: typeof globalThis | undefined = undefined;\n$1void [Object.values({ a: 1 })[0], JSON.stringify(shape), Number('1')];"
       + "\n$1const { ['a']: lit } = { ['a']: import.meta.url };\n$1void lit;");
     expect(analyseStatusRoute(allowed, model!.file).foreignInputs).toEqual([]);
+    // ...and a REAL local binding of a global's name stays clean: one spelling
+    // per allowlist entry of emitsRuntimeBinding that the route sources do not
+    // already exercise, so dropping any entry turns its own case red. The
+    // binding sits above the handler and the read is inside it.
+    const locals: Array<[string, string, string]> = [
+      ['a class', 'class process {}', 'void process;'],
+      ['a class expression', 'const box = class process { static p = process; };', 'void box;'],
+      ['an enum', 'enum process { A = 1 }', 'void process.A;'],
+      ['a named function expression', 'const fn = function process(): unknown { return process; };', 'void fn;'],
+      ['a value default import', "import process from 'next/server';", 'void process;'],
+      ['a value namespace import', "import * as process from 'next/server';", 'void process;'],
+    ];
+    for (const [name, prelude, read] of locals) {
+      const src = mutate(mutate(model!.source, POLLED_ID, `$&\n$1${read}`), HANDLER_OPEN, `${prelude}\n$1`);
+      expect(src, name).toContain(prelude);
+      expect(analyseStatusRoute(src, model!.file).foreignInputs, name).toEqual([]);
+    }
   });
 
   it('SELECTS each real status route that takes its key from ANY key-returning resolver export', () => {
