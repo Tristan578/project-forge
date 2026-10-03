@@ -1164,11 +1164,17 @@ array_elements() {
   local file="$1" name="$2" decl body
   decl="$(awk -v n="$name" 'index($0, n "=(") == 1 && length($0) == length(n) + 2 { f = 1 } f { print } f && /^\)$/ { closed = 1; exit } END { exit !closed }' "$file" 2>/dev/null)" || return 2
   body="$(sed '1d;$d' <<<"$decl")"
-  if [ -n "$body" ] && grep -vqE '^[[:space:]]*(#.*)?$|^[[:space:]]*("[^"$`\\#]*"([[:space:]]+|$))+(#.*)?$' <<<"$body"; then
+  # Bash splits words on space and tab only. [[:space:]] is wider in every
+  # locale (\v, \f, \r) and, under a UTF-8 locale, also matches U+3000 and the
+  # other Unicode spaces, which bash keeps INSIDE a word: measured, a braces
+  # line ending `"GHSA-..."<U+3000># note` read as one waiver here and as a
+  # different word to bash, so the pin passed while the cron blocked.
+  local b=$'[ \t]'
+  if [ -n "$body" ] && grep -vqE '^'"$b"'*(#.*)?$|^'"$b"'*("[^"$`\\#]*"('"$b"'+|$))+(#.*)?$' <<<"$body"; then
     return 2
   fi
   local stripped quoted
-  stripped="$(sed -E 's/^[[:space:]]*#.*$//; s/("[[:space:]]+)#.*$/\1/' <<<"$body")"
+  stripped="$(sed -E 's/^'"$b"'*#.*$//; s/("'"$b"'+)#.*$/\1/' <<<"$body")"
   quoted="$(grep -oE '"[^"]*"' <<<"$stripped" || true)"
   [ -z "$quoted" ] || sed -E 's/^"(.*)"$/\1/' <<<"$quoted"
 }
@@ -1226,6 +1232,24 @@ f="$FIX/lockstep-two-per-line.sh"
 printf '%s\n' 'ALLOWED_ADVISORIES=(' '  # two waivers on one line are two waivers' '  "GHSA-aaaa-aaaa-aaaa:node_modules/a" "GHSA-bbbb-bbbb-bbbb:node_modules/b"' ')' > "$f"
 rc=0; out="$(array_elements "$f" ALLOWED_ADVISORIES)" || rc=$?
 if [ "$rc" = 0 ] && [ "$out" = "$(printf '%s\n%s' 'GHSA-aaaa-aaaa-aaaa:node_modules/a' 'GHSA-bbbb-bbbb-bbbb:node_modules/b')" ]; then pass "lockstep reader returns both elements of a two-entry line"; else fail "lockstep reader misread a two-entry line (rc=$rc, out=[$out])"; fi
+# A separator bash does not split on is not a separator. U+3000 (written as
+# its UTF-8 bytes) is whitespace to [[:space:]] under a UTF-8 locale and part
+# of the word to bash, in any locale; so are \v and \f. Each body must be
+# refused under C.UTF-8, where the wide class would have accepted it.
+ideo=$'\xe3\x80\x80'
+for shape in 'between two elements' 'before a comment' 'alone on a line' 'vertical tab' 'form feed'; do
+  case "$shape" in
+    'between two elements') line="  \"GHSA-aaaa-aaaa-aaaa\"${ideo}\"GHSA-bbbb-bbbb-bbbb\"" ;;
+    'before a comment') line="  \"GHSA-aaaa-aaaa-aaaa\"${ideo}# note" ;;
+    'alone on a line') line="  ${ideo}" ;;
+    'vertical tab') line="  \"GHSA-aaaa-aaaa-aaaa\""$'\v'"\"GHSA-bbbb-bbbb-bbbb\"" ;;
+    'form feed') line="  \"GHSA-aaaa-aaaa-aaaa\""$'\f'"# note" ;;
+  esac
+  f="$FIX/lockstep-wide-space.sh"
+  printf '%s\n' 'ALLOWED_GHSA=(' "$line" ')' > "$f"
+  rc=0; out="$(LC_ALL=C.UTF-8 array_elements "$f" ALLOWED_GHSA)" || rc=$?
+  if [ "$rc" = 2 ]; then pass "lockstep reader refuses a non-blank separator ($shape) that bash keeps inside the word"; else fail "lockstep reader accepted a non-blank separator ($shape) under C.UTF-8 (rc=$rc, out=[$out]) and read different elements than bash"; fi
+done
 # Every read of the allowlist array must go through the empty-array guard. This
 # is the half of the bash-3.2 protection that CI can actually enforce. The
 # section-0 runtime check (an `unbound variable` from $EMPTY_GATE) only bites
