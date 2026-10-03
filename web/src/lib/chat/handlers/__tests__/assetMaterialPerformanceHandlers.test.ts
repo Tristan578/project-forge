@@ -757,3 +757,85 @@ describe('materialHandlers — partial snapshot updates', () => {
   });
 
 });
+
+// #10267: the engine refuses an attenuationDistance it would not store as
+// written (is_valid_attenuation_distance: finite and >= 0 after f32
+// narrowing; infinity is null) and drops the WHOLE update. The handler must
+// refuse it first, or the store writes it optimistically and the assistant
+// reports a success the engine never applied.
+describe('materialHandlers — update_material attenuationDistance', () => {
+  const refusal = (shown: string) =>
+    `attenuationDistance must be a finite number >= 0, got ${shown}; send null for infinity`;
+
+  it.each([
+    [-1, '-1'],
+    [-0.5, '-0.5'],
+    [Number.NaN, 'NaN'],
+    [Number.POSITIVE_INFINITY, 'Infinity'],
+    [Number.NEGATIVE_INFINITY, '-Infinity'],
+    // Finite in JS, `inf` once the engine narrows it to f32.
+    [1e300, '1e+300'],
+    [3.5e38, '3.5e+38'],
+    ['10', '"10"'],
+    [true, 'true'],
+    [[1], '[1]'],
+    [{}, '{}'],
+  ])('refuses %s before touching the store', async (value, shown) => {
+    const { result, store } = await invokeHandler(materialHandlers, 'update_material', {
+      entityId: 'ent-1',
+      metallic: 0.9,
+      attenuationDistance: value,
+    });
+    expect(result).toEqual({ success: false, error: refusal(shown) });
+    expect(vi.mocked(store.updateMaterial)).not.toHaveBeenCalled();
+  });
+
+  it('bounds a long refused value in the error text', async () => {
+    const { result, store } = await invokeHandler(materialHandlers, 'update_material', {
+      entityId: 'ent-1',
+      attenuationDistance: 'x'.repeat(500),
+    });
+    expect(result).toEqual({ success: false, error: refusal(`"${'x'.repeat(63)}…`) });
+    expect(vi.mocked(store.updateMaterial)).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [0],
+    [2.5],
+    // f32::MAX: the largest number the engine keeps as written.
+    [3.4028234663852886e38],
+  ])('forwards the finite number %s', async (value) => {
+    const { result, store } = await invokeHandler(materialHandlers, 'update_material', {
+      entityId: 'ent-1',
+      metallic: 0.9,
+      attenuationDistance: value,
+    });
+    expect(result).toEqual({ success: true });
+    expect(vi.mocked(store.updateMaterial)).toHaveBeenCalledWith(
+      'ent-1',
+      expect.objectContaining({ metallic: 0.9, attenuationDistance: value }),
+    );
+  });
+
+  it('forwards null (infinity) over a finite current value', async () => {
+    const { result, store } = await invokeHandler(
+      materialHandlers,
+      'update_material',
+      { entityId: 'ent-1', attenuationDistance: null },
+      { primaryMaterial: { attenuationDistance: 4 } },
+    );
+    expect(result).toEqual({ success: true });
+    expect(vi.mocked(store.updateMaterial)).toHaveBeenCalledWith('ent-1', { attenuationDistance: null });
+  });
+
+  it('keeps the current value when the key is absent', async () => {
+    const { result, store } = await invokeHandler(
+      materialHandlers,
+      'update_material',
+      { entityId: 'ent-1', metallic: 0.9 },
+      { primaryMaterial: { attenuationDistance: 4 } },
+    );
+    expect(result).toEqual({ success: true });
+    expect(vi.mocked(store.updateMaterial)).toHaveBeenCalledWith('ent-1', { attenuationDistance: 4, metallic: 0.9 });
+  });
+});

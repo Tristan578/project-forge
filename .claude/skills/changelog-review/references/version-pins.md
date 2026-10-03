@@ -49,7 +49,10 @@ Documenting why specific dependencies are pinned and what must be audited before
 2. Run `/changelog-review` to check for breaking changes
 3. Test E2E with `npx playwright test` — hydration dialogs often change behavior
 4. Check `web/src/proxy.ts` — middleware API may have changed
-5. Verify `vercel.json` is still valid (no deprecated fields)
+5. Verify `web/vercel.ts` is still valid (no deprecated fields) — `tsc --noEmit` now
+   catches an invalid `VercelConfig` shape on its own (PF-1060/#9097), so this step is
+   mostly a formality; it still matters for fields that are structurally valid but
+   deprecated/no-ops, which `tsc` cannot detect
 
 ---
 

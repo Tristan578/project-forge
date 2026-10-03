@@ -1658,8 +1658,8 @@ pub fn apply_material_updates(
         for (entity_id, mut current_mat) in query.iter_mut() {
             if entity_id.0 == update.entity_id {
                 let old_material = current_mat.clone();
-                // Merge: start from incoming update but preserve existing texture IDs
-                // when the update leaves them as None (update_material only sends changed fields).
+                // The incoming material replaces the whole component; only texture IDs
+                // the update leaves as None are carried over from the old one.
                 let mut new_mat = update.material_data.clone();
                 if new_mat.base_color_texture.is_none() { new_mat.base_color_texture = old_material.base_color_texture.clone(); }
                 if new_mat.normal_map_texture.is_none() { new_mat.normal_map_texture = old_material.normal_map_texture.clone(); }

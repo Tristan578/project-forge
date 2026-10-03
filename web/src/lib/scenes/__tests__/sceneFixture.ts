@@ -24,9 +24,10 @@ export function projectFixture(name: string): ProjectScenes {
 export function attachFixtureValidator(): void {
   setSceneValidator((json) => {
     const scene = JSON.parse(json);
-    return !!scene.metadata && typeof scene.metadata.name === 'string' &&
+    const valid = !!scene.metadata && typeof scene.metadata.name === 'string' &&
       Array.isArray(scene.entities) && scene.entities.every((entity: Record<string, unknown>) =>
         typeof entity.entityId === 'string' && !!entity.transform);
+    return valid ? { valid: true } : { valid: false, reason: 'Invalid scene file: fixture decoder refused it' };
   });
 }
 
