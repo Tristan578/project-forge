@@ -28,14 +28,14 @@ export function trackJob(opts: {
   type: GenerationType;
   prompt: string;
   provider: string;
-  entityId?: string;
-  usageId?: string;
-  durable?: boolean;
-  autoPlace?: boolean;
-  targetEntityId?: string;
-  materialSlot?: string;
-  resultUrl?: string;
-  metadata?: Record<string, unknown>;
+  entityId?: string | undefined;
+  usageId?: string | undefined;
+  durable?: boolean | undefined;
+  autoPlace?: boolean | undefined;
+  targetEntityId?: string | undefined;
+  materialSlot?: string | undefined;
+  resultUrl?: string | undefined;
+  metadata?: Record<string, unknown> | undefined;
 }) {
   useGenerationStore.getState().addJob({
     id: opts.jobId,

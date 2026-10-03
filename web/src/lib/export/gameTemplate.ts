@@ -19,18 +19,18 @@ export interface GameTemplateOptions {
   sceneData: string;       // JSON scene data
   scriptBundle: string;    // JS script bundle
   includeDebug: boolean;
-  uiData?: string;         // JSON-encoded GameUIData
-  mobileTouchConfig?: string;  // JSON-encoded MobileTouchConfig
-  embeddedWasm?: Record<string, EmbeddedWasmData>;  // Inlined WASM for single-HTML portability
-  orientationLock?: 'landscape' | 'portrait' | 'none';  // Screen orientation lock for mobile
-  creatorTier?: string;    // User subscription tier — branding non-removable on starter/hobbyist
-  hideBranding?: boolean;  // Only honored on creator/pro tiers
+  uiData?: string | undefined;         // JSON-encoded GameUIData
+  mobileTouchConfig?: string | undefined;  // JSON-encoded MobileTouchConfig
+  embeddedWasm?: Record<string, EmbeddedWasmData> | undefined;  // Inlined WASM for single-HTML portability
+  orientationLock?: 'landscape' | 'portrait' | 'none' | undefined;  // Screen orientation lock for mobile
+  creatorTier?: string | undefined;    // User subscription tier — branding non-removable on starter/hobbyist
+  hideBranding?: boolean | undefined;  // Only honored on creator/pro tiers
   /**
    * Project dimension. A scene file does not carry it, and sprites render only
    * through the engine's 2D camera, which `set_project_type` creates — so a 2D
    * game exported without it showed an empty viewport (#10013).
    */
-  projectType?: '2d' | '3d';
+  projectType?: '2d' | '3d' | undefined;
 }
 
 /** Tiers where "Made with SpawnForge" branding cannot be removed. */

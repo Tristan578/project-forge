@@ -36,13 +36,12 @@ import { redactShapeText } from '@/lib/security/redactShapes';
 // ---------------------------------------------------------------------------
 
 function makeEvent(overrides: Partial<Event> = {}): Event {
+  // No explicit-`undefined` base fields: `Event`'s optional fields don't admit
+  // one under exactOptionalPropertyTypes, and omitting them is equivalent for
+  // every test here (each reads a field defensively or supplies it via
+  // `overrides`).
   return {
-    exception: undefined,
-    message: undefined,
-    transaction: undefined,
-    request: undefined,
     tags: {},
-    fingerprint: undefined,
     ...overrides,
   };
 }
@@ -451,7 +450,7 @@ describe('scrubEvent', () => {
   it('scrubs event.extra and event.contexts', () => {
     const event = makeEvent({
       extra: { prompt: 'my key is sk-ant-api03-AbCdEf0123456789xyz' },
-      contexts: { custom: { clientSecret: 'topsecret' } } as Event['contexts'],
+      contexts: { custom: { clientSecret: 'topsecret' } } as NonNullable<Event['contexts']>,
     });
     const out = scrubEvent(event);
     expect((out.extra as Record<string, string>)?.prompt).toBe('my key is [REDACTED_API_KEY]');
@@ -512,7 +511,7 @@ describe('scrubEvent — transaction span data', () => {
     const event = makeEvent({
       contexts: {
         trace: { data: { 'url.full': 'https://api.example.com/root?secret=1#fragment' } },
-      } as unknown as Event['contexts'],
+      } as unknown as NonNullable<Event['contexts']>,
     });
 
     const trace = scrubEvent(event).contexts?.trace as unknown as {
@@ -658,7 +657,7 @@ describe('scrubEvent — hardened coverage (audit review)', () => {
 
   it('drops user.geo and scrubs custom user fields, keeping id', () => {
     const event = makeEvent({
-      user: { id: 'u1', geo: { city: 'Austin' }, plan: 'pro', contact: 'nolantj@live.com' } as Event['user'],
+      user: { id: 'u1', geo: { city: 'Austin' }, plan: 'pro', contact: 'nolantj@live.com' } as NonNullable<Event['user']>,
     });
     const out = scrubEvent(event);
     expect(out.user?.id).toBe('u1');

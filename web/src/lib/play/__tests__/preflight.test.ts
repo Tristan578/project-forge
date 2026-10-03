@@ -9,7 +9,10 @@ vi.mock('@/lib/play/gameMetadata', () => ({ loadPublishedGameMetadata: lookup })
 /** Load the actual proxy under each test's configured environment. */
 async function invoke(path: string, method = 'GET', headers?: Record<string, string>) {
   const { proxy } = await import('@/proxy');
-  return proxy(new NextRequest('http://localhost:3000' + path, { method, headers }));
+  // NextRequest's RequestInit-like `headers` doesn't accept an explicit
+  // `undefined` under exactOptionalPropertyTypes; conditional spread omits
+  // the key when this helper received none.
+  return proxy(new NextRequest('http://localhost:3000' + path, { method, ...(headers !== undefined ? { headers } : {}) }));
 }
 
 describe('published-game pre-stream response', () => {

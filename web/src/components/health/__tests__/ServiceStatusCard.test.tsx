@@ -14,7 +14,9 @@ interface ServiceHealth {
   status: 'healthy' | 'degraded' | 'down';
   latencyMs: number;
   lastChecked: string;
-  error?: string;
+  // `makeService` below always writes this key (as `undefined` unless
+  // overridden), so the type must admit the explicit value.
+  error?: string | undefined;
   summary?: string;
   details?: Record<string, unknown>;
 }

@@ -49,7 +49,7 @@ export interface WifCredential {
 
 /** Auth fields for `createAnthropic()`. Exactly one is set by this module. */
 export interface AnthropicClientAuth {
-  apiKey?: string;
+  apiKey?: string | undefined;
   authToken?: string;
 }
 

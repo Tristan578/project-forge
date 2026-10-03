@@ -17,9 +17,9 @@ const POST_impl = createGenerationHandler<
     prompt: string;
     mode: 'text-to-3d' | 'image-to-3d';
     quality: 'standard' | 'high';
-    imageBase64?: string;
-    artStyle?: string;
-    negativePrompt?: string;
+    imageBase64?: string | undefined;
+    artStyle?: string | undefined;
+    negativePrompt?: string | undefined;
   },
   {
     jobId: string;

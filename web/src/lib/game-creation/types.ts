@@ -132,7 +132,7 @@ export interface EntityBlueprint {
    * the decomposition prompt never contains that word, so the plural cannot come
    * back without a deliberate test change.
    */
-  behavior?: Behavior;
+  behavior?: Behavior | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ export interface EntityBlueprint {
 export interface AssetNeed {
   type: '3d-model' | 'texture' | 'sound' | 'music' | 'voice' | 'sprite';
   description: string;
-  entityRef?: string;
+  entityRef?: string | undefined;
   styleDirective: string;
   priority: 'required' | 'nice-to-have';
   fallback: string;
@@ -200,7 +200,7 @@ export interface PlanStep {
   fallbackStepId?: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
   output?: Record<string, unknown>;
-  error?: OrchestratorStepError;
+  error?: OrchestratorStepError | undefined;
   userFacingErrorMessage?: string;
 }
 
@@ -289,7 +289,7 @@ export interface TokenEstimate {
   totalVarianceLow: number;
   userTier: string;
   sufficientBalance: boolean;
-  warningMessage?: string;
+  warningMessage?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -322,7 +322,7 @@ export interface ExecutorContext {
    * either path to a single boolean.
    */
   dispatchCommand: (command: string, payload: unknown) => import('@/hooks/useEngine').CommandResponse | void;
-  dispatchCommandBatch?: (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
+  dispatchCommandBatch?: ((commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult) | undefined;
   /**
    * Reads the editor store LIVE at call time.
    *
@@ -420,7 +420,7 @@ export interface ExecutorDefinition {
 export interface ExecutorResult {
   success: boolean;
   output?: Record<string, unknown>;
-  error?: OrchestratorStepError;
+  error?: OrchestratorStepError | undefined;
 }
 
 // ---------------------------------------------------------------------------

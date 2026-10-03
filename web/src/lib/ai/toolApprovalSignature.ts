@@ -150,7 +150,7 @@ type MessageLike = { role: string; content: unknown };
 
 interface CollectedApprovals {
   /** approvalId → the request the assistant turn carried. */
-  requests: Map<string, { toolCallId: string; signature?: string }>;
+  requests: Map<string, { toolCallId: string; signature?: string | undefined }>;
   /** toolCallId → the call the assistant turn carried. */
   calls: Map<string, { toolName: string; input: unknown }>;
   /** Every approval-response in the history, in order. */
@@ -158,7 +158,7 @@ interface CollectedApprovals {
 }
 
 function collect(messages: MessageLike[]): CollectedApprovals {
-  const requests = new Map<string, { toolCallId: string; signature?: string }>();
+  const requests = new Map<string, { toolCallId: string; signature?: string | undefined }>();
   const calls = new Map<string, { toolName: string; input: unknown }>();
   const responses: Array<{ approvalId: string; approved: boolean }> = [];
 

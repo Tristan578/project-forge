@@ -17,8 +17,8 @@ export type InitPhase =
 export interface InitEvent {
   phase: InitPhase;
   timestamp: number;
-  message?: string;
-  error?: string;
+  message?: string | undefined;
+  error?: string | undefined;
 }
 
 export interface StoredLog {

@@ -44,7 +44,7 @@ export function useLoadingState(): LoadingState {
 
 export interface CommandResponse {
   success: boolean;
-  error?: string;
+  error?: string | undefined;
   /**
    * Set only by a dispatcher that CAUGHT a throw from the engine call and
    * answered with `success: false` instead of rethrowing. It separates "the
@@ -342,7 +342,12 @@ export interface WasmManifest {
  */
 export async function fetchWasmManifest(basePath: string, signal?: AbortSignal): Promise<WasmManifest | null> {
   try {
-    const res = await fetch(`${basePath}wasm-manifest.json`, { signal, cache: 'no-store' });
+    // DOM's RequestInit.signal is `AbortSignal | null` (no `| undefined`);
+    // conditional spread omits the key when this function received none.
+    const res = await fetch(`${basePath}wasm-manifest.json`, {
+      ...(signal !== undefined ? { signal } : {}),
+      cache: 'no-store',
+    });
     if (!res.ok) return null;
     const data = (await res.json()) as {
       wasmHash?: string;

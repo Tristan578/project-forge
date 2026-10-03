@@ -7,8 +7,8 @@ interface NumberInputProps {
   onChange: (value: number) => void;
   step?: number;
   precision?: number;
-  min?: number;
-  max?: number;
+  min?: number | undefined;
+  max?: number | undefined;
   label?: string;
   labelColor?: string;
   disabled?: boolean;
