@@ -248,6 +248,19 @@ expect_one_fail dup-guarded-powershell \
   'also runs on "Stop"' \
   "a guarded handler that keeps a powershell field (CLI-only on Windows) still fails" \
   "$SETTINGS"
+# The other two fields the cloud-agent-only definition excludes, each alone:
+# `command` is copied to PowerShell on Windows and `exec` is CLI-only, so either
+# one beside a guarded `bash` runs the script unguarded under Copilot CLI.
+expect_one_fail dup-guarded-command \
+  "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD}bash .claude/hooks/on-stop.sh\",\"command\":\"bash .claude/hooks/on-stop.sh\"}]}}" \
+  'also runs on "Stop"' \
+  "a guarded handler that keeps a command field (the cross-platform fallback) still fails" \
+  "$SETTINGS"
+expect_one_fail dup-guarded-exec \
+  "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"${GUARD}bash .claude/hooks/on-stop.sh\",\"exec\":\"bash\",\"args\":[\".claude/hooks/on-stop.sh\"]}]}}" \
+  'also runs on "Stop"' \
+  "a guarded handler that keeps an exec field (CLI-only) still fails" \
+  "$SETTINGS"
 expect_one_fail dup-guard-late \
   "{\"version\":1,\"hooks\":{\"agentStop\":[{\"type\":\"command\",\"bash\":\"bash .claude/hooks/on-stop.sh; ${GUARD}true\"}]}}" \
   'also runs on "Stop"' \
@@ -285,6 +298,31 @@ expect_one_fail guarded-other-event \
   '"sessionEnd" handler is cloud-agent-only, but .claude/settings.json does not run .claude/hooks/on-stop.sh on that event' \
   "a guarded handler whose script .claude/settings.json wires to a DIFFERENT event (Stop, not sessionEnd) fails" \
   "$SETTINGS"
+# Every root prefix SETTINGS_ROOT_PREFIXES strips is read. The real file uses
+# only `$(git rev-parse --show-toplevel)/`, so each other spelling gets a case
+# of its own. SessionStart stays live in the git-rev-parse spelling: if a prefix
+# stopped being read, the cross-check would still have a script, the Stop
+# double run would go unseen, and the case would pass instead of failing here.
+# shellcheck disable=SC2016
+expect_one_fail settings-prefix-braced \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
+  '"agentStop" runs .claude/hooks/on-stop.sh, which .claude/settings.json also runs on "Stop"' \
+  'a .claude/settings.json script anchored with ${CLAUDE_PROJECT_DIR}/ is cross-checked' \
+  '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/on-stop.sh\""}]}],"SessionStart":[{"hooks":[{"type":"command","command":"bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-session-start.sh\""}]}]}}'
+# shellcheck disable=SC2016
+expect_one_fail settings-prefix-bare \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
+  '"agentStop" runs .claude/hooks/on-stop.sh, which .claude/settings.json also runs on "Stop"' \
+  'a .claude/settings.json script anchored with $CLAUDE_PROJECT_DIR/ is cross-checked' \
+  '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/on-stop.sh\""}]}],"SessionStart":[{"hooks":[{"type":"command","command":"bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-session-start.sh\""}]}]}}'
+# The gate reads a .claude/settings.json handler in either shape: nested under
+# `hooks` (Claude format, what the real file uses) or listed directly in the
+# event's array (Copilot format). A flat Stop handler is a double run too.
+expect_one_fail settings-copilot-format \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
+  '"agentStop" runs .claude/hooks/on-stop.sh, which .claude/settings.json also runs on "Stop"' \
+  "a Copilot-format (un-nested) handler in .claude/settings.json is cross-checked" \
+  '{"hooks":{"Stop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}'
 expect_pass dup-other-event \
   '{"version":1,"hooks":{"sessionEnd":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}' \
   "the same script on a DIFFERENT event than .claude/settings.json wires it is not a double run" \
