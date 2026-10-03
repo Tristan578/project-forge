@@ -887,14 +887,22 @@ describe('QuickStartDialog', () => {
         expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
         expect(screen.getByRole('status').textContent).toBe('Starting the build…');
         expect(refusalScrolls()).toHaveLength(2);
+        // Focus is on the status line, not on the first enabled control (the
+        // refusal's "Buy tokens" here, "Discard plan" without one), after the
+        // Dialog's deferred initial-focus frame too (PR #10294 board round 10).
+        await act(async () => {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        });
+        expect(document.activeElement).toBe(screen.getByRole('status'));
         // Refused again: now the settled refusal is brought into view, and
-        // Build it is offered again.
+        // Build it is offered again, with focus on it.
         await act(async () => {
           settleRetry();
         });
         expect(screen.getByRole('button', { name: 'Build it' })).not.toBeDisabled();
         expect(screen.getByRole('status').textContent).toBe('The build did not start.');
         expect(refusalScrolls()).toHaveLength(3);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Build it' }));
       } finally {
         delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
       }
@@ -1306,6 +1314,215 @@ describe('QuickStartDialog', () => {
       await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Starting the build'));
       expect(screen.queryByText(/only when you press Build it/)).toBeNull();
       finish();
+    });
+
+    // PR #10294 board round 10 (security MEDIUM). A cancel is cooperative: the
+    // run's promise settles only when its current step does, and a step has no
+    // timeout. The in-flight hold was a plain boolean, so a DIFFERENT plan
+    // designed after the cancel opened with "Build it" disabled and "Starting
+    // the build…" until the old step ended (or, for a step that never settles,
+    // until a reload). The hold names the plan it belongs to.
+    //
+    // Walks there: Build it (its start left pending), cancel it by one of the
+    // two ways out of a starting build -- the review's armed "Discard it"
+    // (status still 'awaiting_approval' while the start is in flight) or the
+    // dialog's own Stop (once the run reports 'executing') -- close, reopen
+    // onto 'cancelled' (the pick step), and design a different plan while the
+    // cancelled run's promise is still pending.
+    async function cancelThenPlanAnother(exit: 'Discard it' | 'Stop') {
+      let settleOld!: { resolve: () => void; reject: (err: Error) => void };
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            if (exit === 'Stop') hoisted.state.orchestratorStatus = 'executing';
+            settleOld = { resolve, reject };
+          }),
+      );
+      cancelPipeline.mockImplementationOnce(() => {
+        hoisted.state.orchestratorStatus = 'cancelled';
+      });
+      const onClose = vi.fn();
+      const { rerender } = await reachPlanReview({}, onClose);
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
+      if (exit === 'Discard it') {
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Discard it' }));
+      } else {
+        expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+        await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      }
+      expect(cancelPipeline).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledTimes(1);
+      rerender(<QuickStartDialog open={false} onClose={onClose} />);
+      rerender(<QuickStartDialog open onClose={onClose} />);
+
+      const nextPlan = { approvalGates: [PLAN_GATE] };
+      expect(nextPlan).not.toBe(PLAN);
+      startQuickStart.mockImplementationOnce(async () => {
+        Object.assign(hoisted.state, {
+          orchestratorStatus: 'awaiting_approval',
+          orchestratorError: null,
+          currentPlan: nextPlan,
+          tokenEstimate: ESTIMATE,
+        });
+        return true;
+      });
+      await pickPlatformer();
+      await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
+      await screen.findByRole('button', { name: 'Build it' });
+      return { rerender, settleOld };
+    }
+
+    it.each(['Discard it', 'Stop'] as const)(
+      'offers a new plan\'s "Build it" while a cancelled run is still settling, and holds it for its own start only (%s)',
+      async (exit) => {
+        const { settleOld } = await cancelThenPlanAnother(exit);
+        const build = screen.getByRole('button', { name: 'Build it' });
+        expect(build).toBeEnabled();
+        await act(async () => {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        });
+        expect(document.activeElement).toBe(build);
+        expect(screen.getByRole('status').textContent).toBe(
+          'Your game plan is ready. Review it, then build.',
+        );
+
+        // The new plan's own Build it is held for its own start ...
+        let settleNext!: () => void;
+        runPipelineFromPlan.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              settleNext = resolve;
+            }),
+        );
+        await userEvent.click(build);
+        expect(runPipelineFromPlan).toHaveBeenCalledTimes(2);
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        expect(screen.getByRole('status').textContent).toBe('Starting the build…');
+
+        // ... and the old run settling late (here by throwing) neither
+        // releases that hold nor reports onto the new plan.
+        await act(async () => {
+          settleOld.reject(new Error('old run aborted'));
+        });
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        expect(screen.getByRole('status').textContent).toBe('Starting the build…');
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect(screen.queryByText('old run aborted')).toBeNull();
+        expect(toast.error).not.toHaveBeenCalled();
+
+        // The new plan's start settling releases it.
+        await act(async () => {
+          settleNext();
+        });
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeEnabled();
+        expect(screen.getByRole('status').textContent).toBe(
+          'Your game plan is ready. Review it, then build.',
+        );
+      },
+    );
+
+    // The other half of the same scoping: a cancelled run that settles
+    // normally while the NEW plan's run has failed must not report that
+    // failure as its own. The new run reports it, once.
+    it('reports a new plan\'s failure once, from its own run, when a cancelled run settles late', async () => {
+      const { settleOld } = await cancelThenPlanAnother('Discard it');
+      let settleNext!: () => void;
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            settleNext = resolve;
+          }),
+      );
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(2);
+      Object.assign(hoisted.state, {
+        orchestratorStatus: 'failed',
+        orchestratorError: 'Step 2 failed.',
+      });
+
+      await act(async () => {
+        settleOld.resolve();
+      });
+      expect(toast.error).not.toHaveBeenCalled();
+
+      await act(async () => {
+        settleNext();
+      });
+      expect(toast.error).toHaveBeenCalledTimes(1);
+      expect(toast.error).toHaveBeenCalledWith('Step 2 failed.');
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    });
+
+    // PR #10294 board round 10 (ux, architect). The SAME plan reopened while
+    // its Build it is starting mounts with Build it disabled, which cannot
+    // take focus; the Dialog's initial focus then went to the first enabled
+    // control, "Discard plan" here (no refusal link on screen). Focus goes to
+    // the status line instead, and from there wherever the start leads:
+    // refused, back to the re-enabled Build it; started, the review goes away
+    // and focus stays on the status line, which now says the build is on.
+    it.each(['refused', 'started'] as const)(
+      'focuses the status line when the review reopens while Build it is starting, then follows the start (%s)',
+      async (outcome) => {
+        let settle!: () => void;
+        runPipelineFromPlan.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              settle = () => {
+                if (outcome === 'refused') {
+                  hoisted.state.orchestratorError = ENGINE_NOT_READY_MESSAGE;
+                } else {
+                  hoisted.state.orchestratorStatus = 'executing';
+                }
+                resolve();
+              };
+            }),
+        );
+        const { rerender } = await reachPlanReview();
+        await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+        rerender(<QuickStartDialog open={false} onClose={vi.fn()} />);
+        rerender(<QuickStartDialog open onClose={vi.fn()} />);
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        await act(async () => {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        });
+        const status = screen.getByRole('status');
+        expect(status.textContent).toBe('Starting the build…');
+        expect(document.activeElement).toBe(status);
+        expect(document.activeElement).not.toBe(screen.getByRole('button', { name: 'Discard plan' }));
+
+        await act(async () => {
+          settle();
+        });
+        if (outcome === 'refused') {
+          const build = screen.getByRole('button', { name: 'Build it' });
+          expect(build).toBeEnabled();
+          expect(screen.getByRole('status').textContent).toBe('The build did not start.');
+          expect(document.activeElement).toBe(build);
+        } else {
+          expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+          expect(screen.getByRole('status').textContent).toBe('Building your game…');
+          expect(document.activeElement).toBe(screen.getByRole('status'));
+        }
+      },
+    );
+
+    // The status-line hand-off is for OPENING onto a starting build only. A
+    // Build it pressed in an open dialog keeps its own focus handling, and a
+    // refused start comes back to Build it.
+    it('keeps focus with Build it when it is pressed in an open dialog and the start is refused', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorError = ENGINE_NOT_READY_MESSAGE;
+      });
+      await reachPlanReview();
+      const build = screen.getByRole('button', { name: 'Build it' });
+      await waitFor(() => expect(document.activeElement).toBe(build));
+      await userEvent.keyboard('{Enter}');
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
+      await screen.findByText('The build did not start.');
+      expect(document.activeElement).toBe(build);
     });
 
     // "Build it" unmounts with the review once the run moves to 'executing'.

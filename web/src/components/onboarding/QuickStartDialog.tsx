@@ -57,7 +57,7 @@ import {
   quickStartPromptMaxLength,
   type QuickStartGameType,
 } from '@/lib/game-creation/quickStart';
-import type { ApprovalGate } from '@/lib/game-creation/types';
+import type { ApprovalGate, OrchestratorPlan } from '@/lib/game-creation/types';
 import { ApprovalGateActions, ApprovalGateSummary } from '@/components/editor/ApprovalGateDialog';
 import { TokenCostBar, TokenCostTotal } from '@/components/editor/TokenCostBar';
 import { claimQuickStartGate } from '@/components/editor/quickStartGateOwner';
@@ -148,12 +148,17 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  // True from the plan review's "Build it" until that run settles: it disables
-  // the button for the whole run. The slice refuses a second start of the same
-  // plan on its own (`_inFlightPlan`), so this is the visible half of that
-  // guard, not the only one. It must not drive the status line; see
-  // `startingBuild`.
-  const [confirming, setConfirming] = useState(false);
+  // The plan whose "Build it" was pressed, from the press until that run
+  // settles: it disables the button for the whole run. The slice refuses a
+  // second start of the same plan on its own (`_inFlightPlan`, keyed on the
+  // same plan object), so this is the visible half of that guard, not the
+  // only one. It holds THAT plan only. A cancel is cooperative (the run's
+  // promise settles only when its current step does, and a step has no
+  // timeout), so a cancelled run can still be pending when a different plan
+  // reaches the review; a plain boolean held that plan's "Build it" disabled
+  // until the old step ended, or until a reload (PR #10294 board round 10).
+  // It must not drive the status line on its own; see `startingBuild`.
+  const [confirmingPlan, setConfirmingPlan] = useState<OrchestratorPlan | null>(null);
 
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const statusRef = useRef<HTMLDivElement>(null);
@@ -185,11 +190,13 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       ? currentPlan.approvalGates.find((g) => g.id === 'gate_plan') ?? FALLBACK_PLAN_GATE
       : null;
   // "Starting the build…" covers only the gap between the click and the run
-  // reporting 'executing'. `confirming` itself stays true until the whole run
-  // settles (it guards the click), so it must not drive the status line:
+  // reporting 'executing'. `confirmingPlan` itself stays set until the whole
+  // run settles (it guards the click), so it must not drive the status line:
   // "Building your game…" and the mid-run gates' "Waiting on your approval…"
-  // have to show, and be announced, while the build goes on.
-  const startingBuild = confirming && planGate !== null;
+  // have to show, and be announced, while the build goes on. It also gates
+  // "Build it" (`approveDisabled` below), and only for the plan on review.
+  const startingBuild =
+    confirmingPlan !== null && confirmingPlan === currentPlan && planGate !== null;
   // A build refused before any step ran (its reservation was declined, or the
   // engine was not ready) returns the plan to the review with the reason on
   // the store. It is shown ON the review, so it survives the dialog closing,
@@ -219,12 +226,13 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // rejects. React re-runs this render before committing, so nothing downstream
   // ever observes the stale values. Same shape as FeedbackDialog.
   //
-  // `confirming` is NOT reset here: it marks a "Build it" whose start is still
-  // in flight, and closing does not stop that start. Cleared on reopen, the
-  // review re-enabled "Build it" and, with the earlier refusal still on the
+  // `confirmingPlan` is NOT reset here: it marks a "Build it" whose start is
+  // still in flight, and closing does not stop that start. Cleared on reopen,
+  // the review re-enabled "Build it" and, with the earlier refusal still on the
   // store until the run reports 'executing', said "The build did not start."
   // about a build that was starting (PR #10294 board round 9). The pending
-  // call's own `finally` clears it. (`starting` is reset, but it cannot
+  // call's own `finally` clears it, and because it names a plan, a different
+  // plan on the review is never held by it. (`starting` is reset, but it cannot
   // misreport: `startDecomposition` makes the run live before its first await,
   // so a reopen during "Plan my game" resumes the running view, and both reads
   // of `starting` are or-ed with the live status.)
@@ -277,6 +285,23 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     if (!was || askingUser || phase !== 'running') return;
     if (!focusIsWithin(runningRef.current, gateActionsRef.current)) statusRef.current?.focus();
   }, [askingUser, phase]);
+
+  // A review that opens while its "Build it" is still starting (closed and
+  // reopened during the start) mounts with that button disabled, and a
+  // disabled button cannot take focus. Left alone, the Dialog's initial focus
+  // went to the first enabled control, "Buy tokens" or "Discard plan" (PR
+  // #10294 board round 10). Put it on the status line, which says the build
+  // is starting; the gate's own autofocus waits, and moves focus to "Build
+  // it" if the start is refused and the button is enabled again. A different
+  // plan is not held (`startingBuild`), so its "Build it" takes focus as
+  // usual. Only on opening: a "Build it" pressed in an open dialog keeps the
+  // focus handling it has (`ApprovalGateActions`' re-enable restore).
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (open && !wasOpen && startingBuild) statusRef.current?.focus();
+  }, [open, startingBuild]);
 
   // "Play now" appears when the run completes, which is the moment the user
   // has been waiting for: put focus on it so Enter plays. Declared after the
@@ -405,7 +430,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // and the ref is null, so the call is a no-op either way and no test can
   // tell the two apart. The dependency is what matters.
   //
-  // A reopen during an in-flight "Build it" does not scroll: `confirming`
+  // A reopen during an in-flight "Build it" does not scroll: `confirmingPlan`
   // survives the reopen, so `startingBuild` holds the stale refusal back until
   // the start settles.
   const settledRefusal = startingBuild ? null : reviewError;
@@ -416,14 +441,23 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // The plan review's "Build it": the first point at which build tokens are
   // spent. Failures land on the store, not as throws (same contract as
   // `handleSubmit` above), so read the status the run left behind.
+  //
+  // Scoped to the plan it builds, which is the plan `runPipelineFromPlan`
+  // reads off the store at the same moment. A run that settles after the user
+  // has moved on to a different plan (a cancelled run whose step ended late)
+  // reports nothing, since the store's status and error now belong to the
+  // other plan, and releases only its own hold: a newer plan's "Build it" may
+  // be in flight by then.
   const handleConfirmBuild = useCallback(async () => {
+    const plan = useEditorStore.getState().currentPlan;
+    const isThisPlan = () => useEditorStore.getState().currentPlan === plan;
     disarmDiscard();
     setError(null);
-    setConfirming(true);
+    setConfirmingPlan(plan);
     try {
       await runPipelineFromPlan();
       const state = useEditorStore.getState();
-      if (state.orchestratorStatus === 'failed') {
+      if (isThisPlan() && state.orchestratorStatus === 'failed') {
         const message = state.orchestratorError ?? GENERIC_FAILURE;
         setError(message);
         toast.error(message);
@@ -432,11 +466,13 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       // reason in its own alert and status line; a toast as well would announce
       // the same event three times.
     } catch (err) {
-      const message = err instanceof Error && err.message ? err.message : GENERIC_FAILURE;
-      setError(message);
-      toast.error(message);
+      if (isThisPlan()) {
+        const message = err instanceof Error && err.message ? err.message : GENERIC_FAILURE;
+        setError(message);
+        toast.error(message);
+      }
     } finally {
-      setConfirming(false);
+      setConfirmingPlan((held) => (held === plan ? null : held));
     }
   }, [runPipelineFromPlan, disarmDiscard]);
 
@@ -490,10 +526,11 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         approveVariant={discardArmed ? 'destructive' : 'default'}
         onApprove={discardArmed ? handleCancelRun : () => void handleConfirmBuild()}
         // Only "Build it" is held while its start is in flight (a second press
-        // must not start a second build). "Discard it" stays live then: it
+        // must not start a second build), and only for the plan that start
+        // belongs to (`startingBuild`). "Discard it" stays live then: it
         // cancels the start (`cancelPipeline` covers a cancel while the
         // reservation is pending, and releases it if it lands).
-        approveDisabled={!discardArmed && confirming}
+        approveDisabled={!discardArmed && startingBuild}
         cancelLabel={discardArmed ? 'Keep plan' : 'Discard plan'}
         cancelVariant={discardArmed ? 'outline' : 'ghost'}
         onCancel={discardArmed ? keepPlan : handleArmDiscard}

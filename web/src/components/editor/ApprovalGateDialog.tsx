@@ -44,6 +44,16 @@ const CARD = 'rounded-[var(--sf-radius-md)] border border-[var(--sf-warning)] bg
 /** Marks a gate's cancel button inside its action row (rendered literally below). */
 const CANCEL_ATTR = 'data-gate-cancel';
 
+/**
+ * Whether focus is on a control the user could have chosen: one they can Tab
+ * or click to (`tabIndex` 0 or more). Focus that is nowhere, or on an element
+ * only script can focus (`tabIndex` -1: the page body, or a status line
+ * handed focus as a fallback), is not a choice, and may be moved.
+ */
+function focusIsUserChosen(active: Element | null): boolean {
+  return active instanceof HTMLElement && active.tabIndex >= 0;
+}
+
 /** The id of a gate's heading, which also labels its summary region and its action group. */
 function headingIdFor(gate: ApprovalGate): string {
   return `approval-gate-heading-${gate.id}`;
@@ -164,12 +174,15 @@ export interface ApprovalGateActionsProps {
   onApprove: () => void;
   onCancel: () => void;
   /**
-   * Focus Approve on mount (Cancel instead while Approve is destructive: focus
-   * is never handed to a destructive answer). Set by the quick-start dialog, where the gate
-   * replaces the content the user was last focused on — without this, focus
-   * falls to `document.body` inside an `aria-modal` region and keyboard users
-   * have nothing to tab from. The panel leaves it off: the gate appears
-   * beside other content there and stealing focus would be a hijack.
+   * Focus Approve on mount (Cancel instead while Approve is destructive:
+   * focus is never handed to a destructive answer). While Approve is
+   * disabled the focus waits, and is taken when Approve is enabled unless
+   * the user has put focus on a control of their own meanwhile. Set by the
+   * quick-start dialog, where the gate replaces the content the user was
+   * last focused on — without this, focus falls to `document.body` inside an
+   * `aria-modal` region and keyboard users have nothing to tab from. The
+   * panel leaves it off: the gate appears beside other content there and
+   * stealing focus would be a hijack.
    */
   autoFocus?: boolean;
   /**
@@ -239,31 +252,55 @@ export function ApprovalGateActions({
   // cancel button is looked up in the row rather than sharing that ref.
   const buttonsRef = useRef<HTMLDivElement>(null);
 
-  // Focus once per gate (gate.id, so a second gate in the same run re-focuses),
-  // not again when the same gate's approve button changes variant: the plan
-  // review's Keep plan returns focus to its own button, and a re-run here
-  // would pull it onto "Build it".
+  // Focus once per gate (gate.id, so a second gate in the same run re-focuses).
+  // The `approveVariant` and `approveDisabled` dependencies re-run this effect
+  // when the same gate's approve button changes, and the latch below keeps
+  // those re-runs from taking focus again: the plan review's Keep plan
+  // returns focus to its own button, and a second focus here would pull it
+  // onto "Build it".
   //
   // Never onto a destructive approve, the same rule as the re-enable below: if
   // the row mounts with "Discard it" in this place (the plan review reopened
   // while its Discard was still armed, PR #10294 board round 9), focus goes to
   // the cancel button ("Keep plan"), the answer that loses nothing. Skipping
-  // the focus is not enough: the Dialog's deferred initial focus would then
-  // pick the first focusable control in the dialog, which is this one.
+  // the focus is not enough: the Dialog's deferred initial focus picks the
+  // first focusable control in the dialog, which is this one when the body
+  // holds no focusable control of its own.
+  //
+  // Not latched while a non-destructive approve is disabled (the plan review
+  // reopened while its "Build it" is still starting, PR #10294 board round
+  // 10). Focusing a disabled button does nothing, so latching then spent the
+  // gate's one focus on a no-op: the Dialog's initial focus went to the first
+  // enabled control ("Buy tokens" or "Discard plan"), and when the start was
+  // refused nothing put focus back on "Build it". The latch waits for the
+  // button to be enabled, and the focus is taken then unless the user has
+  // since put focus on a control of their own (`focusIsUserChosen`; focus
+  // nowhere, or on a script-only target such as the caller's status line, is
+  // not a choice).
   const autoFocusedGateRef = useRef<string | null>(null);
+  // The gate whose focus is waiting for its disabled approve to be enabled.
+  const deferredGateRef = useRef<string | null>(null);
   useEffect(() => {
     if (!autoFocus) {
       autoFocusedGateRef.current = null;
+      deferredGateRef.current = null;
       return;
     }
     if (autoFocusedGateRef.current === gate.id) return;
-    autoFocusedGateRef.current = gate.id;
     if (approveVariant === 'destructive') {
+      autoFocusedGateRef.current = gate.id;
       buttonsRef.current?.querySelector<HTMLButtonElement>(`[${CANCEL_ATTR}]`)?.focus();
-    } else {
-      approveRef.current?.focus();
+      return;
     }
-  }, [autoFocus, gate.id, approveVariant]);
+    if (approveDisabled) {
+      deferredGateRef.current = gate.id;
+      return;
+    }
+    autoFocusedGateRef.current = gate.id;
+    const waited = deferredGateRef.current === gate.id;
+    if (waited && focusIsUserChosen(approveRef.current?.ownerDocument.activeElement ?? null)) return;
+    approveRef.current?.focus();
+  }, [autoFocus, gate.id, approveVariant, approveDisabled]);
 
   // Pressing Approve can disable it while the action starts (the plan
   // review's "Build it"), and a browser drops focus from a button that

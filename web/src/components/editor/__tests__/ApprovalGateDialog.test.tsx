@@ -286,8 +286,8 @@ describe('ApprovalGateDialog', () => {
     // PR #10294 board round 9 (ux HIGH, defence in depth): the plan review can
     // mount this row with "Discard it" in Approve's place. Focus goes to the
     // cancel answer, never the destructive one. Not focusing at all is not
-    // enough: the Dialog's deferred initial focus would take the first
-    // focusable control, which is the destructive button.
+    // enough: the Dialog's deferred initial focus takes the first focusable
+    // control, which is the destructive button when the body holds none.
     it('focuses the cancel answer, never a destructive approve, on mount', () => {
       render(
         <ApprovalGateActions
@@ -332,6 +332,148 @@ describe('ApprovalGateDialog', () => {
       expect(elsewhere).toHaveFocus();
       rerender(row('gate_assets', false));
       expect(screen.getByRole('button', { name: 'Build it' })).toHaveFocus();
+    });
+
+    // The latch, branch by branch (PR #10294 board round 10, test seat): each
+    // case below goes red when the branch it names is deleted.
+    describe('the once-per-gate latch', () => {
+      const row = ({
+        autoFocus = true,
+        armed = false,
+        disabled = false,
+      }: { autoFocus?: boolean; armed?: boolean; disabled?: boolean } = {}) => (
+        <>
+          <ApprovalGateActions
+            gate={gate}
+            onApprove={vi.fn()}
+            onCancel={vi.fn()}
+            approveLabel={armed ? 'Discard it' : 'Build it'}
+            approveVariant={armed ? 'destructive' : 'default'}
+            cancelLabel={armed ? 'Keep plan' : 'Discard plan'}
+            approveDisabled={!armed && disabled}
+            autoFocus={autoFocus}
+          />
+          <button type="button">Elsewhere</button>
+        </>
+      );
+
+      // `!autoFocus` resets the latch: a caller that turns autoFocus off and
+      // on again is asking for focus again.
+      it('focuses again when autoFocus is turned off and back on', () => {
+        const { rerender } = render(row());
+        const build = screen.getByRole('button', { name: 'Build it' });
+        expect(build).toHaveFocus();
+        rerender(row({ autoFocus: false }));
+        const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+        elsewhere.focus();
+        rerender(row());
+        expect(build).toHaveFocus();
+      });
+
+      // ... and drops a focus that was waiting on a disabled Approve, so the
+      // fresh request is not mistaken for that wait.
+      it('drops a waiting focus when autoFocus is turned off', () => {
+        const { rerender } = render(row({ disabled: true }));
+        rerender(row({ autoFocus: false, disabled: true }));
+        const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+        elsewhere.focus();
+        rerender(row());
+        expect(screen.getByRole('button', { name: 'Build it' })).toHaveFocus();
+      });
+
+      // The destructive branch latches too: Keep plan backs out of the armed
+      // row by turning it back into Build it, and focus stays on the button
+      // the user is on rather than jumping to Build it.
+      it('latches on the destructive mount, so disarming does not pull focus onto Approve', () => {
+        const { rerender } = render(row({ armed: true }));
+        const cancel = screen.getByRole('button', { name: 'Keep plan' });
+        expect(cancel).toHaveFocus();
+        rerender(row());
+        expect(screen.getByRole('button', { name: 'Build it' })).not.toHaveFocus();
+        expect(cancel).toHaveFocus();
+        expect(cancel.textContent).toBe('Discard plan');
+      });
+    });
+
+    // PR #10294 board round 10 (ux, architect): the plan review reopened while
+    // its "Build it" is still starting mounts this row with Approve disabled.
+    // Focusing a disabled button does nothing, and latching the gate's one
+    // focus on that no-op meant a refused start never put focus on "Build
+    // it". The focus waits for the button to be enabled.
+    describe('mounted with Approve disabled', () => {
+      const row = (disabled: boolean, armed = false) => (
+        <>
+          <div role="status" tabIndex={-1}>
+            Starting the build…
+          </div>
+          <ApprovalGateActions
+            gate={gate}
+            onApprove={vi.fn()}
+            onCancel={vi.fn()}
+            approveLabel={armed ? 'Discard it' : 'Build it'}
+            approveVariant={armed ? 'destructive' : 'default'}
+            cancelLabel={armed ? 'Keep plan' : 'Discard plan'}
+            approveDisabled={!armed && disabled}
+            autoFocus
+          />
+          <button type="button">Elsewhere</button>
+        </>
+      );
+
+      it('focuses Approve once it is enabled, from a status line the caller parked focus on', () => {
+        const { rerender } = render(row(true));
+        const build = screen.getByRole('button', { name: 'Build it' });
+        expect(build).toBeDisabled();
+        expect(build).not.toHaveFocus();
+        const status = screen.getByRole('status');
+        status.focus();
+        expect(status).toHaveFocus();
+
+        rerender(row(false));
+        expect(build).toHaveFocus();
+        // Taken once: a later variant change of the same gate does not take
+        // it again.
+        const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+        elsewhere.focus();
+        rerender(row(false, true));
+        rerender(row(false));
+        expect(elsewhere).toHaveFocus();
+      });
+
+      it('focuses Approve once it is enabled when focus is on the page body', () => {
+        const { rerender } = render(row(true));
+        expect(document.activeElement).toBe(document.body);
+        rerender(row(false));
+        expect(screen.getByRole('button', { name: 'Build it' })).toHaveFocus();
+      });
+
+      // `document.activeElement` is null in a document with no body; with no
+      // focus anywhere, nothing the user chose is taken away.
+      it('focuses Approve once it is enabled when there is no active element at all', () => {
+        const { rerender } = render(row(true));
+        const build = screen.getByRole('button', { name: 'Build it' });
+        const focus = vi.spyOn(HTMLButtonElement.prototype, 'focus');
+        Object.defineProperty(document, 'activeElement', { configurable: true, get: () => null });
+        let focusedButtons: unknown[];
+        try {
+          expect(document.activeElement).toBeNull();
+          rerender(row(false));
+          focusedButtons = [...focus.mock.contexts];
+        } finally {
+          delete (document as { activeElement?: unknown }).activeElement;
+          focus.mockRestore();
+        }
+        expect(document.activeElement).not.toBeNull();
+        expect(focusedButtons).toContain(build);
+      });
+
+      it('leaves focus on a control the user chose while Approve was disabled', () => {
+        const { rerender } = render(row(true));
+        const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+        elsewhere.focus();
+        rerender(row(false));
+        expect(elsewhere).toHaveFocus();
+      });
     });
   });
 
