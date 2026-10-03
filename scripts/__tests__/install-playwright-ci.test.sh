@@ -349,6 +349,18 @@ assert_grep "a boot-time holder that outlives the budget is named in the error" 
   "still held by PID 2614 (apt-get) after waiting 30s" "$TMP/err"
 assert_grep "the final error counts zero attempts" "failed after 0 of 5 attempts" "$TMP/err"
 
+# The LAST poll is shortened to what is left of the wait, so the wait ends AT
+# its deadline rather than up to one poll past it. That needs a wait that is
+# not a multiple of the 5s poll: a 153s budget leaves 153 - 120 = 33s, which
+# is six 5s polls and a final 3s one. Unclamped, a seventh 5s poll ends at 35.
+DPKG_TEST_HOLD_AFTER=0 DPKG_TEST_HOLD_UNTIL=99999 PLAYWRIGHT_INSTALL_BUDGET_SECONDS=153 \
+  run_case browsers 0
+assert_eq "a wait that is not a whole number of polls still fails the install" "1" "$?"
+assert_eq "a wait that is not a whole number of polls ends exactly at its deadline" "33" "$(clock)"
+assert_eq "the last poll is shortened to the 3s left of the wait" "3" "$(tail -n 1 "$TMP/sleep-log")"
+assert_grep "the error reports the 33s it waited" \
+  "still held by PID 2614 (apt-get) after waiting 33s" "$TMP/err"
+
 # The minimum-attempt guard on a round that follows a failure. Attempt 1 hangs
 # to its 300s timeout and leaves the orphan; the post-failure probe sees it
 # (skipping the backoff), and the next round's probe sees it gone -- released
@@ -389,6 +401,33 @@ assert_eq "an unreadable lock holder does not block the install" "0" "$?"
 assert_grep "an unreadable lock holder is reported, not silently treated as free" \
   "cannot see the dpkg lock holder" "$TMP/out"
 assert_eq "an unreadable lock holder means fuser is never consulted" "" "$(cat "$TMP/fuser-log")"
+
+# The same false all-clear from the other door: a host with NO fuser at all.
+# The stub dir always supplies one and so does the host, so this case gets a
+# PATH of its own -- every stub but fuser, plus only the host tools the script
+# and the stubs call -- the way the missing-timeout case below is built.
+NO_FUSER="$TMP/no-fuser"
+mkdir "$NO_FUSER"
+for stub in "$STUB"/*; do
+  if [ "$(basename "$stub")" != "fuser" ]; then ln -s "$stub" "$NO_FUSER/"; fi
+done
+for tool in bash dirname cat tr grep sort paste sed; do
+  tool_path="$(command -v "$tool")" || { fail "the no-fuser PATH needs '$tool', which the host lacks"; continue; }
+  ln -s "$tool_path" "$NO_FUSER/$tool"
+done
+# Vacuity guard: the case below is only about a missing fuser if it is missing.
+if PATH="$NO_FUSER" command -v fuser >/dev/null 2>&1; then
+  fail "the no-fuser PATH still resolves a fuser, so the case below proves nothing"
+else
+  pass "the no-fuser PATH resolves no fuser"
+fi
+reset_fixtures
+PLAYWRIGHT_TEST_FAILS=0 PATH="$NO_FUSER" "$BASH_BIN" "$SCRIPT" deps >"$TMP/out" 2>"$TMP/err"
+assert_eq "a host without fuser does not block the install" "0" "$?"
+assert_eq "a host without fuser still runs its one attempt" "1" "$(cat "$TMP/count" 2>/dev/null)"
+assert_grep "a host without fuser is reported, not silently treated as free" \
+  "cannot see the dpkg lock holder" "$TMP/out"
+assert_eq "a host without fuser consults no fuser" "" "$(cat "$TMP/fuser-log")"
 
 # A host with none of the lock files is not an apt host: nothing to probe.
 DPKG_LOCK_FILES="$TMP/dpkg/absent-frontend $TMP/dpkg/absent-lock" run_case deps 0
