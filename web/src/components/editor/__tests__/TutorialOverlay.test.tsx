@@ -295,12 +295,42 @@ describe('TutorialOverlay', () => {
   const ARROW_ROLES = [
     'slider', 'spinbutton', 'radio', 'radiogroup', 'tab', 'tablist', 'tree', 'treeitem',
     'listbox', 'option', 'menu', 'menubar', 'menuitem', 'menuitemradio', 'menuitemcheckbox',
-    'grid', 'gridcell', 'combobox',
+    'grid', 'gridcell', 'combobox', 'application',
   ];
 
   it('covers exactly the roles the overlay leaves the arrows to', () => {
-    expect(ARROW_ROLES).toHaveLength(18);
+    expect(ARROW_ROLES).toHaveLength(19);
     expect([...ARROW_KEY_ROLES].sort()).toEqual([...ARROW_ROLES].sort());
+  });
+
+  // The editor viewport is a focused <canvas role="application"> (CanvasArea),
+  // and in play mode the engine steers with ArrowLeft/ArrowRight without
+  // consuming the event. On the last card ("Press Stop") steering must not
+  // finish the tour. The same canvas without the role is the control: it shows
+  // the keys reach the tour's handler, so the role is what decides.
+  it('leaves the arrow keys to the focused viewport canvas on the last step', () => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    expect(screen.getByText('Step 3 of 3')).toBeInTheDocument();
+    const canvas = document.createElement('canvas');
+    canvas.setAttribute('role', 'application');
+    canvas.tabIndex = 0;
+    document.body.appendChild(canvas);
+    try {
+      canvas.focus();
+      expect(document.activeElement).toBe(canvas);
+      fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+      fireEvent.keyDown(canvas, { key: 'ArrowLeft' });
+      expect(mockCompleteTutorial).not.toHaveBeenCalled();
+      expect(mockAdvanceTutorial).not.toHaveBeenCalled();
+      expect(mockRetreatTutorial).not.toHaveBeenCalled();
+
+      canvas.removeAttribute('role');
+      fireEvent.keyDown(canvas, { key: 'ArrowRight' });
+      expect(mockCompleteTutorial).toHaveBeenCalledOnce();
+    } finally {
+      canvas.remove();
+    }
   });
 
   // The widget carries the role itself, so it is the nearest [role] to the key

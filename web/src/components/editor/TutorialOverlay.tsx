@@ -385,12 +385,16 @@ const KEYLESS_INPUT_TYPES = ['button', 'submit', 'reset', 'checkbox', 'color', '
  * ARIA widgets whose arrow keys ARE the interaction (WAI-ARIA APG): a slider
  * moves, a radio group or tab list changes selection, a tree or list moves
  * focus. The browser's own range and radio inputs behave the same way.
+ * `application` is a surface that handles its own keys: the editor viewport
+ * canvas (`CanvasArea.tsx`), where the engine steers with ArrowLeft/ArrowRight
+ * in play mode (`engine/src/core/input.rs`) without consuming the event, so on
+ * a "Press Stop" card steering would otherwise also step the tour.
  * Exported so the test can hold its own literal list equal to this set.
  */
 export const ARROW_KEY_ROLES: ReadonlySet<string> = new Set([
   'slider', 'spinbutton', 'radio', 'radiogroup', 'tab', 'tablist', 'tree', 'treeitem',
   'listbox', 'option', 'menu', 'menubar', 'menuitem', 'menuitemradio', 'menuitemcheckbox',
-  'grid', 'gridcell', 'combobox',
+  'grid', 'gridcell', 'combobox', 'application',
 ]);
 
 /**
