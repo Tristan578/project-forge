@@ -214,7 +214,9 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   if (embedSnippet) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={(e) => { if (e.target === e.currentTarget) { setEmbedSnippet(null); onClose(); } }}>
-        <div role="dialog" aria-labelledby="embed-dialog-title" aria-modal="true" className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
+        {/* dialogRef marks whichever panel is showing, so Escape and the Tab
+            trap (ownsEscape, the focus loop) see this one as the dialog too. */}
+        <div ref={dialogRef} role="dialog" aria-labelledby="embed-dialog-title" aria-modal="true" className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
           <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
             <h2 id="embed-dialog-title" className="text-base font-semibold text-zinc-100">Embed Code</h2>
             <button

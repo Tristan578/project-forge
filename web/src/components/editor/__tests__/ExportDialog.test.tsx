@@ -259,6 +259,26 @@ describe('ExportDialog', () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  // After an embed export the dialog swaps to the embed-snippet panel. An
+  // Escape from inside THAT panel must still close it (Sentry, on 34124a03).
+  it('closes on an Escape from inside the embed-snippet panel', async () => {
+    setupStore();
+    const onClose = vi.fn();
+    render(<ExportDialog isOpen={true} onClose={onClose} />);
+    fireEvent.click(screen.getByText('Embed (iframe)').closest('label')!.querySelector('input')!);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Export'));
+    });
+    const closeButton = await screen.findByRole('button', { name: 'Close embed dialog' });
+    expect(onClose).not.toHaveBeenCalled();
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    act(() => {
+      closeButton.dispatchEvent(event);
+    });
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   // The tutorial bubble renders ABOVE this dialog, so an Escape from inside it
   // is the tour's (skip), not this dialog's: neither closed nor consumed.
   it('leaves an Escape from another layer (the tutorial bubble) alone', () => {
