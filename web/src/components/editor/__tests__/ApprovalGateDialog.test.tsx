@@ -467,6 +467,34 @@ describe('ApprovalGateDialog', () => {
         expect(focusedButtons).toContain(build);
       });
 
+      // PR #10294 board round 11 (test). The wait belongs to the gate that
+      // mounted disabled. A NEW gate that mounts with Approve enabled has
+      // waited for nothing, so it takes focus as usual, even from a control
+      // the user focused while the earlier gate was waiting.
+      it('focuses a new gate\'s enabled Approve even though an earlier gate waited', () => {
+        const rowFor = (id: string, disabled: boolean) => (
+          <>
+            <ApprovalGateActions
+              gate={{ ...gate, id }}
+              onApprove={vi.fn()}
+              onCancel={vi.fn()}
+              approveLabel="Build it"
+              approveDisabled={disabled}
+              autoFocus
+            />
+            <button type="button">Elsewhere</button>
+          </>
+        );
+        const { rerender } = render(rowFor('gate_a', true));
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+        elsewhere.focus();
+        expect(elsewhere).toHaveFocus();
+
+        rerender(rowFor('gate_b', false));
+        expect(screen.getByRole('button', { name: 'Build it' })).toHaveFocus();
+      });
+
       it('leaves focus on a control the user chose while Approve was disabled', () => {
         const { rerender } = render(row(true));
         const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });

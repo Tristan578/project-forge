@@ -890,6 +890,7 @@ describe('QuickStartDialog', () => {
         // Focus is on the status line, not on the first enabled control (the
         // refusal's "Buy tokens" here, "Discard plan" without one), after the
         // Dialog's deferred initial-focus frame too (PR #10294 board round 10).
+        expect(screen.getByRole('link', { name: 'Buy tokens' })).toBeTruthy();
         await act(async () => {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         });
@@ -1268,7 +1269,7 @@ describe('QuickStartDialog', () => {
       expect(screen.queryByRole('button', { name: /platformer/i })).toBeNull();
     });
 
-    // `confirming` guards the click until the whole run settles, so it must
+    // `confirmingPlan` guards the click until the whole run settles, so it must
     // not own the status line: once the run reports 'executing', and at every
     // mid-run gate, the live region has to say so.
     it('drops "Starting the build" once the run is executing, and shows a mid-run gate\'s wait', async () => {
@@ -1454,6 +1455,32 @@ describe('QuickStartDialog', () => {
       expect(toast.error).toHaveBeenCalledTimes(1);
       expect(toast.error).toHaveBeenCalledWith('Step 2 failed.');
       expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    });
+
+    // PR #10294 board round 11 (test). The status-line focus on opening is
+    // for a review whose OWN Build it is starting (`startingBuild`). A
+    // different plan reopened while a cancelled run is still pending has its
+    // Build it enabled, so focus goes there as usual, not to the status line;
+    // keying the open focus on "any run held, any plan on review" took it
+    // away from the one control the review is for.
+    it('focuses a different plan\'s "Build it", not the status line, when reopened while a cancelled run is pending', async () => {
+      const { rerender, settleOld } = await cancelThenPlanAnother('Discard it');
+      rerender(<QuickStartDialog open={false} onClose={vi.fn()} />);
+      rerender(<QuickStartDialog open onClose={vi.fn()} />);
+      const build = screen.getByRole('button', { name: 'Build it' });
+      expect(build).toBeEnabled();
+      await act(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+      expect(document.activeElement).toBe(build);
+      expect(document.activeElement).not.toBe(screen.getByRole('status'));
+      expect(screen.getByRole('status').textContent).toBe(
+        'Your game plan is ready. Review it, then build.',
+      );
+      await act(async () => {
+        settleOld.resolve();
+      });
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeEnabled();
     });
 
     // PR #10294 board round 10 (ux, architect). The SAME plan reopened while

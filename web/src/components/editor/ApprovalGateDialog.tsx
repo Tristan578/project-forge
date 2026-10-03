@@ -45,10 +45,11 @@ const CARD = 'rounded-[var(--sf-radius-md)] border border-[var(--sf-warning)] bg
 const CANCEL_ATTR = 'data-gate-cancel';
 
 /**
- * Whether focus is on a control the user could have chosen: one they can Tab
- * or click to (`tabIndex` 0 or more). Focus that is nowhere, or on an element
- * only script can focus (`tabIndex` -1: the page body, or a status line
- * handed focus as a fallback), is not a choice, and may be moved.
+ * Whether focus is on a control the user could have chosen: one in the Tab
+ * order (`tabIndex` 0 or more). Focus that is nowhere, or on an element
+ * outside the Tab order (`tabIndex` -1: the page body, or a status line
+ * handed focus as a fallback), is not treated as a choice, even if it was
+ * clicked, and may be moved.
  */
 function focusIsUserChosen(active: Element | null): boolean {
   return active instanceof HTMLElement && active.tabIndex >= 0;
@@ -275,8 +276,8 @@ export function ApprovalGateActions({
   // refused nothing put focus back on "Build it". The latch waits for the
   // button to be enabled, and the focus is taken then unless the user has
   // since put focus on a control of their own (`focusIsUserChosen`; focus
-  // nowhere, or on a script-only target such as the caller's status line, is
-  // not a choice).
+  // nowhere, or on a target outside the Tab order such as the caller's
+  // status line, is not treated as a choice).
   const autoFocusedGateRef = useRef<string | null>(null);
   // The gate whose focus is waiting for its disabled approve to be enabled.
   const deferredGateRef = useRef<string | null>(null);
