@@ -43,7 +43,7 @@ CI runs `npx eslint --max-warnings 0`. Fix immediately, never defer.
   - **Sanctioned clears** (widened, bare-spread, on purpose), both in `web/src/stores/chatStore.ts`: `ToolCallStatus.error` (an execution writes its outcome as a unit, so a success clears a stale error) and `ToolCallStatus.approvalSignature` (a new gate replaces the approvalId/signature pair as a unit, so a stale signature never pairs with a new approvalId). Add to this list, with the reason, before widening another merge target.
 - **`LoosePartial<T>`** (`web/src/lib/types/looseOptional.ts`) types a patch parameter whose fields may be `undefined`. Use it where the function checks each key (`!== undefined`, `??`, or `Object.hasOwn` + `!== undefined`, as `buildPhysicsPatch` does) or spreads the patch into a FRESH command payload, as `spawnTerrain` does for `spawn_terrain`. Never use it for a patch that is bare-spread over EXISTING state.
 - **Casts:** don't cast with `as` to silence the flag in our own code. Casts are sanctioned only for third-party type variance that neither side owns, with a comment saying why:
-  - the MCP SDK `Transport` in `mcp-server/src/transport/http.ts`, tracked for removal in #10278;
+  - the MCP SDK `Transport` in `mcp-server/src/transport/http.ts`, tracked for removal in #10278 and pinned by `mcp-server/src/transport/__tests__/transportGap.test.ts`;
   - Clerk's `dark` theme in `web/src/app/layout.tsx`: `@clerk/themes` (2.4.57) types `cssLayerName?: string | undefined`, while the `appearance.theme` prop it is passed to types the field as plain `string`.
 - **Vendored copy:** after changing `packages/ui/src/`, run `bash apps/design/scripts/sync-vendored-ui.sh` and commit the regenerated `apps/design/vendored/spawnforge-ui/` files.
 
