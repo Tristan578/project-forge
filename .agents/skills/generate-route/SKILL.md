@@ -25,7 +25,7 @@ Create a new `/api/generate/<route-name>` endpoint using `createGenerationHandle
 | 2 | `web/src/lib/tokens/pricing.ts` | Edit — add TOKEN_COSTS entry |
 | 3 | `web/src/app/api/generate/__tests__/route-integration.test.ts` | Edit — add integration test |
 | 4 | `web/src/app/api/__tests__/sentry-regressions.test.ts` | Edit — add to ASYNC_ROUTES if async |
-| 5 | `web/src/app/api/generate/<name>/status/route.ts` | Create if async — gate with `panelTierGateResponseForPoll` before `resolveApiKey` (Step 4) |
+| 5 | `web/src/app/api/generate/<name>/status/route.ts` | Create if async — `panelTierGateResponseForPoll`, then the `verifyProviderJobOwner` ownership refusal, both before `resolveApiKey`; the POST route must bind the job id (Step 4) |
 
 ## Step 1: Create the Route File
 
@@ -171,19 +171,35 @@ it('<name>: rejects missing prompt', async () => {
 An async route usually gets a `GET /api/generate/<name>/status` poller. Pollers
 call `resolveApiKey()` directly rather than through `createGenerationHandler`,
 so the factory's per-panel tier gate does NOT run for them. After
-`withApiMiddleware` authenticates and BEFORE `resolveApiKey`, call the POLL
-variant of the shared gate with the SAME panel id the create route declares,
-and resolve the key as a zero-cost `STATUS_CHECK_OPERATION`:
+`withApiMiddleware` authenticates and BEFORE `resolveApiKey`, IN THIS ORDER:
+call the POLL variant of the shared gate with the SAME panel id the create route
+declares; then refuse a job the caller does not own (#10262); then resolve the
+key as a zero-cost `STATUS_CHECK_OPERATION`:
 
 ```typescript
 import { panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
+import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
+import { jobOwnershipRefusal } from '@/lib/generate/jobOwnershipResponse';
 import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
 // ...
-if (mid.error) return mid.error;
-const tierDenied = panelTierGateResponseForPoll('<panel-id>', mid.authContext!.user);
-if (tierDenied) return tierDenied;
-// ...
-const resolved = await resolveApiKey(mid.userId!, DB_PROVIDER.<x>, 0, STATUS_CHECK_OPERATION);
+async function GET_impl(request: NextRequest) {
+  const mid = await withApiMiddleware(request, { /* requireAuth, rateLimit */ });
+  if (mid.error) return mid.error;
+  const tierDenied = panelTierGateResponseForPoll('<panel-id>', mid.authContext!.user);
+  if (tierDenied) return tierDenied;
+
+  const { searchParams } = new URL(request.url);
+  const jobId = searchParams.get('jobId');
+  if (!jobId) return NextResponse.json({ error: 'Missing jobId parameter' }, { status: 400 });
+
+  // Ownership (#10262): resolveApiKey returns the PLATFORM key, so without
+  // this any signed-in caller could poll another user's job and read its result.
+  const ownership = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.<x>, jobId);
+  if (ownership !== 'owner') return jobOwnershipRefusal(ownership);
+
+  const resolved = await resolveApiKey(mid.userId!, DB_PROVIDER.<x>, 0, STATUS_CHECK_OPERATION);
+  // ... send the provider `jobId` and nothing else the caller chose
+}
 ```
 
 A poll reads a job the caller already paid for, so neither half reads the
@@ -195,9 +211,53 @@ exactly that pair (cost 0 AND the constant, never the literal). Do NOT use the
 create variant `panelTierGateResponse` here: one generation can spend the whole
 trial grant, and the balance-aware rule would then refuse every poll of the job
 the user just paid for. Without the gate at all, a caller whose panel is locked
-could poll a creator-tier provider with the platform key. The gate is NOT a
-job-ownership check: status routes do not bind `jobId` to the caller
-(pre-existing, tracked in #10262). Add route tests: an account below the
+could poll a creator-tier provider with the platform key. The tier gate is
+NOT a job-ownership check; the `verifyProviderJobOwner` refusal after it is.
+
+**The ownership check (#10262).** Write it exactly as above, because
+`src/app/api/__tests__/jobOwnershipCoverage.test.ts` reads its shape from every
+route that calls `resolveApiKey`, at any path:
+
+- both statements are top-level statements of the handler's own body, ahead of
+  the statement holding `resolveApiKey`, and the verdict is a `const`;
+- test the HIT, `ownership !== 'owner'`. The verdict has three states, and
+  `=== 'not_owner'` lets `'unverifiable'` (a failed lookup) through to the
+  platform key. `jobOwnershipRefusal` answers `'not_owner'` with a terminal 404
+  (the poller fails the job and refunds) and `'unverifiable'` with a retryable
+  503 (the poller keeps polling through a DB blip);
+- the user is `mid.userId!` from this body's `withApiMiddleware(...)`, the same
+  one passed to `resolveApiKey`; never a query or body value;
+- `jobId` is the handler's ONLY request input: one `const { searchParams } =
+  new URL(request.url)`, one `const jobId = searchParams.get('jobId')`, and the
+  provider is sent that `jobId`. A second `searchParams.get(...)`,
+  `request.nextUrl`, `request.json()`, `mid.body`, a route-params argument or
+  `next/headers` is reported, because the provider could then be sent an id
+  the check never ran on;
+- import `verifyProviderJobOwner` and `withApiMiddleware` and call them by
+  that binding. A local of the same name, in any scope, is rejected.
+
+**The POST route must bind the id it hands out**, or the owner's own polls are
+refused. `createGenerationHandler` binds `jobIdForOwnership(result)` to the
+caller, awaited before the response; `jobIdForOwnership` defaults to
+`asyncJob.providerJobId`, so a route that declares `asyncJob` binds by default.
+A route with no `asyncJob` (pixel-art: no `generation_type` member) must set
+`jobIdForOwnership: (result) => result.jobId` explicitly. The coverage test
+looks for one of the two in the nearest ancestor route that calls
+`createGenerationHandler`.
+
+Add route tests: a `'not_owner'` verdict answers 404 with
+`JOB_NOT_FOUND_MESSAGE`, and an `'unverifiable'` one 503 with
+`JOB_OWNERSHIP_UNAVAILABLE_MESSAGE`, with `resolveApiKey` and the provider
+client never called in either; the check runs with the authenticated user id,
+`DB_PROVIDER.<x>` and the polled `jobId`, BEFORE `resolveApiKey`; and the
+provider client receives exactly the polled `jobId` when decoy ids
+(`predictionId`, `taskId`, `id`) sit beside it in the query. A route the gate
+should not hold to this shape (a key resolved for a new, token-charged
+operation, or a signed server-to-server callback) goes in the test's
+`KEY_RESOLVING_EXEMPTIONS` with a reason; that is a security decision for
+review, not a way to make the test pass.
+
+Add tier-gate route tests too: an account below the
 panel's tier (for a creator panel, a starter with or without tokens) gets 403
 `TIER_REQUIRED` and `resolveApiKey` is never called; for a hobbyist panel, a
 starter with a spent trial balance is admitted and a never-granted starter
@@ -219,8 +279,12 @@ cd web
 # the integration tests all pass on a route that exports the handler directly,
 # so a checklist without this line reports green on a route outside the control.
 npx vitest run src/app/api/__tests__/egressGuardCoverage.test.ts
+# If the route is async: the ONLY gate that detects a status poller without the
+# ownership check, or a POST route that binds no job id (#10262). Each half is
+# mocked in the other half's tests, so every behavioural suite passes without it.
+npx vitest run src/app/api/__tests__/jobOwnershipCoverage.test.ts
 
-npx vitest run src/app/api/generate/<name>/
+npx vitest run src/app/api/generate/<name>/   # includes status/route.test.ts: 404 + 503 ownership cases
 npx vitest run src/app/api/generate/__tests__/route-integration.test.ts
 npx vitest run src/app/api/__tests__/sentry-regressions.test.ts
 npx eslint --max-warnings 0 src/app/api/generate/<name>/route.ts
@@ -231,6 +295,7 @@ npx tsc --noEmit  # (may need NODE_OPTIONS="--max-old-space-size=4096")
 
 0. **Exporting the handler directly** — `export const POST = createGenerationHandler(...)` is the pre-#9736 shape and puts the route OUTSIDE `withEgressGuard`, so its responses are never redacted. Nothing in lint, types or the integration suite notices; only `egressGuardCoverage.test.ts` does. Always `const POST_impl = ...; export const POST = withEgressGuard(POST_impl);`, and import `withEgressGuard` from `@/lib/security/egressGuard` — an alias or a locally-defined function of the same name is rejected by the coverage test on purpose
 0a. **Missing or misspelled `panel`** — `canAccessPanel` returns true for a panel id absent from `PANEL_TIER_REQUIREMENTS`, so a typo silently removes the server-side tier gate. Copy the id from the map. The same applies to the `panelTierGateResponseForPoll(...)` call in a status poller
+0b. **A status poller without the ownership check, or a POST route that binds nothing** — `resolveApiKey` hands a status poll the PLATFORM key, so a poller that skips `verifyProviderJobOwner` lets any signed-in caller read another user's result, and a POST route with neither `asyncJob` nor `jobIdForOwnership` binds nothing, so the owner's own polls get a terminal 404 and a refund. Only `jobOwnershipCoverage.test.ts` sees either (Step 4)
 1. **Raw provider strings** — always use `DB_PROVIDER.<x>` from `@/lib/config/providers`, never `'anthropic'` or `'openai'` literals
 2. **Truthy checks for optional enum fields** — `if (style && ...)` misses `0`, `false`. Use `style !== undefined && typeof style !== 'string'`
 3. **Missing Number.isInteger() on counts** — `frameCount`, `itemCount` must be integers or billing gets fractional costs
