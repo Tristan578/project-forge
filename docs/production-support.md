@@ -505,12 +505,15 @@ A confirmed miss (a job bound to another account, or never bound) answers
 **404** with "We lost track of this generation, so it was stopped. Try
 generating it again."; the poller treats that as terminal, fails the job and
 refunds it. A failed lookup (a DB error, or the circuit breaker failing fast)
-answers a retryable **503**, which the poller keeps polling through. Rollout
-consequence: the POST routes bind each new job id to its creator before the
-response, so jobs already in flight when this shipped, and any job whose bind
-write failed, were never bound — their next poll gets the terminal 404 and
-the user is refunded. A user reporting "We lost track of this generation"
-right after a deploy is that case; generating again is the fix. The resolver, likewise, skips its tier and balance checks for a
+answers a retryable **503**, which the poller keeps polling through. The POST
+routes bind each new job id to its creator before the response. Migration
+0015 backfilled the jobs already in flight when this shipped (pending,
+processing or downloading, under 24 hours old, from their `generation_jobs`
+rows), except an id that more than one account had claimed, which stays
+unbound. So a job whose bind write failed, an ambiguous id, or a job older
+than 24 hours at deploy gets the terminal 404 and the user is refunded. A user
+reporting "We lost track of this generation" is that case; generating again is
+the fix. The resolver, likewise, skips its tier and balance checks for a
 zero-cost `STATUS_CHECK_OPERATION` call (the pollers and the QStash
 `generation-complete` callback). The polled job was paid for when it was
 created, and one generation can spend the whole grant (a tileset costs 50), so
