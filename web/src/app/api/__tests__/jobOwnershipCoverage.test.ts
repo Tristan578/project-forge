@@ -1123,7 +1123,8 @@ function globalInputProblems(b: Bound): string[] {
   //   for its body, so a read in the parameter list (a default, or a closure
   //   in one) cannot see a function declared in that body; SWC renames the
   //   body's function and leaves the read alone.
-  // - A named class expression's own name, read in its `extends` clause: SWC
+  // - A named class expression's own name, read anywhere in the expression
+  //   OUTSIDE its members (its `extends` clause, or its own decorators): SWC
   //   renames the inner binding and leaves the read alone.
   // Such a declaration does not count for that read.
   const bodyHiddenFrom = (read: ts.Node, d: ts.Declaration): boolean => {
@@ -1132,7 +1133,7 @@ function globalInputProblems(b: Bound): string[] {
         const { body } = n.parent as ts.FunctionLikeDeclaration;
         if (body && d.pos >= body.pos && d.end <= body.end) return true;
       }
-      if (ts.isHeritageClause(n) && n.parent === d && ts.isClassExpression(d)) return true;
+      if (n.parent === d && ts.isClassExpression(d) && !ts.isClassElement(n)) return true;
     }
     return false;
   };
@@ -1173,10 +1174,15 @@ function globalInputProblems(b: Bound): string[] {
     // the bundled module it is the CommonJS wrapper's argument list, whose
     // second entry is `require`. The handler-input rule covers `arguments`
     // only inside the handler, so module scope (and an arrow at module scope)
-    // is reported here.
+    // is reported here. A function's own decorators are evaluated OUTSIDE it,
+    // so a read in one belongs to the scope around the function.
     if (ts.isIdentifier(n) && n.text === 'arguments' && !isNamePosition(n) && !isDeclarationName(n)) {
+      let from: ts.Node = n;
       let fn: ts.Node | undefined = n.parent;
-      while (fn && fn !== sf && !(ts.isFunctionLike(fn) && !ts.isArrowFunction(fn))) fn = fn.parent;
+      while (fn && fn !== sf && !(ts.isFunctionLike(fn) && !ts.isArrowFunction(fn) && !ts.isDecorator(from))) {
+        from = fn;
+        fn = fn.parent;
+      }
       if (!fn || fn === sf) {
         problems.push(`${lineOf(sf, n)}: reads \`arguments\` at module scope (the bundler's module wrapper arguments, which include require)`);
       }
@@ -1964,6 +1970,10 @@ describe('job-id ownership coverage (#10262)', () => {
           'const A = arguments as unknown as unknown[];\n$1'), /reads `arguments` at module scope/],
         ['module-level arguments in an arrow', mutate(feed("const nh = (A()[1] as any)('next/headers');"), HANDLER_OPEN,
           'const A = (): unknown[] => arguments as unknown as unknown[];\n$1'), /reads `arguments` at module scope/],
+        // A method's decorator runs outside the method, so `arguments` in it
+        // is the module's.
+        ['module-level arguments in a method decorator', mutate(feed("const nh = (A[1] as any)('next/headers');"), HANDLER_OPEN,
+          'let A: any;\nclass DA { @((A = arguments, (f: any) => f)) m(): void {} }\nvoid DA;\n$1'), /reads `arguments` at module scope/],
         ['import.meta.webpackContext', feed("const nh = (import.meta as any).webpackContext('next', { recursive: true })('./headers.js');"),
           /reads import\.meta other than import\.meta\.url/],
         // `.require` is ALSO a require reference to the module rule; the global
@@ -2025,6 +2035,7 @@ describe('job-id ownership coverage (#10262)', () => {
           ['a deferred parameter default reading a name its body declares', 'function pf(a: () => any = () => (process as any)' + FETCH + '): any { function process(): any { return 1; } void process; return a(); }', 'process', 'const nh = pf();'],
           ['a deferred default in an arrow reading globalThis its body declares', 'const pf = (a: () => any = () => (globalThis as any).process' + FETCH + '): any => { function globalThis(): any { return 1; } void globalThis; return a(); };', 'globalThis', 'const nh = pf();'],
           ['a class expression name read in its own extends clause', 'let box: any;\nconst K = class process extends ((box = (process as any)' + FETCH + '), Object) {};\nvoid K;', 'process', 'const nh = box;'],
+          ['a class expression name read in its own decorator', 'let box: any;\nfunction dd(x: any): any { box = x; return (c: any): any => c; }\nconst K = @dd((process as any)' + FETCH + ') class process {};\nvoid K;', 'process', 'const nh = box;'],
           // A member EXPORTED from one block of a merged namespace and read bare
           // from a sibling block: the checker resolves the read to the
           // member, but the member is emitted as `N.process`, so the bare
