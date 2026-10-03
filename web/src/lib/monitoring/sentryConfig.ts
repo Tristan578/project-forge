@@ -555,8 +555,9 @@ export const scrubSentryLog = scrubLog;
  * (→ {@link scrubEvent}) and `beforeSendLog` (→ {@link scrubLog}). Two SDK facts
  * make this hook load-bearing rather than precautionary:
  *
- *   - `enableMetrics` **defaults to `true`**, so unlike logs there is no opt-in
- *     line gating the pipeline — any `Sentry.metrics.*` call ships immediately.
+ *   - @sentry v11 has **no `enableMetrics` option** (nor `enableLogs`), so no
+ *     init line gates the pipeline — any `Sentry.metrics.*` call ships
+ *     immediately.
  *   - the SDK copies the active scope's user onto EVERY metric as `user.id`,
  *     `user.email`, and `user.name` (from `username`) — unconditionally, and
  *     BEFORE this hook runs (`_enrichMetricAttributes` in @sentry/core's
@@ -611,6 +612,14 @@ function scrubMetric<T extends { name?: unknown; attributes?: Record<string, unk
 export const scrubSentryMetric = scrubMetric;
 
 /**
+ * Scope-user attributes that v11 stamps onto streamed spans and that
+ * {@link SENSITIVE_KEY_RE} does not name. Each is replaced wholesale, whatever
+ * its value (`user.email` is already covered by the key pattern; `user.id` is
+ * kept for correlation, as on logs and metrics).
+ */
+const STREAMED_SPAN_USER_ATTRIBUTE_KEYS = ['user.name', 'user.username', 'user.ip_address'] as const;
+
+/**
  * Scrub a streamed span before transmission (@sentry v11).
  *
  * v11 made span streaming the default (`traceLifecycle: 'stream'`). Spans are
@@ -637,14 +646,6 @@ export const scrubSentryMetric = scrubMetric;
  * so this always returns the same span object, mutated in place. It is generic
  * so it stays a drop-in for `BeforeSendStreamedSpanCallback`.
  */
-/**
- * Scope-user attributes that v11 stamps onto streamed spans and that
- * {@link SENSITIVE_KEY_RE} does not name. Each is replaced wholesale, whatever
- * its value (`user.email` is already covered by the key pattern; `user.id` is
- * kept for correlation, as on logs and metrics).
- */
-const STREAMED_SPAN_USER_ATTRIBUTE_KEYS = ['user.name', 'user.username', 'user.ip_address'] as const;
-
 function scrubStreamedSpan<
   T extends {
     name?: unknown;
