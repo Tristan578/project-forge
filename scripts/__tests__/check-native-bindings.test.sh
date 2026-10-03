@@ -1060,12 +1060,46 @@ wiring_control "if: on the - line of a gate step outside any derived job" "" nc-
         run: bash scripts/check-native-bindings.sh
       - run: npm run db:drift" \
   "fixture.yml job nc-if-nd: a step that invokes the native-bindings gate carries the key if:"
+# A comment line at the JOB-key indent (four spaces) inside a gate step. YAML
+# ignores it, so the keys after it are still the step's. The sweep's cut ends
+# a step at any four-space line, so without its comment skip this line ends
+# the step early and hides every key after it; nc-coe-cmt's six-space comment
+# cannot reach that branch (test seat on #10296). One fixture, graded for the
+# continue-on-error flag and for the closed key set, which read the same cut;
+# and a derived-job twin for the derived rule's cut.
+cmt4_nd="    steps:
+      - run: npm ci
+      - name: Assert native bindings survived the install
+        run: bash scripts/check-native-bindings.sh
+    # a note at the job-key indent, inside the step
+        continue-on-error: true
+        shell: echo {0}
+      - run: npm run db:drift"
+wiring_control "step continue-on-error after a four-space comment line (every-invocation sweep)" "" nc-coe-cmt4 "$cmt4_nd" \
+  "fixture.yml job nc-coe-cmt4: a step that invokes the native-bindings gate carries a step-level continue-on-error"
+wiring_control "shell: after a four-space comment line (every-invocation sweep)" "" nc-coe-cmt4 "$cmt4_nd" \
+  "fixture.yml job nc-coe-cmt4: a step that invokes the native-bindings gate carries the key shell:"
+wiring_control "shell: after a four-space comment line (derived-job rule)" "" nc-shell-cmt4 "    steps:
+      - run: npm ci
+${gate_name}
+${gate_run}
+    # a note at the job-key indent, inside the step
+        shell: echo {0}
+      - run: npx vitest run" \
+  "fixture.yml job nc-shell-cmt4 loads a native binding but native-bindings step carries the key shell:"
 wiring_control "job-level continue-on-error on a gate-invoking job" "" nc-jcoe "    continue-on-error: true
 $wired_steps" \
   "fixture.yml job nc-jcoe invokes the native-bindings gate but has job-level continue-on-error: true"
 wiring_control "job-level continue-on-error: \${{ true }} on a gate-invoking job" "" nc-jexpr "    \"continue-on-error\": \${{ true }}
 $wired_steps" \
   "fixture.yml job nc-jexpr invokes the native-bindings gate but has job-level continue-on-error: \${{ true }}"
+# A column-0 comment line before the job-level key: YAML ignores it, but the
+# job-level cut leaves jobs: at any column-0 line, so without its comment skip
+# the key after it would never be read.
+wiring_control "job-level continue-on-error after a column-0 comment line" "" nc-jcmt "# a note at column 0, inside the job
+    continue-on-error: true
+$wired_steps" \
+  "fixture.yml job nc-jcmt invokes the native-bindings gate but has job-level continue-on-error: true"
 wiring_control "job-level continue-on-error: false" "" nc-ok "    continue-on-error: false
 $wired_steps" ""
 # The exemption: the same job-level key, with the job named in the table,
