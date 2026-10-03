@@ -287,7 +287,7 @@ WAIVED_GATE="$GATE_VARIANT"
 echo "=== shipped allowlist — the real gate, unmodified (plus its empty steady state) ==="
 # Everything after this section runs against $WAIVED_GATE (one synthetic
 # entry), so the cases here are the ONLY ones that observe the gate as it ships.
-# Three things need proving:
+# What needs proving here:
 #
 #   (a) An EMPTY array works: the exact state the gate returns to when braces
 #       is pruned. $EMPTY_GATE is the real gate with its body replaced by the
@@ -1109,9 +1109,10 @@ fi
 # waiver history is entries that were justified as un-relockable and then
 # quietly stopped being so. Adding an entry, widening a pin, or dropping one must
 # each be a deliberate, reviewed act — which is what failing here forces. The
-# set is EXPECTED to shrink back to empty: when braces is relocked away, delete
-# its line below in the same commit that prunes it (and the section-0 braces
-# cases with it). If you are adding a genuinely un-relockable waiver, add its
+# set is EXPECTED to shrink back to empty: when braces is relocked away, set
+# the value below to '' (the empty reviewed set; do not delete the assignment)
+# in the same commit that prunes it, following the REMOVAL PATH checklist
+# beside the entry in the gate. If you are adding a genuinely un-relockable waiver, add its
 # line here in the same commit and say in the PR body why a relock is impossible.
 #
 # Two reads, because each covers a spelling the other cannot: the body cut sees
@@ -1146,17 +1147,35 @@ fi
 # on one line are two waivers to the gate, and a line-oriented extraction read
 # only the first (measured: an unmirrored second id on the braces line scored
 # "1 id(s)" and passed).
+#
+# The cut is evaluated only after it is proven to be nothing but the
+# declaration: it must open with exactly NAME=( and close with a column-0 ")",
+# and every line between must be blank, a comment, or double-quoted literals
+# with no $, backquote or backslash in them. An indented ")" used to let the
+# cut run on to the end of check-security-alerts.sh, and evaluating that ran
+# its real Dependabot and code-scanning fetches inside this suite (measured).
+# array_elements FILE NAME prints one element per line; exit 2 when the
+# declaration is missing, unclosed at column 0, or holds anything else.
+array_elements() {
+  local file="$1" name="$2" decl body
+  decl="$(awk -v n="$name" 'index($0, n "=(") == 1 && length($0) == length(n) + 2 { f = 1 } f { print } f && /^\)$/ { closed = 1; exit } END { exit !closed }' "$file" 2>/dev/null)" || return 2
+  body="$(sed '1d;$d' <<<"$decl")"
+  if [ -n "$body" ] && grep -vqE '^[[:space:]]*(#.*)?$|^[[:space:]]*("[^"$`\\]*"[[:space:]]*)+(#.*)?$' <<<"$body"; then
+    return 2
+  fi
+  ( eval "$decl"; eval 'for e in ${'"$name"'[@]+"${'"$name"'[@]}"}; do printf "%s\n" "$e"; done' ) 2>/dev/null
+}
+readonly -f array_elements
 alerts_script="$REPO_ROOT/scripts/check-security-alerts.sh"
-audit_decl="$(awk '/^ALLOWED_ADVISORIES=\(/{f=1} f{print} f && /^\)/{exit}' "$SCRIPT" 2>/dev/null || true)"
-ghsa_decl="$(awk '/^ALLOWED_GHSA=\(/{f=1} f{print} f && /^\)/{exit}' "$alerts_script" 2>/dev/null || true)"
-audit_ids="$( (ALLOWED_ADVISORIES=(); eval "$audit_decl"; for e in ${ALLOWED_ADVISORIES[@]+"${ALLOWED_ADVISORIES[@]}"}; do printf '%s\n' "${e%%:*}"; done) 2>/dev/null || true)"
-ghsa_ids="$( (ALLOWED_GHSA=(); eval "$ghsa_decl"; for e in ${ALLOWED_GHSA[@]+"${ALLOWED_GHSA[@]}"}; do printf '%s\n' "$e"; done) 2>/dev/null || true)"
-if [ -z "$audit_decl" ]; then
-  fail "lockstep pin could not cut the ALLOWED_ADVISORIES declaration from the gate — the mirror check below would pass vacuously"
+audit_rc=0; audit_elems="$(array_elements "$SCRIPT" ALLOWED_ADVISORIES)" || audit_rc=$?
+audit_ids="$(while IFS= read -r e; do [ -z "$e" ] || printf '%s\n' "${e%%:*}"; done <<<"$audit_elems")"
+ghsa_rc=0; ghsa_ids="$(array_elements "$alerts_script" ALLOWED_GHSA)" || ghsa_rc=$?
+if [ "$audit_rc" != 0 ]; then
+  fail "lockstep pin could not read the ALLOWED_ADVISORIES declaration from the gate (missing, not closed by a column-0 ')', or holding something other than comments and plain double-quoted entries) — the mirror check below would pass vacuously"
 elif [ -n "$allowlist_elements" ] && [ -z "$audit_ids" ]; then
-  fail "lockstep pin read no advisory id from a non-empty ALLOWED_ADVISORIES body — the declaration no longer evaluates, so the mirror check below would pass vacuously"
-elif [ -n "$audit_ids" ] && [ -z "$ghsa_ids" ]; then
-  fail "lockstep pin read nothing from ALLOWED_GHSA in $alerts_script (moved, renamed, or its column-0 '(' / ')' anchor no longer matches) — the mirror cannot be checked"
+  fail "lockstep pin read no advisory id from a non-empty ALLOWED_ADVISORIES body — the mirror check below would pass vacuously"
+elif [ "$ghsa_rc" != 0 ] || { [ -n "$audit_ids" ] && [ -z "$ghsa_ids" ]; }; then
+  fail "lockstep pin could not read ALLOWED_GHSA in $alerts_script (moved, renamed, not closed by a column-0 ')', or holding something other than comments and plain double-quoted ids) — the mirror cannot be checked"
 else
   missing_ids=""
   while IFS= read -r id; do
@@ -1169,6 +1188,24 @@ else
     fail "waived in the gate but absent from ALLOWED_GHSA in scripts/check-security-alerts.sh:$missing_ids — add it there in the same commit, or the daily Security Alerts cron stays red on an alert this gate already waives (a prune removes the id from the gate as well; follow the REMOVAL PATH checklist beside the entry)"
   fi
 fi
+# array_elements refuses before it evaluates. Each refusal fixture would run a
+# command if it were evaluated, and the marker it would create must not exist.
+f="$FIX/lockstep-indented-close.sh"
+printf '%s\n' 'ALLOWED_GHSA=(' '  "GHSA-aaaa-aaaa-aaaa"' '  )' "touch '$FIX/lockstep-ran-indented'" > "$f"
+rc=0; out="$(array_elements "$f" ALLOWED_GHSA)" || rc=$?
+if [ "$rc" = 2 ] && [ ! -e "$FIX/lockstep-ran-indented" ]; then pass "lockstep reader refuses a declaration whose ')' is not at column 0, and runs nothing after it"; else fail "lockstep reader accepted an indented ')' (rc=$rc, out=[$out]) or ran the code after it"; fi
+f="$FIX/lockstep-unclosed.sh"
+printf '%s\n' 'ALLOWED_GHSA=(' '  "GHSA-aaaa-aaaa-aaaa"' > "$f"
+rc=0; out="$(array_elements "$f" ALLOWED_GHSA)" || rc=$?
+if [ "$rc" = 2 ]; then pass "lockstep reader refuses a declaration with no column-0 ')' at all"; else fail "lockstep reader accepted an unclosed declaration (rc=$rc, out=[$out])"; fi
+f="$FIX/lockstep-expansion.sh"
+printf '%s\n' 'ALLOWED_GHSA=(' "  \"GHSA-\$(touch '$FIX/lockstep-ran-expansion')\"" ')' > "$f"
+rc=0; out="$(array_elements "$f" ALLOWED_GHSA)" || rc=$?
+if [ "$rc" = 2 ] && [ ! -e "$FIX/lockstep-ran-expansion" ]; then pass "lockstep reader refuses an element carrying an expansion, and runs nothing"; else fail "lockstep reader accepted an element with an expansion (rc=$rc, out=[$out]) or ran it"; fi
+f="$FIX/lockstep-two-per-line.sh"
+printf '%s\n' 'ALLOWED_ADVISORIES=(' '  # two waivers on one line are two waivers' '  "GHSA-aaaa-aaaa-aaaa:node_modules/a" "GHSA-bbbb-bbbb-bbbb:node_modules/b"' ')' > "$f"
+rc=0; out="$(array_elements "$f" ALLOWED_ADVISORIES)" || rc=$?
+if [ "$rc" = 0 ] && [ "$out" = "$(printf '%s\n%s' 'GHSA-aaaa-aaaa-aaaa:node_modules/a' 'GHSA-bbbb-bbbb-bbbb:node_modules/b')" ]; then pass "lockstep reader returns both elements of a two-entry line"; else fail "lockstep reader misread a two-entry line (rc=$rc, out=[$out])"; fi
 # Every read of the allowlist array must go through the empty-array guard. This
 # is the half of the bash-3.2 protection that CI can actually enforce. The
 # section-0 runtime check (an `unbound variable` from $EMPTY_GATE) only bites

@@ -48,6 +48,10 @@ set -uo pipefail
 # Known drift: the two esbuild ids below were pruned from the
 # npm-audit list in PF-1002/#9007 and are still listed here (the suite uses
 # GHSA-gv7w-rqvm-qjhr as its allowlisted fixture). Pruning them is its own change.
+#
+# Keep the declaration's `(` and `)` at column 0 on their own lines, and its
+# elements plain double-quoted ids: check-npm-audit.test.sh reads this array
+# for its lockstep pin and refuses (fails) on any other shape.
 ALLOWED_GHSA=(
   # braces <=3.0.3: stack-exhaustion DoS through deeply nested brace patterns.
   # Dev-only, via eslint-config-next -> @next/eslint-plugin-next (pins fast-glob
