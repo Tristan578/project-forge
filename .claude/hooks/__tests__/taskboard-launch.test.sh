@@ -176,13 +176,13 @@ fi
 #      the URL file_url builds there must decode back to the native directory.
 #      nturl2path is importable on every platform, so this runs the Windows
 #      decode on Linux too. A spliced "file://C:/..." puts the drive in the
-#      host field and decodes to \Users\..., which this case reports. The
+#      host field and decodes to \a\..., which this case reports. The
 #      space proves the percent-encoding round-trips.
 if [ -n "$PY" ]; then
-  win_dir='C:/Users/Runner Admin/AppData/Local/Temp/tmp.AbC/file-api'
+  win_dir='C:/a/_temp/Runner Admin/tmp.AbC/file-api'
   win_url="$(file_url "$win_dir" windows)"
   decoded="$("$PY" -W ignore::DeprecationWarning -c 'import nturl2path, sys, urllib.parse; sys.stdout.write(nturl2path.url2pathname(urllib.parse.urlsplit(sys.argv[1] + "/projects").path))' "$win_url")"
-  if [ "$decoded" = 'C:\Users\Runner Admin\AppData\Local\Temp\tmp.AbC\file-api\projects' ]; then
+  if [ "$decoded" = 'C:\a\_temp\Runner Admin\tmp.AbC\file-api\projects' ]; then
     ok "5s. file_url's Windows spelling ($win_url) decodes back to the native fixture path"
   else
     bad "5s. file_url gave $win_url, which Windows urllib decodes to '$decoded', not the fixture directory"
