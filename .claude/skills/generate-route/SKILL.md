@@ -247,9 +247,11 @@ any export added later, whatever its initializer), minus the pinned
   URL(...)`, `Object.keys/values/entries`, `JSON`, `Math`, `Number`, ...;
   never `process` — not even `process.env` — `globalThis`, `global`, `eval`,
   `Function` or `Reflect`). `constructor`, `prototype` and `__proto__` may not
-  appear in the file, and an element access takes a literal name (`x[0]`,
-  `x['a']`, never `x[k]`), because each is a path to `Function` and so to every
-  global;
+  appear in the file, and an element access or a destructuring key takes a
+  literal name (`x[0]`, `x['a']`, never `x[k]` or `const { [k]: f } = x`),
+  because each is a path to `Function` and so to every global; `import.meta`
+  is read only as `import.meta.url` (under webpack,
+  `import.meta.webpackContext(...)` loads a module by name);
 - import `verifyProviderJobOwner` and `withApiMiddleware` and call them by
   that binding. A local of the same name, in any scope, is rejected.
 

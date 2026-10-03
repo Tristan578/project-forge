@@ -22,7 +22,8 @@
  * import only `next/server` and app source under `src/` (no `import()`,
  * `require` or `import =`) and read only the whitelisted globals (`new URL`,
  * `Object.keys/values/entries`, ...; no `process`, `globalThis`, `eval`,
- * `Function`, `constructor` path or computed member name). The exceptions are
+ * `Function`, `constructor` path, computed member or destructuring name, or
+ * `import.meta` but `import.meta.url`). The exceptions are
  * pinned, reasoned exemptions whose property the gate re-checks: a
  * token-charged new operation, a bundled key resolved inside the `execute`
  * step of a charged `createGenerationHandler` generation (sprite's remove.bg

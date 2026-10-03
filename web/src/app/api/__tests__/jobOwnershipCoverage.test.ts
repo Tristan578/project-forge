@@ -103,8 +103,9 @@
  *   `Object.keys/values/entries`, `JSON`, `Math`, ...; never `process`,
  *   `globalThis`, `global`, `eval`, `Function` or `Reflect`), and the path
  *   from any value to `Function` is closed: no `constructor`, `prototype` or
- *   `__proto__` anywhere in the file, and every element access takes a
- *   literal name. So whatever the route
+ *   `__proto__` anywhere in the file, every element access and computed
+ *   property name (`const { [k]: F } = fn`) takes a literal name, and
+ *   `import.meta` is read only as `import.meta.url`. So whatever the route
  *   sends the provider, the only caller-chosen value it can contain is the id
  *   the ownership check ran on. This is a whitelist of the ways IN, not a list
  *   of sinks — the set of sinks is unbounded (#9736).
@@ -129,8 +130,16 @@
  *   accepted until this gate is taught to follow that helper.
  * - A request read inside an app MODULE the route imports (a helper under
  *   `src/` that calls `headers()` and returns the value) is not followed, for
- *   the same reason as the helper limit above; the module whitelist stops the
- *   route reading next/headers itself, not an app helper doing it for it.
+ *   the same reason as the helper limit above; the module and global
+ *   whitelists stop the route reading next/headers itself — by import, or by
+ *   a module fetched through a global such as
+ *   `process.getBuiltinModule('module').createRequire(...)` or
+ *   `process.mainModule.require` — not an app helper doing either for it.
+ * - That the global whitelist is complete against every host: it is a list of
+ *   what a route may read (identifiers resolved by the binder, member names,
+ *   literal-only computed names, `import.meta.url`), proven against the escape
+ *   spellings in the GLOBAL test below; a host that exposes module loading
+ *   through an allowed value would not be seen.
  * - Whether an exemption's REASON is true beyond the property re-checked here.
  */
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -867,8 +876,11 @@ function moduleInputProblems(b: Bound): string[] {
  * - no identifier, property name or string anywhere in the file is
  *   `constructor`, `prototype` or `__proto__` (the path from ANY value to
  *   `Function`, and so to every global);
- * - an element access takes a string or number LITERAL, so a computed name
- *   (`x['con' + 'structor']`) cannot rebuild one.
+ * - an element access, and a computed property name in a destructuring or an
+ *   object literal (`const { [k]: F } = fn`), takes a string or number
+ *   LITERAL, so a computed name (`x['con' + 'structor']`) cannot rebuild one;
+ * - `import.meta` is read only as `import.meta.url` (under webpack,
+ *   `import.meta.webpackContext(...)` loads a module by name).
  *
  * `arguments` and `require` have rules of their own and are not repeated here.
  */
@@ -910,6 +922,18 @@ function globalInputProblems(b: Bound): string[] {
       if (!ts.isStringLiteralLike(arg) && !ts.isNumericLiteral(arg)) {
         problems.push(`${lineOf(sf, n)}: an element access by a computed name (only a string or number literal is readable)`);
       }
+    }
+    // `const { [k]: F } = fn` and `({ [k]: F } = fn)` read a property by a
+    // computed name exactly as `fn[k]` does, with no element access at all.
+    if (ts.isComputedPropertyName(n) && !ts.isStringLiteralLike(n.expression) && !ts.isNumericLiteral(n.expression)) {
+      problems.push(`${lineOf(sf, n)}: a computed property name (only a string or number literal is readable)`);
+    }
+    // `import.meta` is a host object, not a binding: under webpack
+    // `import.meta.webpackContext(...)` loads modules by name. Only its `.url`
+    // string is readable.
+    if (ts.isMetaProperty(n) && n.keywordToken === ts.SyntaxKind.ImportKeyword
+      && !(ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n && n.parent.name.text === 'url')) {
+      problems.push(`${lineOf(sf, n)}: reads import.meta other than import.meta.url (a host object that can load a module)`);
     }
     if (ts.isIdentifier(n) && !isNamePosition(n) && n.text !== 'arguments' && n.text !== 'require') {
       const symbol = ts.isShorthandPropertyAssignment(n.parent) && n.parent.name === n
@@ -1454,7 +1478,8 @@ describe('job-id ownership coverage (#10262)', () => {
       + 'only next/server and app source under web/src (no bare package such as zod, no next/headers; no '
       + 'import(), require, module.require or import =), and reads only the globals in ALLOWED_GLOBALS '
       + '(new URL, Object.keys/values/entries, JSON, Math, ... — never process, globalThis, eval or Function), '
-      + 'with no constructor/prototype/__proto__ and no computed element access — move anything else into an '
+      + 'with no constructor/prototype/__proto__, no computed element access or destructuring key, and no '
+      + 'import.meta but import.meta.url — move anything else into an '
       + 'app helper under src/lib. See src/lib/generate/jobOwnership.ts and .claude/skills/generate-route/SKILL.md Step 4.',
     ).toEqual([]);
   });
@@ -1666,7 +1691,7 @@ describe('job-id ownership coverage (#10262)', () => {
         PROVIDER_CALL,
         'client.$1(other)',
       );
-      const variants: Array<[string, string, RegExp]> = [
+      const variants: Array<[string, string, RegExp, boolean?]> = [
         ['process.getBuiltinModule', feed(`const nh = process${FETCH};`), /reads the global 'process'/],
         ['globalThis', feed(`const nh = globalThis.process${FETCH};`), /reads the global 'globalThis'/],
         ['a shorthand property', feed(`const box = { process };\nconst nh = box.process${FETCH};`), /reads the global 'process'/],
@@ -1679,8 +1704,20 @@ describe('job-id ownership coverage (#10262)', () => {
         ['Function', feed(`const nh = Function('return process')()${FETCH};`), /reads the global 'Function'/],
         ['an Object member off the list', feed("const F = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Object.getPrototypeOf(jobId)), 'cons' + 'tructor')!.value;\n"
           + `const nh = F('return process')()${FETCH};`), /reads the global 'Object' in a way not allowed/],
+        // A computed name in a destructuring reads a property with no element access.
+        ['a computed destructuring', feed("const k = 'con' + 'structor';\n"
+          + 'const { [k]: C } = 0 as unknown as Record<string, Record<string, (s: string) => () => NodeJS.Process>>;\n'
+          + `const { [k]: F } = C;\nconst nh = F('return process')()${FETCH};`), /a computed property name/],
+        ['a computed assignment pattern', feed("const k = 'con' + 'structor';\nlet C: any;\nlet F: any;\n"
+          + `({ [k]: C } = 0 as any);\n({ [k]: F } = C);\nconst nh = F('return process')()${FETCH};`), /a computed property name/],
+        ['import.meta.webpackContext', feed("const nh = (import.meta as any).webpackContext('next', { recursive: true })('./headers.js');"),
+          /reads import\.meta other than import\.meta\.url/],
+        // `.require` is ALSO a require reference to the module rule; the global
+        // rule must still report `process` on its own.
+        ['process.mainModule', feed("const nh = (process as any).mainModule.require('next/headers');"),
+          /reads the global 'process'/, true],
       ];
-      for (const [name, mutated, rule] of variants) {
+      for (const [name, mutated, rule, moduleRuleToo] of variants) {
         expect(mutated, `${r.rel} ${name}`).toContain('client.');
         expect(mutated.match(/const other = /g), `${r.rel} ${name}`).toHaveLength(1);
         const analysis = analyseStatusRoute(mutated, r.file);
@@ -1689,15 +1726,17 @@ describe('job-id ownership coverage (#10262)', () => {
         expect(analysis.untraceable, `${r.rel} ${name}`).toEqual([]);
         const report = analysis.foreignInputs.join('\n');
         expect(report, `${r.rel} ${name}`).toMatch(rule);
-        expect(report, `${r.rel} ${name}`).not.toMatch(MODULE_RULE);
+        if (!moduleRuleToo) expect(report, `${r.rel} ${name}`).not.toMatch(MODULE_RULE);
       }
     }
     // ...and the allowed uses stay clean: new URL, Object.values, JSON, a
-    // literal index, and a type-position global.
+    // literal index, a literal computed key, import.meta.url, and a
+    // type-position global.
     const model = guardedStatus.find((a) => a.rel === 'api/generate/model/status/route.ts');
     expect(model).toBeTruthy();
     const allowed = mutate(model!.source, POLLED_ID,
-      "$&\n$1const shape: typeof globalThis | undefined = undefined;\n$1void [Object.values({ a: 1 })[0], JSON.stringify(shape), Number('1')];");
+      "$&\n$1const shape: typeof globalThis | undefined = undefined;\n$1void [Object.values({ a: 1 })[0], JSON.stringify(shape), Number('1')];"
+      + "\n$1const { ['a']: lit } = { ['a']: import.meta.url };\n$1void lit;");
     expect(analyseStatusRoute(allowed, model!.file).foreignInputs).toEqual([]);
   });
 
