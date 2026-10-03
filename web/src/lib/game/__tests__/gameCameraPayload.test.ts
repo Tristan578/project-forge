@@ -1359,10 +1359,9 @@ describe('blendGameCameraData', () => {
  * `Number.isFinite()` was the whole guard at four separate surfaces, and it is
  * not enough: a negative `followSmoothing` reaches the engine as a negative
  * `damping`, and the follow step lerps toward the target by `damping * delta`.
- * `lerp` does not bound its parameter, so a negative one EXTRAPOLATES — the
- * camera moves away from what it is converging on by a fixed fraction of the
- * remaining gap every frame, which compounds into divergence while the view
- * stays pointed at the target.
+ * Before the engine floored that factor at 0 (PF-1166) a negative one
+ * extrapolated away from the target and compounded every frame; with the floor
+ * it is a frozen camera, and the engine's `flat_damping` refuses it outright.
  *
  * A blanket non-negative rule is equally wrong, which is why this is a policy
  * per field rather than one reader: three of the ten are legitimately signed.

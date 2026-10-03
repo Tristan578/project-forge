@@ -104,9 +104,10 @@ export const GAME_CAMERA_WIRE_KEYS = Object.keys(
 /**
  * Wire keys the engine HARD-REJECTS below zero (`flat_damping`).
  *
- * A negative rate is not a slower camera, it is a lerp factor pointing the wrong
- * way — the camera extrapolates away from its target and compounds the gap every
- * frame (PF-1166). The engine refuses it, and `set_game_camera` is a full-replace
+ * A negative rate is not a slower camera, it asks the follow to move away from
+ * its target. Before `follow_lerp_factor` floored the factor at 0 that
+ * extrapolated and compounded the gap every frame (PF-1166); with the floor it
+ * is a camera frozen where it is. Either way the engine refuses it, and `set_game_camera` is a full-replace
  * command, so one bad rate loses `mode`, `targetEntity` and `offset` along with
  * it. Screening the key here keeps the rest of the command dispatchable, which is
  * the whole reason the tightening needs a matching guard on this side.
@@ -229,14 +230,13 @@ export const ENGINE_CAMERA_DEFAULTS = {
  *
  * `Number.isFinite()` alone is not the whole guard. A negative `followSmoothing`
  * reaches the engine as a negative `damping`, and the follow step is a `lerp`
- * toward the target by `damping * delta` — `lerp` does not bound its parameter,
- * so a negative one EXTRAPOLATES: the camera moves directly away from where it
- * is converging, by a fixed fraction of the remaining gap, every frame. That
- * compounds into a view receding toward infinity while still pointing at the
- * target, so nothing looks wrong at the target itself. (The engine now clamps
- * the factor to `[0, 1]` in `follow_lerp_factor` as well — a public `from_flat` cannot
- * assume it was reached through this module — but a value that can only ever
- * mean "the author made a mistake" should not be dispatched in the first place.)
+ * toward the target by `damping * delta`. `lerp` does not bound its parameter,
+ * so before the engine floored the factor (PF-1166) a negative one extrapolated:
+ * the view receded from the target a fixed fraction of the gap every frame
+ * while still pointing at it. The engine now clamps the factor to `[0, 1]` in
+ * `follow_lerp_factor`, so a negative rate is a camera frozen where it is, and
+ * `flat_damping` refuses it outright. A value that can only ever mean "the
+ * author made a mistake" should not be dispatched in the first place.
  * The remaining seven are incoherent rather than divergent: a negative
  * `followDistance` puts the camera in front of what it follows, a negative
  * `topDownHeight` puts it under the floor.
