@@ -200,8 +200,8 @@ if [ "$rc" = "0" ]; then pass "path with spaces → gate 0 (quoting holds)"; els
 #    check-npm-audit.test.sh's quality-gates/ci.yml/cd.yml sections). The gate
 #    is only real if CI actually invokes it; a PR that unwires an invocation,
 #    adds continue-on-error, or drops the self-defense registration must fail
-#    here. WHICH workflows are read is a glob over .github/workflows/*.yml, not
-#    a list: the same rationale that derives the job set applies one level up.
+#    here. WHICH workflows are read is a glob over .github/workflows/*.yml and
+#    *.yaml, not a list: the same rationale that derives the job set applies one level up.
 #    The derivation read ci.yml alone (#10200), then a hand list of three
 #    (#10222, first cut) — a fourth workflow gaining a vitest job would have
 #    sat outside the pin exactly as cd.yml's test-web and test-mcp did.
