@@ -321,7 +321,7 @@ Typical hand-edit homes (the project ID in particular recurs in `curl` examples)
 Two required CI gates enforce this so a missed surface fails the PR instead of
 silently onboarding the next contributor against a broken board:
 
-- **`agentic-sync`** — runs two checks, with two different fixes:
+- **`agentic-sync`** — runs three checks, with three different fixes:
   - `sync.mjs --check` fails if any of the four generated targets drifts from
     `canonical.json`. Fix: re-run step 2 and commit.
   - `scripts/check-codex-port.sh` fails if the generated Codex CLI surface
@@ -332,6 +332,16 @@ silently onboarding the next contributor against a broken board:
     new source file (only tracked files are mirrored), run
     `node tools/agentic-sync/port.mjs --write`, and commit what it regenerates.
     The gate's output names each problem and the recipe for its kind.
+  - `scripts/check-copilot-hooks.sh` fails if a Copilot hook file in
+    `.github/hooks/` names an event that is not a documented Copilot event or
+    alias; wires `on-stop.sh` to anything but an end-of-turn event, or to no
+    end-of-turn event at all; runs a `*.sh` that does not exist; or runs a
+    script on the same event as `.claude/settings.json` without the
+    `COPILOT_AGENT_PROMPT` guard (Copilot CLI reads both files and would run it
+    twice), or with the guard on a script `.claude/settings.json` does not run
+    on that event (Copilot CLI would then never run it). Fix: the gate names
+    each problem and what to change; the rule for which file owns each event
+    is in the Hooks section of `.github/copilot-instructions.md`.
 - **`taskboard-onboarding-guard`** (`scripts/check-taskboard-onboarding-hygiene.sh`)
   — greps the **whole tree** and fails on a known-dead taskboard ULID *or* a
   taskboard start command carrying the forbidden `--db` flag (which points the

@@ -4,8 +4,7 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "bash .claude/hooks/on-session-start.sh",
-        "powershell": "bash .claude/hooks/on-session-start.sh",
+        "bash": "[ -n \"${COPILOT_AGENT_PROMPT+x}\" ] || exit 0; bash .claude/hooks/on-session-start.sh",
         "cwd": ".",
         "timeoutSec": 20
       }
@@ -13,17 +12,15 @@
     "userPromptSubmitted": [
       {
         "type": "command",
-        "bash": "bash .claude/hooks/on-prompt-submit.sh",
-        "powershell": "bash .claude/hooks/on-prompt-submit.sh",
+        "bash": "[ -n \"${COPILOT_AGENT_PROMPT+x}\" ] || exit 0; bash .claude/hooks/on-prompt-submit.sh",
         "cwd": ".",
         "timeoutSec": 5
       }
     ],
-    "postToolUse": [
+    "agentStop": [
       {
         "type": "command",
-        "bash": "bash .claude/hooks/on-stop.sh",
-        "powershell": "bash .claude/hooks/on-stop.sh",
+        "bash": "[ -n \"${COPILOT_AGENT_PROMPT+x}\" ] || exit 0; bash .claude/hooks/on-stop.sh",
         "cwd": ".",
         "timeoutSec": 20
       }

@@ -297,9 +297,10 @@ Claude Code also has three **subagents** (`.claude/agents/`):
 
 ```bash
 cd project-forge
-# Copilot reads .github/hooks/hooks.json and .github/copilot-instructions.md
+# Copilot reads .github/hooks/*.json and .github/copilot-instructions.md
+# (Copilot CLI also runs the hooks in .claude/settings.json)
 ```
-Hooks trigger on session start (pull), prompt submit (ticket gate), and post-tool-use (validate + push). Skills available in `.github/skills/` and `.agents/skills/`; manual sync is the `sync-pull` and `sync-push` skills.
+Hooks trigger on session start (pull), prompt submit (ticket gate), end of turn (`on-stop.sh`: worktree safety commit + GitHub sync), and post-tool-use (architecture check). Which file owns each event for Copilot CLI versus the cloud agent is in the Hooks section of `.github/copilot-instructions.md`. Skills available in `.github/skills/` and `.agents/skills/`; manual sync is the `sync-pull` and `sync-push` skills.
 
 </details>
 
@@ -523,7 +524,8 @@ project-forge/
 │   │       └── check_arch.py
 │   └── taskboard.db             #   SQLite database (186+ tickets)
 ├── .github/                     # GitHub Copilot
-│   ├── hooks/hooks.json         #   Hook wiring (sessionStart, promptSubmit, postToolUse)
+│   ├── hooks/                   #   hooks.json: cloud-agent-only (sessionStart, userPromptSubmitted, agentStop);
+│   │                            #   session-setup.json, validation.json run on both (CLI uses .claude/settings.json)
 │   ├── copilot-instructions.md  #   Copilot guidance (agentic-sync target)
 │   ├── instructions/review.instructions.md  # PR review criteria
 │   └── skills/                  #   kanban, sync-push, sync-pull

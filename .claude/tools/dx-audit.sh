@@ -131,6 +131,24 @@ else
   fail "scripts/check-codex-port.sh missing"
 fi
 
+# The Copilot hook files (.github/hooks/*.json) are the third gate in CI's
+# Agentic Config Sync job: events, end-of-turn scripts, script paths, and
+# scripts that .claude/settings.json also wires (Copilot CLI reads both).
+COPILOT_GATE="$PROJECT_ROOT/scripts/check-copilot-hooks.sh"
+if [ -f "$COPILOT_GATE" ]; then
+  if command -v node > /dev/null 2>&1; then
+    if bash "$COPILOT_GATE" > /dev/null 2>&1; then
+      pass "Copilot hook files valid (.github/hooks, cross-checked with .claude/settings.json)"
+    else
+      fail "Copilot hook files invalid — run: bash scripts/check-copilot-hooks.sh (it names each problem)"
+    fi
+  else
+    warn "node not found — cannot verify the Copilot hook files"
+  fi
+else
+  fail "scripts/check-copilot-hooks.sh missing"
+fi
+
 # ============================================
 # 2. Validation Script Health
 # ============================================
