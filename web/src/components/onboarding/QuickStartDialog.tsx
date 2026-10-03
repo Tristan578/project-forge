@@ -158,8 +158,9 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const firstCardRef = useRef<HTMLButtonElement>(null);
   const playNowRef = useRef<HTMLButtonElement>(null);
   const reviewErrorRef = useRef<HTMLDivElement>(null);
-  // The gate's Approve / Cancel row. It lives in the Dialog's footer, outside
-  // `runningRef`, so "focus is already in the build view" checks both.
+  // The gate's decision row (Build it / Discard plan, or Approve / Stop
+  // build). It lives in the Dialog's footer, outside `runningRef`, so "focus
+  // is already in the build view" checks both.
   const gateActionsRef = useRef<HTMLDivElement>(null);
   const prevPhaseRef = useRef<Phase | null>(null);
 
@@ -349,6 +350,17 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     discardRef,
   } = useDiscardConfirm(currentPlan, planGate !== null);
 
+  // Arming turns the pressed "Discard plan" into "Keep plan", which is meant
+  // to hold focus so a second press backs out. A mouse click does not focus a
+  // button in Safari, and a "Build it" still in flight has already dropped
+  // focus to <body> by disabling itself, so put focus there explicitly. Left
+  // on <body>, the arm re-enables the approve button (now "Discard it") and
+  // its focus restore would land on the destructive answer (PR #10294 round 5).
+  const handleArmDiscard = useCallback(() => {
+    discardRef.current?.focus();
+    armDiscard();
+  }, [armDiscard, discardRef]);
+
   // A refused "Build it" puts its reason (an alert, with the follow-up link
   // when there is one) in the review, above the cost, while the button the
   // user pressed sits in the footer, outside the Dialog body's scroll. On a
@@ -420,7 +432,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   if (!open) return null;
 
   // The open gate's decision row: the plan review's Build it / Discard plan,
-  // or a mid-run gate's Approve / Cancel. It is rendered in the Dialog's
+  // or a mid-run gate's Approve / Stop build. It is rendered in the Dialog's
   // footer, NOT in the body with the gate's summary. The body is the one
   // scroller here, and the footer is outside it, so the row is in view at
   // every scroll offset without being pinned on top of anything. Rounds 3 and
@@ -446,10 +458,14 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         approveLabel={discardArmed ? 'Discard it' : 'Build it'}
         approveVariant={discardArmed ? 'destructive' : 'default'}
         onApprove={discardArmed ? handleCancelRun : () => void handleConfirmBuild()}
+        // Only "Build it" is held while its start is in flight (a second press
+        // must not start a second build). "Discard it" stays live then: it
+        // cancels the start (`cancelPipeline` covers a cancel while the
+        // reservation is pending, and releases it if it lands).
         approveDisabled={!discardArmed && confirming}
         cancelLabel={discardArmed ? 'Keep plan' : 'Discard plan'}
         cancelVariant={discardArmed ? 'outline' : 'ghost'}
-        onCancel={discardArmed ? keepPlan : armDiscard}
+        onCancel={discardArmed ? keepPlan : handleArmDiscard}
         cancelRef={discardRef}
         summary={
           discardArmed ? (
@@ -463,9 +479,16 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         autoFocus
       />
     ) : pendingGate ? (
+      // Rejecting a mid-build gate ends the build (`resolveGate('rejected')`
+      // sets 'cancelled', and the runner releases the unused tokens), so the
+      // button says so. It is the footer's ONLY stop control while the gate is
+      // up: the dialog's own Stop is hidden below, and "Close" (which only
+      // hides the dialog) must not sit beside a vague "Cancel" that ends the
+      // run (PR #10294 round 5).
       <ApprovalGateActions
         gate={pendingGate}
         onApprove={() => resolveGate('approved')}
+        cancelLabel="Stop build"
         onCancel={() => resolveGate('rejected')}
         autoFocus
       />
@@ -500,9 +523,10 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
         {/* Only while there is something to stop: cancelPipeline after a run
             has completed or failed flips the status to 'cancelled' and re-POSTs
             the token release. Mirrors OrchestratorPanel's footer guard. */}
-        {/* The plan review carries its own "Discard plan", which does the same thing;
-            a second one beside it would be two controls for one action. */}
-        {runIsLive && !planGate && (
+        {/* An open gate carries its own way out, which does the same thing:
+            the plan review's "Discard plan", a mid-build gate's "Stop build".
+            A second one beside it would be two controls for one action. */}
+        {runIsLive && !planGate && !pendingGate && (
           <Button variant="ghost" size="sm" onClick={handleCancelRun}>
             Stop
           </Button>
@@ -517,7 +541,14 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
             Play now
           </Button>
         )}
-        <Button variant={status === 'completed' ? 'ghost' : undefined} size="sm" onClick={onClose}>
+        {/* One filled button per row. Beside "Play now", or beside a gate's
+            own primary (Build it, Approve), Close steps back so the button
+            that acts is the only filled one; on its own it is the default. */}
+        <Button
+          variant={status === 'completed' ? 'ghost' : gateActions ? 'outline' : undefined}
+          size="sm"
+          onClick={onClose}
+        >
           Close
         </Button>
         </div>

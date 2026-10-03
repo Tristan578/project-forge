@@ -10,7 +10,9 @@
  *
  * Two layouts share one markup:
  * - `ApprovalGateDialog` (the orchestrator panel): the gate's summary in its
- *   own bounded scroll region, with the cost and the buttons below it.
+ *   own bounded scroll region, with the buttons below it (and any `children`
+ *   between the two). The panel shows the plan's cost in its own
+ *   `TokenCostBar`, above the gate, so it passes no children.
  * - `ApprovalGateSummary` + `ApprovalGateActions` (the quick-start dialog):
  *   the summary flows into the `@spawnforge/ui` Dialog body, which is the
  *   one scroller, and the buttons go in the Dialog's `actions` footer, which
@@ -239,14 +241,17 @@ export function ApprovalGateActions({
   // dialog. If the action is refused the gate stays, the button comes back
   // enabled, and focus is still nowhere (measured, PR #10294 round 5). Put it
   // back on the button, unless the user has since focused something else.
+  // Never onto a destructive button: the plan review re-enables this place as
+  // "Discard it" when Discard is armed during an in-flight Build it, and
+  // focus handed to it unasked is one Enter away from throwing the plan out.
   const wasDisabledRef = useRef(approveDisabled);
   useEffect(() => {
     const wasDisabled = wasDisabledRef.current;
     wasDisabledRef.current = approveDisabled;
-    if (!wasDisabled || approveDisabled) return;
+    if (!wasDisabled || approveDisabled || approveVariant === 'destructive') return;
     const active = approveRef.current?.ownerDocument.activeElement;
     if (!active || active === approveRef.current?.ownerDocument.body) approveRef.current?.focus();
-  }, [approveDisabled]);
+  }, [approveDisabled, approveVariant]);
 
   return (
     <div
@@ -299,17 +304,19 @@ export function ApprovalGateSummary({ gate, children }: { gate: ApprovalGate; ch
 
 /**
  * The whole gate in one card, buttons included, for the orchestrator panel:
- * the summary bounds itself and the cost and buttons sit below that bound,
- * so they are never scrolled away with it.
+ * the summary bounds itself and the buttons (and any `children`) sit below
+ * that bound, so they are never scrolled away with it.
  */
 export function ApprovalGateDialog({
   children,
   ...actions
 }: Omit<ApprovalGateActionsProps, 'summary' | 'className'> & {
   /**
-   * Extra content between the scrollable summary and the buttons — the plan
-   * review's token cost. Outside the scroll region on purpose: a cost the user
-   * has to scroll to find is not a cost they confirmed.
+   * Optional extra content, rendered between the bounded summary and the
+   * buttons: outside the summary's scroll region, so it stays beside the
+   * buttons however long the summary is. No caller in the app passes it
+   * today (the panel's cost is its own `TokenCostBar`; the quick-start
+   * review passes its cost to `ApprovalGateSummary`).
    */
   children?: ReactNode;
 }) {

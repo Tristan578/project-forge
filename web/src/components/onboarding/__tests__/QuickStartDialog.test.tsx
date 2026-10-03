@@ -12,6 +12,8 @@ import {
   waitFor,
   within,
 } from '@/test/utils/componentTestUtils';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Button } from '@spawnforge/ui';
 import { toast } from 'sonner';
 import { QuickStartDialog } from '../QuickStartDialog';
 import {
@@ -155,6 +157,41 @@ function expectActionsInFooter(button: HTMLElement) {
   expect(heading?.tagName).toBe('H3');
   expect(body?.contains(heading as Node)).toBe(true);
   expect(group?.getAttribute('data-testid')).toBe('approval-gate-actions');
+}
+
+/** The class tokens `@spawnforge/ui`'s Button renders for one variant. */
+function buttonVariantTokens(variant: 'default' | 'destructive' | 'outline' | 'ghost'): Set<string> {
+  const host = document.createElement('div');
+  host.innerHTML = renderToStaticMarkup(
+    <Button variant={variant} size="sm">
+      x
+    </Button>,
+  );
+  return new Set((host.querySelector('button')?.className ?? '').split(/\s+/).filter(Boolean));
+}
+
+/**
+ * The labels of the filled primary buttons in the Dialog footer. "Filled
+ * primary" is derived from the Button itself: the class tokens only the
+ * default variant renders, so a restyled Button changes both sides at once.
+ */
+function filledFooterButtons(): string[] {
+  const primary = buttonVariantTokens('default');
+  const others = [
+    buttonVariantTokens('destructive'),
+    buttonVariantTokens('outline'),
+    buttonVariantTokens('ghost'),
+  ];
+  const primaryOnly = [...primary].filter((token) => others.every((set) => !set.has(token)));
+  // Vacuity guard: with no token unique to the primary, every button would
+  // count as "not filled" and the assertions below could never fail.
+  expect(primaryOnly.length).toBeGreaterThan(0);
+  const footer = screen.getByRole('dialog').querySelector('[data-dialog-actions]');
+  const buttons = Array.from(footer?.querySelectorAll('button') ?? []);
+  expect(buttons.length).toBeGreaterThan(0);
+  return buttons
+    .filter((button) => primaryOnly.every((token) => button.classList.contains(token)))
+    .map((button) => (button.textContent ?? '').trim());
 }
 
 /** Walks the dialog from the type cards to the prompt step. */
@@ -354,13 +391,45 @@ describe('QuickStartDialog', () => {
     const approve = screen.getByRole('button', { name: 'Approve' });
     expect(screen.getByText('Generate assets?')).toBeTruthy();
     expectActionsInFooter(approve);
-    expectActionsInFooter(screen.getByRole('button', { name: 'Cancel' }));
-    // The gate's summary stays in the body; "Stop" and "Close" share the footer.
+    expectActionsInFooter(screen.getByRole('button', { name: 'Stop build' }));
+    // The gate's summary stays in the body; "Close" shares the footer.
     const body = screen.getByRole('dialog').querySelector('[data-dialog-body]');
     expect(body?.contains(screen.getByRole('heading', { name: 'Generate assets?' }))).toBe(true);
     const footer = screen.getByRole('dialog').querySelector('[data-dialog-actions]');
-    expect(footer?.contains(screen.getByRole('button', { name: 'Stop' }))).toBe(true);
     expect(footer?.contains(screen.getByRole('button', { name: 'Close' }))).toBe(true);
+  });
+
+  // PR #10294 round 5 (ux): a mid-build gate's "Cancel" ends the build
+  // (`resolveGate('rejected')` sets 'cancelled'), and the dialog's own "Stop"
+  // sat beside it doing the same, with "Close" (which only hides the dialog)
+  // next to both: "Approve | Cancel | Stop | Close". The gate's button is now
+  // the one way to stop, and says so; Close is no longer a second filled
+  // primary beside Approve.
+  it('gives a mid-build gate one stop control, "Stop build", and one filled button, Approve', async () => {
+    const onClose = vi.fn();
+    const { rerender } = render(<QuickStartDialog open onClose={onClose} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
+    setState({
+      orchestratorStatus: 'executing',
+      pendingGate: {
+        id: 'gate_assets',
+        label: 'Generate assets?',
+        description: 'These cost tokens.',
+        displayData: {},
+      },
+    });
+    rerender(<QuickStartDialog open onClose={onClose} />);
+
+    const footer = screen.getByRole('dialog').querySelector('[data-dialog-actions]');
+    const labels = Array.from(footer?.querySelectorAll('button') ?? []).map((b) => (b.textContent ?? '').trim());
+    expect(labels).toEqual(['Approve', 'Stop build', 'Close']);
+    expect(filledFooterButtons()).toEqual(['Approve']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stop build' }));
+    expect(resolveGate).toHaveBeenCalledWith('rejected');
+    expect(cancelPipeline).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('reaches the submit button by keyboard from the prompt field', async () => {
@@ -554,7 +623,7 @@ describe('QuickStartDialog', () => {
     expect(document.activeElement).toBe(approve);
   });
 
-  it('lands focus on Approve when a gate appears and rejects it on Cancel', async () => {
+  it('lands focus on Approve when a gate appears and rejects it on Stop build', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
     await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
@@ -573,9 +642,9 @@ describe('QuickStartDialog', () => {
     const approve = screen.getByRole('button', { name: 'Approve' });
     await waitFor(() => expect(document.activeElement).toBe(approve));
 
-    // Cancel is the next stop, so the whole gate is reachable by keyboard.
+    // Stop build is the next stop, so the whole gate is reachable by keyboard.
     await userEvent.tab();
-    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    const cancel = screen.getByRole('button', { name: 'Stop build' });
     expect(document.activeElement).toBe(cancel);
 
     await userEvent.click(cancel);
@@ -636,7 +705,7 @@ describe('QuickStartDialog', () => {
       expect(screen.getByRole('heading', { name: 'Review your game plan' })).toBeTruthy();
       expect(screen.getByText('Jungle Canopy')).toBeTruthy();
       expect(screen.getByText('Estimated token cost')).toBeTruthy();
-      // Twice: in the cost bar, and in the total pinned beside "Build it".
+      // Twice: in the cost bar, and in the total beside "Build it" in the footer.
       expect(screen.getAllByText('340')).toHaveLength(2);
       // The number that actually leaves the balance: the reservation is the
       // estimate's upper bound, refunded down to what the build uses.
@@ -644,8 +713,8 @@ describe('QuickStartDialog', () => {
       expect(screen.getByText('Asset generation')).toBeTruthy();
       expect(screen.getByRole('status').textContent).toContain('Your game plan is ready');
       expect(runPipelineFromPlan).not.toHaveBeenCalled();
-      // The review's own Cancel is the way out; a second "Stop" beside it
-      // would be two controls for one action.
+      // The review's own "Discard plan" is the way out; a second "Stop"
+      // beside it would be two controls for one action.
       expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
     });
 
@@ -658,6 +727,9 @@ describe('QuickStartDialog', () => {
       const build = screen.getByRole('button', { name: 'Build it' });
       expectActionsInFooter(build);
       expectActionsInFooter(screen.getByRole('button', { name: 'Discard plan' }));
+      // One filled button in the row: Close steps back beside Build it
+      // (PR #10294 round 5, ux: both were the same filled primary).
+      expect(filledFooterButtons()).toEqual(['Build it']);
 
       const body = screen.getByRole('dialog').querySelector('[data-dialog-body]');
       // Non-vacuous: each of the tall parts is actually rendered.
@@ -716,6 +788,9 @@ describe('QuickStartDialog', () => {
       // again backs out rather than discarding.
       expect(buttons[1]).toBe(discard);
       expect(document.activeElement).toBe(discard);
+      // "Discard it" is destructive and "Keep plan" outlined, so nothing in
+      // the row is a filled primary, Close included.
+      expect(filledFooterButtons()).toEqual([]);
       // Nothing about the question is left in the body to be scrolled away.
       const body = screen.getByRole('dialog').querySelector('[data-dialog-body]');
       expect(body?.textContent).not.toContain('Discard this plan?');
@@ -744,25 +819,33 @@ describe('QuickStartDialog', () => {
             settle = resolve;
           });
         });
+        // Only the calls that bring the refusal into view. The Dialog body
+        // also scrolls a keyboard-focused control into view (nearest), and
+        // that is not under test here.
+        const refusalScrolls = () =>
+          scrollIntoView.mock.contexts.filter(
+            (el) => el instanceof HTMLElement && el.querySelector('[role="alert"]') !== null,
+          );
         const { rerender } = await reachPlanReview();
-        expect(scrollIntoView).not.toHaveBeenCalled();
+        expect(refusalScrolls()).toHaveLength(0);
         await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
         // The mocked store does not notify; re-render as a store update would.
         rerender(<QuickStartDialog open onClose={vi.fn()} />);
         await screen.findByRole('alert');
         expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
-        expect(scrollIntoView).not.toHaveBeenCalled();
+        expect(refusalScrolls()).toHaveLength(0);
         await act(async () => {
           settle();
         });
         expect(screen.getByRole('button', { name: 'Build it' })).not.toBeDisabled();
-        expect(scrollIntoView).toHaveBeenCalledTimes(1);
-        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
-        const target = scrollIntoView.mock.contexts[0] as HTMLElement;
+        expect(refusalScrolls()).toHaveLength(1);
+        const index = scrollIntoView.mock.contexts.indexOf(refusalScrolls()[0]);
+        expect(scrollIntoView.mock.calls[index]).toEqual([{ block: 'nearest' }]);
+        const target = refusalScrolls()[0] as HTMLElement;
         expect(within(target).getByRole('alert').textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
         // The same refusal re-rendered is not scrolled to again.
         rerender(<QuickStartDialog open onClose={vi.fn()} />);
-        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+        expect(refusalScrolls()).toHaveLength(1);
       } finally {
         delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
       }
@@ -796,6 +879,48 @@ describe('QuickStartDialog', () => {
 
       expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
       await waitFor(() => expect(build).toHaveProperty('disabled', true));
+      finish();
+    });
+
+    // PR #10294 round 5 (test): while "Build it" is in flight it is disabled,
+    // and the browser has dropped focus to <body>. Arming Discard then must
+    // offer a LIVE "Discard it" (it cancels the start), with focus on "Keep
+    // plan", never handed to the destructive answer. The click is a pointer
+    // press that does not focus its button, as in Safari.
+    it('arms Discard during an in-flight Build it: "Discard it" is live, and focus is on Keep plan', async () => {
+      let finish!: () => void;
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const onClose = vi.fn();
+      await reachPlanReview({}, onClose);
+      const build = screen.getByRole('button', { name: 'Build it' });
+      fireEvent.click(build);
+      await waitFor(() => expect(build).toHaveProperty('disabled', true));
+      // What the browser does to a focused button that becomes disabled: focus
+      // falls to <body>. (jsdom ignores blur() on a disabled element, so the
+      // fall is reproduced by removing a focused stand-in.)
+      const standIn = document.createElement('input');
+      document.body.append(standIn);
+      standIn.focus();
+      standIn.remove();
+      expect(document.activeElement).toBe(document.body);
+
+      const discard = screen.getByRole('button', { name: 'Discard plan' });
+      fireEvent.click(discard);
+
+      const buttons = within(screen.getByTestId('approval-gate-buttons')).getAllByRole('button');
+      expect(buttons.map((b) => b.textContent)).toEqual(['Discard it', 'Keep plan']);
+      expect(buttons[0]).toBeEnabled();
+      expect(buttons[1]).toBe(discard);
+      expect(document.activeElement).toBe(discard);
+
+      await userEvent.click(buttons[0]);
+      expect(cancelPipeline).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledTimes(1);
       finish();
     });
 

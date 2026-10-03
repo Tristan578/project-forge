@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import { type FocusEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import { cn } from "../utils/cn";
 import { SCROLL_REGION_ATTR, useDialogA11y } from "../hooks/useDialogA11y";
 import { useScrollLock } from "../hooks/useScrollLock";
@@ -79,6 +79,33 @@ function useOverflowsVertically(
   }, [regionActive, scrollerRef, focusFallbackRef]);
 
   return regionActive;
+}
+
+/**
+ * Scrolls a control that took keyboard focus inside the Dialog body into the
+ * body's visible area (`block: "nearest"`: no movement when it is already in
+ * view). Browsers are meant to do this themselves, but WebKit did not reliably
+ * do it for a Tab-focused link inside the body: in CI a Tab onto a link
+ * 500-700px below the body's fold sometimes left it there (PR #10294 round 5,
+ * E2E Cross-Browser webkit). React's `onFocus` bubbles (it is `focusin`), so
+ * one handler on the body covers every descendant.
+ *
+ * Keyboard focus only (`:focus-visible`). A pointer press focuses its button
+ * on mousedown; scrolling then could move the button out from under the
+ * pointer before mouseup, and the click would be lost. The body itself (the
+ * focusable region) is the scrollport, so focusing it scrolls nothing.
+ */
+function revealFocusedDescendant(event: FocusEvent<HTMLDivElement>) {
+  const target = event.target;
+  if (target === event.currentTarget || !(target instanceof HTMLElement)) return;
+  let visible = false;
+  try {
+    visible = target.matches(":focus-visible");
+  } catch {
+    // An engine without :focus-visible: leave scrolling to the browser.
+  }
+  // jsdom does not implement scrollIntoView.
+  if (visible) target.scrollIntoView?.({ block: "nearest", inline: "nearest" });
 }
 
 export interface DialogProps {
@@ -188,6 +215,7 @@ export function Dialog({
           <ScrollArea
             ref={bodyRef}
             data-dialog-body=""
+            onFocus={revealFocusedDescendant}
             className="min-h-0 flex-1 px-6 py-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sf-accent)]"
             {...(bodyOverflows
               ? {

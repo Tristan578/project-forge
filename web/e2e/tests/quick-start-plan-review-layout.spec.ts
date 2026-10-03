@@ -52,8 +52,14 @@ const VIEWPORTS = [
   { width: 568, height: 320 },
 ] as const;
 
-/** A short and a long plan: the long one overflows the body at every viewport above. */
-const SCENE_COUNTS = [1, 12] as const;
+/**
+ * The long plan's scene count. It overflows the body at every viewport above,
+ * which each test asserts, so the scroll it exercises is real everywhere.
+ */
+const LONG_PLAN_SCENES = 12;
+
+/** A short and a long plan. */
+const SCENE_COUNTS = [1, LONG_PLAN_SCENES] as const;
 
 /** Tab presses allowed to walk the dialog's whole focus cycle once. */
 const MAX_TAB_STOPS = 20;
@@ -71,9 +77,18 @@ interface Placement {
   inFooter: boolean;
 }
 
+/**
+ * Where focus is: on a control in the dialog (measured in `active`), on the
+ * Dialog body itself (the scroll region, which is the scrollport rather than
+ * content in it), or anywhere outside the dialog, <body> included. The last
+ * one is a failure at every Tab stop: the dialog is modal and traps focus.
+ */
+type FocusKind = 'control' | 'body-region' | 'outside';
+
 interface Snapshot {
   overflows: boolean;
   scrollTop: number;
+  focus: FocusKind;
   active: Placement | null;
   total: Placement | null;
   question: Placement | null;
@@ -105,12 +120,15 @@ function measure(): Snapshot {
     return { label, hidden, covered, inFooter: footer.contains(el) };
   };
   const active = document.activeElement;
+  // The body itself is a Tab stop while it overflows; it is the scrollport, not content in it.
+  const focus: FocusKind =
+    !active || !dialog.contains(active) ? 'outside' : active === body ? 'body-region' : 'control';
   return {
     overflows: body.scrollHeight - body.clientHeight > 1,
     scrollTop: body.scrollTop,
-    // The body itself is a Tab stop while it overflows; it is the scrollport, not content in it.
+    focus,
     active:
-      active && active !== body && dialog.contains(active)
+      focus === 'control' && active
         ? place(active, (active.textContent ?? '').trim().slice(0, 40) || active.tagName)
         : null,
     total: place(dialog.querySelector('[data-testid="token-cost-total"]'), 'token total'),
@@ -211,27 +229,53 @@ async function scrollBodyToTop(page: Page) {
 
 /**
  * Presses Tab through one whole focus cycle, until focus is back on
- * `startLabel`. Every stop must be in view and uncovered, the total must be in
- * view at every stop (it is beside "Build it" whenever Build it is reachable),
- * and a stop in the footer must leave the body exactly where it was.
+ * `startLabel`, and fails if it is not back there within MAX_TAB_STOPS.
+ * Focus must stay in the dialog at every stop, every stop must be in view and
+ * uncovered, the total must be in view at every stop (it is beside "Build it"
+ * whenever Build it is reachable), and a stop in the footer must leave the
+ * body exactly where it was.
+ *
+ * Each stop is read once the focused control has come into view (polled):
+ * how soon a browser scrolls a Tab-focused element into view is not part of
+ * the contract, and in CI WebKit's first reading was sometimes taken before
+ * the scroll (PR #10294 round 5). The Dialog body also reveals keyboard focus
+ * itself now, so a control that never comes into view still fails here.
  */
 async function walkTabCycle(page: Page, context: string, startLabel: string): Promise<string[]> {
   const visited: string[] = [];
+  let closed = false;
   let before = (await page.evaluate(measure)).scrollTop;
   for (let i = 0; i < MAX_TAB_STOPS; i++) {
     await page.keyboard.press('Tab');
-    const s = await page.evaluate(measure);
     const stop = `${context}, Tab ${i + 1}`;
-    if (s.active) expectInView(s.active, stop);
+    await expect
+      .poll(
+        async () => {
+          const reading = await page.evaluate(measure);
+          return reading.focus === 'control' ? (reading.active?.hidden ?? Number.POSITIVE_INFINITY) : 0;
+        },
+        { message: `${stop}: the focused control never came into view`, timeout: E2E_TIMEOUT_ELEMENT_MS },
+      )
+      .toBeLessThanOrEqual(SLACK);
+    const s = await page.evaluate(measure);
+    expect(s.focus, `${stop}: focus left the dialog`).not.toBe('outside');
+    if (s.focus === 'control') expectInView(s.active, stop);
     expectInView(s.total, stop);
     if (s.active?.inFooter) {
       expect(s.scrollTop, `${stop}: focusing ${s.active.label} in the footer moved the body`).toBe(before);
     }
     before = s.scrollTop;
-    const label = s.active?.label ?? '(the body region)';
-    if (label === startLabel) break;
+    const label = s.focus === 'body-region' ? '(the body region)' : (s.active?.label ?? '');
+    if (label === startLabel) {
+      closed = true;
+      break;
+    }
     visited.push(label);
   }
+  expect(
+    closed,
+    `${context}: ${MAX_TAB_STOPS} Tab presses never returned to ${startLabel} (visited: ${visited.join(' > ')})`,
+  ).toBe(true);
   return visited;
 }
 
@@ -262,6 +306,9 @@ test.describe('Quick-start plan review layout @ui [substituted: AI game design]'
         //     the total is beside it.
         const open = await page.evaluate(measure);
         overflowed ||= open.overflows;
+        if (scenes === LONG_PLAN_SCENES) {
+          expect(open.overflows, `${context}: the long plan does not overflow the body`).toBe(true);
+        }
         expect(open.scrollTop, `${context}, at open: the body is scrolled`).toBe(0);
         expectInView(open.active, `${context}, at open`);
         expect(open.active?.label).toBe('Build it');
@@ -331,8 +378,8 @@ test.describe('Quick-start plan review layout @ui [substituted: AI game design]'
         await page.keyboard.press('Escape');
         await expect(dialog).toBeHidden({ timeout: E2E_TIMEOUT_ELEMENT_MS });
       }
-      // Non-vacuous: at least the long plan overflowed the body, so the review
-      // really was scrollable at this viewport.
+      // Non-vacuous: the long plan's overflow is asserted above at every
+      // viewport; this also fails if SCENE_COUNTS ever loses the long plan.
       expect(overflowed, 'no plan overflowed the dialog body; the layout under test was not exercised').toBe(true);
     });
   }

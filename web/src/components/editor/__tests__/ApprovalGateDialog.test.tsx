@@ -174,7 +174,7 @@ describe('ApprovalGateDialog', () => {
       expect(onApprove).not.toHaveBeenCalled();
     });
 
-    // A cost the user has to scroll to find is not a cost they confirmed.
+    // Extras stay beside the buttons however long the bounded summary is.
     it('renders children outside the scrollable summary, between it and the buttons', () => {
       render(
         <ApprovalGateDialog
@@ -327,6 +327,27 @@ describe('ApprovalGateDialog', () => {
       const { rerender } = render(renderGate(false));
       expect(document.activeElement).toBe(document.body);
       rerender(renderGate(false));
+      expect(document.activeElement).toBe(document.body);
+    });
+
+    // PR #10294 round 5 (test): arming the plan review's Discard during an
+    // in-flight Build it re-enables this place as a destructive "Discard it".
+    // Focus on <body> must not be handed to it: Enter would discard the plan.
+    it('never hands focus to a destructive button it re-enables', () => {
+      const { rerender } = render(renderGate(true));
+      expect(document.activeElement).toBe(document.body);
+      rerender(
+        <ApprovalGateActions
+          gate={makeGate()}
+          onApprove={vi.fn()}
+          onCancel={vi.fn()}
+          approveDisabled={false}
+          approveLabel="Discard it"
+          approveVariant="destructive"
+        />,
+      );
+      const discardIt = screen.getByRole('button', { name: 'Discard it' });
+      expect(discardIt).toBeEnabled();
       expect(document.activeElement).toBe(document.body);
     });
   });

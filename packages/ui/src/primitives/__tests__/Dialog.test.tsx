@@ -181,6 +181,74 @@ describe('Dialog', () => {
     expect(dialog.className).not.toMatch(/max-h-\[85vh\]/);
   });
 
+  // PR #10294 round 5: WebKit sometimes left a Tab-focused link far below the
+  // body's fold. The body scrolls a keyboard-focused descendant into view
+  // itself; jsdom has no layout, so this pins the call, and
+  // e2e/tests/quick-start-plan-review-layout.spec.ts measures the result.
+  describe('reveals keyboard focus inside the body', () => {
+    const scrollIntoView = vi.fn();
+    let focusVisible = true;
+
+    beforeEach(() => {
+      scrollIntoView.mockClear();
+      focusVisible = true;
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        writable: true,
+        value: scrollIntoView,
+      });
+      // jsdom never matches :focus-visible; stand in for the browser's
+      // keyboard-vs-pointer heuristic.
+      const matches = Element.prototype.matches;
+      vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+        return selector === ':focus-visible' ? focusVisible : matches.call(this, selector);
+      });
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    });
+
+    function renderWithLink() {
+      render(
+        <Dialog open onClose={vi.fn()} title="Long dialog" actions={<button type="button">Confirm</button>}>
+          <p>Plan</p>
+          <a href="#buy">Buy tokens</a>
+        </Dialog>
+      );
+      return screen.getByRole('link', { name: 'Buy tokens' });
+    }
+
+    it('scrolls a keyboard-focused control in the body into view, nearest edge only', () => {
+      const link = renderWithLink();
+      act(() => link.focus());
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.contexts[0]).toBe(link);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+    });
+
+    it('leaves a pointer-focused control where it is, so the press is not moved out from under the pointer', () => {
+      const link = renderWithLink();
+      focusVisible = false;
+      act(() => link.focus());
+      expect(document.activeElement).toBe(link);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    });
+
+    it('does not scroll for the body region itself or for the footer actions', () => {
+      renderWithLink();
+      const body = screen.getByRole('dialog').querySelector<HTMLElement>('[data-dialog-body]');
+      if (!body) throw new Error('no dialog body');
+      body.tabIndex = 0;
+      act(() => body.focus());
+      const confirm = screen.getByRole('button', { name: 'Confirm' });
+      act(() => confirm.focus());
+      expect(document.activeElement).toBe(confirm);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    });
+  });
+
   describe('keyboard-scrollable body (WCAG 2.1.1)', () => {
     // jsdom has neither layout nor ResizeObserver. The fake records each
     // observer so a test can fire it after setting the body's fake geometry.
