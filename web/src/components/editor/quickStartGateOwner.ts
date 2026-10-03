@@ -3,8 +3,10 @@
 /**
  * Which surface owns the inline approval gate.
  *
- * `OrchestratorPanel` and `QuickStartDialog` both render `ApprovalGateDialog`
- * for the same `pendingGate`. The quick-start dialog deliberately opens the
+ * `OrchestratorPanel` and `QuickStartDialog` both render the same `pendingGate`
+ * from `ApprovalGateDialog.tsx`: the panel as one `ApprovalGateDialog` card, the
+ * dialog as `ApprovalGateSummary` in its body and `ApprovalGateActions` in its
+ * footer. The quick-start dialog deliberately opens the
  * orchestrator panel before starting a run, so both are mounted at once and the
  * user saw the same gate twice — two Approve buttons wired to one `resolveGate`,
  * where the second click lands on a gate that has already been answered.

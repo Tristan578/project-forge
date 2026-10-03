@@ -1,3 +1,4 @@
+import { createRef } from 'react';
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import { ScrollArea } from '../ScrollArea';
@@ -17,6 +18,19 @@ describe('ScrollArea', () => {
     const { container } = render(<ScrollArea>Content</ScrollArea>);
     const scrollArea = container.firstChild as HTMLElement;
     expect(scrollArea?.className).toContain('overflow-auto');
+  });
+
+  it('contains overscroll so a drag that hits the end does not chain into document scroll (PF-1032 / #9052 AC5)', () => {
+    const { container } = render(<ScrollArea>Content</ScrollArea>);
+    const scrollArea = container.firstChild as HTMLElement;
+    expect(scrollArea?.className).toContain('[overscroll-behavior:contain]');
+  });
+
+  it('hands its ref the scroll container element itself', () => {
+    const ref = createRef<HTMLDivElement>();
+    const { container } = render(<ScrollArea ref={ref}>Content</ScrollArea>);
+    expect(ref.current).not.toBeNull();
+    expect(ref.current).toBe(container.firstChild);
   });
 
   it('accepts height prop', () => {
