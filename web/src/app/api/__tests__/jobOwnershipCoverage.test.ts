@@ -967,9 +967,10 @@ function importedKeyNames(b: Bound, keys: ReadonlySet<string>): Set<string> {
  * this is a whitelist of modules, not a list of the ones known to read the
  * request (#9736: the set of ways is unbounded):
  *
- * - a runtime static import must be `next/server` or resolve to the app's own
- *   source under `web/src` (whose request reads, if any, are the helper-module
- *   limit stated in the docblock);
+ * - a runtime static import or re-export (`export ... from`) must be
+ *   `next/server` or resolve to the app's own source under `web/src` (whose
+ *   request reads, if any, are the helper-module limit stated in the
+ *   docblock), and never to the route file itself;
  * - no `import x = require(...)`, no `import(...)` and no `require` reference
  *   at all — the gate cannot see what such a module is.
  */
@@ -981,12 +982,26 @@ function moduleInputProblems(b: Bound): string[] {
       && ts.isExternalModuleReference(statement.moduleReference)) {
       problems.push(`${lineOf(sf, statement)}: an import-equals require (a module the gate cannot vet)`);
     }
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
-    if (statement.importClause?.isTypeOnly) continue;
-    const specifier = statement.moduleSpecifier.text;
+    // A re-export (`export { x } from 'm'`, `export * from 'm'`) loads the
+    // module exactly as an import does, and a self-import reads it back.
+    const isImport = ts.isImportDeclaration(statement);
+    if (!isImport && !ts.isExportDeclaration(statement)) continue;
+    const { moduleSpecifier } = statement;
+    if (!moduleSpecifier || !ts.isStringLiteral(moduleSpecifier)) continue;
+    if (isImport ? statement.importClause?.isTypeOnly : statement.isTypeOnly) continue;
+    const specifier = moduleSpecifier.text;
+    const verb = isImport ? 'imports' : 're-exports';
     if (namesModule(b, specifier, NEXT_SERVER_MODULE)) continue;
-    if (isAppSourceFile(resolveModuleFile(specifier, b.containingFile))) continue;
-    problems.push(`${lineOf(sf, statement)}: imports '${specifier}', which is neither ${NEXT_SERVER_MODULE} nor app source `
+    const resolved = resolveModuleFile(specifier, b.containingFile);
+    // The route importing ITSELF reads back whatever it exports, so a
+    // re-export or an export of a global (see globalInputProblems) becomes an
+    // input; no route needs it.
+    if (resolved && path.resolve(resolved) === path.resolve(b.containingFile)) {
+      problems.push(`${lineOf(sf, statement)}: ${verb} its own file '${specifier}' (a self-import reads back what the route exports)`);
+      continue;
+    }
+    if (isAppSourceFile(resolved)) continue;
+    problems.push(`${lineOf(sf, statement)}: ${verb} '${specifier}', which is neither ${NEXT_SERVER_MODULE} nor app source `
       + 'under src/ (next/headers and other modules can read request headers and cookies)');
   }
   forEachDescendant(sf, (n) => {
@@ -1071,9 +1086,12 @@ function isTypePosition(n: ts.Node): boolean {
  * one more kind a denylist let through: type declarations MERGED with a
  * non-binding value declaration, then an uninstantiated namespace, a const
  * enum and an import-equals of a type. After the switch to an allowlist they
- * found a member of a merged namespace, and a function declared in a body
- * read from that function's own parameter list; both are handled here or in
- * `globalInputProblems`.)
+ * found a member of a merged namespace; a function declared in a body, read
+ * from that function's own parameter list; a class's own name, read outside
+ * its members (a class expression's `extends` clause, then its own
+ * decorator, then an unused class declaration's `extends` clause); and
+ * `arguments` at module scope. Each is handled here or in
+ * `globalInputProblems`, which also reports every decorator outright.)
  *
  * Nothing in an ambient context counts: `declare const process: any`,
  * `declare function eval(...)`, anything inside `declare global { ... }` or
@@ -1123,9 +1141,13 @@ function globalInputProblems(b: Bound): string[] {
   //   for its body, so a read in the parameter list (a default, or a closure
   //   in one) cannot see a function declared in that body; SWC renames the
   //   body's function and leaves the read alone.
-  // - A named class expression's own name, read anywhere in the expression
-  //   OUTSIDE its members (its `extends` clause, or its own decorators): SWC
-  //   renames the inner binding and leaves the read alone.
+  // - A class's own name, read anywhere in the class OUTSIDE its members (its
+  //   `extends` clause, or its own decorators). For a class expression, SWC
+  //   renames the inner binding and leaves the read alone. For an unused
+  //   class declaration, the production minifier drops the class, keeps the
+  //   heritage expression for its side effects, and leaves the read bound to
+  //   the global. (A used one throws in its TDZ, but the checker cannot
+  //   tell which.)
   // Such a declaration does not count for that read.
   const bodyHiddenFrom = (read: ts.Node, d: ts.Declaration): boolean => {
     for (let n: ts.Node | undefined = read; n && n !== sf; n = n.parent) {
@@ -1133,7 +1155,7 @@ function globalInputProblems(b: Bound): string[] {
         const { body } = n.parent as ts.FunctionLikeDeclaration;
         if (body && d.pos >= body.pos && d.end <= body.end) return true;
       }
-      if (n.parent === d && ts.isClassExpression(d) && !ts.isClassElement(n)) return true;
+      if (n.parent === d && ts.isClassLike(d) && !ts.isClassElement(n)) return true;
     }
     return false;
   };
@@ -1148,7 +1170,26 @@ function globalInputProblems(b: Bound): string[] {
     if (ts.canHaveModifiers(n) && (ts.getModifiers(n) ?? []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) {
       problems.push(`${lineOf(sf, n)}: an ambient declaration statement (\`declare\` emits nothing, so the name it declares is still the global)`);
     }
+    // `export { process as p }` (no module specifier) READS its local name as
+    // a value, inside an export declaration the type-position skip below
+    // would pass over; an import of the route itself reads it back. Each
+    // value specifier must name a binding this file creates at run time.
+    if (ts.isExportDeclaration(n) && !n.moduleSpecifier && !n.isTypeOnly && n.exportClause && ts.isNamedExports(n.exportClause)) {
+      for (const el of n.exportClause.elements) {
+        if (el.isTypeOnly) continue;
+        const local = el.propertyName ?? el.name;
+        if (!declaredHere(checker.getExportSpecifierLocalTargetSymbol(el), local)) {
+          problems.push(`${lineOf(sf, el)}: exports '${local.text}', which this file does not bind at run time (the global, read back through an import)`);
+        }
+      }
+    }
     if (isTypePosition(n)) return;
+    // A decorator is reported outright: the compiler evaluates it outside
+    // the scope the checker resolves its names in (a class expression's own
+    // name, a method's `arguments`), and no route uses one.
+    if (ts.isDecorator(n)) {
+      problems.push(`${lineOf(sf, n)}: a decorator (its expression runs outside the scope the checker resolves it in)`);
+    }
     if ((ts.isIdentifier(n) || ts.isStringLiteralLike(n)) && FUNCTION_PATH_NAMES.has(n.text)) {
       problems.push(`${lineOf(sf, n)}: names '${n.text}', the path from any value to Function and so to every global`);
     }
@@ -1918,6 +1959,20 @@ describe('job-id ownership coverage (#10262)', () => {
         ['createRequire, aliased', feed("const nh = cr(import.meta.url)('next/headers');", "(await nh.headers()).get('x-poll-id')",
           "import { createRequire as cr } from 'node:module';\n"), IMPORT_RULE('node:module')],
         ['import =', feed('', "(await nh.headers()).get('x-poll-id')", "import nh = require('next/headers');\n"), /an import-equals require/],
+        // A re-export loads the module too, and a self-import reads it back.
+        // The same source carries both, pinned to each rule separately.
+        ...(['export { headers as hh } from', 'export * from', 'export * as nh from'] as const).flatMap((spelling): Array<[string, string, RegExp]> => {
+          const reExport = spelling === 'export * as nh from' ? "export * as nh from 'next/headers';\n"
+            : spelling === 'export * from' ? "export * from 'next/headers';\n" : "export { headers as hh } from 'next/headers';\n";
+          const back = spelling === 'export * as nh from' ? "import { nh } from './route';\n"
+            : spelling === 'export * from' ? "import { headers as hh } from './route';\n" : "import { hh } from './route';\n";
+          const read = spelling === 'export * as nh from' ? "(await nh.headers()).get('x-poll-id')" : "(await hh()).get('x-poll-id')";
+          const src = feed('', read, back + reExport);
+          return [
+            [`${spelling} (the re-export)`, src, /re-exports 'next\/headers', which is neither/],
+            [`${spelling} (the self-import)`, src, /imports its own file '\.\/route'/],
+          ];
+        }),
       ];
       for (const [name, mutated, rule] of variants) {
         expect(mutated, `${r.rel} ${name}`).toContain('client.');
@@ -1974,6 +2029,16 @@ describe('job-id ownership coverage (#10262)', () => {
         // is the module's.
         ['module-level arguments in a method decorator', mutate(feed("const nh = (A[1] as any)('next/headers');"), HANDLER_OPEN,
           'let A: any;\nclass DA { @((A = arguments, (f: any) => f)) m(): void {} }\nvoid DA;\n$1'), /reads `arguments` at module scope/],
+        // A global EXPORTED by name and read back through a self-import: the
+        // import is the module rule's, the export is this rule's.
+        ['a local export of a global, read back', "export { process as hostProcess };\nimport { hostProcess } from './route';\n"
+          + feed(`const nh = (hostProcess as any)${FETCH};`), /exports 'process', which this file does not bind at run time/, true],
+        ['a default export of a global, read back', "export { globalThis as default };\nimport hg from './route';\n"
+          + feed(`const nh = (hg as any).process${FETCH};`), /exports 'globalThis', which this file does not bind at run time/, true],
+        // Any decorator, even one that reads nothing, is reported on its own.
+        ['a decorator', mutate(feed('const nh = box;'), HANDLER_OPEN,
+          "const box: any = { headers: async () => new Headers() };\nclass DD { @((f: any) => f) m(): void {} }\nvoid DD;\n$1"),
+        /: a decorator \(its expression runs outside the scope the checker resolves it in\)/],
         ['import.meta.webpackContext', feed("const nh = (import.meta as any).webpackContext('next', { recursive: true })('./headers.js');"),
           /reads import\.meta other than import\.meta\.url/],
         // `.require` is ALSO a require reference to the module rule; the global
@@ -2035,6 +2100,8 @@ describe('job-id ownership coverage (#10262)', () => {
           ['a deferred parameter default reading a name its body declares', 'function pf(a: () => any = () => (process as any)' + FETCH + '): any { function process(): any { return 1; } void process; return a(); }', 'process', 'const nh = pf();'],
           ['a deferred default in an arrow reading globalThis its body declares', 'const pf = (a: () => any = () => (globalThis as any).process' + FETCH + '): any => { function globalThis(): any { return 1; } void globalThis; return a(); };', 'globalThis', 'const nh = pf();'],
           ['a class expression name read in its own extends clause', 'let box: any;\nconst K = class process extends ((box = (process as any)' + FETCH + '), Object) {};\nvoid K;', 'process', 'const nh = box;'],
+          // A LOCAL base, not `Object`, so no other read is reported.
+          ['an unused class declaration name read in its own extends clause', 'class B0 {}\nlet box: any;\nclass process extends ((box = () => (process as any)' + FETCH + '), B0) {}\nvoid box;', 'process', 'const nh = box();'],
           ['a class expression name read in its own decorator', 'let box: any;\nfunction dd(x: any): any { box = x; return (c: any): any => c; }\nconst K = @dd((process as any)' + FETCH + ') class process {};\nvoid K;', 'process', 'const nh = box;'],
           // A member EXPORTED from one block of a merged namespace and read bare
           // from a sibling block: the checker resolves the read to the
@@ -2095,6 +2162,14 @@ describe('job-id ownership coverage (#10262)', () => {
       ['a named function expression', 'const fn = function process(): unknown { return process; };', 'void fn;'],
       ['a value default import', "import process from 'next/server';", 'void process;'],
       ['a value namespace import', "import * as process from 'next/server';", 'void process;'],
+      // A parameter list hides only its OWN body's declarations: a
+      // module-level function, or an earlier parameter, is still local.
+      ['a parameter default reading a module-level function',
+        'function process(): number { return 1; }\nfunction pf(a: number = process()): number { return a; }', 'void pf;'],
+      ['a parameter default reading an earlier parameter',
+        'function pf(process: () => number = () => 1, a: number = process()): number { return a; }', 'void pf;'],
+      // A PROPERTY named arguments at module scope is not the wrapper's list.
+      ['a module-level property named arguments', 'const meta = { arguments: 1 };\nconst ma = meta.arguments;', 'void ma;'],
     ];
     for (const [name, prelude, read] of locals) {
       const src = mutate(mutate(model!.source, POLLED_ID, `$&\n$1${read}`), HANDLER_OPEN, `${prelude}\n$1`);
