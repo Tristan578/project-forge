@@ -26,7 +26,9 @@ import path from 'node:path';
  *  - the gap itself (which optional members disagree) is read through the
  *    type checker: every property of each cast's target and source type,
  *    INHERITED ones included, with each member's declared type resolved
- *    (so a type alias that carries `| undefined` counts).
+ *    (so a type alias that carries `| undefined` counts) from the declaration
+ *    tsc reads it from (an accessor pair's getter; a merged property's first
+ *    declaration).
  *
  * The un-cast compile is the ORACLE. The derivation explains the errors; it
  * never decides whether the gap is closed:
@@ -70,15 +72,36 @@ import path from 'node:path';
  * all). For the operand: a project-local subclass (the `.d.ts` half), a value
  * already typed as the SDK interface (the class-kind filter), and a nullable
  * operand and `as unknown` (no type symbol). Then compiler options that are
- * themselves an error, a cast nested
- * in another cast's operand, a statement whose casts produce fewer or more
- * errors than it has casts, a non-exactOptional error inside a cast statement,
- * and an error outside every cast statement.
+ * themselves an error, a cast nested in another cast's operand, a statement
+ * whose casts produce fewer or more errors than it has casts, a
+ * non-exactOptional error inside a cast statement, an error outside every
+ * cast statement, and a derived member that is only a substring of the
+ * property the error names.
  *
  * The third `describe` drives the helpers directly (`findCasts`,
  * `statementAt`, `deriveGap`, `widenOptionals` and the overlay builders), on
- * small fixtures that put every clause of every guard in reach: each clause,
- * mutated alone, turns at least one case RED.
+ * small fixtures that put every clause of every guard in reach. It also checks
+ * deriveGap's accessor-pair and merged-declaration rule against tsc's own
+ * verdict, shape by shape.
+ *
+ * Mutated alone, every clause turns at least one case RED except these (the
+ * PR's sweep tables give each one's measurement):
+ *  - the `declarations?.` links in step 3: unreachable, because no compiling
+ *    cast's target or operand has a symbol without declarations;
+ *  - three mutants that cannot change a result. `d.start ?? -1` -> `d.start!`
+ *    in step 5 (`undefined >= n` is false too). `s.getStart()` -> `s.pos` as
+ *    a statement's lower bound in step 5: only leading trivia lies between
+ *    them, a TS2375/TS2379 always starts at a token, and any other diagnostic
+ *    is unexpected whichever statement holds it. Deleting the minimality
+ *    check that the remaining error names the member: the narrowed checkGap
+ *    run's own step 6 already requires the error to name a derived member,
+ *    and with every other member widened the derivation is that member alone;
+ *  - the completeness match in the main test, made vacuous: it can only fail
+ *    for a derived set whose widening does not close the gap, and the real
+ *    derivation's does. It is load-bearing all the same: with deriveGap returning `['onclose']`,
+ *    it is what turns the main test RED (the deriveGap fixture cases go RED
+ *    as well);
+ *  - three caches that only affect speed.
  */
 
 const MCP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -254,27 +277,29 @@ function includesUndefined(t: ts.Type): boolean {
 }
 
 /**
- * Whether each typed declaration of a property admits `undefined` in its
- * DECLARED type (not the read type, which exactOptionalPropertyTypes widens
- * for every optional member). Resolved through the checker, so aliases count.
- * `undefined` when no declaration carries a type the checker can read.
+ * Whether a property's DECLARED type admits `undefined` (not its read type,
+ * which exactOptionalPropertyTypes widens for every optional member), taken
+ * from the one declaration tsc reads the type from:
+ *  - an accessor pair: the getter's return type, or the setter's parameter
+ *    type when there is no typed getter. The SDK declares `set onclose`
+ *    before `get onclose`, and a pair whose two halves disagree is judged by
+ *    the getter alone;
+ *  - anything else: the FIRST declaration. Under exactOptionalPropertyTypes
+ *    tsc accepts `x?: T` merged with a later `x?: T | undefined` (no TS2717)
+ *    and reads `T` from the first.
+ * Resolved through the checker, so aliases count. `undefined` when that
+ * declaration carries no type the checker can read.
  */
-function declaredTypesAdmitUndefined(checker: ts.TypeChecker, prop: ts.Symbol): boolean[] | undefined {
-  const answers: boolean[] = [];
-  for (const decl of prop.declarations ?? []) {
-    if (ts.isMethodSignature(decl) || ts.isMethodDeclaration(decl)) {
-      answers.push(false); // a method's declared type is a function type
-      continue;
-    }
-    const node =
-      ts.isPropertySignature(decl) || ts.isPropertyDeclaration(decl) || ts.isGetAccessorDeclaration(decl)
-        ? decl.type
-        : ts.isSetAccessorDeclaration(decl)
-          ? decl.parameters[0]?.type
-          : undefined;
-    if (node) answers.push(includesUndefined(checker.getTypeFromTypeNode(node)));
-  }
-  return answers.length > 0 ? answers : undefined;
+function declaredTypeAdmitsUndefined(checker: ts.TypeChecker, prop: ts.Symbol): boolean | undefined {
+  const decls = prop.declarations ?? [];
+  const first = decls[0];
+  // A method's declared type is a function type.
+  if (first && (ts.isMethodSignature(first) || ts.isMethodDeclaration(first))) return false;
+  const node =
+    decls.find(ts.isGetAccessorDeclaration)?.type ??
+    decls.find(ts.isSetAccessorDeclaration)?.parameters[0]?.type ??
+    (first && (ts.isPropertySignature(first) || ts.isPropertyDeclaration(first)) ? first.type : undefined);
+  return node ? includesUndefined(checker.getTypeFromTypeNode(node)) : undefined;
 }
 
 /**
@@ -286,11 +311,10 @@ function deriveGap(checker: ts.TypeChecker, target: ts.Type, source: ts.Type): s
   const gap: string[] = [];
   for (const targetProp of checker.getPropertiesOfType(target)) {
     if ((targetProp.flags & ts.SymbolFlags.Optional) === 0) continue;
-    const targetAdmits = declaredTypesAdmitUndefined(checker, targetProp);
-    if (!targetAdmits || targetAdmits.some(Boolean)) continue;
+    // No readable type, or one that already admits undefined: not the gap.
+    if (declaredTypeAdmitsUndefined(checker, targetProp) !== false) continue;
     const sourceProp = checker.getPropertyOfType(source, targetProp.getName());
-    const sourceAdmits = sourceProp && declaredTypesAdmitUndefined(checker, sourceProp);
-    if (sourceAdmits?.some(Boolean)) gap.push(targetProp.getName());
+    if (sourceProp && declaredTypeAdmitsUndefined(checker, sourceProp)) gap.push(targetProp.getName());
   }
   return gap.sort();
 }
@@ -1112,6 +1136,22 @@ describe('Transport gap check against overlaid sources (#10278)', () => {
     expect(TS_EXACT_OPTIONAL.has(named[0]!.code)).toBe(true);
   }, 60_000);
 
+  // Step 6 matches a member by its QUOTED name, as tsc prints a property. A
+  // derived name that is only a substring of the property the error names is
+  // in the error text, but names no member.
+  it('a derived member that is only a substring of the property the error names -> RED "names none of the derived gap members"', () => {
+    const text = real().diagnostics[0]!.text;
+    const property = /property '([^']+)'/.exec(text)?.[1];
+    expect(property, `the un-cast error names a property: ${text}`).toBeDefined();
+    const partial = property!.slice(1);
+    // The case is only meaningful if the bare substring IS in the text and the quoted one is not.
+    expect([partial.length > 0, text.includes(partial), text.includes(`'${partial}'`)]).toEqual([true, true, false]);
+    const message = messageOf(() => checkGap(config, { derive: () => [partial] }));
+    expect(message).toContain(
+      `the error for the cast at ${HTTP_REL}:${firstLine()} names none of the derived gap members (${partial}):`,
+    );
+  }, 60_000);
+
   it('a cast moved into an assignment (TS2375 instead of TS2379) still passes', () => {
     const result = checkGap(config, { overrides: new Map([[HTTP_TS, assignmentForm(read(HTTP_TS)).text]]) });
     expect(result.diagnostics.map((d) => d.code).sort()).toEqual([2375, 2379]);
@@ -1213,13 +1253,21 @@ function virtualProgram(text: string): ts.Program {
 /**
  * One member per deriveGap decision. IN the gap: sig (method signature vs a
  * getter), getterOnly, setterOnly, declProp (a property declaration), bareUndef
- * (a bare `undefined`), aliased (through a type alias), and baseMethod/baseProp
+ * (a bare `undefined`), aliased (through a type alias), baseMethod/baseProp
  * (inherited from a CLASS the interface extends: a method and a property
- * declaration on the target side). NOT in it: req (required), untyped (target
- * has no type), mapped (from a mapped type: the target property has no
- * declaration at all), already (target admits undefined), missing (not on the
- * source), strictSrc (source does not admit undefined), untypedSrc and
- * noParamSetter (source has no readable type).
+ * declaration on the target side), mixedPair (a get/set pair whose getter
+ * admits undefined and whose setter does not), setterFirst (the same pair with
+ * the setter declared first, as the SDK orders its pairs), untypedGetter (a
+ * pair whose getter has no type, so the setter's type is read) and
+ * mergedFirstStrict (two merged target declarations, the first strict). NOT in
+ * it: req (required), untyped (target has no type), mapped (from a mapped
+ * type: the target property has no declaration at all), already (target admits
+ * undefined), missing (not on the source), strictSrc (source does not admit
+ * undefined), untypedSrc and noParamSetter (source has no readable type),
+ * reversePair (a pair whose getter is strict and whose setter admits undefined)
+ * and mergedFirstAdmits (two merged target declarations, the first admitting
+ * undefined). The pair and merge shapes are checked against tsc's own verdict
+ * in PAIR_AND_MERGE_SHAPES below.
  */
 const DERIVE_FIXTURE = [
   'declare class TargetBase {',
@@ -1241,6 +1289,16 @@ const DERIVE_FIXTURE = [
   '  declProp?: string;',
   '  bareUndef?: string;',
   '  aliased?: string;',
+  '  mixedPair?: string;',
+  '  reversePair?: string;',
+  '  setterFirst?: string;',
+  '  untypedGetter?: string;',
+  '  mergedFirstStrict?: string;',
+  '  mergedFirstAdmits?: string | undefined;',
+  '}',
+  'interface Target {',
+  '  mergedFirstStrict?: string | undefined;',
+  '  mergedFirstAdmits?: string;',
   '}',
   'type MaybeString = string | undefined;',
   'declare class Source {',
@@ -1259,9 +1317,44 @@ const DERIVE_FIXTURE = [
   '  declProp: string | undefined;',
   '  get bareUndef(): undefined;',
   '  get aliased(): MaybeString;',
+  '  get mixedPair(): string | undefined;',
+  '  set mixedPair(v: string);',
+  '  get reversePair(): string;',
+  '  set reversePair(v: string | undefined);',
+  '  set setterFirst(v: string);',
+  '  get setterFirst(): string | undefined;',
+  '  get untypedGetter();',
+  '  set untypedGetter(v: string | undefined);',
+  '  mergedFirstStrict: string | undefined;',
+  '  mergedFirstAdmits: string | undefined;',
   '}',
   '',
 ].join('\n');
+
+/**
+ * DERIVE_FIXTURE's accessor-pair and merged-declaration members, each alone as
+ * `m`, with whether tsc refuses `const t: Target = s` (TS2375). The test asserts
+ * tsc's verdict first, then that deriveGap agrees with it, so the rule in
+ * declaredTypeAdmitsUndefined is checked against the compiler, not restated.
+ */
+const PAIR_AND_MERGE_SHAPES: Array<[label: string, target: string, source: string, refused: boolean]> = [
+  ['mixedPair', 'interface Target { m?: string }', 'get m(): string | undefined; set m(v: string);', true],
+  ['reversePair', 'interface Target { m?: string }', 'get m(): string; set m(v: string | undefined);', false],
+  ['setterFirst', 'interface Target { m?: string }', 'set m(v: string); get m(): string | undefined;', true],
+  ['untypedGetter', 'interface Target { m?: string }', 'get m(); set m(v: string | undefined);', true],
+  [
+    'mergedFirstStrict',
+    'interface Target { m?: string }\ninterface Target { m?: string | undefined }',
+    'm: string | undefined;',
+    true,
+  ],
+  [
+    'mergedFirstAdmits',
+    'interface Target { m?: string | undefined }\ninterface Target { m?: string }',
+    'm: string | undefined;',
+    false,
+  ],
+];
 
 const WIDEN_FIXTURE = [
   'interface W {',
@@ -1370,10 +1463,29 @@ describe('Transport gap check helpers reach every guard (#10278)', () => {
       'baseProp',
       'declProp',
       'getterOnly',
+      'mergedFirstStrict',
+      'mixedPair',
+      'setterFirst',
       'setterOnly',
       'sig',
+      'untypedGetter',
     ]);
   }, 60_000);
+
+  it.each(PAIR_AND_MERGE_SHAPES)(
+    'deriveGap agrees with tsc on the %s shape',
+    (_label, target, source, refused) => {
+      const program = virtualProgram(`${target}\ndeclare class Source { ${source} }\ndeclare const s: Source;\nconst t: Target = s;\n`);
+      const sf = program.getSourceFile(VIRTUAL)!;
+      const checker = program.getTypeChecker();
+      const typeOf = (name: string): ts.Type =>
+        checker.getDeclaredTypeOfSymbol(checker.getSymbolAtLocation(findDeclaration(sf, name).name)!);
+      const codes = ts.getPreEmitDiagnostics(program, sf).map((d) => d.code);
+      expect(codes.includes(2375), `tsc ${refused ? 'refuses' : 'accepts'} the assignment`).toBe(refused);
+      expect(deriveGap(checker, typeOf('Target'), typeOf('Source'))).toEqual(refused ? ['m'] : []);
+    },
+    60_000,
+  );
 
   it('syntacticallyAdmitsUndefined: bare, in a union, through parentheses', () => {
     const typeNode = (t: string): ts.TypeNode =>
