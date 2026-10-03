@@ -44,6 +44,7 @@ async function spawnCubeAndSelect(page: Page, editor: EditorPage) {
       const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { selectedIds: Set<string> } } }).__EDITOR_STORE;
       return store && store.getState().selectedIds.size > 0;
     },
+    undefined,
     { timeout: E2E_TIMEOUT_LOAD_MS },
   );
 }
@@ -115,6 +116,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
         // primaryTransform.position[0] should be approximately 7.5
         return t && typeof t.position?.[0] === 'number' && Math.abs(t.position[0] - 7.5) < 0.1;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
@@ -176,6 +178,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
         const zOk = typeof t.position?.[2] === 'number' && Math.abs(t.position[2] - (-2.5)) < 0.1;
         return yOk && zOk;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
@@ -261,6 +264,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
         const t = store.getState().primaryTransform;
         return t && Array.isArray(t.scale) && Math.abs(t.scale[0] - 2.0) < 0.1;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
@@ -350,6 +354,7 @@ test.describe('Group 2: Material Editing @engine', () => {
         const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { selectedIds: Set<string> } } }).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 
@@ -370,6 +375,7 @@ test.describe('Group 2: Material Editing @engine', () => {
         const mat = store.getState().primaryMaterial;
         return mat && Math.abs((mat.perceptualRoughness ?? 0) - 0.25) < 0.05;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
@@ -581,6 +587,7 @@ test.describe('Group 4: Store Round-Trip Verification @engine', () => {
           Math.abs(t.position[2] - 3.0) < 0.1
         );
       },
+      undefined,
       { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 

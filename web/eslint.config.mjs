@@ -7,6 +7,7 @@ import nextTs from "eslint-config-next/typescript";
 // rules below predate that split; new ones belong in a file.
 import noRawResponseInCatch from "./eslint-rules/no-raw-response-in-catch.mjs";
 import { RULE_OPTIONS } from "./eslint-rules/no-raw-response-in-catch.options.mjs";
+import noWaitForFunctionOptionsAsArg from "./eslint-rules/no-wait-for-function-options-as-arg.mjs";
 
 // Local plugin: detect hardcoded Tailwind color classes that should use design tokens.
 // Pattern: bg-zinc-800, text-gray-300, border-slate-500, etc.
@@ -237,6 +238,7 @@ const localPlugin = {
     'no-empty-test-assertion': noEmptyTestAssertion,
     'no-bare-dialogue-tree-index': noBareDialogueTreeIndex,
     'no-raw-response-in-catch': noRawResponseInCatch,
+    'no-wait-for-function-options-as-arg': noWaitForFunctionOptionsAsArg,
   },
 };
 
@@ -428,6 +430,21 @@ const eslintConfig = defineConfig([
           message: 'Do not assign getDb() to a variable — this bypasses automatic retries and circuit-breaker recovery for DB outages. Wrap with queryWithResilience(() => getDb().select()...) instead. If multiple queries share a db ref inside a queryWithResilience callback, add eslint-disable-next-line.',
         },
       ],
+    },
+  },
+  {
+    // Playwright's waitForFunction takes OPTIONS THIRD. `waitForFunction(fn,
+    // { timeout })` hands the object to the page function and waits for
+    // actionTimeout (10s) instead — 62 calls in e2e/ did this, including the
+    // editor fixture's 90s cold-start hydration wait. A dedicated rule name
+    // rather than a `no-restricted-syntax` entry, so it cannot replace (or be
+    // replaced by) another block's selectors. Scoped to every TS file outside
+    // the build output, not just e2e/: a Playwright helper can live anywhere.
+    // Tests: e2e/lib/__tests__/noWaitForFunctionOptionsAsArg.test.ts.
+    files: ['**/*.{ts,tsx,mts,cts}'],
+    plugins: { spawnforge: localPlugin },
+    rules: {
+      'spawnforge/no-wait-for-function-options-as-arg': 'error',
     },
   },
   {

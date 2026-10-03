@@ -126,6 +126,7 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
         const store = (window as any).__EDITOR_STORE;
         return store?.getState().engineMode === 'play';
       },
+      undefined,
       { timeout: E2E_TIMEOUT_INTERACTION_MS }
     );
 
@@ -145,6 +146,7 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
       },
       // Stop is the reverse engine round-trip (restore snapshot); same generous
       // interaction budget as the Play transition above.
+      undefined,
       { timeout: E2E_TIMEOUT_INTERACTION_MS }
     );
     await expect(page.locator('canvas').first()).toBeVisible();
