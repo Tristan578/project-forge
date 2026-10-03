@@ -53,12 +53,13 @@ describe('orchestratorErrorAction', () => {
 
   // Anything that resolves off this origin would be an open redirect. The
   // middle three start with '/' but a browser's URL parser reads them as
-  // another host: it treats '\' as '/' and drops tabs and newlines. The last
-  // two parse ON this origin, yet their pathname collapses to '//evil.example'
-  // (a '..' segment eats the one before it), which Clerk would then resolve as
-  // a protocol-relative URL — so the emitted value is checked, not the input.
-  // The final two make the URL parser THROW (an unterminated IPv6 host); the
-  // helper must catch that and fall back rather than throw during render.
+  // another host: it treats '\' as '/' and drops tabs and newlines.
+  // '/..//evil.example/x' and '/a/..//evil.example' parse ON this origin, yet
+  // their pathname collapses to '//evil.example' (a '..' segment eats the one
+  // before it), which Clerk would then resolve as a protocol-relative URL — so
+  // the emitted value is checked, not the input. '//[x' and '/\[x' make the
+  // URL parser THROW (an unterminated IPv6 host); the helper must catch that
+  // and fall back rather than throw during render.
   it.each([
     undefined,
     null,
