@@ -69,6 +69,13 @@ describe('describeSceneRefusal', () => {
       .toBe('Invalid type: string "x", expected f32.');
   });
 
+  it('strips only the TRAILING serde position, not a look-alike inside a quoted value', () => {
+    // The quoted value is the creator's own text; only the suffix serde appends is noise.
+    expect(describeSceneRefusal(
+      'Invalid scene file: invalid type: string "x at line 3 column 4 y", expected f32 at line 1 column 900',
+    )).toBe('Invalid type: string "x at line 3 column 4 y", expected f32.');
+  });
+
   it('drops a repeated prefix', () => {
     expect(describeSceneRefusal('Invalid scene file: Invalid scene file: missing field `entities` at line 3 column 14'))
       .toBe('Missing field `entities`.');
