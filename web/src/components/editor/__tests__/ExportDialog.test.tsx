@@ -245,6 +245,37 @@ describe('ExportDialog', () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  it('closes on an Escape from a control inside the dialog', () => {
+    setupStore();
+    const onClose = vi.fn();
+    render(<ExportDialog isOpen={true} onClose={onClose} />);
+    const inside = screen.getByTestId('export-dialog').querySelector('button');
+    expect(inside).not.toBeNull();
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    act(() => {
+      inside!.dispatchEvent(event);
+    });
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  // The tutorial bubble renders ABOVE this dialog, so an Escape from inside it
+  // is the tour's (skip), not this dialog's: neither closed nor consumed.
+  it('leaves an Escape from another layer (the tutorial bubble) alone', () => {
+    setupStore();
+    const onClose = vi.fn();
+    render(<ExportDialog isOpen={true} onClose={onClose} />);
+    const bubble = document.createElement('button');
+    document.body.appendChild(bubble);
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    act(() => {
+      bubble.dispatchEvent(event);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    bubble.remove();
+  });
+
   it('does not close on Escape while exporting', () => {
     setupStore({ isExporting: true });
     const onClose = vi.fn();
