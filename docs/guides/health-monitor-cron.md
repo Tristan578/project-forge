@@ -2,7 +2,7 @@
 
 `GET /api/cron/health-monitor` is SpawnForge's only automated detector of a
 production outage between deploys. Vercel Cron fires it on the schedule in
-`web/vercel.json` (`*/15 * * * *`, ~96 runs a day) against the **production**
+`web/vercel.ts` (`config.crons`, `*/15 * * * *`, ~96 runs a day) against the **production**
 deployment only. Each run executes every check in
 `web/src/lib/monitoring/healthChecks.ts` (`runAllHealthChecks()`), prunes
 expired webhook-idempotency rows, reports any non-healthy service to Sentry as

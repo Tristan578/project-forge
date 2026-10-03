@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockWithMonitor = vi.fn();
@@ -15,6 +13,12 @@ import {
   withCronMonitor,
   type CronMonitor,
 } from '../cronMonitors';
+// Source of truth for what Vercel actually schedules (PF-1060 / #9097 migrated
+// this from `web/vercel.json`, read via `readFileSync`, to the typed
+// `web/vercel.ts` module below). Importing the module — rather than reading a
+// JSON file off disk — is what makes this parity check survive the config's
+// move to TypeScript with zero changes to its own logic.
+import { config as vercelConfig } from '../../../../vercel';
 
 describe('CRON_MONITORS registry', () => {
   it('has at least one monitor', () => {
@@ -41,38 +45,35 @@ describe('CRON_MONITORS registry', () => {
   });
 });
 
-describe('CRON_MONITORS ↔ vercel.json parity', () => {
-  // The registry is the runtime mirror of the source-of-truth `web/vercel.json`.
-  // Drift in either direction (a Vercel cron without a monitor, or a monitor
-  // for a non-existent cron) must fail CI rather than ship an unmonitored job.
-  type VercelCron = { path: string; schedule: string };
-  const vercelJson = JSON.parse(
-    readFileSync(join(__dirname, '../../../../vercel.json'), 'utf8'),
-  ) as { crons?: VercelCron[] };
-  const vercelCrons = vercelJson.crons ?? [];
+describe('CRON_MONITORS ↔ vercel.ts parity', () => {
+  // The registry is the runtime mirror of the source-of-truth `web/vercel.ts`
+  // (`config.crons` — formerly `web/vercel.json`, PF-1060 / #9097). Drift in
+  // either direction (a Vercel cron without a monitor, or a monitor for a
+  // non-existent cron) must fail CI rather than ship an unmonitored job.
+  const vercelCrons = vercelConfig.crons ?? [];
 
-  it('every vercel.json cron has a registry entry with a matching schedule', () => {
+  it('every vercel.ts cron has a registry entry with a matching schedule', () => {
     for (const cron of vercelCrons) {
       const monitor = getCronMonitor(cron.path);
       expect(
         monitor,
-        `vercel.json cron ${cron.path} has no Sentry monitor in CRON_MONITORS`,
+        `vercel.ts cron ${cron.path} has no Sentry monitor in CRON_MONITORS`,
       ).toBeDefined();
       expect(monitor?.schedule).toBe(cron.schedule);
     }
   });
 
-  it('every registry entry maps to a real vercel.json cron', () => {
+  it('every registry entry maps to a real vercel.ts cron', () => {
     const vercelPaths = new Set(vercelCrons.map((c) => c.path));
     for (const m of CRON_MONITORS) {
       expect(
         vercelPaths.has(m.path),
-        `CRON_MONITORS entry ${m.path} is not declared in vercel.json crons`,
+        `CRON_MONITORS entry ${m.path} is not declared in vercel.ts crons`,
       ).toBe(true);
     }
   });
 
-  it('registry count equals vercel.json cron count', () => {
+  it('registry count equals vercel.ts cron count', () => {
     expect(CRON_MONITORS.length).toBe(vercelCrons.length);
   });
 
@@ -85,7 +86,7 @@ describe('CRON_MONITORS ↔ vercel.json parity', () => {
   const MAX_RUNS_PER_HOUR = 4;
   const MIN_STEP_MINUTES = 60 / MAX_RUNS_PER_HOUR;
 
-  it(`every vercel.json cron fires at most ${MAX_RUNS_PER_HOUR}x/hour`, () => {
+  it(`every vercel.ts cron fires at most ${MAX_RUNS_PER_HOUR}x/hour`, () => {
     for (const cron of vercelCrons) {
       const minuteField = cron.schedule.trim().split(/\s+/)[0];
       const step = /^\*\/(\d+)$/.exec(minuteField);
