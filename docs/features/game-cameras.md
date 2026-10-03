@@ -76,7 +76,7 @@ Every mode that eases toward its target — 3rd Person Follow, Side Scroller and
 // Switch camera mode at runtime
 forge.camera.setMode("thirdPersonFollow");
 
-// Change the follow target
+// Change the camera's target (the entity it tracks)
 forge.camera.setTarget("player_entity_id");
 
 // Trigger a camera shake (intensity 0-1, duration in seconds)

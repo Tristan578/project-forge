@@ -477,8 +477,8 @@ const GDD_CONFIG_KEY_ALIASES: Record<string, GddConfigAlias> = {
     field: 'followSmoothing',
     convert: convertGddSmoothingToDamping,
     // A per-frame lerp fraction lives in (0, 1]. A negative one is left to
-    // `followSmoothing`'s own policy, which refuses the negative rate it
-    // converts to with the reason that names the actual hazard (divergence).
+    // `followSmoothing`'s own policy ("must not be negative"): it converts to
+    // a negative rate, which the engine's `flat_damping` also refuses.
     // Exactly 0 (and -0, which `!==` treats the same) is refused HERE: it
     // converts to a frozen follow, the opposite of what "no smoothing" means
     // in plain English — see `convertGddSmoothingToDamping`.
