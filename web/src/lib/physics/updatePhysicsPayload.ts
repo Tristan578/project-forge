@@ -14,6 +14,7 @@
  */
 
 import type { PhysicsData } from '@/stores/slices/types';
+import type { LoosePartial } from '@/lib/types/looseOptional';
 
 /**
  * Every field the engine's `PhysicsPatch` accepts.
@@ -69,7 +70,7 @@ export type PhysicsPatchPayload = { entityId: string } & Partial<PhysicsData>;
  */
 export function buildPhysicsPatch(
   entityId: string,
-  patch: Partial<PhysicsData>,
+  patch: LoosePartial<PhysicsData>,
 ): PhysicsPatchPayload {
   const payload: PhysicsPatchPayload = { entityId };
   for (const key of PHYSICS_PATCH_KEYS) {

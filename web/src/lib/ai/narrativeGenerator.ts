@@ -36,21 +36,21 @@ export interface NarrativeScene {
   name: string;
   description: string;
   dialogue: DialogueLine[];
-  choices?: Choice[];
-  nextSceneId?: string;
+  choices?: Choice[] | undefined;
+  nextSceneId?: string | undefined;
 }
 
 export interface DialogueLine {
   speaker: string;
   text: string;
-  emotion?: string;
+  emotion?: string | undefined;
 }
 
 export interface Choice {
   text: string;
   consequence: string;
   nextSceneId: string;
-  affectsEnding?: string;
+  affectsEnding?: string | undefined;
 }
 
 export interface Character {
@@ -141,7 +141,7 @@ export const NARRATIVE_PRESETS: Record<string, NarrativePreset> = {
 // ============================================================================
 
 export interface NarrativeGenerationOptions {
-  preset?: string;
+  preset?: string | undefined;
   actCount?: number;
 }
 

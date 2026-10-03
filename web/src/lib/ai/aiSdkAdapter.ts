@@ -164,10 +164,13 @@ export async function* streamViaSdk(
     let toolIndex = 0;
     const result = streamText({
       model: modelInstance,
-      system: systemText || undefined,
+      // `ai`'s LanguageModelCallOptions doesn't accept an explicit `undefined`
+      // for these under exactOptionalPropertyTypes; conditional spread omits
+      // the key entirely rather than casting a vendor type.
+      ...(systemText ? { system: systemText } : {}),
       messages: convertMessages(messages),
       maxOutputTokens: maxTokens,
-      tools,
+      ...(tools ? { tools } : {}),
       // The installed AI SDK's `TelemetryOptions` (ai@7, v7's rewritten
       // diagnostics-channel telemetry) has no `metadata` field -- Sentry's
       // subscriber (`vercel-ai-dc-subscriber.js`) reads only `functionId`

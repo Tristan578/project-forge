@@ -31,7 +31,7 @@ export interface AIClientOptions {
    */
   effort?: 'low' | 'medium' | 'high';
   /** AbortSignal to cancel the in-flight request. */
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
   /**
    * Request priority for the shared AI queue.
    *   1 — user-initiated (default for fetchAI/streamAI)
@@ -157,8 +157,10 @@ async function fetchAIUncached(prompt: string, options?: AIClientOptions): Promi
   } = options ?? {};
 
   return aiQueue.enqueue(async () => {
-    // Attach abort to the fetch call so cancellation propagates
-    const fetchOptions: RequestInit = { signal };
+    // Attach abort to the fetch call so cancellation propagates. DOM's
+    // RequestInit.signal is `AbortSignal | null` (no `| undefined`);
+    // conditional spread omits the key when no signal was supplied.
+    const fetchOptions: RequestInit = { ...(signal !== undefined ? { signal } : {}) };
 
     try {
       const response = await fetch('/api/chat', {

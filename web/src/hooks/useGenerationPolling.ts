@@ -49,10 +49,10 @@ interface StatusResponse {
   jobId: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
-  resultUrl?: string;
-  maps?: Record<string, string>;
-  error?: string;
-  durationSeconds?: number;
+  resultUrl?: string | undefined;
+  maps?: Record<string, string> | undefined;
+  error?: string | undefined;
+  durationSeconds?: number | undefined;
 }
 
 /** A machine code such as `TIER_REQUIRED` or `SERVICE_DEGRADED`: never user-facing text. */

@@ -22,13 +22,28 @@ const FOCUSABLE_SELECTORS =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
+ * Marks a focusable element that exists only so keyboard users can scroll it
+ * (a scroll container given `tabIndex={0}`, e.g. `Dialog`'s overflowing body).
+ * It stays in the Tab order and the focus trap, but initial focus skips it in
+ * favour of the first real control: landing on a scroll box when a dialog opens
+ * would put the dialog's actual inputs and buttons one Tab further away.
+ */
+export const SCROLL_REGION_ATTR = 'data-sf-scroll-region';
+
+/**
  * Provides ARIA attributes for modal/dialog components.
  * Handles:
  *   - role="dialog" + aria-modal="true"
  *   - aria-labelledby wired to the title element
  *   - Escape key -> onClose
  *   - Focus trap: Tab cycles within the dialog
- *   - Initial focus: first focusable element (or dialog container) on open
+ *   - Initial focus: first focusable element that is not a keyboard-scroll
+ *     region (`SCROLL_REGION_ATTR`), else that region, else the container.
+ *     The choice is made once, in the first animation frame. A region that
+ *     only becomes focusable after that frame (Dialog's body learns it
+ *     overflows from a ResizeObserver, which Chromium notifies after the
+ *     frame callback) is not seen here; Dialog itself moves focus from the
+ *     container into its region when that happens.
  *   - Focus return to trigger on close
  */
 export function useDialogA11y({
@@ -59,9 +74,15 @@ export function useDialogA11y({
         // 2, 4/5: this previously only got papered over in a test helper
         // that waited out the race rather than the hook respecting it).
         if (dialogRef.current.contains(document.activeElement)) return;
-        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
-        if (focusable.length > 0) {
-          focusable[0].focus();
+        const focusable = Array.from(
+          dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS),
+        );
+        // Prefer a real control over a keyboard-scroll region; fall back to
+        // the region only when it is the one focusable thing in the dialog.
+        const initial =
+          focusable.find((el) => !el.hasAttribute(SCROLL_REGION_ATTR)) ?? focusable[0];
+        if (initial) {
+          initial.focus();
         } else {
           dialogRef.current.focus();
         }

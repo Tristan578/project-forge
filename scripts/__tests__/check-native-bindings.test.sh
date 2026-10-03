@@ -197,11 +197,116 @@ rc="$(run_gate "$space_nm" linux x64)"
 if [ "$rc" = "0" ]; then pass "path with spaces → gate 0 (quoting holds)"; else fail "path with spaces → expected 0, got $rc"; fi
 
 # ── workflow structural wiring (self-defense — canonical pattern from
-#    check-npm-audit.test.sh's quality-gates/ci.yml sections). The gate is only
-#    real if CI actually invokes it; a PR that unwires an invocation, adds
-#    continue-on-error, or drops the self-defense registration must fail here.
-CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
-QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
+#    check-npm-audit.test.sh's quality-gates/ci.yml/cd.yml sections). The gate
+#    is only real if CI actually invokes it; a PR that unwires an invocation,
+#    adds continue-on-error, or drops the self-defense registration must fail
+#    here. WHICH workflows are read is a glob over .github/workflows/*.yml and
+#    *.yaml, not a list: the same rationale that derives the job set applies one level up.
+#    The derivation read ci.yml alone (#10200), then a hand list of three
+#    (#10222, first cut) — a fourth workflow gaining a vitest job would have
+#    sat outside the pin exactly as cd.yml's test-web and test-mcp did.
+WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
+
+# Per-workflow floors: the jobs KNOWN to load a native binding today, one row
+# per workflow that has any, written `<workflow>: <job> <job> ...`. A floor is
+# a self-test of the derivation (see assert_gate_wired), never the set under
+# test, so this is the one place a job name is typed. A workflow with no floor
+# is still swept: every job it derives is checked, and only the zero-derived
+# vacuity check is waived — schema-drift.yml carries the gate but derives
+# nothing (`npm run db:drift` loads no binding) and engine-cdn-test.yml's
+# `npm test` is `node --test`.
+#   - quality-gates.yml runs no `next build` line of its own: lighthouse-delta
+#     builds through web's `npm run build`, test-web and test-mcp run vitest,
+#     and editor-boot's Playwright config starts `next dev` (#10200).
+#   - cd.yml (the deploy path) has the same shape: test-web and test-mcp run
+#     vitest directly, and e2e builds Next.js itself (`npx next build`) before
+#     its own Playwright run. e2e already carried the gate; test-web and
+#     test-mcp did not (#10222).
+# ONE table, read by both floor_jobs and floored_workflows. The floors used to
+# be a case statement AND a separate list of floored workflows, typed twice
+# with nothing tying them together: deleting cd.yml's case arm left cd.yml
+# listed but silently unfloored, and an arm for a workflow that did not exist
+# was never evaluated (review board on #10296, lesson 18). A row that does not
+# parse, a workflow named twice, or an empty table fails below.
+readonly NATIVE_BINDING_FLOORS='
+ci.yml: build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-crossbrowser docs-e2e observatory-tests docs-internal-gate design-internal-gate
+quality-gates.yml: test-web test-mcp editor-boot lighthouse-delta
+cd.yml: test-web test-mcp e2e
+'
+FLOOR_ROW_RE='^[A-Za-z0-9._-]+\.ya?ml:([[:space:]]+[a-z][a-z0-9_-]*)+[[:space:]]*$'
+
+# $1 = workflow file name; prints its floor jobs space-separated, or nothing.
+floor_jobs() {
+  awk -v wf="$1:" '$1 == wf { $1 = ""; sub(/^[[:space:]]+/, ""); print; exit }' <<<"$NATIVE_BINDING_FLOORS"
+}
+readonly -f floor_jobs
+
+# Prints every workflow a floor table names, one per line, in table order.
+# $1 = the table; NATIVE_BINDING_FLOORS when omitted (the fixtures below pass
+# their own, so the row and duplicate checks run on a bad table too).
+floored_workflows() {
+  awk 'NF { w = $1; sub(/:$/, "", w); print w }' <<<"${1-$NATIVE_BINDING_FLOORS}"
+}
+readonly -f floored_workflows
+
+# $1 = a floor table. Fails once per malformed row, once for any workflow
+# named twice, and once for a table with no rows; passes only a well-formed
+# table with one row per workflow. It runs on the real table here and, in a
+# subshell, on bad fixtures just below, so neutering any of the three checks
+# turns a fixture case red.
+assert_floor_table() {
+  local table="$1" rows row dupes malformed=0
+  rows="$(grep -v '^[[:space:]]*$' <<<"$table" || true)"
+  if [ -z "$rows" ]; then
+    fail "NATIVE_BINDING_FLOORS has no rows — no workflow's derivation is self-tested"
+    return
+  fi
+  while IFS= read -r row; do
+    if ! grep -qE "$FLOOR_ROW_RE" <<<"$row"; then
+      fail "NATIVE_BINDING_FLOORS row '${row}' is not '<workflow>.yml: <job> [<job> ...]' (or .yaml) — an emptied or mistyped row unfloors its workflow"
+      malformed=1
+    fi
+  done <<<"$rows"
+  dupes="$(floored_workflows "$table" | sort | uniq -d)"
+  if [ -n "$dupes" ]; then
+    fail "NATIVE_BINDING_FLOORS names $(tr '\n' ' ' <<<"$dupes")more than once — floor_jobs reads only the first row"
+  elif [ "$malformed" = 0 ]; then
+    pass "NATIVE_BINDING_FLOORS: $(grep -c '' <<<"$rows") well-formed row(s), one per workflow"
+  fi
+}
+readonly -f assert_floor_table
+
+assert_floor_table "$NATIVE_BINDING_FLOORS"
+
+# Negative controls for the table checks. Each runs assert_floor_table in a
+# subshell, so its expected FAIL is captured rather than counted, and asserts
+# its own defect text: an emptied row, a row with no colon, a workflow named
+# twice, a table with no rows. The well-formed fixture is the pair. It must
+# pass and fail nothing, so a check that fires on every table cannot read as
+# a working control. $1 = label, $2 = table, $3 = the expected FAIL text, or
+# empty for "must pass".
+floor_control() {
+  local label="$1" table="$2" want="$3" got
+  got="$(assert_floor_table "$table")"
+  if [ -z "$want" ]; then
+    if grep -q 'FAIL:' <<<"$got" || ! grep -q 'PASS: NATIVE_BINDING_FLOORS' <<<"$got"; then
+      fail "floor-table control: $label should pass and fail nothing (got: ${got:-nothing})"
+    else
+      pass "floor-table control: $label passes"
+    fi
+  elif grep -qF "FAIL: $want" <<<"$got"; then
+    pass "floor-table control: $label is refused"
+  else
+    fail "floor-table control: $label was not refused with '$want' (got: ${got:-nothing})"
+  fi
+}
+readonly -f floor_control
+
+floor_control "a well-formed two-row table" $'\na.yml: j1 j2\nb.yaml: j3\n' ""
+floor_control "an emptied row" $'\na.yml:\nb.yml: j3\n' "NATIVE_BINDING_FLOORS row 'a.yml:' is not"
+floor_control "a row with no colon" $'\na.yml j1\n' "NATIVE_BINDING_FLOORS row 'a.yml j1' is not"
+floor_control "a workflow named twice" $'\na.yml: j1\nb.yml: j2\na.yml: j3\n' "NATIVE_BINDING_FLOORS names a.yml more than once"
+floor_control "a table with no rows" $'\n  \n' "NATIVE_BINDING_FLOORS has no rows"
 
 # WHICH jobs need a native binding is DERIVED from the workflow text, never
 # typed out. This list was hand-maintained twice and wrong both times: first
@@ -403,12 +508,35 @@ native_binding_jobs() {
 }
 readonly -f native_binding_jobs
 
+# The gate step's keys are a CLOSED set: `name` and `run`, which is exactly
+# what all 19 gate steps under .github/workflows carry today. Any other key
+# can disarm the gate without touching its run: line — `shell: echo {0}`
+# makes the runner echo the script's path and exit 0, `working-directory:`
+# points it at a tree with no node_modules — and enumerating the disarming
+# keys one at a time is the unwinnable list lessons 18 and 21 describe
+# (security seat on #10296). So every key is read and anything outside the
+# set is refused, by name. One awk function, included in both cuts below
+# (the derived-job rule and the every-invocation sweep), so the two cannot
+# disagree about what a key is: for a step at the repository's indent (the
+# `      - ` line opens it, its own keys sit at eight spaces), it returns the
+# key on that line with any quotes stripped, or the whole text of an
+# eight-space line that has no colon, and "" for any deeper line (an env:
+# entry, a block scalar's body). Comment lines are skipped by the callers.
+readonly STEP_KEY_AWK='
+function step_key(line,   k) {
+  if (line ~ /^      - / || line ~ /^        [^[:space:]]/) k = substr(line, 9)
+  else return ""
+  sub(/[[:space:]]*:.*$/, "", k)
+  gsub(/["\047]/, "", k)
+  return k
+}'
+
 # Reads workflow text on stdin; prints one line per way <job> fails to run the
 # gate, and nothing when it is wired. Job blocks are extracted individually so
 # an invocation moving to the wrong job (or a job losing its invocation while
 # another keeps two) cannot cancel out in a whole-file count.
 job_wiring_defects() {
-  local job="$1" text job_block job_executable step_block run_count
+  local job="$1" text job_block job_executable step_block run_count job_before_gate extra_key
   text="$(cat)"
   job_block="$(awk -v j="  ${job}:" -v hdr="$JOB_HEADER_RE" '$0==j{f=1} f{print} f && $0 ~ hdr && $0!=j{exit}' <<<"$text")"
   if [ -z "$job_block" ]; then
@@ -430,9 +558,13 @@ job_wiring_defects() {
   # mutation takes effect in the very run that should have caught it.
   # actionlint (the `actionlint` job, #8719) flags duplicate keys, but it runs
   # from this same PR-controlled file — this count is the independent backstop. Scope it to the gate's STEP block so a
-  # legitimate `run:` in a sibling step is not counted.
+  # legitimate `run:` in a sibling step is not counted. A comment line, at any
+  # indent, neither ends the cut nor enters it: YAML ignores it, so a
+  # `      # note` between two of the step's keys does not end the step, and
+  # ending the cut there would hide every key after it from the checks below.
   step_block="$(awk '
     !f && /^      - name:/ && index($0, "Assert native swc binding survived npm ci") {f=1; print; next}
+    f && /^[[:space:]]*#/ {next}
     f && /^      - /{exit}
     f && !/^        / && !/^[[:space:]]*$/{exit}
     f {print}
@@ -448,16 +580,56 @@ job_wiring_defects() {
   if ! grep -qE '^[[:space:]]*run: bash scripts/check-native-bindings\.sh[[:space:]]*$' <<<"$step_block"; then
     echo "native-bindings step does not run 'bash scripts/check-native-bindings.sh' as its whole run: line — neutered, rewritten, or comment-suffixed"
   fi
+
+  # A gate that runs is still useless in three more shapes, all of which
+  # passed every check above (test and security seats on #10296). An `if:` on
+  # the step can skip it (`if: false`, or any condition that comes out false)
+  # while the job goes on to load the binding — no gate step has a reason to
+  # be conditional, so any `if:` is refused. A step-level `continue-on-error`
+  # lets the job go on past a red gate. It is checked over the WHOLE step cut,
+  # not a few lines around the run: line: YAML key order is free, so the key
+  # can sit after an env: block or before one, any distance from run:. Any
+  # value is refused, `false` included, for the same reason as `if:`. And a
+  # gate placed AFTER the first step that loads a
+  # binding runs too late: the drop has already surfaced there as the opaque
+  # SWC error or the silent vitest run the gate exists to replace. "Loads a
+  # binding" is the derivation itself, run over the job cut off just before
+  # the gate step, so the two cannot disagree about what a binding step is.
+  if grep -qE '^[[:space:]]*(- )?["'"'"']?if["'"'"']?[[:space:]]*:' <<<"$step_block"; then
+    echo "native-bindings step carries an if: — a condition can skip the gate while the job still loads the binding"
+  fi
+  if grep -qE '^[[:space:]]*(- )?["'"'"']?continue-on-error["'"'"']?[[:space:]]*:' <<<"$step_block"; then
+    echo "native-bindings step carries a step-level continue-on-error — the job goes on past a red gate and loads the binding anyway"
+  fi
+  # The closed set (STEP_KEY_AWK above): every key other than name and run is
+  # refused by name. if: and continue-on-error keep their own, more specific
+  # messages just above, so they are not reported a second time here.
+  while IFS= read -r extra_key; do
+    [ -n "$extra_key" ] || continue
+    echo "native-bindings step carries the key ${extra_key}: — the gate step may carry only name and run, and any other key (shell:, working-directory:, env: ...) can change what runs or whether its exit counts"
+  done <<<"$(awk "$STEP_KEY_AWK"'
+    { k = step_key($0) }
+    k != "" && k != "name" && k != "run" && k != "if" && k != "continue-on-error" { print k }
+  ' <<<"$step_block" | sort -u)"
+  job_before_gate="$(awk '/^      - name:/ && index($0, "Assert native swc binding survived npm ci") {exit} {print}' <<<"$job_block")"
+  if grep -qxF "$job" <<<"$(native_binding_jobs <<<"$(printf 'jobs:\n%s\n' "$job_before_gate")")"; then
+    echo "native-bindings step runs AFTER a step that already loads a native binding — the drop surfaces there first, as the opaque failure the gate exists to replace"
+  fi
 }
 readonly -f job_wiring_defects
 
 # 14. EVERY job that loads a native binding must invoke the gate, where
 #     "every" is the derived set above rather than a list someone keeps in
 #     step with the workflow. $1 = workflow text, $2 = its label, $3.. = the
-#     jobs known to need the gate today. That floor is a self-test of the
-#     derivation, NOT the set under test (lesson 9 — a sweep over zero jobs
-#     reads as zero defects): a new job is checked without being added here,
-#     and a job missing from it is still checked if it loads a binding.
+#     jobs known to need the gate today (may be none). That floor is a
+#     self-test of the derivation, NOT the set under test (lesson 9 — a sweep
+#     over zero jobs reads as zero defects): a new job is checked without
+#     being added here, and a job missing from it is still checked if it
+#     loads a binding. The zero-derived vacuity check applies only when a
+#     floor is given: a floored workflow deriving nothing means the
+#     derivation broke, while an unfloored one deriving nothing is simply a
+#     workflow that loads no binding (schema-drift.yml, engine-cdn-test.yml).
+#     Unresolvable rows fail in either case — an unknown is never "no".
 assert_gate_wired() {
   local text="$1" label="$2" derived unresolved derived_jobs floor_ok job defects defect
   shift 2
@@ -469,18 +641,24 @@ assert_gate_wired() {
       fail "$label job ${job} runs ${what} in '${dir}', which cannot be resolved — cannot tell whether it loads a native binding, so it cannot be left out of the pin"
     done <<<"$unresolved"
   fi
-  if [ -z "$derived_jobs" ]; then
-    fail "the derivation found ZERO native-binding jobs in $label — the sweep below would check nothing and pass"
-  fi
-  floor_ok=1
-  for job in "$@"; do
-    if ! grep -qxF "$job" <<<"$derived_jobs"; then
-      fail "the derivation does not recognise $label job ${job} as loading a native binding — either it stopped building, testing or serving Next.js/vitest (drop it from this floor) or the derivation regressed and 'every such job' no longer holds"
-      floor_ok=0
+  if [ "$#" -eq 0 ]; then
+    if [ -n "$derived_jobs" ]; then
+      pass "$label: $(grep -c '' <<<"$derived_jobs") native-binding job(s) derived with no floor declared — each is checked below"
     fi
-  done
-  if [ "$floor_ok" = 1 ]; then
-    pass "$label: the derivation recognises all $# known native-binding jobs ($(grep -c '' <<<"$derived_jobs") derived)"
+  else
+    if [ -z "$derived_jobs" ]; then
+      fail "the derivation found ZERO native-binding jobs in $label, which has a floor of $# — the sweep below would check nothing and pass"
+    fi
+    floor_ok=1
+    for job in "$@"; do
+      if ! grep -qxF "$job" <<<"$derived_jobs"; then
+        fail "the derivation does not recognise $label job ${job} as loading a native binding — either it stopped building, testing or serving Next.js/vitest (drop it from this floor) or the derivation regressed and 'every such job' no longer holds"
+        floor_ok=0
+      fi
+    done
+    if [ "$floor_ok" = 1 ]; then
+      pass "$label: the derivation recognises all $# known native-binding jobs ($(grep -c '' <<<"$derived_jobs") derived)"
+    fi
   fi
   while IFS= read -r job; do
     [ -n "$job" ] || continue
@@ -521,18 +699,524 @@ assert_unwiring_caught() {
 }
 readonly -f assert_unwiring_caught
 
-if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
-  ci="$(cat "$CI_YML")"
-  qg="$(cat "$QG_YML")"
+# Reads workflow text on stdin; prints one `job<TAB>value` line per job under
+# `jobs:` that invokes the gate in an executable line. value is that job's
+# JOB-LEVEL continue-on-error (quotes and a trailing comment stripped), or
+# empty when it has none. A job-level `continue-on-error: true` lets the job
+# pass with any step failing, the gate step included. It is a key of the JOB,
+# not of any step, so the step-level check in 15 does not read it (review
+# board on #10296).
+gate_job_continue_on_error() {
+  awk -v hdr="$JOB_HEADER_RE" '
+    function flush() { if (job != "" && invokes) print job "\t" coe }
+    /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
+    !in_jobs { next }
+    /^[[:space:]]*#/ { next }
+    $0 ~ hdr { flush(); job = $1; sub(/:$/, "", job); invokes = 0; coe = ""; next }
+    /^[^[:space:]]/ { flush(); job = ""; in_jobs = 0; next }
+    /bash scripts\/check-native-bindings\.sh/ { invokes = 1 }
+    /^    ["\047]?continue-on-error["\047]?[[:space:]]*:/ {
+      v = $0
+      sub(/^[^:]*:[[:space:]]*/, "", v)
+      sub(/[[:space:]]+#.*$/, "", v)
+      gsub(/["\047]/, "", v)
+      sub(/[[:space:]]+$/, "", v)
+      coe = (v == "" ? "(empty)" : v)
+    }
+    END { flush() }
+  '
+}
+readonly -f gate_job_continue_on_error
 
-  assert_gate_wired "$ci" ci.yml \
-    build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-crossbrowser docs-e2e \
-    observatory-tests docs-internal-gate design-internal-gate
-  # quality-gates.yml runs no `next build` line of its own: lighthouse-delta
-  # builds through web's `npm run build`, test-web and test-mcp run vitest,
-  # and editor-boot's Playwright config starts `next dev` (#10200).
-  assert_gate_wired "$qg" quality-gates.yml \
-    test-web test-mcp editor-boot lighthouse-delta
+# The one job allowed a job-level continue-on-error while invoking the gate,
+# as `<workflow>:<job>` rows. ci.yml's test-e2e-crossbrowser is non-blocking as
+# a WHOLE job for its first landing (its own comment: the firefox/webkit pass
+# rate is unmeasured, and it sits outside ci-success.needs), so its gate is
+# exactly as blocking as the rest of that job. The exemption is checked in both
+# directions: a row whose job no longer invokes the gate with a job-level
+# continue-on-error fails as stale, so flipping crossbrowser to blocking (which
+# drops the key) has to delete this row too, and the row cannot outlive the
+# reason for it (assert_coe_exemption_live, with its own negative controls).
+readonly GATE_COE_EXEMPT='
+ci.yml:test-e2e-crossbrowser
+'
+
+# Reads workflow text on stdin; prints one `job<TAB>flag<TAB>keys` line per
+# STEP under `jobs:` whose executable lines invoke the gate, whatever the step
+# is named and whether or not its job is derived (schema-drift.yml's gate step
+# is named differently and sits in a job that loads no binding). flag is 1
+# when the step carries a continue-on-error key anywhere in the step, any
+# value, and 0 otherwise. keys lists, space-separated, every key of the step
+# outside the closed set (STEP_KEY_AWK: name and run; continue-on-error is
+# reported by flag instead), so an if:, shell: or working-directory: on a
+# gate step outside any derived job is refused as well. A step runs from its `      - ` line to the next one, or to
+# the first job-level (4-space) or job (2-space) key. Comment lines are
+# skipped, so they neither end a step nor count inside it. This reads the
+# whole step, where the check it replaces read a `grep -B3 -A1` window around
+# the run: line and missed a key placed after an env: block (security and
+# test seats on #10296).
+gate_step_continue_on_error() {
+  awk -v hdr="$JOB_HEADER_RE" "$STEP_KEY_AWK"'
+    function flush() { if (in_step && inv) print job "\t" coe "\t" extra; in_step = 0 }
+    /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
+    !in_jobs { next }
+    /^[[:space:]]*#/ { next }
+    $0 ~ hdr { flush(); job = $1; sub(/:$/, "", job); in_steps = 0; next }
+    /^[^[:space:]]/ { flush(); job = ""; in_jobs = 0; in_steps = 0; next }
+    /^    steps:[[:space:]]*$/ { flush(); in_steps = 1; next }
+    /^    [^[:space:]]/ { flush(); in_steps = 0; next }
+    in_steps && /^      - / { flush(); in_step = 1; inv = 0; coe = 0; extra = "" }
+    !in_step { next }
+    /bash scripts\/check-native-bindings\.sh/ { inv = 1 }
+    /^[[:space:]]*(- )?["\047]?continue-on-error["\047]?[[:space:]]*:/ { coe = 1 }
+    { k = step_key($0) }
+    k != "" && k != "name" && k != "run" && k != "continue-on-error" { extra = extra (extra == "" ? "" : " ") k }
+    END { flush() }
+  '
+}
+readonly -f gate_step_continue_on_error
+
+# 15. No continue-on-error may shadow any gate invocation: it would swallow the
+#     non-zero exit and pass the job on a dropped binding. Reads workflow text
+#     on stdin. $1 = its label, $2 = the job-level exemption table
+#     (GATE_COE_EXEMPT, or a fixture's). Returns 3, checking nothing, when no
+#     executable line invokes the gate; otherwise checks two places and
+#     returns 0. On the STEP: every step that invokes the gate, read whole,
+#     must carry no continue-on-error at all, and no key outside the closed
+#     set of name and run (STEP_KEY_AWK). On the JOB: every job that
+#     invokes the gate must have no job-level continue-on-error other than
+#     `false`, unless the exemption table names it. Each half fails when its
+#     cut found nothing, so neither can pass over zero items. It runs on every
+#     workflow in the sweep and, in a subshell, on the fixtures below, so a
+#     neutered check turns a fixture case red.
+assert_gate_continue_on_error() {
+  local label="$1" exempt="$2" text executable steps jobs job coe flag extra extra_keys key step_clean=1 job_clean=1 exempted=0
+  text="$(cat)"
+  executable="$(grep -v '^[[:space:]]*#' <<<"$text" || true)"
+  grep -qF 'bash scripts/check-native-bindings.sh' <<<"$executable" || return 3
+  steps="$(gate_step_continue_on_error <<<"$text")"
+  if [ -z "$steps" ]; then
+    fail "$label invokes the gate, but no step under jobs: was found invoking it — the step-level continue-on-error check would run over nothing"
+  else
+    while IFS=$'\t' read -r job flag extra; do
+      if [ "$flag" = 1 ]; then
+        fail "$label job ${job}: a step that invokes the native-bindings gate carries a step-level continue-on-error — gate exit code would be ignored"
+        step_clean=0
+      fi
+      read -r -a extra_keys <<<"$extra"
+      for key in ${extra_keys[@]+"${extra_keys[@]}"}; do
+        fail "$label job ${job}: a step that invokes the native-bindings gate carries the key ${key}: — a gate step may carry only name and run, and any other key can change what runs or whether its exit counts"
+        step_clean=0
+      done
+    done <<<"$steps"
+    if [ "$step_clean" = 1 ]; then
+      pass "$label: none of the $(grep -c '' <<<"$steps") step(s) invoking the gate carries a step-level continue-on-error or a key other than name and run"
+    fi
+  fi
+  jobs="$(gate_job_continue_on_error <<<"$text")"
+  if [ -z "$jobs" ]; then
+    fail "$label invokes the gate, but no job under jobs: was found invoking it — the job-level continue-on-error check would run over nothing"
+    return 0
+  fi
+  while IFS=$'\t' read -r job coe; do
+    if [ -n "$coe" ] && [ "$coe" != "false" ]; then
+      if grep -qxF "${label}:${job}" <<<"$exempt"; then
+        exempted=$((exempted + 1))
+      else
+        fail "$label job ${job} invokes the native-bindings gate but has job-level continue-on-error: ${coe} — the job passes with the gate red"
+        job_clean=0
+      fi
+    fi
+  done <<<"$jobs"
+  if [ "$job_clean" = 1 ]; then
+    pass "$label: none of the $(grep -c '' <<<"$jobs") job(s) invoking the gate has a non-exempt job-level continue-on-error ($exempted exempt)"
+  fi
+  return 0
+}
+readonly -f assert_gate_continue_on_error
+
+# The other direction of the job-level exemption. $1 = one GATE_COE_EXEMPT row
+# (`<workflow>:<job>`); reads the text of the workflow that row names on stdin
+# (empty when that file is missing). Passes when the row's job invokes the gate
+# under a job-level continue-on-error other than `false`, read through the same
+# cut assert_gate_continue_on_error uses; otherwise fails as stale, so the row
+# cannot outlive the reason for it. The sweep calls it once per row and, in a
+# subshell, the fixtures below call it, so a neutered staleness check turns a
+# fixture case red (architect seat on #10296).
+assert_coe_exemption_live() {
+  local row="$1" text live
+  text="$(cat)"
+  live="$(gate_job_continue_on_error <<<"$text" \
+    | awk -F'\t' -v j="${row#*:}" '$1 == j && $2 != "" && $2 != "false" { print $1 }')"
+  if [ -n "$live" ]; then
+    pass "continue-on-error exemption ${row} still matches a gate-invoking job with a job-level continue-on-error"
+  else
+    fail "continue-on-error exemption ${row} is stale — that job no longer invokes the gate under a job-level continue-on-error; delete the row from GATE_COE_EXEMPT"
+  fi
+}
+readonly -f assert_coe_exemption_live
+
+# $1 = a workflow the negative controls below mutate, $2 = the variable to load
+# its text into. The workflow must have a NATIVE_BINDING_FLOORS row: a control
+# is only meaningful where the floor has proven the derivation reads that file,
+# and with the controls as the consumer, deleting a row from the table goes
+# red here instead of unflooring the workflow in silence.
+load_controlled_workflow() {
+  local wf="$1" var="$2"
+  if ! grep -qxF "$wf" <<<"$(floored_workflows)"; then
+    fail "the negative controls mutate $wf, but NATIVE_BINDING_FLOORS has no row for it — its derivation would run unfloored"
+  fi
+  printf -v "$var" '%s' "$(cat "$WORKFLOWS_DIR/$wf")"
+}
+readonly -f load_controlled_workflow
+
+# $1 = a workflows directory; prints every workflow file GitHub would run from
+# it, one path per line: *.yml AND *.yaml. GitHub reads both extensions, and
+# a *.yml-only glob let an ungated vitest job saved as zz-new.yaml sweep green
+# while the same job as zz-new.yml went red (test seat on #10296; precedent:
+# scripts/check-suite-wiring.sh).
+list_workflow_files() {
+  local dir="$1" f
+  for f in "$dir"/*.yml "$dir"/*.yaml; do
+    if [ -f "$f" ]; then printf '%s\n' "$f"; fi
+  done
+}
+readonly -f list_workflow_files
+
+# Hermetic: a .yaml workflow is enumerated, and an ungated vitest job in it is
+# graded red by the same assert_gate_wired the sweep uses (run in a subshell
+# so its expected FAIL is captured rather than counted).
+yaml_dir="$TMPDIR_T/yaml-workflows"
+mkdir -p "$yaml_dir"
+printf 'on: push\njobs:\n  gated:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm ci\n      - name: Assert native swc binding survived npm ci\n        run: bash scripts/check-native-bindings.sh\n      - run: npx vitest run\n' >"$yaml_dir/gated.yml"
+printf 'on: push\njobs:\n  zz-vitest:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm ci\n      - run: npx vitest run\n' >"$yaml_dir/zz-new.yaml"
+yaml_listed="$(list_workflow_files "$yaml_dir")"
+if grep -qxF "$yaml_dir/zz-new.yaml" <<<"$yaml_listed" && grep -qxF "$yaml_dir/gated.yml" <<<"$yaml_listed"; then
+  pass "workflow enumeration lists both *.yml and *.yaml"
+else
+  fail "workflow enumeration missed a file (got: ${yaml_listed:-nothing}) — a workflow GitHub runs would sit outside the sweep"
+fi
+yaml_graded=""
+while IFS= read -r wf_path; do
+  [ -n "$wf_path" ] || continue
+  yaml_graded="${yaml_graded}$(assert_gate_wired "$(cat "$wf_path")" "${wf_path##*/}")"$'\n'
+done <<<"$yaml_listed"
+if grep -qF 'FAIL: zz-new.yaml job zz-vitest loads a native binding but does not invoke' <<<"$yaml_graded"; then
+  pass "an ungated vitest job in a .yaml workflow is graded red"
+else
+  fail "an ungated vitest job in a .yaml workflow was not graded red (got: ${yaml_graded:-nothing})"
+fi
+if grep -qF 'FAIL: gated.yml' <<<"$yaml_graded"; then
+  fail "fixture: the gated .yml control was graded red — the .yaml case may be red for the wrong reason"
+fi
+
+# Negative controls for the step and job rules: the gate step's if:, its
+# position, step-level continue-on-error read over the whole step, and
+# job-level continue-on-error with its exemption. Each fixture is a hermetic
+# one-job workflow graded by the same two functions the sweep calls,
+# assert_gate_wired and assert_gate_continue_on_error, in a subshell so the
+# expected FAIL is captured rather than counted. Each asserts its own defect
+# text. The correctly wired fixture is the pair: it must fail nothing and
+# pass both functions, so a rule that fires on every job cannot read as a
+# working control.
+# $1 = label, $2 = job-level exemption table, $3 = job name, $4 = the job's
+# lines from `continue-on-error`/`steps:` on, $5 = expected FAIL text, or
+# empty for "must pass".
+wiring_control() {
+  local label="$1" exempt="$2" job="$3" body="$4" want="$5" fixture got
+  fixture="$(printf 'on: push\njobs:\n  %s:\n    runs-on: ubuntu-latest\n%s\n' "$job" "$body")"
+  got="$(assert_gate_wired "$fixture" fixture.yml; assert_gate_continue_on_error fixture.yml "$exempt" <<<"$fixture")"
+  if [ -z "$want" ]; then
+    if grep -q 'FAIL:' <<<"$got" \
+       || ! grep -qF "PASS: fixture.yml job ${job} loads a native binding and runs the gate" <<<"$got" \
+       || ! grep -qF 'PASS: fixture.yml: none of the 1 step(s) invoking the gate' <<<"$got" \
+       || ! grep -qF 'PASS: fixture.yml: none of the 1 job(s) invoking the gate' <<<"$got"; then
+      fail "wiring control: $label should pass every check and fail none (got: ${got:-nothing})"
+    else
+      pass "wiring control: $label passes"
+    fi
+  elif grep -qF "FAIL: $want" <<<"$got"; then
+    pass "wiring control: $label is refused"
+  else
+    fail "wiring control: $label was not refused with '$want' (got: ${got:-nothing})"
+  fi
+}
+readonly -f wiring_control
+
+gate_name=$'      - name: Assert native swc binding survived npm ci'
+gate_run=$'        run: bash scripts/check-native-bindings.sh'
+wired_steps="    steps:
+      - run: npm ci
+${gate_name}
+${gate_run}
+      - run: npx vitest run"
+wiring_control "a correctly wired gate step" "" nc-ok "$wired_steps" ""
+wiring_control "a gate step carrying if: false" "" nc-if "    steps:
+      - run: npm ci
+${gate_name}
+        if: false
+${gate_run}
+      - run: npx vitest run" \
+  "fixture.yml job nc-if loads a native binding but native-bindings step carries an if:"
+wiring_control "a gate step placed after npx vitest run" "" nc-late "    steps:
+      - run: npm ci
+      - run: npx vitest run
+${gate_name}
+${gate_run}" \
+  "fixture.yml job nc-late loads a native binding but native-bindings step runs AFTER a step that already loads a native binding"
+# Step-level continue-on-error, placed where a window around run: cannot see
+# it: after a two-key env: block (the security seat's measured placement),
+# and right after name: with a four-key env: block before run: (the test
+# seat's). Both must be refused by the derived-job rule AND by the
+# every-invocation sweep, so each half is controlled on its own text.
+coe_after_env="    steps:
+      - run: npm ci
+${gate_name}
+${gate_run}
+        env:
+          A: \"1\"
+          B: \"2\"
+        continue-on-error: true
+      - run: npx vitest run"
+wiring_control "step continue-on-error after an env: block (derived-job rule)" "" nc-coe-env "$coe_after_env" \
+  "fixture.yml job nc-coe-env loads a native binding but native-bindings step carries a step-level continue-on-error"
+wiring_control "step continue-on-error after an env: block (every-invocation sweep)" "" nc-coe-env "$coe_after_env" \
+  "fixture.yml job nc-coe-env: a step that invokes the native-bindings gate carries a step-level continue-on-error"
+coe_before_env="    steps:
+      - run: npm ci
+${gate_name}
+        continue-on-error: true
+        env:
+          A: \"1\"
+          B: \"2\"
+          C: \"3\"
+          D: \"4\"
+${gate_run}
+      - run: npx vitest run"
+wiring_control "step continue-on-error before a four-key env: block (derived-job rule)" "" nc-coe-far "$coe_before_env" \
+  "fixture.yml job nc-coe-far loads a native binding but native-bindings step carries a step-level continue-on-error"
+wiring_control "step continue-on-error before a four-key env: block (every-invocation sweep)" "" nc-coe-far "$coe_before_env" \
+  "fixture.yml job nc-coe-far: a step that invokes the native-bindings gate carries a step-level continue-on-error"
+# A comment line at the step-list indent inside the step: YAML ignores it, so
+# the key after it is still the gate step's.
+wiring_control "step continue-on-error after a comment line (derived-job rule)" "" nc-coe-cmt "    steps:
+      - run: npm ci
+${gate_name}
+${gate_run}
+      # a note between two keys of the same step
+        continue-on-error: true
+      - run: npx vitest run" \
+  "fixture.yml job nc-coe-cmt loads a native binding but native-bindings step carries a step-level continue-on-error"
+# schema-drift.yml's shape: a differently named gate step in a job that loads
+# no binding, so only the every-invocation sweep reads it.
+wiring_control "step continue-on-error on a gate step outside any derived job" "" nc-coe-nd "    steps:
+      - run: npm ci
+      - name: Assert native bindings survived the install
+        run: bash scripts/check-native-bindings.sh
+        env:
+          A: \"1\"
+        continue-on-error: true
+      - run: npm run db:drift" \
+  "fixture.yml job nc-coe-nd: a step that invokes the native-bindings gate carries a step-level continue-on-error"
+# The closed set of step keys (name and run). `shell: echo {0}` after run:
+# makes the runner echo the script's path and exit 0 (the security seat's
+# measured disarm on cd.yml test-web), and `working-directory:` points the
+# gate at a tree that is not the one the job loads. Each is refused by name,
+# by the derived-job rule and by the every-invocation sweep; the correctly
+# wired fixture above (nc-ok) is the pair that must pass both.
+shell_steps="    steps:
+      - run: npm ci
+${gate_name}
+${gate_run}
+        shell: echo {0}
+      - run: npx vitest run"
+wiring_control "a gate step carrying shell: after run: (derived-job rule)" "" nc-shell "$shell_steps" \
+  "fixture.yml job nc-shell loads a native binding but native-bindings step carries the key shell:"
+wiring_control "a gate step carrying shell: after run: (every-invocation sweep)" "" nc-shell "$shell_steps" \
+  "fixture.yml job nc-shell: a step that invokes the native-bindings gate carries the key shell:"
+wd_steps="    steps:
+      - run: npm ci
+${gate_name}
+        \"working-directory\": apps/docs
+${gate_run}
+      - run: npx vitest run"
+wiring_control "a gate step carrying a quoted \"working-directory\": (derived-job rule)" "" nc-wd-key "$wd_steps" \
+  "fixture.yml job nc-wd-key loads a native binding but native-bindings step carries the key working-directory:"
+wiring_control "a gate step carrying a quoted \"working-directory\": (every-invocation sweep)" "" nc-wd-key "$wd_steps" \
+  "fixture.yml job nc-wd-key: a step that invokes the native-bindings gate carries the key working-directory:"
+# schema-drift.yml's shape again: only the sweep reads this step, so it must
+# refuse shell: and if: there itself, including a key on the step's `- ` line.
+wiring_control "shell: on a gate step outside any derived job" "" nc-shell-nd "    steps:
+      - run: npm ci
+      - name: Assert native bindings survived the install
+        run: bash scripts/check-native-bindings.sh
+        shell: echo {0}
+      - run: npm run db:drift" \
+  "fixture.yml job nc-shell-nd: a step that invokes the native-bindings gate carries the key shell:"
+wiring_control "if: on the - line of a gate step outside any derived job" "" nc-if-nd "    steps:
+      - run: npm ci
+      - if: false
+        name: Assert native bindings survived the install
+        run: bash scripts/check-native-bindings.sh
+      - run: npm run db:drift" \
+  "fixture.yml job nc-if-nd: a step that invokes the native-bindings gate carries the key if:"
+# A comment line at the JOB-key indent (four spaces) inside a gate step. YAML
+# ignores it, so the keys after it are still the step's. The sweep's cut ends
+# a step at any four-space line, so without its comment skip this line ends
+# the step early and hides every key after it; nc-coe-cmt's six-space comment
+# cannot reach that branch (test seat on #10296). One fixture, graded for the
+# continue-on-error flag and for the closed key set, which read the same cut;
+# and a derived-job twin for the derived rule's cut.
+cmt4_nd="    steps:
+      - run: npm ci
+      - name: Assert native bindings survived the install
+        run: bash scripts/check-native-bindings.sh
+    # a note at the job-key indent, inside the step
+        continue-on-error: true
+        shell: echo {0}
+      - run: npm run db:drift"
+wiring_control "step continue-on-error after a four-space comment line (every-invocation sweep)" "" nc-coe-cmt4 "$cmt4_nd" \
+  "fixture.yml job nc-coe-cmt4: a step that invokes the native-bindings gate carries a step-level continue-on-error"
+wiring_control "shell: after a four-space comment line (every-invocation sweep)" "" nc-coe-cmt4 "$cmt4_nd" \
+  "fixture.yml job nc-coe-cmt4: a step that invokes the native-bindings gate carries the key shell:"
+wiring_control "shell: after a four-space comment line (derived-job rule)" "" nc-shell-cmt4 "    steps:
+      - run: npm ci
+${gate_name}
+${gate_run}
+    # a note at the job-key indent, inside the step
+        shell: echo {0}
+      - run: npx vitest run" \
+  "fixture.yml job nc-shell-cmt4 loads a native binding but native-bindings step carries the key shell:"
+wiring_control "job-level continue-on-error on a gate-invoking job" "" nc-jcoe "    continue-on-error: true
+$wired_steps" \
+  "fixture.yml job nc-jcoe invokes the native-bindings gate but has job-level continue-on-error: true"
+wiring_control "job-level continue-on-error: \${{ true }} on a gate-invoking job" "" nc-jexpr "    \"continue-on-error\": \${{ true }}
+$wired_steps" \
+  "fixture.yml job nc-jexpr invokes the native-bindings gate but has job-level continue-on-error: \${{ true }}"
+# A column-0 comment line before the job-level key: YAML ignores it, but the
+# job-level cut leaves jobs: at any column-0 line, so without its comment skip
+# the key after it would never be read.
+wiring_control "job-level continue-on-error after a column-0 comment line" "" nc-jcmt "# a note at column 0, inside the job
+    continue-on-error: true
+$wired_steps" \
+  "fixture.yml job nc-jcmt invokes the native-bindings gate but has job-level continue-on-error: true"
+wiring_control "job-level continue-on-error: false" "" nc-ok "    continue-on-error: false
+$wired_steps" ""
+# The exemption: the same job-level key, with the job named in the table,
+# is passed and counted as exempt, and only that exact row exempts it.
+wiring_control "job-level continue-on-error on an exempted job" $'\nfixture.yml:nc-jcoe\n' nc-jcoe "    continue-on-error: true
+$wired_steps" ""
+jcoe_graded="$(printf 'on: push\njobs:\n  nc-jcoe:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n%s\n' "$wired_steps" \
+  | assert_gate_continue_on_error fixture.yml $'\nfixture.yml:nc-jcoe\n')"
+if grep -qF 'PASS: fixture.yml: none of the 1 job(s) invoking the gate has a non-exempt job-level continue-on-error (1 exempt)' <<<"$jcoe_graded"; then
+  pass "wiring control: the exempted job-level continue-on-error is counted as exempt"
+else
+  fail "wiring control: the exempted job-level continue-on-error was not counted as exempt (got: ${jcoe_graded:-nothing})"
+fi
+wiring_control "job-level continue-on-error exempted for a DIFFERENT job" $'\nfixture.yml:nc-other\nother.yml:nc-jcoe\n' nc-jcoe "    continue-on-error: true
+$wired_steps" \
+  "fixture.yml job nc-jcoe invokes the native-bindings gate but has job-level continue-on-error: true"
+
+# Negative controls for the stale-exemption rule, the other direction of the
+# exemption above. Each grades one exemption row against a hermetic workflow
+# with assert_coe_exemption_live, the function the sweep calls, in a subshell
+# so the expected FAIL is captured rather than counted, and asserts its own
+# defect text. The live row is the pair: a job that keeps the key must pass
+# and fail nothing, so a check that calls every row stale cannot read as a
+# working control. $1 = label, $2 = exemption row, $3 = workflow text (empty
+# for a missing file), $4 = expected FAIL text, or empty for "must pass".
+exemption_control() {
+  local label="$1" row="$2" text="$3" want="$4" got
+  got="$(assert_coe_exemption_live "$row" <<<"$text")"
+  if [ -z "$want" ]; then
+    if grep -q 'FAIL:' <<<"$got" \
+       || ! grep -qF "PASS: continue-on-error exemption ${row} still matches" <<<"$got"; then
+      fail "exemption control: $label should pass and fail nothing (got: ${got:-nothing})"
+    else
+      pass "exemption control: $label passes"
+    fi
+  elif grep -qF "FAIL: $want" <<<"$got"; then
+    pass "exemption control: $label is refused"
+  else
+    fail "exemption control: $label was not refused with '$want' (got: ${got:-nothing})"
+  fi
+}
+readonly -f exemption_control
+
+jcoe_live="$(printf 'on: push\njobs:\n  nc-jcoe:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n%s\n' "$wired_steps")"
+exemption_control "a row whose job keeps the job-level key" fixture.yml:nc-jcoe "$jcoe_live" ""
+exemption_control "a row whose job dropped the job-level key" fixture.yml:nc-jstale \
+  "$(printf 'on: push\njobs:\n  nc-jstale:\n    runs-on: ubuntu-latest\n%s\n' "$wired_steps")" \
+  "continue-on-error exemption fixture.yml:nc-jstale is stale"
+exemption_control "a row whose job set the key to false" fixture.yml:nc-jfalse \
+  "$(printf 'on: push\njobs:\n  nc-jfalse:\n    runs-on: ubuntu-latest\n    continue-on-error: false\n%s\n' "$wired_steps")" \
+  "continue-on-error exemption fixture.yml:nc-jfalse is stale"
+exemption_control "a row whose job keeps the key but no longer invokes the gate" fixture.yml:nc-jnogate \
+  "$(printf 'on: push\njobs:\n  nc-jnogate:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n    steps:\n      - run: npm ci\n      - run: npx vitest run\n')" \
+  "continue-on-error exemption fixture.yml:nc-jnogate is stale"
+exemption_control "a row naming a job the workflow does not have" fixture.yml:nc-other "$jcoe_live" \
+  "continue-on-error exemption fixture.yml:nc-other is stale"
+exemption_control "a row naming a missing workflow" gone.yml:nc-jcoe "" \
+  "continue-on-error exemption gone.yml:nc-jcoe is stale"
+
+# The sweep itself. Every *.yml and *.yaml under .github/workflows/ is read —
+# the gh-aw *.lock.yml compilations included, since they are workflows GitHub
+# runs — and each is graded against its floor (if any). Every floored workflow
+# must be present: a floor whose file is missing would otherwise never be
+# evaluated, and the derivation's self-test would vanish without a FAIL
+# (lesson 9).
+workflow_files=()
+while IFS= read -r wf_path; do
+  if [ -n "$wf_path" ]; then workflow_files+=("$wf_path"); fi
+done <<<"$(list_workflow_files "$WORKFLOWS_DIR")"
+floored_missing=0
+for wf_label in $(floored_workflows); do
+  if [ ! -f "$WORKFLOWS_DIR/$wf_label" ]; then
+    fail "floored workflow $wf_label not found under $WORKFLOWS_DIR — its floor cannot be evaluated"
+    floored_missing=1
+  fi
+done
+
+if [ "${#workflow_files[@]}" -gt 0 ] && [ "$floored_missing" = 0 ]; then
+  # Declared before load_controlled_workflow fills them through printf -v. The
+  # linter cannot see an indirect assignment, so without these it reports every
+  # later "$ci"/"$qg"/"$cdwf" as SC2154 and the CI shellcheck step fails.
+  ci="" qg="" cdwf=""
+  load_controlled_workflow ci.yml ci
+  load_controlled_workflow quality-gates.yml qg
+  load_controlled_workflow cd.yml cdwf
+
+  # 15 rides along (assert_gate_continue_on_error, above). It runs wherever an
+  #    invocation exists (schema-drift.yml carries one outside any derived
+  #    job, so this is broader than the derived set), and the count of such
+  #    workflows must be non-zero or the check ran over nothing.
+  invoking_workflows=0
+  for wf_path in "${workflow_files[@]}"; do
+    wf_label="${wf_path##*/}"
+    wf_text="$(cat "$wf_path")"
+    read -r -a floor <<<"$(floor_jobs "$wf_label")"
+    assert_gate_wired "$wf_text" "$wf_label" ${floor[@]+"${floor[@]}"}
+    if assert_gate_continue_on_error "$wf_label" "$GATE_COE_EXEMPT" <<<"$wf_text"; then
+      invoking_workflows=$((invoking_workflows + 1))
+    fi
+  done
+  # The other direction: every exemption must still describe a job that
+  # invokes the gate under a job-level continue-on-error, or it is stale
+  # (assert_coe_exemption_live, controlled by the stale-exemption fixtures
+  # above). A row naming a missing workflow is graded on empty text: stale.
+  while IFS= read -r coe_exempt; do
+    [ -n "$coe_exempt" ] || continue
+    exempt_text=""
+    if [ -f "$WORKFLOWS_DIR/${coe_exempt%%:*}" ]; then
+      exempt_text="$(cat "$WORKFLOWS_DIR/${coe_exempt%%:*}")"
+    fi
+    assert_coe_exemption_live "$coe_exempt" <<<"$exempt_text"
+  done <<<"$GATE_COE_EXEMPT"
+  if [ "$invoking_workflows" -gt 0 ]; then
+    pass "swept ${#workflow_files[@]} workflow file(s) under .github/workflows; $invoking_workflows invoke the gate"
+  else
+    fail "swept ${#workflow_files[@]} workflow file(s) and none invokes scripts/check-native-bindings.sh — the continue-on-error check ran over nothing"
+  fi
 
   # The regression from #8632: test-e2e-crossbrowser loses its gate. The
   # hand-typed list did not contain that job, so this exact mutation left the
@@ -544,6 +1228,12 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
   assert_unwiring_caught test-mcp quality-gates.yml <<<"$qg"
   assert_unwiring_caught lighthouse-delta quality-gates.yml <<<"$qg"
   assert_unwiring_caught editor-boot quality-gates.yml <<<"$qg"
+  # #10222: cd.yml's own regression shape — test-web/test-mcp losing the gate
+  # they were just given, and e2e (which always had it) losing it too, so a
+  # future edit to any of the three is caught the same way.
+  assert_unwiring_caught test-web cd.yml <<<"$cdwf"
+  assert_unwiring_caught test-mcp cd.yml <<<"$cdwf"
+  assert_unwiring_caught e2e cd.yml <<<"$cdwf"
 
   # A NEW job appended to ci.yml. $1 = job name, $2 = its steps after npm ci.
   with_job() {
@@ -625,20 +1315,6 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
     fail "derivation: \`playwright test\` against a missing config was not reported unresolvable (got: ${unresolvable:-nothing})"
   fi
 
-  # 15. No continue-on-error may shadow any gate invocation — it would swallow
-  #     the non-zero exit and pass the job on a dropped binding. Windowed to
-  #     the invocation lines so legitimate continue-on-error elsewhere in a
-  #     workflow does not false-positive.
-  for wf_label in ci.yml quality-gates.yml; do
-    if [ "$wf_label" = ci.yml ]; then wf_text="$ci"; else wf_text="$qg"; fi
-    native_windows="$(grep -v '^[[:space:]]*#' <<<"$wf_text" | grep -B3 -A1 'bash scripts/check-native-bindings.sh' || true)"
-    if grep -q 'continue-on-error' <<<"$native_windows"; then
-      fail "a $wf_label native-bindings gate step has continue-on-error — gate exit code would be ignored"
-    else
-      pass "$wf_label: no continue-on-error shadows any native-bindings gate invocation"
-    fi
-  done
-
   # 16. Self-defense registration: the lockfile-sync-tests (CI Self-Defense
   #     Tests) job must shellcheck the gate + this suite AND run this suite,
   #     so a PR that neuters either fails a required check.
@@ -654,7 +1330,7 @@ if [ -f "$CI_YML" ] && [ -f "$QG_YML" ]; then
     fail "self-defense job does not run scripts/__tests__/check-native-bindings.test.sh"
   fi
 else
-  fail "workflow files not found at $CI_YML / $QG_YML — structural assertions cannot run"
+  fail "no workflow files under $WORKFLOWS_DIR, or a floored workflow is missing — structural assertions cannot run"
 fi
 
 # ── @rolldown: the second native binding, and the reason this gate is a list ──

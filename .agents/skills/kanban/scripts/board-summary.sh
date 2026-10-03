@@ -19,7 +19,7 @@ BOARD_JSON=$(curl -s --max-time 5 "${BASE_URL}/board" 2>/dev/null || echo "")
 
 if [ -z "${BOARD_JSON}" ] || echo "${BOARD_JSON}" | grep -q '"error"'; then
   echo "ERROR: Could not reach taskboard."
-  echo "  Start with: taskboard start --port 3010  (NO --db flag)"
+  echo "  Start with: node .claude/hooks/taskboard-launch.mjs start  (resolves + passes the shared DB path; never start the binary by hand)"
   echo "  Verify:     curl -s ${BASE_URL}/board | python3 -c \"import json,sys; d=json.load(sys.stdin); print(len(d.get('tickets',[])), 'tickets')\""
   exit 0
 fi
@@ -44,7 +44,7 @@ elif "columns" in data:
 if not tickets:
     print("Board is empty (0 tickets).")
     print("If you expected tickets, the taskboard may be using the wrong database.")
-    print("Never use --db flag; the OS default path is the source of truth.")
+    print("Never start the binary by hand or pass your own --db; the launcher (node .claude/hooks/taskboard-launch.mjs start) resolves the shared path and passes it itself.")
     sys.exit(0)
 
 # Count by status

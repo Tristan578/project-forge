@@ -46,8 +46,12 @@ async function POST_impl(req: NextRequest) {
     // Create Stripe Checkout session for one-time payment
     const session = await getStripe().checkout.sessions.create({
       mode: 'payment',
-      customer: user.stripeCustomerId ?? undefined,
-      customer_email: user.stripeCustomerId ? undefined : user.email,
+      // Stripe's SessionCreateParams doesn't accept an explicit `undefined`
+      // for these under exactOptionalPropertyTypes; conditional spread keeps
+      // exactly one of the two set, matching the prior ??/ternary behavior.
+      ...(user.stripeCustomerId
+        ? { customer: user.stripeCustomerId }
+        : { customer_email: user.email }),
       line_items: [{ price: priceId, quantity: 1 }],
       metadata: {
         userId: user.id,

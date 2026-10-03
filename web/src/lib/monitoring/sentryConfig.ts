@@ -364,7 +364,7 @@ function scrubEvent<T extends Event>(event: T): T {
     if (typeof qs === 'string') {
       event.request.query_string = scrubString(qs);
     } else if (qs != null) {
-      event.request.query_string = deepScrub(qs) as typeof event.request.query_string;
+      event.request.query_string = deepScrub(qs) as NonNullable<typeof event.request.query_string>;
     }
   }
 
@@ -493,7 +493,7 @@ function scrubLog<T extends { message?: unknown; attributes?: Record<string, unk
     for (const key of ['user.name', 'user.username']) {
       if (key in attrs) attrs[key] = REDACTED;
     }
-    log.attributes = attrs as T['attributes'];
+    log.attributes = attrs as NonNullable<T['attributes']>;
   }
   return log;
 }
@@ -555,7 +555,7 @@ function scrubMetric<T extends { name?: unknown; attributes?: Record<string, unk
     for (const key of ['user.name', 'user.username']) {
       if (key in attrs) attrs[key] = REDACTED;
     }
-    metric.attributes = attrs as T['attributes'];
+    metric.attributes = attrs as NonNullable<T['attributes']>;
   }
   return metric;
 }

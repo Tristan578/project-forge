@@ -80,10 +80,12 @@ interface ServiceEntry {
   status: ServiceStatus;
   latencyMs: number;
   lastChecked: string;
-  error?: string;
+  // `makeService` below always writes this key (as `undefined` when its
+  // `error` param is omitted), so the type must admit the explicit value.
+  error?: string | undefined;
   summary?: string;
   configurationOnly?: boolean;
-  details?: Record<string, unknown>;
+  details?: Record<string, unknown> | undefined;
 }
 
 function makeService(name: string, status: ServiceStatus, error?: string): ServiceEntry {

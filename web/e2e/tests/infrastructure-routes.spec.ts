@@ -121,8 +121,11 @@ test.describe('Infrastructure Routes @api', () => {
       for (const endpoint of endpoints) {
         // Only /api/capabilities is public-rate-limited per client here; give
         // it its own address so this sweep cannot 429 (#9725 p7).
+        // Playwright's request options don't accept an explicit `undefined`
+        // for `headers` under exactOptionalPropertyTypes; conditional spread
+        // omits the key for every other endpoint.
         const response = await request.get(endpoint, {
-          headers: endpoint === '/api/capabilities' ? isolatedClientHeaders() : undefined,
+          ...(endpoint === '/api/capabilities' ? { headers: isolatedClientHeaders() } : {}),
         });
         expect(response.status(), `${endpoint}: ${await response.text()}`).toBe(200);
         expect(response.headers()['content-type']).toContain('application/json');

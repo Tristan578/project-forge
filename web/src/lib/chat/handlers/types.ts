@@ -8,7 +8,7 @@ import type { EditorState } from '@/stores/editorStore';
 export interface ToolCallContext {
   store: EditorState;
   dispatchCommand: (command: string, payload: unknown) => void;
-  dispatchCommandBatch?: (commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult;
+  dispatchCommandBatch?: ((commands: Array<{ command: string; payload?: unknown }>) => import('@/hooks/useEngine').BatchResult) | undefined;
 }
 
 export type ToolHandler = (
@@ -20,7 +20,7 @@ export interface ExecutionResult {
   success: boolean;
   result?: unknown;
   message?: string;
-  error?: string;
+  error?: string | undefined;
 }
 
 // Re-export common types that handlers need

@@ -22,13 +22,13 @@ export interface ResolvedRoute {
   /** API key to use — may be empty string for OIDC-authenticated backends */
   apiKey: string;
   /** Optional base URL override */
-  endpoint?: string;
+  endpoint?: string | undefined;
   /** Resolved model identifier (backend-specific format) */
-  modelId?: string;
+  modelId?: string | undefined;
   /** Whether this call should be tracked in the cost ledger */
   metered: boolean;
   /** Usage record ID if metered — set after token deduction */
-  usageId?: string;
+  usageId?: string | undefined;
 }
 
 /**

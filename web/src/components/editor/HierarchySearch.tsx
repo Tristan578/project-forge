@@ -13,7 +13,7 @@ import { useEditorStore } from '@/stores/editorStore';
 /** Optional result-count context for the hierarchy search field. */
 interface HierarchySearchProps {
   /** Matching entity count; omitted by default and shown only for nonempty input. */
-  matchCount?: number;
+  matchCount?: number | undefined;
 }
 
 /**
