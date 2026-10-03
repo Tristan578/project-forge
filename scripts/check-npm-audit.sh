@@ -139,11 +139,14 @@ ALLOWED_ADVISORIES=(
   #      body cut fails closed on an empty body);
   #   2. prune the same id from ALLOWED_GHSA in scripts/check-security-alerts.sh;
   #   3. in scripts/__tests__/check-npm-audit.test.sh, set
-  #      expected_allowlist_entries to '' and delete the section-0 braces cases,
-  #      then update SELF_EXEC_EXPECTED_DROP and the expected_openers list
-  #      (their failure messages print the new values);
-  #   4. reword the History paragraph and "The one entry below" above, and the
-  #      matching sentence in .claude/rules/gotchas-build-ci.md.
+  #      expected_allowlist_entries to '' and delete the section-0 braces cases
+  #      with their (c) comment block; update the expected_openers list FIRST,
+  #      then SELF_EXEC_EXPECTED_DROP (its value depends on the openers; each
+  #      failure message prints the value to use);
+  #   4. reword every prose mention of braces as the current entry: the History
+  #      paragraph and "The one entry below" above, the suite's header and its
+  #      "when braces is relocked away" notes (grep the suite for "braces"),
+  #      and the matching sentence in .claude/rules/gotchas-build-ci.md.
   # RE-CHECK on every eslint-config-next or next bump: `npm view braces versions`
   # and `npm view @next/eslint-plugin-next@latest dependencies.fast-glob`.
   # Tracking issue: #10323 (warn when a waived advisory becomes fixable).

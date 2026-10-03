@@ -1122,7 +1122,7 @@ expected_allowlist_entries='  "GHSA-vfj7-8cjw-p6xm:node_modules/braces"'
 readonly expected_allowlist_entries
 allowlist_elements="$(grep -vE '^[[:space:]]*(#|$)' <<<"$allowlist_body" || true)"
 if [ "$allowlist_elements" = "$expected_allowlist_entries" ]; then
-  pass "ALLOWED_ADVISORIES ships exactly the reviewed entry set (braces GHSA-vfj7-8cjw-p6xm pinned to node_modules/braces)"
+  pass "ALLOWED_ADVISORIES ships exactly the reviewed entry set ($(grep -c . <<<"$allowlist_elements" || true) entr(y/ies): [$(tr -s ' \n' ' ' <<<"$allowlist_elements" | sed -E 's/^ +| +$//g')])"
 else
   fail "ALLOWED_ADVISORIES differs from the reviewed entry set — expected [$expected_allowlist_entries], got [$allowlist_elements]. If you just PRUNED an entry, follow the REMOVAL PATH checklist beside it in the gate and update this pin to match (an empty allowlist means an empty reviewed set). If you ADDED or widened one, try relocking first ('npm view <pkg> versions' against the advisory's patched range); if the change is genuinely warranted, update this pin deliberately"
 fi
@@ -1132,6 +1132,32 @@ if [ "$gate_ghsa_lines" = "$reviewed_ghsa_lines" ]; then
   pass "the gate file carries no quoted advisory element beyond the reviewed set"
 else
   fail "the gate file's quoted \"GHSA- element line count ($gate_ghsa_lines) differs from the reviewed set's ($reviewed_ghsa_lines) — more means a waiver outside the one column-0 ALLOWED_ADVISORIES body (or a duplicate); fewer means a reviewed entry was removed without updating the reviewed entry-set pin above"
+fi
+# Lockstep with the daily Dependabot-alert gate. scripts/check-security-alerts.sh
+# says its ALLOWED_GHSA mirrors this allowlist; without the mirror, that cron
+# stays red on an alert this gate already waives, and a gate that is always red
+# hides the next real alert. Derived from both files at run time: every id in
+# this gate's column-0 body must appear as a quoted element of ALLOWED_GHSA's
+# column-0 body. Subset only: ALLOWED_GHSA's pre-existing esbuild drift is
+# documented beside it and tolerated here.
+alerts_script="$REPO_ROOT/scripts/check-security-alerts.sh"
+ghsa_body="$(awk '/^ALLOWED_GHSA=\(/{f=1;next} f && /^\)/{exit} f' "$alerts_script" 2>/dev/null || true)"
+audit_ids="$(grep -vE '^[[:space:]]*(#|$)' <<<"$allowlist_body" | sed -E 's/^[[:space:]]*"?([^:"]*).*/\1/' || true)"
+if [ -n "$allowlist_elements" ] && [ -z "$audit_ids" ]; then
+  fail "lockstep pin read no advisory id from a non-empty ALLOWED_ADVISORIES body — the id extraction no longer matches the entry shape, so the mirror check below would pass vacuously"
+elif [ -n "$audit_ids" ] && [ -z "$ghsa_body" ]; then
+  fail "lockstep pin read nothing from ALLOWED_GHSA in $alerts_script (moved, renamed, or its column-0 '(' / ')' anchor no longer matches) — the mirror cannot be checked"
+else
+  missing_ids=""
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    grep -qE "^[[:space:]]*\"$id\"[[:space:]]*\$" <<<"$ghsa_body" || missing_ids="$missing_ids $id"
+  done <<<"$audit_ids"
+  if [ -z "$missing_ids" ]; then
+    pass "every ALLOWED_ADVISORIES id is mirrored in check-security-alerts.sh ALLOWED_GHSA ($(grep -c . <<<"$audit_ids" || true) id(s))"
+  else
+    fail "waived here but missing from ALLOWED_GHSA in scripts/check-security-alerts.sh:$missing_ids — add (or, on a prune, remove) it there in the same commit, or the daily Security Alerts cron stays red on an alert this gate already waives"
+  fi
 fi
 # Every read of the allowlist array must go through the empty-array guard. This
 # is the half of the bash-3.2 protection that CI can actually enforce. The
