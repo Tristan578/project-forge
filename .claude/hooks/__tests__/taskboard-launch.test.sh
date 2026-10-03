@@ -40,6 +40,25 @@ run_launcher() {
 }
 readonly -f run_launcher
 
+PY="$(command -v python3 || command -v python || true)"
+
+# file_url <absolute-path> [windows] — the file:// URL that Python's urllib,
+# the runtime's api(), maps back to <path>. Python builds it; it is never
+# spliced together as "file://$path". Under Git Bash, mktemp returns a POSIX
+# path (/tmp/tmp.XXXX). MSYS rewrites that to C:/... when it is a whole argv
+# or env value handed to a native program, but not inside a URL, so
+# "file://$TMP/..." reached the Windows runtime as file:///tmp/..., which
+# url2pathname maps to \tmp\... on the current drive, a directory that does
+# not exist. As an argv value "$1" IS rewritten, so Python sees the native
+# path and as_uri() spells it file:///C:/... `windows` builds the URI with
+# PureWindowsPath, the flavour pathlib.Path is on Windows, so case 5s checks
+# the Windows spelling on any host. sys.stdout.write, not print: print on
+# Windows ends the line with \r\n, and $(...) strips only the \n.
+file_url() {
+  "$PY" -c 'import pathlib, sys; cls = pathlib.PureWindowsPath if sys.argv[2:] == ["windows"] else pathlib.Path; sys.stdout.write(cls(sys.argv[1]).as_uri())' "$@"
+}
+readonly -f file_url
+
 echo "=== taskboard-launch.mjs tests ==="
 
 # ---- 1. argv forwarding: db-path prints the runtime's resolved path ---------
@@ -86,11 +105,10 @@ fi
 #      start path would instead try to start a server on it, so this message
 #      proves the launcher forwarded `init` and the runtime dispatched it as
 #      init. Nothing is spawned, so the case is hermetic on every platform.
-PY="$(command -v python3 || command -v python || true)"
+populated="$TMP/populated/taskboard.db"
 if [ -z "$PY" ]; then
   bad "4. python is required to plant the populated database fixture"
 else
-  populated="$TMP/populated/taskboard.db"
   mkdir -p "$TMP/populated"
   "$PY" -c 'import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); c.execute("CREATE TABLE projects(id TEXT PRIMARY KEY, name TEXT)"); c.execute("INSERT INTO projects VALUES(?, ?)", ("p1", "existing")); c.commit(); c.close()' "$populated"
   before="$(cksum < "$populated")"
@@ -117,12 +135,30 @@ fi
 #      gets a raw traceback. The "not a database" assertion proves the failure
 #      really came from sqlite, so the case cannot pass on some other refusal
 #      (a missing file, an unreachable API) that the handler already covered.
+#      Case 5a is the positive control: the same file:// API with case 4's
+#      populated database must answer "matched", so an API URL the runtime
+#      cannot open fails there by name. (An unopenable URL reads as "server
+#      down", and doctor then refuses for want of a taskboard binary, which
+#      is the shape this case took on windows-latest before file_url.)
 api_dir="$TMP/file-api"
 mkdir -p "$api_dir" "$TMP/garbage"
 printf '[{"id":"p1"}]' > "$api_dir/projects"
 garbage="$TMP/garbage/taskboard.db"
 printf 'this is not a sqlite database, only enough bytes to fill a header.........................\n' > "$garbage"
-res="$(run_launcher doctor TASKBOARD_DB="$garbage" TASKBOARD_API="file://$api_dir")"
+api_url=""
+[ -n "$PY" ] && api_url="$(file_url "$api_dir")"
+if [ -n "$api_url" ] && [ -f "$populated" ]; then
+  res="$(run_launcher doctor TASKBOARD_DB="$populated" TASKBOARD_API="$api_url")"
+  rc="${res%%|*}"; out="${res#*|}"
+  if [ "$rc" -eq 0 ] && grep -qF '"apiIdentity": "matched"' <<<"$out"; then
+    ok "5a. the runtime opens the file:// API fixture ($api_url) and matches the populated database"
+  else
+    bad "5a. expected exit 0 + apiIdentity matched through $api_url, got exit $rc: $out"
+  fi
+else
+  bad "5a. python and case 4's populated database are required to build and prove the file:// API fixture"
+fi
+res="$(run_launcher doctor TASKBOARD_DB="$garbage" TASKBOARD_API="$api_url")"
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" -eq 1 ] && grep -q '^\[taskboard\] ' <<<"$out" && grep -qF "not a database" <<<"$out"; then
   ok "5. a sqlite3.Error in doctor exits 1 with a '[taskboard] ' line naming the sqlite failure"
@@ -133,6 +169,26 @@ if ! grep -qF "Traceback" <<<"$out"; then
   ok "5b. the sqlite failure is reported without a Python traceback"
 else
   bad "5b. the sqlite failure escaped as a raw traceback: $out"
+fi
+
+# ---- 5s. the Windows spelling of the file:// fixture, checked on any host ----
+#      On Windows the runtime's urllib decodes a file URL with nturl2path, so
+#      the URL file_url builds there must decode back to the native directory.
+#      nturl2path is importable on every platform, so this runs the Windows
+#      decode on Linux too. A spliced "file://C:/..." puts the drive in the
+#      host field and decodes to \Users\..., which this case reports. The
+#      space proves the percent-encoding round-trips.
+if [ -n "$PY" ]; then
+  win_dir='C:/Users/Runner Admin/AppData/Local/Temp/tmp.AbC/file-api'
+  win_url="$(file_url "$win_dir" windows)"
+  decoded="$("$PY" -W ignore::DeprecationWarning -c 'import nturl2path, sys, urllib.parse; sys.stdout.write(nturl2path.url2pathname(urllib.parse.urlsplit(sys.argv[1] + "/projects").path))' "$win_url")"
+  if [ "$decoded" = 'C:\Users\Runner Admin\AppData\Local\Temp\tmp.AbC\file-api\projects' ]; then
+    ok "5s. file_url's Windows spelling ($win_url) decodes back to the native fixture path"
+  else
+    bad "5s. file_url gave $win_url, which Windows urllib decodes to '$decoded', not the fixture directory"
+  fi
+else
+  bad "5s. python is required to check the Windows file:// spelling"
 fi
 
 echo
