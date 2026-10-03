@@ -48,7 +48,7 @@ const ENGINE_ERRORS = {
   'spaced 512-character reason': `Invalid scene file: ${longerThanCap(
     'unknown variant `bloomSettingsLegacy`, expected one of `none`, `low`, `medium`, `high`, `ultra` for the post processing profile in entity Player Character, ',
   )}`,
-  'unbroken 500-character token': `Invalid scene file: invalid type: string "${'A'.repeat(MAX_ENGINE_ERROR_CHARS)}", expected f32 at line 1 column 2`,
+  'unbroken token': `Invalid scene file: invalid type: string "${'A'.repeat(MAX_ENGINE_ERROR_CHARS)}", expected f32 at line 1 column 2`,
 } as const;
 
 /** Open the real editor page for a mocked project with no WASM engine. */
