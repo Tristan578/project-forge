@@ -113,10 +113,14 @@ describe('GET /api/generate/texture/status', () => {
       vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
       mockGetTextureStatus.mockResolvedValue({ status: 'IN_PROGRESS', progress: 10 });
 
-      await GET(makeRequest({ jobId: 'task_123' }));
+      // Decoy ids beside the polled one: the provider must be sent the id the
+      // ownership check ran on, never another caller-chosen value (#10262).
+      await GET(makeRequest({ jobId: 'task_123', predictionId: 'decoy_other', taskId: 'decoy_other', id: 'decoy_other' }));
 
       expect(verifyProviderJobOwner).toHaveBeenCalledTimes(1);
       expect(verifyProviderJobOwner).toHaveBeenCalledWith(user.id, 'meshy', 'task_123');
+      expect(mockGetTextureStatus).toHaveBeenCalledTimes(1);
+      expect(mockGetTextureStatus).toHaveBeenCalledWith('task_123');
     });
   });
 

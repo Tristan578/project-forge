@@ -112,16 +112,23 @@ describe('GET /api/generate/sprite-sheet/status', () => {
     });
 
     it('checks ownership with the authenticated userId, the sprite provider, and the polled jobId', async () => {
+      const getReplicateStatus = vi.fn().mockResolvedValue({ status: 'processing' });
       vi.mocked(SpriteClient).mockImplementation(
         function (this: InstanceType<typeof SpriteClient>) {
-          this.getReplicateStatus = vi.fn().mockResolvedValue({ status: 'processing' });
+          this.getReplicateStatus = getReplicateStatus;
         } as unknown as typeof SpriteClient
       );
 
-      await GET(makeRequest('replicate-pred-123'));
+      // Decoy ids beside the polled one: the provider must be sent the id the
+      // ownership check ran on, never another caller-chosen value (#10262).
+      await GET(new NextRequest(
+        'http://test/api/generate/sprite-sheet/status?jobId=replicate-pred-123&predictionId=decoy_other&taskId=decoy_other&id=decoy_other',
+      ));
 
       expect(verifyProviderJobOwner).toHaveBeenCalledTimes(1);
       expect(verifyProviderJobOwner).toHaveBeenCalledWith('user_1', 'replicate', 'replicate-pred-123');
+      expect(getReplicateStatus).toHaveBeenCalledTimes(1);
+      expect(getReplicateStatus).toHaveBeenCalledWith('replicate-pred-123');
     });
   });
 

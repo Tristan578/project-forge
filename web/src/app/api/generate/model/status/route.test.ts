@@ -114,16 +114,23 @@ describe('GET /api/generate/model/status', () => {
     });
 
     it('checks ownership with the authenticated userId, the model3d provider, and the polled jobId', async () => {
+      const getTaskStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 10 });
       vi.mocked(MeshyClient).mockImplementation(
         function (this: InstanceType<typeof MeshyClient>) {
-          this.getTaskStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 10 });
+          this.getTaskStatus = getTaskStatus;
         } as unknown as typeof MeshyClient
       );
 
-      await GET(makeRequest('job-123'));
+      // Decoy ids beside the polled one: the provider must be sent the id the
+      // ownership check ran on, never another caller-chosen value (#10262).
+      await GET(new NextRequest(
+        'http://test/api/generate/model/status?jobId=job-123&predictionId=decoy_other&taskId=decoy_other&id=decoy_other',
+      ));
 
       expect(verifyProviderJobOwner).toHaveBeenCalledTimes(1);
       expect(verifyProviderJobOwner).toHaveBeenCalledWith('user_1', 'meshy', 'job-123');
+      expect(getTaskStatus).toHaveBeenCalledTimes(1);
+      expect(getTaskStatus).toHaveBeenCalledWith('job-123');
     });
 
     it('checks ownership BEFORE resolving the API key', async () => {

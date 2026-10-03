@@ -114,10 +114,14 @@ describe('GET /api/generate/pixel-art/status', () => {
       vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
       mockGetReplicateStatus.mockResolvedValue({ status: 'processing', output: undefined });
 
-      await GET(makeRequest({ jobId: 'pred_abc123' }));
+      // Decoy ids beside the polled one: the provider must be sent the id the
+      // ownership check ran on, never another caller-chosen value (#10262).
+      await GET(makeRequest({ jobId: 'pred_abc123', predictionId: 'decoy_other', taskId: 'decoy_other', id: 'decoy_other' }));
 
       expect(verifyProviderJobOwner).toHaveBeenCalledTimes(1);
       expect(verifyProviderJobOwner).toHaveBeenCalledWith(user.id, 'replicate', 'pred_abc123');
+      expect(mockGetReplicateStatus).toHaveBeenCalledTimes(1);
+      expect(mockGetReplicateStatus).toHaveBeenCalledWith('pred_abc123');
     });
   });
 
