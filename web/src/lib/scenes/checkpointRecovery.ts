@@ -4,7 +4,7 @@
  */
 import { newSceneExportRequestId, SCENE_EXPORTED_EVENT, type SceneExportedDetail } from '@/lib/engine/sceneExportWire';
 import type { SceneFileData } from './sceneManager';
-import { isValidSceneFile } from './sceneValidation';
+import { describeSceneRefusal, validateSceneFile } from './sceneValidation';
 
 /** Emitted after the engine applies a scene and the editor adopts its metadata. */
 export const SCENE_LOADED_EVENT = 'forge:scene-loaded';
@@ -12,6 +12,23 @@ export const SCENE_LOADED_EVENT = 'forge:scene-loaded';
 export const CHECKPOINT_EXPORT_PREFIX = 'checkpoint-';
 
 type ExportRequest = (requestId: string) => boolean;
+
+/** The next step every checkpoint-validation failure ends with. */
+const CHECKPOINT_NEXT_STEP = 'Reload the editor and try again.';
+
+/**
+ * The error a person reads when the scene the engine handed back for a
+ * checkpoint fails validation.
+ *
+ * @param reason The refusal text, or `null` when there is none: no decoder
+ *   was attached, the decoder threw, or the engine refused without saying why.
+ * @returns A plain sentence naming the failure, followed by the next step.
+ */
+export function checkpointValidationMessage(reason: string | null): string {
+  return reason
+    ? `The engine returned a scene that failed validation. ${describeSceneRefusal(reason)} ${CHECKPOINT_NEXT_STEP}`
+    : `The engine returned an invalid scene, or scene validation is unavailable. ${CHECKPOINT_NEXT_STEP}`;
+}
 
 /** Read exactly this request's response; legacy uncorrelated replies are unsafe.
  *
@@ -35,7 +52,11 @@ export function captureCheckpointScene(requestExport: ExportRequest, timeoutMs =
       if (detail?.requestId !== requestId) return;
       try {
         const data: unknown = JSON.parse(detail.json);
-        if (!isValidSceneFile(data)) throw new Error('The engine returned an invalid scene, or scene validation is unavailable. Reload the editor and try again.');
+        // This is where #10267's bug class surfaces first — the engine wrote a
+        // scene its own decoder then refuses — so the reason must reach the
+        // person (in plain words, see `describeSceneRefusal`), with a next step.
+        const verdict = validateSceneFile(data);
+        if (!verdict.valid) throw new Error(checkpointValidationMessage(verdict.reason));
         finish(undefined, data as SceneFileData);
       } catch (error) {
         finish(error instanceof Error ? error : new Error('The scene could not be read.'));

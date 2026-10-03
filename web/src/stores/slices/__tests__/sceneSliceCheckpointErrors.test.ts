@@ -160,8 +160,10 @@ describe('checkpoint recovery transaction', () => {
     // The engine never adopted the checkpoint, so what it holds is not this
     // project's restored scene and the save lockout must stand — the same
     // reason `loadScene` records on its own rejection branch.
+    // The fixture engine refuses with `error: 'Refused'`; that text must ride
+    // along on the lockout so the person sees WHY, not only that it failed.
     expect(store.getState().sceneLoadError).toEqual({
-      reason: expect.stringContaining('the engine refused to load it'),
+      reason: 'This scene could not be opened: the engine refused to load it. Details: Refused.',
       at: expect.any(Number),
     });
     store.getState().saveScene('after-refused-restore');

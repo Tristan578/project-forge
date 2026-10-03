@@ -48,7 +48,51 @@ describe('checkpoint engine confirmation', () => {
       }));
       return true;
     }, () => true);
-    await expect(pending).rejects.toThrow('invalid scene');
+    // The readback failed the browser-side check for the scene's required
+    // parts. The person reads that in plain words (no "envelope", no
+    // repeated "Invalid scene file:"), followed by what to do next.
+    await expect(pending).rejects.toHaveProperty(
+      'message',
+      'The engine returned a scene that failed validation. The scene file is incomplete or damaged. Reload the editor and try again.',
+    );
+  });
+
+  function readbackOf(json: string): Promise<unknown> {
+    return captureCheckpointScene((requestId) => {
+      window.dispatchEvent(new CustomEvent(SCENE_EXPORTED_EVENT, { detail: { json, requestId } }));
+      return true;
+    });
+  }
+
+  it("names the decoder's own reason in plain words when the engine returns a scene its decoder refuses", async () => {
+    // A scene that passes the browser-side check but the (real) decoder still
+    // refuses — #10267's shape: the engine exported it, then its own loader
+    // says no. The browser-side check is strictly stronger than the fixture
+    // validator, so the refusal has to come from a validator that answers
+    // like the engine. serde's prefix and line/column are dropped for the
+    // person; the AI validate_scene tool still gets the raw text.
+    setSceneValidator(() => ({
+      valid: false,
+      reason: 'Invalid scene file: invalid type: string "x", expected f32 at line 1 column 900',
+    }));
+    await expect(readbackOf(JSON.stringify(sceneFixture('Decoder refuses')))).rejects.toHaveProperty(
+      'message',
+      'The engine returned a scene that failed validation. Invalid type: string "x", expected f32. Reload the editor and try again.',
+    );
+  });
+
+  // With no reason there is no way to tell these apart, so the message names
+  // both possibilities and still says what to do.
+  it.each([
+    ['no decoder is attached', null],
+    ['the engine refuses without saying why', () => ({ valid: false as const, reason: null })],
+    ['the decoder throws', () => { throw new Error('decoder crashed'); }],
+  ])('covers both causes and gives the next step when %s', async (_case, validator) => {
+    setSceneValidator(validator);
+    await expect(readbackOf(JSON.stringify(sceneFixture('No reason')))).rejects.toHaveProperty(
+      'message',
+      'The engine returned an invalid scene, or scene validation is unavailable. Reload the editor and try again.',
+    );
   });
 
   it('cleans up after a dispatcher throws so later exports cannot complete the request', async () => {
