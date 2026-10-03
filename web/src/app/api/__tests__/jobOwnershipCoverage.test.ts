@@ -1241,6 +1241,12 @@ describe('job-id ownership coverage (#10262)', () => {
     // The key resolved inside a nested function the guard's body does not own.
     expect(unguarded(fn(head + guard + '  const go = async () => resolveApiKey(mid.userId!, p, 0, op);\n'
       + '  return go();\n'))).toHaveLength(1);
+    // ... even a nested function that is complete on its own: the OUTER body
+    // can read a second caller-chosen id the inner whitelist never sees.
+    const inner = (head + guard + call.replace('client.status(jobId)', 'client.status(decoy)'))
+      .split('\n').filter(Boolean).map((l) => `  ${l}`).join('\n');
+    expect(unguarded(fn("  const decoy = request.headers.get('x-id');\n"
+      + `  const go = async (request: Request) => {\n${inner}\n  };\n  return go(request);\n`))).toHaveLength(1);
 
     // THE USER ARGUMENT. Ownership checked against a caller-chosen user.
     expect(unguarded(fn(head + guard.replace('mid.userId!', "searchParams.get('userId')!") + call))).toHaveLength(1);

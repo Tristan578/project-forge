@@ -9,11 +9,15 @@
  * and read back its result using the platform's credentials.
  *
  * `src/app/api/__tests__/jobOwnershipCoverage.test.ts` is the structural gate:
- * it parses every status route and fails one that resolves a key without
- * first refusing a non-`'owner'` result of `verifyProviderJobOwner` for the
- * authenticated caller (`withApiMiddleware`'s `userId`, the same user the key
- * is resolved for), and every
- * POST route behind such a status route that binds nothing.
+ * it parses every App Router route file, selects each one that calls
+ * `resolveApiKey` (at any path, not only `status/`), and fails one that
+ * resolves a key without first refusing a non-`'owner'` result of
+ * `verifyProviderJobOwner` for the authenticated caller (`withApiMiddleware`'s
+ * `userId`, the same user the key is resolved for) on the polled `jobId`, which
+ * must be the only value the handler reads from the request — unless the route
+ * is a pinned, reasoned exemption (a token-charged new operation, or the
+ * QStash-signed callback). It also fails a POST route behind such a route that
+ * binds nothing.
  *
  * `generation_jobs` cannot serve as that ownership record on its own: its
  * rows are created by the CLIENT (`generationStore.addJob` -> `POST
