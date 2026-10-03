@@ -1926,11 +1926,22 @@ describe('job-id ownership coverage (#10262)', () => {
           mutate(feed(read), HANDLER_OPEN, `${prelude}\n$1`),
           [/: an ambient declaration statement/, new RegExp(`reads the global '${global}' \\(its only declarations in this file emit no run-time binding\\)`)],
         ]),
-        // A TYPE-ONLY import binds nothing at run time either; there is no
-        // `declare` here, so this one is the binding rule's alone.
-        ['a type-only import', mutate(feed(`const nh = process${FETCH};`), HANDLER_OPEN,
-          "import type { NextRequest as process } from 'next/server';\n$1"),
-        [/reads the global 'process' \(its only declarations in this file emit no run-time binding\)/]],
+        // A TYPE-ONLY import, or a function signature with no body, binds
+        // nothing at run time either; there is no `declare` here, so these are
+        // the binding rule's alone. One spelling per branch of
+        // emitsRuntimeBinding, so deleting any single branch turns its own
+        // case red (lessons-learned #19).
+        ...([
+          ['a type-only import', "import type { NextRequest as process } from 'next/server';", 'process', `const nh = process${FETCH};`],
+          ['an inline type-only import specifier', "import { type NextRequest as process } from 'next/server';", 'process', `const nh = process${FETCH};`],
+          ['a type-only default import', "import type process from 'next/server';", 'process', `const nh = process${FETCH};`],
+          ['a type-only namespace import', "import type * as process from 'next/server';", 'process', `const nh = process${FETCH};`],
+          ['a bodiless function signature', 'function eval(source: string): any;', 'eval', `const nh = eval('process')${FETCH};`],
+        ] as const).map(([name, prelude, global, read]): [string, string, RegExp] => [
+          name,
+          mutate(feed(read), HANDLER_OPEN, `${prelude}\n$1`),
+          new RegExp(`reads the global '${global}' \\(its only declarations in this file emit no run-time binding\\)`),
+        ]),
         // An INSTANTIATION EXPRESSION reads its expression at run time; only
         // the type arguments are erased.
         ['an instantiation expression of Reflect.get', feed("const get = Reflect.get<object, string>;\nconst k = 'con' + 'structor';\n"
