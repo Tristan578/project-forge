@@ -1140,18 +1140,28 @@ fi
 # this gate's column-0 body must appear as a quoted element of ALLOWED_GHSA's
 # column-0 body. Subset only: ALLOWED_GHSA's pre-existing esbuild drift is
 # documented beside it and tolerated here.
+#
+# The elements come from BASH'S OWN PARSE of each column-0 declaration (cut,
+# then evaluated in a subshell), not from a per-line regex: two quoted entries
+# on one line are two waivers to the gate, and a line-oriented extraction read
+# only the first (measured: an unmirrored second id on the braces line scored
+# "1 id(s)" and passed).
 alerts_script="$REPO_ROOT/scripts/check-security-alerts.sh"
-ghsa_body="$(awk '/^ALLOWED_GHSA=\(/{f=1;next} f && /^\)/{exit} f' "$alerts_script" 2>/dev/null || true)"
-audit_ids="$(grep -vE '^[[:space:]]*(#|$)' <<<"$allowlist_body" | sed -E 's/^[[:space:]]*"?([^:"]*).*/\1/' || true)"
-if [ -n "$allowlist_elements" ] && [ -z "$audit_ids" ]; then
-  fail "lockstep pin read no advisory id from a non-empty ALLOWED_ADVISORIES body — the id extraction no longer matches the entry shape, so the mirror check below would pass vacuously"
-elif [ -n "$audit_ids" ] && [ -z "$ghsa_body" ]; then
+audit_decl="$(awk '/^ALLOWED_ADVISORIES=\(/{f=1} f{print} f && /^\)/{exit}' "$SCRIPT" 2>/dev/null || true)"
+ghsa_decl="$(awk '/^ALLOWED_GHSA=\(/{f=1} f{print} f && /^\)/{exit}' "$alerts_script" 2>/dev/null || true)"
+audit_ids="$( (ALLOWED_ADVISORIES=(); eval "$audit_decl"; for e in ${ALLOWED_ADVISORIES[@]+"${ALLOWED_ADVISORIES[@]}"}; do printf '%s\n' "${e%%:*}"; done) 2>/dev/null || true)"
+ghsa_ids="$( (ALLOWED_GHSA=(); eval "$ghsa_decl"; for e in ${ALLOWED_GHSA[@]+"${ALLOWED_GHSA[@]}"}; do printf '%s\n' "$e"; done) 2>/dev/null || true)"
+if [ -z "$audit_decl" ]; then
+  fail "lockstep pin could not cut the ALLOWED_ADVISORIES declaration from the gate — the mirror check below would pass vacuously"
+elif [ -n "$allowlist_elements" ] && [ -z "$audit_ids" ]; then
+  fail "lockstep pin read no advisory id from a non-empty ALLOWED_ADVISORIES body — the declaration no longer evaluates, so the mirror check below would pass vacuously"
+elif [ -n "$audit_ids" ] && [ -z "$ghsa_ids" ]; then
   fail "lockstep pin read nothing from ALLOWED_GHSA in $alerts_script (moved, renamed, or its column-0 '(' / ')' anchor no longer matches) — the mirror cannot be checked"
 else
   missing_ids=""
   while IFS= read -r id; do
     [ -n "$id" ] || continue
-    grep -qE "^[[:space:]]*\"$id\"[[:space:]]*\$" <<<"$ghsa_body" || missing_ids="$missing_ids $id"
+    grep -qxF -- "$id" <<<"$ghsa_ids" || missing_ids="$missing_ids $id"
   done <<<"$audit_ids"
   if [ -z "$missing_ids" ]; then
     pass "every ALLOWED_ADVISORIES id is mirrored in check-security-alerts.sh ALLOWED_GHSA ($(grep -c . <<<"$audit_ids" || true) id(s))"
