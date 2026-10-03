@@ -33,7 +33,7 @@
     "@clerk/nextjs": "^7.9.1",
     "@clerk/shared": "^4.31.1",
     "@hono/node-server": "^2.0.5",
-    "dompurify": ">=3.4.13",
+    "dompurify": ">=3.4.16",
     "esbuild": ">=0.28.2",
     "fast-xml-parser": ">=5.7.2",
     "hono": ">=4.13.5",
