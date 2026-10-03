@@ -333,6 +333,40 @@ describe('TutorialOverlay', () => {
     }
   });
 
+  // The role can sit on a surface AROUND the focused element: SceneBrowser's
+  // delete confirm/cancel are plain <button>s inside role="option" rows of a
+  // role="listbox". The button has no role, so only the ancestor lookup keeps
+  // the arrows from stepping the tour. The same button outside the row is the
+  // control: it shows the keys reach the tour's handler.
+  it('leaves the arrow keys to a role-less button inside an option row', () => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    const list = document.createElement('div');
+    list.setAttribute('role', 'listbox');
+    const row = document.createElement('div');
+    row.setAttribute('role', 'option');
+    const button = document.createElement('button');
+    row.appendChild(button);
+    list.appendChild(row);
+    document.body.appendChild(list);
+    try {
+      expect(button.hasAttribute('role')).toBe(false);
+      fireEvent.keyDown(button, { key: 'ArrowLeft' });
+      fireEvent.keyDown(button, { key: 'ArrowRight' });
+      expect(mockRetreatTutorial).not.toHaveBeenCalled();
+      expect(mockCompleteTutorial).not.toHaveBeenCalled();
+      fireEvent.keyDown(button, { key: 'Escape' });
+      expect(mockSkipTutorial).toHaveBeenCalledOnce();
+
+      document.body.appendChild(button);
+      fireEvent.keyDown(button, { key: 'ArrowRight' });
+      expect(mockCompleteTutorial).toHaveBeenCalledOnce();
+    } finally {
+      list.remove();
+      button.remove();
+    }
+  });
+
   // The widget carries the role itself, so it is the nearest [role] to the key
   // target: a tab inside a tablist would never reach the tablist role.
   it.each(ARROW_ROLES)('leaves the arrow keys to a role=%s widget, and Escape still skips', (role) => {
