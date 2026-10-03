@@ -102,13 +102,15 @@ set -uo pipefail
 # the base rate. An entry is warranted only once a relock is proven impossible.
 #
 # The array is expanded through the `${ARR[@]+"${ARR[@]}"}` guard at all
-# three read sites below: under `set -u`, bash 3.2 (the macOS system bash, which
-# `#!/usr/bin/env bash` resolves to) aborts on a plain `"${ARR[@]}"` expansion of
+# three read sites below: under `set -u`, bash older than 4.4 (macOS ships 3.2,
+# which `#!/usr/bin/env bash` resolves to there) aborts on a plain `"${ARR[@]}"` expansion of
 # an empty array — the steady state, and the state it returns to the day the
 # entry below is pruned. Unguarded, the abort happens INSIDE a command substitution, so
 # the crashed capture reads as an empty result — which the caller scores as
-# WAIVED. A crash that fails OPEN is exactly what this gate must not do; the
-# suite greps every gate run for `unbound variable` to keep it that way.
+# WAIVED. A crash that fails OPEN is exactly what this gate must not do. The
+# suite enforces the guard STRUCTURALLY: every subscripted mention of the
+# array in this file must sit inside the guarded form. Its runtime `unbound variable`
+# sweep only bites under bash older than 4.4, so it cannot fail on CI's bash 5.
 #
 # Keep the declaration's `(` and `)` at column 0 on their own lines: the suite
 # cuts the array body with a column-0-anchored awk range to scope its
@@ -131,7 +133,10 @@ ALLOWED_ADVISORIES=(
   # REMOVAL PATH: a braces release that fixes it (micromatch's "^3.0.3" range
   # takes a 3.0.x patch by relock alone), or upstream fast-glob/micromatch, or
   # @next/eslint-plugin-next, dropping braces from the chain. Then relock and
-  # prune this entry.
+  # prune this entry with its comment block, leaving the single line
+  # `# (no waivers in effect)` as the array body (the suite's column-0 body cut
+  # fails closed on an empty body), and update the suite's
+  # expected_allowlist_entries in the same commit.
   # RE-CHECK on every eslint-config-next or next bump: `npm view braces versions`
   # and `npm view @next/eslint-plugin-next@latest dependencies.fast-glob`.
   # Tracking issue: #10323 (warn when a waived advisory becomes fixable).

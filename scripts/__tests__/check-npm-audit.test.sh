@@ -1096,7 +1096,7 @@ echo "=== gate script hardening (structural) ==="
 # cut, and the pin must fail rather than affirm.
 allowlist_body="$(awk '/^ALLOWED_ADVISORIES=\(/{f=1;next} f && /^\)/{exit} f' "$SCRIPT")"
 if [ -z "$allowlist_body" ]; then
-  fail "the ALLOWED_ADVISORIES body cut read nothing — the column-0 anchor no longer matches the declaration, so the pruned-waiver pin below would affirm from an empty body"
+  fail "the ALLOWED_ADVISORIES body cut read nothing — the column-0 anchor no longer matches the declaration, so the pruned-waiver pin below would affirm from an empty body (if you just pruned the last entry, restore the line '# (no waivers in effect)' as the body)"
 elif grep -qF 'GHSA-gv7w-rqvm-qjhr' <<<"$allowlist_body" || grep -qF 'GHSA-g7r4-m6w7-qqqr' <<<"$allowlist_body"; then
   fail "pruned esbuild waiver still present in ALLOWED_ADVISORIES (advisories are gone from every workspace)"
 elif grep -qF 'GHSA-mh99-v99m-4gvg' <<<"$allowlist_body"; then
@@ -1126,10 +1126,12 @@ if [ "$allowlist_elements" = "$expected_allowlist_entries" ]; then
 else
   fail "ALLOWED_ADVISORIES differs from the reviewed entry set — expected [$expected_allowlist_entries], got [$allowlist_elements]. Try relocking first ('npm view <pkg> versions' against the advisory's patched range); if a change is genuinely warranted, update this pin deliberately"
 fi
-if [ "$(grep -cE '^[[:space:]]*"GHSA-' "$SCRIPT" || true)" = "$(grep -cE '^[[:space:]]*"GHSA-' <<<"$expected_allowlist_entries" || true)" ]; then
+gate_ghsa_lines="$(grep -cE '^[[:space:]]*"GHSA-' "$SCRIPT" || true)"
+reviewed_ghsa_lines="$(grep -cE '^[[:space:]]*"GHSA-' <<<"$expected_allowlist_entries" || true)"
+if [ "$gate_ghsa_lines" = "$reviewed_ghsa_lines" ]; then
   pass "the gate file carries no quoted advisory element beyond the reviewed set"
 else
-  fail "the gate file carries a quoted \"GHSA- element line beyond the reviewed set (outside the allowlist body, or duplicated) — every waiver must sit in the one column-0 ALLOWED_ADVISORIES body"
+  fail "the gate file's quoted \"GHSA- element line count ($gate_ghsa_lines) differs from the reviewed set's ($reviewed_ghsa_lines) — more means a waiver outside the one column-0 ALLOWED_ADVISORIES body (or a duplicate); fewer means a reviewed entry was removed without updating the reviewed entry-set pin above"
 fi
 # Every read of the allowlist array must go through the empty-array guard. This
 # is the half of the bash-3.2 protection that CI can actually enforce. The
