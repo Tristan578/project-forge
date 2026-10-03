@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
-import { TutorialOverlay, ARROW_KEY_ROLES } from '../TutorialOverlay';
+import { TutorialOverlay, ARROW_KEY_ROLES, KEYLESS_INPUT_TYPES } from '../TutorialOverlay';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 
 vi.mock('@/stores/onboardingStore', () => ({
@@ -372,18 +372,27 @@ describe('TutorialOverlay', () => {
     expect(mockRetreatTutorial).toHaveBeenCalledOnce();
   });
 
-  // An input that takes no keys of its own (the keep-free side of the input
-  // branch): arrows and Escape there are still the tour's.
-  it.each([
-    ['a checkbox input', 'checkbox'],
-    ['a button input', 'button'],
-    ['a submit input', 'submit'],
-  ])('keeps its keys while focus is on %s', (_case, type) => {
+  // Every input type that takes no keys of its own (the keep-free side of the
+  // input branch), listed literally rather than read off KEYLESS_INPUT_TYPES:
+  // a type dropped from the set must turn its own case red, not quietly remove
+  // the case. The equality check catches a type added with no case here.
+  const KEYLESS_TYPES = ['button', 'submit', 'reset', 'checkbox', 'color', 'file', 'image'];
+
+  it('covers exactly the input types the overlay treats as keyless', () => {
+    expect(KEYLESS_TYPES).toHaveLength(7);
+    expect([...KEYLESS_INPUT_TYPES].sort()).toEqual([...KEYLESS_TYPES].sort());
+  });
+
+  // Arrows and Escape on a keyless input are still the tour's.
+  it.each(KEYLESS_TYPES)('keeps its keys while focus is on a type=%s input', (type) => {
     setupStore({ tutorialStep: 2 });
     render(<TutorialOverlay />);
     const control = Object.assign(document.createElement('input'), { type });
     document.body.appendChild(control);
     try {
+      // jsdom turns a type it does not know back into 'text', which would test
+      // the other branch.
+      expect(control.type).toBe(type);
       fireEvent.keyDown(control, { key: 'ArrowLeft' });
       fireEvent.keyDown(control, { key: 'Escape' });
     } finally {
@@ -391,6 +400,24 @@ describe('TutorialOverlay', () => {
     }
     expect(mockRetreatTutorial).toHaveBeenCalledOnce();
     expect(mockSkipTutorial).toHaveBeenCalledOnce();
+  });
+
+  // The control for the cases above: through the same harness, an input the
+  // user types into keeps the arrows and Escape for itself.
+  it.each(['text', 'number'])('leaves its keys to a type=%s input', (type) => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    const field = Object.assign(document.createElement('input'), { type });
+    document.body.appendChild(field);
+    try {
+      expect(field.type).toBe(type);
+      fireEvent.keyDown(field, { key: 'ArrowLeft' });
+      fireEvent.keyDown(field, { key: 'Escape' });
+    } finally {
+      field.remove();
+    }
+    expect(mockRetreatTutorial).not.toHaveBeenCalled();
+    expect(mockSkipTutorial).not.toHaveBeenCalled();
   });
 
   // A tour step can point at a control that opens its own dialog (Export).
@@ -536,6 +563,29 @@ describe('TutorialOverlay bubble placement', () => {
     expect(b.top + b.maxHeight).toBeLessThanOrEqual(400 - EDGE);
   });
 
+  // The same fallback when the step's own side is the smaller one: neither side
+  // has the budget, so the bubble goes to the OTHER side, anchored to the edge
+  // facing the target and capped at the room there.
+  //   300/560: 268px above, 188px below (both usable, above roomier).
+  //   250/400: 218px above, 78px below (below too small even for a card).
+  it.each([
+    [300, 560],
+    [250, 400],
+  ])('puts a bottom step above its target (top %i, viewport %i) when above has more room', (top, h) => {
+    const b = place('bottom', { left: 400, top, width: 40, height: 40 }, { w: 1024, h });
+    expect(b.bubble.style.top).toBe('');
+    expect(b.bubble.style.bottom).toBe(`${h - top + GAP}px`);
+    expect(b.maxHeight).toBe(top - GAP - EDGE);
+  });
+
+  // 188px above, 268px below: a top step goes below, the side with more room.
+  it('puts a top step below its target when below has more room and neither has the budget', () => {
+    const b = place('top', { left: 400, top: 220, width: 40, height: 40 }, { w: 1024, h: 560 });
+    expect(b.bubble.style.bottom).toBe('');
+    expect(b.top).toBe(260 + GAP);
+    expect(b.maxHeight).toBe(560 - 260 - GAP - EDGE);
+  });
+
   it('falls back to a centred card, capped to the viewport, when neither side has usable room', () => {
     const b = place('bottom', { left: 400, top: 100, width: 40, height: 40 }, { w: 1024, h: 240 });
     expect(b.bubble.style.top).toBe('50%');
@@ -601,5 +651,18 @@ describe('TutorialOverlay bubble placement', () => {
     expect(b.left).toBeGreaterThanOrEqual(EDGE);
     expect(b.left + b.width).toBeLessThanOrEqual(320 - EDGE);
     expect(b.top + b.maxHeight).toBeLessThanOrEqual(640 - EDGE);
+  });
+
+  // ...or above, when there is more room there: 368px above, 168px below.
+  it.each<[Position, number]>([
+    ['left', 100],
+    ['right', 200],
+  ])('moves a %s step above its target on a 320px screen when above has more room', (position, targetLeft) => {
+    const b = place(position, { left: targetLeft, top: 400, width: 40, height: 40 }, { w: 320, h: 640 });
+    expect(b.bubble.style.top).toBe('');
+    expect(b.bubble.style.bottom).toBe(`${640 - 400 + GAP}px`);
+    expect(b.maxHeight).toBe(400 - GAP - EDGE);
+    expect(b.left).toBeGreaterThanOrEqual(EDGE);
+    expect(b.left + b.width).toBeLessThanOrEqual(320 - EDGE);
   });
 });

@@ -378,8 +378,13 @@ function placeBubble(
   }
 }
 
-/** Input types that take no keys of their own: arrows and Escape are free there. */
-const KEYLESS_INPUT_TYPES = ['button', 'submit', 'reset', 'checkbox', 'color', 'file', 'image'];
+/**
+ * Input types that take no keys of their own: arrows and Escape are free there.
+ * Exported so the test can hold its own literal list equal to this set.
+ */
+export const KEYLESS_INPUT_TYPES: ReadonlySet<string> = new Set([
+  'button', 'submit', 'reset', 'checkbox', 'color', 'file', 'image',
+]);
 
 /**
  * ARIA widgets whose arrow keys ARE the interaction (WAI-ARIA APG): a slider
@@ -414,7 +419,7 @@ function targetOwnsKey(target: EventTarget | null, key: string): boolean {
   const isArrow = key === 'ArrowLeft' || key === 'ArrowRight';
   if (target instanceof HTMLInputElement) {
     if (target.type === 'range' || target.type === 'radio') return isArrow;
-    return !KEYLESS_INPUT_TYPES.includes(target.type);
+    return !KEYLESS_INPUT_TYPES.has(target.type);
   }
   if (isArrow) {
     const widget = target.closest('[role]');
