@@ -75,8 +75,9 @@ BACKOFF_SECONDS=(15 30 60 90)
 # reached its 300s timeout mid-install, attempt 2 started a SECOND apt-get
 # that waited out the lock timeout below and died with "Unable to acquire the
 # dpkg frontend lock ... held by process 2614 (apt-get)" at 498s, and the
-# budget refused attempt 3. The re-runs passed, one of them after 445s in the
-# deps step alone -- the install was slow, not broken.
+# budget refused attempt 3. One re-run passed after 445s in the deps step
+# alone -- the install was slow, not broken -- while #10302's webkit job
+# failed the same way on two more re-runs.
 #
 # So before EVERY attempt (the first included, which also covers the
 # unattended-upgrades timer on a fresh runner) this script asks who holds the
