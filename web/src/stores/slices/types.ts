@@ -36,7 +36,7 @@ export interface SceneGraph {
    * top-level `completionMode` key of the scene file — see
    * `lib/scenes/sceneCompletionMode.ts` and `docs/features/save-load.md`.
    */
-  completionMode?: CompletionMode;
+  completionMode?: CompletionMode | undefined;
 }
 
 // Transform data for an entity
@@ -235,12 +235,12 @@ export interface VertexWeights2d {
 export interface AttachmentData2d {
   type: 'sprite' | 'mesh';
   textureId: string;
-  offset?: [number, number];
-  rotation?: number;
-  scale?: [number, number];
-  vertices?: [number, number][];
-  uvs?: [number, number][];
-  triangles?: number[];
+  offset?: [number, number] | undefined;
+  rotation?: number | undefined;
+  scale?: [number, number] | undefined;
+  vertices?: [number, number][] | undefined;
+  uvs?: [number, number][] | undefined;
+  triangles?: number[] | undefined;
   /**
    * One entry per vertex for a `mesh` attachment. The store used to have no home
    * for weights, so a mesh attachment authored anywhere but the raw
@@ -249,7 +249,7 @@ export interface AttachmentData2d {
    * editor and `parseSkeletonWire2d` now carry it so a round-trip preserves the
    * skinning instead of silently flattening it.
    */
-  weights?: VertexWeights2d[];
+  weights?: VertexWeights2d[] | undefined;
 }
 
 export interface IkConstraint2d {
@@ -274,9 +274,9 @@ export interface SkeletalAnimation2d {
 
 export interface BoneKeyframe2d {
   time: number;
-  position?: [number, number];
-  rotation?: number;
-  scale?: [number, number];
+  position?: [number, number] | undefined;
+  rotation?: number | undefined;
+  scale?: [number, number] | undefined;
   easing: 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out' | 'step';
 }
 
@@ -361,13 +361,13 @@ export interface InputBinding {
   actionName: string;
   actionType: 'digital' | 'axis';
   sources: string[];           // For digital: key/button codes
-  positiveKeys?: string[];     // For axis: positive direction keys
-  negativeKeys?: string[];     // For axis: negative direction keys
-  deadZone?: number;
+  positiveKeys?: string[] | undefined;     // For axis: positive direction keys
+  negativeKeys?: string[] | undefined;     // For axis: negative direction keys
+  deadZone?: number | undefined;
   // Local-player slot this binding belongs to (0 = the primary player). Absent
   // means player 0, so a single-player scene's bindings and every caller that
   // predates two-player support behave exactly as before (physics.FR-1.OP-04).
-  player?: number;
+  player?: number | undefined;
 }
 
 // Input preset names
@@ -532,7 +532,7 @@ export interface AssetMetadata {
 export interface ScriptData {
   source: string;
   enabled: boolean;
-  template?: string | null;
+  template?: string | null | undefined;
 }
 
 // Script log entry from Worker

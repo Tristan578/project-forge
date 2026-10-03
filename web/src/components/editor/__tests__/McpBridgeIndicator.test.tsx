@@ -17,7 +17,7 @@ class FakeWebSocket {
   readonly OPEN = 1;
   readyState = 0;
   sent: string[] = [];
-  closedWith: { code?: number } | null = null;
+  closedWith: { code?: number | undefined } | null = null;
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: unknown }) => void) | null = null;
   onerror: (() => void) | null = null;

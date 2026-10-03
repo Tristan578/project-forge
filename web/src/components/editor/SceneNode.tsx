@@ -26,49 +26,49 @@ interface SceneNodeProps {
     position: { x: number; y: number };
   }) => void;
   /** Enables editing when this row is rendered without a shared edit target. */
-  isEditing?: boolean;
+  isEditing?: boolean | undefined;
   /** Shared recursive rename target: undefined uses standalone isEditing; null disables editing. */
-  editingEntityId?: string | null;
+  editingEntityId?: string | null | undefined;
   /** Receives a trimmed name to commit, or null to cancel/ignore an empty name. */
-  onEditComplete?: (newName: string | null) => void;
+  onEditComplete?: ((newName: string | null) => void) | undefined;
   // Drag-related props
   /** Whether a hierarchy drag interaction is active. */
-  isDragging?: boolean;
+  isDragging?: boolean | undefined;
   /** Entity currently being moved, or null. */
-  draggedEntityId?: string | null;
+  draggedEntityId?: string | null | undefined;
   /** Entities that cannot receive the dragged entity. */
-  invalidTargetIds?: Set<string>;
+  invalidTargetIds?: Set<string> | undefined;
   /** Current applicable drop target and zone. */
-  dropTarget?: DropTarget | null;
+  dropTarget?: DropTarget | null | undefined;
   /** Begins dragging the supplied entity identity/name. */
-  onDragStart?: (entityId: string, entityName: string) => void;
+  onDragStart?: ((entityId: string, entityName: string) => void) | undefined;
   /** Ends the active hierarchy drag. */
-  onDragEnd?: () => void;
+  onDragEnd?: (() => void) | undefined;
   /** Updates the candidate target, drop zone and nesting depth. */
-  onDragOver?: (entityId: string, zone: DropZone, depth: number) => void;
+  onDragOver?: ((entityId: string, zone: DropZone, depth: number) => void) | undefined;
   /** Completes a drop on the supplied entity. */
-  onDrop?: (entityId: string) => void;
+  onDrop?: ((entityId: string) => void) | undefined;
   // Filter-related props
   /** Optional search text highlighted within entity names. */
-  filterTerm?: string;
+  filterTerm?: string | undefined;
   /** Optional entities whose names match the current search. */
-  matchingIds?: Set<string>;
+  matchingIds?: Set<string> | undefined;
   /** Optional filter membership used to omit nonvisible descendants. */
-  visibleIds?: Set<string>;
+  visibleIds?: Set<string> | undefined;
   // Keyboard navigation props
   /** Entity to highlight and scroll into view; parent moves DOM focus separately. */
-  focusedEntityId?: string | null;
+  focusedEntityId?: string | null | undefined;
   /** Requests a controlled expansion toggle for the supplied entity. */
-  onToggleExpand?: (entityId: string) => void;
+  onToggleExpand?: ((entityId: string) => void) | undefined;
   /** Controlled expanded entities; omitted uses local state, initially expanded. */
-  expandedIds?: Set<string>;
+  expandedIds?: Set<string> | undefined;
   /**
    * The entity id that currently holds the roving tabindex. Exactly one visible
    * row has tabIndex=0; every other row has tabIndex=-1 (ARIA tree pattern).
    */
-  rovingActiveId?: string | null;
+  rovingActiveId?: string | null | undefined;
   /** Called when DOM focus lands on this row (keeps the roving index in sync). */
-  onRowFocus?: (entityId: string) => void;
+  onRowFocus?: ((entityId: string) => void) | undefined;
 }
 
 // Icon mapping based on component types or entity names

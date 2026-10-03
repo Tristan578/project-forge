@@ -19,11 +19,11 @@ export interface AsyncResponse {
   requestId: string;
   status: 'ok' | 'error' | 'progress';
   data?: unknown;
-  error?: string;
+  error?: string | undefined;
   progress?: {
     percent: number;
-    message?: string;
-  };
+    message?: string | undefined;
+  } | undefined;
 }
 
 export interface ChannelConfig {

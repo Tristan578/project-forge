@@ -18,10 +18,10 @@ const POST_impl = createGenerationHandler<
   {
     text: string;
     textLength: number;
-    voiceId?: string;
-    stability?: number;
-    similarityBoost?: number;
-    style?: number;
+    voiceId?: string | undefined;
+    stability?: number | undefined;
+    similarityBoost?: number | undefined;
+    style?: number | undefined;
   },
   { audioBase64: string; durationSeconds: number; provider: string }
 >({

@@ -1,5 +1,6 @@
 // Pins `exactOptionalPropertyTypes: true` as the EFFECTIVE compiler option of
-// the three packages that turned it on in #7592. Nothing else would notice the
+// the four packages that turned it on: apps/docs, mcp-server and packages/ui in
+// #7592, and web in #10230. Nothing else would notice the
 // flag being deleted: every file that compiles under it also compiles without
 // it, so tsc, vitest and the build all stay green while checking silently
 // loosens (lessons-learned #16 — a property no runtime test can see needs a
@@ -8,9 +9,6 @@
 // "Effective" means after following `extends`, the way tsc resolves it: a
 // child's own value wins, otherwise the nearest ancestor's. A key that only
 // appears in a comment, or a chain that ends without the key, is a failure.
-//
-// web/ is deliberately absent: its migration is #10230. Add it to PINNED when
-// that lands.
 //
 // Runs in the CI Self-Defense Tests job, which has no `npm ci`, so this file
 // uses node built-ins only (no `typescript` import for parsing tsconfig).
@@ -21,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '../..');
-const PINNED = ['apps/docs/tsconfig.json', 'mcp-server/tsconfig.json', 'packages/ui/tsconfig.json'];
+const PINNED = ['apps/docs/tsconfig.json', 'mcp-server/tsconfig.json', 'packages/ui/tsconfig.json', 'web/tsconfig.json'];
 const FLAG = 'exactOptionalPropertyTypes';
 
 // tsconfig is JSONC: // and /* */ comments plus trailing commas. Strip both
@@ -90,12 +88,12 @@ export function effectiveFlag(file, seen = new Set()) {
 
 for (const rel of PINNED) {
   test(`${rel} has ${FLAG} effectively true`, () => {
-    assert.equal(effectiveFlag(join(root, rel)), true, `${rel}: ${FLAG} must resolve to true (#7592)`);
+    assert.equal(effectiveFlag(join(root, rel)), true, `${rel}: ${FLAG} must resolve to true (#7592, #10230)`);
   });
 }
 
 test('the pinned list is non-empty and every file exists', () => {
-  assert.ok(PINNED.length === 3);
+  assert.ok(PINNED.length === 4);
   for (const rel of PINNED) assert.ok(existsSync(join(root, rel)), `${rel} missing`);
 });
 

@@ -385,7 +385,7 @@ if [ "$MODE" = "onboard" ]; then
   if curl -s http://localhost:3010/api/health > /dev/null 2>&1; then
     pass "Taskboard server running at :3010"
   else
-    warn "Taskboard not running (run: taskboard start --port 3010)"
+    warn "Taskboard not running (run: node .claude/hooks/taskboard-launch.mjs start)"
   fi
 fi
 

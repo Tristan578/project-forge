@@ -46,10 +46,10 @@ export interface GameIdea {
 }
 
 export interface IdeaFilters {
-  genreIds?: string[];
-  mechanicIds?: string[];
-  maxComplexity?: 'low' | 'medium' | 'high';
-  trendingOnly?: boolean;
+  genreIds?: string[] | undefined;
+  mechanicIds?: string[] | undefined;
+  maxComplexity?: 'low' | 'medium' | 'high' | undefined;
+  trendingOnly?: boolean | undefined;
 }
 
 // ---------------------------------------------------------------------------

@@ -13,9 +13,14 @@
 #                     Gemini/Windsurf/Antigravity contributor created tickets
 #                     against IDs that 404.
 #   (2) FORBIDDEN-DB — a `taskboard start ... --db .claude/taskboard.db` command.
-#                     Passing --db creates an EMPTY local DB copy, so the board
-#                     shows 0 tickets. The OS-default path is the source of truth;
-#                     the runbook says NEVER pass --db.
+#                     That RELATIVE, repo-local path is a throwaway copy: the
+#                     binary creates it empty on open, so the board shows 0
+#                     tickets. It is NOT "--db is bad": the runtime launcher
+#                     (node .claude/hooks/taskboard-launch.mjs start) always
+#                     resolves the ONE shared database — an ABSOLUTE path under
+#                     the OS config dir, or TASKBOARD_DB — and passes it as
+#                     --db itself (#9995). The regex below matches only the
+#                     hand-typed relative form, never the launcher's path.
 #
 # The agentic-sync generator keeps the canonical FACTS BLOCK in sync across the 4
 # primary onboarding files, but it cannot reach a fact embedded inline in a curl
@@ -153,8 +158,12 @@ if [ "${#offenders[@]}" -gt 0 ]; then
   echo "(There is no live 'Leadership' team — remove that reference entirely.)"
   echo ""
   echo "FORBIDDEN-DB — a 'taskboard start ... --db .claude/taskboard.db' command."
-  echo "Drop the --db flag: 'taskboard start --port 3010'. The OS-default DB is"
-  echo "the source of truth; passing --db creates an empty copy (board shows 0)."
+  echo "That relative, repo-local path is a throwaway copy the binary creates empty"
+  echo "(board shows 0). Do NOT fix it by dropping --db and starting the binary by"
+  echo "hand: replace the whole command with the runtime launcher,"
+  echo "    node .claude/hooks/taskboard-launch.mjs start"
+  echo "which resolves the ONE shared database (an absolute path under the OS"
+  echo "config dir, or TASKBOARD_DB) and passes it as --db itself (#9995)."
   echo ""
   echo "The only allowed home for these as data is the parity-review doc; the dead"
   echo "PROJECT id may also live in legacyProjectIds of $ALLOW_CFG."

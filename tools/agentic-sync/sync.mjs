@@ -174,7 +174,10 @@ function renderBlock(canonical) {
     lines.push(`- API: \`${s(tb.apiBaseUrl)}\` · Web UI: \`${s(tb.webUrl)}\``);
   }
   if (tb.startCommand) {
-    lines.push(`- Start: \`${s(tb.startCommand)}\`  *(do not pass \`--db\` — it uses the OS-default DB)*`);
+    lines.push(`- Start: \`${s(tb.startCommand)}\`  *(the launcher resolves the shared database path and passes it to the binary itself — never start the binary by hand or pass your own \`--db\`)*`);
+  }
+  if (tb.initCommand) {
+    lines.push(`- First run on a new machine (no taskboard database yet): \`${s(tb.initCommand)}\` once, instead of Start  *(the only command that creates the shared database; it refuses when a populated database already exists or a server is already running)*`);
   }
   if (tb.apiBaseUrl) {
     lines.push(

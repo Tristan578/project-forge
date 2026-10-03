@@ -463,22 +463,31 @@ python3 .claude/skills/arch-validator/check_arch.py --json     # machine-readabl
 
 All work is tracked on a local [taskboard](https://github.com/tcarac/taskboard) that syncs to GitHub Projects.
 
-**Install:**
+**Install** (`go install github.com/tcarac/taskboard@latest` does not work: v0.6.0 has no main package at the module root, and `cmd/taskboard` embeds a `web/dist` the module does not ship):
 ```bash
-go install github.com/tcarac/taskboard@latest
-# Or download from https://github.com/tcarac/taskboard/releases
+brew tap tcarac/taskboard && brew install taskboard
+# Or download a release binary from https://github.com/tcarac/taskboard/releases
+# Or build from source: git clone https://github.com/tcarac/taskboard && cd taskboard && make build
+# Not on PATH? Set TASKBOARD_BIN to the binary.
 ```
 
-**Start:**
+**First run on a new machine** (no taskboard database yet) — once, instead of `start`:
 ```bash
 cd project-forge
-taskboard start --port 3010
+node .claude/hooks/taskboard-launch.mjs init    # the only command that creates the shared database
+python3 .claude/hooks/github_project_sync.py pull
+```
+
+**Start** (every time after that):
+```bash
+cd project-forge
+node .claude/hooks/taskboard-launch.mjs start   # never start the binary by hand — see "Database" below
 ```
 
 - **Web UI:** http://localhost:3010
 - **API:** http://localhost:3010/api
 - **Project ID:** `01KMM9ZA6SBZ7RKJZJTZS9VR4R` (prefix: PF)
-- **Database:** OS-default path (`~/Library/Application Support/taskboard/` on macOS) — do **not** pass `--db`, which points the board at an empty local copy instead of the shared store.
+- **Database:** resolved by the launcher — `TASKBOARD_DB` if set, else the OS config directory (`%APPDATA%\taskboard\taskboard.db` on Windows, `~/Library/Application Support/taskboard/taskboard.db` on macOS, `$XDG_CONFIG_HOME/taskboard/taskboard.db` on Linux (`~/.config/taskboard/taskboard.db` when `XDG_CONFIG_HOME` is unset; `node .claude/hooks/taskboard-launch.mjs db-path` prints the resolved path)) — and passed to the binary explicitly, so the HTTP server, the MCP server and the GitHub sync all open the same file. Never start the binary by hand and never pass your own `--db`: a stray `--db` points the board at an empty local copy instead of the shared store.
 
 Tools with hook support auto-start the taskboard on session start. Ticket state is shared across contributors via the GitHub Projects sync (`.claude/hooks/github_project_sync.py`), not a committed database.
 

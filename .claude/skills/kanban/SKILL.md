@@ -19,15 +19,14 @@ You manage project work via the **taskboard MCP server** (22 tools). The taskboa
 
 If the taskboard is not running when needed:
 ```bash
-taskboard start --port 3010 &    # NO --db flag — uses OS default path
-sleep 2
+node .claude/hooks/taskboard-launch.mjs start   # resolves + passes the shared DB path, waits for the API, verifies its identity
 # Verify board has data — 0 tickets means wrong DB path
 curl -s http://taskboard.localhost:1355/api/board | python3 -c "import json,sys; c=len(json.load(sys.stdin).get('tickets',[])); print(f'{c} tickets'); exit(0 if c > 0 else 1)"
 # If 0 tickets, sync from GitHub:
 python3 .claude/hooks/github_project_sync.py pull
 ```
 
-**CRITICAL:** NEVER pass `--db .claude/taskboard.db` — it creates an empty local copy. The OS default (`~/Library/Application Support/taskboard/`) is the source of truth.
+**CRITICAL:** Never start the binary by hand, and never pass your own `--db` — least of all `--db .claude/taskboard.db`, which creates an empty local copy. The launcher always resolves the ONE shared database path (`TASKBOARD_DB` if set, else the OS config directory via `taskboard_runtime.default_db()`) and passes it to the binary itself, so the HTTP server, the MCP server and `github_project_sync.py` all open the same file (#9995).
 
 **Web UI:** http://taskboard.localhost:1355 (fallback: http://localhost:3010)
 **Project:** Project Forge (prefix: PF, ID: `01KMM9ZA6SBZ7RKJZJTZS9VR4R`)
@@ -284,7 +283,7 @@ This runs automatically via SessionStart hook. Pull manually when:
 
 - Config: `.claude/hooks/github-sync-config.json` (project IDs, field mappings)
 - Mapping: `.claude/hooks/github-project-map.json` (ticket ↔ GitHub item ID mapping)
-- DB path: auto-detected — never pass `--db .claude/taskboard.db` to `taskboard start`
+- DB path: resolved by `taskboard_runtime.default_db()` and passed to the binary by the launcher (`node .claude/hooks/taskboard-launch.mjs start`) — never pass your own `--db`, and never start the binary by hand
 
 ### Conflict resolution
 

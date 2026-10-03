@@ -26,7 +26,7 @@ function createAsset(
   name: string,
   kind: 'gltf_model' | 'texture' | 'audio',
   data?: ArrayBuffer,
-): AssetMetadata & { data?: ArrayBuffer } {
+): AssetMetadata & { data?: ArrayBuffer | undefined } {
   return {
     id,
     name,
@@ -55,7 +55,7 @@ describe('assetPackager', () => {
     });
 
     it('filters out assets without data', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'texture.png', 'texture'),
         asset2: createAsset('asset2', 'model.glb', 'gltf_model', new ArrayBuffer(1024)),
       };
@@ -65,7 +65,7 @@ describe('assetPackager', () => {
     });
 
     it('generates filenames with ID and extension', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'texture.png', 'texture', new ArrayBuffer(100)),
       };
       const result = await packageAssets(assets);
@@ -73,7 +73,7 @@ describe('assetPackager', () => {
     });
 
     it('resolves MIME types for image extensions', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         png: createAsset('png', 'test.png', 'texture', new ArrayBuffer(10)),
         jpg: createAsset('jpg', 'test.jpg', 'texture', new ArrayBuffer(10)),
         jpeg: createAsset('jpeg', 'test.jpeg', 'texture', new ArrayBuffer(10)),
@@ -87,7 +87,7 @@ describe('assetPackager', () => {
     });
 
     it('resolves MIME types for model extensions', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         glb: createAsset('glb', 'model.glb', 'gltf_model', new ArrayBuffer(10)),
         gltf: createAsset('gltf', 'model.gltf', 'gltf_model', new ArrayBuffer(10)),
       };
@@ -97,7 +97,7 @@ describe('assetPackager', () => {
     });
 
     it('resolves MIME types for audio extensions', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         mp3: createAsset('mp3', 'sound.mp3', 'audio', new ArrayBuffer(10)),
         ogg: createAsset('ogg', 'sound.ogg', 'audio', new ArrayBuffer(10)),
         wav: createAsset('wav', 'sound.wav', 'audio', new ArrayBuffer(10)),
@@ -111,7 +111,7 @@ describe('assetPackager', () => {
     });
 
     it('handles unknown extensions with generic MIME type', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         unknown: createAsset('unknown', 'file.xyz', 'texture', new ArrayBuffer(10)),
       };
       const result = await packageAssets(assets);
@@ -119,7 +119,7 @@ describe('assetPackager', () => {
     });
 
     it('handles files without extension', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         noext: createAsset('noext', 'file', 'texture', new ArrayBuffer(10)),
       };
       const result = await packageAssets(assets);
@@ -129,7 +129,7 @@ describe('assetPackager', () => {
     });
 
     it('calculates total size correctly', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'file1.png', 'texture', new ArrayBuffer(1024)),
         asset2: createAsset('asset2', 'file2.glb', 'gltf_model', new ArrayBuffer(2048)),
         asset3: createAsset('asset3', 'file3.mp3', 'audio', new ArrayBuffer(512)),
@@ -139,7 +139,7 @@ describe('assetPackager', () => {
     });
 
     it('builds manifest mapping IDs to filenames', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'texture.png', 'texture', new ArrayBuffer(100)),
         asset2: createAsset('asset2', 'model.glb', 'gltf_model', new ArrayBuffer(200)),
       };
@@ -152,7 +152,7 @@ describe('assetPackager', () => {
 
     it('preserves ArrayBuffer data in packaged assets', async () => {
       const buffer = new ArrayBuffer(100);
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'file.png', 'texture', buffer),
       };
       const result = await packageAssets(assets);
@@ -160,7 +160,7 @@ describe('assetPackager', () => {
     });
 
     it('does not call compressTexture when compress=false (default)', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'texture.png', 'texture', new ArrayBuffer(100)),
       };
       await packageAssets(assets);
@@ -183,7 +183,7 @@ describe('assetPackager', () => {
         ratio: 0.5,
       });
 
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'texture.png', 'texture', new ArrayBuffer(100)),
       };
       await packageAssets(assets, { compress: true });
@@ -191,7 +191,7 @@ describe('assetPackager', () => {
     });
 
     it('does not call compressTexture for non-image assets', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         audio: createAsset('audio', 'sound.mp3', 'audio', new ArrayBuffer(100)),
         model: createAsset('model', 'model.glb', 'gltf_model', new ArrayBuffer(200)),
       };
@@ -209,7 +209,7 @@ describe('assetPackager', () => {
         ratio: 0.4,
       });
 
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'texture.jpg', 'texture', new ArrayBuffer(100)),
       };
       const result = await packageAssets(assets, { compress: true });
@@ -229,7 +229,7 @@ describe('assetPackager', () => {
       });
 
       const originalBuffer = new ArrayBuffer(100);
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'texture.png', 'texture', originalBuffer),
       };
       const result = await packageAssets(assets, { compress: true });
@@ -241,7 +241,7 @@ describe('assetPackager', () => {
       vi.mocked(compressTexture).mockRejectedValue(new Error('Canvas not available'));
 
       const originalBuffer = new ArrayBuffer(100);
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'texture.png', 'texture', originalBuffer),
       };
       const result = await packageAssets(assets, { compress: true });
@@ -259,7 +259,7 @@ describe('assetPackager', () => {
         ratio: 0.5,
       });
 
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'sprite.png', 'texture', new ArrayBuffer(100)),
       };
       const result = await packageAssets(assets, { compress: true });
@@ -287,7 +287,7 @@ describe('assetPackager', () => {
         generateMipmaps: false,
       };
 
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'texture.jpg', 'texture', new ArrayBuffer(100)),
       };
       await packageAssets(assets, { compress: true, compressionConfig: customConfig });
@@ -309,7 +309,7 @@ describe('assetPackager', () => {
     it('includes assets within the per-asset size limit', async () => {
       // 1 byte under the default 10 MB limit
       const justUnder = new ArrayBuffer(MAX_ASSET_SIZE_BYTES - 1);
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'big.glb', 'gltf_model', justUnder),
       };
       const result = await packageAssets(assets);
@@ -320,7 +320,7 @@ describe('assetPackager', () => {
     it('skips an asset that exceeds the per-asset size limit and warns (regression #7744)', async () => {
       const oversized = new ArrayBuffer(MAX_ASSET_SIZE_BYTES + 1);
       const normalBuffer = new ArrayBuffer(1024);
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         big: createAsset('big', 'huge_texture.png', 'texture', oversized),
         small: createAsset('small', 'icon.png', 'texture', normalBuffer),
       };
@@ -338,7 +338,7 @@ describe('assetPackager', () => {
 
     it('emits a console.warn with the asset name when skipping an oversized asset', async () => {
       const oversized = new ArrayBuffer(MAX_ASSET_SIZE_BYTES + 1);
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         toobig: createAsset('toobig', 'oversized_texture.png', 'texture', oversized),
       };
 
@@ -355,7 +355,7 @@ describe('assetPackager', () => {
 
     it('respects a custom maxAssetSize option', async () => {
       const slightlyLarge = new ArrayBuffer(2 * 1024 * 1024); // 2 MB
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         medium: createAsset('medium', 'medium.glb', 'gltf_model', slightlyLarge),
       };
 
@@ -372,7 +372,7 @@ describe('assetPackager', () => {
     it('throws when total package size would exceed the limit (regression #7744)', async () => {
       // Two assets each just under the per-asset limit but together exceeding 200 MB
       const halfPackage = new ArrayBuffer(MAX_PACKAGE_SIZE_BYTES / 2 + 1);
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'part1.glb', 'gltf_model', halfPackage),
         asset2: createAsset('asset2', 'part2.glb', 'gltf_model', halfPackage),
       };
@@ -384,7 +384,7 @@ describe('assetPackager', () => {
 
     it('throws with a helpful message including the asset name and limit', async () => {
       const halfPackage = new ArrayBuffer(MAX_PACKAGE_SIZE_BYTES / 2 + 1);
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'part1.glb', 'gltf_model', halfPackage),
         asset2: createAsset('asset2', 'part2.glb', 'gltf_model', halfPackage),
       };
@@ -402,7 +402,7 @@ describe('assetPackager', () => {
     });
 
     it('respects a custom maxPackageSize option', async () => {
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'file1.glb', 'gltf_model', new ArrayBuffer(600)),
         asset2: createAsset('asset2', 'file2.glb', 'gltf_model', new ArrayBuffer(600)),
       };
@@ -415,7 +415,7 @@ describe('assetPackager', () => {
 
     it('does not throw when total size equals the package limit exactly', async () => {
       // Exactly at the limit — should succeed (limit is exclusive: > not >=)
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         asset1: createAsset('asset1', 'file1.glb', 'gltf_model', new ArrayBuffer(500)),
         asset2: createAsset('asset2', 'file2.glb', 'gltf_model', new ArrayBuffer(500)),
       };
@@ -428,7 +428,7 @@ describe('assetPackager', () => {
     it('validates size before compression when compress=true', async () => {
       // Per-asset check happens on asset.data (before compression)
       const oversized = new ArrayBuffer(MAX_ASSET_SIZE_BYTES + 1);
-      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer | undefined }> = {
         big: createAsset('big', 'big.png', 'texture', oversized),
       };
 

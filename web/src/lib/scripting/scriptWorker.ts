@@ -157,7 +157,13 @@ let uiDirty = false;
 interface PendingAsyncRequest {
   resolve: (data: unknown) => void;
   reject: (error: Error) => void;
-  onProgress?: (progress: { percent: number; message?: string }) => void;
+  // | undefined (#10230): asyncRequest()'s own onProgress parameter is
+  // already `| undefined`, and every read of this field below is a `?.()`
+  // optional call — the omitted-vs-undefined distinction was never
+  // meaningful here. Unrelated to this file's Function(...) sandbox sink;
+  // see CLAUDE.md's SEC-2 section — this interface is pure async-channel
+  // progress-callback plumbing.
+  onProgress?: ((progress: { percent: number; message?: string }) => void) | undefined;
   channel: string;
   method: string;
 }

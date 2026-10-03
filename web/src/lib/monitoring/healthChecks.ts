@@ -53,7 +53,7 @@ export interface ServiceHealth {
   status: ServiceStatus;
   latencyMs: number;
   lastChecked: string; // ISO timestamp
-  error?: string;
+  error?: string | undefined;
   /**
    * Public-safe one-liner saying WHAT is wrong (#9719). Unlike `error`, which
    * `sanitizeForPublic` replaces because it may carry env-var names or
@@ -80,7 +80,7 @@ export interface ServiceHealth {
    * never for an unreachable dependency, a rejected credential, or any `down`.
    */
   configurationOnly?: boolean;
-  details?: Record<string, unknown>;
+  details?: Record<string, unknown> | undefined;
 }
 
 export interface HealthReport {

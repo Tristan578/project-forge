@@ -22,7 +22,7 @@ export type RigType =
 
 export interface BoneDefinition {
   name: string;
-  parent?: string;
+  parent?: string | undefined;
   position: { x: number; y: number; z: number };
   rotation?: { x: number; y: number; z: number };
   length: number;

@@ -3,14 +3,17 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import {
   render,
   cleanup,
   screen,
   fireEvent,
   waitFor,
+  within,
 } from '@/test/utils/componentTestUtils';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Button } from '@spawnforge/ui';
 import { toast } from 'sonner';
 import { QuickStartDialog } from '../QuickStartDialog';
 import {
@@ -111,6 +114,85 @@ afterEach(() => {
   // test's `useQuickStartOwnsGate()` reports.
   _resetQuickStartGateOwner();
 });
+
+/** A class list that makes an element a scroll container or bounds its height. */
+const SCROLLER_CLASS = /(^|\s)(overflow-(y-)?(auto|scroll)|max-h-\S+)(\s|$)/;
+
+/**
+ * Asserts a gate's action button is in view at every scroll offset by
+ * construction: it is in the Dialog's footer (`[data-dialog-actions]`), which
+ * is outside the body's scroll, not in the body. Walking up from it to the
+ * dialog panel there is no scroll container or height bound at all; the body
+ * is still the ONE scroller (no second bounded scroller nested in it), and
+ * nothing in the dialog is pinned (`sticky`) over the body's content. The
+ * button sits in the gate's action group, named by the gate heading in the
+ * body, so a screen reader still hears which gate it answers.
+ */
+function expectActionsInFooter(button: HTMLElement) {
+  const dialog = screen.getByRole('dialog');
+  expect(dialog.contains(button)).toBe(true);
+  const body = dialog.querySelector('[data-dialog-body]');
+  const footer = dialog.querySelector('[data-dialog-actions]');
+  expect(body).not.toBeNull();
+  expect(footer).not.toBeNull();
+  expect(footer?.contains(button)).toBe(true);
+  expect(body?.contains(button)).toBe(false);
+
+  let node: HTMLElement | null = button.parentElement;
+  while (node && node !== dialog) {
+    expect(node.getAttribute('class') ?? '', `bounded ancestor: ${node.outerHTML.slice(0, 80)}`).not.toMatch(SCROLLER_CLASS);
+    node = node.parentElement;
+  }
+  expect(node).toBe(dialog);
+
+  const inside = Array.from(body?.querySelectorAll('*') ?? []);
+  expect(inside.length).toBeGreaterThan(0);
+  const nested = inside.filter((el) => SCROLLER_CLASS.test(el.getAttribute('class') ?? ''));
+  expect(nested.map((el) => el.outerHTML.slice(0, 120))).toEqual([]);
+  expect(dialog.querySelectorAll('.sticky')).toHaveLength(0);
+
+  const group = button.closest<HTMLElement>('[role="group"]');
+  expect(group).not.toBeNull();
+  const heading = document.getElementById(group?.getAttribute('aria-labelledby') ?? '');
+  expect(heading?.tagName).toBe('H3');
+  expect(body?.contains(heading as Node)).toBe(true);
+  expect(group?.getAttribute('data-testid')).toBe('approval-gate-actions');
+}
+
+/** The class tokens `@spawnforge/ui`'s Button renders for one variant. */
+function buttonVariantTokens(variant: 'default' | 'destructive' | 'outline' | 'ghost'): Set<string> {
+  const host = document.createElement('div');
+  host.innerHTML = renderToStaticMarkup(
+    <Button variant={variant} size="sm">
+      x
+    </Button>,
+  );
+  return new Set((host.querySelector('button')?.className ?? '').split(/\s+/).filter(Boolean));
+}
+
+/**
+ * The labels of the filled primary buttons in the Dialog footer. "Filled
+ * primary" is derived from the Button itself: the class tokens only the
+ * default variant renders, so a restyled Button changes both sides at once.
+ */
+function filledFooterButtons(): string[] {
+  const primary = buttonVariantTokens('default');
+  const others = [
+    buttonVariantTokens('destructive'),
+    buttonVariantTokens('outline'),
+    buttonVariantTokens('ghost'),
+  ];
+  const primaryOnly = [...primary].filter((token) => others.every((set) => !set.has(token)));
+  // Vacuity guard: with no token unique to the primary, every button would
+  // count as "not filled" and the assertions below could never fail.
+  expect(primaryOnly.length).toBeGreaterThan(0);
+  const footer = screen.getByRole('dialog').querySelector('[data-dialog-actions]');
+  const buttons = Array.from(footer?.querySelectorAll('button') ?? []);
+  expect(buttons.length).toBeGreaterThan(0);
+  return buttons
+    .filter((button) => primaryOnly.every((token) => button.classList.contains(token)))
+    .map((button) => (button.textContent ?? '').trim());
+}
 
 /** Walks the dialog from the type cards to the prompt step. */
 async function pickPlatformer() {
@@ -280,14 +362,17 @@ describe('QuickStartDialog', () => {
     expect(resolveGate).toHaveBeenCalledWith('approved');
   });
 
-  // PF-1215 round 2 (4/5): a second `max-h-[45vh] overflow-y-auto` wrapper
-  // around the whole ApprovalGateDialog used to clip the Approve/Cancel row
-  // along with the scroll body -- the outer, SMALLER bound always engaged
-  // before ApprovalGateDialog's own inner max-h-[50vh] region could, so the
-  // inner bound was dead code and the buttons scrolled out of view again,
-  // the exact failure the inner region exists to prevent. Approve must not
-  // sit inside ANY scrollable-bounded ancestor between it and the dialog.
-  it('never nests the approval gate action row inside a scroll-bounded container', async () => {
+  // PF-1215 round 2 (4/5), then PR #10294: a bounded scroller nested inside
+  // another lets the OUTER scroll carry the inner box's Approve/Cancel row out
+  // of view on a short viewport. PF-1215 round 2 removed a `max-h-[45vh]` wrapper;
+  // #10294 made the Dialog body itself a scroller, so the gate's own
+  // max-h-[50vh] box became the nested one. The rule now: exactly ONE
+  // scroller in the dialog -- the Dialog body -- and the gate's buttons in the
+  // Dialog's footer, outside that scroll, so no scroll offset can hide them
+  // (board round 4: pinning them inside the body covered content and failed in
+  // Firefox). jsdom has no layout, so this pins the structure; the geometry is
+  // measured by e2e/tests/quick-start-plan-review-layout.spec.ts.
+  it('keeps the approval gate actions reachable: one scroller (the Dialog body), actions in the footer outside it', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
     await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
@@ -303,12 +388,48 @@ describe('QuickStartDialog', () => {
     });
     rerender(<QuickStartDialog open onClose={vi.fn()} />);
 
-    const approveButton = screen.getByRole('button', { name: 'Approve' });
-    let node: HTMLElement | null = approveButton.parentElement;
-    while (node && node !== document.body) {
-      expect(node.className).not.toContain('overflow-y-auto');
-      node = node.parentElement;
-    }
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    expect(screen.getByText('Generate assets?')).toBeTruthy();
+    expectActionsInFooter(approve);
+    expectActionsInFooter(screen.getByRole('button', { name: 'Stop build' }));
+    // The gate's summary stays in the body; "Close" shares the footer.
+    const body = screen.getByRole('dialog').querySelector('[data-dialog-body]');
+    expect(body?.contains(screen.getByRole('heading', { name: 'Generate assets?' }))).toBe(true);
+    const footer = screen.getByRole('dialog').querySelector('[data-dialog-actions]');
+    expect(footer?.contains(screen.getByRole('button', { name: 'Close' }))).toBe(true);
+  });
+
+  // PR #10294 board round 5 (ux): a mid-build gate's "Cancel" ends the build
+  // (`resolveGate('rejected')` sets 'cancelled'), and the dialog's own "Stop"
+  // sat beside it doing the same, with "Close" (which only hides the dialog)
+  // next to both: "Approve | Cancel | Stop | Close". The gate's button is now
+  // the one way to stop, and says so; Close is no longer a second filled
+  // primary beside Approve.
+  it('gives a mid-build gate one stop control, "Stop build", and one filled button, Approve', async () => {
+    const onClose = vi.fn();
+    const { rerender } = render(<QuickStartDialog open onClose={onClose} />);
+    await pickPlatformer();
+    await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
+    setState({
+      orchestratorStatus: 'executing',
+      pendingGate: {
+        id: 'gate_assets',
+        label: 'Generate assets?',
+        description: 'These cost tokens.',
+        displayData: {},
+      },
+    });
+    rerender(<QuickStartDialog open onClose={onClose} />);
+
+    const footer = screen.getByRole('dialog').querySelector('[data-dialog-actions]');
+    const labels = Array.from(footer?.querySelectorAll('button') ?? []).map((b) => (b.textContent ?? '').trim());
+    expect(labels).toEqual(['Approve', 'Stop build', 'Close']);
+    expect(filledFooterButtons()).toEqual(['Approve']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stop build' }));
+    expect(resolveGate).toHaveBeenCalledWith('rejected');
+    expect(cancelPipeline).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('reaches the submit button by keyboard from the prompt field', async () => {
@@ -472,7 +593,37 @@ describe('QuickStartDialog', () => {
     expect(screen.getByLabelText(/what happens in your platformer/i)).toBeTruthy();
   });
 
-  it('lands focus on Approve when a gate appears and rejects it on Cancel', async () => {
+  // The gate's buttons live in the Dialog footer, outside the running view's
+  // own element. Reopening onto a pending gate changes the phase in the same
+  // commit that mounts the gate, and the phase effect must count the footer
+  // as "the build view already placed focus", or it pulls focus off Approve
+  // onto the status line (PR #10294 board round 4).
+  it('keeps focus on Approve when the dialog reopens onto a pending gate', async () => {
+    setState({
+      orchestratorStatus: 'executing',
+      pendingGate: {
+        id: 'gate_assets',
+        label: 'Generate assets?',
+        description: 'These cost tokens.',
+        displayData: {},
+      },
+    });
+    const { rerender } = render(<QuickStartDialog open={false} onClose={vi.fn()} />);
+    rerender(<QuickStartDialog open onClose={vi.fn()} />);
+
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    expect(document.activeElement).toBe(approve);
+    // Still there once the Dialog's deferred initial-focus frame has run:
+    // `useDialogA11y` schedules it with requestAnimationFrame at open, and
+    // frame callbacks run in the order they were scheduled, so this one runs
+    // after it.
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    expect(document.activeElement).toBe(approve);
+  });
+
+  it('lands focus on Approve when a gate appears and rejects it on Stop build', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
     await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
@@ -491,9 +642,9 @@ describe('QuickStartDialog', () => {
     const approve = screen.getByRole('button', { name: 'Approve' });
     await waitFor(() => expect(document.activeElement).toBe(approve));
 
-    // Cancel is the next stop, so the whole gate is reachable by keyboard.
+    // Stop build is the next stop, so the whole gate is reachable by keyboard.
     await userEvent.tab();
-    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    const cancel = screen.getByRole('button', { name: 'Stop build' });
     expect(document.activeElement).toBe(cancel);
 
     await userEvent.click(cancel);
@@ -554,16 +705,208 @@ describe('QuickStartDialog', () => {
       expect(screen.getByRole('heading', { name: 'Review your game plan' })).toBeTruthy();
       expect(screen.getByText('Jungle Canopy')).toBeTruthy();
       expect(screen.getByText('Estimated token cost')).toBeTruthy();
-      expect(screen.getByText('340')).toBeTruthy();
+      // Twice: in the cost bar, and in the total beside "Build it" in the footer.
+      expect(screen.getAllByText('340')).toHaveLength(2);
       // The number that actually leaves the balance: the reservation is the
       // estimate's upper bound, refunded down to what the build uses.
       expect(screen.getByText(/tokens are held while it builds/).textContent).toContain('Up to 400 tokens');
       expect(screen.getByText('Asset generation')).toBeTruthy();
       expect(screen.getByRole('status').textContent).toContain('Your game plan is ready');
       expect(runPipelineFromPlan).not.toHaveBeenCalled();
-      // The review's own Cancel is the way out; a second "Stop" beside it
-      // would be two controls for one action.
+      // The review's own "Discard plan" is the way out; a second "Stop"
+      // beside it would be two controls for one action.
       expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    });
+
+    // PR #10294: the review's buttons are in the Dialog footer, outside the
+    // body's scroll, so the body can be scrolled to any offset without
+    // carrying them away or sliding anything under them. The cost bar, its
+    // Buy tokens link and the plan stay in the body, reachable by scrolling.
+    it('puts "Build it" and "Discard plan" in the Dialog footer; the cost and its Buy tokens link stay in the body', async () => {
+      await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
+      const build = screen.getByRole('button', { name: 'Build it' });
+      expectActionsInFooter(build);
+      expectActionsInFooter(screen.getByRole('button', { name: 'Discard plan' }));
+      // One filled button in the row: Close steps back beside Build it
+      // (PR #10294 board round 5, ux: both were the same filled primary).
+      expect(filledFooterButtons()).toEqual(['Build it']);
+
+      const body = screen.getByRole('dialog').querySelector('[data-dialog-body]');
+      // Non-vacuous: each of the tall parts is actually rendered.
+      for (const node of [
+        screen.getByText('Jungle Canopy'),
+        screen.getByText('Estimated token cost'),
+        screen.getByRole('link', { name: 'Buy tokens' }),
+      ]) {
+        expect(body?.contains(node), node.textContent ?? '').toBe(true);
+      }
+    });
+
+    // PR #10294 board round 3 (ux): "Build it" takes focus at open while the cost
+    // bar can be scrolled out of view, so the total rides beside the button,
+    // in the same footer group.
+    it('shows the token total in the footer group beside "Build it"', async () => {
+      await reachPlanReview();
+      const group = screen.getByRole('group', { name: 'Review your game plan' });
+      const total = screen.getByTestId('token-cost-total');
+      expect(group.contains(total)).toBe(true);
+      expect(group.contains(screen.getByRole('button', { name: 'Build it' }))).toBe(true);
+      expect(screen.getByRole('dialog').querySelector('[data-dialog-actions]')?.contains(total)).toBe(true);
+      expect(total.textContent).toBe('Cost: 340 tokens, up to 400 held');
+      expect(within(total).queryByText(/balance/)).toBeNull();
+    });
+
+    it('says in the footer total when the cost may exceed the balance', async () => {
+      await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
+      const total = screen.getByTestId('token-cost-total');
+      expect(screen.getByRole('group', { name: 'Review your game plan' }).contains(total)).toBe(true);
+      expect(within(total).getByText('May exceed your balance')).toBeTruthy();
+      expect(total.textContent).toContain('Cost: 340 tokens, up to 400 held');
+    });
+
+    // PR #10294 board rounds 3-4 (ux HIGH): an armed Discard put "Discard this
+    // plan?" and "Keep plan" in the body, where on a 320px-tall viewport no
+    // scroll offset could show them. The question now IS the action row.
+    it('asks the discard question in the action row itself, with its two answers, and nothing in the body', async () => {
+      await reachPlanReview();
+      const discard = screen.getByRole('button', { name: 'Discard plan' });
+      await userEvent.click(discard);
+
+      const group = screen.getByRole('group', { name: 'Review your game plan' });
+      const question = within(group).getByRole('status');
+      expect(question.textContent).toBe('Discard this plan? Planning it again costs tokens.');
+      // The question takes the total's place, so the row does not grow.
+      expect(within(group).queryByTestId('token-cost-total')).toBeNull();
+      expect(Array.from(screen.getByTestId('approval-gate-action-summary').children)).toEqual([question]);
+      // The two answers, and only them: no "Build it" while the question is open.
+      const buttons = within(screen.getByTestId('approval-gate-buttons')).getAllByRole('button');
+      expect(buttons.map((b) => b.textContent)).toEqual(['Discard it', 'Keep plan']);
+      expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+      expectActionsInFooter(buttons[0]);
+      expectActionsInFooter(buttons[1]);
+      // "Keep plan" is the button just pressed, and keeps focus: pressing it
+      // again backs out rather than discarding.
+      expect(buttons[1]).toBe(discard);
+      expect(document.activeElement).toBe(discard);
+      // "Discard it" is destructive and "Keep plan" outlined, so nothing in
+      // the row is a filled primary, Close included.
+      expect(filledFooterButtons()).toEqual([]);
+      // Nothing about the question is left in the body to be scrolled away.
+      const body = screen.getByRole('dialog').querySelector('[data-dialog-body]');
+      expect(body?.textContent).not.toContain('Discard this plan?');
+      expect(body?.querySelectorAll('button')).toHaveLength(0);
+    });
+
+    // A refused "Build it" puts its reason in the body above the cost, while
+    // the button stays in the footer. On a short viewport or a long plan the
+    // alert was out of view (PR #10294 board round 4: 28 of 48 configurations).
+    it('scrolls a refused build\'s reason into view (nearest), and not before', async () => {
+      const scrollIntoView = vi.fn();
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        writable: true,
+        value: scrollIntoView,
+      });
+      try {
+        // The store reports the refusal before "Build it" settles; the
+        // settling render changes the Dialog's description (and so the body's
+        // height), so the scroll must wait for it.
+        let settle!: () => void;
+        runPipelineFromPlan.mockImplementationOnce(() => {
+          hoisted.state.orchestratorStatus = 'awaiting_approval';
+          hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
+          return new Promise<void>((resolve) => {
+            settle = resolve;
+          });
+        });
+        // Only the calls that bring the refusal into view. The Dialog body
+        // also scrolls a keyboard-focused control into view (nearest), and
+        // that is not under test here.
+        const refusalScrolls = () =>
+          scrollIntoView.mock.contexts.filter(
+            (el) => el instanceof HTMLElement && el.querySelector('[role="alert"]') !== null,
+          );
+        const { rerender } = await reachPlanReview();
+        expect(refusalScrolls()).toHaveLength(0);
+        await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+        // The mocked store does not notify; re-render as a store update would.
+        rerender(<QuickStartDialog open onClose={vi.fn()} />);
+        await screen.findByRole('alert');
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        expect(refusalScrolls()).toHaveLength(0);
+        await act(async () => {
+          settle();
+        });
+        expect(screen.getByRole('button', { name: 'Build it' })).not.toBeDisabled();
+        expect(refusalScrolls()).toHaveLength(1);
+        const index = scrollIntoView.mock.contexts.indexOf(refusalScrolls()[0]);
+        expect(scrollIntoView.mock.calls[index]).toEqual([{ block: 'nearest' }]);
+        const target = refusalScrolls()[0] as HTMLElement;
+        expect(within(target).getByRole('alert').textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
+        // The same refusal re-rendered is not scrolled to again.
+        rerender(<QuickStartDialog open onClose={vi.fn()} />);
+        expect(refusalScrolls()).toHaveLength(1);
+        // Closed and reopened with the refusal still on the store: the review
+        // mounts again at its top, so the alert is brought into view again
+        // (Devin review on #10294).
+        rerender(<QuickStartDialog open={false} onClose={vi.fn()} />);
+        expect(screen.queryByRole('alert')).toBeNull();
+        // A count baseline for the reopen below, not a check of the effect's
+        // `open &&` guard: while closed the alert is unmounted and its ref is
+        // null, so the effect cannot scroll anything with or without the
+        // guard. The guard is defensive and unobservable; the `open`
+        // DEPENDENCY is what the reopen assertions pin.
+        expect(refusalScrolls()).toHaveLength(1);
+        rerender(<QuickStartDialog open onClose={vi.fn()} />);
+        await screen.findByRole('alert');
+        expect(refusalScrolls()).toHaveLength(2);
+        const reopened = refusalScrolls()[1] as HTMLElement;
+        expect(reopened.isConnected).toBe(true);
+        expect(scrollIntoView.mock.calls[scrollIntoView.mock.contexts.indexOf(reopened)]).toEqual([
+          { block: 'nearest' },
+        ]);
+        expect(within(reopened).getByRole('alert').textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
+
+        // Reopened DURING an in-flight retry (PR #10294 board round 9). The
+        // store keeps the earlier refusal until the run reports 'executing',
+        // so a reopen that forgot the start was in flight said "The build did
+        // not start.", re-enabled Build it and scrolled to the stale refusal.
+        let settleRetry!: () => void;
+        runPipelineFromPlan.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              settleRetry = resolve;
+            }),
+        );
+        await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+        expect(runPipelineFromPlan).toHaveBeenCalledTimes(2);
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        rerender(<QuickStartDialog open={false} onClose={vi.fn()} />);
+        rerender(<QuickStartDialog open onClose={vi.fn()} />);
+        await screen.findByRole('alert');
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        expect(screen.getByRole('status').textContent).toBe('Starting the build…');
+        expect(refusalScrolls()).toHaveLength(2);
+        // Focus is on the status line, not on the first enabled control (the
+        // refusal's "Buy tokens" here, "Discard plan" without one), after the
+        // Dialog's deferred initial-focus frame too (PR #10294 board round 10).
+        expect(screen.getByRole('link', { name: 'Buy tokens' })).toBeTruthy();
+        await act(async () => {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        });
+        expect(document.activeElement).toBe(screen.getByRole('status'));
+        // Refused again: now the settled refusal is brought into view, and
+        // Build it is offered again, with focus on it.
+        await act(async () => {
+          settleRetry();
+        });
+        expect(screen.getByRole('button', { name: 'Build it' })).not.toBeDisabled();
+        expect(screen.getByRole('status').textContent).toBe('The build did not start.');
+        expect(refusalScrolls()).toHaveLength(3);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Build it' }));
+      } finally {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
     });
 
     it('puts focus on "Build it" so the confirmation is one keypress away', async () => {
@@ -597,6 +940,48 @@ describe('QuickStartDialog', () => {
       finish();
     });
 
+    // PR #10294 board round 5 (test): while "Build it" is in flight it is disabled,
+    // and the browser has dropped focus to <body>. Arming Discard then must
+    // offer a LIVE "Discard it" (it cancels the start), with focus on "Keep
+    // plan", never handed to the destructive answer. The click is a pointer
+    // press that does not focus its button, as in Safari.
+    it('arms Discard during an in-flight Build it: "Discard it" is live, and focus is on Keep plan', async () => {
+      let finish!: () => void;
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const onClose = vi.fn();
+      await reachPlanReview({}, onClose);
+      const build = screen.getByRole('button', { name: 'Build it' });
+      fireEvent.click(build);
+      await waitFor(() => expect(build).toHaveProperty('disabled', true));
+      // What the browser does to a focused button that becomes disabled: focus
+      // falls to <body>. (jsdom ignores blur() on a disabled element, so the
+      // fall is reproduced by removing a focused stand-in.)
+      const standIn = document.createElement('input');
+      document.body.append(standIn);
+      standIn.focus();
+      standIn.remove();
+      expect(document.activeElement).toBe(document.body);
+
+      const discard = screen.getByRole('button', { name: 'Discard plan' });
+      fireEvent.click(discard);
+
+      const buttons = within(screen.getByTestId('approval-gate-buttons')).getAllByRole('button');
+      expect(buttons.map((b) => b.textContent)).toEqual(['Discard it', 'Keep plan']);
+      expect(buttons[0]).toBeEnabled();
+      expect(buttons[1]).toBe(discard);
+      expect(document.activeElement).toBe(discard);
+
+      await userEvent.click(buttons[0]);
+      expect(cancelPipeline).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledTimes(1);
+      finish();
+    });
+
     // The plan cost tokens to design, so Discard asks once -- the same rule
     // as OrchestratorPanel, through the same useDiscardConfirm.
     it('asks once, then drops the plan and closes on "Discard it"', async () => {
@@ -609,11 +994,12 @@ describe('QuickStartDialog', () => {
       expect(cancelPipeline).not.toHaveBeenCalled();
       expect(onClose).not.toHaveBeenCalled();
       expect(screen.getByText('Discard this plan? Planning it again costs tokens.')).toBeTruthy();
-      // One button whose label changes, so focus stays where the user pressed.
-      expect(screen.getByRole('button', { name: 'Discard it' })).toBe(discard);
+      // The pressed button turns into "Keep plan" and keeps focus, so a second
+      // press backs out; discarding is the deliberate move to "Discard it".
+      expect(screen.getByRole('button', { name: 'Keep plan' })).toBe(discard);
       expect(document.activeElement).toBe(discard);
 
-      await userEvent.click(discard);
+      await userEvent.click(screen.getByRole('button', { name: 'Discard it' }));
 
       expect(cancelPipeline).toHaveBeenCalledTimes(1);
       expect(onClose).toHaveBeenCalledTimes(1);
@@ -626,15 +1012,51 @@ describe('QuickStartDialog', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Keep plan' }));
 
-      // The pressed button unmounts with the prompt; focus goes back to Discard.
+      // Focus stays on the same button, which reads "Discard plan" again; it
+      // does not move to "Build it", one Enter away from spending.
       expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Discard plan' }));
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
       expect(screen.queryByText(/Discard this plan\?/)).toBeNull();
       expect(cancelPipeline).not.toHaveBeenCalled();
     });
 
+    // PR #10294 board round 9 (ux HIGH): the dialog renders nothing while
+    // closed but stays mounted, and Close, Escape and the backdrop only call
+    // onClose. The arm survived, so the review reopened asking "Discard this
+    // plan?" with focus on "Discard it", where "Build it" usually is: one
+    // Enter dropped the plan.
+    it('reopens an armed review unarmed, focus on "Build it": one Enter builds, never discards', async () => {
+      const onClose = vi.fn();
+      const { rerender } = await reachPlanReview({}, onClose);
+      await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+      expect(screen.getByRole('button', { name: 'Discard it' })).toBeTruthy();
+
+      rerender(<QuickStartDialog open={false} onClose={onClose} />);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      rerender(<QuickStartDialog open onClose={onClose} />);
+
+      const build = screen.getByRole('button', { name: 'Build it' });
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Discard it' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Keep plan' })).toBeNull();
+      expect(screen.queryByText(/Discard this plan\?/)).toBeNull();
+      // After the Dialog's deferred initial-focus frame too.
+      await act(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+      expect(document.activeElement).toBe(build);
+
+      await userEvent.keyboard('{Enter}');
+      expect(cancelPipeline).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
+    });
+
     // An armed Discard must not survive a build attempt: a refused build puts
     // the same plan back on the review, where one click would then drop it.
-    it('disarms Discard when Build it is pressed, so a refused build returns unarmed', async () => {
+    // While armed there is no "Build it" at all (its place answers the
+    // question), so a build can only start from an unarmed review.
+    it('starts a build only from an unarmed review, so a refused build returns unarmed', async () => {
       runPipelineFromPlan.mockImplementationOnce(async () => {
         hoisted.state.orchestratorStatus = 'awaiting_approval';
         hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
@@ -642,6 +1064,8 @@ describe('QuickStartDialog', () => {
       await reachPlanReview();
       await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
       expect(screen.getByRole('button', { name: 'Discard it' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+      await userEvent.click(screen.getByRole('button', { name: 'Keep plan' }));
 
       await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
 
@@ -845,7 +1269,7 @@ describe('QuickStartDialog', () => {
       expect(screen.queryByRole('button', { name: /platformer/i })).toBeNull();
     });
 
-    // `confirming` guards the click until the whole run settles, so it must
+    // `confirmingPlan` guards the click until the whole run settles, so it must
     // not own the status line: once the run reports 'executing', and at every
     // mid-run gate, the live region has to say so.
     it('drops "Starting the build" once the run is executing, and shows a mid-run gate\'s wait', async () => {
@@ -891,6 +1315,241 @@ describe('QuickStartDialog', () => {
       await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Starting the build'));
       expect(screen.queryByText(/only when you press Build it/)).toBeNull();
       finish();
+    });
+
+    // PR #10294 board round 10 (security MEDIUM). A cancel is cooperative: the
+    // run's promise settles only when its current step does, and a step has no
+    // timeout. The in-flight hold was a plain boolean, so a DIFFERENT plan
+    // designed after the cancel opened with "Build it" disabled and "Starting
+    // the build…" until the old step ended (or, for a step that never settles,
+    // until a reload). The hold names the plan it belongs to.
+    //
+    // Walks there: Build it (its start left pending), cancel it by one of the
+    // two ways out of a starting build -- the review's armed "Discard it"
+    // (status still 'awaiting_approval' while the start is in flight) or the
+    // dialog's own Stop (once the run reports 'executing') -- close, reopen
+    // onto 'cancelled' (the pick step), and design a different plan while the
+    // cancelled run's promise is still pending.
+    async function cancelThenPlanAnother(exit: 'Discard it' | 'Stop') {
+      let settleOld!: { resolve: () => void; reject: (err: Error) => void };
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            if (exit === 'Stop') hoisted.state.orchestratorStatus = 'executing';
+            settleOld = { resolve, reject };
+          }),
+      );
+      cancelPipeline.mockImplementationOnce(() => {
+        hoisted.state.orchestratorStatus = 'cancelled';
+      });
+      const onClose = vi.fn();
+      const { rerender } = await reachPlanReview({}, onClose);
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
+      if (exit === 'Discard it') {
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Discard it' }));
+      } else {
+        expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+        await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      }
+      expect(cancelPipeline).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledTimes(1);
+      rerender(<QuickStartDialog open={false} onClose={onClose} />);
+      rerender(<QuickStartDialog open onClose={onClose} />);
+
+      const nextPlan = { approvalGates: [PLAN_GATE] };
+      expect(nextPlan).not.toBe(PLAN);
+      startQuickStart.mockImplementationOnce(async () => {
+        Object.assign(hoisted.state, {
+          orchestratorStatus: 'awaiting_approval',
+          orchestratorError: null,
+          currentPlan: nextPlan,
+          tokenEstimate: ESTIMATE,
+        });
+        return true;
+      });
+      await pickPlatformer();
+      await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
+      await screen.findByRole('button', { name: 'Build it' });
+      return { rerender, settleOld };
+    }
+
+    it.each(['Discard it', 'Stop'] as const)(
+      'offers a new plan\'s "Build it" while a cancelled run is still settling, and holds it for its own start only (%s)',
+      async (exit) => {
+        const { settleOld } = await cancelThenPlanAnother(exit);
+        const build = screen.getByRole('button', { name: 'Build it' });
+        expect(build).toBeEnabled();
+        await act(async () => {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        });
+        expect(document.activeElement).toBe(build);
+        expect(screen.getByRole('status').textContent).toBe(
+          'Your game plan is ready. Review it, then build.',
+        );
+
+        // The new plan's own Build it is held for its own start ...
+        let settleNext!: () => void;
+        runPipelineFromPlan.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              settleNext = resolve;
+            }),
+        );
+        await userEvent.click(build);
+        expect(runPipelineFromPlan).toHaveBeenCalledTimes(2);
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        expect(screen.getByRole('status').textContent).toBe('Starting the build…');
+
+        // ... and the old run settling late (here by throwing) neither
+        // releases that hold nor reports onto the new plan.
+        await act(async () => {
+          settleOld.reject(new Error('old run aborted'));
+        });
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        expect(screen.getByRole('status').textContent).toBe('Starting the build…');
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect(screen.queryByText('old run aborted')).toBeNull();
+        expect(toast.error).not.toHaveBeenCalled();
+
+        // The new plan's start settling releases it.
+        await act(async () => {
+          settleNext();
+        });
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeEnabled();
+        expect(screen.getByRole('status').textContent).toBe(
+          'Your game plan is ready. Review it, then build.',
+        );
+      },
+    );
+
+    // The other half of the same scoping: a cancelled run that settles
+    // normally while the NEW plan's run has failed must not report that
+    // failure as its own. The new run reports it, once.
+    it('reports a new plan\'s failure once, from its own run, when a cancelled run settles late', async () => {
+      const { settleOld } = await cancelThenPlanAnother('Discard it');
+      let settleNext!: () => void;
+      runPipelineFromPlan.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            settleNext = resolve;
+          }),
+      );
+      await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(2);
+      Object.assign(hoisted.state, {
+        orchestratorStatus: 'failed',
+        orchestratorError: 'Step 2 failed.',
+      });
+
+      await act(async () => {
+        settleOld.resolve();
+      });
+      expect(toast.error).not.toHaveBeenCalled();
+
+      await act(async () => {
+        settleNext();
+      });
+      expect(toast.error).toHaveBeenCalledTimes(1);
+      expect(toast.error).toHaveBeenCalledWith('Step 2 failed.');
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    });
+
+    // PR #10294 board round 11 (test). The status-line focus on opening is
+    // for a review whose OWN Build it is starting (`startingBuild`). A
+    // different plan reopened while a cancelled run is still pending has its
+    // Build it enabled, so focus goes there as usual, not to the status line;
+    // keying the open focus on "any run held, any plan on review" took it
+    // away from the one control the review is for.
+    it('focuses a different plan\'s "Build it", not the status line, when reopened while a cancelled run is pending', async () => {
+      const { rerender, settleOld } = await cancelThenPlanAnother('Discard it');
+      rerender(<QuickStartDialog open={false} onClose={vi.fn()} />);
+      rerender(<QuickStartDialog open onClose={vi.fn()} />);
+      const build = screen.getByRole('button', { name: 'Build it' });
+      expect(build).toBeEnabled();
+      await act(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+      expect(document.activeElement).toBe(build);
+      expect(document.activeElement).not.toBe(screen.getByRole('status'));
+      expect(screen.getByRole('status').textContent).toBe(
+        'Your game plan is ready. Review it, then build.',
+      );
+      await act(async () => {
+        settleOld.resolve();
+      });
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeEnabled();
+    });
+
+    // PR #10294 board round 10 (ux, architect). The SAME plan reopened while
+    // its Build it is starting mounts with Build it disabled, which cannot
+    // take focus; the Dialog's initial focus then went to the first enabled
+    // control, "Discard plan" here (no refusal link on screen). Focus goes to
+    // the status line instead, and from there wherever the start leads:
+    // refused, back to the re-enabled Build it; started, the review goes away
+    // and focus stays on the status line, which now says the build is on.
+    it.each(['refused', 'started'] as const)(
+      'focuses the status line when the review reopens while Build it is starting, then follows the start (%s)',
+      async (outcome) => {
+        let settle!: () => void;
+        runPipelineFromPlan.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              settle = () => {
+                if (outcome === 'refused') {
+                  hoisted.state.orchestratorError = ENGINE_NOT_READY_MESSAGE;
+                } else {
+                  hoisted.state.orchestratorStatus = 'executing';
+                }
+                resolve();
+              };
+            }),
+        );
+        const { rerender } = await reachPlanReview();
+        await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+        rerender(<QuickStartDialog open={false} onClose={vi.fn()} />);
+        rerender(<QuickStartDialog open onClose={vi.fn()} />);
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        await act(async () => {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        });
+        const status = screen.getByRole('status');
+        expect(status.textContent).toBe('Starting the build…');
+        expect(document.activeElement).toBe(status);
+        expect(document.activeElement).not.toBe(screen.getByRole('button', { name: 'Discard plan' }));
+
+        await act(async () => {
+          settle();
+        });
+        if (outcome === 'refused') {
+          const build = screen.getByRole('button', { name: 'Build it' });
+          expect(build).toBeEnabled();
+          expect(screen.getByRole('status').textContent).toBe('The build did not start.');
+          expect(document.activeElement).toBe(build);
+        } else {
+          expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+          expect(screen.getByRole('status').textContent).toBe('Building your game…');
+          expect(document.activeElement).toBe(screen.getByRole('status'));
+        }
+      },
+    );
+
+    // The status-line hand-off is for OPENING onto a starting build only. A
+    // Build it pressed in an open dialog keeps its own focus handling, and a
+    // refused start comes back to Build it.
+    it('keeps focus with Build it when it is pressed in an open dialog and the start is refused', async () => {
+      runPipelineFromPlan.mockImplementationOnce(async () => {
+        hoisted.state.orchestratorError = ENGINE_NOT_READY_MESSAGE;
+      });
+      await reachPlanReview();
+      const build = screen.getByRole('button', { name: 'Build it' });
+      await waitFor(() => expect(document.activeElement).toBe(build));
+      await userEvent.keyboard('{Enter}');
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
+      await screen.findByText('The build did not start.');
+      expect(document.activeElement).toBe(build);
     });
 
     // "Build it" unmounts with the review once the run moves to 'executing'.

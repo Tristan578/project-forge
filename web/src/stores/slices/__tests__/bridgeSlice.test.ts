@@ -101,5 +101,19 @@ describe('BridgeSlice', () => {
       store.getState().removeBridgeOperation('op-1');
       expect(store.getState().bridgeOperations).toHaveLength(0);
     });
+
+    // #10306: TYPE-LEVEL gate, enforced by `tsc --noEmit` (which type-checks
+    // test files), not by this test's runtime. updateBridgeOperation merges
+    // with a bare spread, so `error` stays exact and an explicit-undefined
+    // patch cannot compile. Widening the field leaves the directive unused,
+    // and tsc fails TS2578. The closure is never called.
+    it('rejects an explicit-undefined error patch at compile time (#10306)', () => {
+      const mustNotCompile = () => {
+        // @ts-expect-error -- error is exact: undefined would erase it on the merge
+        store.getState().updateBridgeOperation('op-1', { status: 'failed', error: undefined });
+      };
+      // Reporting-only at runtime (lessons #11): the gate is the directive.
+      expect(typeof mustNotCompile).toBe('function');
+    });
   });
 });

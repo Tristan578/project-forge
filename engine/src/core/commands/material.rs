@@ -1,7 +1,9 @@
 //! Material, lighting, and environment command handlers.
 
 use serde::Deserialize;
-use crate::core::material::{MaterialData, MaterialAlphaMode, ParallaxMethod};
+use crate::core::material::{
+    is_valid_attenuation_distance, MaterialAlphaMode, MaterialData, ParallaxMethod,
+};
 use crate::core::lighting::LightData;
 use crate::core::shader_effects::ShaderEffectData;
 use crate::core::post_processing::{
@@ -95,18 +97,48 @@ struct UpdateMaterialPayload {
     diffuse_transmission: Option<f32>,
     ior: Option<f32>,
     thickness: Option<f32>,
-    attenuation_distance: Option<f32>,
+    /// Three states, so an explicit `null` is not confused with an absent key:
+    /// absent → `None`, `null` → `Some(None)` (infinity, "no attenuation"),
+    /// a number → `Some(Some(v))`. See `handle_update_material`.
+    #[serde(default, deserialize_with = "deserialize_present")]
+    attenuation_distance: Option<Option<f32>>,
     attenuation_color: Option<[f32; 3]>,
 }
 
+/// Wrap whatever is present — `null` included — in `Some`, so that with
+/// `#[serde(default)]` an absent key stays `None` while an explicit `null`
+/// becomes `Some(None)`. Plain `Option<Option<T>>` cannot tell them apart:
+/// serde maps both to the outer `None`.
+fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+/// The refusal for an explicit `attenuationDistance` number the engine will
+/// not store. Names the field and the one spelling of infinity.
+fn invalid_update_attenuation_distance(value: f32) -> String {
+    format!(
+        "update_material: attenuationDistance must be a finite number >= 0, got {value}; send null for infinity"
+    )
+}
+
 /// Handle update_material command from React.
-/// Accepts partial updates — only provided fields are changed.
+///
+/// Every field is optional on the wire, but this is a REPLACE, not a patch:
+/// a field left out resets to its `MaterialData::default()` value, because
+/// `apply_material_updates` swaps the whole material in and keeps only the
+/// texture ids. Callers that mean "change one field" send the full material
+/// (the inspector and the AI `update_material` handler both merge first).
 fn handle_update_material(payload: serde_json::Value) -> super::CommandResult {
     let data: UpdateMaterialPayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid update_material payload: {}", e))?;
 
     // Build a MaterialData with defaults, then overlay provided fields.
-    // The apply system will merge this with the existing component.
+    // `apply_material_updates` replaces the existing component with this,
+    // carrying over only texture ids the update leaves unset.
     let mut mat = MaterialData::default();
     if let Some(v) = data.base_color { mat.base_color = v; }
     if let Some(v) = data.metallic { mat.metallic = v; }
@@ -146,7 +178,29 @@ fn handle_update_material(payload: serde_json::Value) -> super::CommandResult {
     if let Some(v) = data.diffuse_transmission { mat.diffuse_transmission = v; }
     if let Some(v) = data.ior { mat.ior = v; }
     if let Some(v) = data.thickness { mat.thickness = v; }
-    if let Some(v) = data.attenuation_distance { mat.attenuation_distance = v; }
+    // `update_material` REPLACES the material: `mat` starts from
+    // `MaterialData::default()` above, and `apply_material_updates`
+    // (entity_factory.rs) swaps it in whole, keeping only texture ids. So an
+    // ABSENT field resets to its default — for this one, infinity — exactly
+    // like every other field here; it does not keep the current value.
+    match data.attenuation_distance {
+        // Absent: the default from `MaterialData::default()` stands.
+        None => {}
+        // Explicit `null`: infinity, "no attenuation" — the inspector's
+        // "Infinite" checkbox and the manifest's "send null for infinity".
+        // Set explicitly rather than left to the default, so it stays true
+        // if the starting value ever changes.
+        Some(None) => mat.attenuation_distance = f32::INFINITY,
+        // A number must be one the scene loader keeps as written (#10267).
+        // The loader tolerates a bad number in an OLD scene by reading it as
+        // infinity; refusing it here is what stops a new one being written.
+        Some(Some(v)) => {
+            if !is_valid_attenuation_distance(v) {
+                return Err(invalid_update_attenuation_distance(v));
+            }
+            mat.attenuation_distance = v;
+        }
+    }
     if let Some(v) = data.attenuation_color { mat.attenuation_color = v; }
 
     let update = MaterialUpdate {
@@ -716,6 +770,158 @@ mod tests {
         }));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // #10267: `attenuationDistance` on the live command. A number must be one
+    // the scene loader keeps as written (the loader reads any other number in
+    // an OLD scene as infinity; refusing it here stops a NEW one being
+    // written). An explicit `null` means infinity. An absent key resets to the
+    // default — infinity — like every other field, because update_material
+    // replaces the material (`apply_material_updates`, entity_factory.rs).
+
+    /// Run `update_material` with a live pending queue registered, and hand
+    /// back the one `MaterialData` it queued. Without the registration the push
+    /// is a silent no-op and the handler answers "not initialized", so a test
+    /// could not tell a queued update from a refused one.
+    fn queued_material(payload: serde_json::Value) -> Result<MaterialData, String> {
+        struct PendingGuard;
+        impl Drop for PendingGuard {
+            fn drop(&mut self) {
+                crate::core::pending::unregister_pending_commands();
+            }
+        }
+
+        let mut pending = crate::core::pending::PendingCommands::default();
+        crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        let guard = PendingGuard;
+        let result = run("update_material", payload);
+        drop(guard);
+        result?;
+        assert_eq!(
+            pending.material_updates.len(),
+            1,
+            "an accepted update_material must queue exactly one update"
+        );
+        Ok(pending.material_updates.remove(0).material_data)
+    }
+
+    /// Queue `payload`, then run the real `apply_material_updates` against an
+    /// entity whose current `attenuation_distance` is `current`, and return
+    /// what the entity holds afterwards.
+    fn attenuation_after_update(current: f32, payload: serde_json::Value) -> f32 {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::prelude::World;
+
+        let update = queued_material(payload).expect("the update must be accepted");
+        let mut world = World::new();
+        let mut pending = crate::core::pending::PendingCommands::default();
+        pending.material_updates.push(MaterialUpdate {
+            entity_id: "entity-1".to_string(),
+            material_data: update,
+        });
+        world.insert_resource(pending);
+        world.insert_resource(crate::core::history::HistoryStack::default());
+        let mut existing = MaterialData::default();
+        existing.attenuation_distance = current;
+        let entity = world
+            .spawn((
+                crate::core::entity_id::EntityId("entity-1".to_string()),
+                existing,
+            ))
+            .id();
+        world
+            .run_system_once(crate::core::entity_factory::apply_material_updates)
+            .expect("apply_material_updates must run on a hand-built world");
+        world
+            .get::<MaterialData>(entity)
+            .expect("the entity keeps its material")
+            .attenuation_distance
+    }
+
+    #[test]
+    fn update_material_keeps_a_finite_non_negative_attenuation_distance() {
+        for value in [0.0_f32, 4.5, 10.0] {
+            let material = queued_material(json!({
+                "entityId": "entity-1",
+                "attenuationDistance": value
+            }))
+            .unwrap_or_else(|e| panic!("{value} must be accepted: {e}"));
+            assert_eq!(material.attenuation_distance, value);
+        }
+    }
+
+    #[test]
+    fn update_material_null_attenuation_distance_sets_infinity_on_a_finite_material() {
+        // The inspector's "Infinite" checkbox sends `null`; so does a model
+        // following the manifest's "send null for infinity".
+        assert_eq!(
+            attenuation_after_update(
+                10.0,
+                json!({ "entityId": "entity-1", "attenuationDistance": null })
+            ),
+            f32::INFINITY
+        );
+    }
+
+    #[test]
+    fn update_material_finite_attenuation_distance_replaces_infinity() {
+        assert_eq!(
+            attenuation_after_update(
+                f32::INFINITY,
+                json!({ "entityId": "entity-1", "attenuationDistance": 4.5 })
+            ),
+            4.5
+        );
+    }
+
+    #[test]
+    fn update_material_absent_attenuation_distance_resets_to_the_default() {
+        // Full replace, not a patch: leaving the key out does NOT keep the
+        // current 10 — it resets to the default, as every other field does.
+        // Pinned so nobody documents "absent = unchanged" again.
+        assert_eq!(
+            attenuation_after_update(10.0, json!({ "entityId": "entity-1", "metallic": 0.5 })),
+            f32::INFINITY
+        );
+    }
+
+    #[test]
+    fn update_material_rejects_a_number_the_loader_would_not_keep() {
+        // Spelled as the command wire carries them. `1e300` parses as f64 and
+        // narrows to +inf as f32.
+        for literal in ["-1", "-0.5", "1e300"] {
+            let payload: serde_json::Value = serde_json::from_str(&format!(
+                r#"{{"entityId":"entity-1","attenuationDistance":{literal}}}"#
+            ))
+            .unwrap();
+            let err = queued_material(payload).expect_err(&format!(
+                "attenuationDistance {literal} must be refused live"
+            ));
+            assert!(
+                err.starts_with(
+                    "update_material: attenuationDistance must be a finite number >= 0, got "
+                ),
+                "the error must name the command, the field and the rule: {err}"
+            );
+            assert!(
+                err.ends_with("; send null for infinity"),
+                "the error must name the one spelling of infinity: {err}"
+            );
+
+            // Why refuse rather than tolerate: the loader would NOT keep this
+            // value — it reads it back as infinity — so storing it would make
+            // the scene the creator sees differ from the one they reopen.
+            let material_json = serde_json::to_string(&MaterialData::default())
+                .unwrap()
+                .replace(
+                    "\"attenuationDistance\":null",
+                    &format!("\"attenuationDistance\":{literal}"),
+                );
+            assert!(material_json.contains(literal), "{material_json}");
+            let reloaded = serde_json::from_str::<MaterialData>(&material_json)
+                .unwrap_or_else(|e| panic!("the loader must tolerate {literal}: {e}"));
+            assert_eq!(reloaded.attenuation_distance, f32::INFINITY, "{literal}");
+        }
     }
 
     #[test]

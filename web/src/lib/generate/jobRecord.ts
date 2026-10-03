@@ -49,10 +49,10 @@ export async function updateJobStatus(
   jobId: string,
   updates: {
     status: 'processing' | 'completed' | 'failed';
-    progress?: number;
-    resultUrl?: string;
-    resultMeta?: Record<string, unknown>;
-    errorMessage?: string;
+    progress?: number | undefined;
+    resultUrl?: string | undefined;
+    resultMeta?: Record<string, unknown> | undefined;
+    errorMessage?: string | undefined;
   }
 ): Promise<void> {
   const setValues: Record<string, unknown> = {
@@ -96,10 +96,10 @@ export async function updateJobStatusByProviderJob(
   userId: string,
   updates: {
     status: 'processing' | 'completed' | 'failed';
-    progress?: number;
-    resultUrl?: string;
-    resultMeta?: Record<string, unknown>;
-    errorMessage?: string;
+    progress?: number | undefined;
+    resultUrl?: string | undefined;
+    resultMeta?: Record<string, unknown> | undefined;
+    errorMessage?: string | undefined;
   }
 ): Promise<void> {
   const setValues: Record<string, unknown> = {
