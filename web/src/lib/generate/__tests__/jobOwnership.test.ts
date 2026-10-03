@@ -66,7 +66,11 @@ describe('jobOwnership', () => {
       });
     });
 
-    it('uses ON CONFLICT DO NOTHING so first writer wins and a job can never be reassigned', async () => {
+    it('writes with ON CONFLICT DO NOTHING (the call only; see jobOwnership.db.test.ts)', async () => {
+      // This proves the clause is issued, not that it does anything: without
+      // the (provider, provider_job_id) unique index there is no conflict to
+      // arbitrate. First-writer-wins against real Postgres, built from the
+      // migration chain, is `jobOwnership.db.test.ts`.
       await bindProviderJob('user-1', 'meshy', 'task-abc');
 
       expect(mockOnConflictDoNothing).toHaveBeenCalledTimes(1);

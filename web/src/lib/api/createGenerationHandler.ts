@@ -402,8 +402,10 @@ export function createGenerationHandler<TParams, TResult>(
     try {
       // `bindProviderJob` already never throws on its own (it reports a write
       // failure to Sentry and swallows it), but this call site never trusts
-      // that from the outside: losing the binding must never cost the user
-      // their otherwise-successful generation.
+      // that from the outside: a failed bind must not turn this submit into a
+      // 5xx. It does NOT save the job — with no binding row the owner's first
+      // poll gets a terminal 404 and a refund — and it is not a security gap,
+      // because an unbound id is refused to every caller.
       await bindProviderJob(userId, resolvedProvider, providerJobId);
     } catch (err) {
       captureException(err, { route, action: 'job_ownership_bind', providerJobId, userId });

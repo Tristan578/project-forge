@@ -24,9 +24,11 @@
  * `jobOwnershipRefusal`), their tests and the poller's fallback, so the wording
  * cannot drift per route the way the `produced no <artifact>` catalogue once
  * did (`emptyArtifactError.test.ts`). The poller keys its behaviour on the
- * STATUS (404 terminal, 503 transient) — it never parses this text — so the
- * sentences are free to change; only their register is pinned by
- * `__tests__/jobNotFound.test.ts`.
+ * STATUS (404 terminal, 503 transient) — it never parses this text. Even so,
+ * `__tests__/jobNotFound.test.ts` pins the 404 sentence VERBATIM, because the
+ * changeset quotes it to users (a reword must edit both together); only the
+ * 503 sentence is pinned by register (what it says and that it gives a next
+ * step), not word for word.
  *
  * Client-safe: no server imports, because `useGenerationPolling` uses
  * `JOB_NOT_FOUND_MESSAGE` as its fallback for a 404 whose body is unreadable.

@@ -29,36 +29,75 @@
  *   lookup has a third answer (`'unverifiable'`, a failed lookup), and a check
  *   written against the miss rather than the hit lets that one through to the
  *   key — fail-open on a DB error;
+ * - the first argument (`<user>`) is the AUTHENTICATED caller: `<mid>.userId`
+ *   (a trailing `!` allowed), where `const <mid> = await withApiMiddleware(...)`
+ *   is a top-level statement of the same body ahead of the check, and it is
+ *   the same `<mid>.userId` the guarded `resolveApiKey(...)` call passes as ITS
+ *   first argument. A check run against a caller-chosen user
+ *   (`searchParams.get('userId')`, a body field) would answer `'owner'` for
+ *   whoever the caller names and hand them the platform key;
  * - the third argument is the id the route polls: a `const` read from
  *   `searchParams.get('jobId')` in the same body;
- * - both names RESOLVE to their modules (an import of the real export, not a
- *   same-named local), the aliasing class that defeated the static passes in
- *   #9736.
+ * - `verifyProviderJobOwner` and `withApiMiddleware` RESOLVE to their modules
+ *   (an import of the real export, not a same-named local), the aliasing class
+ *   that defeated the static passes in #9736.
  *
- * FAILS CLOSED ON ZERO (lessons-learned #9), and every rule is proven able to
- * REPORT by mutating the REAL route sources in memory and asserting each
- * mutation applied before trusting the red (#11, #16, #18, #19).
+ * WHICH FILES. Every file name Next.js routes — `route.ts`, `.tsx`, `.js`,
+ * `.jsx`, `.mjs` (the `ROUTE_FILE` set `egressGuardCoverage.test.ts` uses) —
+ * for both the status route and the POST route beside it, each parsed with the
+ * script kind its extension implies. The floor is derived from the source,
+ * not a count: every endpoint in `STATUS_ENDPOINTS`
+ * (`src/lib/generation/statusEndpoints.ts`, the map the poller dials) must
+ * map to a walked status route, so a route renamed or moved out of the walk is
+ * named rather than silently dropped (lessons-learned #9, #18).
+ *
+ * Every rule is proven able to REPORT by mutating the REAL route sources in
+ * memory and asserting each mutation applied before trusting the red (#11,
+ * #16, #18, #19).
  *
  * WHAT THIS DOES NOT PROVE. That the lookup is correct, or that the refusal
  * maps to the right status: those are `src/lib/generate/__tests__/
  * jobOwnership.test.ts`, `jobOwnershipResponse.test.ts` and each
  * `status/route.test.ts`.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { STATUS_ENDPOINTS } from '@/lib/generation/statusEndpoints';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const GENERATE = path.join(WEB_ROOT, 'src', 'app', 'api', 'generate');
+const GENERATE_URL_PREFIX = '/api/generate/';
+
+/** Every file name Next.js routes — the same set `egressGuardCoverage.test.ts` walks. */
+const ROUTE_FILE = /^route\.(?:ts|tsx|js|jsx|mjs)$/;
 
 const RESOLVER_MODULE = '@/lib/keys/resolver';
 const RESOLVE = 'resolveApiKey';
 const OWNERSHIP_MODULE = '@/lib/generate/jobOwnership';
 const VERIFY = 'verifyProviderJobOwner';
+const MIDDLEWARE_MODULE = '@/lib/api/middleware';
+const MIDDLEWARE = 'withApiMiddleware';
 const HANDLER_MODULE = '@/lib/api/createGenerationHandler';
 const HANDLER = 'createGenerationHandler';
+
+/** The script kind Next.js's compiler would give a route file, by extension. */
+function scriptKindFor(fileName: string): ts.ScriptKind {
+  switch (path.extname(fileName)) {
+    case '.tsx': return ts.ScriptKind.TSX;
+    case '.jsx': return ts.ScriptKind.JSX;
+    case '.js':
+    case '.mjs': return ts.ScriptKind.JS;
+    default: return ts.ScriptKind.TS;
+  }
+}
+
+function parse(fileName: string, source: string): ts.SourceFile {
+  return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, scriptKindFor(fileName));
+}
 
 /**
  * Status routes that resolve NO key themselves, pinned as a set so adding one
@@ -152,23 +191,57 @@ function refusesNonOwner(cond: ts.Expression, name: string): boolean {
 }
 
 /**
- * Index of the first top-level statement of `body` at which the ownership
- * refusal has fully happened (the `if` after the `const`), or -1.
+ * `<mid>.userId` (parentheses and `!` stripped) -> `mid`; anything else ->
+ * undefined. The user argument of both `verifyProviderJobOwner` and
+ * `resolveApiKey` must have this shape, and the SAME `<mid>`.
  */
-function guardIndex(body: ts.Block, verifyNames: Set<string>): number {
+function authenticatedUserBase(expr: ts.Expression | undefined): string | undefined {
+  let e = expr;
+  while (e && (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e))) e = e.expression;
+  if (
+    e && ts.isPropertyAccessExpression(e)
+    && ts.isIdentifier(e.expression)
+    && e.name.text === 'userId'
+  ) {
+    return e.expression.text;
+  }
+  return undefined;
+}
+
+/**
+ * Index of the first top-level statement of `body` at which the ownership
+ * refusal has fully happened (the `if` after the `const`), or -1. Only a
+ * check whose user argument is `<user>.userId` counts, where `<user>` is the
+ * `const` result of `withApiMiddleware(...)` declared earlier in the same body
+ * — the caller the middleware authenticated, and the same user the guarded
+ * `resolveApiKey` call resolves for.
+ */
+function guardIndex(
+  body: ts.Block,
+  verifyNames: Set<string>,
+  middlewareNames: Set<string>,
+  user: string,
+): number {
   const polled = polledIdNames(body);
+  const authenticated = new Set<string>();
   const verdicts = new Set<string>();
   for (let i = 0; i < body.statements.length; i++) {
     const statement = body.statements[i];
     if (ts.isVariableStatement(statement) && isConst(statement.declarationList)) {
       for (const decl of statement.declarationList.declarations) {
         const call = unwrapAwait(decl.initializer);
+        if (!ts.isIdentifier(decl.name) || !call || !ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) {
+          continue;
+        }
+        if (middlewareNames.has(call.expression.text)) {
+          authenticated.add(decl.name.text);
+          continue;
+        }
         if (
-          ts.isIdentifier(decl.name)
-          && call && ts.isCallExpression(call)
-          && ts.isIdentifier(call.expression)
-          && verifyNames.has(call.expression.text)
+          verifyNames.has(call.expression.text)
           && call.arguments.length === 3
+          && authenticatedUserBase(call.arguments[0]) === user
+          && authenticated.has(user)
           && ts.isIdentifier(call.arguments[2])
           && polled.has(call.arguments[2].text)
         ) {
@@ -213,9 +286,10 @@ export interface StatusRouteAnalysis {
 }
 
 export function analyseStatusRoute(source: string, fileName = 'route.ts'): StatusRouteAnalysis {
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parse(fileName, source);
   const resolveNames = importedLocalNames(sf, RESOLVER_MODULE, RESOLVE);
   const verifyNames = importedLocalNames(sf, OWNERSHIP_MODULE, VERIFY);
+  const middlewareNames = importedLocalNames(sf, MIDDLEWARE_MODULE, MIDDLEWARE);
   const out: StatusRouteAnalysis = { keyResolutions: 0, unguarded: [] };
 
   const visit = (node: ts.Node): void => {
@@ -230,7 +304,10 @@ export function analyseStatusRoute(source: string, fileName = 'route.ts'): Statu
         out.keyResolutions += 1;
         const body = enclosingBody(node);
         const at = body ? topLevelIndex(body, node) : -1;
-        const guard = body ? guardIndex(body, verifyNames) : -1;
+        // The key is resolved for THIS user; the refusal must be for the same
+        // one. A call whose user is not `<mid>.userId` has no guard by design.
+        const user = authenticatedUserBase(node.arguments[0]);
+        const guard = body && user ? guardIndex(body, verifyNames, middlewareNames, user) : -1;
         if (!body || guard < 0 || guard >= at) {
           const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
           out.unguarded.push(`line ${line + 1}`);
@@ -271,7 +348,7 @@ export interface PostRouteAnalysis {
  * the status-route check.
  */
 export function analysePostRoute(source: string, fileName = 'route.ts'): PostRouteAnalysis {
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parse(fileName, source);
   const handlerNames = importedLocalNames(sf, HANDLER_MODULE, HANDLER);
   const out: PostRouteAnalysis = { handlers: 0, binding: 0 };
   const visit = (node: ts.Node): void => {
@@ -298,29 +375,48 @@ export function analysePostRoute(source: string, fileName = 'route.ts'): PostRou
   return out;
 }
 
-interface StatusRoute {
+export interface StatusRoute {
   /** The generation type: `model`, `sprite`, ... */
   type: string;
   statusFile: string;
-  postFile: string;
+  /** The route file(s) beside the `status` directory — where the POST lives. */
+  postFiles: string[];
 }
 
-/** Every `generate/<type>/status/route.ts`, at any depth. */
-function walkStatusRoutes(dir: string, out: StatusRoute[] = []): StatusRoute[] {
+/** The route files Next.js would serve from `dir`, in any spelling it routes. */
+function routeFilesIn(dir: string): string[] {
+  return readdirSync(dir)
+    .filter((entry) => ROUTE_FILE.test(entry) && statSync(path.join(dir, entry)).isFile())
+    .map((entry) => path.join(dir, entry));
+}
+
+/** Every `<root>/<type>/status/route.{ts,tsx,js,jsx,mjs}`, at any depth. */
+export function walkStatusRoutes(root: string, dir: string = root, out: StatusRoute[] = []): StatusRoute[] {
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry);
     if (!statSync(full).isDirectory() || entry === '__tests__' || entry === 'node_modules') continue;
-    const statusFile = path.join(full, 'route.ts');
-    if (entry === 'status' && existsSync(statusFile)) {
-      out.push({
-        type: path.relative(GENERATE, dir).split(path.sep).join('/'),
-        statusFile,
-        postFile: path.join(dir, 'route.ts'),
-      });
+    if (entry === 'status') {
+      for (const statusFile of routeFilesIn(full)) {
+        out.push({
+          type: path.relative(root, dir).split(path.sep).join('/'),
+          statusFile,
+          postFiles: routeFilesIn(dir),
+        });
+      }
     }
-    walkStatusRoutes(full, out);
+    walkStatusRoutes(root, full, out);
   }
   return out;
+}
+
+/**
+ * The status endpoints the poller dials (`STATUS_ENDPOINTS`) that no walked
+ * route serves. Source-derived, so it shrinks and grows with the map rather
+ * than with a hand-kept count (lessons-learned #18).
+ */
+export function unwalkedStatusEndpoints(routes: StatusRoute[], endpoints: readonly string[]): string[] {
+  const walked = new Set(routes.map((r) => `${GENERATE_URL_PREFIX}${r.type}/status`));
+  return endpoints.filter((endpoint) => !walked.has(endpoint));
 }
 
 /** Apply a text mutation and REFUSE to continue if it did not land (lessons-learned #19). */
@@ -338,17 +434,27 @@ const GUARD_CONST = /^([ \t]*)(const ownership = await verifyProviderJobOwner\()
 
 describe('job-id ownership coverage (#10262)', () => {
   const routes = walkStatusRoutes(GENERATE);
-  const analysed = routes.map((r) => ({
-    ...r,
-    source: readFileSync(r.statusFile, 'utf8'),
-    status: analyseStatusRoute(readFileSync(r.statusFile, 'utf8'), r.statusFile),
-  }));
+  const analysed = routes.map((r) => {
+    const source = readFileSync(r.statusFile, 'utf8');
+    return { ...r, source, status: analyseStatusRoute(source, r.statusFile) };
+  });
   const resolving = analysed.filter((r) => r.status.keyResolutions > 0);
+  const endpoints: readonly string[] = Object.values(STATUS_ENDPOINTS);
 
-  it('finds status routes, and key-resolving ones, to check at all', () => {
-    // Fail closed on zero: a walk that stops matching is the walk breaking.
-    expect(routes.length).toBeGreaterThan(0);
-    expect(resolving.length).toBeGreaterThan(0);
+  it('walks a status route for EVERY endpoint the poller dials (source-derived floor)', () => {
+    // The floor is the map in src/lib/generation/statusEndpoints.ts, not a
+    // count: a route renamed or moved out of the walk is NAMED here instead of
+    // silently shrinking the set every later check runs over.
+    expect(endpoints.length).toBeGreaterThan(0);
+    for (const endpoint of endpoints) {
+      expect(endpoint, 'STATUS_ENDPOINTS entries must be /api/generate/<type>/status').toMatch(
+        /^\/api\/generate\/.+\/status$/,
+      );
+    }
+    expect(unwalkedStatusEndpoints(routes, endpoints)).toEqual([]);
+    // Key-resolving routes are every walked route but the pinned exemptions,
+    // so this cannot pass on a walk that lost some of them.
+    expect(resolving.length).toBe(routes.length - STATUS_ROUTES_RESOLVING_NO_KEY.length);
   });
 
   it('pins the status routes that resolve no key, so a new one is a decision', () => {
@@ -358,24 +464,28 @@ describe('job-id ownership coverage (#10262)', () => {
 
   it("refuses a non-'owner' verdict before EVERY key resolution in every status route", () => {
     const unguarded = resolving.flatMap((r) =>
-      r.status.unguarded.map((where) => `${r.type}/status/route.ts ${where}`),
+      r.status.unguarded.map((where) => `${path.relative(GENERATE, r.statusFile)} ${where}`),
     );
     expect(
       unguarded,
       `${unguarded.length} resolveApiKey call(s) run without an ownership refusal ahead of them. Add, in the same `
-      + 'function body and before the call: `const ownership = await verifyProviderJobOwner(userId, provider, jobId);` '
-      + "+ `if (ownership !== 'owner') return jobOwnershipRefusal(ownership);` — see src/lib/generate/jobOwnership.ts.",
+      + 'function body and before the call: `const ownership = await verifyProviderJobOwner(mid.userId!, provider, jobId);` '
+      + "+ `if (ownership !== 'owner') return jobOwnershipRefusal(ownership);`, where `mid` is this body's "
+      + '`await withApiMiddleware(...)` and the call resolves the key for the same `mid.userId!` — see '
+      + 'src/lib/generate/jobOwnership.ts.',
     ).toEqual([]);
   });
 
   it('binds the job id in every POST route that sits behind a key-resolving status route', () => {
     const problems = resolving.flatMap((r) => {
-      if (!existsSync(r.postFile)) return [`${r.type}/route.ts is missing`];
-      const post = analysePostRoute(readFileSync(r.postFile, 'utf8'), r.postFile);
-      if (post.handlers === 0) return [`${r.type}/route.ts has no ${HANDLER}({...}) call the gate can read`];
-      return post.binding === post.handlers
+      if (r.postFiles.length === 0) return [`${r.type}/route.{ts,tsx,js,jsx,mjs} is missing`];
+      const posts = r.postFiles.map((f) => analysePostRoute(readFileSync(f, 'utf8'), f));
+      const handlers = posts.reduce((n, p) => n + p.handlers, 0);
+      const binding = posts.reduce((n, p) => n + p.binding, 0);
+      if (handlers === 0) return [`${r.type}/route.* has no ${HANDLER}({...}) call the gate can read`];
+      return binding === handlers
         ? []
-        : [`${r.type}/route.ts: ${post.handlers - post.binding} handler(s) set neither jobIdForOwnership nor asyncJob.providerJobId`];
+        : [`${r.type}/route.*: ${handlers - binding} handler(s) set neither jobIdForOwnership nor asyncJob.providerJobId`];
     });
     expect(problems).toEqual([]);
   });
@@ -385,11 +495,21 @@ describe('job-id ownership coverage (#10262)', () => {
   // asserts it applied before its result is trusted.
   // -------------------------------------------------------------------------
 
+  it('names the endpoint when any ONE real status route drops out of the walk', () => {
+    // Removing each walked route in turn stands in for renaming it to a
+    // spelling the walk misses: the floor must name exactly that endpoint.
+    for (const r of routes) {
+      const endpoint = `${GENERATE_URL_PREFIX}${r.type}/status`;
+      expect(endpoints, r.type).toContain(endpoint);
+      expect(unwalkedStatusEndpoints(routes.filter((x) => x !== r), endpoints), r.type).toEqual([endpoint]);
+    }
+  });
+
   it('reports each real status route with its refusal DELETED', () => {
     expect(resolving.length).toBeGreaterThan(0);
     for (const r of resolving) {
       const mutated = mutate(r.source, GUARD_IF, '');
-      expect(analyseStatusRoute(mutated).unguarded, r.type).not.toEqual([]);
+      expect(analyseStatusRoute(mutated, r.statusFile).unguarded, r.type).not.toEqual([]);
     }
   });
 
@@ -397,7 +517,7 @@ describe('job-id ownership coverage (#10262)', () => {
     for (const r of resolving) {
       let mutated = mutate(r.source, GUARD_IF, '  // if (ownership !== \'owner\') return jobOwnershipRefusal(ownership);');
       mutated = mutate(mutated, GUARD_CONST, '$1// $2');
-      expect(analyseStatusRoute(mutated).unguarded, r.type).not.toEqual([]);
+      expect(analyseStatusRoute(mutated, r.statusFile).unguarded, r.type).not.toEqual([]);
     }
   });
 
@@ -406,38 +526,143 @@ describe('job-id ownership coverage (#10262)', () => {
     // lookup) would sail past this to the platform key.
     for (const r of resolving) {
       const mutated = mutate(r.source, /ownership !== 'owner'/, "ownership === 'not_owner'");
-      expect(analyseStatusRoute(mutated).unguarded, r.type).not.toEqual([]);
+      expect(analyseStatusRoute(mutated, r.statusFile).unguarded, r.type).not.toEqual([]);
     }
   });
 
   it('reports each real status route whose check runs on something other than the polled jobId', () => {
     for (const r of resolving) {
       const mutated = mutate(r.source, /(verifyProviderJobOwner\([^)]*), jobId\)/, '$1, otherId)');
-      expect(analyseStatusRoute(mutated).unguarded, r.type).not.toEqual([]);
+      expect(analyseStatusRoute(mutated, r.statusFile).unguarded, r.type).not.toEqual([]);
+    }
+  });
+
+  it('reports each real status route whose check runs against a CALLER-CHOSEN user', () => {
+    // The check would then answer 'owner' for whoever the caller names, and the
+    // key would be resolved behind it. Exactly one occurrence per route, so the
+    // mutation is the whole difference.
+    for (const r of resolving) {
+      expect(r.source.match(/verifyProviderJobOwner\(mid\.userId!, /g), r.type).toHaveLength(1);
+      const mutated = mutate(
+        r.source,
+        /verifyProviderJobOwner\(mid\.userId!, /,
+        "verifyProviderJobOwner(searchParams.get('userId')!, ",
+      );
+      expect(analyseStatusRoute(mutated, r.statusFile).unguarded, r.type).not.toEqual([]);
+    }
+  });
+
+  it('reports each real status route whose check and key resolution name DIFFERENT users', () => {
+    // Each half alone: the check for the authenticated user but the key for a
+    // caller-chosen one, so the refusal guards a different principal.
+    for (const r of resolving) {
+      const mutated = mutate(
+        r.source,
+        /(resolveApiKey\(\s*)mid\.userId!/,
+        "$1searchParams.get('userId')!",
+      );
+      expect(analyseStatusRoute(mutated, r.statusFile).unguarded, r.type).not.toEqual([]);
+    }
+  });
+
+  it('reports each real status route whose user does not come from withApiMiddleware', () => {
+    for (const r of resolving) {
+      const mutated = mutate(
+        r.source,
+        /const mid = await withApiMiddleware\(/,
+        'const mid = await parseCallerFromQuery(',
+      );
+      expect(analyseStatusRoute(mutated, r.statusFile).unguarded, r.type).not.toEqual([]);
     }
   });
 
   it('reports each real POST route with its binding removed', () => {
     for (const r of resolving) {
-      const source = readFileSync(r.postFile, 'utf8');
-      const mutated = mutate(source, /\b(jobIdForOwnership|providerJobId):/, '$1Removed:');
-      const post = analysePostRoute(mutated);
-      expect(post.handlers, r.type).toBeGreaterThan(0);
-      expect(post.binding, r.type).toBeLessThan(post.handlers);
+      expect(r.postFiles.length, r.type).toBeGreaterThan(0);
+      for (const postFile of r.postFiles) {
+        const source = readFileSync(postFile, 'utf8');
+        const mutated = mutate(source, /\b(jobIdForOwnership|providerJobId):/, '$1Removed:');
+        const post = analysePostRoute(mutated, postFile);
+        expect(post.handlers, r.type).toBeGreaterThan(0);
+        expect(post.binding, r.type).toBeLessThan(post.handlers);
+      }
     }
+  });
+
+  it('walks every route-file spelling Next.js serves, for the status route AND the POST beside it', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'job-ownership-walk-'));
+    try {
+      const spellings = ['ts', 'tsx', 'js', 'jsx', 'mjs'];
+      for (const ext of spellings) {
+        mkdirSync(path.join(root, ext, 'status'), { recursive: true });
+        writeFileSync(path.join(root, ext, 'status', `route.${ext}`), '');
+        writeFileSync(path.join(root, ext, `route.${ext}`), '');
+      }
+      // Not routes: the walk must not pick these up.
+      mkdirSync(path.join(root, 'decoy', 'status'), { recursive: true });
+      writeFileSync(path.join(root, 'decoy', 'status', 'route.test.ts'), '');
+      writeFileSync(path.join(root, 'decoy', 'status', 'route.ts.bak'), '');
+
+      const walked = walkStatusRoutes(root)
+        .map((r) => ({
+          type: r.type,
+          status: path.basename(r.statusFile),
+          posts: r.postFiles.map((f) => path.basename(f)),
+        }))
+        .sort((a, b) => a.type.localeCompare(b.type));
+      expect(walked).toEqual(
+        [...spellings].sort().map((ext) => ({ type: ext, status: `route.${ext}`, posts: [`route.${ext}`] })),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('parses a .tsx / .jsx status route as JSX, so markup cannot fake the check', () => {
+    const imports = "import { resolveApiKey } from '@/lib/keys/resolver';\n"
+      + "import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';\n"
+      + "import { withApiMiddleware } from '@/lib/api/middleware';\n";
+    const head = '  const mid = await withApiMiddleware(request, {});\n'
+      + "  const jobId = searchParams.get('jobId');\n";
+    const guard = '  const ownership = await verifyProviderJobOwner(mid.userId!, p, jobId);\n'
+      + "  if (ownership !== 'owner') return refuse(ownership);\n";
+    const call = '  await resolveApiKey(mid.userId!, p, 0, op);\n';
+    const fn = (body: string) => `${imports}async function GET_impl() {\n${body}}\n`;
+    // The check written as JSX TEXT inside an element: in a .tsx/.jsx file it
+    // is prose, not a statement, so the key resolution below is unguarded.
+    // Parsed as plain TS, `<p>` reads as a type assertion that fails, and the
+    // parser recovers by treating the text as the real `const` + `if` — so a
+    // gate that ignores the extension would call this route guarded.
+    const markupOnly = fn(`${head}  const help = <p>\n${guard}  </p>;\n${call}`);
+
+    for (const fileName of ['route.tsx', 'route.jsx']) {
+      expect(analyseStatusRoute(fn(head + guard + call), fileName), fileName)
+        .toEqual({ keyResolutions: 1, unguarded: [] });
+      expect(analyseStatusRoute(markupOnly, fileName).unguarded, fileName).toHaveLength(1);
+    }
+    // Proof the fixture can tell the two parses apart (lessons-learned #11): as
+    // a .ts file the text does not compile, and the parser's error recovery
+    // reads the guard as code. That misreading is what a hardcoded
+    // ScriptKind.TS would apply to the JSX spellings above.
+    expect(analyseStatusRoute(markupOnly, 'route.ts').unguarded).toEqual([]);
   });
 
   it('reports the shapes a text match would accept', () => {
     const imports = "import { resolveApiKey } from '@/lib/keys/resolver';\n"
-      + "import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';\n";
-    const head = "  const jobId = searchParams.get('jobId');\n";
-    const guard = "  const ownership = await verifyProviderJobOwner(u, p, jobId);\n"
+      + "import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';\n"
+      + "import { withApiMiddleware } from '@/lib/api/middleware';\n";
+    const auth = '  const mid = await withApiMiddleware(request, {});\n';
+    const head = `${auth}  const jobId = searchParams.get('jobId');\n`;
+    const guard = '  const ownership = await verifyProviderJobOwner(mid.userId!, p, jobId);\n'
       + "  if (ownership !== 'owner') return refuse(ownership);\n";
-    const call = '  await resolveApiKey(u, p, 0, op);\n';
+    const call = '  await resolveApiKey(mid.userId!, p, 0, op);\n';
     const fn = (body: string) => `${imports}async function GET_impl() {\n${body}}\n`;
 
     // The accepted shape, so the analyser is not simply reporting everything.
     expect(analyseStatusRoute(fn(head + guard + call))).toEqual({ keyResolutions: 1, unguarded: [] });
+    // `!` and parentheses are not part of the identity of the user argument.
+    expect(analyseStatusRoute(fn(head + guard.replace('mid.userId!', '(mid.userId)') + call)).unguarded)
+      .toEqual([]);
 
     // Guard AFTER the call.
     expect(analyseStatusRoute(fn(head + call + guard)).unguarded).toHaveLength(1);
@@ -445,15 +670,38 @@ describe('job-id ownership coverage (#10262)', () => {
     expect(analyseStatusRoute(fn(`${head}  if (flag) {\n${guard}  }\n${call}`)).unguarded).toHaveLength(1);
     // `if` that does not return.
     expect(analyseStatusRoute(fn(head
-      + "  const ownership = await verifyProviderJobOwner(u, p, jobId);\n"
+      + '  const ownership = await verifyProviderJobOwner(mid.userId!, p, jobId);\n'
       + "  if (ownership !== 'owner') console.warn(ownership);\n" + call)).unguarded).toHaveLength(1);
     // `let` verdict (reassignable between check and use).
     expect(analyseStatusRoute(fn(head + guard.replace('const ownership', 'let ownership') + call)).unguarded)
       .toHaveLength(1);
     // Truthiness of the verdict: every state is a non-empty string, so this refuses nothing.
     expect(analyseStatusRoute(fn(head
-      + "  const ownership = await verifyProviderJobOwner(u, p, jobId);\n"
+      + '  const ownership = await verifyProviderJobOwner(mid.userId!, p, jobId);\n'
       + '  if (!ownership) return refuse(ownership);\n' + call)).unguarded).toHaveLength(1);
+
+    // THE USER ARGUMENT. Ownership checked against a caller-chosen user.
+    expect(analyseStatusRoute(fn(head
+      + guard.replace('mid.userId!', "searchParams.get('userId')!") + call)).unguarded).toHaveLength(1);
+    // ... against a plain identifier (whose value the gate cannot see).
+    expect(analyseStatusRoute(fn(head + guard.replace('mid.userId!', 'userId') + call)).unguarded)
+      .toHaveLength(1);
+    // The check for the authenticated user, the key for a caller-chosen one.
+    expect(analyseStatusRoute(fn(head + guard
+      + call.replace('mid.userId!', "searchParams.get('userId')!"))).unguarded).toHaveLength(1);
+    // Two authenticated results: the check and the key must name the SAME one.
+    expect(analyseStatusRoute(fn(head + '  const other = await withApiMiddleware(request, {});\n'
+      + guard.replace('mid.userId!', 'other.userId!') + call)).unguarded).toHaveLength(1);
+    // `<x>.userId` where `<x>` is not withApiMiddleware's result.
+    const unauth = head.replace('withApiMiddleware(request, {})', 'readCallerFromQuery(request)');
+    expect(analyseStatusRoute(fn(unauth + guard + call)).unguarded).toHaveLength(1);
+    // ... nor withApiMiddleware imported from somewhere else.
+    expect(analyseStatusRoute(fn(head + guard + call).replace(
+      "from '@/lib/api/middleware'", "from './local'",
+    )).unguarded).toHaveLength(1);
+    // ... nor a property other than `userId` of the authenticated result.
+    expect(analyseStatusRoute(fn(head + guard.replace('mid.userId!', 'mid.ownerId!')
+      + call.replace('mid.userId!', 'mid.ownerId!'))).unguarded).toHaveLength(1);
     // The check in a comment only (every line of it).
     const commented = guard.split('\n').filter(Boolean).map((l) => `  // ${l.trim()}`).join('\n');
     expect(analyseStatusRoute(fn(`${head}${commented}\n${call}`)).unguarded).toHaveLength(1);

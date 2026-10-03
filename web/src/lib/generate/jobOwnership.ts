@@ -10,7 +10,9 @@
  *
  * `src/app/api/__tests__/jobOwnershipCoverage.test.ts` is the structural gate:
  * it parses every status route and fails one that resolves a key without
- * first refusing a non-`'owner'` result of `verifyProviderJobOwner`, and every
+ * first refusing a non-`'owner'` result of `verifyProviderJobOwner` for the
+ * authenticated caller (`withApiMiddleware`'s `userId`, the same user the key
+ * is resolved for), and every
  * POST route behind such a status route that binds nothing.
  *
  * `generation_jobs` cannot serve as that ownership record on its own: its
@@ -41,10 +43,18 @@ import { captureException } from '@/lib/monitoring/sentry-server';
  * MUST be awaited before the generation response reaches the client — a poll
  * can arrive the instant the client has the job id, so the binding has to
  * exist before that id is ever exposed. Never throws: a write failure is
- * reported to Sentry and swallowed, matching the fail-open posture of the
- * adjacent QStash durable-callback publish (`maybePublishAsyncCallback` in
- * `createGenerationHandler.ts`) — losing this write means the job is left
- * unprotected, not that the user's own generation should fail because of it.
+ * reported to Sentry and swallowed, so the submit response itself still
+ * succeeds (the same posture as the adjacent QStash durable-callback publish,
+ * `maybePublishAsyncCallback` in `createGenerationHandler.ts`).
+ *
+ * What a failed write costs. It is NOT a security gap: with no binding row,
+ * `verifyProviderJobOwner` answers `'not_owner'` to EVERY caller, so nobody —
+ * attacker or owner — can poll that id with the platform key. But it DOES cost
+ * the owner this job: the POST still answers 200 with the job id, and the
+ * owner's first poll then gets a terminal 404 (`JOB_NOT_FOUND_MESSAGE`), which
+ * the poller turns into a refund and a "We lost track of this generation"
+ * toast. Swallowing the error only keeps the submit response from failing; it
+ * does not keep the generation alive.
  */
 export async function bindProviderJob(
   userId: string,
