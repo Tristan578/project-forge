@@ -404,7 +404,8 @@ describe('GameCameraInspector', () => {
       render(<GameCameraInspector />);
       fireEvent.change(screen.getByLabelText('Smoothing'), { target: { value: '-3' } });
       // A negative `damping` asks the follow to move away from the target (the
-      // engine clamps it to a frozen camera). The row reverts to the current value rather than sending it.
+      // engine clamps it to a frozen camera). The row reverts to the current
+      // value rather than sending it.
       expect(mockSetGameCamera).toHaveBeenCalledWith('entity-1', baseGameCamera);
     });
 

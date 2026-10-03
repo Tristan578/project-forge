@@ -107,10 +107,11 @@ export const GAME_CAMERA_WIRE_KEYS = Object.keys(
  * A negative rate is not a slower camera, it asks the follow to move away from
  * its target. Before `follow_lerp_factor` floored the factor at 0 that
  * extrapolated and compounded the gap every frame (PF-1166); with the floor it
- * is a camera frozen where it is. Either way the engine refuses it, and `set_game_camera` is a full-replace
- * command, so one bad rate loses `mode`, `targetEntity` and `offset` along with
- * it. Screening the key here keeps the rest of the command dispatchable, which is
- * the whole reason the tightening needs a matching guard on this side.
+ * is a camera frozen where it is. Either way the engine refuses it, and
+ * `set_game_camera` is a full-replace command, so one bad rate loses `mode`,
+ * `targetEntity` and `offset` along with it. Screening the key here keeps the
+ * rest of the command dispatchable, which is the whole reason the tightening
+ * needs a matching guard on this side.
  *
  * Pinned against the Rust readers by `__tests__/gameCameraPayload.test.ts`, so a
  * second field adopting a sign policy cannot leave this set behind.
