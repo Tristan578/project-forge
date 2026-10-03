@@ -137,7 +137,8 @@ ALLOWED_ADVISORIES=(
   #   1. prune this entry with its comment block, leaving the single line
   #      `# (no waivers in effect)` as the array body (the suite's column-0
   #      body cut fails closed on an empty body);
-  #   2. prune the same id from ALLOWED_GHSA in scripts/check-security-alerts.sh;
+  #   2. prune the same id AND its comment block from ALLOWED_GHSA in
+  #      scripts/check-security-alerts.sh;
   #   3. in scripts/__tests__/check-npm-audit.test.sh, set
   #      expected_allowlist_entries to '' and delete the section-0 braces cases
   #      with their (c) comment block; update the expected_openers list FIRST,

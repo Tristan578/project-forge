@@ -45,7 +45,7 @@ set -uo pipefail
 # same commit. Every entry is a hole in the gate and needs a justification +
 # removal path. Origin: #8617.
 #
-# Known drift, predating braces: the two esbuild ids below were pruned from the
+# Known drift: the two esbuild ids below were pruned from the
 # npm-audit list in PF-1002/#9007 and are still listed here (the suite uses
 # GHSA-gv7w-rqvm-qjhr as its allowlisted fixture). Pruning them is its own change.
 ALLOWED_GHSA=(
