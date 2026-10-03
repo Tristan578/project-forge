@@ -1060,10 +1060,10 @@ const physics2dHandlers: Record<string, ToolHandler> = {
       // `Object.prototype` — truthy, so the `??` fallback never fires and the merge
       // below builds a near-empty full-replace payload (PF-1167).
       const existing = ownEntry(ctx.store.physics2d, entityId) ?? defaultPhysics2dData();
-      // omitUndefinedValues, not a bare spread: zod types every `.optional()`
-      // field as `T | undefined` even though it never actually emits the key
-      // when absent, and a literal `undefined` here would overwrite a real
-      // value on `existing` instead of leaving it alone.
+      // omitUndefinedValues, not a bare spread: zod leaves an absent key
+      // absent, but an input key present with `undefined` survives the parse
+      // as an own key, and that key would overwrite a real value on `existing`
+      // instead of leaving it alone. The helper strips it at runtime.
       const data: Physics2dData = { ...existing, ...omitUndefinedValues(physicsArgs) };
       ctx.store.setPhysics2d(entityId, data, true);
       return { success: true, result: { message: `Set 2D physics on entity ${entityId}` } };

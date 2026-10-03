@@ -12,6 +12,7 @@ import { useGenerationHistoryStore } from './generationHistoryStore';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import { trackAIAssetGenerated } from '@/lib/analytics/events';
 import { captureException } from '@/lib/monitoring/sentry-client';
+import { omitUndefinedValues } from '@/lib/utils/omitUndefined';
 
 export type GenerationType = 'model' | 'texture' | 'sfx' | 'voice' | 'skybox' | 'music' | 'sprite' | 'sprite_sheet' | 'tileset' | 'pixel-art';
 export type GenerationStatus = 'pending' | 'processing' | 'downloading' | 'completed' | 'failed';
@@ -146,7 +147,16 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     set((state) => {
       const existing = state.jobs[id];
       if (!existing) return state;
-      const updated = { ...existing, ...updates };
+      // The optional fields of GenerationJob admit `undefined` (#10230: the
+      // job-construction sites forward maybe-undefined provider data), so a
+      // patch can carry an explicit `undefined` key. Strip those keys before
+      // the spread: on a bare `{ ...existing, ...updates }` the key would
+      // erase a real value (`dbId`, `usageId`, `resultUrl`), and no caller
+      // clears a job field this way. The completion replay in `addJob`
+      // re-sends the job's own current `resultUrl` / `error`, so dropping an
+      // undefined one there leaves the stored value exactly as it was. The
+      // PATCH below still reads `updates`; JSON drops undefined values anyway.
+      const updated = { ...existing, ...omitUndefinedValues(updates) };
 
       // Track completion
       if (updated.status === 'completed' && existing.status !== 'completed') {

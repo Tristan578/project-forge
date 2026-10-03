@@ -113,6 +113,14 @@ describe('taskStore', () => {
       expect(task.assignee).toBe('ai');
     });
 
+    it('omits the description key when none is given (#10306)', () => {
+      const { addTask } = useTaskStore.getState();
+      addTask('No description', undefined, 'ai');
+
+      const task = useTaskStore.getState().tasks[0];
+      expect(Object.hasOwn(task, 'description')).toBe(false);
+    });
+
     it('defaults status to "todo"', () => {
       const { addTask } = useTaskStore.getState();
       addTask('New task');
@@ -215,6 +223,26 @@ describe('taskStore', () => {
       expect(() => updateTask('nonexistent-id', { title: 'Ghost' })).not.toThrow();
       // Tasks unchanged
       expect(useTaskStore.getState().tasks).toHaveLength(1);
+    });
+
+    // #10306: TYPE-LEVEL gate, enforced by `tsc --noEmit` (which type-checks
+    // test files), not by this test's runtime. updateTask merges with a bare
+    // spread, so an explicit `undefined` key would erase the stored value;
+    // EditorTask's optional fields stay exact so such a patch cannot compile.
+    // Widening any of them leaves its directive unused, and tsc fails TS2578.
+    // The closure is never called, so nothing below reaches the store.
+    it('rejects an explicit-undefined patch at compile time (#10306)', () => {
+      const mustNotCompile = () => {
+        const { updateTask } = useTaskStore.getState();
+        // @ts-expect-error -- description is exact: undefined would erase it on the merge
+        updateTask('id', { description: undefined });
+        // @ts-expect-error -- progress is exact: undefined would erase it on the merge
+        updateTask('id', { progress: undefined });
+        // @ts-expect-error -- result is exact: undefined would erase it on the merge
+        updateTask('id', { result: undefined });
+      };
+      // Reporting-only at runtime (lessons #11): the gate is the directives.
+      expect(typeof mustNotCompile).toBe('function');
     });
   });
 

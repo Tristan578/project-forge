@@ -289,9 +289,11 @@ describe('ToolCallCard', () => {
 
       cleanup();
 
+      // A preview card carries no approvalId at all (the field is exact).
+      const { approvalId: _approvalId, ...ungated } = gated;
       const { container: previewEl } = render(
         <ToolCallCard
-          toolCall={{ ...gated, status: 'preview', approvalId: undefined }}
+          toolCall={{ ...ungated, status: 'preview' }}
           onApprove={vi.fn()}
           onReject={vi.fn()}
         />

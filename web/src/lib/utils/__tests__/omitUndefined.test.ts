@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { omitUndefinedValues } from '../omitUndefined';
+import { z } from 'zod';
 
 describe('omitUndefinedValues', () => {
   it('drops keys whose value is explicitly undefined', () => {
@@ -38,6 +39,20 @@ describe('omitUndefinedValues', () => {
     expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
     expect(result.bodyType).toBeUndefined();
     expect(Object.keys(result).sort()).toEqual(['__proto__', 'friction']);
+  });
+
+  // Pins the docblock's zod claim: absent input keys stay absent, but an input
+  // key present with `undefined` survives `.parse()` as an own key, so a raw
+  // spread of the parsed object WOULD erase the stored value.
+  it('strips the explicit-undefined key that survives a zod .optional() parse', () => {
+    const schema = z.object({ a: z.number().optional(), b: z.number().optional() });
+    expect(Object.hasOwn(schema.parse({}), 'a')).toBe(false);
+    const parsed = schema.parse({ a: undefined, b: 2 });
+    expect(Object.hasOwn(parsed, 'a')).toBe(true);
+
+    const existing = { a: 1, b: 1 };
+    expect({ ...existing, ...parsed }).toStrictEqual({ a: undefined, b: 2 });
+    expect({ ...existing, ...omitUndefinedValues(parsed) }).toStrictEqual({ a: 1, b: 2 });
   });
 
   it('safely merges over an existing full record without overwriting with undefined', () => {

@@ -167,6 +167,38 @@ describe('generationStore', () => {
       expect(state.jobs['client-123'].prompt).toBe('A blue cube');
       expect(state.jobs['client-123'].provider).toBe('meshy');
     });
+
+    // #10306: GenerationJob's optional fields admit `undefined`, so a patch
+    // that forwards a maybe-undefined value type-checks. The merge must not let
+    // that key erase the stored value.
+    it('does not erase stored fields when a patch carries explicit undefined keys', () => {
+      const { addJob, updateJob } = useGenerationStore.getState();
+      addJob({
+        ...mockJob,
+        dbId: 'db-keep',
+        usageId: 'usage-keep',
+        resultUrl: 'https://example.test/keep.glb',
+        error: 'previous error',
+        metadata: { keep: true },
+      });
+
+      updateJob('client-123', {
+        status: 'processing',
+        dbId: undefined,
+        usageId: undefined,
+        resultUrl: undefined,
+        error: undefined,
+        metadata: undefined,
+      });
+
+      const job = useGenerationStore.getState().jobs['client-123'];
+      expect(job.status).toBe('processing');
+      expect(job.dbId).toBe('db-keep');
+      expect(job.usageId).toBe('usage-keep');
+      expect(job.resultUrl).toBe('https://example.test/keep.glb');
+      expect(job.error).toBe('previous error');
+      expect(job.metadata).toEqual({ keep: true });
+    });
   });
 
   describe('removeJob', () => {
