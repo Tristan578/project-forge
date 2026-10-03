@@ -104,8 +104,8 @@ set -uo pipefail
 # The array is expanded through the `${ARR[@]+"${ARR[@]}"}` guard at all
 # three read sites below: under `set -u`, bash older than 4.4 (macOS ships 3.2,
 # which `#!/usr/bin/env bash` resolves to there) aborts on a plain `"${ARR[@]}"` expansion of
-# an empty array — the steady state, and the state it returns to the day the
-# entry below is pruned. Unguarded, the abort happens INSIDE a command substitution, so
+# an empty array — the steady state, and the state it returns to whenever the
+# last waiver is pruned. Unguarded, the abort happens INSIDE a command substitution, so
 # the crashed capture reads as an empty result — which the caller scores as
 # WAIVED. A crash that fails OPEN is exactly what this gate must not do. The
 # suite enforces the guard STRUCTURALLY: every subscripted mention of the
@@ -145,9 +145,11 @@ ALLOWED_ADVISORIES=(
   #      then SELF_EXEC_EXPECTED_DROP (its value depends on the openers; each
   #      failure message prints the value to use);
   #   4. reword every prose mention of braces as the current entry: the History
-  #      paragraph and "The one entry below" above, the suite's header and its
-  #      "when braces is relocked away" notes (grep the suite for "braces"),
-  #      and the matching sentence in .claude/rules/gotchas-build-ci.md.
+  #      paragraph, "The one entry below" and its count of former occupants
+  #      above, the suite's header and its "when braces is relocked away" notes
+  #      (grep the suite for "braces"), and every braces hit on the `npm audit`
+  #      bullet and its "Adding/removing a waiver" sub-bullet in
+  #      .claude/rules/gotchas-build-ci.md (grep it for "braces").
   # RE-CHECK on every eslint-config-next or next bump: `npm view braces versions`
   # and `npm view @next/eslint-plugin-next@latest dependencies.fast-glob`.
   # Tracking issue: #10323 (warn when a waived advisory becomes fixable).

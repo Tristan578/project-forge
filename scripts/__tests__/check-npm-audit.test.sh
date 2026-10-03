@@ -1148,22 +1148,28 @@ fi
 # only the first (measured: an unmirrored second id on the braces line scored
 # "1 id(s)" and passed).
 #
-# The cut is evaluated only after it is proven to be nothing but the
-# declaration: it must open with exactly NAME=( and close with a column-0 ")",
-# and every line between must be blank, a comment, or double-quoted literals
-# with no $, backquote or backslash in them. An indented ")" used to let the
-# cut run on to the end of check-security-alerts.sh, and evaluating that ran
-# its real Dependabot and code-scanning fetches inside this suite (measured).
+# Nothing is evaluated. The cut must open with exactly NAME=( and close with
+# a column-0 ")", and every line between must be blank, a comment, or plain
+# double-quoted words (no $, backquote or backslash inside, and whitespace or
+# end of line after each closing quote, so `"x"#...` is not taken for a
+# comment). On a body of that shape the elements are exactly the quoted runs
+# before any comment, so they are read as text. Two earlier designs evaluated
+# the cut, and both ran code (measured): an indented ")" let the cut run on to
+# the end of check-security-alerts.sh and fire its real fetches, and
+# `"x"#$(cmd)` passed a looser shape check and ran cmd.
 # array_elements FILE NAME prints one element per line; exit 2 when the
 # declaration is missing, unclosed at column 0, or holds anything else.
 array_elements() {
   local file="$1" name="$2" decl body
   decl="$(awk -v n="$name" 'index($0, n "=(") == 1 && length($0) == length(n) + 2 { f = 1 } f { print } f && /^\)$/ { closed = 1; exit } END { exit !closed }' "$file" 2>/dev/null)" || return 2
   body="$(sed '1d;$d' <<<"$decl")"
-  if [ -n "$body" ] && grep -vqE '^[[:space:]]*(#.*)?$|^[[:space:]]*("[^"$`\\]*"[[:space:]]*)+(#.*)?$' <<<"$body"; then
+  if [ -n "$body" ] && grep -vqE '^[[:space:]]*(#.*)?$|^[[:space:]]*("[^"$`\\]*"([[:space:]]+|$))+(#.*)?$' <<<"$body"; then
     return 2
   fi
-  ( eval "$decl"; eval 'for e in ${'"$name"'[@]+"${'"$name"'[@]}"}; do printf "%s\n" "$e"; done' ) 2>/dev/null
+  local stripped quoted
+  stripped="$(sed -E 's/^[[:space:]]*#.*$//; s/("[[:space:]]+)#.*$/\1/' <<<"$body")"
+  quoted="$(grep -oE '"[^"]*"' <<<"$stripped" || true)"
+  [ -z "$quoted" ] || sed -E 's/^"(.*)"$/\1/' <<<"$quoted"
 }
 readonly -f array_elements
 alerts_script="$REPO_ROOT/scripts/check-security-alerts.sh"
@@ -1202,6 +1208,14 @@ f="$FIX/lockstep-expansion.sh"
 printf '%s\n' 'ALLOWED_GHSA=(' "  \"GHSA-\$(touch '$FIX/lockstep-ran-expansion')\"" ')' > "$f"
 rc=0; out="$(array_elements "$f" ALLOWED_GHSA)" || rc=$?
 if [ "$rc" = 2 ] && [ ! -e "$FIX/lockstep-ran-expansion" ]; then pass "lockstep reader refuses an element carrying an expansion, and runs nothing"; else fail "lockstep reader accepted an element with an expansion (rc=$rc, out=[$out]) or ran it"; fi
+f="$FIX/lockstep-glued-comment.sh"
+printf '%s\n' 'ALLOWED_GHSA=(' "  \"GHSA-aaaa-aaaa-aaaa\"#\$(touch '$FIX/lockstep-ran-glued')" ')' > "$f"
+rc=0; out="$(array_elements "$f" ALLOWED_GHSA)" || rc=$?
+if [ "$rc" = 2 ] && [ ! -e "$FIX/lockstep-ran-glued" ]; then pass "lockstep reader refuses a '#' glued to a closing quote (one word to bash, not a comment), and runs nothing"; else fail "lockstep reader accepted a '#' glued to a closing quote (rc=$rc, out=[$out]) or ran it"; fi
+f="$FIX/lockstep-trailing-comment.sh"
+printf '%s\n' 'ALLOWED_GHSA=(' '  "GHSA-aaaa-aaaa-aaaa" # note with "quotes" in it' '  # "GHSA-cccc-cccc-cccc" commented out' ')' > "$f"
+rc=0; out="$(array_elements "$f" ALLOWED_GHSA)" || rc=$?
+if [ "$rc" = 0 ] && [ "$out" = 'GHSA-aaaa-aaaa-aaaa' ]; then pass "lockstep reader ignores quoted text inside comments"; else fail "lockstep reader read quoted text from a comment (rc=$rc, out=[$out])"; fi
 f="$FIX/lockstep-two-per-line.sh"
 printf '%s\n' 'ALLOWED_ADVISORIES=(' '  # two waivers on one line are two waivers' '  "GHSA-aaaa-aaaa-aaaa:node_modules/a" "GHSA-bbbb-bbbb-bbbb:node_modules/b"' ')' > "$f"
 rc=0; out="$(array_elements "$f" ALLOWED_ADVISORIES)" || rc=$?
