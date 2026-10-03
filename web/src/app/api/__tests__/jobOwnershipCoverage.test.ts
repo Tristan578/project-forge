@@ -1070,7 +1070,10 @@ function isTypePosition(n: ts.Node): boolean {
  * global, so a read of it is reported. (Successive review rounds each found
  * one more kind a denylist let through: type declarations MERGED with a
  * non-binding value declaration, then an uninstantiated namespace, a const
- * enum, an import-equals of a type, and a member of a merged namespace.)
+ * enum and an import-equals of a type. After the switch to an allowlist they
+ * found a member of a merged namespace, and a function declared in a body
+ * read from that function's own parameter list; both are handled here or in
+ * `globalInputProblems`.)
  *
  * Nothing in an ambient context counts: `declare const process: any`,
  * `declare function eval(...)`, anything inside `declare global { ... }` or
@@ -1114,8 +1117,27 @@ function globalInputProblems(b: Bound): string[] {
   // A name is LOCAL only when this file gives it a binding that exists at run
   // time: `declare const process: any` is a type-level claim about the global,
   // not a shadow of it.
-  const declaredHere = (s: ts.Symbol | undefined) => !!s?.declarations?.some(
-    (d) => d.getSourceFile() === sf && emitsRuntimeBinding(d),
+  // Two places where the checker resolves a read to a local the emitter
+  // does not bind there, so the read is the real global:
+  // - ES gives a function whose parameters hold expressions a SEPARATE scope
+  //   for its body, so a read in the parameter list (a default, or a closure
+  //   in one) cannot see a function declared in that body; SWC renames the
+  //   body's function and leaves the read alone.
+  // - A named class expression's own name, read in its `extends` clause: SWC
+  //   renames the inner binding and leaves the read alone.
+  // Such a declaration does not count for that read.
+  const bodyHiddenFrom = (read: ts.Node, d: ts.Declaration): boolean => {
+    for (let n: ts.Node | undefined = read; n && n !== sf; n = n.parent) {
+      if (ts.isParameter(n) && ts.isFunctionLike(n.parent)) {
+        const { body } = n.parent as ts.FunctionLikeDeclaration;
+        if (body && d.pos >= body.pos && d.end <= body.end) return true;
+      }
+      if (ts.isHeritageClause(n) && n.parent === d && ts.isClassExpression(d)) return true;
+    }
+    return false;
+  };
+  const declaredHere = (s: ts.Symbol | undefined, read: ts.Node) => !!s?.declarations?.some(
+    (d) => d.getSourceFile() === sf && emitsRuntimeBinding(d) && !bodyHiddenFrom(read, d),
   );
   const declaredInFile = (s: ts.Symbol | undefined) => !!s?.declarations?.some((d) => d.getSourceFile() === sf);
   const visit = (n: ts.Node): void => {
@@ -1152,7 +1174,7 @@ function globalInputProblems(b: Bound): string[] {
       const symbol = ts.isShorthandPropertyAssignment(n.parent) && n.parent.name === n
         ? checker.getShorthandAssignmentValueSymbol(n.parent)
         : checker.getSymbolAtLocation(n);
-      if (!declaredHere(symbol)) {
+      if (!declaredHere(symbol, n)) {
         const allowed = hasOwn(ALLOWED_GLOBALS, n.text) ? ALLOWED_GLOBALS[n.text] : undefined;
         const p = n.parent;
         const ok = allowed === 'value'
@@ -1977,6 +1999,14 @@ describe('job-id ownership coverage (#10262)', () => {
           ['an empty namespace merged with a type-only import', "import type { NextRequest as process } from 'next/server';\nnamespace process {}", 'process', `const nh = process${FETCH};`],
           ['an empty namespace merged with a bodiless signature', 'function process(): void;\nnamespace process {}', 'process', `const nh = (process as any)${FETCH};`],
           ['a const enum', 'const enum process { A = 1 }', 'process', `const nh = (process as any)${FETCH};`],
+          // A parameter list cannot see its own body's function declarations
+          // (ES gives the body a separate scope), but the checker resolves the
+          // read to them: a default, direct or in a closure, still reads the
+          // real global.
+          ['a parameter default reading a name its body declares', 'function pf(a: any = (process as any)' + FETCH + '): any { function process(): any { return 1; } void process; return a; }', 'process', 'const nh = pf();'],
+          ['a deferred parameter default reading a name its body declares', 'function pf(a: () => any = () => (process as any)' + FETCH + '): any { function process(): any { return 1; } void process; return a(); }', 'process', 'const nh = pf();'],
+          ['a deferred default in an arrow reading globalThis its body declares', 'const pf = (a: () => any = () => (globalThis as any).process' + FETCH + '): any => { function globalThis(): any { return 1; } void globalThis; return a(); };', 'globalThis', 'const nh = pf();'],
+          ['a class expression name read in its own extends clause', 'let box: any;\nconst K = class process extends ((box = (process as any)' + FETCH + '), Object) {};\nvoid K;', 'process', 'const nh = box;'],
           // A member EXPORTED from one block of a merged namespace and read bare
           // from a sibling block: the checker resolves the read to the
           // member, but the member is emitted as `N.process`, so the bare
