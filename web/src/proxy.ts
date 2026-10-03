@@ -268,7 +268,7 @@ export function buildPublicRoutes({ includeDev }: { includeDev: boolean }): stri
     '/api/health/(.*)',
     '/api/status',
     '/api/status/(.*)',
-    // Vercel Cron jobs (e.g. /api/cron/health-monitor, vercel.json crons) carry
+    // Vercel Cron jobs (e.g. /api/cron/health-monitor, vercel.ts config.crons) carry
     // only a CRON_SECRET bearer token, no Clerk session. The routes enforce that
     // secret themselves (see the cron-self-enforcement guard in proxy.test.ts),
     // so they must bypass the Clerk proxy or the scheduled call 401s before its

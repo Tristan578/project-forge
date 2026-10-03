@@ -93,7 +93,7 @@ if command -v curl >/dev/null 2>&1; then
     # 404 is acceptable — the /api root may not exist, but the server is up
     pass "Taskboard API responding (HTTP $HTTP_CODE)"
   elif [ "$HTTP_CODE" = "000" ]; then
-    fail "Taskboard not running — start with: taskboard start --port 3010"
+    fail "Taskboard not running — start with: node .claude/hooks/taskboard-launch.mjs start"
   else
     fail "Taskboard API returned HTTP $HTTP_CODE"
   fi

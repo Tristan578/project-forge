@@ -458,9 +458,12 @@
             "description": "Optical depth for transmission"
           },
           "attenuationDistance": {
-            "type": "number",
+            "type": [
+              "number",
+              "null"
+            ],
             "minimum": 0,
-            "description": "Distance light travels before being attenuated. Use null for infinity."
+            "description": "Distance light travels before being attenuated: a finite number >= 0. Send null for infinity (no attenuation), which is the default."
           },
           "attenuationColor": {
             "type": "array",

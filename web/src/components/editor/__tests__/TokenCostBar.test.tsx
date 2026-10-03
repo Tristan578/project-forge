@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
-import { TokenCostBar } from '../TokenCostBar';
+import { TokenCostBar, TokenCostTotal } from '../TokenCostBar';
 import type { TokenEstimate } from '@/lib/game-creation/types';
 
 // The Buy tokens link sits on the plan review itself: a plain <a> would be a
@@ -53,6 +53,30 @@ describe('TokenCostBar', () => {
     render(<TokenCostBar estimate={{ ...ESTIMATE, sufficientBalance: false }} hideBalanceWarning />);
 
     expect(screen.queryByText(/may cost more than your token balance/)).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
+  });
+});
+
+// The one-line total the quick-start plan review shows beside "Build it" in
+// the Dialog footer (PR #10294 board round 3). The footer takes its height
+// from the scrolling body, so it must stay short and hold nothing focusable.
+describe('TokenCostTotal', () => {
+  it('states the estimate and the upper bound the build holds, on one line with nothing focusable', () => {
+    render(<TokenCostTotal estimate={ESTIMATE} />);
+    const total = screen.getByTestId('token-cost-total');
+    expect(total.textContent).toBe('Cost: 340 tokens, up to 400 held');
+    expect(total.querySelectorAll('a, button, [tabindex]')).toHaveLength(0);
+  });
+
+  it('leaves out the held amount when there is no upper bound', () => {
+    render(<TokenCostTotal estimate={{ ...ESTIMATE, totalVarianceHigh: 0 }} />);
+    expect(screen.getByTestId('token-cost-total').textContent).toBe('Cost: 340 tokens');
+  });
+
+  it('says briefly, with no link, when the cost may exceed the cached balance', () => {
+    render(<TokenCostTotal estimate={{ ...ESTIMATE, sufficientBalance: false }} />);
+    const total = screen.getByTestId('token-cost-total');
+    expect(total.textContent).toBe('Cost: 340 tokens, up to 400 heldMay exceed your balance');
     expect(screen.queryByRole('link')).toBeNull();
   });
 });

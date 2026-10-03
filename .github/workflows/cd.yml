@@ -217,6 +217,15 @@ jobs:
 
       - run: npm ci
 
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
       - name: Build @spawnforge/ui
         run: cd packages/ui && npm run build
 
@@ -274,6 +283,15 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # npm can drop a platform-native optional dep while exiting 0 (npm/cli#4828
+      # class): @next/swc, which `next build` and `next dev` load, or
+      # @rolldown/binding, which vitest loads. Fail loudly here, not as an
+      # opaque SWC error or a vitest run that prints nothing (#9962) minutes
+      # later (PF-947, #10200). check-native-bindings.test.sh derives every job
+      # that needs this step from the workflow text.
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
 
       # vitest does not type-check. Without this step, mcp-server's tsconfig
       # (strict + exactOptionalPropertyTypes, #7592) is enforced only by

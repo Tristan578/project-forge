@@ -27,7 +27,7 @@ You are the infrastructure and DevOps specialist for SpawnForge — an AI-native
 
 | Service | Purpose | Key Files |
 |---------|---------|-----------|
-| **Vercel** | Next.js hosting, staging/prod environments | @web/next.config.ts, `web/vercel.json`, @.github/workflows/cd.yml |
+| **Vercel** | Next.js hosting, staging/prod environments | @web/next.config.ts, `web/vercel.ts`, @.github/workflows/cd.yml |
 | **Cloudflare R2** | Asset storage (user uploads) + engine CDN | @infra/engine-cdn/, bucket: `spawnforge-engine` at `engine.spawnforge.ai` |
 | **Neon Postgres** | User data, projects, billing, cost logging | @web/src/lib/db/ (Drizzle ORM schema + client) |
 | **Upstash Redis** | Distributed rate limiting for API routes | @web/src/lib/rateLimit/distributed.ts |

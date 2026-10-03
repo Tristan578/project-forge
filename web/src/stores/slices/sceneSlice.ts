@@ -28,7 +28,7 @@ import {
 } from '@/lib/scenes/sceneManager';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
-import { emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
+import { boundEngineError, describeSceneRefusal, emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation';
 import { applyCheckpointScene, captureCheckpointScene } from '@/lib/scenes/checkpointRecovery';
 import {
   loadPrefabInstances,
@@ -414,8 +414,14 @@ export function setSceneDispatcher(
 ): void {
   dispatchCommand = dispatcher;
   setSceneValidator(dispatcher ? (json) => {
-    if (!dispatchCommand) return false;
-    return dispatchCommand('validate_scene', { json })?.success === true;
+    if (!dispatchCommand) return { valid: false, reason: null };
+    const response = dispatchCommand('validate_scene', { json });
+    if (response?.success === true) return { valid: true };
+    // Keep the engine's own text (it names the field that failed) so the
+    // AI `validate_scene` tool can relay it instead of a generic sentence —
+    // bounded, because serde_json embeds the whole offending value and this
+    // scene may be a stranger's (remix boundary).
+    return { valid: false, reason: response?.error == null ? null : boundEngineError(response.error) };
   } : null);
   const pending = deferredSceneLoad;
   deferredSceneLoad = null;
@@ -763,8 +769,8 @@ function rollbackPrefabState(snapshot: PrefabRestoreSnapshot): void {
 function dispatchSceneLoad(
   json: string,
   modeOverride?: { completionMode: CompletionMode | undefined },
-): boolean {
-  if (!dispatchCommand) return false;
+): SceneLoadOutcome {
+  if (!dispatchCommand) return { accepted: false, error: null };
   const rollbackAudio = stageSceneAudio(json);
   const rollbackMode = stageSceneCompletionMode(
     modeOverride ? modeOverride.completionMode : readCompletionModeFromSceneJson(json),
@@ -774,14 +780,35 @@ function dispatchSceneLoad(
     if (response?.success === false) {
       rollbackAudio();
       rollbackMode();
-      return false;
+      // The engine's `error` says what it refused (`Invalid scene file: …
+      // missing field …`); it is the only place that text exists, so it
+      // rides along for the lockout reason (#10267) — bounded,
+      // because serde_json embeds the whole offending value and a remixed
+      // scene is a stranger's input; the field-naming head is what survives.
+      return { accepted: false, error: response.error == null ? null : boundEngineError(response.error) };
     }
-    return true;
+    return { accepted: true };
   } catch (error) {
     rollbackAudio();
     rollbackMode();
     throw error;
   }
+}
+
+/** `dispatchSceneLoad`'s answer: adopted, or refused with the engine's own reason (if it gave one). */
+type SceneLoadOutcome = { accepted: true } | { accepted: false; error: string | null };
+
+/**
+ * The lockout reason for a clean `{ success: false }` rejection: the constant
+ * sentence, followed by the engine's reason when it gave one, in the plain
+ * form `describeSceneRefusal` produces (no repeated `Invalid scene file:`
+ * prefix, no serde line/column) — so the person reads WHAT the scene failed
+ * on, not only that it failed. The notice that shows this carries the next
+ * step (reload, or start a new scene). `isEngineLoadThrewLockout` keys on the
+ * THREW prefix, so appending here cannot be mistaken for a throw.
+ */
+function engineLoadRejectionReason(error: string | null): string {
+  return error ? `${ENGINE_LOAD_REJECTION} Details: ${describeSceneRefusal(error)}` : ENGINE_LOAD_REJECTION;
 }
 
 /**
@@ -895,11 +922,11 @@ export const createSceneSlice: StateCreator<
       rejectEditor(PREFAB_LOAD_REJECTION);
       return false;
     }
-    let accepted: boolean;
+    let outcome: SceneLoadOutcome;
     try {
       // A deferred replay keeps the mode the page hydrated at deferral time
       // (and any edit made since) — same rule as the arrangement below.
-      accepted = dispatchSceneLoad(
+      outcome = dispatchSceneLoad(
         json,
         replayingDeferredSceneLoad ? { completionMode: get().sceneGraph.completionMode } : undefined,
       );
@@ -919,7 +946,7 @@ export const createSceneSlice: StateCreator<
       if (strandOnThrow) setLockout(`${ENGINE_LOAD_THREW} ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
-    if (!accepted) {
+    if (!outcome.accepted) {
       // The engine never adopted the incoming scene — the scene still on
       // screen is the previous one, so its instance registry AND its prefab
       // LIBRARY must both come back (scene.FR-1 N1 BUG-2/BUG-5): the merge
@@ -928,7 +955,7 @@ export const createSceneSlice: StateCreator<
       // and the next save would persist the wrong instances onto the scene
       // that is actually still active.
       rollbackPrefabState(snapshot);
-      rejectEditor(ENGINE_LOAD_REJECTION);
+      rejectEditor(engineLoadRejectionReason(outcome.error));
       return false;
     }
     // A rejected request must not invalidate an unrelated recovery operation.
@@ -1471,9 +1498,9 @@ export const createSceneSlice: StateCreator<
     // window where a manual save could pass the `sceneLoadError` gate against
     // a viewport that has not yet caught up.
     const dispatchRestoreLoad = (json: string): boolean => {
-      let accepted: boolean;
+      let outcome: SceneLoadOutcome;
       try {
-        accepted = dispatchSceneLoad(json);
+        outcome = dispatchSceneLoad(json);
       } catch (error) {
         set({
           sceneLoadError: {
@@ -1483,12 +1510,12 @@ export const createSceneSlice: StateCreator<
         });
         throw error;
       }
-      if (!accepted && !isEngineLoadThrewLockout(get().sceneLoadError)) {
+      if (!outcome.accepted && !isEngineLoadThrewLockout(get().sceneLoadError)) {
         // Keep an existing throw lockout across failed retries: a later
         // recovery must still know that its prior capture is untrusted.
-        set({ sceneLoadError: { reason: ENGINE_LOAD_REJECTION, at: Date.now() } });
+        set({ sceneLoadError: { reason: engineLoadRejectionReason(outcome.error), at: Date.now() } });
       }
-      return accepted;
+      return outcome.accepted;
     };
     // `dispatchRestoreLoad`, plus the arrangement sync `loadScene`/`newScene`/
     // `loadTemplate` get. Used ONLY for the primary restore below, never for

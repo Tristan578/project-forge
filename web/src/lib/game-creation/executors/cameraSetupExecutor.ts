@@ -111,7 +111,7 @@ export const cameraSetupExecutor: ExecutorDefinition = {
     const cameraData: Partial<GameCameraData> & { mode: GameCameraMode } = {
       mode,
       targetEntity,
-      ...filterCameraNumerics(parsed.data.cameraConfig),
+      ...filterCameraNumerics(parsed.data.cameraConfig, mode),
     };
 
     // One `sendCommands` call, not two: configuring a camera the engine is not
@@ -156,7 +156,7 @@ export const cameraSetupExecutor: ExecutorDefinition = {
     // value, and a duplicate spelling needs neither. They shared a sentence that
     // named only the first case, so the other two were reported as something
     // they are not.
-    const report = classifyCameraConfigKeys(parsed.data.cameraConfig);
+    const report = classifyCameraConfigKeys(parsed.data.cameraConfig, mode);
     if (report.unknown.length > 0) {
       warnings.push(
         `Camera settings the engine has no parameter for were ignored: ${report.unknown.join(', ')}.`,
@@ -165,6 +165,10 @@ export const cameraSetupExecutor: ExecutorDefinition = {
     if (report.unusable.length > 0) {
       const detail = report.unusable.map(({ key, reason }) => `${key} (${reason})`).join(', ');
       warnings.push(`Camera settings the engine cannot accept were ignored: ${detail}.`);
+    }
+    if (report.unusedByMode.length > 0) {
+      const detail = report.unusedByMode.map(({ key, reason }) => `${key} (${reason})`).join(', ');
+      warnings.push(`Camera settings this camera mode does not use were ignored: ${detail}.`);
     }
     if (report.overridden.length > 0) {
       const detail = report.overridden
