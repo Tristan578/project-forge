@@ -41,11 +41,14 @@ describe('SceneLoadErrorNotice', () => {
 
   it('wraps a long unbroken token in the reason instead of overflowing the notice', () => {
     // An engine refusal can quote a scene value verbatim (bounded at 512
-    // characters upstream), and a 500-character token with no break point
-    // would otherwise push the alert past its max-width. jsdom has no layout,
-    // so this pins the two properties that make wrapping possible: the
-    // reason wraps anywhere a word cannot (`break-words`), and neither it nor
-    // its flex-item column refuses to shrink below its content (`min-w-0`).
+    // characters upstream). The notice is a shrink-to-fit fixed box, so its
+    // width comes from its content's MIN-CONTENT width. `break-words`
+    // (overflow-wrap: break-word) does not lower that, so a 500-character
+    // token grew the notice to its cap and ran it off a 375px screen
+    // (measured in Chromium). `wrap-anywhere` (overflow-wrap: anywhere)
+    // does. jsdom has no layout, so this pins the classes that keep the
+    // notice inside the viewport: `wrap-anywhere` on the reason, `min-w-0`
+    // on it and its flex-item column, and a max width capped at the viewport.
     const token = 'A'.repeat(500);
     mockEditorStore({ reason: `This scene could not be opened: the engine refused to load it. Details: ${token}`, at: 1 });
 
@@ -53,9 +56,13 @@ describe('SceneLoadErrorNotice', () => {
 
     const reason = screen.getByTestId('scene-load-error-reason');
     expect(reason.textContent).toContain(token);
-    expect(reason.classList.contains('break-words')).toBe(true);
+    expect(reason.classList.contains('wrap-anywhere')).toBe(true);
+    expect(reason.classList.contains('break-words')).toBe(false);
     expect(reason.classList.contains('min-w-0')).toBe(true);
     expect(reason.parentElement?.classList.contains('min-w-0')).toBe(true);
+    const notice = screen.getByRole('alert');
+    expect(notice.classList.contains('max-w-[min(36rem,calc(100vw-1.5rem))]')).toBe(true);
+    expect(notice.classList.contains('max-w-xl')).toBe(false);
   });
 
   it('renders nothing when no scene load was rejected', () => {
