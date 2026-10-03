@@ -20,6 +20,7 @@ import {
   RESERVATION_UNCONFIRMED_MESSAGE,
   SIGNED_OUT_MESSAGE,
 } from '@/stores/slices/orchestratorSlice';
+import { MCP_TOKEN_PARAM } from '@/lib/mcp/tokenParam';
 
 // A client-side Link keeps the editor's in-memory state (a plan waiting to be
 // built) across the trip to settings; a plain <a> would reload and drop it.
@@ -80,13 +81,13 @@ describe('orchestratorErrorAction', () => {
 
   // The MCP relay token must not be copied into a second URL.
   it('drops the mcp relay token from the return path and keeps the rest', () => {
-    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, '/editor/p1?mcp=secret-token&tab=scene')?.href).toBe(
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, `/editor/p1?${MCP_TOKEN_PARAM}=secret-token&tab=scene`)?.href).toBe(
       '/sign-in?redirect_url=%2Feditor%2Fp1%3Ftab%3Dscene',
     );
   });
 
   it('leaves no dangling ? when the token was the only query parameter', () => {
-    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, '/editor/p1?mcp=tok')?.href).toBe(
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, `/editor/p1?${MCP_TOKEN_PARAM}=tok`)?.href).toBe(
       '/sign-in?redirect_url=%2Feditor%2Fp1',
     );
   });

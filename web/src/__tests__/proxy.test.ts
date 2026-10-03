@@ -38,6 +38,7 @@ import { isPlayPath, PLAY_ROUTE_SOURCE } from '@/lib/security/csp';
 // two guards cannot disagree about which routes are meant to be reachable
 // without a session.
 import { PUBLIC_PAGE_ROUTES } from '@/test/utils/publicSurface';
+import { MCP_TOKEN_PARAM } from '@/lib/mcp/tokenParam';
 
 vi.mock('server-only', () => ({}));
 
@@ -266,13 +267,13 @@ describe('proxy auth decision (applyAuthDecision, real matcher)', () => {
     expect(redirectToSignIn).toHaveBeenCalledWith({ returnBackUrl: 'https://spawnforge.ai/dashboard' });
   });
 
-  // `?mcp=` is the MCP relay token (lib/mcp/bridgeOptIn.ts). Handing it to Clerk
+  // `?mcp=` is the MCP relay token (MCP_TOKEN_PARAM, lib/mcp/tokenParam.ts). Handing it to Clerk
   // as returnBackUrl would copy a credential into the sign-in redirect URL.
   it.each([
-    ['/editor/p1?mcp=secret-token&tab=scene', 'https://spawnforge.ai/editor/p1?tab=scene'],
-    ['/editor/p1?tab=scene&mcp=secret-token', 'https://spawnforge.ai/editor/p1?tab=scene'],
-    ['/editor/p1?mcp=secret-token', 'https://spawnforge.ai/editor/p1'],
-    ['/editor/p1?mcp=secret-token&mcp=secret-token-2', 'https://spawnforge.ai/editor/p1'],
+    [`/editor/p1?${MCP_TOKEN_PARAM}=secret-token&tab=scene`, 'https://spawnforge.ai/editor/p1?tab=scene'],
+    [`/editor/p1?tab=scene&${MCP_TOKEN_PARAM}=secret-token`, 'https://spawnforge.ai/editor/p1?tab=scene'],
+    [`/editor/p1?${MCP_TOKEN_PARAM}=secret-token`, 'https://spawnforge.ai/editor/p1'],
+    [`/editor/p1?${MCP_TOKEN_PARAM}=secret-token&${MCP_TOKEN_PARAM}=secret-token-2`, 'https://spawnforge.ai/editor/p1'],
   ])('drops the mcp relay token from the sign-in return URL (%s)', async (path, expected) => {
     redirectToSignIn.mockClear();
     const res = await applyAuthDecision(unauthed, reqFor(path), isPublicRoute);

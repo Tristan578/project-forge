@@ -56,6 +56,13 @@ with `4409`), and closes an unknown `role` with `4400`.
 The editor side is opt-in per tab (the `?mcp=` parameter), is off in production
 builds unless `NEXT_PUBLIC_MCP_BRIDGE=true`, and asks for your consent in the tab
 before it attaches — a small dialog naming what the agent can and cannot do.
+The token is never carried through sign-in: if a signed-out visit to a
+protected editor URL sends you to the sign-in page, you land back without
+`?mcp=`, so **sign in first, then open (or reopen) the `?mcp=<token>` URL**.
+The local URL this guide uses, `/dev?mcp=<token>`, is public outside production
+and never goes through sign-in there. A project URL (`/editor/<id>?mcp=<token>`)
+does whenever Clerk is configured and you are signed out, and so does `/dev` in a
+production build opted in with `NEXT_PUBLIC_MCP_BRIDGE=true`.
 Once attached, a persistent indicator names each command that ran or was
 refused, with a one-click **Detach**. The bridge runs an **allowlist**: 322 of
 the 380 commands are permitted by name, and anything not enumerated — including
@@ -334,7 +341,7 @@ If a command times out, the error message will name the specific command. Retry 
 
 **"Not connected to the MCP relay"** — start the relay (`cd mcp-server && MCP_RELAY_TOKEN=<secret> npm run relay`) with the same token the server was given. The server retries with backoff a bounded number of times and then stops; restart it after the relay is up.
 
-**"No editor is attached to the MCP relay"** — the relay is up but no tab has attached. Open the editor with `?mcp=<token>` (`http://spawnforge.localhost:1355/dev?mcp=<token>` locally), then **approve the consent prompt in the tab** — the bridge does not attach until you do. Only one tab can be attached at a time; a second one is refused.
+**"No editor is attached to the MCP relay"** — the relay is up but no tab has attached. Open the editor with `?mcp=<token>` (`http://spawnforge.localhost:1355/dev?mcp=<token>` locally), then **approve the consent prompt in the tab** — the bridge does not attach until you do. If the address bar no longer shows `?mcp=` because a sign-in page came in between, reopen the `?mcp=<token>` URL now that you are signed in: the token is deliberately not carried through sign-in. Only one tab can be attached at a time; a second one is refused.
 
 **The relay exits immediately with "MCP_RELAY_TOKEN is required" or "…is N characters; at least 32 are required"** — the token is missing or too short. Generate one with `openssl rand -hex 32`.
 

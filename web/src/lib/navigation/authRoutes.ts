@@ -6,6 +6,8 @@
  * gate, which would stay green if the route moved.
  */
 
+import { MCP_TOKEN_PARAM } from '@/lib/mcp/tokenParam';
+
 /** Clerk's sign-in page. */
 export const SIGN_IN_HREF = '/sign-in';
 
@@ -13,11 +15,12 @@ export const SIGN_IN_HREF = '/sign-in';
 const PROBE_ORIGIN = 'https://return-path.invalid';
 
 /**
- * Query parameters never carried into a return path. `mcp` is the MCP relay
- * token (`lib/mcp/bridgeOptIn.ts`): copying it into `redirect_url` would put a
- * credential into a second URL, its history entry and the auth flow's requests.
+ * Query parameters never carried into a return path. `MCP_TOKEN_PARAM` is the
+ * MCP relay token (`lib/mcp/tokenParam.ts`, the name `lib/mcp/bridgeOptIn.ts`
+ * reads it by): copying it into `redirect_url` would put a credential into a
+ * second URL, its history entry and the auth flow's requests.
  */
-const NEVER_CARRIED_PARAMS = ['mcp'];
+const NEVER_CARRIED_PARAMS = [MCP_TOKEN_PARAM];
 
 /**
  * `absoluteUrl` with every never-carried parameter removed, for a return URL
