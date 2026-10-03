@@ -29,15 +29,20 @@ export const ENGINE_ERROR_TRUNCATED = ' … [truncated]';
  *
  * @param error The engine's error text, verbatim.
  * @param max Maximum length of the RETURNED string, marker included.
- * @returns `error` unchanged when it fits, else its head plus the marker.
+ * @returns `error` unchanged when it fits, else its head plus the marker. A
+ *   `max` too small to hold the marker and one character of head gets a bare
+ *   cut instead, because the bound is the promise; a `max` that is not a
+ *   positive number returns the empty string.
  */
 export function boundEngineError(error: string, max = MAX_ENGINE_ERROR_CHARS): string {
   if (error.length <= max) return error;
-  let head = error.slice(0, Math.max(0, max - ENGINE_ERROR_TRUNCATED.length));
+  const marker = max > ENGINE_ERROR_TRUNCATED.length ? ENGINE_ERROR_TRUNCATED : '';
+  const keep = max - marker.length;
+  let head = error.slice(0, keep > 0 ? keep : 0);
   // Never end on the high half of a surrogate pair: that is not a character.
   const last = head.charCodeAt(head.length - 1);
   if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
-  return head + ENGINE_ERROR_TRUNCATED;
+  return head + marker;
 }
 
 type SceneValidator = (json: string) => SceneValidation;

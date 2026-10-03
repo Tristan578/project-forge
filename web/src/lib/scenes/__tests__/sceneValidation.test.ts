@@ -61,6 +61,32 @@ describe('boundEngineError', () => {
     expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
     expect(head).toBe('a'.repeat(headLength - 1));
   });
+
+  // Devin review on #10292: a bound shorter than the marker used to return the
+  // whole marker, so the result was longer than the bound it was asked to keep.
+  it('never returns more than the bound, below, at and just above the marker length', () => {
+    const input = 'b'.repeat(100);
+    const m = ENGINE_ERROR_TRUNCATED.length;
+    const cases: Array<[number, string]> = [
+      [1, 'b'],
+      [m - 1, 'b'.repeat(m - 1)],
+      [m, 'b'.repeat(m)],
+      [m + 1, 'b' + ENGINE_ERROR_TRUNCATED],
+    ];
+    for (const [max, expected] of cases) {
+      expect({ max, out: boundEngineError(input, max) }).toEqual({ max, out: expected });
+    }
+  });
+
+  it('returns the empty string for a bound that is not a positive number', () => {
+    for (const max of [0, -5, Number.NaN]) {
+      expect({ max, out: boundEngineError('b'.repeat(100), max) }).toEqual({ max, out: '' });
+    }
+  });
+
+  it('keeps a bare cut whole-character when the bound is below the marker length', () => {
+    expect(boundEngineError('a\u{1F600}' + 'z'.repeat(20), 2)).toBe('a');
+  });
 });
 
 describe('describeSceneRefusal', () => {
