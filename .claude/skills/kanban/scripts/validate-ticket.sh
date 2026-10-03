@@ -31,7 +31,7 @@ TICKET_JSON=$(cat "$TICKET_FILE")
 if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] || [ -z "${TICKET_JSON}" ]; then
   echo "ERROR: Could not fetch ticket '${TICKET_ID}' — check the ID and ensure taskboard is running."
   echo "  HTTP status: ${HTTP_CODE}"
-  echo "  Start taskboard: taskboard start --port 3010"
+  echo "  Start taskboard: node .claude/hooks/taskboard-launch.mjs start"
   exit 0
 fi
 

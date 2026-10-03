@@ -1302,7 +1302,7 @@ describe('validate_scene', () => {
 
   it('validates the complete scene without loading or saving it', async () => {
     const scene = emptySceneFile('Validation only');
-    const validate = vi.fn(() => true);
+    const validate = vi.fn(() => ({ valid: true as const }));
     setSceneValidator(validate);
     const { result, store } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json: JSON.stringify(scene) });
     expect(result).toEqual({ success: true, result: { valid: true } });
@@ -1312,7 +1312,7 @@ describe('validate_scene', () => {
   });
 
   it.each(['{broken', '{}', JSON.stringify({ formatVersion: 99 })])('rejects invalid scene JSON %s', async (json) => {
-    const validate = vi.fn(() => true);
+    const validate = vi.fn(() => ({ valid: true as const }));
     setSceneValidator(validate);
     const { result, store } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json });
     expect(result.success).toBe(false);
@@ -1320,10 +1320,24 @@ describe('validate_scene', () => {
     expect(store.loadScene).not.toHaveBeenCalled();
   });
 
-  it.each([null, () => false, () => { throw new Error('decoder unavailable'); }])('fails when the attached decoder cannot validate', async (validate) => {
+  it.each([
+    null,
+    () => ({ valid: false as const, reason: null }),
+    () => { throw new Error('decoder unavailable'); },
+  ])('fails with the generic sentence when the attached decoder cannot say why', async (validate) => {
     setSceneValidator(validate);
     const { result } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json: JSON.stringify(emptySceneFile('Refused')) });
-    expect(result.success).toBe(false);
+    expect(result).toEqual({ success: false, error: 'Scene validation failed or the engine is unavailable.' });
+  });
+
+  it('relays the engine\'s own reason so the assistant can see which field failed (#10267)', async () => {
+    // The engine names the field it refused; the tool result must carry that
+    // text through, not collapse it to a generic sentence.
+    // Raw, serde position included: the assistant needs it to repair the scene.
+    const reason = 'Invalid scene file: invalid type: string "x", expected f32 at line 1 column 900';
+    setSceneValidator(() => ({ valid: false, reason }));
+    const { result } = await invokeHandler(sceneManagementHandlers, 'validate_scene', { json: JSON.stringify(emptySceneFile('Refused')) });
+    expect(result).toEqual({ success: false, error: `Scene validation failed: ${reason}` });
   });
 
   it('requires the JSON argument', async () => {

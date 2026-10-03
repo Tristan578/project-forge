@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { cameraSetupExecutor } from '../cameraSetupExecutor';
 import type { ExecutorContext } from '../../types';
 import type { EditorState } from '@/stores/editorStore';
+import type { GameCameraMode } from '@/stores/slices/types';
+import { MODE_READS_DAMPING } from '@/lib/game/gameCameraPayload';
 
 /**
  * The whole point of this executor is that a GDD camera directive REACHES the
@@ -231,11 +233,14 @@ describe('cameraSetupExecutor', () => {
 
     // The real vocabulary the GDD generator emits. Before PF-1125's second half,
     // `filterCameraNumerics` returned `{}` for input like this — 100% of it
-    // dropped — while the step still reported `applied: true`.
+    // dropped — while the step still reported `applied: true`. `smoothing` is
+    // deliberately NOT one of the keys here any more — PF-1134 gave it a
+    // conversion onto `followSmoothing`/`damping`, so it now reaches the
+    // engine instead of landing in this warning (see the dedicated test below).
     const result = await cameraSetupExecutor.execute(
       {
         cameraMode: 'side-scroll',
-        cameraConfig: { smoothing: 0.1, leadAhead: 3, locked: true },
+        cameraConfig: { tilt: 30, leadAhead: 3, locked: true },
         targetEntityId: 'p',
       },
       ctx,
@@ -248,9 +253,63 @@ describe('cameraSetupExecutor', () => {
       targetEntity: 'p',
     });
     expect(result.output?.warning).toContain('no parameter for');
-    for (const key of ['smoothing', 'leadAhead', 'locked']) {
+    for (const key of ['tilt', 'leadAhead', 'locked']) {
       expect(result.output?.warning).toContain(key);
     }
+  });
+
+  it('converts smoothing to damping instead of reporting it as unknown (PF-1134)', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    const result = await cameraSetupExecutor.execute(
+      {
+        cameraMode: 'follow',
+        cameraConfig: { smoothing: 0.1 },
+        targetEntityId: 'p',
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    // 0.1 / (1/60) = 6 — see `convertGddSmoothingToDamping` in `cameraResolution.ts`.
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'thirdPersonFollow',
+      targetEntity: 'p',
+      damping: 6,
+    });
+    expect(result.output?.warning).toBeUndefined();
+  });
+
+  it('sends the converted smoothing as damping for a top-down GDD camera (Sentry finding on #10295)', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    // The exact camera system from `__fixtures__/cozy-farming.json`. The GDD
+    // conversion produced `followSmoothing: 3` for it, and then the payload
+    // builder dropped that on the floor because it translated `followSmoothing`
+    // in the thirdPersonFollow arm only — so the fixture's one smoothing
+    // setting reached the engine as nothing while the step reported applied.
+    const result = await cameraSetupExecutor.execute(
+      {
+        cameraMode: 'top-down',
+        cameraConfig: { altitude: 15, tilt: 30, smoothing: 0.05 },
+        targetEntityId: 'p',
+      },
+      ctx,
+    );
+
+    expect(result.success).toBe(true);
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'topDown',
+      targetEntity: 'p',
+      height: 15,
+      // 0.05 / (1/60) = 3 — see `convertGddSmoothingToDamping`.
+      damping: 3,
+    });
+    // `tilt` still has no engine parameter; only it may be reported.
+    expect(result.output?.warning).toContain('tilt');
+    expect(result.output?.warning).not.toContain('smoothing');
   });
 
   it('reports a real field carrying a value that cannot be sent', async () => {
@@ -270,14 +329,61 @@ describe('cameraSetupExecutor', () => {
     expect(result.output?.warning).not.toContain('no parameter for');
   });
 
+  it('does not freeze a follow camera for a GDD smoothing of 0 (PF-1134)', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    // Converted, `smoothing: 0` is `damping: 0`, which the engine runs as a
+    // follow that never moves. It is refused at the GDD domain instead, so no
+    // `damping` is sent (the engine keeps its default of 5) and the author is
+    // told why.
+    const result = await cameraSetupExecutor.execute(
+      { cameraMode: 'top-down', cameraConfig: { altitude: 15, smoothing: 0 }, targetEntityId: 'p' },
+      ctx,
+    );
+
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'topDown',
+      targetEntity: 'p',
+      height: 15,
+    });
+    expect(result.output?.warning).toContain(
+      'smoothing (must be above 0 and at most 1 — the share of the gap closed each frame;',
+    );
+    expect(result.output?.warning).toContain(
+      'the engine default is kept unless followSmoothing is set)',
+    );
+  });
+
+  it('still sends an explicit followSmoothing when the GDD smoothing beside it is refused', async () => {
+    const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+    // The refusal reason says "the engine default is kept unless
+    // followSmoothing is set". This is the "unless": a refused alias does not
+    // take a sendable engine spelling of the same field down with it.
+    const result = await cameraSetupExecutor.execute(
+      { cameraMode: 'top-down', cameraConfig: { smoothing: 5, followSmoothing: 3 }, targetEntityId: 'p' },
+      ctx,
+    );
+
+    expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+      entityId: 'e-9',
+      mode: 'topDown',
+      targetEntity: 'p',
+      damping: 3,
+    });
+    expect(result.output?.warning).toContain('smoothing (must be above 0 and at most 1');
+  });
+
   it('reports a value the range policy refuses, naming the range as the reason', async () => {
     const { ctx, dispatch } = makeCtx(CAMERA_NODE);
 
-    // A negative follow damping is the PF-1166 defect: the engine computes
-    // `t = (damping * delta).min(1.0)` and lerps by it, so `t` is capped above
-    // but never below — a negative rate extrapolates AWAY from the target and
-    // compounds ~16x per second at 60fps. It used to be accepted here, sent, and
-    // reported as applied.
+    // A negative follow damping is the PF-1166 defect: when the engine's lerp
+    // factor was `(damping * delta).min(1.0)`, capped above but not below, a
+    // negative rate extrapolated AWAY from the target ~16x per second at 60fps.
+    // The engine now clamps the factor to [0, 1] (a frozen camera) and refuses a
+    // negative `damping` at the wire, failing the whole command. It used to be
+    // accepted here, sent, and reported as applied.
     const result = await cameraSetupExecutor.execute(
       {
         cameraMode: 'follow',
@@ -306,13 +412,135 @@ describe('cameraSetupExecutor', () => {
   it('combines the targetless and ignored-key warnings into one report', async () => {
     const { ctx } = makeCtx(CAMERA_NODE);
 
+    // `tilt`, not `smoothing`: PF-1134 gave `smoothing` a conversion, so it no
+    // longer belongs in this "ignored key" case.
     const result = await cameraSetupExecutor.execute(
-      { cameraMode: 'follow', cameraConfig: { smoothing: 0.2 } },
+      { cameraMode: 'follow', cameraConfig: { tilt: 5 } },
       ctx,
     );
 
     expect(result.output?.warning).toContain('will not move');
-    expect(result.output?.warning).toContain('smoothing');
+    expect(result.output?.warning).toContain('tilt');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Smoothing on a mode that does not ease toward its target (Devin, #10295)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The builder sends `damping` only for the modes in `MODE_READS_DAMPING`, so
+   * a GDD `smoothing` (or an explicit `followSmoothing`) on any other mode
+   * reaches the engine as nothing. Before this, the step still reported
+   * `applied: true` with no warning, which is the PF-1125 silent drop again.
+   * On `main`, before the conversion existed, `smoothing` was at least reported
+   * as an unknown key. Both mode lists are read off the table, so a mode that
+   * changes column moves between these cases with it.
+   */
+  describe('smoothing on a mode that does not ease toward its target', () => {
+    const MODES = Object.entries(MODE_READS_DAMPING) as [GameCameraMode, boolean][];
+    const EASING = MODES.filter(([, eases]) => eases).map(([mode]) => mode);
+    const NOT_EASING = MODES.filter(([, eases]) => !eases).map(([mode]) => mode);
+    const easingList = `${EASING.slice(0, -1).join(', ')} and ${EASING[EASING.length - 1]}`;
+    const reasonFor = (mode: GameCameraMode) =>
+      `a camera in ${mode} mode does not ease toward its target, so smoothing has no effect — only ${easingList} do`;
+
+    it('splits the modes into both kinds, so neither sweep below is vacuous', () => {
+      expect(EASING.length).toBeGreaterThan(0);
+      expect(NOT_EASING.length).toBeGreaterThan(0);
+      expect(EASING.length + NOT_EASING.length).toBe(6);
+    });
+
+    it.each(NOT_EASING)('reports a GDD smoothing on a %s camera as unused by the mode', async (mode) => {
+      const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+      const result = await cameraSetupExecutor.execute(
+        { cameraMode: mode, cameraConfig: { smoothing: 0.1 }, targetEntityId: 'p' },
+        ctx,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.output?.applied).toBe(true);
+      expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+        entityId: 'e-9',
+        mode,
+        targetEntity: 'p',
+      });
+      expect(result.output?.warning).toBe(
+        `Camera settings this camera mode does not use were ignored: smoothing (${reasonFor(mode)}).`,
+      );
+    });
+
+    // One expectation written out in full, not rebuilt from the production
+    // template: a template shared by code and test cannot catch its own
+    // wording (it read "a orbital camera" until this case existed).
+    it('words the orbital warning as a creator reads it', async () => {
+      const { ctx } = makeCtx(CAMERA_NODE);
+
+      const result = await cameraSetupExecutor.execute(
+        { cameraMode: 'orbital', cameraConfig: { smoothing: 0.1 }, targetEntityId: 'p' },
+        ctx,
+      );
+
+      expect(result.output?.warning).toBe(
+        'Camera settings this camera mode does not use were ignored: smoothing (a camera in orbital mode ' +
+          'does not ease toward its target, so smoothing has no effect — only thirdPersonFollow, ' +
+          'sideScroller and topDown do).',
+      );
+    });
+
+    it.each(NOT_EASING)('reports an explicit followSmoothing on a %s camera as unused by the mode', async (mode) => {
+      const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+      const result = await cameraSetupExecutor.execute(
+        { cameraMode: mode, cameraConfig: { followSmoothing: 3 }, targetEntityId: 'p' },
+        ctx,
+      );
+
+      expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+        entityId: 'e-9',
+        mode,
+        targetEntity: 'p',
+      });
+      expect(result.output?.warning).toBe(
+        `Camera settings this camera mode does not use were ignored: followSmoothing (${reasonFor(mode)}).`,
+      );
+    });
+
+    it.each(NOT_EASING)('reports both spellings on a %s camera as unused, not one as overridden', async (mode) => {
+      const { ctx } = makeCtx(CAMERA_NODE);
+
+      // The mode is judged before the value or the precedence: neither spelling
+      // could have applied, so "superseded by followSmoothing" would send the
+      // author to delete the wrong key, and a range complaint about a 5 would
+      // send them to fix a value that cannot matter on this mode.
+      const result = await cameraSetupExecutor.execute(
+        { cameraMode: mode, cameraConfig: { smoothing: 5, followSmoothing: 3 }, targetEntityId: 'p' },
+        ctx,
+      );
+
+      expect(result.output?.warning).toBe(
+        'Camera settings this camera mode does not use were ignored: ' +
+          `smoothing (${reasonFor(mode)}), followSmoothing (${reasonFor(mode)}).`,
+      );
+    });
+
+    it.each(EASING)('still sends smoothing as damping on a %s camera, with no warning', async (mode) => {
+      const { ctx, dispatch } = makeCtx(CAMERA_NODE);
+
+      const result = await cameraSetupExecutor.execute(
+        { cameraMode: mode, cameraConfig: { smoothing: 0.1 }, targetEntityId: 'p' },
+        ctx,
+      );
+
+      // 0.1 / (1/60) = 6 — see `convertGddSmoothingToDamping`.
+      expect(dispatch).toHaveBeenCalledWith('set_game_camera', {
+        entityId: 'e-9',
+        mode,
+        targetEntity: 'p',
+        damping: 6,
+      });
+      expect(result.output?.warning).toBeUndefined();
+    });
   });
 
   // ---------------------------------------------------------------------------

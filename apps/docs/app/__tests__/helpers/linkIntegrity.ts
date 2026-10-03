@@ -48,7 +48,8 @@
  *   - Whether a route is REACHABLE once resolved. A route can exist and still
  *     bounce an anonymous visitor to sign-in (that is the `/dashboard` case in
  *     #9046). This checks existence only; auth-gating is a separate concern.
- *   - Rewrites and redirects declared in `next.config.ts` / `vercel.json`. A
+ *   - Rewrites and redirects declared in `next.config.ts` or the app's Vercel
+ *     config (`web/vercel.ts`, `apps/docs/vercel.json`). A
  *     link rescued by a rewrite would be reported dead here. Neither app
  *     declares any today; if one is added, teach `isKnownRedirect` about it.
  *   - Runtime-only correctness: `/settings?tab=keys` resolves because

@@ -37,8 +37,8 @@ Per-provider inventory for `capability-review`. For each provider: the **changel
 
 ### Vercel (platform)
 - Changelog: https://vercel.com/changelog · Pricing: https://vercel.com/pricing
-- We currently wire: Functions, crons (cd.yml), preview deploys, Deployment Protection (SSO gate).
-- Opportunity surface: **Fluid Compute** tuning, **Queues** (beta), **Sandbox** (GA), **AI Gateway**, **BotID** (GA), **Rolling Releases** (GA), ISR, `vercel.ts` config migration, edge config.
+- We currently wire: Functions, crons (web/vercel.ts), preview deploys, Deployment Protection (SSO gate), typed `vercel.ts` project config (`@vercel/config`, PF-1060).
+- Opportunity surface: **Fluid Compute** tuning, **Queues** (beta), **Sandbox** (GA), **AI Gateway**, **BotID** (GA), **Rolling Releases** (GA), ISR, edge config.
 - Grep markers: `vercel.json`, `vercel.ts`, `waitUntil`, `unstable_after` / `after(`, `@vercel/functions`, `BotId` / `@vercel/bot`, `ai-gateway` / `gateway/`.
 
 ### Cloudflare

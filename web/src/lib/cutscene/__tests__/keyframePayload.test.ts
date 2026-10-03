@@ -82,8 +82,8 @@ describe('sanitizeKeyframePayload', () => {
      * this file shipped with, and it type-checks identically.
      */
     it('drops a negative value for a param whose engine meaning has no negative', () => {
-      // A negative `damping` makes the follow lerp extrapolate away from the
-      // target rather than converge on it.
+      // A negative `damping` asks the follow to move away from the target
+      // rather than converge on it (the engine clamps it to a frozen camera).
       expect(
         sanitizeKeyframePayload('camera', { mode: 'thirdPersonFollow', followSmoothing: -0.5 }),
       ).toEqual({ mode: 'thirdPersonFollow' });

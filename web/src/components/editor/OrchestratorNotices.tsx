@@ -75,14 +75,18 @@ export function OrchestratorErrorNotice({ error, className }: { error: string; c
 }
 
 /**
- * Shown while Discard is armed: what discarding costs, and a way back.
- * Designing a plan is metered by /api/game/decompose, so a discarded plan is
- * paid for again if the user wants it back.
+ * The question an armed Discard asks. Designing a plan is metered by
+ * /api/game/decompose, so a discarded plan is paid for again if the user wants
+ * it back. One string for both plan surfaces: the panel shows it in
+ * `DiscardConfirmPrompt`, the quick-start review in its action row.
  */
+export const DISCARD_CONFIRM_QUESTION = 'Discard this plan? Planning it again costs tokens.';
+
+/** Shown while Discard is armed: what discarding costs, and a way back. */
 export function DiscardConfirmPrompt({ onKeep }: { onKeep: () => void }) {
   return (
     <div role="status" className="flex items-center justify-between gap-2 text-xs text-[var(--sf-text)]">
-      <span>Discard this plan? Planning it again costs tokens.</span>
+      <span>{DISCARD_CONFIRM_QUESTION}</span>
       <Button type="button" variant="outline" size="sm" onClick={onKeep}>
         Keep plan
       </Button>

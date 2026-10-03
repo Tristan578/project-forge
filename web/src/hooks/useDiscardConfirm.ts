@@ -6,18 +6,28 @@ import { useCallback, useRef, useState } from 'react';
  * Two-step Discard for a plan waiting to be built.
  *
  * Discarding throws away a plan the user paid to design, so the first press
- * arms and the second discards. The arm belongs to ONE plan at ONE review:
+ * arms and a second, separate answer discards. In OrchestratorPanel that
+ * answer is the same Discard button, relabelled "Discard it". In
+ * QuickStartDialog it is a different button: the footer row swaps, so "Discard
+ * it" takes the place of "Build it" and the pressed Discard button becomes
+ * "Keep plan". The arm belongs to ONE plan at ONE review:
  * - it is keyed on the plan object, so a new plan is never shown pre-armed;
  * - leaving the review (`awaiting` goes false: a build started, from this
- *   surface or from chat, or the run was cancelled or reset) clears it;
+ *   surface or from chat, or the run was cancelled or reset) clears it. A
+ *   surface that stays mounted while hidden folds its visibility into
+ *   `awaiting` (QuickStartDialog passes `open && …`), so closing it counts as
+ *   leaving and a reopened review is never shown pre-armed;
  * - the caller clears it (`disarm`) when the user presses Build, because a
  *   refused build returns the SAME plan to the review without ever leaving it
  *   long enough to render (#6831 review).
  *
  * Both plan surfaces use this, so a plan is guarded the same way wherever it
  * waits. Attach `discardRef` to the Discard button: `keep` backs out of the
- * arm and puts focus back on it, since the Keep plan button the user pressed
- * unmounts with the prompt and focus would otherwise fall to the body.
+ * arm and puts focus back on it. In OrchestratorPanel the Keep plan button the
+ * user pressed unmounts with the prompt, so focus would otherwise fall to the
+ * body. In QuickStartDialog the pressed button is `discardRef` itself, still
+ * mounted, so `keep` only returns focus to a button that may not hold it (a
+ * click does not focus a button in Safari).
  */
 export function useDiscardConfirm(plan: object | null, awaiting: boolean) {
   const [armedFor, setArmedFor] = useState<object | null>(null);

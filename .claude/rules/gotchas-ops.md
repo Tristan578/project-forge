@@ -4,6 +4,7 @@ paths:
   - ".claude/**"
   - ".github/**"
   - "vercel.json"
+  - "vercel.ts"
 ---
 
 # Gotchas — Claude Code Config, Infrastructure & Hooks
