@@ -16,9 +16,9 @@
  * - `ApprovalGateSummary` + `ApprovalGateActions` (the quick-start dialog):
  *   the summary flows into the `@spawnforge/ui` Dialog body, which is the
  *   one scroller, and the buttons go in the Dialog's `actions` footer, which
- *   does not scroll. PR #10294 rounds 3 and 4 first pinned the buttons inside
- *   the body (`sticky`) and kept focus clear of them with the body's scroll
- *   padding. Every layer of that fought the scroller: Firefox does not honour
+ *   does not scroll. PR #10294 first pinned the buttons inside the body
+ *   (`sticky`) and kept focus clear of them with the body's scroll padding;
+ *   board rounds 3 and 4 showed that every layer of that fought the scroller: Firefox does not honour
  *   the padding for focus scrolling the way Chromium does, focusing a pinned
  *   button scrolled the body, and on a 320px-tall viewport the row covered
  *   the very prompt it was confirming. A row outside the scroller has none of
@@ -239,7 +239,7 @@ export function ApprovalGateActions({
   // review's "Build it"), and a browser drops focus from a button that
   // becomes disabled: Chromium moves it to <body>, outside the `aria-modal`
   // dialog. If the action is refused the gate stays, the button comes back
-  // enabled, and focus is still nowhere (measured, PR #10294 round 5). Put it
+  // enabled, and focus is still nowhere (measured, PR #10294 board round 4). Put it
   // back on the button, unless the user has since focused something else.
   // Never onto a destructive button: the plan review re-enables this place as
   // "Discard it" when Discard is armed during an in-flight Build it, and

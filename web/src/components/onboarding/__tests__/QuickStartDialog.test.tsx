@@ -369,7 +369,7 @@ describe('QuickStartDialog', () => {
   // max-h-[50vh] box became the nested one. The rule now: exactly ONE
   // scroller in the dialog -- the Dialog body -- and the gate's buttons in the
   // Dialog's footer, outside that scroll, so no scroll offset can hide them
-  // (round 5: pinning them inside the body covered content and failed in
+  // (board round 4: pinning them inside the body covered content and failed in
   // Firefox). jsdom has no layout, so this pins the structure; the geometry is
   // measured by e2e/tests/quick-start-plan-review-layout.spec.ts.
   it('keeps the approval gate actions reachable: one scroller (the Dialog body), actions in the footer outside it', async () => {
@@ -399,7 +399,7 @@ describe('QuickStartDialog', () => {
     expect(footer?.contains(screen.getByRole('button', { name: 'Close' }))).toBe(true);
   });
 
-  // PR #10294 round 5 (ux): a mid-build gate's "Cancel" ends the build
+  // PR #10294 board round 5 (ux): a mid-build gate's "Cancel" ends the build
   // (`resolveGate('rejected')` sets 'cancelled'), and the dialog's own "Stop"
   // sat beside it doing the same, with "Close" (which only hides the dialog)
   // next to both: "Approve | Cancel | Stop | Close". The gate's button is now
@@ -597,7 +597,7 @@ describe('QuickStartDialog', () => {
   // own element. Reopening onto a pending gate changes the phase in the same
   // commit that mounts the gate, and the phase effect must count the footer
   // as "the build view already placed focus", or it pulls focus off Approve
-  // onto the status line (PR #10294 round 5).
+  // onto the status line (PR #10294 board round 4).
   it('keeps focus on Approve when the dialog reopens onto a pending gate', async () => {
     setState({
       orchestratorStatus: 'executing',
@@ -728,7 +728,7 @@ describe('QuickStartDialog', () => {
       expectActionsInFooter(build);
       expectActionsInFooter(screen.getByRole('button', { name: 'Discard plan' }));
       // One filled button in the row: Close steps back beside Build it
-      // (PR #10294 round 5, ux: both were the same filled primary).
+      // (PR #10294 board round 5, ux: both were the same filled primary).
       expect(filledFooterButtons()).toEqual(['Build it']);
 
       const body = screen.getByRole('dialog').querySelector('[data-dialog-body]');
@@ -742,7 +742,7 @@ describe('QuickStartDialog', () => {
       }
     });
 
-    // PR #10294 round 3 (ux): "Build it" takes focus at open while the cost
+    // PR #10294 board round 3 (ux): "Build it" takes focus at open while the cost
     // bar can be scrolled out of view, so the total rides beside the button,
     // in the same footer group.
     it('shows the token total in the footer group beside "Build it"', async () => {
@@ -764,7 +764,7 @@ describe('QuickStartDialog', () => {
       expect(total.textContent).toContain('Cost: 340 tokens, up to 400 held');
     });
 
-    // PR #10294 rounds 3-4 (ux HIGH): an armed Discard put "Discard this
+    // PR #10294 board rounds 3-4 (ux HIGH): an armed Discard put "Discard this
     // plan?" and "Keep plan" in the body, where on a 320px-tall viewport no
     // scroll offset could show them. The question now IS the action row.
     it('asks the discard question in the action row itself, with its two answers, and nothing in the body', async () => {
@@ -799,7 +799,7 @@ describe('QuickStartDialog', () => {
 
     // A refused "Build it" puts its reason in the body above the cost, while
     // the button stays in the footer. On a short viewport or a long plan the
-    // alert was out of view (PR #10294 round 4: 28 of 48 configurations).
+    // alert was out of view (PR #10294 board round 4: 28 of 48 configurations).
     it('scrolls a refused build\'s reason into view (nearest), and not before', async () => {
       const scrollIntoView = vi.fn();
       Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -882,7 +882,7 @@ describe('QuickStartDialog', () => {
       finish();
     });
 
-    // PR #10294 round 5 (test): while "Build it" is in flight it is disabled,
+    // PR #10294 board round 5 (test): while "Build it" is in flight it is disabled,
     // and the browser has dropped focus to <body>. Arming Discard then must
     // offer a LIVE "Discard it" (it cancels the start), with focus on "Keep
     // plan", never handed to the destructive answer. The click is a pointer

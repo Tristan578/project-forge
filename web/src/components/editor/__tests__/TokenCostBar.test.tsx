@@ -57,9 +57,9 @@ describe('TokenCostBar', () => {
   });
 });
 
-// The one-line total the quick-start plan review pins beside "Build it"
-// (PR #10294 round 4). It lives in a pinned row, so it must stay short and
-// hold nothing focusable.
+// The one-line total the quick-start plan review shows beside "Build it" in
+// the Dialog footer (PR #10294 board round 3). The footer takes its height
+// from the scrolling body, so it must stay short and hold nothing focusable.
 describe('TokenCostTotal', () => {
   it('states the estimate and the upper bound the build holds, on one line with nothing focusable', () => {
     render(<TokenCostTotal estimate={ESTIMATE} />);

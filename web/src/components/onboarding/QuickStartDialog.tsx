@@ -13,10 +13,13 @@
  * 'awaiting_approval'. The running view then shows the plan and its estimated
  * token cost, and the build's tokens are reserved only when the user presses
  * "Build it" there (owner decision on #6831: confirm the cost first). "Build
- * it" means exactly that one action. "Discard plan" arms on the first press
- * and drops the plan on the second ("Keep plan" backs out; `useDiscardConfirm`,
- * shared with OrchestratorPanel); "Close" keeps it, and reopening the dialog
- * returns to the review. The confirmation
+ * it" means exactly that one action. "Discard plan" does not drop the plan:
+ * it arms, and the footer row then asks "Discard this plan?" with "Discard it"
+ * (drops the plan; it takes the place of "Build it") and "Keep plan" (backs
+ * out; it is the pressed "Discard plan" button, relabelled, and keeps focus).
+ * `useDiscardConfirm` holds the arm and is shared with OrchestratorPanel, which
+ * asks the same question in its own way. "Close" keeps the plan, and reopening
+ * the dialog returns to the review. The confirmation
  * is the user's answer to `gate_plan`, which the slice therefore
  * auto-approves; `gate_assets` / `gate_final` still stop the
  * pipeline, so this dialog renders the same gate markup the orchestrator
@@ -355,7 +358,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // button in Safari, and a "Build it" still in flight has already dropped
   // focus to <body> by disabling itself, so put focus there explicitly. Left
   // on <body>, the arm re-enables the approve button (now "Discard it") and
-  // its focus restore would land on the destructive answer (PR #10294 round 5).
+  // its focus restore would land on the destructive answer (PR #10294 board round 5).
   const handleArmDiscard = useCallback(() => {
     discardRef.current?.focus();
     armDiscard();
@@ -366,7 +369,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // user pressed sits in the footer, outside the Dialog body's scroll. On a
   // short viewport, or with a long plan, that alert lands out of view and the
   // only visible change is the status line, if that is in view at all (PR
-  // #10294 round 4: not fully visible in 28 of 48 measured configurations).
+  // #10294 board round 4: not fully visible in 28 of 48 measured configurations).
   // Bring it into view. Nothing is pinned inside the body any more, so
   // `nearest` puts it exactly at the scrollport's edge, or leaves it alone
   // when it is already visible.
@@ -375,7 +378,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // reports the error a render before "Build it" settles, and that settling
   // render swaps the Dialog's description for a longer one, which shrinks
   // the body. Scrolling a render early left the alert 12px below the body at
-  // 375x667 (measured, round 5). jsdom has no `scrollIntoView`, hence the
+  // 375x667 (measured, board round 4). jsdom has no `scrollIntoView`, hence the
   // optional call.
   const settledRefusal = startingBuild ? null : reviewError;
   useEffect(() => {
@@ -484,7 +487,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
       // button says so. It is the footer's ONLY stop control while the gate is
       // up: the dialog's own Stop is hidden below, and "Close" (which only
       // hides the dialog) must not sit beside a vague "Cancel" that ends the
-      // run (PR #10294 round 5).
+      // run (PR #10294 board round 5).
       <ApprovalGateActions
         gate={pendingGate}
         onApprove={() => resolveGate('approved')}

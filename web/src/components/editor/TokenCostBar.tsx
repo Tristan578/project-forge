@@ -24,7 +24,7 @@ import { SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
  * the full `TokenCostBar` scrolls with the plan, and on a short viewport it
  * can be out of view while "Build it" (in the footer, which does not scroll)
  * is in view and focused. This line keeps the number that leaves the balance
- * beside that button (PR #10294 round 3).
+ * beside that button (PR #10294 board round 3).
  *
  * It is deliberately short: every line in the footer is height taken from the
  * scrolling body above it, and on a 320px-tall viewport there is little to

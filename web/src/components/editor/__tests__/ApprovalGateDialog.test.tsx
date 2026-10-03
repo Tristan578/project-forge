@@ -284,7 +284,7 @@ describe('ApprovalGateDialog', () => {
     });
   });
 
-  // PR #10294 round 5, measured in Chromium: "Build it" is disabled while the
+  // PR #10294 board round 4, measured in Chromium: "Build it" is disabled while the
   // build starts, the browser drops focus from a disabled button to <body>,
   // and a refused build re-enabled the button with focus still on <body>,
   // outside the aria-modal dialog.
@@ -330,7 +330,7 @@ describe('ApprovalGateDialog', () => {
       expect(document.activeElement).toBe(document.body);
     });
 
-    // PR #10294 round 5 (test): arming the plan review's Discard during an
+    // PR #10294 board round 5 (test): arming the plan review's Discard during an
     // in-flight Build it re-enables this place as a destructive "Discard it".
     // Focus on <body> must not be handed to it: Enter would discard the plan.
     it('never hands focus to a destructive button it re-enables', () => {

@@ -41,7 +41,7 @@ import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 /**
  * A phone, a landscape phone, a laptop, and two 320px-tall landscape phones
- * (a 1280x640 window at 200% zoom; an iPhone SE on its side), where the
+ * (667x320 and 568x320; 568x320 is an iPhone SE on its side), where the
  * previous layout had no scroll offset that showed the discard prompt.
  */
 const VIEWPORTS = [
@@ -238,7 +238,7 @@ async function scrollBodyToTop(page: Page) {
  * Each stop is read once the focused control has come into view (polled):
  * how soon a browser scrolls a Tab-focused element into view is not part of
  * the contract, and in CI WebKit's first reading was sometimes taken before
- * the scroll (PR #10294 round 5). The Dialog body also reveals keyboard focus
+ * the scroll (PR #10294 board round 5). The Dialog body also reveals keyboard focus
  * itself now, so a control that never comes into view still fails here.
  */
 async function walkTabCycle(page: Page, context: string, startLabel: string): Promise<string[]> {

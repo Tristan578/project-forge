@@ -23,7 +23,7 @@ import { ScrollArea } from "./ScrollArea";
  * dialog's initial focus land on its scroll region in a real browser.
  * `useDialogA11y` picks the initial focus target in a `requestAnimationFrame`,
  * and Chromium runs that frame callback BEFORE the first ResizeObserver
- * notification (measured, PR #10294 round 3). So at that moment the region is
+ * notification (measured, PR #10294 board round 3). So at that moment the region is
  * not focusable yet, there is nothing else to focus, and the container takes
  * focus; the region then becomes focusable a moment later and takes it over.
  * The same path returns focus to the region when content that shrank grows
@@ -86,7 +86,7 @@ function useOverflowsVertically(
  * body's visible area (`block: "nearest"`: no movement when it is already in
  * view). Browsers are meant to do this themselves, but WebKit did not reliably
  * do it for a Tab-focused link inside the body: in CI a Tab onto a link
- * 500-700px below the body's fold sometimes left it there (PR #10294 round 5,
+ * 500-700px below the body's fold sometimes left it there (PR #10294 board round 5,
  * E2E Cross-Browser webkit). React's `onFocus` bubbles (it is `focusin`), so
  * one handler on the body covers every descendant.
  *
@@ -208,7 +208,7 @@ export function Dialog({
             its own content (and buttons) out of view. Nor should they pin
             controls inside it (`sticky`): a pinned row covers whatever scrolls
             under it, and keeping focus clear of it needs scroll padding that
-            browsers do not honour alike (PR #10294 rounds 3 and 4). Controls
+            browsers do not honour alike (PR #10294 board rounds 3 and 4). Controls
             that must stay in view go in `actions`, below, which does not
             scroll. */}
         {hasBody && (

@@ -181,7 +181,7 @@ describe('Dialog', () => {
     expect(dialog.className).not.toMatch(/max-h-\[85vh\]/);
   });
 
-  // PR #10294 round 5: WebKit sometimes left a Tab-focused link far below the
+  // PR #10294 board round 5: WebKit sometimes left a Tab-focused link far below the
   // body's fold. The body scrolls a keyboard-focused descendant into view
   // itself; jsdom has no layout, so this pins the call, and
   // e2e/tests/quick-start-plan-review-layout.spec.ts measures the result.
@@ -327,7 +327,7 @@ describe('Dialog', () => {
 
     // useDialogA11y picks the initial focus target in a requestAnimationFrame.
     // In Chromium that frame callback runs BEFORE the first ResizeObserver
-    // notification (measured 20/20, PR #10294 round 3), so the tests below run
+    // notification (measured 20/20, PR #10294 board round 3), so the tests below run
     // the frame first and fire the observer after it: the order production
     // actually sees. The observer-first order is kept as a second case where
     // the outcome must not depend on it.
