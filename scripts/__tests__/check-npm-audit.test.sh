@@ -243,6 +243,7 @@ GATE_VARIANT=''
 make_gate_variant() {
   local name="$1" entry="$2" anchors body outside_real outside_variant
   GATE_VARIANT=''
+  # raw-grep-ok: -x is a whole-line match, so only a line that IS exactly the anchor counts; a comment line starts with '#' and cannot equal it.
   anchors="$(grep -cxF "$ALLOWLIST_ANCHOR" "$SCRIPT" || true)"
   if [ "$anchors" != "1" ]; then
     echo "make_gate_variant: expected exactly one column-0 '$ALLOWLIST_ANCHOR' line in the gate, found $anchors — did the declaration change?" >&2; exit 1
@@ -288,19 +289,22 @@ echo "=== shipped allowlist — the real gate, unmodified (plus its empty steady
 # entry), so the cases here are the ONLY ones that observe the gate as it ships.
 # Three things need proving:
 #
-#   (a) An EMPTY array does not crash it. Under `set -u`, bash 3.2 — the macOS
-#       system bash, and what `#!/usr/bin/env bash` resolves to there — aborts on
-#       a plain "${ARR[@]}" expansion of an empty array. The gate reads the array
-#       at three sites, all guarded with ${ARR[@]+"${ARR[@]}"}. Drop a guard and
-#       the abort happens inside a command substitution: the capture comes back
+#   (a) An EMPTY array works: the exact state the gate returns to when braces
+#       is pruned. $EMPTY_GATE is the real gate with its body replaced by the
+#       placeholder comment, and it must pass a clean report and block an
+#       unwaived one. Under `set -u`, bash older than 4.4 — macOS ships 3.2, and
+#       `#!/usr/bin/env bash` resolves to it there — aborts on a plain
+#       "${ARR[@]}" expansion of an empty array. The gate reads the array at
+#       three sites, all guarded with ${ARR[@]+"${ARR[@]}"}. Drop a guard and the
+#       abort happens inside a command substitution: the capture comes back
 #       empty and scores as WAIVED, so the gate fails OPEN with a green exit
-#       code. run_gate_script tees `unbound variable` into $FIX/bash-errors.log
-#       and the suite fails at the end on any hit, so this is caught even when
-#       the exit code happens to match. The shipped allowlist is no longer empty
-#       (braces, 2026-10-03), so this runs against $EMPTY_GATE — the real gate
-#       with its body replaced by the placeholder comment, i.e. the exact state
-#       it returns to when braces is pruned — and the guard stays proven for
-#       that day instead of going unexercised until it arrives.
+#       code. The `unbound variable` check below (and the end-of-suite sweep of
+#       $FIX/bash-errors.log) catches that ONLY when the suite runs under
+#       bash < 4.4, i.e. on macOS. CI runs bash 5, where the same expansion is
+#       not an error, so on CI that check cannot fail: dropping any one guard
+#       was measured green there. What CI enforces is the structural pin in the
+#       "gate script hardening" section, which reads the gate file and requires
+#       every ALLOWED_ADVISORIES[ mention to sit inside the guarded form.
 #   (b) A high advisory the allowlist does not name BLOCKS, on both the shipped
 #       gate and the empty one. The waived-fixture cases further down all pass
 #       through a variant that carries a synthetic waiver, so without these the
@@ -322,7 +326,7 @@ res="$(run_gate_script "$SCRIPT" "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ]; then pass "shipped gate: clean report passes (exit 0)"; else fail "shipped gate should exit 0 on a clean report, got $rc — output: $out"; fi
 res="$(run_gate_script "$EMPTY_GATE" "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "0" ]; then pass "empty-allowlist gate: clean report passes (exit 0)"; else fail "empty-allowlist gate should exit 0 on a clean report, got $rc — output: $out"; fi
-if ! grep -qF "unbound variable" <<<"$out"; then pass "empty-allowlist gate: empty allowlist does not trip bash 3.2 unbound-variable on any of the three array reads"; else fail "empty-allowlist gate: empty-array expansion crashed — a \${ARR[@]+\"\${ARR[@]}\"} guard is missing, and the crash fails OPEN"; fi
+if ! grep -qF "unbound variable" <<<"$out"; then pass "empty-allowlist gate: no unbound-variable crash on the array reads (can only fail under bash < 4.4; the structural guard pin is what CI enforces)"; else fail "empty-allowlist gate: empty-array expansion crashed — a \${ARR[@]+\"\${ARR[@]}\"} guard is missing, and the crash fails OPEN"; fi
 
 f="$(fixture shipped-high.json <<'JSON'
 {"auditReportVersion":2,"vulnerabilities":{
@@ -338,8 +342,10 @@ res="$(run_gate_script "$EMPTY_GATE" "cat $f")"; rc="${res%%|*}"; out="${res#*|}
 if [ "$rc" = "1" ]; then pass "empty-allowlist gate: a high advisory blocks (exit 1)"; else fail "empty-allowlist gate should exit 1 on a high advisory, got $rc"; fi
 if grep -qF "::error::non-allowlisted advisory" <<<"$out"; then pass "empty-allowlist gate: the block is reported as non-allowlisted"; else fail "empty-allowlist gate: expected the non-allowlisted ::error:: annotation — output: $out"; fi
 
-# (c) The real report shape as of 2026-10-03: the braces source advisory plus
-# the three string-via propagation rows npm emits for its chain.
+# (c) The real report shape as of 2026-10-03 (`npm audit --json` in web): the
+# braces source advisory plus the four string-via propagation rows npm emits
+# for its chain (micromatch, fast-glob, @next/eslint-plugin-next and
+# eslint-config-next).
 f="$(fixture shipped-braces-pinned.json <<'JSON'
 {"auditReportVersion":2,"vulnerabilities":{
   "braces":{"name":"braces","severity":"high","via":[
@@ -347,7 +353,8 @@ f="$(fixture shipped-braces-pinned.json <<'JSON'
     "nodes":["node_modules/braces"]},
   "micromatch":{"name":"micromatch","severity":"high","via":["braces"],"nodes":["node_modules/micromatch"]},
   "fast-glob":{"name":"fast-glob","severity":"high","via":["micromatch"],"nodes":["node_modules/fast-glob"]},
-  "@next/eslint-plugin-next":{"name":"@next/eslint-plugin-next","severity":"high","via":["fast-glob"],"nodes":["node_modules/@next/eslint-plugin-next"]}}}
+  "@next/eslint-plugin-next":{"name":"@next/eslint-plugin-next","severity":"high","via":["fast-glob"],"nodes":["node_modules/@next/eslint-plugin-next"]},
+  "eslint-config-next":{"name":"eslint-config-next","severity":"high","via":["@next/eslint-plugin-next"],"nodes":["node_modules/eslint-config-next"]}}}
 JSON
 )"
 res="$(run_gate_script "$SCRIPT" "cat $f")"; rc="${res%%|*}"; out="${res#*|}"
@@ -1123,6 +1130,48 @@ if [ "$(grep -cE '^[[:space:]]*"GHSA-' "$SCRIPT" || true)" = "$(grep -cE '^[[:sp
   pass "the gate file carries no quoted advisory element beyond the reviewed set"
 else
   fail "the gate file carries a quoted \"GHSA- element line beyond the reviewed set (outside the allowlist body, or duplicated) — every waiver must sit in the one column-0 ALLOWED_ADVISORIES body"
+fi
+# Every read of the allowlist array must go through the empty-array guard. This
+# is the half of the bash-3.2 protection that CI can actually enforce. The
+# section-0 runtime check (an `unbound variable` from $EMPTY_GATE) only bites
+# under bash older than 4.4; CI runs bash 5, where an empty "${ARR[@]}" under
+# `set -u` is not an error, so replacing any one of the gate's guarded reads
+# with a plain "${ALLOWED_ADVISORIES[@]}" measured green there. This pin reads
+# the gate FILE instead, so it fails the same way on every bash.
+#
+# Derived, not restated: it does not list the read sites or count them against a
+# remembered number. It removes every occurrence of the exact guarded form from
+# each line, then reports any "ALLOWED_ADVISORIES[" left over. A plain "[@]"
+# read, "[*]", an index, a "${#...}" length, a ":-" default and a guard missing
+# its inner quotes all leave a mention behind. The leftover scan runs over the
+# WHOLE file, comments included: stripping comments first would make every
+# `#`-leading line a blind region, so a comment that spells an unguarded read
+# fails here too (reword it; that is a false FAIL, never a false PASS). The
+# vacuity floor counts guarded reads on executable lines only, so a comment that
+# spells the guarded form cannot satisfy it after the real reads are gone.
+# Honest bound: a `declare -n` alias of the array, or an `eval` of a name built
+# at runtime, is not seen.
+# shellcheck disable=SC2016  # the guarded expansion is matched as literal text
+allowlist_read_guard='${ALLOWED_ADVISORIES[@]+"${ALLOWED_ADVISORIES[@]}"}'
+readonly allowlist_read_guard
+guard_scan="$(GUARD="$allowlist_read_guard" awk '
+  BEGIN { g = ENVIRON["GUARD"]; m = "ALLOWED_ADVISORIES["; guarded = 0 }
+  {
+    line = $0; gc = 0
+    while ((i = index(line, g)) > 0) { gc++; line = substr(line, 1, i - 1) " " substr(line, i + length(g)) }
+    while ((i = index(line, m)) > 0) { printf "unguarded %d\n", NR; line = substr(line, i + length(m)) }
+    if ($0 !~ /^[[:space:]]*#/) guarded += gc
+  }
+  END { printf "guarded %d\n", guarded }
+' "$SCRIPT")"
+guard_reads="$(awk '$1 == "guarded" { print $2 }' <<<"$guard_scan")"
+guard_misses="$(awk '$1 == "unguarded" { printf " %s", $2 }' <<<"$guard_scan")"
+if [ -n "$guard_misses" ]; then
+  fail "check-npm-audit.sh reads ALLOWED_ADVISORIES outside the empty-array guard at line(s):$guard_misses — use the guarded form at every read; bash < 4.4 under set -u aborts on an unguarded empty-array read inside a command substitution, and the gate then fails OPEN"
+elif ! [ "${guard_reads:-0}" -ge 1 ] 2>/dev/null; then
+  fail "found no guarded ALLOWED_ADVISORIES read on an executable line of check-npm-audit.sh (got '${guard_reads}') — the guard pin would pass having checked nothing"
+else
+  pass "every ALLOWED_ADVISORIES read in the gate uses the empty-array guard (${guard_reads} guarded read(s) on executable lines, none unguarded)"
 fi
 # The gate must FAIL CLOSED — `exit 2` on tooling error must exist in the script.
 if grep -qE 'exit 2' "$SCRIPT"; then
@@ -3474,7 +3523,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=684
+readonly SELF_EXEC_EXPECTED_DROP=685
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -4161,6 +4210,7 @@ SELF_EXEC_DIAG
 SELF_EXEC_EXPECTED_DROP
 npm_argv
 expected_allowlist_entries
+allowlist_read_guard
 PIN_INPUTS'
 readonly PIN_INPUTS
 

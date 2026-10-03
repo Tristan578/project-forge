@@ -43,8 +43,8 @@
 # EXPECTED node_modules path(s); the id showing up anywhere else is a BLOCK, not
 # a WAIVE, naming the unexpected location(s) so the next regression is loud.
 #
-# Tracking issue: #8617 (F25) — re-evaluate every entry when its removal path
-# (documented alongside the id) becomes available.
+# Origin: #8617 (F25, closed). Each entry names its own open tracking issue
+# beside it; re-evaluate the entry when its removal path becomes available.
 #
 # CONTRACT
 #   check-npm-audit.sh <workspace-dir>
@@ -93,8 +93,9 @@ set -uo pipefail
 # advisory is legitimately un-relockable at more than one location) are
 # comma-separated. GHSA ids and node_modules paths never contain `:` or `,`.
 # EMPTY IS THE CORRECT STEADY STATE — see the History note above for why the
-# three former occupants were pruned rather than carried, and why the one entry
-# below is an exception with an expiry rather than a new normal. Do NOT add an entry
+# three former occupants were pruned rather than carried. The one entry below is
+# a dated exception with an expiry, not a new normal: its removal path, re-check
+# trigger and tracking issue sit beside it. Do NOT add an entry
 # back "to get the pipeline green": try relocking FIRST (`npm view <pkg>
 # versions` against the advisory's patched range). Every waiver ever added here
 # was justified as un-relockable and every one of them stopped being so; that is
@@ -131,6 +132,9 @@ ALLOWED_ADVISORIES=(
   # takes a 3.0.x patch by relock alone), or upstream fast-glob/micromatch, or
   # @next/eslint-plugin-next, dropping braces from the chain. Then relock and
   # prune this entry.
+  # RE-CHECK on every eslint-config-next or next bump: `npm view braces versions`
+  # and `npm view @next/eslint-plugin-next@latest dependencies.fast-glob`.
+  # Tracking issue: #10323 (warn when a waived advisory becomes fixable).
   "GHSA-vfj7-8cjw-p6xm:node_modules/braces"
 )
 
