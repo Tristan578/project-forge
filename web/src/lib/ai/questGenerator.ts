@@ -99,7 +99,7 @@ export interface GenerateOptions {
   templateId: ChainTemplateId;
   playerDescription: string;
   difficulty: number;
-  questCount?: number;
+  questCount?: number | undefined;
 }
 
 // ---------------------------------------------------------------------------

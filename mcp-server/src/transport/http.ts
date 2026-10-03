@@ -286,12 +286,14 @@ export async function startHttpTransport(
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: false,
     });
-    // SDK type-variance: StreamableHTTPServerTransport.onclose is
-    // `(() => void) | undefined` but the Transport interface declares
-    // `onclose?: () => void`, which exactOptionalPropertyTypes reads as
-    // non-undefined. Both declarations are the SDK's (1.30.0), so neither is
-    // ours to widen; the objects are identical. Drop the cast when the SDK
-    // agrees with itself: #10278.
+    // SDK type-variance: StreamableHTTPServerTransport types `onclose`,
+    // `onerror`, `onmessage` and `sessionId` as `... | undefined` accessors,
+    // but the Transport interface declares all four as plain optionals
+    // (`onclose?: () => void`, `sessionId?: string`, ...), which
+    // exactOptionalPropertyTypes reads as non-undefined. Both declarations are
+    // the SDK's (1.30.0), so neither is ours to widen; the objects are
+    // identical. Drop the cast when the SDK agrees with itself: #10278,
+    // pinned by src/transport/__tests__/transportGap.test.ts.
     await sharedServer.connect(sharedTransport as Transport);
   }
 

@@ -644,7 +644,7 @@ class AudioManager {
 
   // --- Audio Layers ---
   addLayer(entityId: string, slotName: string, assetId: string, options?: {
-    volume?: number; pitch?: number; loop?: boolean; spatial?: boolean; bus?: string;
+    volume?: number | undefined; pitch?: number | undefined; loop?: boolean | undefined; spatial?: boolean | undefined; bus?: string | undefined;
   }): void {
     const ctx = this.ensureContext();
     const buffer = this.buffers.get(assetId);
@@ -786,7 +786,7 @@ class AudioManager {
   }
 
   playOneShot(assetId: string, options?: {
-    position?: [number, number, number]; bus?: string; volume?: number; pitch?: number;
+    position?: [number, number, number] | undefined; bus?: string | undefined; volume?: number | undefined; pitch?: number | undefined;
   }): string {
     const ctx = this.ensureContext();
     const buffer = this.buffers.get(assetId);
@@ -1165,8 +1165,8 @@ class AudioManager {
    */
   setAdaptiveMusic(
     trackId: string,
-    stems: Array<{ name: string; assetId: string; baseVolume?: number; intensityRange?: [number, number] }>,
-    options?: { bus?: string; initialIntensity?: number }
+    stems: Array<{ name: string; assetId: string; baseVolume?: number | undefined; intensityRange?: [number, number] | undefined }>,
+    options?: { bus?: string | undefined; initialIntensity?: number | undefined }
   ): void {
     // Stop any existing track with this ID
     this.stopAdaptiveMusic(trackId);
@@ -1548,8 +1548,8 @@ class AudioManager {
    * then scores candidates based on waveform similarity at start/end points.
    */
   detectLoopPoints(assetId: string, options?: {
-    maxResults?: number;
-    minLoopDuration?: number;
+    maxResults?: number | undefined;
+    minLoopDuration?: number | undefined;
   }): LoopPoint[] {
     const buffer = this.buffers.get(assetId);
     if (!buffer) return [];

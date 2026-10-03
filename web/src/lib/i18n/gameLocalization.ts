@@ -132,15 +132,15 @@ interface DialogueNode {
 interface UiWidget {
   id: string;
   type: string;
-  text?: string;
-  placeholder?: string;
-  label?: string;
+  text?: string | undefined;
+  placeholder?: string | undefined;
+  label?: string | undefined;
 }
 
 export interface SceneForExtraction {
-  nodes?: Record<string, SceneNode>;
-  dialogueTrees?: Record<string, { nodes?: Record<string, DialogueNode> }>;
-  uiWidgets?: Record<string, UiWidget>;
+  nodes?: Record<string, SceneNode> | undefined;
+  dialogueTrees?: Record<string, { nodes?: Record<string, DialogueNode> }> | undefined;
+  uiWidgets?: Record<string, UiWidget> | undefined;
 }
 
 // ---------------------------------------------------------------------------

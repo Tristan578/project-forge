@@ -26,7 +26,7 @@ export interface ModificationRequest {
 /** A single step in a modification plan. */
 export interface ModificationStep {
   action: 'update' | 'add' | 'remove';
-  entityId?: string;
+  entityId?: string | undefined;
   component: string;
   changes: Record<string, unknown>;
   command: string;

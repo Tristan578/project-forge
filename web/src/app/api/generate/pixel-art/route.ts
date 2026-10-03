@@ -28,7 +28,7 @@ interface PixelArtParams {
   prompt: string;
   targetSize: number;
   palette: string;
-  customPalette?: string[];
+  customPalette?: string[] | undefined;
   dithering: string;
   ditheringIntensity: number;
   style: string;

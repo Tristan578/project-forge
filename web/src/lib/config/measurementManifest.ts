@@ -92,10 +92,10 @@ export interface ManifestUserAgentData {
 
 /** Minimal navigator surface the manifest reads. Injectable for tests. */
 export interface ManifestNavigator {
-  userAgent?: string;
-  deviceMemory?: number;
-  gpu?: { requestAdapter: () => Promise<unknown> };
-  userAgentData?: ManifestUserAgentData;
+  userAgent?: string | undefined;
+  deviceMemory?: number | undefined;
+  gpu?: { requestAdapter: () => Promise<unknown> } | undefined;
+  userAgentData?: ManifestUserAgentData | undefined;
 }
 
 /** Minimal window surface the manifest reads. Injectable for tests. */
@@ -394,9 +394,9 @@ export interface BuildManifestOptions {
    */
   browserVersion?: string | Unknown;
   /** Injectable navigator (defaults to the global). */
-  nav?: ManifestNavigator;
+  nav?: ManifestNavigator | undefined;
   /** Injectable window (defaults to the global). */
-  win?: ManifestWindow;
+  win?: ManifestWindow | undefined;
 }
 
 function defaultNavigator(): ManifestNavigator | undefined {

@@ -42,10 +42,10 @@ export async function trackGamePublishedServer(tier: string, slug: string): Prom
 export async function trackAiCacheHitRate(
   tier: 'short' | 'long',
   usage: {
-    inputTokens?: number;
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-    outputTokens?: number;
+    inputTokens?: number | undefined;
+    cacheReadTokens?: number | undefined;
+    cacheWriteTokens?: number | undefined;
+    outputTokens?: number | undefined;
   },
 ): Promise<void> {
   await track('ai_cache_hit_rate', {

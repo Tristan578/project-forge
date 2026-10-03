@@ -221,7 +221,7 @@ export async function cachedGenerate<T>(
   operation: string,
   params: Record<string, unknown>,
   executeFn: () => Promise<T>,
-  config?: { ttlSeconds?: number; skipCache?: boolean; userId?: string }
+  config?: { ttlSeconds?: number | undefined; skipCache?: boolean; userId?: string }
 ): Promise<{ result: T; cached: boolean }> {
   if (config?.skipCache || NEVER_CACHE_OPS.has(operation)) {
     const result = await executeFn();

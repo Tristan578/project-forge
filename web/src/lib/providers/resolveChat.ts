@@ -74,7 +74,7 @@ export type ResolveChatStreamEvent =
   | { type: 'tool_start'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_input_delta'; json: string }
   | { type: 'content_block_stop'; index: number }
-  | { type: 'usage'; inputTokens?: number; outputTokens?: number }
+  | { type: 'usage'; inputTokens?: number | undefined; outputTokens?: number | undefined }
   | { type: 'turn_complete'; stop_reason: string }
   | { type: 'error'; message: string };
 
