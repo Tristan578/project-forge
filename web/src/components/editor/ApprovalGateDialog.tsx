@@ -18,11 +18,12 @@
  *   one scroller, and the buttons go in the Dialog's `actions` footer, which
  *   does not scroll. PR #10294 first pinned the buttons inside the body
  *   (`sticky`) and kept focus clear of them with the body's scroll padding;
- *   board rounds 3 and 4 showed that every layer of that fought the scroller: Firefox does not honour
- *   the padding for focus scrolling the way Chromium does, focusing a pinned
- *   button scrolled the body, and on a 320px-tall viewport the row covered
- *   the very prompt it was confirming. A row outside the scroller has none of
- *   those failure modes, in any browser, because nothing scrolls under it.
+ *   board rounds 3 and 4 showed that every layer of that fought the
+ *   scroller: Firefox does not honour the padding for focus scrolling the
+ *   way Chromium does, focusing a pinned button scrolled the body, and on a
+ *   320px-tall viewport the row covered the very prompt it was confirming.
+ *   A row outside the scroller has none of those failure modes, in any
+ *   browser, because nothing scrolls under it.
  *
  * Every colour here is a `--sf-*` token, not a Tailwind palette shade. The
  * previous zinc/amber/green markup was rendered inside the token-themed

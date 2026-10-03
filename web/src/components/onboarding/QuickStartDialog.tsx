@@ -438,8 +438,8 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // or a mid-run gate's Approve / Stop build. It is rendered in the Dialog's
   // footer, NOT in the body with the gate's summary. The body is the one
   // scroller here, and the footer is outside it, so the row is in view at
-  // every scroll offset without being pinned on top of anything. Rounds 3 and
-  // 4 of PR #10294 pinned it inside the body (`sticky`) instead, and that
+  // every scroll offset without being pinned on top of anything. An earlier
+  // iteration of PR #10294 pinned it inside the body (`sticky`) instead, and that
   // fought the scroller in every way measured: the row covered whatever
   // scrolled under it (on a 320px-tall viewport, the very prompt it was
   // confirming), keeping focus clear of it took the body's scroll padding,
@@ -704,7 +704,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               own max-h-[50vh] box) and their buttons in the Dialog footer
               (`gateActions`), outside that scroll. Nesting any second bounded
               scroller in this body (the gate's own box, or the
-              `max-h-[45vh] overflow-y-auto` wrapper that round 2 review removed)
+              `max-h-[45vh] overflow-y-auto` wrapper that the PF-1215 round 2 review removed)
               lets the outer scroll carry the inner box out of view on a short
               viewport. */}
           {pendingGate && <ApprovalGateSummary gate={pendingGate} />}

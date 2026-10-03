@@ -199,8 +199,8 @@ describe('ApprovalGateDialog', () => {
   // the quick-start dialog the gate is split. Its summary flows into that one
   // scroll (a second bounded scroller nested inside it carries the inner box
   // out of view on a short viewport), and its buttons go in the Dialog's
-  // footer, outside the scroll. Rounds 3 and 4 pinned the buttons inside the
-  // body instead (sticky + scroll padding); in a real browser that covered
+  // footer, outside the scroll. An earlier iteration of this PR pinned the
+  // buttons inside the body instead (sticky + scroll padding); in a real browser that covered
   // content, scrolled the body on every focus, and failed in Firefox. jsdom
   // has no layout, so these pin the structure; the geometry is measured by
   // e2e/tests/quick-start-plan-review-layout.spec.ts.

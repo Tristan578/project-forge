@@ -10,8 +10,8 @@ import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
  * OUTSIDE that scroll. jsdom has no layout, so the unit tests can only pin
  * that structure; this file measures what it buys.
  *
- * Rounds 3 and 4 pinned the row inside the body instead (`sticky`), and kept
- * focus clear of it with the body's scroll padding. Every defect below shipped
+ * An earlier iteration of this PR pinned the row inside the body instead
+ * (`sticky`), and kept focus clear of it with the body's scroll padding. Every defect below shipped
  * past the unit tests and was visible only here:
  *
  *  1. "Build it" took focus at open with the token total scrolled away.

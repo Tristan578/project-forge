@@ -364,7 +364,7 @@ describe('QuickStartDialog', () => {
 
   // PF-1215 round 2 (4/5), then PR #10294: a bounded scroller nested inside
   // another lets the OUTER scroll carry the inner box's Approve/Cancel row out
-  // of view on a short viewport. Round 2 removed a `max-h-[45vh]` wrapper here;
+  // of view on a short viewport. PF-1215 round 2 removed a `max-h-[45vh]` wrapper;
   // #10294 made the Dialog body itself a scroller, so the gate's own
   // max-h-[50vh] box became the nested one. The rule now: exactly ONE
   // scroller in the dialog -- the Dialog body -- and the gate's buttons in the
