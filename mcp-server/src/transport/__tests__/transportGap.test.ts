@@ -446,7 +446,10 @@ describe('mcp SDK Transport gap (#10278)', () => {
       // Reported lines are 1-based, as an editor shows them.
       expect(lines[site.line - 1], `${HTTP_REL}:${site.line} should hold the cast`).toContain(`as ${TARGET_INTERFACE}`);
     }
-    expect(result.diagnostics.map((d) => d.line)).toEqual(result.casts.map((c) => c.line));
+    // checkGap already matched exactly one exactOptional error to each cast by
+    // STATEMENT; a line comparison here would reject a formatter-wrapped cast
+    // (TS2375 lands on the declared name, a line above the cast) that tsc accepts.
+    expect(result.diagnostics.length, 'one exactOptional error per cast statement').toBe(result.casts.length);
   }, 60_000);
 });
 
@@ -568,8 +571,12 @@ function indentOf(text: string, pos: number): string {
   return text.slice(text.lastIndexOf('\n', pos - 1) + 1, pos);
 }
 
-/** The first argument-position cast, rewritten as `const x: Transport = ... as Transport; connect(x)`. */
-function assignmentForm(text: string): string {
+/**
+ * The first argument-position cast, rewritten as `const x: Transport = ... as Transport; connect(x)`.
+ * `wrapped` breaks the declaration after `=`, the way a formatter wraps a long line, so the
+ * TS2375 lands on the declared name one line above the cast.
+ */
+function assignmentForm(text: string, wrapped = false): string {
   const sf = parse(HTTP_TS, text);
   const local = transportLocalName(sf);
   const cast = findCasts(sf).find((c) => ts.isCallExpression(c.parent) && c.parent.arguments.includes(c));
@@ -581,7 +588,7 @@ function assignmentForm(text: string): string {
     {
       start,
       end: stmt.end,
-      text: `const castForGapTest: ${local} = ${cast.getText(sf)};\n${indentOf(text, start)}${call}`,
+      text: `const castForGapTest: ${local} =${wrapped ? `\n${indentOf(text, start)}  ` : ' '}${cast.getText(sf)};\n${indentOf(text, start)}${call}`,
     },
   ]);
 }
@@ -680,6 +687,13 @@ describe('Transport gap check against overlaid sources (#10278)', () => {
   it('a cast moved into an assignment (TS2375 instead of TS2379) still passes', () => {
     const result = checkGap(config, { overrides: new Map([[HTTP_TS, assignmentForm(read(HTTP_TS))]]) });
     expect(result.diagnostics.map((d) => d.code).sort()).toEqual([2375, 2379]);
+  }, 60_000);
+
+  it('a formatter-wrapped assignment (TS2375 a line above the cast) still passes', () => {
+    const result = checkGap(config, { overrides: new Map([[HTTP_TS, assignmentForm(read(HTTP_TS), true)]]) });
+    expect(result.diagnostics.map((d) => d.code).sort()).toEqual([2375, 2379]);
+    const assignment = result.diagnostics.find((d) => d.code === 2375)!;
+    expect(result.casts.some((c) => c.line === assignment.line + 1)).toBe(true);
   }, 60_000);
 
   it('an unneeded extra cast -> RED naming the cast line that produced no error', () => {
