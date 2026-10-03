@@ -241,6 +241,10 @@ describe('cameraToCommands', () => {
       mode: 'sideScroller',
       targetEntity: null,
       zOffset: 10,
+      // The preset's `followSmoothing: 4`. The engine reads `damping` in the
+      // sideScroller arm exactly as in thirdPersonFollow's; this assertion used
+      // to PIN its absence, so every 2D preset silently ran at the engine's 5.
+      damping: 4,
     });
   });
 
@@ -251,6 +255,8 @@ describe('cameraToCommands', () => {
       mode: 'topDown',
       targetEntity: null,
       height: 20,
+      // The preset's `followSmoothing: 2` — same reason as platformer_2d.
+      damping: 2,
     });
   });
 

@@ -77,10 +77,11 @@ Track type payload schemas:
 - camera: { "mode": "thirdPersonFollow|firstPerson|sideScroller|topDown|fixed|orbital", "targetEntity": "string|null", plus the params for that mode:
     thirdPersonFollow: "followDistance", "followHeight", "followOffsetX", "followSmoothing"
     firstPerson: "firstPersonHeight", "firstPersonMouseSensitivity"
-    sideScroller: "sideScrollerDistance"
-    topDown: "topDownHeight"
+    sideScroller: "sideScrollerDistance", "followSmoothing"
+    topDown: "topDownHeight", "followSmoothing"
     orbital: "orbitalDistance", "orbitalAutoRotateSpeed"
-    fixed: no params — the camera entity's own transform positions it }
+    fixed: no params — the camera entity's own transform positions it
+    "followSmoothing" is the follow rate for EVERY following mode (thirdPersonFollow, sideScroller, topDown): a rate per second, higher = snappier, 0 = frozen, never negative; omit it for the engine default of 5 }
 - animation: { "clipName": "string", "crossfadeSecs": number }
 - dialogue: { "treeId": "string", "text": "string" }
 - audio: { "volume": number, "pitch": number }
