@@ -85,7 +85,7 @@ import path from 'node:path';
  * verdict, shape by shape.
  *
  * Mutated alone, every clause turns at least one case RED except these (the
- * PR's sweep tables give each one's measurement):
+ * sweep tables in PR #10307's description give each one's measurement):
  *  - the `declarations?.` links in step 3: unreachable, because no compiling
  *    cast's target or operand has a symbol without declarations;
  *  - three mutants that cannot change a result. `d.start ?? -1` -> `d.start!`
@@ -98,9 +98,9 @@ import path from 'node:path';
  *    and with every other member widened the derivation is that member alone;
  *  - the completeness match in the main test, made vacuous: it can only fail
  *    for a derived set whose widening does not close the gap, and the real
- *    derivation's does. It is load-bearing all the same: with deriveGap returning `['onclose']`,
- *    it is what turns the main test RED (the deriveGap fixture cases go RED
- *    as well);
+ *    derivation's does. It is load-bearing all the same: with deriveGap
+ *    returning `['onclose']`, it is what turns the main test RED (the
+ *    deriveGap fixture cases go RED as well);
  *  - three caches that only affect speed.
  */
 
