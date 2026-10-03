@@ -319,7 +319,7 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
       // happened — the QStash extract site captures too, so it could not see
       // this catch losing the userId. There is no providerJobId to report
       // (extracting it is what threw), but the user whose job is now unbound
-      // is in scope and is what an on-call engineer needs to find them.
+      // is in scope and is what whoever investigates the Sentry event needs to find them.
       const handler = makeAsyncHandler({ providerJobId: () => { throw new Error('bad result shape'); } });
       const res = await handler(makeRequest({ prompt: 'a castle' }));
 

@@ -221,7 +221,9 @@ route, at any path, that calls or references a KEY EXPORT of
 from its source on each run (`resolveApiKey`, `resolveByokOrPlatformKey`, and
 any export added later, whatever its initializer), minus the pinned
 `NON_KEY_RESOLVER_EXPORTS` (`ApiKeyError`, `storeProviderKey`,
-`deleteProviderKey`, `listConfiguredProviders`):
+`deleteProviderKey`, `listConfiguredProviders`), each pinned to its exact
+declared return type or as an error class, so changing one fails the test
+until you decide again whether it can carry a key:
 
 - both statements are top-level statements of the handler's own body, ahead of
   the statement holding the key call (`resolveApiKey(...)`), and the verdict is a `const`;
@@ -246,7 +248,10 @@ any export added later, whatever its initializer), minus the pinned
   and the only globals read are those in the test's `ALLOWED_GLOBALS` (`new
   URL(...)`, `Object.keys/values/entries`, `JSON`, `Math`, `Number`, ...;
   never `process` — not even `process.env` — `globalThis`, `global`, `eval`,
-  `Function` or `Reflect`). `constructor`, `prototype` and `__proto__` may not
+  `Function` or `Reflect`). A `declare const process: any` (or `declare
+  global`, or a type-only import) does not make the name local, since it emits
+  nothing, and any `declare` statement is reported; `Reflect.get<T>` is a read
+  of `Reflect`. `constructor`, `prototype` and `__proto__` may not
   appear in the file, and an element access or a destructuring key takes a
   literal name (`x[0]`, `x['a']`, never `x[k]` or `const { [k]: f } = x`),
   because each is a path to `Function` and so to every global; `import.meta`

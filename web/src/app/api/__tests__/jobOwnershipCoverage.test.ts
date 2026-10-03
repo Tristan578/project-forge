@@ -25,9 +25,13 @@
  * exports are DERIVED from `@/lib/keys/resolver`'s source on every run: every
  * exported VALUE binding, whatever its initializer (a function, a const alias
  * `= getPlatformKey`, a call result, a `satisfies`/`as` expression, a
- * `let`/`var`, `export default` keyed `default`, an export list, a class),
- * except the pinned `NON_KEY_RESOLVER_EXPORTS` (each re-checked to be a
- * function declaring a return type naming no key, or a plain error class);
+ * `let`/`var`, `export default` keyed `default`, an export list — including
+ * one naming a value that shares its name with a type or interface — a class),
+ * except the pinned `NON_KEY_RESOLVER_EXPORTS`, each pinned to what was
+ * DECIDED about it and re-checked: a plain error class, or a non-generic
+ * function whose declared return type is EXACTLY the pinned text (any change,
+ * `Promise<any>` or an alias of `string` included, fails until someone
+ * re-decides) with every type name in it still bound where it was;
  * types are not values, and an `export * from` refuses to derive at all —
  * `resolveApiKey` and `resolveByokOrPlatformKey` today, and any export added
  * later. "Calls" counts
@@ -101,7 +105,12 @@
  *   (`process.getBuiltinModule('module').createRequire(...)('next/headers')`),
  *   so the GLOBALS are whitelisted the same way (`ALLOWED_GLOBALS`: `new URL`,
  *   `Object.keys/values/entries`, `JSON`, `Math`, ...; never `process`,
- *   `globalThis`, `global`, `eval`, `Function` or `Reflect`), and the path
+ *   `globalThis`, `global`, `eval`, `Function` or `Reflect`; a name counts
+ *   as local only when this file gives it a binding that exists at run time,
+ *   so `declare const process: any`, `declare global { var process }` or a
+ *   type-only import does not make `process` local, and any `declare`
+ *   statement is reported outright; an instantiation expression such as
+ *   `Reflect.get<object, string>` is a read of `Reflect`), and the path
  *   from any value to `Function` is closed: no `constructor`, `prototype` or
  *   `__proto__` anywhere in the file, every element access and computed
  *   property name (`const { [k]: F } = fn`) takes a literal name, and
@@ -141,6 +150,11 @@
  *   spellings in the GLOBAL test below; a host that exposes module loading
  *   through an allowed value would not be seen.
  * - Whether an exemption's REASON is true beyond the property re-checked here.
+ * - That a pinned non-key export's BODY honours its declared return type: the
+ *   pin is on the declaration (exact text, names bound where they were), so
+ *   `return key as unknown as void` would pass it, and the definition of a
+ *   type the pin names from another module (`Provider`, in `@/lib/db/schema`)
+ *   is not re-read.
  */
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -156,6 +170,9 @@ const APP_ROOT = path.join(WEB_ROOT, 'src', 'app');
 /** Every file name Next.js routes — the same set `egressGuardCoverage.test.ts` walks. */
 const ROUTE_FILE = /^route\.(?:ts|tsx|js|jsx|mjs)$/;
 
+/** Own-property lookup, so a pinned map keyed by a name like `constructor` reads only what it declares. */
+const hasOwn = (obj: object, key: string): boolean => Object.prototype.hasOwnProperty.call(obj, key);
+
 const RESOLVER_MODULE = '@/lib/keys/resolver';
 const RESOLVE = 'resolveApiKey';
 /** The resolver's uncharged BYOK-or-platform lookup: a key with no tier, balance or charge in front of it. */
@@ -164,14 +181,44 @@ const RESOLVE_BYOK = 'resolveByokOrPlatformKey';
  * The resolver's exports that return NO key, pinned. Every OTHER exported
  * value binding of the resolver module — whatever its initializer — is
  * treated as key-returning (see `KEY_EXPORTS`), so a new export selects its
- * callers until someone decides here that it returns no key. Each entry is
- * re-checked, in EVERY declaration of the name, to still be either a function
- * declaration or a `const` bound straight to a function, with a declared
- * return type naming neither `string` nor `ResolvedKey`, or an error class
- * (`extends Error`, a constructor and nothing else, no `return`) — so the pin
- * cannot be kept by an alias, a call result or a cast of something that does.
+ * callers until someone decides here that it returns no key. Each entry pins
+ * WHAT was decided, and is re-checked in EVERY declaration of the name:
+ *
+ * - `{ returns }`: a function declaration, or a `const` bound straight to a
+ *   function, with no type parameters, whose declared return type is EXACTLY
+ *   this text (whitespace collapsed). ANY change — `Promise<Secret>` through a
+ *   `type Secret = string`, `Promise<any>`, `Promise<unknown>`,
+ *   `Promise<{ k: Secret }>` — fails, and forces someone to decide again
+ *   whether the new type carries a key. A deny-list on the type's text cannot
+ *   do that: the ways to spell a string type are unbounded (#9736). Every type
+ *   NAME the pinned text references must also still bind where
+ *   `NON_KEY_TYPE_ORIGINS` says, so the text cannot keep its meaning-free
+ *   spelling while a local `type Date = string` changes what it means.
+ * - `'error-class'`: a class that `extends Error` with a constructor and
+ *   nothing else, and no `return` (so `new X()` is that error).
+ *
+ * So the pin cannot be kept by an alias, a call result, a cast, a changed
+ * return type or a redefined type name.
  */
-const NON_KEY_RESOLVER_EXPORTS: readonly string[] = ['ApiKeyError', 'storeProviderKey', 'deleteProviderKey', 'listConfiguredProviders'];
+type NonKeyPin = 'error-class' | { returns: string };
+const NON_KEY_RESOLVER_EXPORTS: Readonly<Record<string, NonKeyPin>> = {
+  ApiKeyError: 'error-class',
+  storeProviderKey: { returns: 'Promise<void>' },
+  deleteProviderKey: { returns: 'Promise<void>' },
+  listConfiguredProviders: { returns: 'Promise<{ provider: Provider; createdAt: Date }[]>' },
+};
+/**
+ * Where each type name a pinned `returns` text references must be bound in the
+ * resolver's source: `'global'` (declared and imported NOWHERE at its top
+ * level, so it is the lib's), or the specifier of the import that must bind it
+ * under that same name. `Provider` is `@/lib/db/schema`'s union of the
+ * provider-enum literals; that module's definition is not re-read here.
+ */
+const NON_KEY_TYPE_ORIGINS: Readonly<Record<string, string>> = {
+  Promise: 'global',
+  Date: 'global',
+  Provider: '../db/schema',
+};
 /** The one framework module a selected route may import (see `moduleInputProblems`). */
 const NEXT_SERVER_MODULE = 'next/server';
 const SRC_ROOT = path.join(WEB_ROOT, 'src');
@@ -243,6 +290,8 @@ export interface ResolverExport {
    * result, a wrapped or cast expression, a `let`/`var`, a re-export.
    */
   returnType: string | undefined;
+  /** The function above declares type parameters (`<Promise>` would rebind a name its return type spells). */
+  generic: boolean;
   /**
    * An exported class that `extends Error` and whose only member is a
    * constructor with no `return` (so `new X()` is that error, nothing else).
@@ -286,15 +335,33 @@ export function resolverValueExports(source: string): ResolverExport[] {
     forEachDescendant(c, (n) => { if (ts.isReturnStatement(n)) returns = true; });
     return extendsError && !returns && c.members.length === 1 && ts.isConstructorDeclaration(c.members[0]);
   };
-  // Local names with no value, for `export { X }`.
+  // `export { X }` skips X only when X is a type and NOTHING ELSE: a type or
+  // interface can share its name with a value (`interface K {}` + `const K =
+  // getPlatformKey`), and the export list then exports the value too. Every
+  // top-level name with a value declaration — var/let/const (any binding
+  // pattern), function, class, enum, namespace, or a non-type-only import or
+  // `import =` — counts as a value.
   const typeLocals = new Set<string>();
+  const valueLocals = new Set<string>();
   for (const st of sf.statements) {
     if (ts.isInterfaceDeclaration(st) || ts.isTypeAliasDeclaration(st)) typeLocals.add(st.name.text);
+    else if (ts.isVariableStatement(st)) st.declarationList.declarations.forEach((d) => boundNames(d.name).forEach((n) => valueLocals.add(n)));
+    else if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st)) && st.name) valueLocals.add(st.name.text);
+    else if ((ts.isEnumDeclaration(st) || ts.isModuleDeclaration(st)) && ts.isIdentifier(st.name)) valueLocals.add(st.name.text);
+    else if (ts.isImportEqualsDeclaration(st) && !st.isTypeOnly) valueLocals.add(st.name.text);
+    else if (ts.isImportDeclaration(st) && st.importClause && !st.importClause.isTypeOnly) {
+      const clause = st.importClause;
+      if (clause.name) valueLocals.add(clause.name.text);
+      const nb = clause.namedBindings;
+      if (nb && ts.isNamespaceImport(nb)) valueLocals.add(nb.name.text);
+      if (nb && ts.isNamedImports(nb)) nb.elements.forEach((el) => { if (!el.isTypeOnly) valueLocals.add(el.name.text); });
+    }
   }
-  const value = (name: string, returnType?: string): ResolverExport => ({ name, returnType, errorClass: false });
+  const typeOnlyLocal = (name: string) => typeLocals.has(name) && !valueLocals.has(name);
+  const value = (name: string, returnType?: string, generic = false): ResolverExport => ({ name, returnType, generic, errorClass: false });
   for (const st of sf.statements) {
     if (ts.isFunctionDeclaration(st) && exported(st)) {
-      out.push(value(exportName(st, st.name?.text), st.type?.getText(sf)));
+      out.push(value(exportName(st, st.name?.text), st.type?.getText(sf), !!st.typeParameters?.length));
     } else if (ts.isClassDeclaration(st) && exported(st)) {
       out.push({ ...value(exportName(st, st.name?.text)), errorClass: errorClass(st) });
     } else if (ts.isVariableStatement(st) && exported(st)) {
@@ -304,7 +371,7 @@ export function resolverValueExports(source: string): ResolverExport[] {
         while (init && ts.isParenthesizedExpression(init)) init = init.expression;
         const fn = constList && ts.isIdentifier(d.name) && !d.type && init
           && (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) ? init : undefined;
-        for (const name of boundNames(d.name)) out.push(value(name, fn?.type?.getText(sf)));
+        for (const name of boundNames(d.name)) out.push(value(name, fn?.type?.getText(sf), !!fn?.typeParameters?.length));
       }
     } else if (ts.isExportAssignment(st)) {
       // `export default <expr>` (and `export = <expr>`): a value, whatever it is.
@@ -323,7 +390,7 @@ export function resolverValueExports(source: string): ResolverExport[] {
       }
       for (const el of st.exportClause.elements) {
         if (el.isTypeOnly) continue;
-        if (!st.moduleSpecifier && typeLocals.has((el.propertyName ?? el.name).text)) continue;
+        if (!st.moduleSpecifier && typeOnlyLocal((el.propertyName ?? el.name).text)) continue;
         out.push(value(el.name.text));
       }
     }
@@ -333,25 +400,96 @@ export function resolverValueExports(source: string): ResolverExport[] {
 
 /** The resolver's key-returning exports: every exported value binding but the pinned `NON_KEY_RESOLVER_EXPORTS`. */
 export function keyExportsOf(exports: readonly ResolverExport[]): Set<string> {
-  return new Set(exports.map((e) => e.name).filter((name) => !NON_KEY_RESOLVER_EXPORTS.includes(name)));
+  return new Set(exports.map((e) => e.name).filter((name) => !hasOwn(NON_KEY_RESOLVER_EXPORTS, name)));
+}
+
+/** Whitespace-collapsed type text, so a reflow is not a change of type. */
+const typeText = (t: string) => t.replace(/\s+/g, ' ').trim();
+
+/**
+ * Every top-level binding of `name` in a module's source, each described as
+ * `import from '<specifier>'` (under the same imported name) or `local`.
+ */
+function topLevelBindingsOf(sf: ts.SourceFile, name: string): string[] {
+  const found: string[] = [];
+  const bindingNames = (b: ts.BindingName): string[] => (ts.isIdentifier(b)
+    ? [b.text]
+    : (b.elements as ts.NodeArray<ts.ArrayBindingElement>).flatMap((el) => (ts.isOmittedExpression(el) ? [] : bindingNames(el.name))));
+  for (const st of sf.statements) {
+    if (ts.isImportDeclaration(st) && st.importClause && ts.isStringLiteral(st.moduleSpecifier)) {
+      const { name: def, namedBindings: nb } = st.importClause;
+      if (def?.text === name || (nb && ts.isNamespaceImport(nb) && nb.name.text === name)) found.push('local');
+      if (nb && ts.isNamedImports(nb)) {
+        for (const el of nb.elements) {
+          if (el.name.text !== name) continue;
+          found.push(!el.propertyName || el.propertyName.text === name ? `import from '${st.moduleSpecifier.text}'` : 'local');
+        }
+      }
+    } else if (ts.isVariableStatement(st)) {
+      if (st.declarationList.declarations.some((d) => bindingNames(d.name).includes(name))) found.push('local');
+    } else if ((ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st) || ts.isInterfaceDeclaration(st)
+      || ts.isTypeAliasDeclaration(st) || ts.isEnumDeclaration(st) || ts.isModuleDeclaration(st)
+      || ts.isImportEqualsDeclaration(st)) && st.name && ts.isIdentifier(st.name) && st.name.text === name) {
+      found.push('local');
+    } else if (ts.isModuleDeclaration(st) && (st.flags & ts.NodeFlags.GlobalAugmentation) !== 0) {
+      // `declare global { type Date = string }` rebinds a global name too.
+      forEachDescendant(st, (n) => {
+        if ((ts.isTypeAliasDeclaration(n) || ts.isInterfaceDeclaration(n) || ts.isVariableDeclaration(n))
+          && ts.isIdentifier(n.name) && n.name.text === name) found.push('local');
+      });
+    }
+  }
+  return found;
+}
+
+/** The type names a type text references (the leftmost identifier of each type reference). */
+function typeNamesIn(text: string): string[] {
+  const sf = ts.createSourceFile('t.ts', `type __Pinned = ${text};`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const names = new Set<string>();
+  forEachDescendant(sf, (n) => {
+    if (!ts.isTypeReferenceNode(n)) return;
+    let e: ts.EntityName = n.typeName;
+    while (ts.isQualifiedName(e)) e = e.left;
+    names.add(e.text);
+  });
+  return [...names];
 }
 
 /**
  * Why a pinned `NON_KEY_RESOLVER_EXPORTS` name can no longer be trusted to
- * return no key: it is not exported, or ANY declaration of it is neither a
- * function with a declared non-key return type nor an error class.
+ * return no key: it is not exported; ANY declaration of it is not the pinned
+ * kind (an error class, or a non-generic function whose declared return type
+ * is EXACTLY the pinned text); or a type name that text references no longer
+ * binds where `NON_KEY_TYPE_ORIGINS` says.
  */
-export function nonKeyPinProblems(exports: readonly ResolverExport[]): string[] {
+export function nonKeyPinProblems(source: string): string[] {
+  const exports = resolverValueExports(source);
+  const sf = ts.createSourceFile('resolver.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const problems: string[] = [];
-  for (const name of NON_KEY_RESOLVER_EXPORTS) {
+  for (const [name, pin] of Object.entries(NON_KEY_RESOLVER_EXPORTS)) {
     const declared = exports.filter((e) => e.name === name);
     if (declared.length === 0) problems.push(`${name}: pinned as a non-key export but not exported`);
     for (const e of declared) {
-      if (e.errorClass) continue;
-      if (!e.returnType) {
+      if (pin === 'error-class') {
+        if (!e.errorClass) problems.push(`${name}: pinned as an error class but is not one (extends Error, a constructor only, no return)`);
+      } else if (!e.returnType) {
         problems.push(`${name}: pinned as a non-key export but is not a function declaration or a const function with a declared return type`);
-      } else if (/\bstring\b|ResolvedKey/.test(e.returnType)) {
-        problems.push(`${name}: pinned as a non-key export but its return type (${e.returnType}) can carry a key`);
+      } else if (typeText(e.returnType) !== typeText(pin.returns)) {
+        problems.push(`${name}: pinned as returning ${pin.returns} but declares ${e.returnType}: decide whether the new type `
+          + 'can carry a key, then re-pin it here (or drop the pin, which makes it a key export)');
+      } else if (e.generic) {
+        problems.push(`${name}: pinned as a non-key export but declares type parameters, which can rebind a name its return type spells`);
+      }
+    }
+    if (pin === 'error-class') continue;
+    for (const typeName of typeNamesIn(pin.returns)) {
+      const origin = hasOwn(NON_KEY_TYPE_ORIGINS, typeName) ? NON_KEY_TYPE_ORIGINS[typeName] : undefined;
+      const bindings = topLevelBindingsOf(sf, typeName);
+      if (!origin) {
+        problems.push(`${name}: its pinned return type names ${typeName}, which has no NON_KEY_TYPE_ORIGINS entry`);
+      } else if (origin === 'global' ? bindings.length > 0 : bindings.join() !== `import from '${origin}'`) {
+        problems.push(`${name}: its pinned return type names ${typeName}, which must bind to `
+          + `${origin === 'global' ? 'the global' : `an import from '${origin}'`} but binds to [${bindings.join(', ')}]`);
       }
     }
   }
@@ -360,7 +498,8 @@ export function nonKeyPinProblems(exports: readonly ResolverExport[]): string[] 
 
 const RESOLVER_FILE = canonicalModuleFile(RESOLVER_MODULE);
 if (!RESOLVER_FILE) throw new Error(`${RESOLVER_MODULE} does not resolve: the gate cannot derive the key-returning exports`);
-const RESOLVER_EXPORTS = resolverValueExports(readFileSync(RESOLVER_FILE, 'utf8'));
+const RESOLVER_SOURCE = readFileSync(RESOLVER_FILE, 'utf8');
+const RESOLVER_EXPORTS = resolverValueExports(RESOLVER_SOURCE);
 /**
  * Every name a key comes out of: derived from the resolver module's exports
  * at run time, so a new key-returning export selects its callers without an
@@ -870,9 +1009,15 @@ function moduleInputProblems(b: Bound): string[] {
  * 'return process')()` — so, like the module rule, this is a whitelist of the
  * ways in, not a list of the known escapes (#9736):
  *
- * - an identifier that resolves to no declaration in the file (a global) must
- *   be one of these, used only in the way listed: `'value'` any use; `'new'`
- *   only as `new X(...)`; a member list only as `X.<member>(...)`;
+ * - an identifier that resolves to no declaration in the file that EMITS A
+ *   RUN-TIME BINDING (a global: an ambient `declare`, a type or a type-only
+ *   import binds nothing, see `emitsRuntimeBinding`) must be one of these,
+ *   used only in the way listed: `'value'` any use; `'new'` only as
+ *   `new X(...)`; a member list only as `X.<member>(...)`. An instantiation
+ *   expression (`Reflect.get<T>`) is a read like any other;
+ * - a `declare` statement (and so `declare global` / `declare module`) is
+ *   reported wherever it appears: it emits nothing, so in a route it can only
+ *   be there to let the compiler accept a read of a global;
  * - no identifier, property name or string anywhere in the file is
  *   `constructor`, `prototype` or `__proto__` (the path from ANY value to
  *   `Function`, and so to every global);
@@ -900,19 +1045,64 @@ const ALLOWED_GLOBALS: Readonly<Record<string, 'value' | 'new' | readonly string
 };
 const FUNCTION_PATH_NAMES = new Set(['constructor', 'prototype', '__proto__']);
 
-/** Is `n` in a TYPE position (erased, so it reads nothing at run time)? */
+/**
+ * Is `n` in a TYPE position (erased, so it reads nothing at run time)?
+ *
+ * An `ExpressionWithTypeArguments` is a type only in an `implements` clause
+ * (an interface's `extends` is inside an interface declaration, already a
+ * type). A class `extends X<T>` evaluates `X`, and OUTSIDE a heritage clause
+ * the node is an INSTANTIATION EXPRESSION — `Reflect.get<object, string>`,
+ * `structuredClone<T>` — which reads its expression at run time exactly as
+ * `Reflect.get` does; only the type arguments are erased.
+ */
 function isTypePosition(n: ts.Node): boolean {
-  if (ts.isExpressionWithTypeArguments(n) && ts.isHeritageClause(n.parent)
-    && n.parent.token === ts.SyntaxKind.ExtendsKeyword && ts.isClassLike(n.parent.parent)) return false;
+  if (ts.isExpressionWithTypeArguments(n)) {
+    return ts.isHeritageClause(n.parent) && n.parent.token === ts.SyntaxKind.ImplementsKeyword;
+  }
   return ts.isTypeNode(n) || ts.isInterfaceDeclaration(n) || ts.isTypeAliasDeclaration(n)
     || ts.isImportDeclaration(n) || ts.isExportDeclaration(n);
+}
+
+/**
+ * Does `d` create a binding AT RUN TIME? An ambient declaration — `declare
+ * const process: any`, `declare function eval(...)`, anything inside
+ * `declare global { ... }` or `declare module '...' { ... }` — emits nothing, so at
+ * run time the name it "declares" is still the real global. Neither does a
+ * type-only import, a type, an interface, a type parameter or a function
+ * signature with no body.
+ */
+function emitsRuntimeBinding(d: ts.Declaration): boolean {
+  // In an ambient context: the declaration, or any node enclosing it (the
+  // statement of a `declare const`, a `declare global` / `declare module`
+  // block), carries a `declare` modifier.
+  for (let n: ts.Node | undefined = d; n; n = n.parent) {
+    if (ts.canHaveModifiers(n) && (ts.getModifiers(n) ?? []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) return false;
+  }
+  if (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d) || ts.isTypeParameterDeclaration(d)) return false;
+  if (ts.isFunctionDeclaration(d) && !d.body) return false;
+  if (ts.isImportSpecifier(d) && (d.isTypeOnly || d.parent.parent.isTypeOnly)) return false;
+  if ((ts.isImportClause(d) && d.isTypeOnly) || (ts.isNamespaceImport(d) && d.parent.isTypeOnly)) return false;
+  if (ts.isImportEqualsDeclaration(d) && d.isTypeOnly) return false;
+  return true;
 }
 
 function globalInputProblems(b: Bound): string[] {
   const { sf, checker } = b;
   const problems: string[] = [];
-  const declaredHere = (s: ts.Symbol | undefined) => !!s?.declarations?.some((d) => d.getSourceFile() === sf);
+  // A name is LOCAL only when this file gives it a binding that exists at run
+  // time: `declare const process: any` is a type-level claim about the global,
+  // not a shadow of it.
+  const declaredHere = (s: ts.Symbol | undefined) => !!s?.declarations?.some(
+    (d) => d.getSourceFile() === sf && emitsRuntimeBinding(d),
+  );
+  const declaredInFile = (s: ts.Symbol | undefined) => !!s?.declarations?.some((d) => d.getSourceFile() === sf);
   const visit = (n: ts.Node): void => {
+    // A `declare` statement (or `declare global` / `declare module`) is
+    // reported outright: it emits nothing, and its only use in a route is to
+    // make the compiler accept a read of a global the whitelist refuses.
+    if (ts.canHaveModifiers(n) && (ts.getModifiers(n) ?? []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) {
+      problems.push(`${lineOf(sf, n)}: an ambient declaration statement (\`declare\` emits nothing, so the name it declares is still the global)`);
+    }
     if (isTypePosition(n)) return;
     if ((ts.isIdentifier(n) || ts.isStringLiteralLike(n)) && FUNCTION_PATH_NAMES.has(n.text)) {
       problems.push(`${lineOf(sf, n)}: names '${n.text}', the path from any value to Function and so to every global`);
@@ -935,7 +1125,8 @@ function globalInputProblems(b: Bound): string[] {
       && !(ts.isPropertyAccessExpression(n.parent) && n.parent.expression === n && n.parent.name.text === 'url')) {
       problems.push(`${lineOf(sf, n)}: reads import.meta other than import.meta.url (a host object that can load a module)`);
     }
-    if (ts.isIdentifier(n) && !isNamePosition(n) && n.text !== 'arguments' && n.text !== 'require') {
+    // A declaration's own name is not a read; every USE of an ambient one is.
+    if (ts.isIdentifier(n) && !isNamePosition(n) && !isDeclarationName(n) && n.text !== 'arguments' && n.text !== 'require') {
       const symbol = ts.isShorthandPropertyAssignment(n.parent) && n.parent.name === n
         ? checker.getShorthandAssignmentValueSymbol(n.parent)
         : checker.getSymbolAtLocation(n);
@@ -948,6 +1139,7 @@ function globalInputProblems(b: Bound): string[] {
             && allowed.includes(p.name.text) && ts.isCallExpression(p.parent) && p.parent.expression === p);
         if (!ok) {
           problems.push(`${lineOf(sf, n)}: reads the global '${n.text}'${allowed ? ' in a way not allowed' : ''} `
+            + (declaredInFile(symbol) ? '(its only declarations in this file emit no run-time binding) ' : '')
             + '(a global can fetch a module or the request at run time; see ALLOWED_GLOBALS)');
         }
       }
@@ -1325,7 +1517,6 @@ export function walkRouteFiles(root: string, out: string[] = []): string[] {
   return out;
 }
 
-const hasOwn = (obj: object, key: string): boolean => Object.prototype.hasOwnProperty.call(obj, key);
 
 const relTo = (root: string, file: string): string => path.relative(root, file).split(path.sep).join('/');
 
@@ -1478,6 +1669,7 @@ describe('job-id ownership coverage (#10262)', () => {
       + 'only next/server and app source under web/src (no bare package such as zod, no next/headers; no '
       + 'import(), require, module.require or import =), and reads only the globals in ALLOWED_GLOBALS '
       + '(new URL, Object.keys/values/entries, JSON, Math, ... — never process, globalThis, eval or Function), '
+      + '(a `declare` does not make a global local, and is itself reported), '
       + 'with no constructor/prototype/__proto__, no computed element access or destructuring key, and no '
       + 'import.meta but import.meta.url — move anything else into an '
       + 'app helper under src/lib. See src/lib/generate/jobOwnership.ts and .claude/skills/generate-route/SKILL.md Step 4.',
@@ -1691,7 +1883,7 @@ describe('job-id ownership coverage (#10262)', () => {
         PROVIDER_CALL,
         'client.$1(other)',
       );
-      const variants: Array<[string, string, RegExp, boolean?]> = [
+      const variants: Array<[string, string, RegExp | RegExp[], boolean?]> = [
         ['process.getBuiltinModule', feed(`const nh = process${FETCH};`), /reads the global 'process'/],
         ['globalThis', feed(`const nh = globalThis.process${FETCH};`), /reads the global 'globalThis'/],
         ['a shorthand property', feed(`const box = { process };\nconst nh = box.process${FETCH};`), /reads the global 'process'/],
@@ -1716,6 +1908,37 @@ describe('job-id ownership coverage (#10262)', () => {
         // rule must still report `process` on its own.
         ['process.mainModule', feed("const nh = (process as any).mainModule.require('next/headers');"),
           /reads the global 'process'/, true],
+        // An AMBIENT declaration emits nothing: the name it "declares" is still
+        // the real global at run time. Each is reported twice, by two rules
+        // that each stand alone — the `declare` itself, and the read of a name
+        // whose only declarations here emit no binding — so removing either
+        // rule turns these red (lessons-learned #19).
+        ...([
+          ['declare const process: any', 'declare const process: any;', 'process', `const nh = process${FETCH};`],
+          ['declare const process: NodeJS.Process', 'declare const process: NodeJS.Process;', 'process', `const nh = process${FETCH};`],
+          ['declare global { var process }', 'declare global { var process: NodeJS.Process }', 'process', `const nh = process${FETCH};`],
+          ['declare var globalThis', 'declare var globalThis: any;', 'globalThis', `const nh = globalThis.process${FETCH};`],
+          ['declare function eval', 'declare function eval(source: string): any;', 'eval', `const nh = eval('process')${FETCH};`],
+          ['declare const Reflect', 'declare const Reflect: any;', 'Reflect',
+            "const nh = Reflect.get(Reflect.get(Math, 'max'), 'call');"],
+        ] as const).map(([name, prelude, global, read]): [string, string, RegExp[]] => [
+          name,
+          mutate(feed(read), HANDLER_OPEN, `${prelude}\n$1`),
+          [/: an ambient declaration statement/, new RegExp(`reads the global '${global}' \\(its only declarations in this file emit no run-time binding\\)`)],
+        ]),
+        // A TYPE-ONLY import binds nothing at run time either; there is no
+        // `declare` here, so this one is the binding rule's alone.
+        ['a type-only import', mutate(feed(`const nh = process${FETCH};`), HANDLER_OPEN,
+          "import type { NextRequest as process } from 'next/server';\n$1"),
+        [/reads the global 'process' \(its only declarations in this file emit no run-time binding\)/]],
+        // An INSTANTIATION EXPRESSION reads its expression at run time; only
+        // the type arguments are erased.
+        ['an instantiation expression of Reflect.get', feed("const get = Reflect.get<object, string>;\nconst k = 'con' + 'structor';\n"
+          + `const nh = (get(get(Math, k) as object, k) as (s: string) => () => NodeJS.Process)('return process')()${FETCH};`),
+        /reads the global 'Reflect'/],
+        ['an instantiation expression of structuredClone',
+          feed(`const nh = structuredClone<NodeJS.Process>(undefined as unknown as NodeJS.Process)${FETCH};`),
+          /reads the global 'structuredClone'/],
       ];
       for (const [name, mutated, rule, moduleRuleToo] of variants) {
         expect(mutated, `${r.rel} ${name}`).toContain('client.');
@@ -1724,8 +1947,9 @@ describe('job-id ownership coverage (#10262)', () => {
         // Still a guarded key resolution: only the global rule stands in the way.
         expect(analysis.unguarded, `${r.rel} ${name}`).toEqual([]);
         expect(analysis.untraceable, `${r.rel} ${name}`).toEqual([]);
+        expect(analysis.keyResolutions, `${r.rel} ${name}`).toBeGreaterThan(0);
         const report = analysis.foreignInputs.join('\n');
-        expect(report, `${r.rel} ${name}`).toMatch(rule);
+        for (const one of Array.isArray(rule) ? rule : [rule]) expect(report, `${r.rel} ${name}`).toMatch(one);
         if (!moduleRuleToo) expect(report, `${r.rel} ${name}`).not.toMatch(MODULE_RULE);
       }
     }
@@ -1764,10 +1988,11 @@ describe('job-id ownership coverage (#10262)', () => {
     // the routes also import from the resolver is not.
     expect([...KEY_EXPORTS].sort()).toEqual(expect.arrayContaining([RESOLVE, RESOLVE_BYOK]));
     expect(KEY_EXPORTS.has('ApiKeyError')).toBe(false);
-    // Every pinned non-key export is still a function declaring a non-key
-    // return type, or an error class — so the pin cannot hide a key source.
-    expect(nonKeyPinProblems(RESOLVER_EXPORTS)).toEqual([]);
-    for (const name of NON_KEY_RESOLVER_EXPORTS) {
+    // Every pinned non-key export is still exactly what was decided: an error
+    // class, or a function returning exactly the pinned type, whose type names
+    // still bind where they did — so the pin cannot hide a key source.
+    expect(nonKeyPinProblems(RESOLVER_SOURCE)).toEqual([]);
+    for (const name of Object.keys(NON_KEY_RESOLVER_EXPORTS)) {
       expect(RESOLVER_EXPORTS.some((e) => e.name === name), `${name} is exported`).toBe(true);
       expect(KEY_EXPORTS.has(name), `${name} is pinned as a non-key export`).toBe(false);
     }
@@ -1795,6 +2020,12 @@ describe('job-id ownership coverage (#10262)', () => {
       ['keyModule', "export * as keyModule from './platformKeys';"],
       ['KeyBox', 'export class KeyBox { static get(u: string) { return u; } }'],
       ['KeyMaker', 'export class KeyMaker { make(u: string) { return u; } }'],
+      // A type or interface sharing its name with a VALUE does not hide the
+      // value from an export list.
+      ['resolveMergedKey', 'interface resolveMergedKey { x: 1 }\nconst resolveMergedKey = getPlatformKey;\nexport { resolveMergedKey };'],
+      ['resolveTypeMergedKey', 'type resolveTypeMergedKey = string;\nconst resolveTypeMergedKey = getPlatformKey;\nexport { resolveTypeMergedKey };'],
+      ['resolveFnMergedKey', 'interface resolveFnMergedKey { x: 1 }\nfunction resolveFnMergedKey(u: string) { return u; }\nexport { resolveFnMergedKey };'],
+      ['resolveRenamedMergedKey', 'type MergedLocal = string;\nconst MergedLocal = getPlatformKey;\nexport { MergedLocal as resolveRenamedMergedKey };'],
     ];
     for (const [name, line] of spellings) {
       const added = `${source}\n${line}\n`;
@@ -1812,29 +2043,56 @@ describe('job-id ownership coverage (#10262)', () => {
     expect(() => resolverValueExports(`${source}\nexport * from './platformKeys';\n`)).toThrow(/re-exports a whole module/);
   });
 
-  it('re-checks each NON-KEY pin in every declaration, so an alias, a cast or a key-carrying class cannot keep it', () => {
+  it('re-checks each NON-KEY pin in every declaration, so an alias, a cast, a changed return type or a rebound type name cannot keep it', () => {
     const clean = [
+      "import type { Provider } from '../db/schema';",
       'export class ApiKeyError extends Error {\n  constructor(public code: string, message: string) { super(message); }\n}',
       'export async function storeProviderKey(u: string): Promise<void> { void u; }',
       'export const deleteProviderKey = async (u: string): Promise<void> => { void u; };',
-      'export async function listConfiguredProviders(u: string): Promise<Provider[]> { return [u as Provider]; }',
+      'export async function listConfiguredProviders(u: string): Promise<{ provider: Provider; createdAt: Date }[]> { return [{ provider: u as Provider, createdAt: new Date() }]; }',
     ].join('\n');
-    expect(nonKeyPinProblems(resolverValueExports(clean))).toEqual([]);
-    const variants: Array<[string, RegExp, string]> = [
-      ['a const alias', /^export async function storeProviderKey\(.*$/m, 'export const storeProviderKey = resolveApiKey;'],
-      ['a key return type', /Promise<void> \{ void u; \}$/m, 'Promise<string> { return u; }'],
+    expect(nonKeyPinProblems(clean)).toEqual([]);
+    // A reflow is not a change of type.
+    expect(nonKeyPinProblems(mutate(clean, /Promise<\{ provider: Provider; createdAt: Date \}\[\]>/,
+      'Promise<{\n  provider: Provider;\n  createdAt: Date\n}[]>'))).toEqual([]);
+    const RETYPED = /pinned as returning .* but declares/;
+    const variants: Array<[string, RegExp, string, RegExp]> = [
+      ['a const alias', /^export async function storeProviderKey\(.*$/m, 'export const storeProviderKey = resolveApiKey;', /is not a function declaration/],
+      ['a key return type', /Promise<void> \{ void u; \}$/m, 'Promise<string> { return u; }', RETYPED],
+      // The deny-list this replaced (`/\bstring\b|ResolvedKey/` on the text)
+      // passed every one of these four.
+      ['a string through a type alias', /^export async function storeProviderKey\(u: string\): Promise<void> \{ void u; \}$/m,
+        'type Secret = string;\nexport async function storeProviderKey(u: string): Promise<Secret> { return u; }', RETYPED],
+      ['any', /=> Promise<void> =>|: Promise<void> => \{/, ': Promise<any> => {', RETYPED],
+      ['unknown', /: Promise<void> => \{/, ': Promise<unknown> => {', RETYPED],
+      ['a key inside an object type', /^export async function storeProviderKey\(u: string\): Promise<void> \{ void u; \}$/m,
+        'type Secret = string;\nexport async function storeProviderKey(u: string): Promise<{ k: Secret }> { return { k: u }; }', RETYPED],
       ['a cast', /^export const deleteProviderKey = .*$/m,
-        'export const deleteProviderKey = (async (): Promise<void> => {}) as unknown as (u: string) => Promise<string>;'],
-      ['a let', /^export const deleteProviderKey/m, 'export let deleteProviderKey'],
+        'export const deleteProviderKey = (async (): Promise<void> => {}) as unknown as (u: string) => Promise<string>;', /is not a function declaration/],
+      ['a let', /^export const deleteProviderKey/m, 'export let deleteProviderKey', /is not a function declaration/],
+      ['type parameters', /storeProviderKey\(u: string\)/, 'storeProviderKey<Promise>(u: string)', /declares type parameters/],
+      // The pinned TEXT is unchanged; what one of its names MEANS is not.
+      ['a local Date', /^import type \{ Provider \}.*$/m, "$&\ntype Date = string;", /names Date, which must bind to the global/],
+      ['a global-augmented Date', /^import type \{ Provider \}.*$/m, '$&\ndeclare global { type Date = string }', /names Date, which must bind to the global/],
+      ['Provider from another module', /'\.\.\/db\/schema'/, "'./keyTypes'", /names Provider, which must bind to an import from '\.\.\/db\/schema'/],
+      ['a local Provider', /^import type \{ Provider \}.*$/m, 'type Provider = string;', /names Provider, which must bind to an import from/],
+      ['a renamed Provider import', /import type \{ Provider \}/, 'import type { ProviderKey as Provider }', /names Provider, which must bind to an import from/],
       ['a static member', /^export class ApiKeyError extends Error \{$/m,
-        'export class ApiKeyError extends Error {\n  static key(u: string) { return u; }'],
-      ['a constructor that returns', /\{ super\(message\); \}/, '{ super(message); return { key: message }; }'],
-      ['a non-Error base', /extends Error/, 'extends KeyHolder'],
-      ['an unexported pin', /^export async function listConfiguredProviders/m, 'async function listConfiguredProviders'],
+        'export class ApiKeyError extends Error {\n  static key(u: string) { return u; }', /pinned as an error class but is not one/],
+      ['a constructor that returns', /\{ super\(message\); \}/, '{ super(message); return { key: message }; }', /pinned as an error class but is not one/],
+      ['a non-Error base', /extends Error/, 'extends KeyHolder', /pinned as an error class but is not one/],
+      // A pin records WHICH decision was made: a function pin cannot be kept
+      // by turning the export into an error class, nor the reverse.
+      ['a function pin kept by an error class', /^export async function storeProviderKey\(.*$/m,
+        'export class storeProviderKey extends Error {\n  constructor(m: string) { super(m); }\n}', /is not a function declaration/],
+      ['an error-class pin kept by a function', /^export class ApiKeyError extends Error \{\n.*\n\}$/m,
+        'export async function ApiKeyError(): Promise<void> {}', /pinned as an error class but is not one/],
+      ['an unexported pin', /^export async function listConfiguredProviders/m, 'async function listConfiguredProviders', /not exported/],
     ];
-    for (const [name, find, replace] of variants) {
+    for (const [name, find, replace, rule] of variants) {
       const mutated = mutate(clean, find, replace);
-      expect(nonKeyPinProblems(resolverValueExports(mutated)), name).not.toEqual([]);
+      const problems = nonKeyPinProblems(mutated).join('\n');
+      expect(problems, name).toMatch(rule);
     }
   });
 

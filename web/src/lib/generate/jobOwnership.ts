@@ -13,7 +13,8 @@
  * not only `status/`) that calls or references a KEY EXPORT of
  * `@/lib/keys/resolver` — every exported value binding of that module
  * (`resolveApiKey`, `resolveByokOrPlatformKey` today), derived from its
- * source on each run, minus the pinned non-key names. It fails one that
+ * source on each run, minus the pinned non-key names (each pinned to its exact
+ * declared return type, so a changed one fails until re-decided). It fails one that
  * resolves a key without first refusing a non-`'owner'` result of
  * `verifyProviderJobOwner` for the authenticated caller (`withApiMiddleware`'s
  * `userId`, the same user the key is resolved for) on the polled `jobId`, which
@@ -23,7 +24,8 @@
  * `require` or `import =`) and read only the whitelisted globals (`new URL`,
  * `Object.keys/values/entries`, ...; no `process`, `globalThis`, `eval`,
  * `Function`, `constructor` path, computed member or destructuring name, or
- * `import.meta` but `import.meta.url`). The exceptions are
+ * `import.meta` but `import.meta.url`; a `declare` does not make a global
+ * local, and is itself reported). The exceptions are
  * pinned, reasoned exemptions whose property the gate re-checks: a
  * token-charged new operation, a bundled key resolved inside the `execute`
  * step of a charged `createGenerationHandler` generation (sprite's remove.bg
