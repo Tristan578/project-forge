@@ -20,7 +20,14 @@
  * any path, `status/[jobId]/route.ts` and `texture/poll/route.ts` included —
  * is parsed with the script kind its extension implies, and every one that
  * calls `resolveApiKey` (or references it, or imports the resolver module in a
- * way the gate cannot follow) is SELECTED. A selected route must pass every
+ * way the gate cannot follow) is SELECTED. "Calls" counts a named import of
+ * `resolveApiKey` under ANY local name from ANY specifier (`as resolveKey`,
+ * from `@/lib/keys/resolver`, `@/lib/keys/resolver.ts` or a relative path —
+ * over-counting only makes the gate stricter). Where the MODULE is what matters
+ * — a namespace, default, `import =` or dynamic import of the resolver, and the
+ * module each guard callee must come from — the specifier is identified by
+ * tsc's own module resolution with `web/tsconfig.json`'s options, against the
+ * file's real path, never by its spelling. A selected route must pass every
  * rule below, or be in `KEY_RESOLVING_EXEMPTIONS`, where each entry carries a
  * reason AND a structural property the gate re-checks on every run (a
  * token-charged new operation is not a zero-cost status poll; a QStash callback
@@ -57,7 +64,8 @@
  *   whoever the caller names and hand them the platform key;
  * - `verifyProviderJobOwner` and `withApiMiddleware` RESOLVE to the import of
  *   the real export: the callee's symbol, per the TypeScript binder, must be
- *   that import specifier. A same-named const, function, parameter, catch
+ *   that import specifier, in an import whose module tsc resolves to the real
+ *   module's file (a look-alike module is rejected). A same-named const, function, parameter, catch
  *   binding or destructured name in ANY enclosing scope — or a top-level
  *   redeclaration — resolves elsewhere and is rejected (the aliasing class that
  *   defeated the static passes in #9736);
@@ -67,7 +75,9 @@
  *   `const { searchParams } = new URL(request.url)`; `searchParams` only as the
  *   single `const <jobId> = searchParams.get('jobId')`; the middleware result
  *   only as `.error`, `.userId` and `.authContext` (`.body` is caller input);
- *   no second handler argument (route params); no `next/headers` import. So
+ *   no second handler argument (route params); no `arguments` anywhere in the
+ *   handler (`arguments[0]` is the request, `arguments[1]` the route params,
+ *   under a name nothing above looks for); no `next/headers` import. So
  *   whatever the route sends the provider, the only caller-chosen value it can
  *   contain is the id the ownership check ran on. This is a whitelist of the
  *   ways IN, not a list of sinks — the set of sinks is unbounded (#9736).
@@ -121,6 +131,44 @@ const STATUS_CHECK_LITERAL = 'status_check';
 /** The middleware result's fields a selected handler may read. `body` is caller input. */
 const MIDDLEWARE_FIELDS = new Set(['error', 'userId', 'authContext']);
 
+/**
+ * The options `web/tsconfig.json` resolves modules with — `paths` (`@/*`),
+ * `moduleResolution: bundler`, `allowImportingTsExtensions` — so whether a
+ * specifier names a module is decided the way tsc decides it, not by how the
+ * specifier is spelled (`@/lib/keys/resolver`, `@/lib/keys/resolver.ts` and
+ * `../../../../lib/keys/resolver` are one module). Only module resolution reads
+ * these; each per-file program below still loads nothing but the file itself.
+ */
+const TSCONFIG = path.join(WEB_ROOT, 'tsconfig.json');
+const RESOLUTION_OPTIONS: ts.CompilerOptions = (() => {
+  const read = ts.readConfigFile(TSCONFIG, ts.sys.readFile);
+  if (read.error) throw new Error(`cannot read ${TSCONFIG}: ${ts.flattenDiagnosticMessageText(read.error.messageText, '\n')}`);
+  return ts.parseJsonConfigFileContent(read.config, ts.sys, WEB_ROOT, undefined, TSCONFIG).options;
+})();
+const RESOLUTION_CACHE = ts.createModuleResolutionCache(WEB_ROOT, (f) => f, RESOLUTION_OPTIONS);
+
+/** The file `specifier`, written in `containingFile`, resolves to under tsc's rules — or undefined. */
+function resolveModuleFile(specifier: string, containingFile: string): string | undefined {
+  return ts.resolveModuleName(specifier, containingFile, RESOLUTION_OPTIONS, ts.sys, RESOLUTION_CACHE)
+    .resolvedModule?.resolvedFileName;
+}
+
+/**
+ * Where an in-memory source with a bare file name ('route.ts') is taken to
+ * live, so its relative specifiers resolve against a real directory: two
+ * levels under `src/app`, like `api/<name>/route.ts`.
+ */
+const SYNTHETIC_DIR = path.join(APP_ROOT, 'api', '__synthetic__');
+
+/** The file each canonical module specifier resolves to (asserted to exist by the suite). */
+const moduleFileCache = new Map<string, string | undefined>();
+function canonicalModuleFile(moduleName: string): string | undefined {
+  if (!moduleFileCache.has(moduleName)) {
+    moduleFileCache.set(moduleName, resolveModuleFile(moduleName, path.join(SYNTHETIC_DIR, 'route.ts')));
+  }
+  return moduleFileCache.get(moduleName);
+}
+
 /** The script kind Next.js's compiler would give a route file, by extension. */
 function scriptKindFor(fileName: string): ts.ScriptKind {
   switch (path.extname(fileName)) {
@@ -135,6 +183,8 @@ function scriptKindFor(fileName: string): ts.ScriptKind {
 interface Bound {
   sf: ts.SourceFile;
   checker: ts.TypeChecker;
+  /** The real path the source's module specifiers resolve against. */
+  containingFile: string;
 }
 
 /**
@@ -162,16 +212,40 @@ function bind(fileName: string, source: string): Bound {
     options: { noLib: true, noResolve: true, allowJs: true, jsx: ts.JsxEmit.Preserve, types: [] },
     host,
   });
-  return { sf: program.getSourceFile(virtual) ?? sf, checker: program.getTypeChecker() };
+  return {
+    sf: program.getSourceFile(virtual) ?? sf,
+    checker: program.getTypeChecker(),
+    containingFile: path.isAbsolute(fileName) ? fileName : path.join(SYNTHETIC_DIR, fileName),
+  };
 }
 
-/** Local names this module binds to `name` exported from `moduleName`, minus top-level redeclarations. */
-function importedLocalNames(sf: ts.SourceFile, moduleName: string, name: string): Set<string> {
+/**
+ * Does `specifier`, written in `b`'s file, name the module `moduleName` names?
+ * Decided by tsc's module resolution against the file's real location, so any
+ * spelling of the same module — alias, relative, extensioned, `/index` — is
+ * that module, and a specifier that resolves elsewhere (or nowhere) is not.
+ */
+function namesModule(b: Bound, specifier: string, moduleName: string): boolean {
+  if (specifier === moduleName) return true;
+  const target = canonicalModuleFile(moduleName);
+  return !!target && resolveModuleFile(specifier, b.containingFile) === target;
+}
+
+/** `importedLocalNames(..., ANY_MODULE, ...)`: a named import of the export from any specifier at all. */
+const ANY_MODULE = null;
+
+/**
+ * Local names this module binds to `name` exported from `moduleName` (any
+ * spelling of it — see `namesModule`; `ANY_MODULE` for every specifier),
+ * minus top-level redeclarations.
+ */
+function importedLocalNames(b: Bound, moduleName: string | typeof ANY_MODULE, name: string): Set<string> {
+  const { sf } = b;
   const out = new Set<string>();
   for (const statement of sf.statements) {
     if (!ts.isImportDeclaration(statement)) continue;
     if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
-    if (statement.moduleSpecifier.text !== moduleName) continue;
+    if (moduleName !== ANY_MODULE && !namesModule(b, statement.moduleSpecifier.text, moduleName)) continue;
     if (statement.importClause?.isTypeOnly) continue;
     const bindings = statement.importClause?.namedBindings;
     if (!bindings || !ts.isNamedImports(bindings)) continue;
@@ -201,7 +275,7 @@ function importedLocalNames(sf: ts.SourceFile, moduleName: string, name: string)
  * that declaration instead, and is rejected.
  */
 function resolvesToImport(b: Bound, id: ts.Identifier, moduleName: string, exportName: string): boolean {
-  if (!importedLocalNames(b.sf, moduleName, exportName).has(id.text)) return false;
+  if (!importedLocalNames(b, moduleName, exportName).has(id.text)) return false;
   const declarations = b.checker.getSymbolAtLocation(id)?.declarations ?? [];
   if (declarations.length !== 1) return false;
   const spec = declarations[0];
@@ -210,7 +284,7 @@ function resolvesToImport(b: Bound, id: ts.Identifier, moduleName: string, expor
   return ts.isImportDeclaration(decl)
     && !decl.importClause?.isTypeOnly
     && ts.isStringLiteral(decl.moduleSpecifier)
-    && decl.moduleSpecifier.text === moduleName
+    && namesModule(b, decl.moduleSpecifier.text, moduleName)
     && (spec.propertyName ?? spec.name).text === exportName;
 }
 
@@ -331,6 +405,15 @@ function handlerInputs(b: Bound, fn: ts.FunctionLikeDeclaration, body: ts.Block)
   const reqParam = fn.parameters[0];
   const req = reqParam && ts.isIdentifier(reqParam.name) ? reqParam.name.text : undefined;
   if (reqParam && !req) problems.push(`${lineOf(sf, reqParam)}: the request parameter is destructured`);
+  // `arguments` is the request (`arguments[0]`) and the route params
+  // (`arguments[1]`) under a name the rules below never look for. Reported
+  // anywhere in the handler — body or parameter defaults, and inside a nested
+  // function too (an arrow's `arguments` IS the handler's).
+  forEachDescendant(fn, (n) => {
+    if (ts.isIdentifier(n) && n.text === 'arguments' && !isNamePosition(n)) {
+      problems.push(`${lineOf(sf, n)}: reads arguments (the request and the route params, unnamed)`);
+    }
+  });
 
   let urlDecl: ts.VariableDeclaration | undefined;
   let sp: string | undefined;
@@ -527,14 +610,27 @@ export interface StatusRouteAnalysis {
 export function analyseStatusRoute(source: string, fileName = 'route.ts'): StatusRouteAnalysis {
   const b = bind(fileName, source);
   const { sf } = b;
-  const resolveNames = importedLocalNames(sf, RESOLVER_MODULE, RESOLVE);
+  // A named import of `resolveApiKey` under ANY local name, from ANY specifier:
+  // the name is what gets called, and over-counting only makes the gate
+  // stricter. (A specifier that does not resolve to the resolver — an
+  // unrelated module, or a relative path in a copy of the tree — still counts.)
+  const resolveNames = importedLocalNames(b, ANY_MODULE, RESOLVE);
   const out: StatusRouteAnalysis = { keyResolutions: 0, unguarded: [], untraceable: [], foreignInputs: [] };
   const inputs = new Map<ts.FunctionLikeDeclaration, HandlerInputs>();
 
   for (const statement of sf.statements) {
+    // `import keys = require('...')`: a module object, like a namespace import.
+    if (
+      ts.isImportEqualsDeclaration(statement) && !statement.isTypeOnly
+      && ts.isExternalModuleReference(statement.moduleReference)
+      && ts.isStringLiteral(statement.moduleReference.expression)
+      && namesModule(b, statement.moduleReference.expression.text, RESOLVER_MODULE)
+    ) {
+      out.untraceable.push(`${lineOf(sf, statement)}: an import-equals of ${RESOLVER_MODULE}`);
+    }
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
     const clause = statement.importClause;
-    if (statement.moduleSpecifier.text === RESOLVER_MODULE && clause && !clause.isTypeOnly
+    if (namesModule(b, statement.moduleSpecifier.text, RESOLVER_MODULE) && clause && !clause.isTypeOnly
       && (clause.name || (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)))) {
       out.untraceable.push(`${lineOf(sf, statement)}: a default or namespace import of ${RESOLVER_MODULE}`);
     }
@@ -552,7 +648,7 @@ export function analyseStatusRoute(source: string, fileName = 'route.ts'): Statu
       && (node.expression.kind === ts.SyntaxKind.ImportKeyword
         || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
       && node.arguments.length > 0 && ts.isStringLiteralLike(node.arguments[0])
-      && node.arguments[0].text === RESOLVER_MODULE
+      && namesModule(b, node.arguments[0].text, RESOLVER_MODULE)
       && !destructuresWithoutResolve(node)
     ) {
       out.untraceable.push(`${lineOf(sf, node)}: a dynamic import of ${RESOLVER_MODULE}`);
@@ -710,8 +806,9 @@ export const KEY_RESOLVING_EXEMPTIONS: Readonly<Record<string, Exemption>> = {
 const STATUS_ROUTES_RESOLVING_NO_KEY = ['api/generate/music/status/route.ts'];
 
 /** Calls spelled `resolveApiKey` (or `<x>.resolveApiKey`) in a parsed file. */
-function resolveCalls(sf: ts.SourceFile): ts.CallExpression[] {
-  const names = importedLocalNames(sf, RESOLVER_MODULE, RESOLVE);
+function resolveCalls(b: Bound): ts.CallExpression[] {
+  const { sf } = b;
+  const names = importedLocalNames(b, ANY_MODULE, RESOLVE);
   const out: ts.CallExpression[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
@@ -732,7 +829,7 @@ export function exemptionProblems(kind: ExemptionKind, source: string, fileName 
   const b = bind(fileName, source);
   const { sf } = b;
   const problems: string[] = [];
-  const calls = resolveCalls(sf);
+  const calls = resolveCalls(b);
   if (calls.length === 0) problems.push('resolves no key: the exemption is stale');
 
   if (kind === 'charged-new-operation') {
@@ -1084,6 +1181,82 @@ describe('job-id ownership coverage (#10262)', () => {
     }
   });
 
+  it('reports each real status route that reads the request through `arguments`', () => {
+    // `arguments[0]` is the request and `arguments[1]` the route params, under a
+    // name no other rule looks for. Each variant feeds the provider call, and
+    // the unmutated route is clean, so the report comes from the mutation.
+    for (const r of guardedStatus) {
+      expect(analyseStatusRoute(r.source, r.file).foreignInputs, r.rel).toEqual([]);
+      expect(r.source.match(/\barguments\b/g), r.rel).toBeNull();
+      const variants = [
+        mutate(
+          mutate(r.source, POLLED_ID, "$&\n$1const other = new URL(arguments[0].url).searchParams.get('taskId') ?? undefined;"),
+          PROVIDER_CALL,
+          'client.$1(other ?? jobId)',
+        ),
+        mutate(
+          mutate(r.source, POLLED_ID, '$&\n$1const ctx = arguments[1] as { params: Promise<{ id: string }> };'),
+          PROVIDER_CALL,
+          'client.$1((await ctx.params).id)',
+        ),
+      ];
+      for (const mutated of variants) {
+        expect(mutated.match(/\barguments\[/g), r.rel).toHaveLength(1);
+        expect(analyseStatusRoute(mutated, r.file).foreignInputs.join('\n'), r.rel).toMatch(/reads arguments/);
+      }
+    }
+  });
+
+  it('SELECTS each real status route whose resolveApiKey is an ALIAS from another spelling of the resolver module', () => {
+    // The import specifier is not the module: a relative path and a `.ts`
+    // extension (allowImportingTsExtensions) name the same file as
+    // '@/lib/keys/resolver'. With its refusal deleted, every spelling is
+    // selected and reported; with it intact, every spelling is clean — so the
+    // alias is followed into the guard check, not merely counted.
+    const RESOLVER_IMPORT = /^import \{ resolveApiKey(, [^}]*)? \} from '@\/lib\/keys\/resolver';$/m;
+    for (const r of guardedStatus) {
+      const relative = path.relative(path.dirname(r.file), path.join(WEB_ROOT, 'src', 'lib', 'keys', 'resolver'))
+        .split(path.sep).join('/');
+      expect(relative.startsWith('../'), r.rel).toBe(true);
+      for (const specifier of [relative, `${relative}.ts`, '@/lib/keys/resolver.ts', 'unrelated-module']) {
+        const aliased = mutate(
+          mutate(r.source, RESOLVER_IMPORT, `import { resolveApiKey as resolveKey$1 } from '${specifier}';`),
+          /\bresolveApiKey\(/,
+          'resolveKey(',
+        );
+        // No call is still spelled `resolveApiKey`, so only the alias can select it.
+        expect(aliased.match(/\bresolveApiKey\(/g), `${r.rel} ${specifier}`).toBeNull();
+        expect(aliased, `${r.rel} ${specifier}`).toContain(`import { resolveApiKey as resolveKey`);
+        const clean = analyseStatusRoute(aliased, r.file);
+        expect(clean.keyResolutions, `${r.rel} ${specifier}`).toBeGreaterThan(0);
+        expect(clean.unguarded, `${r.rel} ${specifier}`).toEqual([]);
+        expect(clean.untraceable, `${r.rel} ${specifier}`).toEqual([]);
+        const unguardedRoute = analyseStatusRoute(mutate(aliased, GUARD_IF, ''), r.file);
+        expect(unguardedRoute.keyResolutions, `${r.rel} ${specifier}`).toBeGreaterThan(0);
+        expect(unguardedRoute.unguarded, `${r.rel} ${specifier}`).not.toEqual([]);
+      }
+    }
+  });
+
+  it('accepts each real status route whose guard callees are imported through another spelling of the REAL module, and no other', () => {
+    // Module identity is tsc's resolution, not the specifier text: a relative
+    // or extensioned path to jobOwnership.ts is the real check; a look-alike
+    // module (`jobOwnershipResponse`) exporting the same name is not.
+    const OWNERSHIP_IMPORT = /^import \{ verifyProviderJobOwner \} from '@\/lib\/generate\/jobOwnership';$/m;
+    for (const r of guardedStatus) {
+      const relative = path.relative(path.dirname(r.file), path.join(WEB_ROOT, 'src', 'lib', 'generate', 'jobOwnership'))
+        .split(path.sep).join('/');
+      for (const specifier of [relative, '@/lib/generate/jobOwnership.ts']) {
+        const respelled = mutate(r.source, OWNERSHIP_IMPORT, `import { verifyProviderJobOwner } from '${specifier}';`);
+        expect(analyseStatusRoute(respelled, r.file).unguarded, `${r.rel} ${specifier}`).toEqual([]);
+      }
+      for (const specifier of ['@/lib/generate/jobOwnershipResponse', `${relative}Response`, './jobOwnership']) {
+        const lookalike = mutate(r.source, OWNERSHIP_IMPORT, `import { verifyProviderJobOwner } from '${specifier}';`);
+        expect(analyseStatusRoute(lookalike, r.file).unguarded, `${r.rel} ${specifier}`).not.toEqual([]);
+      }
+    }
+  });
+
   it('reports each real POST route with its binding removed', () => {
     for (const r of guardedStatus) {
       const postDir = path.dirname(path.dirname(r.file));
@@ -1150,6 +1323,51 @@ describe('job-id ownership coverage (#10262)', () => {
       expect(byRel.get('api/generate/texture/poll/route.js')?.join('\n')).toMatch(/without an ownership refusal/);
       expect(byRel.get('api/other/check/route.ts')?.join('\n')).toMatch(/POST route in any directory above it/);
       expect(byRel.get('api/generate/texture/status/[jobId]/route.ts')).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('SELECTS a route at a path the poller never dials whose resolveApiKey is an alias from a non-canonical specifier', () => {
+    // Off the STATUS_ENDPOINTS map, so neither floor can name it: only the
+    // selection rule stands between it and a green gate. One spelling is a
+    // relative path out of the copy to the real resolver file; the other is
+    // the probe's own spelling, which in a copy of the tree
+    // resolves NOWHERE and is still selected, because a named import of
+    // resolveApiKey counts whatever its specifier.
+    const root = mkdtempSync(path.join(tmpdir(), 'job-ownership-alias-'));
+    try {
+      const model = guardedStatus.find((a) => a.rel === 'api/generate/model/status/route.ts');
+      expect(model).toBeTruthy();
+      const write = (rel: string, source: string) => {
+        mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+        writeFileSync(path.join(root, rel), source);
+      };
+      for (const post of ['api/generate/model/route.ts', 'api/generate/texture/route.ts']) {
+        write(post, readFileSync(path.join(APP_ROOT, post), 'utf8'));
+      }
+      const RESOLVER_IMPORT = "import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';";
+      const aliasedFrom = (specifier: string) => mutate(
+        mutate(mutate(model!.source, GUARD_IF, ''), /^import \{ resolveApiKey, ApiKeyError \} from '@\/lib\/keys\/resolver';$/m,
+          `import { resolveApiKey as resolveKey, ApiKeyError } from '${specifier}';`),
+        /\bresolveApiKey\(/,
+        'resolveKey(',
+      );
+      expect(model!.source).toContain(RESOLVER_IMPORT);
+      const pollRel = 'api/generate/texture/poll/route.ts';
+      const checkRel = 'api/generate/model/check/route.ts';
+      const realResolver = path.relative(path.join(root, path.dirname(checkRel)), path.join(WEB_ROOT, 'src', 'lib', 'keys', 'resolver'))
+        .split(path.sep).join('/');
+      expect(resolveModuleFile(realResolver, path.join(root, checkRel))).toBe(canonicalModuleFile(RESOLVER_MODULE));
+      write(pollRel, aliasedFrom('../../../../../lib/keys/resolver'));
+      write(checkRel, aliasedFrom(`${realResolver}.ts`));
+      for (const rel of [pollRel, checkRel]) expect(endpoints, rel).not.toContain(urlOf(rel));
+
+      const found = auditKeyResolvingRoutes(root, {});
+      const byRel = new Map(found.map((a) => [a.rel, a.problems]));
+      expect([...byRel.keys()].sort()).toEqual([checkRel, pollRel]);
+      expect(byRel.get(pollRel)?.join('\n')).toMatch(/without an ownership refusal/);
+      expect(byRel.get(checkRel)?.join('\n')).toMatch(/without an ownership refusal/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1339,6 +1557,69 @@ describe('job-id ownership coverage (#10262)', () => {
     expect(analyseStatusRoute(lazy('{ resolveApiKey: rk }')).untraceable).not.toEqual([]);
     expect(analyseStatusRoute(lazy('{ ...resolver }')).untraceable).not.toEqual([]);
     expect(analyseStatusRoute(lazy('resolver')).untraceable).not.toEqual([]);
+  });
+
+  it('identifies the resolver by the IMPORTED NAME under any specifier, and the resolver MODULE by resolution', () => {
+    // Every canonical module the gate compares against resolves to a real file
+    // — otherwise module identity would silently fall back to spelling alone.
+    for (const moduleName of [RESOLVER_MODULE, OWNERSHIP_MODULE, MIDDLEWARE_MODULE, HANDLER_MODULE, QSTASH_MODULE]) {
+      const file = canonicalModuleFile(moduleName);
+      expect(file, moduleName).toBeTruthy();
+      expect(statSync(file!).isFile(), moduleName).toBe(true);
+    }
+    // Analysed as if it lived at a path the poller never dials, so the
+    // relative spellings resolve against src/app/api/generate/texture/poll/.
+    const at = path.join(APP_ROOT, 'api', 'generate', 'texture', 'poll', 'route.ts');
+    const call = (name: string) => `async function GET_impl(request: Request) {\n  await ${name}(u, p, 0, op);\n}\n`;
+    for (const specifier of ['../../../../../lib/keys/resolver', '../../../../../lib/keys/resolver.ts',
+      '@/lib/keys/resolver.ts', './not-the-resolver']) {
+      expect(analyseStatusRoute(`import { resolveApiKey as resolveKey } from '${specifier}';\n${call('resolveKey')}`, at), specifier)
+        .toMatchObject({ keyResolutions: 1, unguarded: ['line 3'] });
+    }
+    // The module object, through any spelling tsc resolves to the resolver.
+    for (const src of [
+      "import * as keys from '../../../../../lib/keys/resolver';\nexport const f = keys;\n",
+      "import keys from '@/lib/keys/resolver.ts';\nexport const f = keys;\n",
+      "import keys = require('../../../../../lib/keys/resolver');\nexport const f = keys;\n",
+      "export async function g() {\n  const m = await import('@/lib/keys/resolver.ts');\n  return m;\n}\n",
+    ]) {
+      expect(analyseStatusRoute(src, at).untraceable, src).toHaveLength(1);
+    }
+    expect(analyseStatusRoute("const m = require('../../../../../lib/keys/resolver');\nmodule.exports = m;\n",
+      at.replace(/\.ts$/, '.js')).untraceable).toHaveLength(1);
+    // ... and NOT a module object of some other module: resolution, not "every namespace import".
+    expect(analyseStatusRoute("import * as keys from '../../../../../lib/keys/encryption';\nexport const f = keys;\n", at))
+      .toEqual({ keyResolutions: 0, unguarded: [], untraceable: [], foreignInputs: [] });
+    // An exemption's re-check counts the alias too, so it is not called stale.
+    expect(exemptionProblems('charged-new-operation',
+      `import { resolveApiKey as rk } from './not-the-resolver';\nasync function f() {\n  await rk(u, p, 5, 'chat');\n}\n`, at))
+      .toEqual([]);
+  });
+
+  it('reports `arguments` anywhere in a key-resolving handler, and not a property named arguments', () => {
+    const imports = "import { resolveApiKey } from '@/lib/keys/resolver';\n"
+      + "import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';\n"
+      + "import { withApiMiddleware } from '@/lib/api/middleware';\n";
+    const head = '  const mid = await withApiMiddleware(request, {});\n'
+      + '  const { searchParams } = new URL(request.url);\n'
+      + "  const jobId = searchParams.get('jobId');\n"
+      + '  const ownership = await verifyProviderJobOwner(mid.userId!, p, jobId);\n'
+      + "  if (ownership !== 'owner') return refuse(ownership);\n";
+    const tail = '  await resolveApiKey(mid.userId!, p, 0, op);\n  return client.status(jobId);\n';
+    const fn = (body: string, params = 'request: Request') => `${imports}async function GET_impl(${params}) {\n${body}}\n`;
+    const foreign = (src: string) => analyseStatusRoute(src).foreignInputs;
+
+    expect(foreign(fn(head + tail))).toEqual([]);
+    expect(foreign(fn(`${head}  const fnMeta = meta.arguments;\n${tail}`))).toEqual([]);
+    for (const src of [
+      fn(`${head}  const other = new URL(arguments[0].url).searchParams.get('taskId');\n${tail}`),
+      fn(`${head}  const { params } = arguments[1];\n${tail}`),
+      fn(`${head}  const all = [...arguments];\n${tail}`),
+      fn(`${head}  const read = () => arguments[1];\n${tail}`),
+      fn(head + tail, 'request: Request = arguments[1]'),
+    ]) {
+      expect(foreign(src).join('\n'), src).toMatch(/reads arguments/);
+    }
   });
 
   it('reads both POST binding spellings, rejects an explicit undefined, and resolves the factory by binding', () => {

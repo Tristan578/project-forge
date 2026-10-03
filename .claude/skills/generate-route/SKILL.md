@@ -230,8 +230,8 @@ route that calls `resolveApiKey`, at any path:
 - `jobId` is the handler's ONLY request input: one `const { searchParams } =
   new URL(request.url)`, one `const jobId = searchParams.get('jobId')`, and the
   provider is sent that `jobId`. A second `searchParams.get(...)`,
-  `request.nextUrl`, `request.json()`, `mid.body`, a route-params argument or
-  `next/headers` is reported, because the provider could then be sent an id
+  `request.nextUrl`, `request.json()`, `mid.body`, a route-params argument,
+  `arguments` or `next/headers` is reported, because the provider could then be sent an id
   the check never ran on;
 - import `verifyProviderJobOwner` and `withApiMiddleware` and call them by
   that binding. A local of the same name, in any scope, is rejected.
