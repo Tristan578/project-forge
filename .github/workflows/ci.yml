@@ -2465,16 +2465,28 @@ jobs:
           # report cache-hit and skip the Firefox/WebKit install (#9610).
           key: playwright-all-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
+      # Three engines' apt deps make this the slowest install in CI: on
+      # 2026-10-01 a slow runner needed 445s for the deps step alone, and nine
+      # job runs failed when the 660s default budget ran out while a timed-out
+      # attempt's orphaned apt-get was still finishing the install. The job's
+      # 30-minute timeout has room for a larger budget. Keep the budget on the
+      # step: scripts/__tests__/install-playwright-ci.test.sh checks that each
+      # step's budget + 45s (15s kill grace + 30s step startup) fits its
+      # timeout-minutes, and fails on a budget set at job or workflow level.
       - name: Install Playwright browsers (chromium, firefox, webkit)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 12
+        timeout-minutes: 18
         working-directory: web
+        env:
+          PLAYWRIGHT_INSTALL_BUDGET_SECONDS: '1020'
         run: bash ../scripts/install-playwright-ci.sh browsers chromium firefox webkit
 
       - name: Install Playwright OS deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 12
+        timeout-minutes: 18
         working-directory: web
+        env:
+          PLAYWRIGHT_INSTALL_BUDGET_SECONDS: '1020'
         run: bash ../scripts/install-playwright-ci.sh deps chromium firefox webkit
 
       - name: Build for cross-browser E2E
