@@ -156,6 +156,9 @@ expect_one_fail other-name \
   '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/xon-stop.sh"}]}}' \
   'no hook runs on-stop.sh on an end-of-turn event' \
   "a script whose name only ENDS in on-stop.sh does not count as on-stop.sh"
+expect_pass other-name-elsewhere \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}],"postToolUse":[{"type":"command","bash":"bash .claude/hooks/xon-stop.sh"}]}}' \
+  "a script whose name only ENDS in on-stop.sh may run on a per-tool event"
 mkcase gone-on-stop '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh"}]}}'
 rm "$TMP/gone-on-stop/root/.claude/hooks/on-stop.sh"
 run gone-on-stop
