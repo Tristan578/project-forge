@@ -1068,10 +1068,13 @@ function isTypePosition(n: ts.Node): boolean {
  * const process: any`, `declare function eval(...)`, anything inside
  * `declare global { ... }` or `declare module '...' { ... }` — emits nothing, so at
  * run time the name it "declares" is still the real global. Neither does a
- * type-only import (any of its four spellings) or a function signature with
- * no body. A local interface, type alias or type parameter needs no branch:
- * it has no value meaning, so the checker never lists it among the
- * declarations of the value a read resolves to.
+ * type-only import (in any spelling), a function signature with no body, or
+ * an interface, type alias or type parameter. The last three matter through
+ * DECLARATION MERGING: `interface eval {}` plus a bodiless `function eval(...)`
+ * is one symbol, which the checker lists for the value read, so without that
+ * branch the interface would make `eval` look local. (They also make
+ * `export default <local type name>` reported, a harmless false positive: both
+ * emitters drop that statement.)
  */
 function emitsRuntimeBinding(d: ts.Declaration): boolean {
   // In an ambient context: the declaration, or any node enclosing it (the
@@ -1080,6 +1083,7 @@ function emitsRuntimeBinding(d: ts.Declaration): boolean {
   for (let n: ts.Node | undefined = d; n; n = n.parent) {
     if (ts.canHaveModifiers(n) && (ts.getModifiers(n) ?? []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) return false;
   }
+  if (ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d) || ts.isTypeParameterDeclaration(d)) return false;
   if (ts.isFunctionDeclaration(d) && !d.body) return false;
   if (ts.isImportSpecifier(d) && (d.isTypeOnly || d.parent.parent.isTypeOnly)) return false;
   if ((ts.isImportClause(d) && d.isTypeOnly) || (ts.isNamespaceImport(d) && d.parent.isTypeOnly)) return false;
@@ -1929,9 +1933,9 @@ describe('job-id ownership coverage (#10262)', () => {
         ]),
         // A TYPE-ONLY import, or a function signature with no body, binds
         // nothing at run time either; there is no `declare` here, so these are
-        // the binding rule's alone. One spelling per branch of
-        // emitsRuntimeBinding, so deleting any single branch turns its own
-        // case red (lessons-learned #19).
+        // the binding rule's alone. At least one spelling per non-ambient
+        // branch of emitsRuntimeBinding, so deleting any single branch turns a
+        // case of its own red (lessons-learned #19).
         ...([
           ['a type-only import', "import type { NextRequest as process } from 'next/server';", 'process', `const nh = process${FETCH};`],
           ['an inline type-only import specifier', "import { type NextRequest as process } from 'next/server';", 'process', `const nh = process${FETCH};`],
@@ -1939,6 +1943,13 @@ describe('job-id ownership coverage (#10262)', () => {
           ['a type-only namespace import', "import type * as process from 'next/server';", 'process', `const nh = process${FETCH};`],
           ['a type-only import-equals', "import type process = require('next/server');", 'process', `const nh = process${FETCH};`],
           ['a bodiless function signature', 'function eval(source: string): any;', 'eval', `const nh = eval('process')${FETCH};`],
+          // Each type-only declaration MERGED with a non-binding value
+          // declaration: one symbol, so `.some(emitsRuntimeBinding)` would
+          // count the type half as a local binding without its own branch.
+          ['an interface merged with a bodiless signature', 'interface eval { x: 1 }\nfunction eval(source: string): any;', 'eval', `const nh = eval('process')${FETCH};`],
+          ['a type alias merged with a bodiless signature', 'type eval = { x: 1 };\nfunction eval(source: string): any;', 'eval', `const nh = eval('process')${FETCH};`],
+          ['a type parameter merged with a bodiless signature', "function g<eval>(): any { function eval(source: string): any; return eval('process'); }", 'eval', `const nh = g()${FETCH};`],
+          ['an interface merged with a type-only import', "import type { NextRequest as process } from 'next/server';\ninterface process { x: 1 }", 'process', `const nh = process${FETCH};`],
         ] as const).map(([name, prelude, global, read]): [string, string, RegExp] => [
           name,
           mutate(feed(read), HANDLER_OPEN, `${prelude}\n$1`),
