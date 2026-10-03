@@ -118,9 +118,11 @@ const SCROLLER_CLASS = /(^|\s)(overflow-(y-)?(auto|scroll)|max-h-\S+)(\s|$)/;
 /**
  * Asserts a gate's action button stays reachable inside the Dialog: walking
  * up from it to the dialog panel, the ONLY scroll container / height bound is
- * the Dialog body, and the button sits in a `sticky bottom-0` footer whose
+ * the Dialog body, and the button sits in a `sticky bottom-0` action row whose
  * nearest scroll container is that body (so it pins to the body's visible
- * bottom edge rather than scrolling away with the summary).
+ * bottom edge rather than scrolling away with the summary). That row holds
+ * only buttons: a sticky block taller than the scrollport has a part no
+ * scroll offset reveals, so the cost and notices must stay out of it.
  */
 function expectActionsReachable(button: HTMLElement) {
   const dialog = screen.getByRole('dialog');
@@ -143,11 +145,15 @@ function expectActionsReachable(button: HTMLElement) {
   const nested = inside.filter((el) => SCROLLER_CLASS.test(el.getAttribute('class') ?? ''));
   expect(nested.map((el) => el.outerHTML.slice(0, 120))).toEqual([]);
 
-  const footer = button.closest('[data-testid="approval-gate-footer"]');
-  expect(footer).not.toBeNull();
-  expect(footer?.classList.contains('sticky')).toBe(true);
-  expect(footer?.classList.contains('bottom-0')).toBe(true);
-  expect(body?.contains(footer as Node)).toBe(true);
+  const row = button.closest<HTMLElement>('.sticky');
+  expect(row).not.toBeNull();
+  expect(row?.classList.contains('bottom-0')).toBe(true);
+  expect(body?.contains(row as Node)).toBe(true);
+  // One sticky element in the body, and it is a row of buttons only.
+  expect(Array.from(body?.querySelectorAll('.sticky') ?? [])).toEqual([row]);
+  const rowChildren = Array.from(row?.children ?? []);
+  expect(rowChildren).toContain(button);
+  expect(rowChildren.map((el) => el.tagName)).toEqual(['BUTTON', 'BUTTON']);
 }
 
 /** Walks the dialog from the type cards to the prompt step. */
@@ -603,14 +609,29 @@ describe('QuickStartDialog', () => {
       expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
     });
 
-    it('keeps "Build it" and its cost reachable: one scroller (the Dialog body), footer sticky to it', async () => {
-      await reachPlanReview();
+    // PR #10294 round 3: the review's cost bar can carry a balance warning
+    // with a "Buy tokens" link, and the discard prompt can sit under it. A
+    // sticky footer holding all that could outgrow the Dialog body's
+    // scrollport on a phone, leaving its top (the cost header) unreachable.
+    // So only the button row is pinned; the cost, its link and the prompt
+    // stay in normal flow directly above it, reachable by scrolling.
+    it('keeps "Build it" reachable with only the button row pinned; the cost and its Buy tokens link stay in flow above it', async () => {
+      await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
+      await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
       const build = screen.getByRole('button', { name: 'Build it' });
       expectActionsReachable(build);
-      // The cost rides in the same sticky footer: a cost the user has to
-      // scroll to find is not a cost they confirmed.
-      const footer = build.closest('[data-testid="approval-gate-footer"]');
-      expect(footer?.contains(screen.getByText('Estimated token cost'))).toBe(true);
+
+      const row = build.closest('.sticky') as HTMLElement;
+      // Non-vacuous: each of the tall parts is actually rendered.
+      const inFlow = [
+        screen.getByText('Estimated token cost'),
+        screen.getByRole('link', { name: 'Buy tokens' }),
+        screen.getByRole('button', { name: 'Keep plan' }),
+      ];
+      for (const node of inFlow) {
+        expect(node.closest('.sticky'), node.textContent ?? '').toBeNull();
+        expect(node.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
     });
 
     it('puts focus on "Build it" so the confirmation is one keypress away', async () => {

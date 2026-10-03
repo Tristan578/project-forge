@@ -175,7 +175,11 @@ control — a new one-off that duplicates a primitive is a UX review failure.
 - One component per theme (`EmberGlow`, `IceFrost`, …), sharing keyframes in `effects.css`
 
 ### `packages/ui/src/hooks/`, `utils/`, `composites/`
-`useTheme` (reads/writes `data-sf-theme` on `documentElement`), `useDialogA11y` (focus trap + aria), `cn()`
+`useTheme` (reads/writes `data-sf-theme` on `documentElement`), `useDialogA11y` (focus trap + aria; initial focus
+skips elements marked `data-sf-scroll-region` (`SCROLL_REGION_ATTR`, e.g. `Dialog`'s overflowing body) in favour of
+the first real control, falling back to the region only when nothing else is focusable), `useScrollLock(locked)`
+(public; a ref-counted page-scroll lock on `documentElement`, never `body`, that pads the root by the scrollbar width
+so in-flow content does not shift; right-anchored `position: fixed` chrome is not compensated), `cn()`
 (`clsx` + `tailwind-merge`). `composites/index.ts` is the package's public surface; `internal.ts` is not exported.
 
 ## Documentation Site (`apps/docs/`)

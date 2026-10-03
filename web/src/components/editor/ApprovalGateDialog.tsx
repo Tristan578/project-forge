@@ -77,14 +77,20 @@ export function ApprovalGateDialog({
    * bounded scroller there would nest one scroll box in another, and on a
    * short viewport the outer one carries the inner box's buttons out of view.
    * So the summary is not bounded and flows into the parent's single scroll,
-   * and the cost + buttons are `sticky bottom-0`: pinned to the parent's
-   * visible bottom edge while the summary scrolls behind them.
+   * and ONLY the Approve/Cancel row is `sticky bottom-0`: pinned to the
+   * parent's visible bottom edge while everything above it scrolls behind it.
+   * `children` (the cost, notices) stay in normal flow directly above that
+   * row. They are not pinned with it because a sticky block taller than the
+   * parent's scrollport cannot be scrolled into view at any offset, and the
+   * plan review's cost + balance warning + discard prompt can be that tall on
+   * a phone (PR #10294 round 3).
    */
   scrollContainer?: 'own' | 'parent';
   /**
-   * Extra content between the scrollable summary and the buttons — the plan
-   * review's token cost. Outside the scroll region on purpose: a cost the user
-   * has to scroll to find is not a cost they confirmed.
+   * Extra content between the summary and the buttons — the plan review's
+   * token cost. In `'own'` mode it sits outside the bounded summary box, so it
+   * is always next to the buttons. In `'parent'` mode it scrolls with the
+   * summary and ends directly above the pinned button row.
    */
   children?: ReactNode;
 }) {
@@ -182,31 +188,47 @@ export function ApprovalGateDialog({
       </div>
 
       {/*
-       * In 'parent' mode this footer sticks to the parent scroller's bottom
-       * edge (bg so the summary scrolling underneath stays hidden), so the
-       * cost and the buttons stay in view however long the summary is.
+       * Normal flow in both modes. In 'parent' mode, every descendant gets a
+       * bottom scroll margin taller than the pinned button row below (pt-2 +
+       * a 44px touch-target button = 52px; scroll-mb-16 = 64px), so a control
+       * in here that takes focus (the cost's "Buy tokens" link, the discard
+       * prompt's "Keep plan") is scrolled clear of that row instead of
+       * landing underneath it (WCAG 2.4.11).
+       */}
+      {children && (
+        <div
+          data-testid="approval-gate-extra"
+          className={cn('mb-3', !ownScroll && '[&_*]:scroll-mb-16')}
+        >
+          {children}
+        </div>
+      )}
+
+      {/*
+       * In 'parent' mode ONLY this row is sticky: it pins to the parent
+       * scroller's bottom edge (opaque bg so content scrolling underneath stays
+       * hidden). It must stay a direct child of the gate's root: a sticky box
+       * cannot leave its parent, so it can only follow the summary while its
+       * parent spans the summary too. And nothing else may join it: a sticky
+       * block taller than the scrollport has a part no scroll offset reveals.
        */}
       <div
-        data-testid="approval-gate-footer"
-        className={cn(!ownScroll && 'sticky bottom-0 bg-[var(--sf-bg-surface)] pt-2')}
+        data-testid="approval-gate-actions"
+        className={cn('flex gap-2', !ownScroll && 'sticky bottom-0 bg-[var(--sf-bg-surface)] pt-2')}
       >
-        {children && <div className="mb-3">{children}</div>}
-
-        <div className="flex gap-2">
-          <Button
-            ref={approveRef}
-            type="button"
-            size="sm"
-            onClick={onApprove}
-            disabled={approveDisabled}
-            className="flex-1"
-          >
-            {approveLabel}
-          </Button>
-          <Button ref={cancelRef} type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
-            {cancelLabel}
-          </Button>
-        </div>
+        <Button
+          ref={approveRef}
+          type="button"
+          size="sm"
+          onClick={onApprove}
+          disabled={approveDisabled}
+          className="flex-1"
+        >
+          {approveLabel}
+        </Button>
+        <Button ref={cancelRef} type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
+          {cancelLabel}
+        </Button>
       </div>
     </div>
   );

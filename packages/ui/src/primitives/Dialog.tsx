@@ -10,10 +10,18 @@ import { ScrollArea } from "./ScrollArea";
  * whenever either the box (viewport resize) or the content (async content,
  * a phase change) resizes. Without `ResizeObserver` (jsdom, very old
  * engines) it measures once.
+ *
+ * While it overflows, the scroller is a focusable region (see `Dialog`). When
+ * it stops overflowing (a resize, a rotation, content shrinking) that region
+ * loses its `tabIndex`; if it held focus at that moment, the browser would drop
+ * focus to `<body>`, outside the `aria-modal` dialog. So focus moves to
+ * `focusFallbackRef` (the dialog container, `tabIndex={-1}`) first, before the
+ * state change that removes the attribute.
  */
 function useOverflowsVertically(
   scrollerRef: RefObject<HTMLElement | null>,
   contentRef: RefObject<HTMLElement | null>,
+  focusFallbackRef: RefObject<HTMLElement | null>,
   active: boolean
 ): boolean {
   const [overflows, setOverflows] = useState(false);
@@ -21,9 +29,14 @@ function useOverflowsVertically(
   useEffect(() => {
     const scroller = scrollerRef.current;
     if (!active || !scroller) return;
-    // 1px of slack absorbs sub-pixel rounding between the two integer reads.
-    const measure = () =>
-      setOverflows(scroller.scrollHeight - scroller.clientHeight > 1);
+    const measure = () => {
+      // 1px of slack absorbs sub-pixel rounding between the two integer reads.
+      const next = scroller.scrollHeight - scroller.clientHeight > 1;
+      if (!next && scroller.ownerDocument.activeElement === scroller) {
+        focusFallbackRef.current?.focus();
+      }
+      setOverflows(next);
+    };
     if (typeof ResizeObserver === "undefined") {
       measure();
       return () => setOverflows(false);
@@ -37,7 +50,7 @@ function useOverflowsVertically(
       observer.disconnect();
       setOverflows(false);
     };
-  }, [active, scrollerRef, contentRef]);
+  }, [active, scrollerRef, contentRef, focusFallbackRef]);
 
   return active && overflows;
 }
@@ -73,6 +86,7 @@ export function Dialog({
   const bodyOverflows = useOverflowsVertically(
     bodyRef,
     bodyContentRef,
+    dialogProps.ref,
     open && hasBody
   );
 

@@ -273,6 +273,55 @@ describe('Dialog', () => {
       expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Terms' }));
     });
 
+    it('moves focus to the dialog, not <body>, when the focused region stops overflowing', () => {
+      vi.useFakeTimers();
+      render(
+        <Dialog open onClose={vi.fn()} title="Terms">
+          <p>Very long text with no controls.</p>
+        </Dialog>
+      );
+      const body = getBody();
+      setBodyGeometry(body, 900, 300);
+      act(() => {
+        vi.runAllTimers();
+      });
+      // Precondition: the region holds focus (it is the only focusable thing).
+      expect(document.activeElement).toBe(body);
+
+      // The viewport grew (or the content shrank) while the region had focus.
+      setBodyGeometry(body, 300, 300);
+      expect(body.hasAttribute('tabindex')).toBe(false);
+      const dialog = screen.getByRole('dialog');
+      // Focus stays inside the aria-modal dialog: on its container, which is
+      // programmatically focusable (tabIndex -1) but not a Tab stop.
+      expect(document.activeElement).toBe(dialog);
+      expect(dialog.tabIndex).toBe(-1);
+    });
+
+    it('leaves focus alone when the region stops overflowing without holding focus', () => {
+      vi.useFakeTimers();
+      render(
+        <Dialog
+          open
+          onClose={vi.fn()}
+          title="Long dialog"
+          actions={<button type="button">Confirm</button>}
+        >
+          <p>Body</p>
+        </Dialog>
+      );
+      const body = getBody();
+      setBodyGeometry(body, 900, 300);
+      act(() => {
+        vi.runAllTimers();
+      });
+      const confirm = screen.getByRole('button', { name: 'Confirm' });
+      expect(document.activeElement).toBe(confirm);
+
+      setBodyGeometry(body, 300, 300);
+      expect(document.activeElement).toBe(confirm);
+    });
+
     it('measures once when ResizeObserver is unavailable', () => {
       vi.stubGlobal('ResizeObserver', undefined);
       const scrollHeight = vi

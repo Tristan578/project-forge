@@ -199,7 +199,9 @@ describe('ApprovalGateDialog', () => {
   // inside it the gate must not bring a second bounded scroller (nested
   // scrolling carries the inner box's buttons out of view on a short
   // viewport). In 'parent' mode the summary flows into the enclosing scroll
-  // and the cost + buttons stick to its bottom edge.
+  // and ONLY the Approve/Cancel row sticks to its bottom edge (round 3: a
+  // sticky footer that also carried the cost could grow taller than the
+  // scrollport, leaving its top unreachable at every scroll offset).
   describe("scrollContainer='parent'", () => {
     const SCROLLER = /(^|\s)(overflow-(y-)?(auto|scroll)|max-h-\S+)(\s|$)/;
 
@@ -232,28 +234,54 @@ describe('ApprovalGateDialog', () => {
       expect(screen.getByTestId('approval-gate-summary')).not.toHaveAttribute('tabindex');
     });
 
-    it('pins the cost and both buttons in a sticky footer after the summary', () => {
-      renderParentMode();
-      const footer = screen.getByTestId('approval-gate-footer');
-      expect(footer.classList.contains('sticky')).toBe(true);
-      expect(footer.classList.contains('bottom-0')).toBe(true);
-      // An opaque background, so the summary scrolling underneath is hidden.
-      expect(footer.className).toContain('bg-[var(--sf-bg-surface)]');
-      for (const node of [
-        screen.getByText('Estimated token cost 340'),
-        screen.getByRole('button', { name: 'Approve' }),
-        screen.getByRole('button', { name: 'Cancel' }),
-      ]) {
-        expect(footer.contains(node)).toBe(true);
-      }
+    it('makes the action row the ONE sticky element, holding nothing but the two buttons', () => {
+      const { container } = renderParentMode();
+      const approve = screen.getByRole('button', { name: 'Approve' });
+      const cancel = screen.getByRole('button', { name: 'Cancel' });
+
+      // Derived from the DOM, not named: every sticky element the gate renders.
+      const sticky = Array.from(container.querySelectorAll<HTMLElement>('.sticky'));
+      expect(sticky).toHaveLength(1);
+      const [row] = sticky;
+      expect(row.classList.contains('bottom-0')).toBe(true);
+      // An opaque background, so the content scrolling underneath is hidden.
+      expect(row.className).toContain('bg-[var(--sf-bg-surface)]');
+      // Only the action row: its children are exactly the two buttons, so
+      // nothing else (cost, notices, prompts) can make it taller.
+      expect(Array.from(row.children)).toEqual([approve, cancel]);
+
+      // The cost stays in normal flow, before the row.
+      const cost = screen.getByText('Estimated token cost 340');
+      expect(row.contains(cost)).toBe(false);
+      expect(cost.closest('.sticky')).toBeNull();
+      expect(cost.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+      // A sticky box cannot leave its parent, so the row is a direct child of
+      // the gate root that also holds the summary: it can follow the whole
+      // summary, not just a wrapper the size of the row.
       const summary = screen.getByTestId('approval-gate-summary');
       expect(summary.contains(screen.getByText('Level 1'))).toBe(true);
-      expect(summary.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(row.parentElement).toBe(summary.parentElement);
+      expect(row.parentElement?.lastElementChild).toBe(row);
     });
 
-    it("leaves the default 'own' mode footer unpinned", () => {
-      render(<ApprovalGateDialog gate={makeGate()} onApprove={vi.fn()} onCancel={vi.fn()} />);
-      expect(screen.getByTestId('approval-gate-footer').classList.contains('sticky')).toBe(false);
+    it('gives the in-flow extras a bottom scroll margin, so a focused control is not hidden under the pinned row', () => {
+      renderParentMode();
+      const extra = screen.getByTestId('approval-gate-extra');
+      expect(extra.contains(screen.getByText('Estimated token cost 340'))).toBe(true);
+      expect(Array.from(extra.classList).some((c) => /^\[&_\*\]:scroll-mb-\d+$/.test(c))).toBe(true);
+    });
+
+    it("pins nothing in the default 'own' mode", () => {
+      const { container } = render(
+        <ApprovalGateDialog gate={makeGate()} onApprove={vi.fn()} onCancel={vi.fn()}>
+          <p>Estimated token cost 340</p>
+        </ApprovalGateDialog>,
+      );
+      // Non-vacuous: the row and the extras rendered.
+      expect(screen.getByTestId('approval-gate-actions')).toBeInTheDocument();
+      expect(container.querySelectorAll('.sticky')).toHaveLength(0);
+      expect(Array.from(screen.getByTestId('approval-gate-extra').classList).some((c) => c.includes('scroll-mb'))).toBe(false);
     });
   });
 });

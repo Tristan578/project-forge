@@ -587,8 +587,11 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               is the ONE scroller here: it is capped below the viewport and turns
               into a focusable region while it overflows. Both gates therefore
               use scrollContainer="parent", which drops ApprovalGateDialog's own
-              max-h-[50vh] scroll box and pins its cost + Approve/Cancel row to
-              the body's visible bottom edge (sticky). Nesting any second bounded
+              max-h-[50vh] scroll box and pins ONLY its Approve/Cancel row to
+              the body's visible bottom edge (sticky); the plan review's cost and
+              notices stay in normal flow above that row, because a pinned block
+              taller than the body could never be scrolled fully into view on a
+              phone. Nesting any second bounded
               scroller in this body (the gate's own box, or the
               `max-h-[45vh] overflow-y-auto` wrapper that round 2 review removed)
               lets the outer scroll carry the inner box's buttons out of view on
