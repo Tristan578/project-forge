@@ -365,16 +365,12 @@ const project2dHandlers: Record<string, ToolHandler> = {
         args,
       );
       if (p.error) return p.error;
-      // Conditional spread (not `p.data` directly): `setGrid2d` merges this
+      // omitUndefinedValues (not `p.data` directly): `setGrid2d` merges this
       // object over the existing settings via `{ ...state.grid2d, ...settings }`,
       // so an explicit `undefined` key here would overwrite a real value
       // instead of preserving it — the omitted-vs-undefined distinction is
       // real for THIS object, unlike most optional fields in this codebase.
-      const settings: Partial<Grid2dSettings> = {
-        ...(p.data.enabled !== undefined ? { enabled: p.data.enabled } : {}),
-        ...(p.data.size !== undefined ? { size: p.data.size } : {}),
-        ...(p.data.snapToGrid !== undefined ? { snapToGrid: p.data.snapToGrid } : {}),
-      };
+      const settings: Partial<Grid2dSettings> = omitUndefinedValues(p.data);
       ctx.store.setGrid2d(settings);
       return { success: true, result: { message: 'Grid 2D settings updated' } };
     } catch (err) {

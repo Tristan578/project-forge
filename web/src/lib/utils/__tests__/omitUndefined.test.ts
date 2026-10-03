@@ -30,6 +30,16 @@ describe('omitUndefinedValues', () => {
     expect('b' in input).toBe(true);
   });
 
+  it('keeps an own __proto__ key as data and never grafts it onto the prototype', () => {
+    // JSON.parse creates `__proto__` as an OWN property; copying that key by
+    // plain assignment would call the prototype setter instead.
+    const input = JSON.parse('{"__proto__":{"bodyType":"static"},"friction":0.9}') as Record<string, unknown>;
+    const result = omitUndefinedValues(input) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    expect(result.bodyType).toBeUndefined();
+    expect(Object.keys(result).sort()).toEqual(['__proto__', 'friction']);
+  });
+
   it('safely merges over an existing full record without overwriting with undefined', () => {
     const existing = { bodyType: 'dynamic' as const, friction: 0.5 };
     const partialUpdate: { bodyType?: 'dynamic' | 'static'; friction?: number } = { friction: 0.9 };

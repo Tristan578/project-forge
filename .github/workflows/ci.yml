@@ -127,11 +127,11 @@ jobs:
           # that too.
           echo "$CHANGED" | grep -qE '^engine/|^\.transform-gizmo-fork/' && engine=true
           echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
-          # The three tsconfig.json files are here because the job that pins their
-          # exactOptionalPropertyTypes (#7592, scripts/__tests__/exact-optional-
-          # property-types.test.mjs, CI Self-Defense Tests) runs on needs-ci. A PR
-          # deleting only that flag would otherwise skip its own pin.
-          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/|^(apps/docs|mcp-server|packages/ui)/tsconfig\.json$' && ci=true
+          # The four tsconfig.json files are here because the job that pins their
+          # exactOptionalPropertyTypes (#7592, #10230, scripts/__tests__/exact-
+          # optional-property-types.test.mjs, CI Self-Defense Tests) runs on
+          # needs-ci. A PR deleting only that flag would otherwise skip its own pin.
+          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/|^(apps/docs|mcp-server|packages/ui|web)/tsconfig\.json$' && ci=true
           # The docs gate is what runs apps/docs/scripts/check-manifest-sync.ts,
           # the ONLY check comparing the canonical MCP manifest against its two
           # derived copies. The canonical dir and the apps/docs copy were listed;

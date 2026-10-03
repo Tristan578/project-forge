@@ -16,12 +16,11 @@
 export function omitUndefinedValues<T extends object>(
   obj: T,
 ): { [K in keyof T]: Exclude<T[K], undefined> } {
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(obj) as (keyof T & string)[]) {
-    const value = obj[key];
-    if (value !== undefined) {
-      result[key] = value;
-    }
-  }
+  // Object.fromEntries, not `result[key] = value`: it defines own data
+  // properties, so an own `__proto__` key (JSON.parse produces one) stays an
+  // ordinary key instead of hitting the prototype setter and grafting its value
+  // onto the result's prototype chain, where a later `{ ...existing, ...out }`
+  // read of an absent field would find it.
+  const result = Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined));
   return result as { [K in keyof T]: Exclude<T[K], undefined> };
 }
