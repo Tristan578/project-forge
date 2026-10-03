@@ -438,8 +438,16 @@ assert_eq "an unreadable lock holder is warned about once, not once per attempt"
 
 # The same false all-clear from the other door: a host with NO fuser at all.
 # The stub dir always supplies one and so does the host, so this case gets a
-# PATH of its own -- every stub but fuser, plus only the host tools the script
-# and the stubs call -- the way the missing-timeout case below is built.
+# PATH of its own: every stub but fuser, plus the host tools the script and the
+# stubs call, plus every host PATH directory that holds no fuser.
+#
+# That last part is what keeps the case runnable on Windows. Git Bash's `ln -s`
+# COPIES by default, and a copied bash.exe or dirname.exe cannot find
+# msys-2.0.dll unless a directory holding it is on PATH -- so a PATH of only
+# this directory made the script die with exit 2 before its first attempt
+# (Hook and Script Tests (Windows), #10316). Git for Windows ships no fuser, so
+# there the filter keeps its whole PATH; on Linux it drops /usr/bin, and the
+# links below supply what the case needs from it.
 NO_FUSER="$TMP/no-fuser"
 mkdir "$NO_FUSER"
 for stub in "$STUB"/*; do
@@ -449,15 +457,25 @@ for tool in bash dirname cat tr grep sort paste sed; do
   tool_path="$(command -v "$tool")" || { fail "the no-fuser PATH needs '$tool', which the host lacks"; continue; }
   ln -s "$tool_path" "$NO_FUSER/$tool"
 done
+NO_FUSER_PATH="$NO_FUSER"
+IFS=: read -r -a host_path_dirs <<< "$PATH"
+for dir in ${host_path_dirs[@]+"${host_path_dirs[@]}"}; do
+  if [ -n "$dir" ] && [ ! -e "$dir/fuser" ] && [ ! -e "$dir/fuser.exe" ]; then
+    NO_FUSER_PATH="$NO_FUSER_PATH:$dir"
+  fi
+done
 # Vacuity guard: the case below is only about a missing fuser if it is missing.
-if PATH="$NO_FUSER" command -v fuser >/dev/null 2>&1; then
+if PATH="$NO_FUSER_PATH" command -v fuser >/dev/null 2>&1; then
   fail "the no-fuser PATH still resolves a fuser, so the case below proves nothing"
 else
   pass "the no-fuser PATH resolves no fuser"
 fi
 reset_fixtures
-PLAYWRIGHT_TEST_FAILS=0 PATH="$NO_FUSER" "$BASH_BIN" "$SCRIPT" deps >"$TMP/out" 2>"$TMP/err"
-assert_eq "a host without fuser does not block the install" "0" "$?"
+PLAYWRIGHT_TEST_FAILS=0 PATH="$NO_FUSER_PATH" "$BASH_BIN" "$SCRIPT" deps >"$TMP/out" 2>"$TMP/err"
+rc=$?
+assert_eq "a host without fuser does not block the install" "0" "$rc"
+# A failure here is otherwise unreadable from a CI log: show what the script said.
+if [ "$rc" -ne 0 ]; then sed 's/^/    no-fuser stderr: /' "$TMP/err"; fi
 assert_eq "a host without fuser still runs its one attempt" "1" "$(cat "$TMP/count" 2>/dev/null)"
 assert_grep "a host without fuser is reported, not silently treated as free" \
   "cannot see the dpkg lock holder" "$TMP/out"
