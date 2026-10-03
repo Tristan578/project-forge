@@ -2,16 +2,24 @@
  * Remove keys whose value is exactly `undefined` from a shallow copy of `obj`.
  * Keys that were never present are untouched (there is nothing to remove).
  *
- * Why this exists: a zod `.optional()` field types as `T | undefined` in the
- * parser's *output* type, even though zod itself omits the key entirely when
- * the input didn't supply it (verified: `'a' in schema.parse({})` is `false`
- * for `z.object({ a: z.string().optional() })`). Spreading such a parsed
- * object directly over an existing full record (`{ ...existing, ...parsed }`)
- * is therefore safe at runtime, but under `exactOptionalPropertyTypes` the
- * *type* of the spread — which must account for the type-level possibility of
- * an explicit `undefined` — no longer satisfies a target type whose fields
- * don't admit `undefined`. This closes that gap explicitly, so the merge is
- * safe by both the type checker and the same guarantee zod already gives.
+ * Why this exists: spreading a patch over an existing record
+ * (`{ ...existing, ...patch }`) lets an own key whose value is `undefined`
+ * ERASE the stored value. Two sources produce such keys:
+ *
+ * - zod. A `.optional()` field types as `T | undefined` in the parser's output.
+ *   An ABSENT input key stays absent (`'a' in schema.parse({})` is `false`),
+ *   but an input key that is present with the value `undefined` SURVIVES the
+ *   parse as an own key: with zod 4.6.5,
+ *   `Object.hasOwn(z.object({ a: z.number().optional() }).parse({ a: undefined }), 'a')`
+ *   is `true`. JSON cannot carry `undefined`, but an in-process caller can.
+ * - A type that admits `undefined` (`prop?: T | undefined`), whose patches
+ *   can carry the key wherever a caller forwards a maybe-undefined value.
+ *
+ * This helper strips those keys at RUNTIME, so the merge keeps the stored
+ * value, and its result type drops `undefined` from every field, so the
+ * merge also satisfies `exactOptionalPropertyTypes` against a target whose
+ * fields do not admit it. Use it only where `undefined` is NOT meant to clear
+ * the field.
  */
 export function omitUndefinedValues<T extends object>(
   obj: T,

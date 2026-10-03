@@ -65,6 +65,13 @@ export interface ToolCallStatus {
    */
   status: ToolCallStatusName;
   result?: unknown;
+  /**
+   * Admits `undefined` DELIBERATELY (#10306): an execution writes its whole
+   * outcome as a unit (`status`, `result`, `error: result.error`), so a
+   * success after an earlier failure clears the stale error rather than
+   * keeping it under a `'success'` status. The bare-spread merges
+   * (`updateToolCall`, the resume's `applyToolCallUpdate`) rely on that.
+   */
   error?: string | undefined;
   undoable: boolean;
   /**
@@ -72,14 +79,22 @@ export interface ToolCallStatus {
    * the resume history can be rebuilt). The SDK correlates a resume by this id
    * and throws `InvalidToolApprovalError` for one it never issued, so a
    * decision whose call has no `approvalId` is dropped rather than sent.
+   *
+   * Exact on purpose (#10306): the tool-call merges use a bare spread, and
+   * no writer clears an approvalId, so a patch must not be able to erase it.
    */
-  approvalId?: string | undefined;
+  approvalId?: string;
   /**
    * The HMAC the server stamped on the `tool-approval-request` chunk. Carried
    * back verbatim on the resume so `/api/chat` can prove the (approvalId,
    * toolCallId, toolName, input) tuple is the one it signed — the client
    * rebuilds the approval history, so without this a modified client could
    * approve a narrow call and resume with a wider one.
+   *
+   * Admits `undefined` DELIBERATELY (#10306): a new gate writes the
+   * (approvalId, approvalSignature) pair as a unit, so a gate that arrives
+   * without a signature clears the previous one instead of pairing a stale
+   * signature with the new approvalId, which the server would reject.
    */
   approvalSignature?: string | undefined;
 }

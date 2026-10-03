@@ -338,7 +338,7 @@ export interface TilemapLayer {
    * have been authored, and missing cell entries read as `none`. This metadata
    * does not generate runtime colliders yet (#9814).
    */
-  collisionShapes?: CollisionShape[] | undefined;
+  collisionShapes?: CollisionShape[];
 }
 
 export interface TilemapData {

@@ -72,7 +72,9 @@ export interface BridgeOperationInfo {
   operationName: string;
   status: 'running' | 'completed' | 'failed';
   startedAt: number;
-  error?: string | undefined;
+  // Exact on purpose (#10306): `updateBridgeOperation` merges with a bare
+  // spread, so admitting `undefined` here would let a patch erase the error.
+  error?: string;
 }
 
 export interface BridgeSlice {
