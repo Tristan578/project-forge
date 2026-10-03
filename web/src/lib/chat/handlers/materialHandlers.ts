@@ -60,6 +60,41 @@ const LIGHT_UPDATE_FIELDS = {
   outerAngle: true,
 } satisfies Record<keyof LightData, true>;
 
+/** Longest slice of a refused value echoed back in the error text. */
+const MAX_ECHOED_VALUE_CHARS = 64;
+
+/**
+ * The engine's `update_material` keeps an explicit `attenuationDistance`
+ * number only when it is finite and >= 0 AFTER narrowing to f32
+ * (`is_valid_attenuation_distance`, engine/src/core/material.rs); infinity is
+ * spelled `null`. It refuses anything else, and refuses the WHOLE update, so a
+ * value the engine will drop has to be caught here, before
+ * `store.updateMaterial` writes the material optimistically and the assistant
+ * reports a success the engine never applied (#10267). `Math.fround` performs
+ * the same round-to-nearest narrowing as serde's f64 -> f32 cast, so `1e300`
+ * (finite in JS, `inf` in the engine) is refused here as it is there.
+ */
+function attenuationDistanceError(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value === 'number' && value >= 0 && Number.isFinite(Math.fround(value))) {
+    return null;
+  }
+  let shown: string;
+  if (typeof value === 'number') {
+    shown = String(value);
+  } else {
+    try {
+      shown = JSON.stringify(value) ?? String(value);
+    } catch {
+      shown = typeof value;
+    }
+  }
+  if (shown.length > MAX_ECHOED_VALUE_CHARS) {
+    shown = `${shown.slice(0, MAX_ECHOED_VALUE_CHARS)}…`;
+  }
+  return `attenuationDistance must be a finite number >= 0, got ${shown}; send null for infinity`;
+}
+
 export const materialHandlers: Record<string, ToolHandler> = {
   update_material: async (args, { store }) => {
     const p = parseArgs(z.object({ entityId: zEntityId }), args);
@@ -67,6 +102,13 @@ export const materialHandlers: Record<string, ToolHandler> = {
     // Build a partial material, merge with current if available
     const matInput = { ...args } as Record<string, unknown>;
     delete matInput.entityId;
+
+    // An absent key (or `undefined`, which never reaches the engine) keeps the
+    // merged value; only a value the caller actually sent is checked.
+    if (matInput.attenuationDistance !== undefined) {
+      const error = attenuationDistanceError(matInput.attenuationDistance);
+      if (error) return { success: false, error };
+    }
 
     // Get current material as base, overlay with provided fields
     const baseMaterial: MaterialData = store.primaryMaterial ?? {
