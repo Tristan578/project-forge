@@ -18,7 +18,11 @@
  * nodes in, this module never reaches for the store itself.
  */
 
-import { isCameraMode, NUMERIC_CAMERA_FIELDS } from '@/lib/game/gameCameraPayload';
+import {
+  isCameraMode,
+  MODE_READS_DAMPING,
+  NUMERIC_CAMERA_FIELDS,
+} from '@/lib/game/gameCameraPayload';
 import type { NumericCameraField } from '@/lib/game/gameCameraPayload';
 import type { GameCameraMode } from '@/stores/slices/types';
 
@@ -247,6 +251,41 @@ function asCameraField(key: string): NumericCameraField | undefined {
   return fields.includes(key) ? (key as NumericCameraField) : undefined;
 }
 
+/** The modes that send `damping`, in table order, read off `MODE_READS_DAMPING`. */
+const EASING_MODES = (Object.keys(MODE_READS_DAMPING) as GameCameraMode[]).filter(
+  (mode) => MODE_READS_DAMPING[mode],
+);
+
+/**
+ * Why `mode` makes no use of `field` at all, or `null` if it does.
+ *
+ * `buildSetGameCameraPayload` writes `damping` only for the modes in
+ * `MODE_READS_DAMPING`, so a `followSmoothing` on any other mode, and a GDD
+ * `smoothing` converted into one, reaches the engine as nothing. Without this
+ * the step reported `applied: true` for it with no warning. On `main` before
+ * PF-1134, `smoothing` was at least reported as an unknown key, so the
+ * conversion had made it silent.
+ *
+ * Judged before the value and before alias precedence, by both
+ * {@link filterCameraNumerics} and {@link classifyCameraConfigKeys}. On a mode
+ * that cannot use the field, a range complaint would send the author to fix a
+ * value that cannot matter, and "superseded by followSmoothing" would send them
+ * to delete the wrong key.
+ *
+ * Only `followSmoothing` is judged here, because it is the one field that more
+ * than one mode reads and so the one with a table to judge it by. The other
+ * mode-specific fields (an `altitude` on a side-scroller, say) are dropped by
+ * the builder's per-mode switch in the same way and are not reported yet.
+ */
+function modeIgnoresFieldReason(mode: GameCameraMode, field: NumericCameraField): string | null {
+  if (field !== 'followSmoothing' || MODE_READS_DAMPING[mode]) return null;
+  const easing =
+    EASING_MODES.length > 1
+      ? `${EASING_MODES.slice(0, -1).join(', ')} and ${EASING_MODES[EASING_MODES.length - 1]}`
+      : EASING_MODES.join('');
+  return `a ${mode} camera does not ease toward its target, so smoothing has no effect — only ${easing} do`;
+}
+
 /**
  * Project a GDD-authored camera config onto the numeric fields the engine can
  * actually receive.
@@ -259,9 +298,15 @@ function asCameraField(key: string): NumericCameraField | undefined {
  *
  * Everything this drops is reported by {@link classifyCameraConfigKeys} — the
  * drop being silent is the PF-1125/PF-1166 defect itself.
+ *
+ * `mode` is required, not optional: a field the mode makes no use of is
+ * dropped here and named by the classifier (see
+ * {@link modeIgnoresFieldReason}), and a caller that could leave the mode out
+ * would get neither.
  */
 export function filterCameraNumerics(
   raw: unknown,
+  mode: GameCameraMode,
 ): Partial<Record<NumericCameraField, number>> {
   const out: Partial<Record<NumericCameraField, number>> = {};
   if (!raw || typeof raw !== 'object') return out;
@@ -270,6 +315,7 @@ export function filterCameraNumerics(
     // Own keys only. This object is GDD-derived, so the model controls its keys
     // and a bare read walks the prototype chain.
     if (!Object.hasOwn(obj, key)) continue;
+    if (modeIgnoresFieldReason(mode, key) !== null) continue;
     const val = obj[key];
     if (isSendableCameraValue(key, val)) out[key] = val;
   }
@@ -277,6 +323,7 @@ export function filterCameraNumerics(
   // so an explicit `topDownHeight` always beats an aliased `altitude`.
   for (const [alias, entry] of Object.entries(GDD_CONFIG_KEY_ALIASES)) {
     const { field, convert } = entry;
+    if (modeIgnoresFieldReason(mode, field) !== null) continue;
     if (out[field] !== undefined) continue;
     if (!Object.hasOwn(obj, alias)) continue;
     // Domain first, in the GDD's unit, then the engine's policy on the
@@ -514,6 +561,8 @@ export interface CameraConfigReport {
   unknown: string[];
   /** Keys naming a real parameter, carrying a value it cannot take. */
   unusable: { key: string; reason: string }[];
+  /** Keys naming a real parameter that this camera mode makes no use of. */
+  unusedByMode: { key: string; reason: string }[];
   /** Aliases that lost to an explicit spelling of the same field. */
   overridden: { key: string; field: NumericCameraField }[];
 }
@@ -521,12 +570,20 @@ export interface CameraConfigReport {
 /**
  * Explain every config key that did not reach the engine.
  *
- * Shares {@link cameraValueRejection} with {@link filterCameraNumerics}, so the
- * two cannot disagree about what "sendable" means — a value dropped there is
- * always named here.
+ * Shares {@link cameraValueRejection} and {@link modeIgnoresFieldReason} with
+ * {@link filterCameraNumerics}, so the two cannot disagree about what
+ * "sendable" means — a value dropped there is always named here.
  */
-export function classifyCameraConfigKeys(raw: unknown): CameraConfigReport {
-  const report: CameraConfigReport = { unknown: [], unusable: [], overridden: [] };
+export function classifyCameraConfigKeys(
+  raw: unknown,
+  mode: GameCameraMode,
+): CameraConfigReport {
+  const report: CameraConfigReport = {
+    unknown: [],
+    unusable: [],
+    unusedByMode: [],
+    overridden: [],
+  };
   if (!raw || typeof raw !== 'object') return report;
   const obj = raw as Record<string, unknown>;
 
@@ -538,6 +595,14 @@ export function classifyCameraConfigKeys(raw: unknown): CameraConfigReport {
     const field = alias ? alias.field : asCameraField(key);
     if (field === undefined) {
       report.unknown.push(key);
+      continue;
+    }
+    // The mode before the value: on a mode that never reads the field, neither
+    // a range complaint nor "superseded by …" names the fix, which is to drop
+    // the key (or change the mode).
+    const unusedReason = modeIgnoresFieldReason(mode, field);
+    if (unusedReason !== null) {
+      report.unusedByMode.push({ key, reason: unusedReason });
       continue;
     }
     // Convert BEFORE judging sendability, matching `filterCameraNumerics`: a
