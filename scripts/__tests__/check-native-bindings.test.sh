@@ -725,6 +725,10 @@ for wf_label in $(floored_workflows); do
 done
 
 if [ "${#workflow_files[@]}" -gt 0 ] && [ "$floored_missing" = 0 ]; then
+  # Declared before load_controlled_workflow fills them through printf -v. The
+  # linter cannot see an indirect assignment, so without these it reports every
+  # later "$ci"/"$qg"/"$cdwf" as SC2154 and the CI shellcheck step fails.
+  ci="" qg="" cdwf=""
   load_controlled_workflow ci.yml ci
   load_controlled_workflow quality-gates.yml qg
   load_controlled_workflow cd.yml cdwf
