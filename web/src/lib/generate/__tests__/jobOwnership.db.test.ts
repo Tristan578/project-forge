@@ -29,6 +29,7 @@
  * `drizzle-kit push` builds an environment from `schema.ts`, not from the
  * migration chain.
  */
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import type { TestHarness } from '@/lib/db/__tests__/pgliteHarness';
@@ -118,6 +119,83 @@ describe('provider_job_owners first-writer-wins (real Postgres, #10262)', () => 
     expect(rows).toHaveLength(1);
     expect(rows[0].indexdef).toMatch(/^CREATE UNIQUE INDEX /);
     expect(rows[0].indexdef).toMatch(/\(provider, provider_job_id\)$/);
+  });
+});
+
+// The backfill statement from migration 0015, read from the file so the test
+// exercises the SQL that ships rather than a copy of it. The harness already
+// ran it once on an empty table; each test below re-runs it against seeded rows.
+const BACKFILL = readFileSync(
+  new URL('../../../../drizzle/0015_provider_job_owners.sql', import.meta.url),
+  'utf8',
+)
+  .split(/-->\s*statement-breakpoint/)
+  .filter((stmt) => stmt.includes('INSERT INTO "provider_job_owners"'));
+
+async function seedJob(
+  userId: string,
+  providerJobId: string,
+  type: string,
+  status: string,
+  ageHours = 0,
+): Promise<void> {
+  await harness().pglite.query(
+    `INSERT INTO generation_jobs (user_id, provider, provider_job_id, type, prompt, status, created_at)
+     VALUES ($1, 'seed', $2, $3, 'p', $4, now() - ($5 || ' hours')::interval)`,
+    [userId, providerJobId, type, status, String(ageHours)],
+  );
+}
+
+describe('migration 0015 binds the generations in flight when it runs (#10262)', () => {
+  it('the migration carries exactly one backfill statement', () => {
+    expect(BACKFILL).toHaveLength(1);
+  });
+
+  it('binds recent in-flight jobs under the provider their status route verifies, and nothing else', async () => {
+    const a = await seedUser(harness().neonSql);
+    const b = await seedUser(harness().neonSql);
+    const c = await seedUser(harness().neonSql);
+
+    await seedJob(a.id, 'job-model', 'model', 'processing');
+    await seedJob(a.id, 'job-skybox', 'skybox', 'pending');
+    await seedJob(b.id, 'job-sheet', 'sprite_sheet', 'downloading');
+    // Not bound: finished, too old, a type with no polled status route.
+    await seedJob(a.id, 'job-done', 'texture', 'completed');
+    await seedJob(a.id, 'job-old', 'tileset', 'processing', 30);
+    await seedJob(a.id, 'job-sfx', 'sfx', 'processing');
+    // Not bound: two users claim the same provider job id, so neither is trusted.
+    await seedJob(a.id, 'job-claimed', 'model', 'processing');
+    await seedJob(c.id, 'job-claimed', 'model', 'processing');
+    // Already bound before the backfill: the existing owner is kept.
+    await bindProviderJob(c.id, 'meshy', 'job-bound');
+    await seedJob(a.id, 'job-bound', 'model', 'processing');
+
+    await harness().pglite.exec(BACKFILL[0]);
+
+    const { rows } = await harness().pglite.query<{ provider: string; provider_job_id: string; user_id: string }>(
+      `SELECT provider, provider_job_id, user_id::text AS user_id
+       FROM provider_job_owners ORDER BY provider_job_id ASC`,
+    );
+    expect(rows.map((r) => [r.provider, r.provider_job_id, r.user_id])).toEqual([
+      ['meshy', 'job-bound', c.id],
+      ['meshy', 'job-model', a.id],
+      ['replicate', 'job-sheet', b.id],
+      ['meshy', 'job-skybox', a.id],
+    ]);
+
+    expect(await verifyProviderJobOwner(a.id, 'meshy', 'job-model')).toBe('owner');
+    expect(await verifyProviderJobOwner(b.id, 'meshy', 'job-model')).toBe('not_owner');
+    expect(await verifyProviderJobOwner(a.id, 'meshy', 'job-claimed')).toBe('not_owner');
+  });
+
+  it('is idempotent', async () => {
+    const a = await seedUser(harness().neonSql);
+    await seedJob(a.id, 'job-twice', 'texture', 'processing');
+
+    await harness().pglite.exec(BACKFILL[0]);
+    await harness().pglite.exec(BACKFILL[0]);
+
+    expect(await bindings('job-twice')).toEqual([{ provider: 'meshy', user_id: a.id }]);
   });
 });
 
