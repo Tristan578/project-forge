@@ -38,7 +38,12 @@ export const SCROLL_REGION_ATTR = 'data-sf-scroll-region';
  *   - Escape key -> onClose
  *   - Focus trap: Tab cycles within the dialog
  *   - Initial focus: first focusable element that is not a keyboard-scroll
- *     region (`SCROLL_REGION_ATTR`), else that region, else the container
+ *     region (`SCROLL_REGION_ATTR`), else that region, else the container.
+ *     The choice is made once, in the first animation frame. A region that
+ *     only becomes focusable after that frame (Dialog's body learns it
+ *     overflows from a ResizeObserver, which Chromium notifies after the
+ *     frame callback) is not seen here; Dialog itself moves focus from the
+ *     container into its region when that happens.
  *   - Focus return to trigger on close
  */
 export function useDialogA11y({

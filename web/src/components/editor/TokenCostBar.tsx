@@ -18,6 +18,42 @@ import { AlertTriangle } from 'lucide-react';
 import type { TokenEstimate } from '@/lib/game-creation/types';
 import { SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
 
+/**
+ * The plan's token total as one short line, for the quick-start plan review's
+ * pinned action row (`ApprovalGateDialog`'s `actionSummary`). There the full
+ * `TokenCostBar` scrolls with the plan, and on a short viewport it can be out
+ * of view while "Build it" (pinned) is in view and focused. This line keeps
+ * the number that leaves the balance beside that button (PR #10294 round 3).
+ *
+ * It is deliberately short: it lives in a pinned row, and a pinned block taller
+ * than the scrollport has a part no scroll offset reveals. So the balance case
+ * is a few words with no link; the cost bar above carries the full warning and
+ * its "Buy tokens" link.
+ */
+export function TokenCostTotal({ estimate }: { estimate: TokenEstimate }) {
+  return (
+    <p
+      data-testid="token-cost-total"
+      className="flex flex-wrap items-center gap-x-2 text-xs text-[var(--sf-text-secondary)]"
+    >
+      <span>
+        Cost: <span className="font-mono text-[var(--sf-text)]">{estimate.totalEstimated}</span> tokens
+        {estimate.totalVarianceHigh > 0 && (
+          <>
+            , up to <span className="font-mono text-[var(--sf-text)]">{estimate.totalVarianceHigh}</span> held
+          </>
+        )}
+      </span>
+      {!estimate.sufficientBalance && (
+        <span className="inline-flex items-center gap-1 text-[var(--sf-text)]">
+          <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+          May exceed your balance
+        </span>
+      )}
+    </p>
+  );
+}
+
 export function TokenCostBar({
   estimate,
   hideBalanceWarning = false,

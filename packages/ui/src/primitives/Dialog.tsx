@@ -17,6 +17,19 @@ import { ScrollArea } from "./ScrollArea";
  * focus to `<body>`, outside the `aria-modal` dialog. So focus moves to
  * `focusFallbackRef` (the dialog container, `tabIndex={-1}`) first, before the
  * state change that removes the attribute.
+ *
+ * The reverse hand-off: when the region APPEARS while focus sits on that
+ * container, focus moves into the region. This is what makes a control-less
+ * dialog's initial focus land on its scroll region in a real browser.
+ * `useDialogA11y` picks the initial focus target in a `requestAnimationFrame`,
+ * and Chromium runs that frame callback BEFORE the first ResizeObserver
+ * notification (measured, PR #10294 round 3). So at that moment the region is
+ * not focusable yet, there is nothing else to focus, and the container takes
+ * focus; the region then becomes focusable a moment later and takes it over.
+ * The same path returns focus to the region when content that shrank grows
+ * back. It also runs if a click on non-interactive dialog text focused the
+ * container (it is `tabIndex={-1}`) just before the content grew; focus then
+ * moves one level in, to the region inside that same container.
  */
 function useOverflowsVertically(
   scrollerRef: RefObject<HTMLElement | null>,
@@ -52,7 +65,20 @@ function useOverflowsVertically(
     };
   }, [active, scrollerRef, contentRef, focusFallbackRef]);
 
-  return active && overflows;
+  const regionActive = active && overflows;
+
+  // Runs after the commit that gave the scroller its `tabIndex`, so the
+  // region can actually take focus here (it could not inside `measure`).
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!regionActive || !scroller) return;
+    const fallback = focusFallbackRef.current;
+    if (fallback && scroller.ownerDocument.activeElement === fallback) {
+      scroller.focus();
+    }
+  }, [regionActive, scrollerRef, focusFallbackRef]);
+
+  return regionActive;
 }
 
 export interface DialogProps {

@@ -10,6 +10,7 @@ import {
   screen,
   fireEvent,
   waitFor,
+  within,
 } from '@/test/utils/componentTestUtils';
 import { toast } from 'sonner';
 import { QuickStartDialog } from '../QuickStartDialog';
@@ -121,8 +122,9 @@ const SCROLLER_CLASS = /(^|\s)(overflow-(y-)?(auto|scroll)|max-h-\S+)(\s|$)/;
  * the Dialog body, and the button sits in a `sticky bottom-0` action row whose
  * nearest scroll container is that body (so it pins to the body's visible
  * bottom edge rather than scrolling away with the summary). That row holds
- * only buttons: a sticky block taller than the scrollport has a part no
- * scroll offset reveals, so the cost and notices must stay out of it.
+ * the two buttons and, at most, the one-line action summary: a sticky block
+ * taller than the scrollport has a part no scroll offset reveals, so the cost
+ * breakdown and the notices must stay out of it.
  */
 function expectActionsReachable(button: HTMLElement) {
   const dialog = screen.getByRole('dialog');
@@ -149,11 +151,16 @@ function expectActionsReachable(button: HTMLElement) {
   expect(row).not.toBeNull();
   expect(row?.classList.contains('bottom-0')).toBe(true);
   expect(body?.contains(row as Node)).toBe(true);
-  // One sticky element in the body, and it is a row of buttons only.
+  // One sticky element in the body: the buttons, optionally under the summary line.
   expect(Array.from(body?.querySelectorAll('.sticky') ?? [])).toEqual([row]);
-  const rowChildren = Array.from(row?.children ?? []);
-  expect(rowChildren).toContain(button);
-  expect(rowChildren.map((el) => el.tagName)).toEqual(['BUTTON', 'BUTTON']);
+  const slots = Array.from(row?.children ?? []).map((el) => el.getAttribute('data-testid'));
+  expect([['approval-gate-buttons'], ['approval-gate-action-summary', 'approval-gate-buttons']]).toContainEqual(slots);
+  const buttons = row?.querySelector('[data-testid="approval-gate-buttons"]');
+  expect(Array.from(buttons?.children ?? []).map((el) => el.tagName)).toEqual(['BUTTON', 'BUTTON']);
+  expect(buttons?.contains(button)).toBe(true);
+  // The summary line holds text only: nothing in it can take focus.
+  const summary = row?.querySelector('[data-testid="approval-gate-action-summary"]');
+  expect(summary?.querySelectorAll('a, button, input, select, textarea, [tabindex]').length ?? 0).toBe(0);
 }
 
 /** Walks the dialog from the type cards to the prompt step. */
@@ -597,7 +604,8 @@ describe('QuickStartDialog', () => {
       expect(screen.getByRole('heading', { name: 'Review your game plan' })).toBeTruthy();
       expect(screen.getByText('Jungle Canopy')).toBeTruthy();
       expect(screen.getByText('Estimated token cost')).toBeTruthy();
-      expect(screen.getByText('340')).toBeTruthy();
+      // Twice: in the cost bar, and in the total pinned beside "Build it".
+      expect(screen.getAllByText('340')).toHaveLength(2);
       // The number that actually leaves the balance: the reservation is the
       // estimate's upper bound, refunded down to what the build uses.
       expect(screen.getByText(/tokens are held while it builds/).textContent).toContain('Up to 400 tokens');
@@ -631,6 +639,52 @@ describe('QuickStartDialog', () => {
       for (const node of inFlow) {
         expect(node.closest('.sticky'), node.textContent ?? '').toBeNull();
         expect(node.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
+    });
+
+    // PR #10294 round 3 (ux): "Build it" takes focus at open and is pinned,
+    // while the cost bar scrolls with the plan. On a short viewport that put
+    // the user one Enter away from spending with the total out of view. The
+    // total now rides in the pinned row itself.
+    it('pins the token total in the action row beside "Build it"', async () => {
+      await reachPlanReview();
+      const build = screen.getByRole('button', { name: 'Build it' });
+      const row = build.closest('.sticky') as HTMLElement;
+      const total = screen.getByTestId('token-cost-total');
+      expect(row.contains(total)).toBe(true);
+      expect(total.textContent).toBe('Cost: 340 tokens, up to 400 held');
+      expect(within(total).queryByText(/balance/)).toBeNull();
+    });
+
+    it('says in the pinned total when the cost may exceed the balance', async () => {
+      await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
+      const total = screen.getByTestId('token-cost-total');
+      expect(screen.getByRole('button', { name: 'Build it' }).closest('.sticky')?.contains(total)).toBe(true);
+      expect(within(total).getByText('May exceed your balance')).toBeTruthy();
+      expect(total.textContent).toContain('Cost: 340 tokens, up to 400 held');
+    });
+
+    // PR #10294 round 3 (ux): arming Discard inserts the prompt in normal flow
+    // just above the pinned row, which on a short viewport is out of view, so
+    // the user saw the button turn red but not the question or "Keep plan".
+    it('scrolls the discard prompt into view (nearest) when Discard is armed, and not before', async () => {
+      const scrollIntoView = vi.fn();
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        writable: true,
+        value: scrollIntoView,
+      });
+      try {
+        await reachPlanReview();
+        expect(scrollIntoView).not.toHaveBeenCalled();
+        await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+        const target = scrollIntoView.mock.contexts[0] as HTMLElement;
+        expect(target.textContent).toContain('Discard this plan? Planning it again costs tokens.');
+        expect(within(target).getByRole('button', { name: 'Keep plan' })).toBeTruthy();
+      } finally {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
       }
     });
 

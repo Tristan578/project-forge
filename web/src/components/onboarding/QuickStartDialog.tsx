@@ -55,7 +55,7 @@ import {
 } from '@/lib/game-creation/quickStart';
 import type { ApprovalGate } from '@/lib/game-creation/types';
 import { ApprovalGateDialog } from '@/components/editor/ApprovalGateDialog';
-import { TokenCostBar } from '@/components/editor/TokenCostBar';
+import { TokenCostBar, TokenCostTotal } from '@/components/editor/TokenCostBar';
 import { claimQuickStartGate } from '@/components/editor/quickStartGateOwner';
 
 /**
@@ -149,6 +149,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   const runningRef = useRef<HTMLDivElement>(null);
   const firstCardRef = useRef<HTMLButtonElement>(null);
   const playNowRef = useRef<HTMLButtonElement>(null);
+  const discardPromptRef = useRef<HTMLDivElement>(null);
   const prevPhaseRef = useRef<Phase | null>(null);
 
   const status = useEditorStore((s) => s.orchestratorStatus);
@@ -340,6 +341,17 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
     keep: keepPlan,
     discardRef,
   } = useDiscardConfirm(currentPlan, planGate !== null);
+
+  // Arming Discard inserts the "Discard this plan?" prompt in normal flow
+  // directly above the review's pinned button row, which on a short viewport
+  // is below the visible area. The button turning red is not the question:
+  // bring the prompt and its "Keep plan" into view. `nearest` honours the
+  // body's scroll padding (kept at the pinned row's height by
+  // ApprovalGateDialog), so it stops above the row, not under it (PR #10294
+  // round 3). jsdom has no `scrollIntoView`, hence the optional call.
+  useEffect(() => {
+    if (discardArmed) discardPromptRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [discardArmed]);
 
   // The plan review's "Build it": the first point at which build tokens are
   // spent. Failures land on the store, not as throws (same contract as
@@ -550,7 +562,10 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               check: `sufficientBalance` reads a cached client balance, so it
               does not disable the button (the orchestrator panel's Start
               Building makes the same choice). A refused reservation comes back
-              as an error here, with nothing spent. */}
+              as an error here, with nothing spent. The full cost bar scrolls
+              with the plan; its total also rides in the pinned action row
+              (`actionSummary`), so the number is in view whenever "Build it"
+              is, including at open, when "Build it" takes focus. */}
           {planGate && (
             <ApprovalGateDialog
               gate={planGate}
@@ -562,6 +577,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
               cancelVariant={discardArmed ? 'destructive' : 'ghost'}
               cancelRef={discardRef}
               scrollContainer="parent"
+              actionSummary={tokenEstimate ? <TokenCostTotal estimate={tokenEstimate} /> : undefined}
               autoFocus
             >
               {reviewError && (
@@ -576,7 +592,7 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
                 />
               )}
               {discardArmed && (
-                <div className="mt-3">
+                <div ref={discardPromptRef} className="mt-3">
                   <DiscardConfirmPrompt onKeep={keepPlan} />
                 </div>
               )}

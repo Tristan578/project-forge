@@ -3,9 +3,10 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import type { ReactNode } from 'react';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
-import { ApprovalGateDialog } from '../ApprovalGateDialog';
+import { ApprovalGateDialog, PINNED_ROW_CLEARANCE_PX } from '../ApprovalGateDialog';
 import type { ApprovalGate } from '@/lib/game-creation/types';
 
 function makeGate(overrides: Partial<ApprovalGate['displayData']> = {}): ApprovalGate {
@@ -199,15 +200,18 @@ describe('ApprovalGateDialog', () => {
   // inside it the gate must not bring a second bounded scroller (nested
   // scrolling carries the inner box's buttons out of view on a short
   // viewport). In 'parent' mode the summary flows into the enclosing scroll
-  // and ONLY the Approve/Cancel row sticks to its bottom edge (round 3: a
-  // sticky footer that also carried the cost could grow taller than the
-  // scrollport, leaving its top unreachable at every scroll offset).
+  // and ONLY the action row sticks to its bottom edge (round 3: a sticky
+  // footer that also carried the cost could grow taller than the scrollport,
+  // leaving its top unreachable at every scroll offset). Round 4: that row
+  // also carries a one-line `actionSummary` (the token total), so the total
+  // is in view whenever Approve is.
   describe("scrollContainer='parent'", () => {
     const SCROLLER = /(^|\s)(overflow-(y-)?(auto|scroll)|max-h-\S+)(\s|$)/;
 
-    function renderParentMode() {
+    function renderParentMode({ actionSummary }: { actionSummary?: ReactNode } = {}) {
       return render(
         <ApprovalGateDialog
+          actionSummary={actionSummary}
           gate={makeGate({
             sceneSummaries: [{ name: 'Level 1', entityCount: 3, systemDescriptions: [] }],
           })}
@@ -234,8 +238,8 @@ describe('ApprovalGateDialog', () => {
       expect(screen.getByTestId('approval-gate-summary')).not.toHaveAttribute('tabindex');
     });
 
-    it('makes the action row the ONE sticky element, holding nothing but the two buttons', () => {
-      const { container } = renderParentMode();
+    it('makes the action row the ONE sticky element, holding only the buttons and the one-line summary', () => {
+      const { container } = renderParentMode({ actionSummary: <span>Cost: 340 tokens</span> });
       const approve = screen.getByRole('button', { name: 'Approve' });
       const cancel = screen.getByRole('button', { name: 'Cancel' });
 
@@ -243,33 +247,124 @@ describe('ApprovalGateDialog', () => {
       const sticky = Array.from(container.querySelectorAll<HTMLElement>('.sticky'));
       expect(sticky).toHaveLength(1);
       const [row] = sticky;
+      expect(row).toBe(screen.getByTestId('approval-gate-actions'));
       expect(row.classList.contains('bottom-0')).toBe(true);
       // An opaque background, so the content scrolling underneath is hidden.
       expect(row.className).toContain('bg-[var(--sf-bg-surface)]');
-      // Only the action row: its children are exactly the two buttons, so
-      // nothing else (cost, notices, prompts) can make it taller.
-      expect(Array.from(row.children)).toEqual([approve, cancel]);
+      // Only the summary line and the buttons: nothing else (the cost
+      // breakdown, notices, prompts) can make the pinned block taller.
+      const summary = screen.getByTestId('approval-gate-action-summary');
+      const buttons = screen.getByTestId('approval-gate-buttons');
+      expect(Array.from(row.children)).toEqual([summary, buttons]);
+      expect(Array.from(buttons.children)).toEqual([approve, cancel]);
+      expect(summary.textContent).toBe('Cost: 340 tokens');
 
-      // The cost stays in normal flow, before the row.
+      // The full cost stays in normal flow, before the row.
       const cost = screen.getByText('Estimated token cost 340');
       expect(row.contains(cost)).toBe(false);
       expect(cost.closest('.sticky')).toBeNull();
       expect(cost.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
       // A sticky box cannot leave its parent, so the row is a direct child of
-      // the gate root that also holds the summary: it can follow the whole
-      // summary, not just a wrapper the size of the row.
-      const summary = screen.getByTestId('approval-gate-summary');
-      expect(summary.contains(screen.getByText('Level 1'))).toBe(true);
-      expect(row.parentElement).toBe(summary.parentElement);
+      // the gate root that also holds the plan summary: it can follow the
+      // whole summary, not just a wrapper the size of the row.
+      const planSummary = screen.getByTestId('approval-gate-summary');
+      expect(planSummary.contains(screen.getByText('Level 1'))).toBe(true);
+      expect(row.parentElement).toBe(planSummary.parentElement);
       expect(row.parentElement?.lastElementChild).toBe(row);
     });
 
-    it('gives the in-flow extras a bottom scroll margin, so a focused control is not hidden under the pinned row', () => {
+    it('renders no summary slot in the row when there is no actionSummary', () => {
       renderParentMode();
-      const extra = screen.getByTestId('approval-gate-extra');
-      expect(extra.contains(screen.getByText('Estimated token cost 340'))).toBe(true);
-      expect(Array.from(extra.classList).some((c) => /^\[&_\*\]:scroll-mb-\d+$/.test(c))).toBe(true);
+      const row = screen.getByTestId('approval-gate-actions');
+      expect(Array.from(row.children)).toEqual([screen.getByTestId('approval-gate-buttons')]);
+      expect(screen.queryByTestId('approval-gate-action-summary')).toBeNull();
+    });
+
+    // The row covers the bottom strip of the parent scroller's visible area.
+    // The browser only keeps a focused control (or a scrollIntoView target)
+    // clear of that strip if the scroller's scroll padding says so; a scroll
+    // MARGIN on the target is not part of Chromium's focus check (PR #10294
+    // round 3). jsdom has no layout, so this pins the VALUE the gate writes;
+    // e2e/tests/quick-start-plan-review-layout.spec.ts measures the result in
+    // Chromium.
+    describe('scroll padding on the parent scroller', () => {
+      type Callback = () => void;
+      const observers: { callback: Callback; observed: Element[] }[] = [];
+      let rowHeight = 0;
+
+      beforeEach(() => {
+        observers.length = 0;
+        rowHeight = 52.4;
+        vi.stubGlobal(
+          'ResizeObserver',
+          class {
+            observed: Element[] = [];
+            constructor(public callback: Callback) {
+              observers.push(this);
+            }
+            observe(el: Element) {
+              this.observed.push(el);
+            }
+            disconnect() {
+              this.observed = [];
+            }
+          },
+        );
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+          this: HTMLElement,
+        ) {
+          const height = this.dataset.testid === 'approval-gate-actions' ? rowHeight : 0;
+          return { x: 0, y: 0, top: 0, left: 0, right: 0, width: 0, bottom: height, height, toJSON: () => ({}) };
+        });
+      });
+
+      afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      });
+
+      function renderInScroller(scrollContainer: 'own' | 'parent') {
+        return render(
+          <div data-testid="scroller" style={{ overflowY: 'auto', paddingBottom: '12px', scrollPaddingBottom: '3px' }}>
+            {/* A non-scrolling wrapper in between: the gate must find the
+                scroll container, not just its parent. */}
+            <div data-testid="wrapper">
+              <ApprovalGateDialog gate={makeGate()} onApprove={vi.fn()} onCancel={vi.fn()} scrollContainer={scrollContainer}>
+                <p>Estimated token cost 340</p>
+              </ApprovalGateDialog>
+            </div>
+          </div>,
+        );
+      }
+
+      it('covers the row height plus the scroller bottom padding, follows the row as it resizes, and restores the old value on unmount', () => {
+        const { unmount } = renderInScroller('parent');
+        const scroller = screen.getByTestId('scroller');
+        expect(screen.getByTestId('wrapper').style.scrollPaddingBottom).toBe('');
+        // ceil(52.4 + 12) + 8 = 73: the sticky row pins 12px above the
+        // scrollport edge (the scroller's padding), and is 52.4px tall.
+        expect(scroller.style.scrollPaddingBottom).toBe(`${Math.ceil(52.4 + 12) + PINNED_ROW_CLEARANCE_PX}px`);
+        expect(PINNED_ROW_CLEARANCE_PX).toBeGreaterThan(0);
+
+        // The row grew (a wrapped summary line, a narrower viewport).
+        const row = screen.getByTestId('approval-gate-actions');
+        const observer = observers.find((o) => o.observed.includes(row));
+        expect(observer).toBeDefined();
+        rowHeight = 92;
+        observer?.callback();
+        expect(scroller.style.scrollPaddingBottom).toBe(`${92 + 12 + PINNED_ROW_CLEARANCE_PX}px`);
+
+        unmount();
+        expect(scroller.style.scrollPaddingBottom).toBe('3px');
+        expect(observer?.observed).toEqual([]);
+      });
+
+      it("leaves the scroller's scroll padding alone in 'own' mode", () => {
+        renderInScroller('own');
+        expect(screen.getByTestId('scroller').style.scrollPaddingBottom).toBe('3px');
+        expect(observers).toHaveLength(0);
+      });
     });
 
     it("pins nothing in the default 'own' mode", () => {
@@ -281,7 +376,6 @@ describe('ApprovalGateDialog', () => {
       // Non-vacuous: the row and the extras rendered.
       expect(screen.getByTestId('approval-gate-actions')).toBeInTheDocument();
       expect(container.querySelectorAll('.sticky')).toHaveLength(0);
-      expect(Array.from(screen.getByTestId('approval-gate-extra').classList).some((c) => c.includes('scroll-mb'))).toBe(false);
     });
   });
 });

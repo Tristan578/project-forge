@@ -235,31 +235,66 @@ describe('Dialog', () => {
       expect(body.hasAttribute('tabindex')).toBe(false);
     });
 
-    it('keeps initial focus on the first real control, not the scroll region before it', () => {
-      vi.useFakeTimers();
-      render(
-        <Dialog
-          open
-          onClose={vi.fn()}
-          title="Long dialog"
-          actions={<button type="button">Confirm</button>}
-        >
-          <button type="button">First control</button>
-        </Dialog>
-      );
-      setBodyGeometry(getBody(), 900, 300);
-      // The region precedes the control in DOM (and Tab) order.
-      const region = screen.getByRole('region', { name: 'Long dialog' });
-      const first = screen.getByRole('button', { name: 'First control' });
-      expect(region.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
+    // useDialogA11y picks the initial focus target in a requestAnimationFrame.
+    // In Chromium that frame callback runs BEFORE the first ResizeObserver
+    // notification (measured 20/20, PR #10294 round 3), so the tests below run
+    // the frame first and fire the observer after it: the order production
+    // actually sees. The observer-first order is kept as a second case where
+    // the outcome must not depend on it.
+    function runFrame() {
       act(() => {
         vi.runAllTimers();
       });
-      expect(document.activeElement).toBe(first);
+    }
+
+    it.each([
+      ['frame, then observer (Chromium)', 'frame-first'],
+      ['observer, then frame', 'observer-first'],
+    ] as const)(
+      'keeps initial focus on the first real control, not the scroll region before it: %s',
+      (_label, order) => {
+        vi.useFakeTimers();
+        render(
+          <Dialog
+            open
+            onClose={vi.fn()}
+            title="Long dialog"
+            actions={<button type="button">Confirm</button>}
+          >
+            <button type="button">First control</button>
+          </Dialog>
+        );
+        if (order === 'frame-first') runFrame();
+        setBodyGeometry(getBody(), 900, 300);
+        if (order === 'observer-first') runFrame();
+        // The region precedes the control in DOM (and Tab) order.
+        const region = screen.getByRole('region', { name: 'Long dialog' });
+        const first = screen.getByRole('button', { name: 'First control' });
+        expect(region.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        // The region appearing does not pull focus off a real control.
+        expect(document.activeElement).toBe(first);
+      }
+    );
+
+    it('moves initial focus from the container into the scroll region when the region appears after the frame (the Chromium order)', () => {
+      vi.useFakeTimers();
+      render(
+        <Dialog open onClose={vi.fn()} title="Terms">
+          <p>Very long text with no controls.</p>
+        </Dialog>
+      );
+      const dialog = screen.getByRole('dialog');
+      runFrame();
+      // At the frame nothing inside is focusable yet, so the container takes focus.
+      expect(document.activeElement).toBe(dialog);
+      expect(screen.queryByRole('region')).toBeNull();
+
+      // The observer then reports the overflow: the region appears and takes focus.
+      setBodyGeometry(getBody(), 900, 300);
+      expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Terms' }));
     });
 
-    it('falls back to the scroll region for initial focus when it is the only focusable thing', () => {
+    it('focuses the scroll region directly when the observer reports before the frame', () => {
       vi.useFakeTimers();
       render(
         <Dialog open onClose={vi.fn()} title="Terms">
@@ -267,13 +302,11 @@ describe('Dialog', () => {
         </Dialog>
       );
       setBodyGeometry(getBody(), 900, 300);
-      act(() => {
-        vi.runAllTimers();
-      });
+      runFrame();
       expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Terms' }));
     });
 
-    it('moves focus to the dialog, not <body>, when the focused region stops overflowing', () => {
+    it('moves focus to the dialog, not <body>, when the focused region stops overflowing, and back into the region when it overflows again', () => {
       vi.useFakeTimers();
       render(
         <Dialog open onClose={vi.fn()} title="Terms">
@@ -281,10 +314,8 @@ describe('Dialog', () => {
         </Dialog>
       );
       const body = getBody();
+      runFrame();
       setBodyGeometry(body, 900, 300);
-      act(() => {
-        vi.runAllTimers();
-      });
       // Precondition: the region holds focus (it is the only focusable thing).
       expect(document.activeElement).toBe(body);
 
@@ -296,6 +327,88 @@ describe('Dialog', () => {
       // programmatically focusable (tabIndex -1) but not a Tab stop.
       expect(document.activeElement).toBe(dialog);
       expect(dialog.tabIndex).toBe(-1);
+
+      // The content grew back: the region is the one focusable thing again.
+      setBodyGeometry(body, 900, 300);
+      expect(document.activeElement).toBe(body);
+    });
+
+    it('leaves focus outside the dialog alone when the region appears', () => {
+      vi.useFakeTimers();
+      const outside = document.createElement('button');
+      document.body.appendChild(outside);
+      try {
+        render(
+          <Dialog open onClose={vi.fn()} title="Terms">
+            <p>Very long text with no controls.</p>
+          </Dialog>
+        );
+        runFrame();
+        // Something outside took focus after the frame (not a real dialog
+        // flow, but it isolates the rule: only the CONTAINER hands off).
+        outside.focus();
+        setBodyGeometry(getBody(), 900, 300);
+        expect(screen.getByRole('region', { name: 'Terms' })).toBe(getBody());
+        expect(document.activeElement).toBe(outside);
+      } finally {
+        outside.remove();
+      }
+    });
+
+    it('disconnects every observer when it closes and when it unmounts', () => {
+      const { rerender, unmount } = render(
+        <Dialog open onClose={vi.fn()} title="Long dialog">
+          <p>Body</p>
+        </Dialog>
+      );
+      // Non-vacuous: something was observed while open.
+      expect(observers.length).toBeGreaterThan(0);
+      expect(observers.flatMap((o) => o.observed).length).toBeGreaterThan(0);
+
+      rerender(
+        <Dialog open={false} onClose={vi.fn()} title="Long dialog">
+          <p>Body</p>
+        </Dialog>
+      );
+      expect(observers.map((o) => o.observed.length)).toEqual(observers.map(() => 0));
+
+      rerender(
+        <Dialog open onClose={vi.fn()} title="Long dialog">
+          <p>Body</p>
+        </Dialog>
+      );
+      const afterReopen = observers.length;
+      expect(observers.flatMap((o) => o.observed).length).toBeGreaterThan(0);
+      unmount();
+      // Includes the observer created on reopen.
+      expect(observers.length).toBe(afterReopen);
+      expect(observers.map((o) => o.observed.length)).toEqual(observers.map(() => 0));
+    });
+
+    it('forgets the overflow on close: a reopened body is a plain box until the observer reports again', () => {
+      const { rerender } = render(
+        <Dialog open onClose={vi.fn()} title="Long dialog">
+          <p>Body</p>
+        </Dialog>
+      );
+      setBodyGeometry(getBody(), 900, 300);
+      expect(getBody().getAttribute('role')).toBe('region');
+
+      rerender(
+        <Dialog open={false} onClose={vi.fn()} title="Long dialog">
+          <p>Body</p>
+        </Dialog>
+      );
+      rerender(
+        <Dialog open onClose={vi.fn()} title="Long dialog">
+          <p>Body</p>
+        </Dialog>
+      );
+      // No observer has fired since the reopen.
+      const body = getBody();
+      expect(body.hasAttribute('tabindex')).toBe(false);
+      expect(body.hasAttribute('role')).toBe(false);
+      expect(screen.queryByRole('region')).toBeNull();
     });
 
     it('leaves focus alone when the region stops overflowing without holding focus', () => {
