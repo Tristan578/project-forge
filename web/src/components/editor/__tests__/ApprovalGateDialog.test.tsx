@@ -282,6 +282,57 @@ describe('ApprovalGateDialog', () => {
       render(<ApprovalGateActions gate={gate} onApprove={vi.fn()} onCancel={vi.fn()} />);
       expect(screen.getByRole('button', { name: 'Approve' })).not.toHaveFocus();
     });
+
+    // PR #10294 board round 9 (ux HIGH, defence in depth): the plan review can
+    // mount this row with "Discard it" in Approve's place. Focus goes to the
+    // cancel answer, never the destructive one. Not focusing at all is not
+    // enough: the Dialog's deferred initial focus would take the first
+    // focusable control, which is the destructive button.
+    it('focuses the cancel answer, never a destructive approve, on mount', () => {
+      render(
+        <ApprovalGateActions
+          gate={gate}
+          onApprove={vi.fn()}
+          onCancel={vi.fn()}
+          approveLabel="Discard it"
+          approveVariant="destructive"
+          cancelLabel="Keep plan"
+          autoFocus
+        />,
+      );
+      expect(screen.getByRole('button', { name: 'Discard it' })).not.toHaveFocus();
+      expect(screen.getByRole('button', { name: 'Keep plan' })).toHaveFocus();
+    });
+
+    // Focus is taken once per gate. The plan review swaps the same row
+    // between "Build it" and "Discard it"; Keep plan returns focus to its own
+    // button, and a variant change must not pull it back onto Approve.
+    it('does not re-take focus when the same gate changes variant, and does for a new gate', () => {
+      const row = (id: string, armed: boolean) => (
+        <>
+          <ApprovalGateActions
+            gate={{ ...gate, id }}
+            onApprove={vi.fn()}
+            onCancel={vi.fn()}
+            approveLabel={armed ? 'Discard it' : 'Build it'}
+            approveVariant={armed ? 'destructive' : 'default'}
+            cancelLabel={armed ? 'Keep plan' : 'Discard plan'}
+            autoFocus
+          />
+          <button type="button">Elsewhere</button>
+        </>
+      );
+      const { rerender } = render(row('gate_plan', false));
+      expect(screen.getByRole('button', { name: 'Build it' })).toHaveFocus();
+      const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+      elsewhere.focus();
+      rerender(row('gate_plan', true));
+      expect(elsewhere).toHaveFocus();
+      rerender(row('gate_plan', false));
+      expect(elsewhere).toHaveFocus();
+      rerender(row('gate_assets', false));
+      expect(screen.getByRole('button', { name: 'Build it' })).toHaveFocus();
+    });
   });
 
   // PR #10294 board round 4, measured in Chromium: "Build it" is disabled while the

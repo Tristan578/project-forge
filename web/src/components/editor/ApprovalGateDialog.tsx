@@ -41,6 +41,9 @@ const ROW = 'rounded-[var(--sf-radius-sm)] bg-[var(--sf-bg-elevated)] px-2 py-1 
 /** The card around a gate's heading, summary and extras. */
 const CARD = 'rounded-[var(--sf-radius-md)] border border-[var(--sf-warning)] bg-[var(--sf-bg-surface)] p-4';
 
+/** Marks a gate's cancel button inside its action row (rendered literally below). */
+const CANCEL_ATTR = 'data-gate-cancel';
+
 /** The id of a gate's heading, which also labels its summary region and its action group. */
 function headingIdFor(gate: ApprovalGate): string {
   return `approval-gate-heading-${gate.id}`;
@@ -161,7 +164,8 @@ export interface ApprovalGateActionsProps {
   onApprove: () => void;
   onCancel: () => void;
   /**
-   * Focus Approve on mount. Set by the quick-start dialog, where the gate
+   * Focus Approve on mount (Cancel instead while Approve is destructive: focus
+   * is never handed to a destructive answer). Set by the quick-start dialog, where the gate
    * replaces the content the user was last focused on — without this, focus
    * falls to `document.body` inside an `aria-modal` region and keyboard users
    * have nothing to tab from. The panel leaves it off: the gate appears
@@ -230,11 +234,36 @@ export function ApprovalGateActions({
   className,
 }: ApprovalGateActionsProps) {
   const approveRef = useRef<HTMLButtonElement>(null);
+  // The button row, to find the cancel button for the destructive case below.
+  // `cancelRef` belongs to the caller and a prop may not be written to, so the
+  // cancel button is looked up in the row rather than sharing that ref.
+  const buttonsRef = useRef<HTMLDivElement>(null);
 
+  // Focus once per gate (gate.id, so a second gate in the same run re-focuses),
+  // not again when the same gate's approve button changes variant: the plan
+  // review's Keep plan returns focus to its own button, and a re-run here
+  // would pull it onto "Build it".
+  //
+  // Never onto a destructive approve, the same rule as the re-enable below: if
+  // the row mounts with "Discard it" in this place (the plan review reopened
+  // while its Discard was still armed, PR #10294 board round 9), focus goes to
+  // the cancel button ("Keep plan"), the answer that loses nothing. Skipping
+  // the focus is not enough: the Dialog's deferred initial focus would then
+  // pick the first focusable control in the dialog, which is this one.
+  const autoFocusedGateRef = useRef<string | null>(null);
   useEffect(() => {
-    if (autoFocus) approveRef.current?.focus();
-    // gate.id so a second gate in the same run re-focuses.
-  }, [autoFocus, gate.id]);
+    if (!autoFocus) {
+      autoFocusedGateRef.current = null;
+      return;
+    }
+    if (autoFocusedGateRef.current === gate.id) return;
+    autoFocusedGateRef.current = gate.id;
+    if (approveVariant === 'destructive') {
+      buttonsRef.current?.querySelector<HTMLButtonElement>(`[${CANCEL_ATTR}]`)?.focus();
+    } else {
+      approveRef.current?.focus();
+    }
+  }, [autoFocus, gate.id, approveVariant]);
 
   // Pressing Approve can disable it while the action starts (the plan
   // review's "Build it"), and a browser drops focus from a button that
@@ -266,7 +295,7 @@ export function ApprovalGateActions({
           {summary}
         </div>
       )}
-      <div data-testid="approval-gate-buttons" className="flex gap-2">
+      <div ref={buttonsRef} data-testid="approval-gate-buttons" className="flex gap-2">
         <Button
           ref={approveRef}
           type="button"
@@ -278,7 +307,7 @@ export function ApprovalGateActions({
         >
           {approveLabel}
         </Button>
-        <Button ref={cancelRef} type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
+        <Button ref={cancelRef} data-gate-cancel="" type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
           {cancelLabel}
         </Button>
       </div>

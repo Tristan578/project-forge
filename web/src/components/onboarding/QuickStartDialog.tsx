@@ -218,13 +218,22 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // setState synchronously in an effect body is what `set-state-in-effect`
   // rejects. React re-runs this render before committing, so nothing downstream
   // ever observes the stale values. Same shape as FeedbackDialog.
+  //
+  // `confirming` is NOT reset here: it marks a "Build it" whose start is still
+  // in flight, and closing does not stop that start. Cleared on reopen, the
+  // review re-enabled "Build it" and, with the earlier refusal still on the
+  // store until the run reports 'executing', said "The build did not start."
+  // about a build that was starting (PR #10294 board round 9). The pending
+  // call's own `finally` clears it. (`starting` is reset, but it cannot
+  // misreport: `startDecomposition` makes the run live before its first await,
+  // so a reopen during "Plan my game" resumes the running view, and both reads
+  // of `starting` are or-ed with the live status.)
   const [prevOpen, setPrevOpen] = useState(open);
   if (prevOpen !== open) {
     setPrevOpen(open);
     if (open) {
       setError(null);
       setStarting(false);
-      setConfirming(false);
       if (isOrchestratorRunLive(useEditorStore.getState().orchestratorStatus)) {
         setPhase('running');
       } else {
@@ -345,13 +354,20 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   }, [prompt, selectedId]);
 
   // Same two-step Discard as OrchestratorPanel: the plan cost tokens to design.
+  //
+  // `open` is part of "awaiting": closing renders nothing but keeps this
+  // component, and so the arm, alive. Close, Escape and the backdrop all keep
+  // the plan, so the question they walked away from must not be waiting when
+  // the review reopens. Armed on reopen, "Discard it" stood where "Build it"
+  // usually takes focus, one Enter from dropping the plan (PR #10294 board
+  // round 9). Leaving the review clears the arm (`useDiscardConfirm`).
   const {
     armed: discardArmed,
     arm: armDiscard,
     disarm: disarmDiscard,
     keep: keepPlan,
     discardRef,
-  } = useDiscardConfirm(currentPlan, planGate !== null);
+  } = useDiscardConfirm(currentPlan, open && planGate !== null);
 
   // Arming turns the pressed "Discard plan" into "Keep plan", which is meant
   // to hold focus so a second press backs out. A mouse click does not focus a
@@ -384,7 +400,14 @@ export function QuickStartDialog({ open, onClose }: QuickStartDialogProps) {
   // `open` is a dependency too: closing renders nothing but keeps this
   // component (and the store's refusal) alive, so on reopen the review starts
   // at the top with the same refusal below the fold, and the effect must run
-  // again for the newly mounted alert (Devin review on #10294).
+  // again for the newly mounted alert (Devin review on #10294). The `open &&`
+  // in the condition is defensive only: while closed the alert is not mounted
+  // and the ref is null, so the call is a no-op either way and no test can
+  // tell the two apart. The dependency is what matters.
+  //
+  // A reopen during an in-flight "Build it" does not scroll: `confirming`
+  // survives the reopen, so `startingBuild` holds the stale refusal back until
+  // the start settles.
   const settledRefusal = startingBuild ? null : reviewError;
   useEffect(() => {
     if (open && settledRefusal) reviewErrorRef.current?.scrollIntoView?.({ block: 'nearest' });

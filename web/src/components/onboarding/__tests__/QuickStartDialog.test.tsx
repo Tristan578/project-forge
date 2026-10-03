@@ -848,16 +848,53 @@ describe('QuickStartDialog', () => {
         expect(refusalScrolls()).toHaveLength(1);
         // Closed and reopened with the refusal still on the store: the review
         // mounts again at its top, so the alert is brought into view again
-        // (Devin review on #10294). Closed, nothing is scrolled.
+        // (Devin review on #10294).
         rerender(<QuickStartDialog open={false} onClose={vi.fn()} />);
         expect(screen.queryByRole('alert')).toBeNull();
+        // A count baseline for the reopen below, not a check of the effect's
+        // `open &&` guard: while closed the alert is unmounted and its ref is
+        // null, so the effect cannot scroll anything with or without the
+        // guard. The guard is defensive and unobservable; the `open`
+        // DEPENDENCY is what the reopen assertions pin.
         expect(refusalScrolls()).toHaveLength(1);
         rerender(<QuickStartDialog open onClose={vi.fn()} />);
         await screen.findByRole('alert');
         expect(refusalScrolls()).toHaveLength(2);
         const reopened = refusalScrolls()[1] as HTMLElement;
         expect(reopened.isConnected).toBe(true);
+        expect(scrollIntoView.mock.calls[scrollIntoView.mock.contexts.indexOf(reopened)]).toEqual([
+          { block: 'nearest' },
+        ]);
         expect(within(reopened).getByRole('alert').textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
+
+        // Reopened DURING an in-flight retry (PR #10294 board round 9). The
+        // store keeps the earlier refusal until the run reports 'executing',
+        // so a reopen that forgot the start was in flight said "The build did
+        // not start.", re-enabled Build it and scrolled to the stale refusal.
+        let settleRetry!: () => void;
+        runPipelineFromPlan.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              settleRetry = resolve;
+            }),
+        );
+        await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+        expect(runPipelineFromPlan).toHaveBeenCalledTimes(2);
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        rerender(<QuickStartDialog open={false} onClose={vi.fn()} />);
+        rerender(<QuickStartDialog open onClose={vi.fn()} />);
+        await screen.findByRole('alert');
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        expect(screen.getByRole('status').textContent).toBe('Starting the build…');
+        expect(refusalScrolls()).toHaveLength(2);
+        // Refused again: now the settled refusal is brought into view, and
+        // Build it is offered again.
+        await act(async () => {
+          settleRetry();
+        });
+        expect(screen.getByRole('button', { name: 'Build it' })).not.toBeDisabled();
+        expect(screen.getByRole('status').textContent).toBe('The build did not start.');
+        expect(refusalScrolls()).toHaveLength(3);
       } finally {
         delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
       }
@@ -972,6 +1009,38 @@ describe('QuickStartDialog', () => {
       expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
       expect(screen.queryByText(/Discard this plan\?/)).toBeNull();
       expect(cancelPipeline).not.toHaveBeenCalled();
+    });
+
+    // PR #10294 board round 9 (ux HIGH): the dialog renders nothing while
+    // closed but stays mounted, and Close, Escape and the backdrop only call
+    // onClose. The arm survived, so the review reopened asking "Discard this
+    // plan?" with focus on "Discard it", where "Build it" usually is: one
+    // Enter dropped the plan.
+    it('reopens an armed review unarmed, focus on "Build it": one Enter builds, never discards', async () => {
+      const onClose = vi.fn();
+      const { rerender } = await reachPlanReview({}, onClose);
+      await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+      expect(screen.getByRole('button', { name: 'Discard it' })).toBeTruthy();
+
+      rerender(<QuickStartDialog open={false} onClose={onClose} />);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      rerender(<QuickStartDialog open onClose={onClose} />);
+
+      const build = screen.getByRole('button', { name: 'Build it' });
+      expect(screen.getByRole('button', { name: 'Discard plan' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Discard it' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Keep plan' })).toBeNull();
+      expect(screen.queryByText(/Discard this plan\?/)).toBeNull();
+      // After the Dialog's deferred initial-focus frame too.
+      await act(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+      expect(document.activeElement).toBe(build);
+
+      await userEvent.keyboard('{Enter}');
+      expect(cancelPipeline).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(runPipelineFromPlan).toHaveBeenCalledTimes(1);
     });
 
     // An armed Discard must not survive a build attempt: a refused build puts

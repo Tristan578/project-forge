@@ -13,7 +13,10 @@ import { useCallback, useRef, useState } from 'react';
  * "Keep plan". The arm belongs to ONE plan at ONE review:
  * - it is keyed on the plan object, so a new plan is never shown pre-armed;
  * - leaving the review (`awaiting` goes false: a build started, from this
- *   surface or from chat, or the run was cancelled or reset) clears it;
+ *   surface or from chat, or the run was cancelled or reset) clears it. A
+ *   surface that stays mounted while hidden folds its visibility into
+ *   `awaiting` (QuickStartDialog passes `open && …`), so closing it counts as
+ *   leaving and a reopened review is never shown pre-armed;
  * - the caller clears it (`disarm`) when the user presses Build, because a
  *   refused build returns the SAME plan to the review without ever leaving it
  *   long enough to render (#6831 review).
