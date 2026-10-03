@@ -32,8 +32,9 @@ import path from 'node:path';
  *
  * The un-cast compile is the ORACLE. The derivation explains the errors; it
  * never decides whether the gap is closed:
- *  - the un-cast program compiles clean -> RED "drop the casts and delete this
- *    test" (the issue's "Done when"). This is the only path that says so;
+ *  - the un-cast program compiles clean -> RED "…so the SDK gap is closed:
+ *    drop the `as Transport` casts (lines N, M) and delete this test" (the
+ *    issue's "Done when"). This is the only path that says so;
  *  - the un-cast program still reports the exactOptionalPropertyTypes error
  *    but the derivation finds no disagreeing member -> RED "derivation
  *    broken": fix this test, do NOT drop the casts;
