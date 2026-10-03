@@ -165,21 +165,38 @@ dpkg_lock_holders() {
   done
   if [ ${#existing[@]} -eq 0 ]; then return 1; fi
   command -v fuser >/dev/null 2>&1 || return 2
-  if [ "$(id -u)" -eq 0 ]; then
-    out="$(fuser "${existing[@]}" 2>/dev/null)"
-  elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
-    out="$(sudo -n fuser "${existing[@]}" 2>/dev/null)"
-  else
-    return 2
+  local runner=() err rc out_file
+  if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+      runner=(sudo -n)
+    else
+      return 2
+    fi
   fi
+  # "Free" must be POSITIVE evidence. fuser exits 1 both when nobody has the
+  # files open and when it fails -- a lock file deleted since the -e test above,
+  # or `sudo -n fuser` when the sudo PATH cannot resolve fuser ("sudo: fuser:
+  # command not found", exit 1, nothing on stdout). Read as free, the second
+  # would start an apt-get that fights the holder this probe exists to wait
+  # for. Measured on psmisc fuser: an unused file is exit 1 with stdout AND
+  # stderr empty, and every error path writes to stderr. So: exit 1 with both
+  # streams empty is free, exit 0 with PIDs is held, anything else is unknown.
+  out_file="$(mktemp 2>/dev/null)" || return 2
+  err="$(${runner[@]+"${runner[@]}"} fuser "${existing[@]}" 2>&1 >"$out_file")"
+  rc=$?
+  out="$(cat "$out_file")"
+  rm -f "$out_file"
   # fuser writes the PIDs to stdout and the file names and access letters to
   # stderr; keep only the digits. It prints a PID once PER LOCK FILE that
   # process holds, and apt-get holds several, so dedupe or the log reads
   # "PID 2614 2614".
   out="$(printf '%s\n' "$out" | tr -cs '0-9' '\n' | grep -E '^[0-9]+$' | sort -un | paste -sd ' ' -)"
-  if [ -z "$out" ]; then return 1; fi
-  printf '%s\n' "$out"
-  return 0
+  if [ "$rc" -eq 0 ] && [ -n "$out" ]; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  if [ "$rc" -eq 1 ] && [ -z "$out" ] && [ -z "$err" ]; then return 1; fi
+  return 2
 }
 
 describe_holders() {
@@ -217,6 +234,16 @@ wait_for_dpkg_lock() {
     holders="$(dpkg_lock_holders)"
     status=$?
     waited=$(( $(now) - wait_started ))
+    # A probe that saw the holder and then fails has NOT seen it exit. Only a
+    # confirmed free lock ends the wait; an unreadable one keeps polling, so a
+    # transient probe error cannot start an apt-get that fights the holder.
+    if [ "$status" -eq 2 ]; then
+      if [ "$LOCK_PROBE_WARNED" -eq 0 ]; then
+        echo "::warning::install-playwright-ci: the dpkg lock probe failed while ${LOCK_HOLDERS} held the lock; still waiting rather than treating the lock as released"
+        LOCK_PROBE_WARNED=1
+      fi
+      continue
+    fi
     if [ "$status" -ne 0 ]; then
       echo "install-playwright-ci: the dpkg lock was released after ${waited}s"
       LOCK_HOLDERS=""

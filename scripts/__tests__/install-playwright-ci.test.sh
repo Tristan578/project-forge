@@ -107,6 +107,15 @@ cat > "$STUB/fuser" <<'STUB'
 #!/usr/bin/env bash
 . "$(dirname "$0")/clock.sh"
 printf '%s\n' "$*" >> "$DPKG_TEST_FUSER_LOG"
+# A FAILING probe, as `sudo -n fuser` fails when the sudo PATH cannot resolve
+# fuser: exit 1 and nothing on stdout -- the same exit and stdout as "nobody
+# holds the lock" -- with the error on stderr. Active while the clock is in
+# [DPKG_TEST_FUSER_FAIL_FROM, DPKG_TEST_FUSER_FAIL_UNTIL).
+if [ -n "${DPKG_TEST_FUSER_FAIL_FROM:-}" ] && [ "$(clock_get)" -ge "$DPKG_TEST_FUSER_FAIL_FROM" ] \
+  && [ "$(clock_get)" -lt "${DPKG_TEST_FUSER_FAIL_UNTIL:-999999}" ]; then
+  echo "sudo: fuser: command not found" >&2
+  exit 1
+fi
 if lock_held; then
   printf '%s' "$(( $(held_probes) + 1 ))" > "$DPKG_TEST_PROBE_COUNT"
   # Real fuser prints the holder's PID once PER FILE it holds (apt-get holds
@@ -318,6 +327,32 @@ if [ -s "$TMP/fuser-log" ]; then pass "the lock probe ran (fuser was consulted)"
 fi
 assert_grep "off root the probe runs under sudo -n (a non-root fuser cannot see a root holder)" \
   "-n fuser" "$TMP/sudo-log"
+
+# A probe that FAILS is not a probe that saw the lock free (Devin review on
+# #10316). fuser exits 1 with empty stdout both when nobody holds the lock and
+# when `sudo -n fuser` cannot run at all; only the stderr tells them apart.
+# Mid-wait: the orphan holds the lock until t=520, and the probe fails between
+# t=400 and t=450. Reading that failure as a release would start attempt 2 at
+# t=400 against a live holder. It must keep waiting and start at t=520.
+DPKG_TEST_HOLD_AFTER=1 DPKG_TEST_HOLD_UNTIL=520 \
+  DPKG_TEST_FUSER_FAIL_FROM=400 DPKG_TEST_FUSER_FAIL_UNTIL=450 run_case browsers 1 124
+assert_eq "a probe that fails mid-wait still ends in a successful retry" "0" "$?"
+assert_eq "a probe that fails mid-wait never starts an attempt against the holder" \
+  "" "$(cat "$TMP/fight-log")"
+assert_eq "a probe that fails mid-wait waits for the confirmed release (t=520)" \
+  "140s" "$(attempt_timeout 2)"
+assert_grep "a probe that fails mid-wait is reported, not read as a release" \
+  "the dpkg lock probe failed while" "$TMP/out"
+# Before attempt 1, a failing probe is the same blind spot as no fuser at all:
+# warned about, then apt's own lock wait is the backstop. It must not be
+# silently read as "free".
+DPKG_TEST_FUSER_FAIL_FROM=0 run_case deps 0
+assert_eq "a probe that fails before the first attempt does not block the install" "0" "$?"
+assert_grep "a probe that fails before the first attempt is reported as unreadable, not free" \
+  "cannot see the dpkg lock holder" "$TMP/out"
+if [ -s "$TMP/fuser-log" ]; then pass "the failing probe really ran fuser"; else
+  fail "the failing probe never ran fuser, so the case above is vacuous"
+fi
 
 # A holder that outlives the budget is waited for up to the point where one
 # minimum attempt still fits (660 - 120 = 540), then reported -- never fought.
