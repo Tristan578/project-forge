@@ -37,7 +37,17 @@ import path from 'node:path';
  *    broken": fix this test, do NOT drop the casts;
  *  - the un-cast program reports anything other than one exactOptional error
  *    (TS2375 assignment or TS2379 argument) per cast site -> RED, listing each
- *    unexpected diagnostic and each cast that produced none.
+ *    unexpected diagnostic and each cast that produced none;
+ *  - an error that names none of the derived members -> RED.
+ *
+ * Explaining the errors is not enough on its own: a constant `['onclose']` or
+ * a derivation that reports every strict optional member of `Transport` can
+ * both explain them. So the main test also asks the un-cast compile whether
+ * the derived set IS the gap, by widening members in the SDK's own `.d.ts`:
+ *  - completeness: widening ONLY the derived members makes the un-cast program
+ *    compile clean;
+ *  - minimality: for each derived member, widening all the OTHERS still leaves
+ *    one exactOptional error at each cast, and that error names the member.
  *
  * What removing or rewriting the casts does (measured):
  *  - deleting a cast makes the real `http.ts` fail to compile, so step 1 (the
@@ -450,7 +460,65 @@ describe('mcp SDK Transport gap (#10278)', () => {
     // STATEMENT; a line comparison here would reject a formatter-wrapped cast
     // (TS2375 lands on the declared name, a line above the cast) that tsc accepts.
     expect(result.diagnostics.length, 'one exactOptional error per cast statement').toBe(result.casts.length);
-  }, 60_000);
+
+    // Anchor the derived gap to the oracle (lessons-learned #11/#18). The checks
+    // above only ask deriveGap to EXPLAIN the errors, which a constant or an
+    // over-wide derivation can do; these ask the un-cast compile whether the
+    // derived set is the gap. Both casts take the same SDK value to the same SDK
+    // interface, so they share one gap; widening that gap in the SDK's .d.ts is
+    // the SDK fixing it.
+    const [first] = result.casts;
+    for (const site of result.casts) {
+      expect(
+        [site.gap, site.targetFile],
+        `${HTTP_REL}:${site.line} must share the gap of ${HTTP_REL}:${first!.line}`,
+      ).toEqual([first!.gap, first!.targetFile]);
+    }
+    const gap = first!.gap;
+    const targetFile = path.resolve(first!.targetFile);
+    const sdk = read(targetFile);
+    const widening = (members: string[]): Map<string, string> =>
+      members.length === 0
+        ? new Map()
+        : new Map([[targetFile, widenOptionals(targetFile, sdk, TARGET_INTERFACE, new Set(members))]]);
+
+    // (a) Completeness: widening ONLY the derived members closes the gap, so the
+    //     un-cast program compiles clean (the oracle's "drop the casts" path).
+    let completeness: string;
+    try {
+      checkGap(config, { overrides: widening(gap) });
+      completeness = 'the un-cast program still reports errors';
+    } catch (e) {
+      completeness = e instanceof Error ? e.message : String(e);
+    }
+    expect(
+      completeness,
+      `completeness: widening only the derived gap (${gap.join(', ')}) must make the un-cast ${HTTP_REL} compile clean`,
+    ).toMatch(/compiles without its casts, so the SDK gap is closed/);
+
+    // (b) Minimality: every derived member is needed. Widening all the others
+    //     still leaves one exactOptional error at each cast, naming that member.
+    for (const member of gap) {
+      const rest = gap.filter((m) => m !== member);
+      let narrowed: GapResult;
+      try {
+        narrowed = checkGap(config, { overrides: widening(rest) });
+      } catch (e) {
+        throw new Error(
+          `minimality: with every derived member but '${member}' widened, the un-cast ${HTTP_REL} no longer ` +
+            `reports exactly one exactOptional error per cast, so '${member}' is not part of the gap:\n` +
+            (e instanceof Error ? e.message : String(e)),
+        );
+      }
+      expect(narrowed.diagnostics.length, `minimality: '${member}' alone must still fail each cast`).toBe(
+        result.casts.length,
+      );
+      for (const d of narrowed.diagnostics) {
+        expect(TS_EXACT_OPTIONAL.has(d.code), `minimality: '${member}' error code TS${d.code}`).toBe(true);
+        expect(d.text, `minimality: the remaining error must name '${member}'`).toContain(`'${member}'`);
+      }
+    }
+  }, 120_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -550,13 +618,30 @@ function aliasAccessorTypes(fileName: string, text: string, name: string): strin
   return out;
 }
 
-/** Widens each strict optional property of `name` to `| undefined`: the SDK fixing the gap. */
-function widenOptionals(fileName: string, text: string, name: string): string {
+/**
+ * Widens strict optional properties of `name` to `| undefined`: the SDK fixing the gap.
+ * With `only`, widens exactly those members and throws unless every one of them was
+ * found and widened (lessons-learned #19: a partial edit must not read as a result).
+ */
+function widenOptionals(fileName: string, text: string, name: string, only?: ReadonlySet<string>): string {
   const sf = parse(fileName, text);
   const edits: Edit[] = [];
+  const widened: string[] = [];
   for (const m of membersOf(findDeclaration(sf, name))) {
     if (!ts.isPropertySignature(m) || !m.questionToken || !m.type || syntacticallyAdmitsUndefined(m.type)) continue;
+    const member = m.name.getText(sf);
+    if (only && !only.has(member)) continue;
+    widened.push(member);
     edits.push({ start: m.type.getStart(sf), end: m.type.end, text: `(${m.type.getText(sf)}) | undefined` });
+  }
+  if (only) {
+    const missing = [...only].filter((member) => !widened.includes(member));
+    if (missing.length > 0) {
+      throw new Error(
+        `overlay: ${missing.join(', ')} not found as strict optional properties declared directly on ${name} ` +
+          `in ${fileName}, so they cannot be widened there`,
+      );
+    }
   }
   return applyEdits(text, edits);
 }
@@ -682,6 +767,17 @@ describe('Transport gap check against overlaid sources (#10278)', () => {
     const message = messageOf(() => checkGap(config, { derive: () => [] }));
     expect(message).toMatch(/^derivation broken: tsc still reports/);
     expect(message).not.toMatch(/gap is closed|drop the `as/);
+  }, 60_000);
+
+  it('a derived gap the error does not name -> RED "names none of the derived gap members", with line and code', () => {
+    const message = messageOf(() => checkGap(config, { derive: () => ['notAGapMember'] }));
+    const line = real().casts[0]!.line;
+    expect(message).toContain(`the error for the cast at ${HTTP_REL}:${line} names none of the derived gap members`);
+    expect(message).toContain('(notAGapMember)');
+    // The offending diagnostic, as describeRecord prints it: file:line TScode.
+    const named = real().diagnostics.filter((d) => message.includes(`${HTTP_REL}:${d.line} TS${d.code}: `));
+    expect(named.length, 'the message must quote the unexplained diagnostic with its line and TS code').toBe(1);
+    expect(TS_EXACT_OPTIONAL.has(named[0]!.code)).toBe(true);
   }, 60_000);
 
   it('a cast moved into an assignment (TS2375 instead of TS2379) still passes', () => {
