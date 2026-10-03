@@ -384,6 +384,24 @@ assert_grep "the post-failure probe skipped the backoff for the holder" \
 assert_grep "the minimum-attempt guard reports the exhausted budget" \
   "exhausted its 400s retry budget after 300s; 100s is under the 120s minimum attempt" "$TMP/out"
 
+# The same round with a holder that never leaves: round 2's wait budget is
+# 400 - 300 - 120 = -20s, which the loop clamps to 0 before waiting. Both the
+# wait log and the error print the value, so an unclamped -20 would show.
+DPKG_TEST_HOLD_AFTER=1 DPKG_TEST_HOLD_UNTIL=99999 \
+  PLAYWRIGHT_INSTALL_BUDGET_SECONDS=400 run_case browsers 1 124
+assert_eq "a holder that outlives an overspent budget ends the run with exit 124" "124" "$?"
+assert_eq "a holder that outlives an overspent budget starts no further attempt" "1" "$(cat "$TMP/count")"
+assert_eq "a holder that outlives an overspent budget is never fought" "" "$(cat "$TMP/fight-log")"
+assert_grep "an overspent wait budget is logged as a 0s wait" \
+  "waiting up to 0s for it to exit" "$TMP/out"
+assert_grep "an overspent wait budget is reported as a 0s wait" \
+  "still held by PID 2614 (apt-get) after waiting 0s" "$TMP/err"
+if grep -qF -- "-20s" "$TMP/out" "$TMP/err"; then
+  fail "an overspent wait budget is never printed as a negative wait"
+else
+  pass "an overspent wait budget is never printed as a negative wait"
+fi
+
 # A holder already there at boot (the unattended-upgrades timer) is waited for
 # BEFORE attempt 1, so that wait does not eat the attempt's own timeout.
 DPKG_TEST_HOLD_AFTER=0 DPKG_TEST_HOLD_UNTIL=60 run_case browsers 0
