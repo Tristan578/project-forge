@@ -442,7 +442,7 @@ describe('cameraSetupExecutor', () => {
     const NOT_EASING = MODES.filter(([, eases]) => !eases).map(([mode]) => mode);
     const easingList = `${EASING.slice(0, -1).join(', ')} and ${EASING[EASING.length - 1]}`;
     const reasonFor = (mode: GameCameraMode) =>
-      `a ${mode} camera does not ease toward its target, so smoothing has no effect — only ${easingList} do`;
+      `a camera in ${mode} mode does not ease toward its target, so smoothing has no effect — only ${easingList} do`;
 
     it('splits the modes into both kinds, so neither sweep below is vacuous', () => {
       expect(EASING.length).toBeGreaterThan(0);
@@ -467,6 +467,24 @@ describe('cameraSetupExecutor', () => {
       });
       expect(result.output?.warning).toBe(
         `Camera settings this camera mode does not use were ignored: smoothing (${reasonFor(mode)}).`,
+      );
+    });
+
+    // One expectation written out in full, not rebuilt from the production
+    // template: a template shared by code and test cannot catch its own
+    // wording (it read "a orbital camera" until this case existed).
+    it('words the orbital warning as a creator reads it', async () => {
+      const { ctx } = makeCtx(CAMERA_NODE);
+
+      const result = await cameraSetupExecutor.execute(
+        { cameraMode: 'orbital', cameraConfig: { smoothing: 0.1 }, targetEntityId: 'p' },
+        ctx,
+      );
+
+      expect(result.output?.warning).toBe(
+        'Camera settings this camera mode does not use were ignored: smoothing (a camera in orbital mode ' +
+          'does not ease toward its target, so smoothing has no effect — only thirdPersonFollow, ' +
+          'sideScroller and topDown do).',
       );
     });
 

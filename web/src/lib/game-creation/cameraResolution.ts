@@ -283,7 +283,7 @@ function modeIgnoresFieldReason(mode: GameCameraMode, field: NumericCameraField)
     EASING_MODES.length > 1
       ? `${EASING_MODES.slice(0, -1).join(', ')} and ${EASING_MODES[EASING_MODES.length - 1]}`
       : EASING_MODES.join('');
-  return `a ${mode} camera does not ease toward its target, so smoothing has no effect — only ${easing} do`;
+  return `a camera in ${mode} mode does not ease toward its target, so smoothing has no effect — only ${easing} do`;
 }
 
 /**

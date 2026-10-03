@@ -557,7 +557,7 @@ describe('smoothing on a mode that does not ease toward its target', () => {
   const NOT_EASING = MODES.filter((mode) => !MODE_READS_DAMPING[mode]);
   const easingList = `${EASING.slice(0, -1).join(', ')} and ${EASING[EASING.length - 1]}`;
   const reasonFor = (mode: GameCameraMode) =>
-    `a ${mode} camera does not ease toward its target, so smoothing has no effect — only ${easingList} do`;
+    `a camera in ${mode} mode does not ease toward its target, so smoothing has no effect — only ${easingList} do`;
 
   it('has modes of both kinds, so neither sweep below is vacuous', () => {
     expect(EASING.length).toBeGreaterThan(0);
