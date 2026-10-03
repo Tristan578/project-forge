@@ -703,7 +703,7 @@ readonly -f gate_job_continue_on_error
 # directions: a row whose job no longer invokes the gate with a job-level
 # continue-on-error fails as stale, so flipping crossbrowser to blocking (which
 # drops the key) has to delete this row too, and the row cannot outlive the
-# reason for it.
+# reason for it (assert_coe_exemption_live, with its own negative controls).
 readonly GATE_COE_EXEMPT='
 ci.yml:test-e2e-crossbrowser
 '
@@ -790,6 +790,27 @@ assert_gate_continue_on_error() {
   return 0
 }
 readonly -f assert_gate_continue_on_error
+
+# The other direction of the job-level exemption. $1 = one GATE_COE_EXEMPT row
+# (`<workflow>:<job>`); reads the text of the workflow that row names on stdin
+# (empty when that file is missing). Passes when the row's job invokes the gate
+# under a job-level continue-on-error other than `false`, read through the same
+# cut assert_gate_continue_on_error uses; otherwise fails as stale, so the row
+# cannot outlive the reason for it. The sweep calls it once per row and, in a
+# subshell, the fixtures below call it, so a neutered staleness check turns a
+# fixture case red (architect seat on #10296).
+assert_coe_exemption_live() {
+  local row="$1" text live
+  text="$(cat)"
+  live="$(gate_job_continue_on_error <<<"$text" \
+    | awk -F'\t' -v j="${row#*:}" '$1 == j && $2 != "" && $2 != "false" { print $1 }')"
+  if [ -n "$live" ]; then
+    pass "continue-on-error exemption ${row} still matches a gate-invoking job with a job-level continue-on-error"
+  else
+    fail "continue-on-error exemption ${row} is stale — that job no longer invokes the gate under a job-level continue-on-error; delete the row from GATE_COE_EXEMPT"
+  fi
+}
+readonly -f assert_coe_exemption_live
 
 # $1 = a workflow the negative controls below mutate, $2 = the variable to load
 # its text into. The workflow must have a NATIVE_BINDING_FLOORS row: a control
@@ -976,6 +997,48 @@ wiring_control "job-level continue-on-error exempted for a DIFFERENT job" $'\nfi
 $wired_steps" \
   "fixture.yml job nc-jcoe invokes the native-bindings gate but has job-level continue-on-error: true"
 
+# Negative controls for the stale-exemption rule, the other direction of the
+# exemption above. Each grades one exemption row against a hermetic workflow
+# with assert_coe_exemption_live, the function the sweep calls, in a subshell
+# so the expected FAIL is captured rather than counted, and asserts its own
+# defect text. The live row is the pair: a job that keeps the key must pass
+# and fail nothing, so a check that calls every row stale cannot read as a
+# working control. $1 = label, $2 = exemption row, $3 = workflow text (empty
+# for a missing file), $4 = expected FAIL text, or empty for "must pass".
+exemption_control() {
+  local label="$1" row="$2" text="$3" want="$4" got
+  got="$(assert_coe_exemption_live "$row" <<<"$text")"
+  if [ -z "$want" ]; then
+    if grep -q 'FAIL:' <<<"$got" \
+       || ! grep -qF "PASS: continue-on-error exemption ${row} still matches" <<<"$got"; then
+      fail "exemption control: $label should pass and fail nothing (got: ${got:-nothing})"
+    else
+      pass "exemption control: $label passes"
+    fi
+  elif grep -qF "FAIL: $want" <<<"$got"; then
+    pass "exemption control: $label is refused"
+  else
+    fail "exemption control: $label was not refused with '$want' (got: ${got:-nothing})"
+  fi
+}
+readonly -f exemption_control
+
+jcoe_live="$(printf 'on: push\njobs:\n  nc-jcoe:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n%s\n' "$wired_steps")"
+exemption_control "a row whose job keeps the job-level key" fixture.yml:nc-jcoe "$jcoe_live" ""
+exemption_control "a row whose job dropped the job-level key" fixture.yml:nc-jstale \
+  "$(printf 'on: push\njobs:\n  nc-jstale:\n    runs-on: ubuntu-latest\n%s\n' "$wired_steps")" \
+  "continue-on-error exemption fixture.yml:nc-jstale is stale"
+exemption_control "a row whose job set the key to false" fixture.yml:nc-jfalse \
+  "$(printf 'on: push\njobs:\n  nc-jfalse:\n    runs-on: ubuntu-latest\n    continue-on-error: false\n%s\n' "$wired_steps")" \
+  "continue-on-error exemption fixture.yml:nc-jfalse is stale"
+exemption_control "a row whose job keeps the key but no longer invokes the gate" fixture.yml:nc-jnogate \
+  "$(printf 'on: push\njobs:\n  nc-jnogate:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n    steps:\n      - run: npm ci\n      - run: npx vitest run\n')" \
+  "continue-on-error exemption fixture.yml:nc-jnogate is stale"
+exemption_control "a row naming a job the workflow does not have" fixture.yml:nc-other "$jcoe_live" \
+  "continue-on-error exemption fixture.yml:nc-other is stale"
+exemption_control "a row naming a missing workflow" gone.yml:nc-jcoe "" \
+  "continue-on-error exemption gone.yml:nc-jcoe is stale"
+
 # The sweep itself. Every *.yml and *.yaml under .github/workflows/ is read —
 # the gh-aw *.lock.yml compilations included, since they are workflows GitHub
 # runs — and each is graded against its floor (if any). Every floored workflow
@@ -1018,20 +1081,16 @@ if [ "${#workflow_files[@]}" -gt 0 ] && [ "$floored_missing" = 0 ]; then
     fi
   done
   # The other direction: every exemption must still describe a job that
-  # invokes the gate under a job-level continue-on-error, or it is stale. Read
-  # from the workflow the row names, through the same cut the check above uses.
+  # invokes the gate under a job-level continue-on-error, or it is stale
+  # (assert_coe_exemption_live, controlled by the stale-exemption fixtures
+  # above). A row naming a missing workflow is graded on empty text: stale.
   while IFS= read -r coe_exempt; do
     [ -n "$coe_exempt" ] || continue
-    exempt_live=""
+    exempt_text=""
     if [ -f "$WORKFLOWS_DIR/${coe_exempt%%:*}" ]; then
-      exempt_jobs="$(gate_job_continue_on_error <"$WORKFLOWS_DIR/${coe_exempt%%:*}")"
-      exempt_live="$(awk -F'\t' -v j="${coe_exempt#*:}" '$1 == j && $2 != "" && $2 != "false" { print $1 }' <<<"$exempt_jobs")"
+      exempt_text="$(cat "$WORKFLOWS_DIR/${coe_exempt%%:*}")"
     fi
-    if [ -n "$exempt_live" ]; then
-      pass "continue-on-error exemption ${coe_exempt} still matches a gate-invoking job with a job-level continue-on-error"
-    else
-      fail "continue-on-error exemption ${coe_exempt} is stale — that job no longer invokes the gate under a job-level continue-on-error; delete the row from GATE_COE_EXEMPT"
-    fi
+    assert_coe_exemption_live "$coe_exempt" <<<"$exempt_text"
   done <<<"$GATE_COE_EXEMPT"
   if [ "$invoking_workflows" -gt 0 ]; then
     pass "swept ${#workflow_files[@]} workflow file(s) under .github/workflows; $invoking_workflows invoke the gate"
