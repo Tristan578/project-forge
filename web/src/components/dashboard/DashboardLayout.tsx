@@ -18,7 +18,7 @@ export interface Project {
 
 interface DashboardLayoutProps {
   /** Server-prefetched projects. When provided, skips the initial client fetch. */
-  initialProjects?: Project[];
+  initialProjects?: Project[] | undefined;
 }
 
 export function DashboardLayout({ initialProjects }: DashboardLayoutProps = {}) {

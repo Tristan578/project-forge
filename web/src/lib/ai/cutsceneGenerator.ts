@@ -28,7 +28,7 @@ export interface CutsceneGenerationOptions {
   /** List of entities available in the current scene for context. */
   sceneEntities: SceneEntityRef[];
   /** Desired total duration in seconds. Clamped to max 60. */
-  duration?: number;
+  duration?: number | undefined;
 }
 
 // ============================================================================

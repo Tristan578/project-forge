@@ -54,7 +54,7 @@ export interface CameraPreset {
   fov: number;
   lookAhead: number;
   deadZone: DeadZone;
-  bounds?: CameraBounds;
+  bounds?: CameraBounds | undefined;
   shake: ShakeConfig;
 }
 

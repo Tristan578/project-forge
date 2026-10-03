@@ -286,8 +286,12 @@ export default withSentryConfig(withNextIntl(analyzer(withBotId(nextConfig))), {
   org: process.env.SENTRY_ORG || "tristan-nolan",
   project: process.env.SENTRY_PROJECT || "spawnforge-ai",
 
-  // Auth token for source map upload (set SENTRY_AUTH_TOKEN in env)
-  authToken: process.env.SENTRY_AUTH_TOKEN,
+  // Auth token for source map upload (set SENTRY_AUTH_TOKEN in env).
+  // @sentry/nextjs's SentryBuildOptions.authToken doesn't accept an explicit
+  // `undefined` under exactOptionalPropertyTypes; conditional spread omits
+  // the key when unset (the plugin's own upload step reads
+  // SENTRY_AUTH_TOKEN from the environment directly in that case anyway).
+  ...(process.env.SENTRY_AUTH_TOKEN ? { authToken: process.env.SENTRY_AUTH_TOKEN } : {}),
 
   // Tree-shake Sentry logger statements to reduce bundle size (webpack only;
   // Turbopack handles this via its own dead-code elimination).

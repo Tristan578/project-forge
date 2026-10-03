@@ -55,7 +55,7 @@ export interface SceneSnapshot {
 /** Everything an agent observes about the editor at a given moment. */
 export interface ViewportObservation {
   /** Optional label for this observation (e.g. "after spawning cube"). */
-  label?: string;
+  label?: string | undefined;
   /** Scene graph state. */
   scene: SceneSnapshot;
   /** Canvas frame capture. */
@@ -71,7 +71,7 @@ export interface CommandResult {
   /** Whether the command dispatched without error. */
   success: boolean;
   /** Error message if success is false. */
-  error?: string;
+  error?: string | undefined;
   /** Entity ID returned by spawn commands. */
   entityId?: string;
   /** Wall-clock time in ms from dispatch to response. */

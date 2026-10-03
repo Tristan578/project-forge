@@ -18,8 +18,8 @@ const POST_impl = createGenerationHandler<
     resolution: string;
     style: string;
     tiling: boolean;
-    entityId?: string;
-    generateMaps?: Record<string, boolean>;
+    entityId?: string | undefined;
+    generateMaps?: Record<string, boolean> | undefined;
   },
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }
 >({

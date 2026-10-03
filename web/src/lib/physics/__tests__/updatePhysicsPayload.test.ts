@@ -61,7 +61,7 @@ describe('buildPhysicsPatch', () => {
     const payload = buildPhysicsPatch('ent-1', {
       friction: undefined,
       density: 2,
-    } as Partial<PhysicsData>);
+    });
     expect(payload).toEqual({ entityId: 'ent-1', density: 2 });
     expect(Object.hasOwn(payload, 'friction')).toBe(false);
   });

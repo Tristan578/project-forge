@@ -41,7 +41,7 @@ export interface LootTable {
 export interface RewardConfig {
   currency: string;
   amount: number;
-  items?: string[];
+  items?: string[] | undefined;
 }
 
 export interface ProgressionCurve {

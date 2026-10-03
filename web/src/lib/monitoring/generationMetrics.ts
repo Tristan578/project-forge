@@ -161,7 +161,7 @@ export function recordGenerationMetrics({
   status: number;
   durationMs: number;
   ctx: GenerationMetricsContext;
-  cache?: string;
+  cache?: string | undefined;
 }): void {
   try {
     const outcome = ctx.outcome ?? classifyGenerationOutcome(status);

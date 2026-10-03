@@ -91,7 +91,7 @@ async function verify(): Promise<{ success: boolean; codes: string[] }> {
 
 type Surface = 'manual' | 'ai';
 
-async function setMode(surface: Surface, mode: unknown): Promise<{ ok: boolean; error?: string }> {
+async function setMode(surface: Surface, mode: unknown): Promise<{ ok: boolean; error?: string | undefined }> {
   if (surface === 'manual') {
     // The action the picker's radio buttons call.
     const result = useEditorStore.getState().setCompletionMode(mode);

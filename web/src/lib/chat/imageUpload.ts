@@ -140,7 +140,7 @@ export async function processImageFile(file: File): Promise<ImageUploadResult> {
 export async function processImageFiles(
   files: File[],
   existingCount: number = 0,
-): Promise<{ results: ImageUploadResult[]; error?: string }> {
+): Promise<{ results: ImageUploadResult[]; error?: string | undefined }> {
   const available = IMAGE_MAX_COUNT - existingCount;
   if (available <= 0) {
     return { results: [], error: `Maximum ${IMAGE_MAX_COUNT} images allowed` };
