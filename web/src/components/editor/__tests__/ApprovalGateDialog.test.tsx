@@ -3,10 +3,9 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import type { ReactNode } from 'react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
-import { ApprovalGateDialog, PINNED_ROW_CLEARANCE_PX } from '../ApprovalGateDialog';
+import { ApprovalGateActions, ApprovalGateDialog, ApprovalGateSummary } from '../ApprovalGateDialog';
 import type { ApprovalGate } from '@/lib/game-creation/types';
 
 function makeGate(overrides: Partial<ApprovalGate['displayData']> = {}): ApprovalGate {
@@ -196,38 +195,29 @@ describe('ApprovalGateDialog', () => {
     });
   });
 
-  // PR #10294: the @spawnforge/ui Dialog body is now a scroller of its own, so
-  // inside it the gate must not bring a second bounded scroller (nested
-  // scrolling carries the inner box's buttons out of view on a short
-  // viewport). In 'parent' mode the summary flows into the enclosing scroll
-  // and ONLY the action row sticks to its bottom edge (round 3: a sticky
-  // footer that also carried the cost could grow taller than the scrollport,
-  // leaving its top unreachable at every scroll offset). Round 4: that row
-  // also carries a one-line `actionSummary` (the token total), so the total
-  // is in view whenever Approve is.
-  describe("scrollContainer='parent'", () => {
+  // PR #10294: the @spawnforge/ui Dialog body is a scroller of its own, so in
+  // the quick-start dialog the gate is split. Its summary flows into that one
+  // scroll (a second bounded scroller nested inside it carries the inner box
+  // out of view on a short viewport), and its buttons go in the Dialog's
+  // footer, outside the scroll. Rounds 3 and 4 pinned the buttons inside the
+  // body instead (sticky + scroll padding); in a real browser that covered
+  // content, scrolled the body on every focus, and failed in Firefox. jsdom
+  // has no layout, so these pin the structure; the geometry is measured by
+  // e2e/tests/quick-start-plan-review-layout.spec.ts.
+  describe('ApprovalGateSummary and ApprovalGateActions (for a parent that scrolls)', () => {
     const SCROLLER = /(^|\s)(overflow-(y-)?(auto|scroll)|max-h-\S+)(\s|$)/;
+    const gate = makeGate({ sceneSummaries: [{ name: 'Level 1', entityCount: 3, systemDescriptions: [] }] });
 
-    function renderParentMode({ actionSummary }: { actionSummary?: ReactNode } = {}) {
-      return render(
-        <ApprovalGateDialog
-          actionSummary={actionSummary}
-          gate={makeGate({
-            sceneSummaries: [{ name: 'Level 1', entityCount: 3, systemDescriptions: [] }],
-          })}
-          onApprove={vi.fn()}
-          onCancel={vi.fn()}
-          scrollContainer="parent"
-        >
+    it('renders the summary with no scroll box, height bound, region or button of its own', () => {
+      const { container } = render(
+        <ApprovalGateSummary gate={gate}>
           <p>Estimated token cost 340</p>
-        </ApprovalGateDialog>,
+        </ApprovalGateSummary>,
       );
-    }
-
-    it('brings no scroll box, max-height bound or region of its own', () => {
-      const { container } = renderParentMode();
-      // Non-vacuous: the gate rendered and the summary is in it.
+      // Non-vacuous: the heading, the plan and the extras all rendered.
+      expect(screen.getByRole('heading', { name: 'Review the plan' })).toBeInTheDocument();
       expect(screen.getByText('Level 1')).toBeInTheDocument();
+      expect(screen.getByText('Estimated token cost 340')).toBeInTheDocument();
       const elements = Array.from(container.querySelectorAll<HTMLElement>('*'));
       expect(elements.length).toBeGreaterThan(5);
       for (const el of elements) {
@@ -236,146 +226,122 @@ describe('ApprovalGateDialog', () => {
       expect(screen.queryByTestId('approval-gate-scroll')).toBeNull();
       expect(screen.queryByRole('region')).toBeNull();
       expect(screen.getByTestId('approval-gate-summary')).not.toHaveAttribute('tabindex');
+      // The buttons belong to the parent's footer, not to this card.
+      expect(screen.queryAllByRole('button')).toEqual([]);
+      expect(screen.queryByTestId('approval-gate-actions')).toBeNull();
     });
 
-    it('makes the action row the ONE sticky element, holding only the buttons and the one-line summary', () => {
-      const { container } = renderParentMode({ actionSummary: <span>Cost: 340 tokens</span> });
-      const approve = screen.getByRole('button', { name: 'Approve' });
-      const cancel = screen.getByRole('button', { name: 'Cancel' });
-
-      // Derived from the DOM, not named: every sticky element the gate renders.
-      const sticky = Array.from(container.querySelectorAll<HTMLElement>('.sticky'));
-      expect(sticky).toHaveLength(1);
-      const [row] = sticky;
-      expect(row).toBe(screen.getByTestId('approval-gate-actions'));
-      expect(row.classList.contains('bottom-0')).toBe(true);
-      // An opaque background, so the content scrolling underneath is hidden.
-      expect(row.className).toContain('bg-[var(--sf-bg-surface)]');
-      // Only the summary line and the buttons: nothing else (the cost
-      // breakdown, notices, prompts) can make the pinned block taller.
+    it('renders the action row as a group named by the gate heading: summary line, then the two buttons', () => {
+      const onApprove = vi.fn();
+      const onCancel = vi.fn();
+      render(
+        <>
+          <ApprovalGateSummary gate={gate} />
+          <footer>
+            <ApprovalGateActions
+              gate={gate}
+              onApprove={onApprove}
+              onCancel={onCancel}
+              approveLabel="Build it"
+              cancelLabel="Discard plan"
+              summary={<span>Cost: 340 tokens</span>}
+            />
+          </footer>
+        </>,
+      );
+      // Rendered apart from the heading, the row still says which gate it answers.
+      const group = screen.getByRole('group', { name: 'Review the plan' });
+      expect(group).toBe(screen.getByTestId('approval-gate-actions'));
       const summary = screen.getByTestId('approval-gate-action-summary');
       const buttons = screen.getByTestId('approval-gate-buttons');
-      expect(Array.from(row.children)).toEqual([summary, buttons]);
-      expect(Array.from(buttons.children)).toEqual([approve, cancel]);
+      expect(Array.from(group.children)).toEqual([summary, buttons]);
       expect(summary.textContent).toBe('Cost: 340 tokens');
+      const build = screen.getByRole('button', { name: 'Build it' });
+      const discard = screen.getByRole('button', { name: 'Discard plan' });
+      expect(Array.from(buttons.children)).toEqual([build, discard]);
+      // Nothing in the row is pinned: it is meant for a footer that does not scroll.
+      expect(document.querySelectorAll('.sticky')).toHaveLength(0);
 
-      // The full cost stays in normal flow, before the row.
-      const cost = screen.getByText('Estimated token cost 340');
-      expect(row.contains(cost)).toBe(false);
-      expect(cost.closest('.sticky')).toBeNull();
-      expect(cost.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-      // A sticky box cannot leave its parent, so the row is a direct child of
-      // the gate root that also holds the plan summary: it can follow the
-      // whole summary, not just a wrapper the size of the row.
-      const planSummary = screen.getByTestId('approval-gate-summary');
-      expect(planSummary.contains(screen.getByText('Level 1'))).toBe(true);
-      expect(row.parentElement).toBe(planSummary.parentElement);
-      expect(row.parentElement?.lastElementChild).toBe(row);
+      fireEvent.click(build);
+      fireEvent.click(discard);
+      expect(onApprove).toHaveBeenCalledTimes(1);
+      expect(onCancel).toHaveBeenCalledTimes(1);
     });
 
-    it('renders no summary slot in the row when there is no actionSummary', () => {
-      renderParentMode();
-      const row = screen.getByTestId('approval-gate-actions');
-      expect(Array.from(row.children)).toEqual([screen.getByTestId('approval-gate-buttons')]);
+    it('renders no summary slot when there is no summary', () => {
+      render(<ApprovalGateActions gate={gate} onApprove={vi.fn()} onCancel={vi.fn()} />);
+      const group = screen.getByTestId('approval-gate-actions');
+      expect(Array.from(group.children)).toEqual([screen.getByTestId('approval-gate-buttons')]);
       expect(screen.queryByTestId('approval-gate-action-summary')).toBeNull();
     });
 
-    // The row covers the bottom strip of the parent scroller's visible area.
-    // The browser only keeps a focused control (or a scrollIntoView target)
-    // clear of that strip if the scroller's scroll padding says so; a scroll
-    // MARGIN on the target is not part of Chromium's focus check (PR #10294
-    // round 3). jsdom has no layout, so this pins the VALUE the gate writes;
-    // e2e/tests/quick-start-plan-review-layout.spec.ts measures the result in
-    // Chromium.
-    describe('scroll padding on the parent scroller', () => {
-      type Callback = () => void;
-      const observers: { callback: Callback; observed: Element[] }[] = [];
-      let rowHeight = 0;
-
-      beforeEach(() => {
-        observers.length = 0;
-        rowHeight = 52.4;
-        vi.stubGlobal(
-          'ResizeObserver',
-          class {
-            observed: Element[] = [];
-            constructor(public callback: Callback) {
-              observers.push(this);
-            }
-            observe(el: Element) {
-              this.observed.push(el);
-            }
-            disconnect() {
-              this.observed = [];
-            }
-          },
-        );
-        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-          this: HTMLElement,
-        ) {
-          const height = this.dataset.testid === 'approval-gate-actions' ? rowHeight : 0;
-          return { x: 0, y: 0, top: 0, left: 0, right: 0, width: 0, bottom: height, height, toJSON: () => ({}) };
-        });
-      });
-
-      afterEach(() => {
-        vi.unstubAllGlobals();
-        vi.restoreAllMocks();
-      });
-
-      function renderInScroller(scrollContainer: 'own' | 'parent') {
-        return render(
-          <div data-testid="scroller" style={{ overflowY: 'auto', paddingBottom: '12px', scrollPaddingBottom: '3px' }}>
-            {/* A non-scrolling wrapper in between: the gate must find the
-                scroll container, not just its parent. */}
-            <div data-testid="wrapper">
-              <ApprovalGateDialog gate={makeGate()} onApprove={vi.fn()} onCancel={vi.fn()} scrollContainer={scrollContainer}>
-                <p>Estimated token cost 340</p>
-              </ApprovalGateDialog>
-            </div>
-          </div>,
-        );
-      }
-
-      it('covers the row height plus the scroller bottom padding, follows the row as it resizes, and restores the old value on unmount', () => {
-        const { unmount } = renderInScroller('parent');
-        const scroller = screen.getByTestId('scroller');
-        expect(screen.getByTestId('wrapper').style.scrollPaddingBottom).toBe('');
-        // ceil(52.4 + 12) + 8 = 73: the sticky row pins 12px above the
-        // scrollport edge (the scroller's padding), and is 52.4px tall.
-        expect(scroller.style.scrollPaddingBottom).toBe(`${Math.ceil(52.4 + 12) + PINNED_ROW_CLEARANCE_PX}px`);
-        expect(PINNED_ROW_CLEARANCE_PX).toBeGreaterThan(0);
-
-        // The row grew (a wrapped summary line, a narrower viewport).
-        const row = screen.getByTestId('approval-gate-actions');
-        const observer = observers.find((o) => o.observed.includes(row));
-        expect(observer).toBeDefined();
-        rowHeight = 92;
-        observer?.callback();
-        expect(scroller.style.scrollPaddingBottom).toBe(`${92 + 12 + PINNED_ROW_CLEARANCE_PX}px`);
-
-        unmount();
-        expect(scroller.style.scrollPaddingBottom).toBe('3px');
-        expect(observer?.observed).toEqual([]);
-      });
-
-      it("leaves the scroller's scroll padding alone in 'own' mode", () => {
-        renderInScroller('own');
-        expect(screen.getByTestId('scroller').style.scrollPaddingBottom).toBe('3px');
-        expect(observers).toHaveLength(0);
-      });
+    it('focuses Approve on mount when autoFocus is set, and not otherwise', () => {
+      const { unmount } = render(<ApprovalGateActions gate={gate} onApprove={vi.fn()} onCancel={vi.fn()} autoFocus />);
+      expect(screen.getByRole('button', { name: 'Approve' })).toHaveFocus();
+      unmount();
+      render(<ApprovalGateActions gate={gate} onApprove={vi.fn()} onCancel={vi.fn()} />);
+      expect(screen.getByRole('button', { name: 'Approve' })).not.toHaveFocus();
     });
+  });
 
-    it("pins nothing in the default 'own' mode", () => {
-      const { container } = render(
-        <ApprovalGateDialog gate={makeGate()} onApprove={vi.fn()} onCancel={vi.fn()}>
-          <p>Estimated token cost 340</p>
-        </ApprovalGateDialog>,
+  // PR #10294 round 5, measured in Chromium: "Build it" is disabled while the
+  // build starts, the browser drops focus from a disabled button to <body>,
+  // and a refused build re-enabled the button with focus still on <body>,
+  // outside the aria-modal dialog.
+  describe('focus after a disabled Approve comes back', () => {
+    function renderGate(approveDisabled: boolean) {
+      return (
+        <>
+          <ApprovalGateActions gate={makeGate()} onApprove={vi.fn()} onCancel={vi.fn()} approveDisabled={approveDisabled} />
+          <button type="button">Elsewhere</button>
+        </>
       );
-      // Non-vacuous: the row and the extras rendered.
-      expect(screen.getByTestId('approval-gate-actions')).toBeInTheDocument();
-      expect(container.querySelectorAll('.sticky')).toHaveLength(0);
+    }
+
+    it('returns focus to Approve when it is re-enabled while focus is on the page body', () => {
+      const { rerender } = render(renderGate(false));
+      const approve = screen.getByRole('button', { name: 'Approve' });
+      approve.focus();
+      rerender(renderGate(true));
+      // What the browser does to a focused button that becomes disabled:
+      // focus falls to <body>. (jsdom ignores blur() on a disabled element,
+      // so the fall is reproduced by removing a focused stand-in.)
+      const standIn = document.createElement('input');
+      document.body.append(standIn);
+      standIn.focus();
+      standIn.remove();
+      expect(document.activeElement).toBe(document.body);
+      rerender(renderGate(false));
+      expect(approve).toHaveFocus();
     });
+
+    it('leaves focus alone when the user has moved it elsewhere', () => {
+      const { rerender } = render(renderGate(true));
+      const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+      elsewhere.focus();
+      rerender(renderGate(false));
+      expect(elsewhere).toHaveFocus();
+    });
+
+    it('does not take focus on mount, or on a re-render that leaves it enabled', () => {
+      const { rerender } = render(renderGate(false));
+      expect(document.activeElement).toBe(document.body);
+      rerender(renderGate(false));
+      expect(document.activeElement).toBe(document.body);
+    });
+  });
+
+  it('keeps the panel layout in one card: bounded summary, extras, then the action group', () => {
+    const { container } = render(
+      <ApprovalGateDialog gate={makeGate()} onApprove={vi.fn()} onCancel={vi.fn()}>
+        <p>Estimated token cost 340</p>
+      </ApprovalGateDialog>,
+    );
+    const card = container.firstElementChild as HTMLElement;
+    const group = screen.getByRole('group', { name: 'Review the plan' });
+    expect(card.contains(group)).toBe(true);
+    expect(card.lastElementChild).toBe(group);
+    expect(card.contains(screen.getByTestId('approval-gate-scroll'))).toBe(true);
+    expect(container.querySelectorAll('.sticky')).toHaveLength(0);
   });
 });

@@ -20,15 +20,16 @@ import { SETTINGS_TOKENS_HREF } from '@/lib/navigation/settingsRoutes';
 
 /**
  * The plan's token total as one short line, for the quick-start plan review's
- * pinned action row (`ApprovalGateDialog`'s `actionSummary`). There the full
- * `TokenCostBar` scrolls with the plan, and on a short viewport it can be out
- * of view while "Build it" (pinned) is in view and focused. This line keeps
- * the number that leaves the balance beside that button (PR #10294 round 3).
+ * action row (`ApprovalGateActions`' `summary`, in the Dialog footer). There
+ * the full `TokenCostBar` scrolls with the plan, and on a short viewport it
+ * can be out of view while "Build it" (in the footer, which does not scroll)
+ * is in view and focused. This line keeps the number that leaves the balance
+ * beside that button (PR #10294 round 3).
  *
- * It is deliberately short: it lives in a pinned row, and a pinned block taller
- * than the scrollport has a part no scroll offset reveals. So the balance case
- * is a few words with no link; the cost bar above carries the full warning and
- * its "Buy tokens" link.
+ * It is deliberately short: every line in the footer is height taken from the
+ * scrolling body above it, and on a 320px-tall viewport there is little to
+ * give. So the balance case is a few words with no link; the cost bar above
+ * carries the full warning and its "Buy tokens" link.
  */
 export function TokenCostTotal({ estimate }: { estimate: TokenEstimate }) {
   return (

@@ -23,6 +23,28 @@ describe('Dialog', () => {
     expect(screen.getByRole('dialog')).not.toBeNull();
   });
 
+  // PR #10294: controls a consumer needs in view at every scroll offset go in
+  // `actions`, which must sit OUTSIDE the scrolling body (a footer the body's
+  // scroll cannot carry away or slide content under), after it in the panel.
+  it('renders actions in a footer outside the scrolling body, after it', () => {
+    render(
+      <Dialog open onClose={vi.fn()} title="Dialog" actions={<button type="button">Confirm</button>}>
+        <p>Body text</p>
+      </Dialog>
+    );
+    const dialog = screen.getByRole('dialog');
+    const body = dialog.querySelector('[data-dialog-body]');
+    const footer = dialog.querySelector('[data-dialog-actions]');
+    const confirm = screen.getByRole('button', { name: 'Confirm' });
+    expect(body).not.toBeNull();
+    expect(footer).not.toBeNull();
+    expect(body?.contains(screen.getByText('Body text'))).toBe(true);
+    expect(footer?.contains(confirm)).toBe(true);
+    expect(body?.contains(confirm)).toBe(false);
+    expect(footer?.parentElement).toBe(dialog);
+    expect(body?.nextElementSibling).toBe(footer);
+  });
+
   it('renders title', () => {
     render(
       <Dialog open onClose={vi.fn()} title="Test Title">

@@ -178,7 +178,12 @@ export function Dialog({
             When nothing overflows it is a plain container and no extra Tab
             stop. Consumers should NOT nest a second bounded scroller inside
             this one: a box that scrolls inside a box that scrolls can carry
-            its own content (and buttons) out of view. */}
+            its own content (and buttons) out of view. Nor should they pin
+            controls inside it (`sticky`): a pinned row covers whatever scrolls
+            under it, and keeping focus clear of it needs scroll padding that
+            browsers do not honour alike (PR #10294 rounds 3 and 4). Controls
+            that must stay in view go in `actions`, below, which does not
+            scroll. */}
         {hasBody && (
           <ScrollArea
             ref={bodyRef}
@@ -196,9 +201,10 @@ export function Dialog({
             <div ref={bodyContentRef}>{children}</div>
           </ScrollArea>
         )}
-        {/* Actions */}
+        {/* Actions -- outside the body's scroll, so always in view and never
+            covering the body's content. */}
         {actions && (
-          <div className="flex justify-end gap-2 px-6 py-4 border-t border-[var(--sf-border)] bg-[var(--sf-bg-app)]/30 rounded-b-[var(--sf-radius-xl)]">
+          <div data-dialog-actions="" className="flex justify-end gap-2 px-6 py-4 border-t border-[var(--sf-border)] bg-[var(--sf-bg-app)]/30 rounded-b-[var(--sf-radius-xl)]">
             {actions}
           </div>
         )}

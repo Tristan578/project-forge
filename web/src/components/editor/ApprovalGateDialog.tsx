@@ -8,6 +8,20 @@
  * `gate_plan` ONLY, so `gate_assets` / `gate_final` still stop the run: whoever
  * started it has to be able to answer them from where they are standing.
  *
+ * Two layouts share one markup:
+ * - `ApprovalGateDialog` (the orchestrator panel): the gate's summary in its
+ *   own bounded scroll region, with the cost and the buttons below it.
+ * - `ApprovalGateSummary` + `ApprovalGateActions` (the quick-start dialog):
+ *   the summary flows into the `@spawnforge/ui` Dialog body, which is the
+ *   one scroller, and the buttons go in the Dialog's `actions` footer, which
+ *   does not scroll. PR #10294 rounds 3 and 4 first pinned the buttons inside
+ *   the body (`sticky`) and kept focus clear of them with the body's scroll
+ *   padding. Every layer of that fought the scroller: Firefox does not honour
+ *   the padding for focus scrolling the way Chromium does, focusing a pinned
+ *   button scrolled the body, and on a 320px-tall viewport the row covered
+ *   the very prompt it was confirming. A row outside the scroller has none of
+ *   those failure modes, in any browser, because nothing scrolls under it.
+ *
  * Every colour here is a `--sf-*` token, not a Tailwind palette shade. The
  * previous zinc/amber/green markup was rendered inside the token-themed
  * `@spawnforge/ui` Dialog, so on the light theme `text-amber-200` on
@@ -15,186 +29,38 @@
  * only appeared on 6 of the 7 themes.
  */
 
-import { useEffect, useLayoutEffect, useRef, type ReactNode, type Ref, type RefObject } from 'react';
+import { useEffect, useRef, type ReactNode, type Ref } from 'react';
 import { Button, cn } from '@spawnforge/ui';
 import type { ApprovalGate } from '@/lib/game-creation/types';
 
 const ROW = 'rounded-[var(--sf-radius-sm)] bg-[var(--sf-bg-elevated)] px-2 py-1 text-xs text-[var(--sf-text-secondary)]';
 
-/**
- * Space kept between the pinned action row and anything the browser scrolls
- * into view above it (a focused link, the discard prompt), on top of the
- * strip the row covers.
- */
-export const PINNED_ROW_CLEARANCE_PX = 8;
+/** The card around a gate's heading, summary and extras. */
+const CARD = 'rounded-[var(--sf-radius-md)] border border-[var(--sf-warning)] bg-[var(--sf-bg-surface)] p-4';
 
-/**
- * The scroll container a `sticky` descendant of `el` pins to: the nearest
- * ancestor whose `overflow-y` makes it one (`visible` and `clip` do not).
- */
-function findScrollContainer(el: HTMLElement): HTMLElement | null {
-  const view = el.ownerDocument.defaultView;
-  if (!view) return null;
-  for (let node = el.parentElement; node; node = node.parentElement) {
-    const { overflowY } = view.getComputedStyle(node);
-    if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden' || overflowY === 'overlay') {
-      return node;
-    }
-  }
-  return null;
+/** The id of a gate's heading, which also labels its summary region and its action group. */
+function headingIdFor(gate: ApprovalGate): string {
+  return `approval-gate-heading-${gate.id}`;
 }
 
 /**
- * In 'parent' mode, keeps the parent scroller's `scroll-padding-bottom` equal
- * to the strip the pinned row covers, plus PINNED_ROW_CLEARANCE_PX, while the
- * row is mounted, and restores the previous value on unmount.
- *
- * That strip is the row's height PLUS the scroller's own bottom padding: a
- * `sticky bottom-0` box pins to the scrollport's bottom edge inset by the
- * container's padding, not to the edge itself. (The Dialog body's `py-3` is
- * 12px. With the row height alone, "Keep plan" stopped 4px under the row in
- * Chromium: measured, PR #10294 round 4.)
- *
- * The row is `sticky bottom-0`, so it covers the bottom strip of the
- * scroller's visible area, and without this the browser counts that strip as
- * visible. Chromium scrolls a newly focused control only when its box lies
- * outside the scrollport, so Tab could land on "Keep plan" or "Buy tokens"
- * under the row (WCAG 2.4.11), and `scrollIntoView` would stop with its
- * target under it. Both honour the scroller's scroll padding. A scroll MARGIN
- * on the target is not part of Chromium's focus check (PR #10294 round 3,
- * measured), so it cannot do this job.
- *
- * The value is measured, not a constant, because the row's height changes
- * with its summary line, with wrapping, and with the viewport: below the `sm`
- * breakpoint a small button keeps a 44px touch target, above it 32px.
+ * The gate's heading, description, plan summary and extras. `bounded` gives
+ * the summary its own scroll region (the panel); otherwise it flows into the
+ * enclosing scroller.
  */
-function usePinnedRowScrollPadding(rowRef: RefObject<HTMLElement | null>, active: boolean) {
-  useLayoutEffect(() => {
-    const row = rowRef.current;
-    if (!active || !row) return undefined;
-    const scroller = findScrollContainer(row);
-    if (!scroller) return undefined;
-    const previous = scroller.style.scrollPaddingBottom;
-    const view = scroller.ownerDocument.defaultView;
-    const apply = () => {
-      const height = row.getBoundingClientRect().height;
-      const padding = Number.parseFloat(view?.getComputedStyle(scroller).paddingBottom ?? '');
-      const inset = Number.isFinite(padding) ? padding : 0;
-      scroller.style.scrollPaddingBottom = `${Math.ceil(height + inset) + PINNED_ROW_CLEARANCE_PX}px`;
-    };
-    apply();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(apply);
-    observer?.observe(row);
-    return () => {
-      observer?.disconnect();
-      scroller.style.scrollPaddingBottom = previous;
-    };
-  }, [rowRef, active]);
-}
-
-export function ApprovalGateDialog({
+function GateContent({
   gate,
-  onApprove,
-  onCancel,
-  autoFocus = false,
-  approveLabel = 'Approve',
-  cancelLabel = 'Cancel',
-  cancelVariant = 'ghost',
-  cancelRef,
-  approveDisabled = false,
-  scrollContainer = 'own',
-  actionSummary,
+  bounded,
   children,
 }: {
   gate: ApprovalGate;
-  onApprove: () => void;
-  onCancel: () => void;
-  /**
-   * Focus Approve on mount. Set by the quick-start dialog, where the gate
-   * replaces the content the user was last focused on — without this, focus
-   * falls to `document.body` inside an `aria-modal` region and keyboard users
-   * have nothing to tab from. The panel leaves it off: the gate appears
-   * beside other content there and stealing focus would be a hijack.
-   */
-  autoFocus?: boolean;
-  /**
-   * Label for the approve button. The quick-start plan review says "Build it":
-   * that click is what starts spending tokens, so it names the action (#6831).
-   */
-  approveLabel?: string;
-  /**
-   * Label for the cancel button. The plan review says "Discard plan" because
-   * its footer also has "Close", which keeps the plan: two exits with different
-   * consequences must not share a vague name.
-   */
-  cancelLabel?: string;
-  /**
-   * The cancel button's variant. The plan review arms Discard on the first
-   * press and shows the armed button as destructive.
-   */
-  cancelVariant?: 'ghost' | 'destructive';
-  /** Ref to the cancel button, so the plan review can return focus to Discard. */
-  cancelRef?: Ref<HTMLButtonElement>;
-  /** Disables approve, e.g. while the confirmed action is already starting. */
-  approveDisabled?: boolean;
-  /**
-   * Who scrolls a long summary.
-   *
-   * `'own'` (default; the orchestrator panel): the summary is bounded to its
-   * own `max-h-[50vh]` keyboard-reachable scroll region, with the cost and
-   * the buttons below it.
-   *
-   * `'parent'`: the gate sits inside a container that already scrolls — the
-   * `@spawnforge/ui` `Dialog` body, in the quick-start dialog. A second
-   * bounded scroller there would nest one scroll box in another, and on a
-   * short viewport the outer one carries the inner box's buttons out of view.
-   * So the summary is not bounded and flows into the parent's single scroll,
-   * and ONLY the Approve/Cancel row is `sticky bottom-0`: pinned to the
-   * parent's visible bottom edge while everything above it scrolls behind it.
-   * `children` (the cost, notices) stay in normal flow directly above that
-   * row. They are not pinned with it because a sticky block taller than the
-   * parent's scrollport cannot be scrolled into view at any offset, and the
-   * plan review's cost + balance warning + discard prompt can be that tall on
-   * a phone (PR #10294 round 3). What must stay in view with the buttons
-   * goes in `actionSummary` instead. The parent's scroll padding is kept at
-   * the strip the row covers, so focus and `scrollIntoView` stop above the
-   * row rather than under it (`usePinnedRowScrollPadding`).
-   */
-  scrollContainer?: 'own' | 'parent';
-  /**
-   * One short line that travels WITH the buttons, above them in the action
-   * row: the plan review's token total. In `'parent'` mode the row is pinned,
-   * so this is the one piece of `children`-like content guaranteed to be in
-   * view whenever Approve is, which is the point: the total must be visible
-   * when "Build it" is pressed, even while the full cost breakdown is
-   * scrolled away (PR #10294 round 3: a cost the user has to scroll to find
-   * is not a cost they confirmed). Keep it to a line or two. It is pinned, and
-   * a pinned block taller than the scrollport has a part no offset reveals.
-   */
-  actionSummary?: ReactNode;
-  /**
-   * Extra content between the summary and the buttons — the plan review's
-   * token cost. In `'own'` mode it sits outside the bounded summary box, so it
-   * is always next to the buttons. In `'parent'` mode it scrolls with the
-   * summary and ends directly above the pinned button row.
-   */
+  bounded: boolean;
   children?: ReactNode;
 }) {
   const { displayData } = gate;
-  const approveRef = useRef<HTMLButtonElement>(null);
-  const rowRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (autoFocus) approveRef.current?.focus();
-    // gate.id so a second gate in the same run re-focuses.
-  }, [autoFocus, gate.id]);
-
-  const headingId = `approval-gate-heading-${gate.id}`;
-  const ownScroll = scrollContainer === 'own';
-  usePinnedRowScrollPadding(rowRef, !ownScroll);
-
+  const headingId = headingIdFor(gate);
   return (
-    <div className="rounded-[var(--sf-radius-md)] border border-[var(--sf-warning)] bg-[var(--sf-bg-surface)] p-4">
+    <>
       {/*
        * Text pairs with `--sf-text` rather than `--sf-warning`: the token is
        * pinned >= 3:1 as a non-text colour (the border above already uses it
@@ -212,23 +78,26 @@ export function ApprovalGateDialog({
 
       {/*
        * A large plan (many scenes / many generated assets) has no natural
-       * height limit. In 'own' mode (the orchestrator panel) nothing above
-       * this box bounds it, so it bounds itself — without that the
-       * Approve/Reject row below gets pushed out of reach.
+       * height limit. In the panel nothing above this box bounds it, so it
+       * bounds itself — without that the Approve/Reject row below gets pushed
+       * out of reach.
        *
        * tabIndex + role="region" + aria-labelledby make the region itself
        * keyboard-reachable: without them a keyboard-only user has no way to
        * move focus into this box and scroll it (a mouse wheel/trackpad is
        * the only path to the content below the fold).
        *
-       * In 'parent' mode the enclosing scroller (the Dialog body) already
-       * does both jobs — it is bounded and becomes a labelled, focusable
-       * region while it overflows — so this box is plain content.
+       * Unbounded (the quick-start dialog), the enclosing scroller (the
+       * Dialog body) already does both jobs — it is bounded and becomes a
+       * labelled, focusable region while it overflows — so this box is plain
+       * content. A second bounded scroller there would nest one scroll box in
+       * another, and on a short viewport the outer one carries the inner box
+       * out of view.
        */}
       <div
-        data-testid={ownScroll ? 'approval-gate-scroll' : 'approval-gate-summary'}
-        className={ownScroll ? 'mb-3 max-h-[50vh] overflow-y-auto pr-1' : 'mb-3'}
-        {...(ownScroll ? { tabIndex: 0, role: 'region', 'aria-labelledby': headingId } : {})}
+        data-testid={bounded ? 'approval-gate-scroll' : 'approval-gate-summary'}
+        className={bounded ? 'mb-3 max-h-[50vh] overflow-y-auto pr-1' : 'mb-3'}
+        {...(bounded ? { tabIndex: 0, role: 'region', 'aria-labelledby': headingId } : {})}
       >
         {/* Scene summaries */}
         {displayData.sceneSummaries && displayData.sceneSummaries.length > 0 && (
@@ -275,54 +144,181 @@ export function ApprovalGateDialog({
         )}
       </div>
 
-      {/*
-       * Normal flow in both modes. In 'parent' mode a control in here that
-       * takes focus (the cost's "Buy tokens" link, the discard prompt's "Keep
-       * plan") is kept clear of the pinned row below by the parent scroller's
-       * scroll padding (`usePinnedRowScrollPadding`), not by anything on these
-       * elements.
-       */}
       {children && (
         <div data-testid="approval-gate-extra" className="mb-3">
           {children}
         </div>
       )}
+    </>
+  );
+}
 
-      {/*
-       * In 'parent' mode ONLY this row is sticky: it pins to the parent
-       * scroller's bottom edge (opaque bg so content scrolling underneath stays
-       * hidden). It must stay a direct child of the gate's root: a sticky box
-       * cannot leave its parent, so it can only follow the summary while its
-       * parent spans the summary too. It holds the buttons and, at most, the
-       * one-line `actionSummary`; nothing else may join it: a sticky block
-       * taller than the scrollport has a part no scroll offset reveals.
-       */}
-      <div
-        ref={rowRef}
-        data-testid="approval-gate-actions"
-        className={cn(!ownScroll && 'sticky bottom-0 bg-[var(--sf-bg-surface)] pt-2')}
-      >
-        {actionSummary && (
-          <div data-testid="approval-gate-action-summary" className="mb-2">
-            {actionSummary}
-          </div>
-        )}
-        <div data-testid="approval-gate-buttons" className="flex gap-2">
-          <Button
-            ref={approveRef}
-            type="button"
-            size="sm"
-            onClick={onApprove}
-            disabled={approveDisabled}
-            className="flex-1"
-          >
-            {approveLabel}
-          </Button>
-          <Button ref={cancelRef} type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
-            {cancelLabel}
-          </Button>
+export interface ApprovalGateActionsProps {
+  gate: ApprovalGate;
+  onApprove: () => void;
+  onCancel: () => void;
+  /**
+   * Focus Approve on mount. Set by the quick-start dialog, where the gate
+   * replaces the content the user was last focused on — without this, focus
+   * falls to `document.body` inside an `aria-modal` region and keyboard users
+   * have nothing to tab from. The panel leaves it off: the gate appears
+   * beside other content there and stealing focus would be a hijack.
+   */
+  autoFocus?: boolean;
+  /**
+   * Label for the approve button. The quick-start plan review says "Build it":
+   * that click is what starts spending tokens, so it names the action (#6831).
+   * While its Discard is armed the same button reads "Discard it".
+   */
+  approveLabel?: string;
+  /**
+   * The approve button's variant: the primary action by default, destructive
+   * while the plan review's armed Discard puts "Discard it" in this place.
+   */
+  approveVariant?: 'default' | 'destructive';
+  /**
+   * Label for the cancel button. The plan review says "Discard plan" because
+   * its footer also has "Close", which keeps the plan: two exits with different
+   * consequences must not share a vague name.
+   */
+  cancelLabel?: string;
+  /**
+   * The cancel button's variant. The panel's plan review arms Discard on the
+   * first press and shows the armed button as destructive; the quick-start
+   * review's armed row puts an outlined "Keep plan" here instead.
+   */
+  cancelVariant?: 'ghost' | 'destructive' | 'outline';
+  /** Ref to the cancel button, so the plan review can return focus to Discard. */
+  cancelRef?: Ref<HTMLButtonElement>;
+  /** Disables approve, e.g. while the confirmed action is already starting. */
+  approveDisabled?: boolean;
+  /**
+   * One short line above the buttons, in the same group: the plan review's
+   * token total, or, while its Discard is armed, the "Discard this plan?"
+   * question. In the quick-start dialog this row is the non-scrolling footer,
+   * so whatever is here is in view whenever the buttons are (PR #10294: a
+   * cost the user has to scroll to find is not a cost they confirmed). Keep
+   * it to a line or two: it takes height from the scroller above it, and on
+   * a 320px-tall viewport that is all the height there is. Text only; it
+   * must hold nothing that takes focus.
+   */
+  summary?: ReactNode;
+  className?: string;
+}
+
+/**
+ * A gate's Approve / Cancel row, with an optional one-line summary above the
+ * buttons. A `role="group"` named by the gate's heading, so a screen reader
+ * hears which gate the buttons answer even when the row is rendered apart
+ * from that heading (the quick-start dialog puts it in the Dialog footer).
+ */
+export function ApprovalGateActions({
+  gate,
+  onApprove,
+  onCancel,
+  autoFocus = false,
+  approveLabel = 'Approve',
+  approveVariant = 'default',
+  cancelLabel = 'Cancel',
+  cancelVariant = 'ghost',
+  cancelRef,
+  approveDisabled = false,
+  summary,
+  className,
+}: ApprovalGateActionsProps) {
+  const approveRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (autoFocus) approveRef.current?.focus();
+    // gate.id so a second gate in the same run re-focuses.
+  }, [autoFocus, gate.id]);
+
+  // Pressing Approve can disable it while the action starts (the plan
+  // review's "Build it"), and a browser drops focus from a button that
+  // becomes disabled: Chromium moves it to <body>, outside the `aria-modal`
+  // dialog. If the action is refused the gate stays, the button comes back
+  // enabled, and focus is still nowhere (measured, PR #10294 round 5). Put it
+  // back on the button, unless the user has since focused something else.
+  const wasDisabledRef = useRef(approveDisabled);
+  useEffect(() => {
+    const wasDisabled = wasDisabledRef.current;
+    wasDisabledRef.current = approveDisabled;
+    if (!wasDisabled || approveDisabled) return;
+    const active = approveRef.current?.ownerDocument.activeElement;
+    if (!active || active === approveRef.current?.ownerDocument.body) approveRef.current?.focus();
+  }, [approveDisabled]);
+
+  return (
+    <div
+      data-testid="approval-gate-actions"
+      role="group"
+      aria-labelledby={headingIdFor(gate)}
+      className={className}
+    >
+      {summary && (
+        <div data-testid="approval-gate-action-summary" className="mb-2">
+          {summary}
         </div>
+      )}
+      <div data-testid="approval-gate-buttons" className="flex gap-2">
+        <Button
+          ref={approveRef}
+          type="button"
+          size="sm"
+          variant={approveVariant}
+          onClick={onApprove}
+          disabled={approveDisabled}
+          className="flex-1"
+        >
+          {approveLabel}
+        </Button>
+        <Button ref={cancelRef} type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
+          {cancelLabel}
+        </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A gate's card WITHOUT its buttons, for a container that already scrolls
+ * (the quick-start dialog's Dialog body). The summary is not bounded: it
+ * flows into that one scroll. Render the same gate's `ApprovalGateActions`
+ * in the container's non-scrolling footer; this card has no buttons of its
+ * own, so a gate rendered without them cannot be answered.
+ */
+export function ApprovalGateSummary({ gate, children }: { gate: ApprovalGate; children?: ReactNode }) {
+  return (
+    <div className={CARD}>
+      <GateContent gate={gate} bounded={false}>
+        {children}
+      </GateContent>
+    </div>
+  );
+}
+
+/**
+ * The whole gate in one card, buttons included, for the orchestrator panel:
+ * the summary bounds itself and the cost and buttons sit below that bound,
+ * so they are never scrolled away with it.
+ */
+export function ApprovalGateDialog({
+  children,
+  ...actions
+}: Omit<ApprovalGateActionsProps, 'summary' | 'className'> & {
+  /**
+   * Extra content between the scrollable summary and the buttons — the plan
+   * review's token cost. Outside the scroll region on purpose: a cost the user
+   * has to scroll to find is not a cost they confirmed.
+   */
+  children?: ReactNode;
+}) {
+  return (
+    <div className={CARD}>
+      <GateContent gate={actions.gate} bounded>
+        {children}
+      </GateContent>
+      <ApprovalGateActions {...actions} />
     </div>
   );
 }

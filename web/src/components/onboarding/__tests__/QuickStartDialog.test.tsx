@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import {
   render,
   cleanup,
@@ -117,50 +117,44 @@ afterEach(() => {
 const SCROLLER_CLASS = /(^|\s)(overflow-(y-)?(auto|scroll)|max-h-\S+)(\s|$)/;
 
 /**
- * Asserts a gate's action button stays reachable inside the Dialog: walking
- * up from it to the dialog panel, the ONLY scroll container / height bound is
- * the Dialog body, and the button sits in a `sticky bottom-0` action row whose
- * nearest scroll container is that body (so it pins to the body's visible
- * bottom edge rather than scrolling away with the summary). That row holds
- * the two buttons and, at most, the one-line action summary: a sticky block
- * taller than the scrollport has a part no scroll offset reveals, so the cost
- * breakdown and the notices must stay out of it.
+ * Asserts a gate's action button is in view at every scroll offset by
+ * construction: it is in the Dialog's footer (`[data-dialog-actions]`), which
+ * is outside the body's scroll, not in the body. Walking up from it to the
+ * dialog panel there is no scroll container or height bound at all; the body
+ * is still the ONE scroller (no second bounded scroller nested in it), and
+ * nothing in the dialog is pinned (`sticky`) over the body's content. The
+ * button sits in the gate's action group, named by the gate heading in the
+ * body, so a screen reader still hears which gate it answers.
  */
-function expectActionsReachable(button: HTMLElement) {
+function expectActionsInFooter(button: HTMLElement) {
   const dialog = screen.getByRole('dialog');
   expect(dialog.contains(button)).toBe(true);
   const body = dialog.querySelector('[data-dialog-body]');
+  const footer = dialog.querySelector('[data-dialog-actions]');
   expect(body).not.toBeNull();
+  expect(footer).not.toBeNull();
+  expect(footer?.contains(button)).toBe(true);
+  expect(body?.contains(button)).toBe(false);
 
-  const scrollers: Element[] = [];
   let node: HTMLElement | null = button.parentElement;
   while (node && node !== dialog) {
-    if (SCROLLER_CLASS.test(node.getAttribute('class') ?? '')) scrollers.push(node);
+    expect(node.getAttribute('class') ?? '', `bounded ancestor: ${node.outerHTML.slice(0, 80)}`).not.toMatch(SCROLLER_CLASS);
     node = node.parentElement;
   }
   expect(node).toBe(dialog);
-  expect(scrollers).toEqual([body]);
-  // ...and no second bounded scroller anywhere else in the body either (e.g.
-  // the gate's own summary box beside the footer): one scroll, not two.
+
   const inside = Array.from(body?.querySelectorAll('*') ?? []);
   expect(inside.length).toBeGreaterThan(0);
   const nested = inside.filter((el) => SCROLLER_CLASS.test(el.getAttribute('class') ?? ''));
   expect(nested.map((el) => el.outerHTML.slice(0, 120))).toEqual([]);
+  expect(dialog.querySelectorAll('.sticky')).toHaveLength(0);
 
-  const row = button.closest<HTMLElement>('.sticky');
-  expect(row).not.toBeNull();
-  expect(row?.classList.contains('bottom-0')).toBe(true);
-  expect(body?.contains(row as Node)).toBe(true);
-  // One sticky element in the body: the buttons, optionally under the summary line.
-  expect(Array.from(body?.querySelectorAll('.sticky') ?? [])).toEqual([row]);
-  const slots = Array.from(row?.children ?? []).map((el) => el.getAttribute('data-testid'));
-  expect([['approval-gate-buttons'], ['approval-gate-action-summary', 'approval-gate-buttons']]).toContainEqual(slots);
-  const buttons = row?.querySelector('[data-testid="approval-gate-buttons"]');
-  expect(Array.from(buttons?.children ?? []).map((el) => el.tagName)).toEqual(['BUTTON', 'BUTTON']);
-  expect(buttons?.contains(button)).toBe(true);
-  // The summary line holds text only: nothing in it can take focus.
-  const summary = row?.querySelector('[data-testid="approval-gate-action-summary"]');
-  expect(summary?.querySelectorAll('a, button, input, select, textarea, [tabindex]').length ?? 0).toBe(0);
+  const group = button.closest<HTMLElement>('[role="group"]');
+  expect(group).not.toBeNull();
+  const heading = document.getElementById(group?.getAttribute('aria-labelledby') ?? '');
+  expect(heading?.tagName).toBe('H3');
+  expect(body?.contains(heading as Node)).toBe(true);
+  expect(group?.getAttribute('data-testid')).toBe('approval-gate-actions');
 }
 
 /** Walks the dialog from the type cards to the prompt step. */
@@ -335,12 +329,13 @@ describe('QuickStartDialog', () => {
   // another lets the OUTER scroll carry the inner box's Approve/Cancel row out
   // of view on a short viewport. Round 2 removed a `max-h-[45vh]` wrapper here;
   // #10294 made the Dialog body itself a scroller, so the gate's own
-  // max-h-[50vh] box became the nested one. The rule now: exactly ONE scroll
-  // container between Approve and the dialog -- the Dialog body -- and the
-  // action row is sticky to that container's bottom edge so it stays in view.
-  // (jsdom has no layout, so this pins the structure that keeps the row
-  // reachable rather than measuring a rendered viewport.)
-  it('keeps the approval gate actions reachable: one scroller (the Dialog body), actions sticky to it', async () => {
+  // max-h-[50vh] box became the nested one. The rule now: exactly ONE
+  // scroller in the dialog -- the Dialog body -- and the gate's buttons in the
+  // Dialog's footer, outside that scroll, so no scroll offset can hide them
+  // (round 5: pinning them inside the body covered content and failed in
+  // Firefox). jsdom has no layout, so this pins the structure; the geometry is
+  // measured by e2e/tests/quick-start-plan-review-layout.spec.ts.
+  it('keeps the approval gate actions reachable: one scroller (the Dialog body), actions in the footer outside it', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
     await userEvent.click(screen.getByRole('button', { name: 'Plan my game' }));
@@ -358,7 +353,14 @@ describe('QuickStartDialog', () => {
 
     const approve = screen.getByRole('button', { name: 'Approve' });
     expect(screen.getByText('Generate assets?')).toBeTruthy();
-    expectActionsReachable(approve);
+    expectActionsInFooter(approve);
+    expectActionsInFooter(screen.getByRole('button', { name: 'Cancel' }));
+    // The gate's summary stays in the body; "Stop" and "Close" share the footer.
+    const body = screen.getByRole('dialog').querySelector('[data-dialog-body]');
+    expect(body?.contains(screen.getByRole('heading', { name: 'Generate assets?' }))).toBe(true);
+    const footer = screen.getByRole('dialog').querySelector('[data-dialog-actions]');
+    expect(footer?.contains(screen.getByRole('button', { name: 'Stop' }))).toBe(true);
+    expect(footer?.contains(screen.getByRole('button', { name: 'Close' }))).toBe(true);
   });
 
   it('reaches the submit button by keyboard from the prompt field', async () => {
@@ -522,6 +524,31 @@ describe('QuickStartDialog', () => {
     expect(screen.getByLabelText(/what happens in your platformer/i)).toBeTruthy();
   });
 
+  // The gate's buttons live in the Dialog footer, outside the running view's
+  // own element. Reopening onto a pending gate changes the phase in the same
+  // commit that mounts the gate, and the phase effect must count the footer
+  // as "the build view already placed focus", or it pulls focus off Approve
+  // onto the status line (PR #10294 round 5).
+  it('keeps focus on Approve when the dialog reopens onto a pending gate', async () => {
+    setState({
+      orchestratorStatus: 'executing',
+      pendingGate: {
+        id: 'gate_assets',
+        label: 'Generate assets?',
+        description: 'These cost tokens.',
+        displayData: {},
+      },
+    });
+    const { rerender } = render(<QuickStartDialog open={false} onClose={vi.fn()} />);
+    rerender(<QuickStartDialog open onClose={vi.fn()} />);
+
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    expect(document.activeElement).toBe(approve);
+    // Still there once the Dialog's deferred initial-focus frame has run.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.activeElement).toBe(approve);
+  });
+
   it('lands focus on Approve when a gate appears and rejects it on Cancel', async () => {
     const { rerender } = render(<QuickStartDialog open onClose={vi.fn()} />);
     await pickPlatformer();
@@ -617,57 +644,83 @@ describe('QuickStartDialog', () => {
       expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
     });
 
-    // PR #10294 round 3: the review's cost bar can carry a balance warning
-    // with a "Buy tokens" link, and the discard prompt can sit under it. A
-    // sticky footer holding all that could outgrow the Dialog body's
-    // scrollport on a phone, leaving its top (the cost header) unreachable.
-    // So only the button row is pinned; the cost, its link and the prompt
-    // stay in normal flow directly above it, reachable by scrolling.
-    it('keeps "Build it" reachable with only the button row pinned; the cost and its Buy tokens link stay in flow above it', async () => {
+    // PR #10294: the review's buttons are in the Dialog footer, outside the
+    // body's scroll, so the body can be scrolled to any offset without
+    // carrying them away or sliding anything under them. The cost bar, its
+    // Buy tokens link and the plan stay in the body, reachable by scrolling.
+    it('puts "Build it" and "Discard plan" in the Dialog footer; the cost and its Buy tokens link stay in the body', async () => {
       await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
-      await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
       const build = screen.getByRole('button', { name: 'Build it' });
-      expectActionsReachable(build);
+      expectActionsInFooter(build);
+      expectActionsInFooter(screen.getByRole('button', { name: 'Discard plan' }));
 
-      const row = build.closest('.sticky') as HTMLElement;
+      const body = screen.getByRole('dialog').querySelector('[data-dialog-body]');
       // Non-vacuous: each of the tall parts is actually rendered.
-      const inFlow = [
+      for (const node of [
+        screen.getByText('Jungle Canopy'),
         screen.getByText('Estimated token cost'),
         screen.getByRole('link', { name: 'Buy tokens' }),
-        screen.getByRole('button', { name: 'Keep plan' }),
-      ];
-      for (const node of inFlow) {
-        expect(node.closest('.sticky'), node.textContent ?? '').toBeNull();
-        expect(node.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      ]) {
+        expect(body?.contains(node), node.textContent ?? '').toBe(true);
       }
     });
 
-    // PR #10294 round 3 (ux): "Build it" takes focus at open and is pinned,
-    // while the cost bar scrolls with the plan. On a short viewport that put
-    // the user one Enter away from spending with the total out of view. The
-    // total now rides in the pinned row itself.
-    it('pins the token total in the action row beside "Build it"', async () => {
+    // PR #10294 round 3 (ux): "Build it" takes focus at open while the cost
+    // bar can be scrolled out of view, so the total rides beside the button,
+    // in the same footer group.
+    it('shows the token total in the footer group beside "Build it"', async () => {
       await reachPlanReview();
-      const build = screen.getByRole('button', { name: 'Build it' });
-      const row = build.closest('.sticky') as HTMLElement;
+      const group = screen.getByRole('group', { name: 'Review your game plan' });
       const total = screen.getByTestId('token-cost-total');
-      expect(row.contains(total)).toBe(true);
+      expect(group.contains(total)).toBe(true);
+      expect(group.contains(screen.getByRole('button', { name: 'Build it' }))).toBe(true);
+      expect(screen.getByRole('dialog').querySelector('[data-dialog-actions]')?.contains(total)).toBe(true);
       expect(total.textContent).toBe('Cost: 340 tokens, up to 400 held');
       expect(within(total).queryByText(/balance/)).toBeNull();
     });
 
-    it('says in the pinned total when the cost may exceed the balance', async () => {
+    it('says in the footer total when the cost may exceed the balance', async () => {
       await reachPlanReview({ tokenEstimate: { ...ESTIMATE, sufficientBalance: false } });
       const total = screen.getByTestId('token-cost-total');
-      expect(screen.getByRole('button', { name: 'Build it' }).closest('.sticky')?.contains(total)).toBe(true);
+      expect(screen.getByRole('group', { name: 'Review your game plan' }).contains(total)).toBe(true);
       expect(within(total).getByText('May exceed your balance')).toBeTruthy();
       expect(total.textContent).toContain('Cost: 340 tokens, up to 400 held');
     });
 
-    // PR #10294 round 3 (ux): arming Discard inserts the prompt in normal flow
-    // just above the pinned row, which on a short viewport is out of view, so
-    // the user saw the button turn red but not the question or "Keep plan".
-    it('scrolls the discard prompt into view (nearest) when Discard is armed, and not before', async () => {
+    // PR #10294 rounds 3-4 (ux HIGH): an armed Discard put "Discard this
+    // plan?" and "Keep plan" in the body, where on a 320px-tall viewport no
+    // scroll offset could show them. The question now IS the action row.
+    it('asks the discard question in the action row itself, with its two answers, and nothing in the body', async () => {
+      await reachPlanReview();
+      const discard = screen.getByRole('button', { name: 'Discard plan' });
+      await userEvent.click(discard);
+
+      const group = screen.getByRole('group', { name: 'Review your game plan' });
+      const question = within(group).getByRole('status');
+      expect(question.textContent).toBe('Discard this plan? Planning it again costs tokens.');
+      // The question takes the total's place, so the row does not grow.
+      expect(within(group).queryByTestId('token-cost-total')).toBeNull();
+      expect(Array.from(screen.getByTestId('approval-gate-action-summary').children)).toEqual([question]);
+      // The two answers, and only them: no "Build it" while the question is open.
+      const buttons = within(screen.getByTestId('approval-gate-buttons')).getAllByRole('button');
+      expect(buttons.map((b) => b.textContent)).toEqual(['Discard it', 'Keep plan']);
+      expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+      expectActionsInFooter(buttons[0]);
+      expectActionsInFooter(buttons[1]);
+      // "Keep plan" is the button just pressed, and keeps focus: pressing it
+      // again backs out rather than discarding.
+      expect(buttons[1]).toBe(discard);
+      expect(document.activeElement).toBe(discard);
+      // Nothing about the question is left in the body to be scrolled away.
+      const body = screen.getByRole('dialog').querySelector('[data-dialog-body]');
+      expect(body?.textContent).not.toContain('Discard this plan?');
+      expect(body?.querySelectorAll('button')).toHaveLength(0);
+    });
+
+    // A refused "Build it" puts its reason in the body above the cost, while
+    // the button stays in the footer. On a short viewport or a long plan the
+    // alert was out of view (PR #10294 round 4: 28 of 48 configurations).
+    it('scrolls a refused build\'s reason into view (nearest), and not before', async () => {
       const scrollIntoView = vi.fn();
       Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
         configurable: true,
@@ -675,14 +728,36 @@ describe('QuickStartDialog', () => {
         value: scrollIntoView,
       });
       try {
-        await reachPlanReview();
+        // The store reports the refusal before "Build it" settles; the
+        // settling render changes the Dialog's description (and so the body's
+        // height), so the scroll must wait for it.
+        let settle!: () => void;
+        runPipelineFromPlan.mockImplementationOnce(() => {
+          hoisted.state.orchestratorStatus = 'awaiting_approval';
+          hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
+          return new Promise<void>((resolve) => {
+            settle = resolve;
+          });
+        });
+        const { rerender } = await reachPlanReview();
         expect(scrollIntoView).not.toHaveBeenCalled();
-        await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
+        // The mocked store does not notify; re-render as a store update would.
+        rerender(<QuickStartDialog open onClose={vi.fn()} />);
+        await screen.findByRole('alert');
+        expect(screen.getByRole('button', { name: 'Build it' })).toBeDisabled();
+        expect(scrollIntoView).not.toHaveBeenCalled();
+        await act(async () => {
+          settle();
+        });
+        expect(screen.getByRole('button', { name: 'Build it' })).not.toBeDisabled();
         expect(scrollIntoView).toHaveBeenCalledTimes(1);
         expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
         const target = scrollIntoView.mock.contexts[0] as HTMLElement;
-        expect(target.textContent).toContain('Discard this plan? Planning it again costs tokens.');
-        expect(within(target).getByRole('button', { name: 'Keep plan' })).toBeTruthy();
+        expect(within(target).getByRole('alert').textContent).toContain(INSUFFICIENT_TOKENS_MESSAGE);
+        // The same refusal re-rendered is not scrolled to again.
+        rerender(<QuickStartDialog open onClose={vi.fn()} />);
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
       } finally {
         delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
       }
@@ -731,11 +806,12 @@ describe('QuickStartDialog', () => {
       expect(cancelPipeline).not.toHaveBeenCalled();
       expect(onClose).not.toHaveBeenCalled();
       expect(screen.getByText('Discard this plan? Planning it again costs tokens.')).toBeTruthy();
-      // One button whose label changes, so focus stays where the user pressed.
-      expect(screen.getByRole('button', { name: 'Discard it' })).toBe(discard);
+      // The pressed button turns into "Keep plan" and keeps focus, so a second
+      // press backs out; discarding is the deliberate move to "Discard it".
+      expect(screen.getByRole('button', { name: 'Keep plan' })).toBe(discard);
       expect(document.activeElement).toBe(discard);
 
-      await userEvent.click(discard);
+      await userEvent.click(screen.getByRole('button', { name: 'Discard it' }));
 
       expect(cancelPipeline).toHaveBeenCalledTimes(1);
       expect(onClose).toHaveBeenCalledTimes(1);
@@ -748,15 +824,19 @@ describe('QuickStartDialog', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Keep plan' }));
 
-      // The pressed button unmounts with the prompt; focus goes back to Discard.
+      // Focus stays on the same button, which reads "Discard plan" again; it
+      // does not move to "Build it", one Enter away from spending.
       expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Discard plan' }));
+      expect(screen.getByRole('button', { name: 'Build it' })).toBeTruthy();
       expect(screen.queryByText(/Discard this plan\?/)).toBeNull();
       expect(cancelPipeline).not.toHaveBeenCalled();
     });
 
     // An armed Discard must not survive a build attempt: a refused build puts
     // the same plan back on the review, where one click would then drop it.
-    it('disarms Discard when Build it is pressed, so a refused build returns unarmed', async () => {
+    // While armed there is no "Build it" at all (its place answers the
+    // question), so a build can only start from an unarmed review.
+    it('starts a build only from an unarmed review, so a refused build returns unarmed', async () => {
       runPipelineFromPlan.mockImplementationOnce(async () => {
         hoisted.state.orchestratorStatus = 'awaiting_approval';
         hoisted.state.orchestratorError = INSUFFICIENT_TOKENS_MESSAGE;
@@ -764,6 +844,8 @@ describe('QuickStartDialog', () => {
       await reachPlanReview();
       await userEvent.click(screen.getByRole('button', { name: 'Discard plan' }));
       expect(screen.getByRole('button', { name: 'Discard it' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Build it' })).toBeNull();
+      await userEvent.click(screen.getByRole('button', { name: 'Keep plan' }));
 
       await userEvent.click(screen.getByRole('button', { name: 'Build it' }));
 

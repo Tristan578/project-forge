@@ -5,36 +5,51 @@ import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 /**
  * The quick-start plan review's layout, measured in a real browser (PR #10294).
  *
- * The review sits in the `@spawnforge/ui` Dialog body, the one scroller, and
- * its Build it / Discard row is `sticky bottom-0` to that body. jsdom has no
- * layout, so the unit tests can only pin structure. Three defects that shipped
- * past them were visible only here, with real key presses in Chromium:
+ * The review's plan and cost sit in the `@spawnforge/ui` Dialog body, the one
+ * scroller. Its Build it / Discard plan row sits in the Dialog's footer,
+ * OUTSIDE that scroll. jsdom has no layout, so the unit tests can only pin
+ * that structure; this file measures what it buys.
  *
- *  1. "Build it" takes focus at open while the token cost scrolled away under
- *     the pinned row: one Enter from spending with the total out of view. The
- *     total now rides in the pinned row (`TokenCostTotal`).
- *  2. Arming Discard inserted "Discard this plan?" and "Keep plan" under or
- *     below the row. The review now scrolls the prompt into view.
- *  3. Tab landed on "Keep plan" / "Buy tokens" underneath the row: Chromium
- *     scrolls a focused control only when it is outside the scrollport, and
- *     the strip under a sticky row is inside it. The gate now keeps the body's
- *     scroll padding at the height that row covers.
+ * Rounds 3 and 4 pinned the row inside the body instead (`sticky`), and kept
+ * focus clear of it with the body's scroll padding. Every defect below shipped
+ * past the unit tests and was visible only here:
  *
- * Every assertion is a geometry measurement against the rendered page. Each
- * case also asserts the condition that makes it meaningful (the body overflows,
- * the Tab cycle reached the control under test), so a layout that stopped
- * exercising the defect fails instead of passing vacuously (lessons #9, #11).
+ *  1. "Build it" took focus at open with the token total scrolled away.
+ *  2. On a 320px-tall viewport the armed "Discard this plan?" and its "Keep
+ *     plan" sat under the pinned row at every scroll offset.
+ *  3. Firefox does not honour scroll padding for focus scrolling the way
+ *     Chromium does, so Shift+Tab put "Keep plan" under the row there.
+ *  4. The padding made every focus on Build it / Discard scroll the body: at
+ *     open the review was already scrolled down, and Tab threw the reader back.
+ *  5. A refused Build it's reason appeared out of view.
+ *
+ * So the properties asserted are layout facts no focus-scroll heuristic can
+ * bend: the body is at the top at open; a Tab stop in the footer never moves
+ * the body; every control that takes focus, the total, the discard question
+ * and its answers, and a refusal's reason are inside the visible area and
+ * not covered (hit-tested). Each case also asserts the condition that makes it
+ * meaningful (the body overflows, the Tab cycle reached the control under
+ * test), so a layout that stopped exercising a defect fails instead of
+ * passing vacuously (lessons #9, #11).
  *
  * The plan comes from the store, not from the AI design step: that is the
  * substitution this file declares (#10158). The layout under test is the real
- * QuickStartDialog, opened from the real toolbar trigger.
+ * QuickStartDialog, opened from the real toolbar trigger. The refused build
+ * is real too: `loadPage()` runs without the engine, so the slice's own
+ * "editor is still loading" refusal answers Build it.
  */
 
-/** The three viewports the board measured: a phone, a landscape phone, a laptop. */
+/**
+ * A phone, a landscape phone, a laptop, and two 320px-tall landscape phones
+ * (a 1280x640 window at 200% zoom; an iPhone SE on its side), where the
+ * previous layout had no scroll offset that showed the discard prompt.
+ */
 const VIEWPORTS = [
   { width: 375, height: 667 },
   { width: 740, height: 360 },
   { width: 1280, height: 720 },
+  { width: 667, height: 320 },
+  { width: 568, height: 320 },
 ] as const;
 
 /** A short and a long plan: the long one overflows the body at every viewport above. */
@@ -43,75 +58,72 @@ const SCENE_COUNTS = [1, 12] as const;
 /** Tab presses allowed to walk the dialog's whole focus cycle once. */
 const MAX_TAB_STOPS = 20;
 
-interface Box {
-  top: number;
-  bottom: number;
-}
+/** Half a pixel of slack for sub-pixel layout. */
+const SLACK = 0.5;
 
 /** What the page reports about one element. */
 interface Placement {
   label: string;
-  box: Box;
-  /** Part of the box outside the body's scrollport, in px. */
-  outsideScrollport: number;
-  /** Part of the box under the pinned action row, in px (0 for the row's own content). */
-  underRow: number;
+  /** Px of the box outside what the user can see: the viewport, the dialog panel, and (in the body) its scrollport. */
+  hidden: number;
+  /** Whether the element is under another one at its centre (hit-tested). */
+  covered: boolean;
+  inFooter: boolean;
 }
 
 interface Snapshot {
   overflows: boolean;
-  scrollport: Box;
-  row: Box;
+  scrollTop: number;
   active: Placement | null;
-  activeInBody: boolean;
   total: Placement | null;
-  prompt: Placement | null;
-  keep: Placement | null;
+  question: Placement | null;
+  alert: Placement | null;
+  buttons: string[];
 }
 
-/** Runs in the page: measures the review against the Dialog body and the pinned row. */
+/** Runs in the page: measures the review against the viewport, the panel and the Dialog body. */
 function measure(): Snapshot {
-  // Found from the row outward: the compact editor layout renders other
-  // role="dialog" drawers earlier in the document.
-  const row = document.querySelector<HTMLElement>('[data-testid="approval-gate-actions"]');
-  const body = row?.closest<HTMLElement>('[data-dialog-body]');
-  const dialog = row?.closest('[role="dialog"]');
-  if (!dialog || !body || !row) throw new Error('plan review is not rendered');
+  // Found from the gate's action group outward: the compact editor layout
+  // renders other role="dialog" drawers earlier in the document.
+  const group = document.querySelector<HTMLElement>('[data-testid="approval-gate-actions"]');
+  const dialog = group?.closest<HTMLElement>('[role="dialog"]');
+  const body = dialog?.querySelector<HTMLElement>('[data-dialog-body]');
+  const footer = dialog?.querySelector<HTMLElement>('[data-dialog-actions]');
+  if (!group || !dialog || !body || !footer) throw new Error('plan review is not rendered');
   const b = body.getBoundingClientRect();
   const scrollport = { top: b.top + body.clientTop, bottom: b.top + body.clientTop + body.clientHeight };
-  const r = row.getBoundingClientRect();
+  const panel = dialog.getBoundingClientRect();
+  const outside = (top: number, bottom: number, box: DOMRect) =>
+    Math.max(0, top - box.top) + Math.max(0, box.bottom - bottom);
   const place = (el: Element | null | undefined, label: string): Placement | null => {
     if (!el) return null;
     const box = el.getBoundingClientRect();
-    const outsideScrollport =
-      Math.max(0, scrollport.top - box.top) + Math.max(0, box.bottom - scrollport.bottom);
-    const underRow = row.contains(el) ? 0 : Math.max(0, Math.min(box.bottom, r.bottom) - Math.max(box.top, r.top));
-    return { label, box: { top: box.top, bottom: box.bottom }, outsideScrollport, underRow };
+    let hidden = outside(0, window.innerHeight, box) + outside(panel.top, panel.bottom, box);
+    if (body.contains(el) && el !== body) hidden += outside(scrollport.top, scrollport.bottom, box);
+    const hit = document.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+    const covered = !hit || !(hit === el || el.contains(hit));
+    return { label, hidden, covered, inFooter: footer.contains(el) };
   };
   const active = document.activeElement;
-  const promptText = Array.from(dialog.querySelectorAll('span')).find((s) =>
-    s.textContent?.startsWith('Discard this plan?'),
-  );
-  const keep = Array.from(dialog.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Keep plan');
   return {
     overflows: body.scrollHeight - body.clientHeight > 1,
-    scrollport,
-    row: { top: r.top, bottom: r.bottom },
-    active: active ? place(active, (active.textContent ?? '').trim().slice(0, 40) || active.tagName) : null,
-    activeInBody: !!active && active !== body && body.contains(active),
+    scrollTop: body.scrollTop,
+    // The body itself is a Tab stop while it overflows; it is the scrollport, not content in it.
+    active:
+      active && active !== body && dialog.contains(active)
+        ? place(active, (active.textContent ?? '').trim().slice(0, 40) || active.tagName)
+        : null,
     total: place(dialog.querySelector('[data-testid="token-cost-total"]'), 'token total'),
-    prompt: place(promptText, 'discard prompt'),
-    keep: place(keep, 'Keep plan'),
+    question: place(dialog.querySelector('[data-testid="discard-confirm-question"]'), 'discard question'),
+    alert: place(body.querySelector('[role="alert"]'), 'refusal'),
+    buttons: Array.from(group.querySelectorAll('button')).map((el) => (el.textContent ?? '').trim()),
   };
 }
 
-/** Half a pixel of slack for sub-pixel layout. */
-const SLACK = 0.5;
-
-function expectFullyVisible(p: Placement | null, context: string) {
+function expectInView(p: Placement | null, context: string) {
   expect(p, `${context}: not rendered`).not.toBeNull();
-  expect(p?.outsideScrollport, `${context}: ${p?.label} outside the body's visible area`).toBeLessThanOrEqual(SLACK);
-  expect(p?.underRow, `${context}: ${p?.label} under the pinned row`).toBeLessThanOrEqual(SLACK);
+  expect(p?.hidden, `${context}: ${p?.label} outside the visible area`).toBeLessThanOrEqual(SLACK);
+  expect(p?.covered, `${context}: ${p?.label} covered by another element`).toBe(false);
 }
 
 /** Seeds a designed plan awaiting "Build it", as `startQuickStart` leaves it. */
@@ -120,7 +132,15 @@ async function seedPlan(page: Page, scenes: number) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const store = (window as any).__EDITOR_STORE;
     const state = store?.getState?.();
-    if (typeof state?.setPlan !== 'function' || typeof state?.setOrchestratorStatus !== 'function') return false;
+    if (
+      typeof state?.setPlan !== 'function' ||
+      typeof state?.setOrchestratorStatus !== 'function' ||
+      typeof state?.resetOrchestrator !== 'function'
+    ) {
+      return false;
+    }
+    // Clears the previous size's refusal, which `setPlan` leaves in place.
+    state.resetOrchestrator();
     state.setPlan({
       id: `e2e-layout-plan-${sceneCount}`,
       projectId: 'e2e-layout',
@@ -178,18 +198,38 @@ async function seedPlan(page: Page, scenes: number) {
   expect(seeded, 'window.__EDITOR_STORE is missing: build with NEXT_PUBLIC_E2E_HOOKS=true').toBe(true);
 }
 
-/** Presses Tab through one whole focus cycle, asserting each stop inside the body is in view. */
-async function walkTabCycle(page: Page, context: string): Promise<string[]> {
+/** Moves the body to the top, as a reader scrolling back up to Level 1 would. */
+async function scrollBodyToTop(page: Page) {
+  await page.evaluate(() => {
+    const body = document
+      .querySelector('[data-testid="approval-gate-actions"]')
+      ?.closest('[role="dialog"]')
+      ?.querySelector<HTMLElement>('[data-dialog-body]');
+    if (body) body.scrollTop = 0;
+  });
+}
+
+/**
+ * Presses Tab through one whole focus cycle, until focus is back on
+ * `startLabel`. Every stop must be in view and uncovered, the total must be in
+ * view at every stop (it is beside "Build it" whenever Build it is reachable),
+ * and a stop in the footer must leave the body exactly where it was.
+ */
+async function walkTabCycle(page: Page, context: string, startLabel: string): Promise<string[]> {
   const visited: string[] = [];
+  let before = (await page.evaluate(measure)).scrollTop;
   for (let i = 0; i < MAX_TAB_STOPS; i++) {
     await page.keyboard.press('Tab');
     const s = await page.evaluate(measure);
-    expect(s.active, `${context}: focus left the page`).not.toBeNull();
-    const label = s.active?.label ?? '';
-    if (s.activeInBody) expectFullyVisible(s.active, `${context}, Tab ${i + 1}`);
-    // The total must be in view whenever "Build it" is reachable: at every stop.
-    expectFullyVisible(s.total, `${context}, Tab ${i + 1}`);
-    if (label === 'Build it' && visited.length > 0) break;
+    const stop = `${context}, Tab ${i + 1}`;
+    if (s.active) expectInView(s.active, stop);
+    expectInView(s.total, stop);
+    if (s.active?.inFooter) {
+      expect(s.scrollTop, `${stop}: focusing ${s.active.label} in the footer moved the body`).toBe(before);
+    }
+    before = s.scrollTop;
+    const label = s.active?.label ?? '(the body region)';
+    if (label === startLabel) break;
     visited.push(label);
   }
   return visited;
@@ -199,7 +239,7 @@ test.describe('Quick-start plan review layout @ui [substituted: AI game design]'
   annotation: { type: 'substitution', description: 'AI game design' },
 }, () => {
   for (const viewport of VIEWPORTS) {
-    test(`keeps the total, the discard prompt and every Tab stop clear of the pinned row at ${viewport.width}x${viewport.height}`, async ({
+    test(`keeps the review's buttons, total, discard question and refusal in view without moving the plan at ${viewport.width}x${viewport.height}`, async ({
       page,
       editor,
     }) => {
@@ -218,51 +258,81 @@ test.describe('Quick-start plan review layout @ui [substituted: AI game design]'
         await expect(build).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
         await expect(build).toBeFocused({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
-        // (1) At open, focus is on "Build it" and the total is in view beside it.
+        // (1) At open: the plan is read from the top, Build it has focus, and
+        //     the total is beside it.
         const open = await page.evaluate(measure);
         overflowed ||= open.overflows;
-        expectFullyVisible(open.total, `${context}, at open`);
-        expect(open.total?.label).toBe('token total');
+        expect(open.scrollTop, `${context}, at open: the body is scrolled`).toBe(0);
+        expectInView(open.active, `${context}, at open`);
+        expect(open.active?.label).toBe('Build it');
+        expect(open.active?.inFooter, `${context}: Build it is not in the Dialog footer`).toBe(true);
+        expectInView(open.total, `${context}, at open`);
 
-        // (3) Every Tab stop inside the body is in view, and the cycle reaches the
-        //     balance warning's link (the control that used to land under the row).
-        const unarmed = await walkTabCycle(page, `${context}, unarmed`);
+        // (2) A whole Tab cycle back to Build it: every stop in view, footer
+        //     stops never move the body, and the cycle reaches the balance
+        //     warning's link in the body and Discard plan in the footer.
+        const unarmed = await walkTabCycle(page, `${context}, unarmed`, 'Build it');
         expect(unarmed, `${context}: Tab never reached Buy tokens`).toContain('Buy tokens');
+        expect(unarmed, `${context}: Tab never reached Discard plan`).toContain('Discard plan');
 
-        // (2) Arming Discard brings the prompt and "Keep plan" into view above the row.
-        await dialog.getByRole('button', { name: 'Discard plan' }).focus();
+        // (3) A reader back at the top Tabs from Build it to Discard plan and
+        //     arms it: the body stays at the top throughout.
+        await scrollBodyToTop(page);
+        await build.focus();
+        await page.keyboard.press('Tab');
+        const toDiscard = await page.evaluate(measure);
+        expect(toDiscard.active?.label).toBe('Discard plan');
+        expect(toDiscard.scrollTop, `${context}: Tab to Discard plan moved the body`).toBe(0);
         await page.keyboard.press('Enter');
-        await expect(dialog.getByRole('button', { name: 'Keep plan' })).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+
+        // (4) Armed: the row asks the question and offers its two answers, all
+        //     in view, with focus on Keep plan (the button just pressed).
+        const keep = dialog.getByRole('button', { name: 'Keep plan' });
+        await expect(keep).toBeFocused({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+        const armed = await page.evaluate(measure);
+        expect(armed.buttons, `${context}, armed`).toEqual(['Discard it', 'Keep plan']);
+        expectInView(armed.question, `${context}, armed`);
+        expectInView(armed.active, `${context}, armed`);
+        expect(armed.scrollTop, `${context}, armed: arming moved the body`).toBe(0);
+        await page.keyboard.press('Shift+Tab');
+        const toDiscardIt = await page.evaluate(measure);
+        expect(toDiscardIt.active?.label).toBe('Discard it');
+        expectInView(toDiscardIt.active, `${context}, armed, Shift+Tab`);
+        expect(toDiscardIt.scrollTop, `${context}, armed: Shift+Tab moved the body`).toBe(0);
+
+        // Back out: Keep plan returns the review, focus stays on that button.
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Enter');
+        const discardPlan = dialog.getByRole('button', { name: 'Discard plan' });
+        await expect(discardPlan).toBeFocused({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+
+        // (5) A refused Build it (no engine here, so the slice refuses): its
+        //     reason is brought into view in the body, focus is back on Build
+        //     it, and the total is still beside it.
+        await scrollBodyToTop(page);
+        await build.focus();
+        await page.keyboard.press('Enter');
+        await expect(dialog.getByRole('alert'), `${context}: Build it was not refused`).toBeVisible({
+          timeout: E2E_TIMEOUT_ELEMENT_MS,
+        });
         await expect
-          .poll(async () => (await page.evaluate(measure)).prompt?.underRow ?? Number.POSITIVE_INFINITY, {
-            message: `${context}, armed: the discard prompt never cleared the pinned row`,
+          .poll(async () => (await page.evaluate(measure)).alert?.hidden ?? Number.POSITIVE_INFINITY, {
+            message: `${context}, refused: the reason never came into view`,
             timeout: E2E_TIMEOUT_ELEMENT_MS,
           })
           .toBeLessThanOrEqual(SLACK);
-        const armed = await page.evaluate(measure);
-        expectFullyVisible(armed.prompt, `${context}, armed`);
-        expectFullyVisible(armed.keep, `${context}, armed`);
-        expectFullyVisible(armed.total, `${context}, armed`);
-
-        // (3) again with the prompt in place: Tab onto "Keep plan" in both directions.
-        const forward = await walkTabCycle(page, `${context}, armed`);
-        expect(forward, `${context}: Tab never reached Keep plan`).toContain('Keep plan');
-        await dialog.getByRole('button', { name: 'Discard it' }).focus();
-        let reachedKeep = false;
-        for (let i = 0; i < MAX_TAB_STOPS && !reachedKeep; i++) {
-          await page.keyboard.press('Shift+Tab');
-          const s = await page.evaluate(measure);
-          if (s.activeInBody) expectFullyVisible(s.active, `${context}, armed, Shift+Tab ${i + 1}`);
-          reachedKeep = s.active?.label === 'Keep plan';
-        }
-        expect(reachedKeep, `${context}: Shift+Tab never reached Keep plan`).toBe(true);
+        await expect(build).toBeFocused({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+        const refused = await page.evaluate(measure);
+        expectInView(refused.alert, `${context}, refused`);
+        expectInView(refused.active, `${context}, refused`);
+        expectInView(refused.total, `${context}, refused`);
 
         // Close keeps the plan; the next size is seeded fresh.
         await page.keyboard.press('Escape');
         await expect(dialog).toBeHidden({ timeout: E2E_TIMEOUT_ELEMENT_MS });
       }
-      // Non-vacuous: at least the long plan overflowed the body, so the pinned
-      // row was actually covering content at this viewport.
+      // Non-vacuous: at least the long plan overflowed the body, so the review
+      // really was scrollable at this viewport.
       expect(overflowed, 'no plan overflowed the dialog body; the layout under test was not exercised').toBe(true);
     });
   }
