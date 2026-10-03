@@ -57,7 +57,7 @@ Reviewers (dispatch in parallel, max 3 concurrent on M2):
 ```
 
 - Skip reviewers whose domain wasn't touched (e.g. skip ux-reviewer for pure API fixes).
-- PASS/FAIL only, under the scope, severity and round-cap rules in `.claude/skills/review-protocol/SKILL.md`: blockers and majors in the diff fail; minors are fixed in the same push or filed; re-reviews cover only the fix diff; stop and ask the user after round 3.
+- PASS/FAIL only, under the scope, severity and round-cap rules in `.claude/skills/review-protocol/SKILL.md`: blockers and majors in the diff fail; minors are fixed in the same push or filed; re-reviews cover only the fix diff; stop and ask the user if a blocker or major is still open after round 3.
 - NEVER use a generic `code-reviewer` in place of the 5 specialists.
 
 ### Phase 3: Quality Gate (BEFORE push)
@@ -88,7 +88,7 @@ sleep 180
 
 This invokes the full protocol: checkout each PR branch, read current code (not stale diffs), fix real bugs before replying, post threaded replies with commit SHAs, verify 0 unreplied remaining.
 
-**If `/resolve-all-pr-comments` finds real bugs:** fix them → re-run review board → push → wait → resolve again. Loop until clean.
+**If `/resolve-all-pr-comments` finds real bugs:** fix them → push → re-review only the fix diff → resolve again. Stop and ask the user if a blocker or major is still open after round 3 (`.claude/skills/review-protocol/SKILL.md` → Scope, severity and the round cap).
 
 ### Phase 6: Verify Green
 

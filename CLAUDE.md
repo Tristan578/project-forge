@@ -144,7 +144,7 @@ All work tracked via taskboard. Use `/kanban` skill for full protocol.
 
 ## Working Principles
 
-- **PASS or FAIL** — no "pass with issues." The board reviews the diff and the code it touches. A blocker or major there blocks; a minor is fixed in the same push or filed, and never triggers another round. Stop and ask after round 3. Full rules: `.claude/skills/review-protocol/SKILL.md` → Scope, severity and the round cap.
+- **PASS or FAIL** — no "pass with issues." The board reviews the diff and the code it touches. A blocker or major there blocks; a minor is fixed in the same push or filed, and never triggers another round. Stop and ask if a blocker or major is still open after round 3. Full rules: `.claude/skills/review-protocol/SKILL.md` → Scope, severity and the round cap.
 - **Boy Scout Rule** — fix every bug you find in the code you are changing, regardless of whose fault. A pre-existing bug elsewhere gets an issue, not a detour.
 - **Systems, not genres** — games are compositions of systems, not genre categories.
 - **Lessons learned enforced via hooks** — `inject-lessons-learned.sh` fires on every Edit/Write/Bash.

@@ -72,7 +72,7 @@ const VERDICT = {
 // only a bare branch name is rewritten.
 const rawBase = (args && args.base) || 'main'
 const base = rawBase.includes('/') ? rawBase : `origin/${rawBase}`
-const focus = (args && args.focus) ? `\nFocus area from the orchestrator: ${args.focus}\n` : ''
+const focus = (args && args.focus) ? `\nFocus area from the orchestrator: ${args.focus}\nA focus narrows where you look first; it never excuses a blocker or major elsewhere in the diff.\n` : ''
 
 phase('Review')
 const results = await parallel(REVIEWERS.map(r => () =>
@@ -85,8 +85,8 @@ const results = await parallel(REVIEWERS.map(r => () =>
     `   If that diff contains work plainly UNRELATED to what the orchestrator described — other features, other tickets' files, commits that look already-merged — STOP and return FAIL with one finding naming two or three of those unrelated paths, because the base is wrong and every finding you would write is about somebody else's work. Check it with \`git merge-base ${base} HEAD\` before you conclude that: a three-dot diff is measured from the merge base, so a busy trunk does NOT pull other people's commits into it.\n` +
     `   SIZE ALONE IS NOT THAT SIGNAL. A large PR is legitimately large, and the orchestrator may describe only the latest increment of one — being handed a 150-file diff after a note about a 2-file change is the expected shape of a long-running branch, not evidence of a wrong base. Judge by whether the CONTENT belongs to the described work.\n` +
     `5. SCOPE (.claude/skills/review-protocol/SKILL.md, "Scope, severity and the round cap"): review the changed lines and the code they directly interact with — the changed files, and the callers and callees of changed functions. A pre-existing defect outside that scope, a hypothetical you have not tied to a changed line, or a "while you're here" improvement is NOT a finding; put a real pre-existing bug in \`followups\`. Do not build scratch apps, harnesses or production builds to hunt for new attack shapes; run one only to CONFIRM a defect you have already tied to a specific changed line, and name that line.\n` +
-    `6. SEVERITY: \`blocker\`/\`major\` = a correctness or security defect in the diff, a broken or vacuous test of the changed code, or a false claim in the PR. \`minor\` = wording, comment style, docs drift, a nice-to-have test. Verdict is FAIL if you have any blocker or major, else PASS — list minors either way; they do not fail the board.\n` +
-    `7. Before returning, run \`git status --porcelain\`; if it shows anything you changed, revert it and add a finding saying the review attempted a write.${focus}\n` +
+    `6. SEVERITY: \`blocker\`/\`major\` = a correctness or security defect in the diff, a broken or vacuous test of the changed code, or a false claim in the PR. \`minor\` = wording, comment style, docs drift, a nice-to-have test. A security finding rated CRITICAL, HIGH or MEDIUM is a blocker or major, never a minor; a UX finding rated CRITICAL or HIGH is a blocker or major, UX MEDIUM or LOW is minor. Verdict is FAIL if you have any blocker or major, else PASS — list minors either way; they do not fail the board.\n` +
+    `7. Before returning, run \`git status --porcelain\`; if it shows anything you changed, revert it and add a blocker finding saying the review attempted a write.${focus}\n` +
     `Return the structured verdict.`,
     // A REVIEWER SEAT IS A SONNET SEAT. Left unset, every seat inherits the
     // orchestrator's model, and five frontier agents re-reading a whole diff is

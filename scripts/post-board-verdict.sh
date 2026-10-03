@@ -21,8 +21,8 @@
 #     <!-- board-verdict: PASS sha=<40-hex> seats=5/5 -->
 #
 # THE SEAT COUNT IS PART OF THE VERDICT (#10141). The protocol is five seats,
-# any finding is a FAIL, and a PASS means "all five looked and none found
-# anything". A marker without the count let a three-seat run publish PASS and
+# a blocker or major is a FAIL, and a PASS means "all five looked and none
+# found a blocker or major". A marker without the count let a three-seat run publish PASS and
 # `board-verdict.sh` render it `success` — adjacent to the property that
 # matters (lessons-learned #1). So a PASS is refused here unless every seat
 # reported, and the consumer treats a PASS that carries no count, or a partial

@@ -195,6 +195,8 @@ Severity:
 - **MEDIUM** — Suboptimal layout, missing edge case, typography issue
 - **LOW** — Nitpick, style preference
 
+On the review board, CRITICAL and HIGH map to `blocker` or `major` and fail the board; MEDIUM and LOW map to `minor` and do not.
+
 ## When Reviewing Specs
 
 - Is the UX flow fully described from the user's perspective, not just the technical implementation?
