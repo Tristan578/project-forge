@@ -265,10 +265,11 @@ describe('filterCameraNumerics', () => {
      * The conversion's domain is checked on the GDD side, before scaling. A
      * per-frame lerp fraction above 1 has no meaning, but scaled it becomes a
      * damping the engine happily accepts (5 -> 300, an exact snap under the
-     * engine's 1.0 ceiling on the lerp factor), so without this the step reported `applied: true` for a
-     * value that was nonsense where it was written (review-board finding on
-     * #10295). Nothing on the producer side pins the unit — the decomposer types
-     * `config` as `z.record(z.string(), z.unknown())` — so this is the contract.
+     * engine's 1.0 ceiling on the lerp factor), so without this the step
+     * reported `applied: true` for a value that was nonsense where it was
+     * written (review-board finding on #10295). Nothing on the producer side
+     * pins the unit — the decomposer types `config` as
+     * `z.record(z.string(), z.unknown())` — so this is the contract.
      */
     describe('refuses a smoothing outside the (0, 1] per-frame fraction', () => {
       // One reason for every refused value: it names the domain and that the
