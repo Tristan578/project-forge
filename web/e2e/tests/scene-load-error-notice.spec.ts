@@ -170,8 +170,12 @@ test.describe('Scene-load lockout notice on phone screens [substituted: WASM eng
   // plus the explanation does not fit, so the NOTICE's own height cap and
   // scrolling are what keep the Reload button reachable. The two phone cases
   // above never reach that cap, so without this test it would be unpinned.
-  test('320x300, spaced 512-character reason: the notice fits and the Reload button scrolls into view on focus', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 300 });
+  // 240px, not a gentler height: at 320px wide the uncapped notice is about
+  // 266px tall here, so dropping either the cap or the scrolling puts the
+  // button off the screen. At 300px the overflow was ~20px, small enough to
+  // hide in the bottom gutter, and dropping the scrolling stayed green.
+  test('320x240, spaced 512-character reason: the notice fits and the Reload button scrolls into view on focus', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 240 });
     await openEditorWithoutEngine(page);
     await rejectSceneLoad(page, ENGINE_ERRORS['spaced 512-character reason']);
 
@@ -189,7 +193,7 @@ test.describe('Scene-load lockout notice on phone screens [substituted: WASM eng
     // would not be testing the cap at all.
     expect(fit.scrolls).toBe(true);
 
-    // Geometry only, no hit test: on a 300px screen the transient "Couldn't
+    // Geometry only, no hit test: on a 240px screen the transient "Couldn't
     // load the scene" toast that the same rejection raises sits over the
     // bottom of the screen until it times out. That toast is not part of this
     // notice and behaves the same on main.
