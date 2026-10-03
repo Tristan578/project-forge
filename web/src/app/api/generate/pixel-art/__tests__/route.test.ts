@@ -184,9 +184,20 @@ describe('POST /api/generate/pixel-art', () => {
     expect(mockBindProviderJob).toHaveBeenCalledWith('user-123', 'replicate', 'pred-real-123');
   });
 
-  it('does not bind when the provider delivers no artifact (no jobId to bind)', async () => {
+  // A provider response with no prediction id never reaches the binding step:
+  // execute throws EmptyArtifactError (route.ts) and the handler answers 503
+  // and refunds, so there is no job to bind. Asserting the 503 is what makes
+  // this case able to fail — it goes red if execute stops throwing and returns
+  // a result with no id. The handler's own "extractor yields no id" branch is
+  // unreachable from this route (every successful execute carries an id), so
+  // it is pinned in createGenerationHandler.qstash.test.ts ("does not bind when
+  // the extractor returns null").
+  it('does not bind when execute fails because the provider delivered no prediction id', async () => {
     pixelArtClientMock.generate.mockResolvedValue({});
-    await POST(makeRequest(validBody));
+    const res = await POST(makeRequest(validBody));
+    expect(res.status).toBe(503);
+    expect((await res.json()).code).toBe('SERVICE_UNAVAILABLE');
+    expect(pixelArtClientMock.generate).toHaveBeenCalledTimes(1);
     expect(mockBindProviderJob).not.toHaveBeenCalled();
   });
 

@@ -287,8 +287,16 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     });
 
     it('does not bind when the extractor returns null (synchronous result — nothing to poll)', async () => {
-      const handler = makeAsyncHandler({ provider: 'dalle3', providerJobId: (r) => (r.provider === 'sdxl' ? r.jobId : null) });
-      await handler(makeRequest({ prompt: 'a hero' }));
+      // The request SUCCEEDS and the extractor RUNS and yields no id, so the
+      // only thing between it and a bind of `null` is the no-id early return
+      // in maybeBindJobOwnership. (A route-level case cannot reach that line
+      // when execute throws first — see the pixel-art route test.)
+      const extractor = vi.fn((r: ModelResult) => (r.provider === 'sdxl' ? r.jobId : null));
+      const handler = makeAsyncHandler({ provider: 'dalle3', providerJobId: extractor });
+      const res = await handler(makeRequest({ prompt: 'a hero' }));
+      expect(res.status).toBe(200);
+      expect(extractor).toHaveBeenCalled();
+      expect(extractor.mock.results.every((r) => r.type === 'return' && r.value === null)).toBe(true);
       expect(mockBindProviderJob).not.toHaveBeenCalled();
     });
 

@@ -10,8 +10,9 @@
  * suites, `verifyProviderJobOwner` in every `status/route.test.ts`), so a new
  * status route that skips the check, or a POST route that binds nothing,
  * passes every behavioural test. `resolveApiKey` returns the PLATFORM key for
- * a zero-cost status check, so a missing check is a cross-user read of another
- * person's result with the platform's credentials.
+ * a zero-cost status check, and `resolveByokOrPlatformKey` returns it with no
+ * tier, balance or charge at all, so a missing check is a cross-user read of
+ * another person's result with the platform's credentials.
  *
  * WHICH FILES — selected by the PROPERTY, not the directory name
  * (lessons-learned #21: "scope the gate to the property, not the filename").
@@ -19,11 +20,15 @@
  * `.jsx`, `.mjs` (the `ROUTE_FILE` set `egressGuardCoverage.test.ts` uses), at
  * any path, `status/[jobId]/route.ts` and `texture/poll/route.ts` included —
  * is parsed with the script kind its extension implies, and every one that
- * calls `resolveApiKey` (or references it, or imports the resolver module in a
- * way the gate cannot follow) is SELECTED. "Calls" counts a named import of
- * `resolveApiKey` under ANY local name from ANY specifier (`as resolveKey`,
- * from `@/lib/keys/resolver`, `@/lib/keys/resolver.ts` or a relative path —
- * over-counting only makes the gate stricter). Where the MODULE is what matters
+ * calls a KEY EXPORT of the resolver (or references one, or imports the
+ * resolver module in a way the gate cannot follow) is SELECTED. The key
+ * exports are DERIVED from `@/lib/keys/resolver`'s source on every run: every
+ * exported function except the pinned `NON_KEY_RESOLVER_EXPORTS` (each
+ * re-checked to declare a return type naming no key) — `resolveApiKey` and
+ * `resolveByokOrPlatformKey` today, and any export added later. "Calls" counts
+ * a named import of a key export under ANY local name from ANY specifier
+ * (`as resolveKey`, from `@/lib/keys/resolver`, `@/lib/keys/resolver.ts` or a
+ * relative path — over-counting only makes the gate stricter). Where the MODULE is what matters
  * — a namespace, default, `import =` or dynamic import of the resolver, and the
  * module each guard callee must come from — the specifier is identified by
  * tsc's own module resolution with `web/tsconfig.json`'s options, against the
@@ -31,7 +36,9 @@
  * rule below, or be in `KEY_RESOLVING_EXEMPTIONS`, where each entry carries a
  * reason AND a structural property the gate re-checks on every run (a
  * token-charged new operation is not a zero-cost status poll; a QStash callback
- * verifies its signature before resolving). An exemption that no longer
+ * verifies its signature before resolving; a bundled secondary key resolved
+ * inside the `execute` step of a charged `createGenerationHandler` generation,
+ * for that step's authenticated `ctx.userId`). An exemption that no longer
  * resolves a key is stale and fails. Two floors are derived from source, not
  * counted: every endpoint in `STATUS_ENDPOINTS` (the map the poller dials)
  * must map to a walked route, and every one of them but the pinned
@@ -41,8 +48,9 @@
  * single-file `ts.Program`, so names resolve the way the compiler resolves
  * them): a text scan would accept the call inside a comment or a string, and
  * the ORDER and the GATING of the call are the whole property. What a selected
- * route must contain, in the same function body as every `resolveApiKey(...)`
- * call and ahead of the statement that holds it:
+ * route must contain, in the same function body as every key-export call
+ * (`resolveApiKey(...)`, `resolveByokOrPlatformKey(...)`) and ahead of the
+ * statement that holds it:
  *
  *   const <o> = await verifyProviderJobOwner(<user>, <provider>, <jobId>);
  *   if (<o> !== 'owner') return <refusal>;
@@ -58,7 +66,7 @@
  * - the first argument (`<user>`) is the AUTHENTICATED caller: `<mid>.userId`
  *   (a trailing `!` allowed), where `const <mid> = await withApiMiddleware(...)`
  *   is a top-level statement of the same body ahead of the check, and it is
- *   the same `<mid>.userId` the guarded `resolveApiKey(...)` call passes as ITS
+ *   the same `<mid>.userId` the guarded key-export call passes as ITS
  *   first argument. A check run against a caller-chosen user
  *   (`searchParams.get('userId')`, a body field) would answer `'owner'` for
  *   whoever the caller names and hand them the platform key;
@@ -77,10 +85,16 @@
  *   only as `.error`, `.userId` and `.authContext` (`.body` is caller input);
  *   no second handler argument (route params); no `arguments` anywhere in the
  *   handler (`arguments[0]` is the request, `arguments[1]` the route params,
- *   under a name nothing above looks for); no `next/headers` import. So
- *   whatever the route sends the provider, the only caller-chosen value it can
- *   contain is the id the ownership check ran on. This is a whitelist of the
- *   ways IN, not a list of sinks — the set of sinks is unbounded (#9736).
+ *   under a name nothing above looks for). And the MODULES it takes values
+ *   from are whitelisted too, because `next/headers` reads the request with no
+ *   handler argument at all: every runtime static import is `next/server` or
+ *   resolves (tsc's resolution, so `next/headers.js` and a relative path into
+ *   node_modules are caught) to the app's own source under `src/`; there is no
+ *   `import()`, no `require` reference and no `import x = require(...)`, since
+ *   the gate cannot vet a module named at run time. So whatever the route
+ *   sends the provider, the only caller-chosen value it can contain is the id
+ *   the ownership check ran on. This is a whitelist of the ways IN, not a list
+ *   of sinks — the set of sinks is unbounded (#9736).
  *
  * Every rule is proven able to REPORT by mutating the REAL route sources in
  * memory and asserting each mutation applied before trusting the red (#11,
@@ -100,6 +114,10 @@
  *   reached a provider through a helper would be reported only by the
  *   `STATUS_ENDPOINTS` floor (it would select nothing) — and must not be
  *   accepted until this gate is taught to follow that helper.
+ * - A request read inside an app MODULE the route imports (a helper under
+ *   `src/` that calls `headers()` and returns the value) is not followed, for
+ *   the same reason as the helper limit above; the module whitelist stops the
+ *   route reading next/headers itself, not an app helper doing it for it.
  * - Whether an exemption's REASON is true beyond the property re-checked here.
  */
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -118,6 +136,20 @@ const ROUTE_FILE = /^route\.(?:ts|tsx|js|jsx|mjs)$/;
 
 const RESOLVER_MODULE = '@/lib/keys/resolver';
 const RESOLVE = 'resolveApiKey';
+/** The resolver's uncharged BYOK-or-platform lookup: a key with no tier, balance or charge in front of it. */
+const RESOLVE_BYOK = 'resolveByokOrPlatformKey';
+/**
+ * The resolver's exported functions that return NO key, pinned. Every OTHER
+ * exported function of the resolver module is treated as key-returning (see
+ * `KEY_EXPORTS`), so a new export selects its callers until someone decides
+ * here that it returns no key — and each entry is re-checked to still be an
+ * exported function whose declared return type names neither `string` nor
+ * `ResolvedKey`.
+ */
+const NON_KEY_RESOLVER_EXPORTS: readonly string[] = ['storeProviderKey', 'deleteProviderKey', 'listConfiguredProviders'];
+/** The one framework module a selected route may import (see `moduleInputProblems`). */
+const NEXT_SERVER_MODULE = 'next/server';
+const SRC_ROOT = path.join(WEB_ROOT, 'src');
 const OWNERSHIP_MODULE = '@/lib/generate/jobOwnership';
 const VERIFY = 'verifyProviderJobOwner';
 const MIDDLEWARE_MODULE = '@/lib/api/middleware';
@@ -168,6 +200,63 @@ function canonicalModuleFile(moduleName: string): string | undefined {
   }
   return moduleFileCache.get(moduleName);
 }
+
+/** Is `file` (a resolved module path) the app's own source — under `web/src`, outside any node_modules? */
+function isAppSourceFile(file: string | undefined): boolean {
+  if (!file) return false;
+  const resolved = path.resolve(file);
+  return resolved.startsWith(SRC_ROOT + path.sep) && !resolved.split(path.sep).includes('node_modules');
+}
+
+export interface ResolverExport {
+  name: string;
+  /** The declared return type's text, or undefined when none is written (or it is a re-export). */
+  returnType: string | undefined;
+}
+
+/**
+ * The exported FUNCTIONS of the resolver module's source — declarations,
+ * `export const f = (...) => ...`, and names in an `export { ... }` list
+ * (which may be functions; counted, since over-counting only makes the gate
+ * stricter). Classes, interfaces and types are not callable key sources.
+ */
+export function resolverFunctionExports(source: string): ResolverExport[] {
+  const sf = ts.createSourceFile('resolver.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const out: ResolverExport[] = [];
+  const exported = (st: ts.Statement) => ts.canHaveModifiers(st)
+    && (ts.getModifiers(st) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+  for (const st of sf.statements) {
+    if (ts.isFunctionDeclaration(st) && st.name && exported(st)) {
+      out.push({ name: st.name.text, returnType: st.type?.getText(sf) });
+    } else if (ts.isVariableStatement(st) && exported(st)) {
+      for (const d of st.declarationList.declarations) {
+        const init = d.initializer;
+        if (ts.isIdentifier(d.name) && init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
+          out.push({ name: d.name.text, returnType: init.type?.getText(sf) });
+        }
+      }
+    } else if (ts.isExportDeclaration(st) && !st.isTypeOnly && st.exportClause && ts.isNamedExports(st.exportClause)) {
+      for (const el of st.exportClause.elements) if (!el.isTypeOnly) out.push({ name: el.name.text, returnType: undefined });
+    }
+  }
+  return out;
+}
+
+/** The resolver's key-returning exports: every exported function but the pinned `NON_KEY_RESOLVER_EXPORTS`. */
+export function keyExportsOf(exports: readonly ResolverExport[]): Set<string> {
+  return new Set(exports.map((e) => e.name).filter((name) => !NON_KEY_RESOLVER_EXPORTS.includes(name)));
+}
+
+const RESOLVER_FILE = canonicalModuleFile(RESOLVER_MODULE);
+if (!RESOLVER_FILE) throw new Error(`${RESOLVER_MODULE} does not resolve: the gate cannot derive the key-returning exports`);
+const RESOLVER_EXPORTS = resolverFunctionExports(readFileSync(RESOLVER_FILE, 'utf8'));
+/**
+ * Every name a key comes out of: derived from the resolver module's exports
+ * at run time, so a new key-returning export selects its callers without an
+ * edit here (lessons-learned #18). `resolveApiKey` and `resolveByokOrPlatformKey`
+ * today; the suite asserts both are in it.
+ */
+const KEY_EXPORTS: ReadonlySet<string> = keyExportsOf(RESOLVER_EXPORTS);
 
 /** The script kind Next.js's compiler would give a route file, by extension. */
 function scriptKindFor(fileName: string): ts.ScriptKind {
@@ -325,8 +414,9 @@ function refusesNonOwner(cond: ts.Expression, name: string): boolean {
 
 /**
  * `<mid>.userId` (parentheses and `!` stripped) -> `mid`; anything else ->
- * undefined. The user argument of both `verifyProviderJobOwner` and
- * `resolveApiKey` must have this shape, and the SAME `<mid>`.
+ * undefined. The user argument of both `verifyProviderJobOwner` and the key
+ * export must have this shape, and the SAME `<mid>` (and a bundled-step
+ * exemption's key call, with `<ctx>` its `execute` step's third parameter).
  */
 function authenticatedUserBase(expr: ts.Expression | undefined): string | undefined {
   let e = expr;
@@ -503,7 +593,7 @@ function handlerInputs(b: Bound, fn: ts.FunctionLikeDeclaration, body: ts.Block)
  * check whose user argument is `<user>.userId` counts, where `<user>` is the
  * `const` result of `withApiMiddleware(...)` declared earlier in the same body
  * — the caller the middleware authenticated, and the same user the guarded
- * `resolveApiKey` call resolves for — and whose third argument is the polled id.
+ * key-export call resolves for — and whose third argument is the polled id.
  */
 function guardIndex(b: Bound, body: ts.Block, polled: Set<string>, user: string): number {
   const authenticated = new Set<string>();
@@ -567,7 +657,7 @@ function isCallee(node: ts.Node): boolean {
 /**
  * Is this dynamic import of the resolver followable — awaited straight into an
  * object pattern (alone, or as one element of `await Promise.all([...])`) whose
- * every key is spelled out and none is `resolveApiKey`? `capabilities/route.ts`
+ * every key is spelled out and none is a key export (`KEY_EXPORTS`)? `capabilities/route.ts`
  * lazily imports `listConfiguredProviders` this way. Anything else (a module
  * object kept in a variable, a rest element, a computed key) is untraceable.
  */
@@ -592,12 +682,12 @@ function destructuresWithoutResolve(importCall: ts.CallExpression): boolean {
   }
   return !!pattern && ts.isObjectBindingPattern(pattern) && pattern.elements.every((el) => {
     const key = el.propertyName ?? el.name;
-    return !el.dotDotDotToken && ts.isIdentifier(key) && key.text !== RESOLVE;
+    return !el.dotDotDotToken && ts.isIdentifier(key) && !KEY_EXPORTS.has(key.text);
   });
 }
 
 export interface StatusRouteAnalysis {
-  /** Executable `resolveApiKey(...)` calls (comments and strings are not calls). */
+  /** Executable calls of a key export — `resolveApiKey(...)`, `resolveByokOrPlatformKey(...)` (comments and strings are not calls). */
   keyResolutions: number;
   /** Each key resolution with no ownership refusal ahead of it, by line. */
   unguarded: string[];
@@ -607,15 +697,66 @@ export interface StatusRouteAnalysis {
   foreignInputs: string[];
 }
 
+/** Local names bound by a named import of ANY key export (`KEY_EXPORTS`), from ANY specifier. */
+function importedKeyNames(b: Bound): Set<string> {
+  const out = new Set<string>();
+  for (const name of KEY_EXPORTS) for (const local of importedLocalNames(b, ANY_MODULE, name)) out.add(local);
+  return out;
+}
+
+/**
+ * The MODULES a key-resolving route may take values from. Request headers
+ * and cookies reach a handler through a module as well as through its
+ * parameter — `next/headers` is one, under any spelling tsc resolves
+ * (`next/headers.js`, a relative path into node_modules), and a dynamic
+ * `import()` or `require()` can name it, or anything else, at run time. So
+ * this is a whitelist of modules, not a list of the ones known to read the
+ * request (#9736: the set of ways is unbounded):
+ *
+ * - a runtime static import must be `next/server` or resolve to the app's own
+ *   source under `web/src` (whose request reads, if any, are the helper-module
+ *   limit stated in the docblock);
+ * - no `import x = require(...)`, no `import(...)` and no `require` reference
+ *   at all — the gate cannot see what such a module is.
+ */
+function moduleInputProblems(b: Bound): string[] {
+  const { sf } = b;
+  const problems: string[] = [];
+  for (const statement of sf.statements) {
+    if (ts.isImportEqualsDeclaration(statement) && !statement.isTypeOnly
+      && ts.isExternalModuleReference(statement.moduleReference)) {
+      problems.push(`${lineOf(sf, statement)}: an import-equals require (a module the gate cannot vet)`);
+    }
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (statement.importClause?.isTypeOnly) continue;
+    const specifier = statement.moduleSpecifier.text;
+    if (namesModule(b, specifier, NEXT_SERVER_MODULE)) continue;
+    if (isAppSourceFile(resolveModuleFile(specifier, b.containingFile))) continue;
+    problems.push(`${lineOf(sf, statement)}: imports '${specifier}', which is neither ${NEXT_SERVER_MODULE} nor app source `
+      + 'under src/ (next/headers and other modules can read request headers and cookies)');
+  }
+  forEachDescendant(sf, (n) => {
+    if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      problems.push(`${lineOf(sf, n)}: a dynamic import() (a module the gate cannot vet)`);
+    }
+    if (ts.isIdentifier(n) && n.text === 'require' && !isDeclarationName(n)
+      && !(ts.isPropertyAssignment(n.parent) && n.parent.name === n)) {
+      problems.push(`${lineOf(sf, n)}: a require reference (a module the gate cannot vet)`);
+    }
+  });
+  return problems;
+}
+
 export function analyseStatusRoute(source: string, fileName = 'route.ts'): StatusRouteAnalysis {
   const b = bind(fileName, source);
   const { sf } = b;
-  // A named import of `resolveApiKey` under ANY local name, from ANY specifier:
-  // the name is what gets called, and over-counting only makes the gate
-  // stricter. (A specifier that does not resolve to the resolver — an
+  // A named import of any key export under ANY local name, from ANY
+  // specifier: the name is what gets called, and over-counting only makes the
+  // gate stricter. (A specifier that does not resolve to the resolver — an
   // unrelated module, or a relative path in a copy of the tree — still counts.)
-  const resolveNames = importedLocalNames(b, ANY_MODULE, RESOLVE);
+  const resolveNames = importedKeyNames(b);
   const out: StatusRouteAnalysis = { keyResolutions: 0, unguarded: [], untraceable: [], foreignInputs: [] };
+  out.foreignInputs.push(...moduleInputProblems(b));
   const inputs = new Map<ts.FunctionLikeDeclaration, HandlerInputs>();
 
   for (const statement of sf.statements) {
@@ -634,12 +775,9 @@ export function analyseStatusRoute(source: string, fileName = 'route.ts'): Statu
       && (clause.name || (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)))) {
       out.untraceable.push(`${lineOf(sf, statement)}: a default or namespace import of ${RESOLVER_MODULE}`);
     }
-    if (statement.moduleSpecifier.text === 'next/headers' && !clause?.isTypeOnly) {
-      out.foreignInputs.push(`${lineOf(sf, statement)}: imports next/headers (request headers and cookies are caller input)`);
-    }
   }
 
-  const isResolveName = (text: string) => text === RESOLVE || resolveNames.has(text);
+  const isResolveName = (text: string) => KEY_EXPORTS.has(text) || resolveNames.has(text);
 
   const visit = (node: ts.Node): void => {
     // `import('@/lib/keys/resolver')` / `require(...)`: a resolver the gate cannot follow.
@@ -653,9 +791,10 @@ export function analyseStatusRoute(source: string, fileName = 'route.ts'): Statu
     ) {
       out.untraceable.push(`${lineOf(sf, node)}: a dynamic import of ${RESOLVER_MODULE}`);
     }
-    // `resolveApiKey` named anywhere it is not being CALLED — `const rk =
-    // resolveApiKey`, `{ resolveApiKey: rk } = keys`, `keys['resolveApiKey']`:
-    // an alias whose calls this gate would not count.
+    // A key export (`resolveApiKey`, `resolveByokOrPlatformKey`, ...) named
+    // anywhere it is not being CALLED — `const rk = resolveApiKey`,
+    // `{ resolveApiKey: rk } = keys`, `keys['resolveApiKey']`: an alias whose
+    // calls this gate would not count.
     if (ts.isIdentifier(node) && isResolveName(node.text) && !isCallee(node) && !isDeclarationName(node)) {
       const p = node.parent;
       // Only an import specifier, or the KEY of an object member, names it
@@ -665,20 +804,20 @@ export function analyseStatusRoute(source: string, fileName = 'route.ts'): Statu
       const memberKey = (ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isMethodDeclaration(p)
         || ts.isPropertySignature(p) || ts.isMethodSignature(p)) && p.name === node;
       if (!ts.isImportSpecifier(p) && !memberKey) {
-        out.untraceable.push(`${lineOf(sf, node)}: ${RESOLVE} referenced without being called`);
+        out.untraceable.push(`${lineOf(sf, node)}: ${node.text} referenced without being called`);
       }
     }
     if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
-      && node.argumentExpression.text === RESOLVE) {
-      out.untraceable.push(`${lineOf(sf, node)}: ${RESOLVE} read by element access`);
+      && KEY_EXPORTS.has(node.argumentExpression.text)) {
+      out.untraceable.push(`${lineOf(sf, node)}: ${node.argumentExpression.text} read by element access`);
     }
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
-      // Any call spelled `resolveApiKey` — through the resolved import, an
+      // Any call spelled as a key export — through the resolved import, an
       // alias of it, or a namespace (`keys.resolveApiKey`) — is a key
       // resolution. Over-counting only makes the gate stricter.
       const isResolve = (ts.isIdentifier(callee) && isResolveName(callee.text))
-        || (ts.isPropertyAccessExpression(callee) && callee.name.text === RESOLVE);
+        || (ts.isPropertyAccessExpression(callee) && KEY_EXPORTS.has(callee.name.text));
       if (isResolve) {
         out.keyResolutions += 1;
         const fn = enclosingFunction(node);
@@ -765,7 +904,7 @@ export function analysePostRoute(source: string, fileName = 'route.ts'): PostRou
 // Each carries a reason AND a property re-checked on every run.
 // ---------------------------------------------------------------------------
 
-type ExemptionKind = 'charged-new-operation' | 'qstash-signed-callback';
+type ExemptionKind = 'charged-new-operation' | 'bundled-step-of-charged-generation' | 'qstash-signed-callback';
 
 interface Exemption {
   kind: ExemptionKind;
@@ -786,6 +925,11 @@ export const KEY_RESOLVING_EXEMPTIONS: Readonly<Record<string, Exemption>> = {
     kind: 'charged-new-operation',
     reason: 'Billing-only resolution (deduct up front, refund on failure) for a new decomposition; it reads no provider job id.',
   },
+  'api/generate/sprite/route.ts': {
+    kind: 'bundled-step-of-charged-generation',
+    reason: 'Resolves the remove.bg key (resolveByokOrPlatformKey) inside the execute step of a NEW sprite generation '
+      + 'that createGenerationHandler has already charged for, for the caller it authenticated; it polls no job (#9734).',
+  },
   'api/generate/voice/batch/route.ts': {
     kind: 'charged-new-operation',
     reason: 'Resolves the ElevenLabs key for a new, synchronous, token-charged batch the caller submits; nothing is polled.',
@@ -805,16 +949,16 @@ export const KEY_RESOLVING_EXEMPTIONS: Readonly<Record<string, Exemption>> = {
  */
 const STATUS_ROUTES_RESOLVING_NO_KEY = ['api/generate/music/status/route.ts'];
 
-/** Calls spelled `resolveApiKey` (or `<x>.resolveApiKey`) in a parsed file. */
+/** Calls spelled as a key export (or `<x>.<key export>`, or an imported alias of one) in a parsed file. */
 function resolveCalls(b: Bound): ts.CallExpression[] {
   const { sf } = b;
-  const names = importedLocalNames(b, ANY_MODULE, RESOLVE);
+  const names = importedKeyNames(b);
   const out: ts.CallExpression[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const c = node.expression;
-      if ((ts.isIdentifier(c) && (c.text === RESOLVE || names.has(c.text)))
-        || (ts.isPropertyAccessExpression(c) && c.name.text === RESOLVE)) {
+      if ((ts.isIdentifier(c) && (KEY_EXPORTS.has(c.text) || names.has(c.text)))
+        || (ts.isPropertyAccessExpression(c) && KEY_EXPORTS.has(c.name.text))) {
         out.push(node);
       }
     }
@@ -822,6 +966,39 @@ function resolveCalls(b: Bound): ts.CallExpression[] {
   };
   visit(sf);
   return out;
+}
+
+/** Every `<x>.get('jobId')` in the file: a route that reads one polls a job and needs the ownership check. */
+function jobIdReads(sf: ts.SourceFile): string[] {
+  const out: string[] = [];
+  forEachDescendant(sf, (n) => {
+    if (
+      ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'get'
+      && n.arguments.length === 1 && ts.isStringLiteralLike(n.arguments[0]) && n.arguments[0].text === 'jobId'
+    ) {
+      out.push(`${lineOf(sf, n)}: reads a jobId, so it polls a job and needs the ownership check`);
+    }
+  });
+  return out;
+}
+
+/**
+ * Is `fn` the `execute` member of the object literal passed as the first
+ * argument to `createGenerationHandler` — the factory resolved by binding to
+ * its real import (a same-named local factory charges nothing)?
+ */
+function isExecuteOfGenerationHandler(b: Bound, fn: ts.FunctionLikeDeclaration): boolean {
+  let member: ts.Node = fn;
+  if (!ts.isMethodDeclaration(fn)) {
+    if (!ts.isPropertyAssignment(fn.parent) || fn.parent.initializer !== fn) return false;
+    member = fn.parent;
+  }
+  const name = (member as ts.PropertyAssignment | ts.MethodDeclaration).name;
+  if (!ts.isIdentifier(name) || name.text !== 'execute') return false;
+  const config = member.parent;
+  if (!ts.isObjectLiteralExpression(config)) return false;
+  const factory = config.parent;
+  return ts.isCallExpression(factory) && factory.arguments[0] === config && calleeIs(b, factory, HANDLER_MODULE, HANDLER);
 }
 
 /** The property an exemption's kind promises, re-checked against the source. */
@@ -846,14 +1023,26 @@ export function exemptionProblems(kind: ExemptionKind, source: string, fileName 
         problems.push(`${lineOf(sf, call)}: a zero-cost or status-check key resolution is a poll, not a charged new operation`);
       }
     }
-    forEachDescendant(sf, (n) => {
-      if (
-        ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'get'
-        && n.arguments.length === 1 && ts.isStringLiteralLike(n.arguments[0]) && n.arguments[0].text === 'jobId'
-      ) {
-        problems.push(`${lineOf(sf, n)}: reads a jobId, so it polls a job and needs the ownership check`);
+    problems.push(...jobIdReads(sf));
+  } else if (kind === 'bundled-step-of-charged-generation') {
+    // Each resolution runs in the `execute` step of a createGenerationHandler
+    // config — which runs only after the handler has resolved and charged the
+    // primary generation's key — in that function itself (not a nested one), for
+    // `<ctx>.userId`, where `<ctx>` is execute's third parameter: the user the
+    // handler authenticated, not a value the request names.
+    for (const call of calls) {
+      const fn = enclosingFunction(call);
+      if (!fn || !isExecuteOfGenerationHandler(b, fn)) {
+        problems.push(`${lineOf(sf, call)}: not in the execute step of a ${HANDLER}({...}) config, so nothing charged precedes it`);
+        continue;
       }
-    });
+      const ctxParam = fn.parameters[2];
+      const ctx = ctxParam && ts.isIdentifier(ctxParam.name) ? ctxParam.name.text : undefined;
+      if (!ctx || authenticatedUserBase(call.arguments[0]) !== ctx) {
+        problems.push(`${lineOf(sf, call)}: the key is not resolved for <ctx>.userId (execute's third parameter)`);
+      }
+    }
+    problems.push(...jobIdReads(sf));
   } else {
     // Each resolution follows, in its own body, `const <v> = await
     // verifyQstashSignature(...)` and `if (!<v>) return ...`.
@@ -979,7 +1168,7 @@ export function auditKeyResolvingRoutes(
     if (exemption) {
       problems.push(...exemptionProblems(exemption.kind, source, file).map((p) => `exemption (${exemption.kind}): ${p}`));
     } else {
-      problems.push(...analysis.unguarded.map((w) => `${w}: resolveApiKey runs without an ownership refusal ahead of it`));
+      problems.push(...analysis.unguarded.map((w) => `${w}: a provider key is resolved without an ownership refusal ahead of it`));
       problems.push(...analysis.foreignInputs);
       problems.push(...postBindingProblems(appRoot, file));
     }
@@ -1207,6 +1396,93 @@ describe('job-id ownership coverage (#10262)', () => {
     }
   });
 
+  it('reports each real status route that reads request headers or cookies through a MODULE, in every spelling', () => {
+    // next/headers needs no handler argument: headers() and cookies() read the
+    // request from anywhere. Each variant feeds the provider a header or
+    // cookie, and each is pinned to the rule that must report it, so a variant
+    // caught by the wrong rule cannot read as coverage (lessons-learned #19).
+    const headersFile = resolveModuleFile('next/headers', path.join(SYNTHETIC_DIR, 'route.ts'));
+    expect(headersFile).toBeTruthy();
+    // The `.js` spelling is the same module to tsc — the premise of the variant.
+    expect(resolveModuleFile('next/headers.js', path.join(SYNTHETIC_DIR, 'route.ts'))).toBe(headersFile);
+    const IMPORT_RULE = (spec: string) => new RegExp(`imports '${spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}', which is neither`);
+    for (const r of guardedStatus) {
+      expect(analyseStatusRoute(r.source, r.file).foreignInputs, r.rel).toEqual([]);
+      expect(r.source.match(/\brequire\b|\bimport\(/g), r.rel).toBeNull();
+      const feed = (lines: string, read: string, prepend = '') => prepend + mutate(
+        mutate(r.source, POLLED_ID, `$&\n${lines.split('\n').map((l) => `$1${l}`).join('\n')}\n$1const other = ${read} ?? jobId;`),
+        PROVIDER_CALL,
+        'client.$1(other)',
+      );
+      const intoNodeModules = path.relative(path.dirname(r.file), headersFile!.replace(/\.d\.ts$/, '')).split(path.sep).join('/');
+      const variants: Array<[string, string, RegExp]> = [
+        ['static', feed('', "(await headers()).get('x-poll-id')", "import { headers } from 'next/headers';\n"), IMPORT_RULE('next/headers')],
+        ['static .js', feed('', "(await headers()).get('x-poll-id')", "import { headers } from 'next/headers.js';\n"), IMPORT_RULE('next/headers.js')],
+        ['static, a path into node_modules', feed('', "(await headers()).get('x-poll-id')", `import { headers } from '${intoNodeModules}';\n`), IMPORT_RULE(intoNodeModules)],
+        ['dynamic import()', feed("const { headers } = await import('next/headers');", "(await headers()).get('x-poll-id')"), /a dynamic import\(\)/],
+        ['require', feed("const nh = require('next/headers');", "(await nh.cookies()).get('poll')?.value"), /a require reference/],
+        ['module.require', feed("const nh = module.require('next/headers');", "(await nh.cookies()).get('poll')?.value"), /a require reference/],
+        ['createRequire, aliased', feed("const nh = cr(import.meta.url)('next/headers');", "(await nh.headers()).get('x-poll-id')",
+          "import { createRequire as cr } from 'node:module';\n"), IMPORT_RULE('node:module')],
+        ['import =', feed('', "(await nh.headers()).get('x-poll-id')", "import nh = require('next/headers');\n"), /an import-equals require/],
+      ];
+      for (const [name, mutated, rule] of variants) {
+        expect(mutated, `${r.rel} ${name}`).toContain('client.');
+        expect(mutated.match(/const other = /g), `${r.rel} ${name}`).toHaveLength(1);
+        const analysis = analyseStatusRoute(mutated, r.file);
+        // Still a guarded key resolution: only the module rule stands in the way.
+        expect(analysis.unguarded, `${r.rel} ${name}`).toEqual([]);
+        expect(analysis.foreignInputs.join('\n'), `${r.rel} ${name}`).toMatch(rule);
+      }
+    }
+  });
+
+  it('SELECTS each real status route that takes its key from ANY key-returning resolver export', () => {
+    // resolveByokOrPlatformKey hands back the BYOK key or else the PLATFORM key
+    // with no tier, balance or charge in front of it — a status route built on
+    // it needs the same refusal. Swapped in for resolveApiKey everywhere, the
+    // route is still followed into the guard check (clean with the refusal,
+    // reported without it).
+    expect(KEY_EXPORTS.has(RESOLVE_BYOK)).toBe(true);
+    for (const r of guardedStatus) {
+      const swapped = mutate(r.source, /\bresolveApiKey\b/, RESOLVE_BYOK);
+      expect(swapped.match(/\bresolveApiKey\b/g), r.rel).toBeNull();
+      const clean = analyseStatusRoute(swapped, r.file);
+      expect(clean.keyResolutions, r.rel).toBeGreaterThan(0);
+      expect(clean.unguarded, r.rel).toEqual([]);
+      const open = analyseStatusRoute(mutate(swapped, GUARD_IF, ''), r.file);
+      expect(open.keyResolutions, r.rel).toBeGreaterThan(0);
+      expect(open.unguarded, r.rel).not.toEqual([]);
+    }
+  });
+
+  it('derives the key-returning exports from the resolver module, and pins the ones that return no key', () => {
+    // Both key sources the routes use today are in the derived set; the class
+    // the routes also import from the resolver is not.
+    expect([...KEY_EXPORTS].sort()).toEqual(expect.arrayContaining([RESOLVE, RESOLVE_BYOK]));
+    expect(KEY_EXPORTS.has('ApiKeyError')).toBe(false);
+    // Every pinned non-key export is still an exported function whose declared
+    // return type names no key — so the pin cannot hide a key source.
+    const byName = new Map(RESOLVER_EXPORTS.map((e) => [e.name, e]));
+    for (const name of NON_KEY_RESOLVER_EXPORTS) {
+      const declared = byName.get(name);
+      expect(declared, `${name} is pinned as a non-key export but is not an exported function`).toBeTruthy();
+      expect(declared!.returnType, name).toBeTruthy();
+      expect(declared!.returnType, name).not.toMatch(/\bstring\b|ResolvedKey/);
+      expect(KEY_EXPORTS.has(name), `${name} is pinned as a non-key export`).toBe(false);
+    }
+    // A NEW export is a key source until someone pins it otherwise — derived,
+    // not restated (lessons-learned #18). Each spelling applied, then counted.
+    const source = readFileSync(RESOLVER_FILE!, 'utf8');
+    const added = `${source}\nexport async function resolveSecondKey(u: string): Promise<string> { return u; }\n`
+      + 'export const resolveThirdKey = async (u: string) => u;\n'
+      + 'function resolveFourthKey(u: string) { return u; }\nexport { resolveFourthKey };\n';
+    expect(added.length).toBeGreaterThan(source.length);
+    const derived = keyExportsOf(resolverFunctionExports(added));
+    for (const name of ['resolveSecondKey', 'resolveThirdKey', 'resolveFourthKey']) expect(derived.has(name), name).toBe(true);
+    expect(keyExportsOf(resolverFunctionExports(source)).has('resolveSecondKey')).toBe(false);
+  });
+
   it('SELECTS each real status route whose resolveApiKey is an ALIAS from another spelling of the resolver module', () => {
     // The import specifier is not the module: a relative path and a `.ts`
     // extension (allowImportingTsExtensions) name the same file as
@@ -1284,6 +1560,69 @@ describe('job-id ownership coverage (#10262)', () => {
     for (const a of byKind('qstash-signed-callback')) {
       const unsigned = mutate(a.source, /^([ \t]*)(if \(!verified\) \{)$/m, '$1if (false) {');
       expect(exemptionProblems('qstash-signed-callback', unsigned, a.file), a.rel).not.toEqual([]);
+    }
+    const bundled = byKind('bundled-step-of-charged-generation');
+    expect(bundled.map((a) => a.rel)).toEqual(['api/generate/sprite/route.ts']);
+    for (const a of bundled) {
+      expect(exemptionProblems('bundled-step-of-charged-generation', a.source, a.file), a.rel).toEqual([]);
+      const KEY_CALL = /\bresolveByokOrPlatformKey\(ctx\.userId, /;
+      // Each break is pinned to the message of the rule that must report it.
+      const breaks: Array<[string, string, RegExp]> = [
+        ['the key resolved for a caller-chosen user', mutate(a.source, KEY_CALL, 'resolveByokOrPlatformKey(params.userId, '),
+          /not resolved for <ctx>\.userId/],
+        ['the key resolved in a nested function', mutate(a.source, /\(await (resolveByokOrPlatformKey\(ctx\.userId, '[^']+'\))\)/,
+          '(await (async () => $1)())'), /not in the execute step/],
+        ['the step renamed out of execute', mutate(a.source, /^(\s*)execute: async \(/m, '$1run: async ('),
+          /not in the execute step/],
+        ['the factory imported from a look-alike module',
+          mutate(a.source, /from '@\/lib\/api\/createGenerationHandler';/, "from './createGenerationHandler';"),
+          /not in the execute step/],
+        ['a jobId read', mutate(a.source, KEY_CALL, "resolveByokOrPlatformKey(ctx.userId, new URL('x:').searchParams.get('jobId') ?? "),
+          /reads a jobId/],
+      ];
+      for (const [name, mutated, rule] of breaks) {
+        expect(exemptionProblems('bundled-step-of-charged-generation', mutated, a.file).join('\n'), `${a.rel} ${name}`).toMatch(rule);
+      }
+    }
+  });
+
+  it('SELECTS a route at a path the poller never dials that takes its key from resolveByokOrPlatformKey', () => {
+    // Off the STATUS_ENDPOINTS map, so neither floor can name it: only the
+    // selection rule stands between it and a green gate. The model status
+    // route with its refusal deleted and its key taken from the uncharged
+    // BYOK-or-platform lookup, at a preview path.
+    const root = mkdtempSync(path.join(tmpdir(), 'job-ownership-byok-'));
+    try {
+      const model = guardedStatus.find((a) => a.rel === 'api/generate/model/status/route.ts');
+      expect(model).toBeTruthy();
+      const write = (rel: string, source: string) => {
+        mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+        writeFileSync(path.join(root, rel), source);
+      };
+      write('api/generate/model/route.ts', readFileSync(path.join(APP_ROOT, 'api/generate/model/route.ts'), 'utf8'));
+      const previewRel = 'api/generate/model/preview/route.ts';
+      expect(endpoints).not.toContain(urlOf(previewRel));
+      const byok = mutate(
+        mutate(
+          mutate(model!.source, GUARD_IF, ''),
+          /resolveApiKey\(\s*mid\.userId!,\s*DB_PROVIDER\.model3d,[^)]*\)/,
+          'resolveByokOrPlatformKey(mid.userId!, DB_PROVIDER.model3d)',
+        ),
+        /^import \{ resolveApiKey, ApiKeyError \} from '@\/lib\/keys\/resolver';$/m,
+        "import { resolveByokOrPlatformKey, ApiKeyError } from '@/lib/keys/resolver';",
+      );
+      expect(byok.match(/\bresolveApiKey\(/g)).toBeNull();
+      write(previewRel, byok);
+      // The same route WITH its refusal is clean, so the report below comes from the deletion.
+      write('api/generate/model/guarded/route.ts', mutate(model!.source, /\bresolveApiKey\b/, RESOLVE_BYOK));
+
+      const found = auditKeyResolvingRoutes(root, {});
+      const byRel = new Map(found.map((a) => [a.rel, a.problems]));
+      expect([...byRel.keys()].sort()).toEqual(['api/generate/model/guarded/route.ts', previewRel]);
+      expect(byRel.get(previewRel)?.join('\n')).toMatch(/without an ownership refusal/);
+      expect(byRel.get('api/generate/model/guarded/route.ts')).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 
@@ -1528,6 +1867,30 @@ describe('job-id ownership coverage (#10262)', () => {
     expect(foreign(fn(head + "  const again = searchParams.get('jobId');\n" + guard + call))).not.toEqual([]);
     expect(foreign(fn(head + guard + call, 'request: Request, { params }: { params: { id: string } }'))).not.toEqual([]);
     expect(foreign(`import { headers } from 'next/headers';\n${fn(head + guard + call)}`)).not.toEqual([]);
+    // MODULES: any spelling of next/headers, any other package, any dynamic
+    // import or require — and not next/server (any spelling), a type-only
+    // import, or the app's own source.
+    for (const src of [
+      `import { headers } from 'next/headers.js';\n${fn(head + guard + call)}`,
+      `import { cookies } from 'next';\n${fn(head + guard + call)}`,
+      `import 'some-package';\n${fn(head + guard + call)}`,
+      `import { local } from './not-a-module';\n${fn(head + guard + call)}`,
+      fn(`${head}  const { headers } = await import('next/headers');\n${guard}${call}`),
+      fn(`${head}  const h = await import(name);\n${guard}${call}`),
+      fn(`${head}  const nh = require('next/headers');\n${guard}${call}`),
+      fn(`${head}  const r = require;\n${guard}${call}`),
+      `import nh = require('next/headers');\n${fn(head + guard + call)}`,
+    ]) {
+      expect(foreign(src), src).not.toEqual([]);
+    }
+    for (const src of [
+      `import { NextResponse } from 'next/server.js';\n${fn(head + guard + call)}`,
+      `import type { cookies } from 'next/headers';\n${fn(head + guard + call)}`,
+      `import { DB_PROVIDER } from '@/lib/config/providers';\n${fn(head + guard + call)}`,
+      fn(`${head}  const opts = { require: true };\n${guard}${call}`),
+    ]) {
+      expect(foreign(src), src).toEqual([]);
+    }
     // ... and the polled id must come from that one `new URL(request.url)`.
     expect(unguarded(fn(head.replace("searchParams.get('jobId')", "cache.get('jobId')") + guard + call)))
       .toHaveLength(1);
@@ -1551,8 +1914,10 @@ describe('job-id ownership coverage (#10262)', () => {
     // followable — unless one of the keys is the resolver, or a rest element.
     const lazy = (keys: string) => 'async function g() {\n  const [{ a }, ' + keys + "] = await Promise.all([\n"
       + "    import('./a'),\n    import('@/lib/keys/resolver'),\n  ]);\n}\n";
-    expect(analyseStatusRoute(lazy('{ listConfiguredProviders }'))).toEqual(
-      { keyResolutions: 0, unguarded: [], untraceable: [], foreignInputs: [] },
+    // (Not a key resolution, so the file is not selected; were it selected,
+    // its dynamic imports would be reported as module inputs.)
+    expect(analyseStatusRoute(lazy('{ listConfiguredProviders }'))).toMatchObject(
+      { keyResolutions: 0, unguarded: [], untraceable: [] },
     );
     expect(analyseStatusRoute(lazy('{ resolveApiKey: rk }')).untraceable).not.toEqual([]);
     expect(analyseStatusRoute(lazy('{ ...resolver }')).untraceable).not.toEqual([]);
