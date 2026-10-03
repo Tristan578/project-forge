@@ -4,6 +4,11 @@
 # Usage: install-playwright-ci.sh browsers|deps [browser ...]
 # The browser list defaults to chromium; the cross-browser job passes
 # `chromium firefox webkit` (#9610).
+#
+# Environment:
+#   PLAYWRIGHT_INSTALL_BUDGET_SECONDS  wall-clock budget for all attempts and
+#                                      lock waits together (default 660; see
+#                                      TOTAL_BUDGET_SECONDS below).
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,8 +30,9 @@ MAX_ATTEMPTS=5
 # wall-clock budget so the slow case still terminates before the workflow
 # step's outer `timeout-minutes` fires and replaces this script's diagnostic
 # with a bare "step timed out". The suite derives that pairing from the
-# workflows: every install step's budget, plus timeout's 15s SIGKILL grace,
-# must fit inside its own `timeout-minutes`.
+# workflows: every install step's budget plus 45s -- timeout's 15s SIGKILL
+# grace and 30s for the step's own startup -- must fit inside its own
+# `timeout-minutes` (scripts/__tests__/install-playwright-ci.test.sh).
 #
 # THE BUDGET IS ENFORCED BY CAPPING, NOT ONLY BY REFUSING. Every attempt's
 # timeout is min(ATTEMPT_TIMEOUT_SECONDS, what is left of the budget), and a
@@ -44,9 +50,14 @@ MAX_ATTEMPTS=5
 # packages, and when it finished, the retry that would have taken a minute was
 # refused for want of five.
 #
-# 660s is the default for the 12-minute steps (660 + 15 < 720, leaving 45s for
-# the step's own overhead). The cross-browser job installs the apt deps of
-# three engines and sets a larger budget on its own steps; see below.
+# 660s is the default for the 12-minute steps (660 + 45 <= 720). The
+# cross-browser job installs the apt deps of three engines, so it sets
+# PLAYWRIGHT_INSTALL_BUDGET_SECONDS on its two install steps ("Install
+# Playwright browsers (chromium, firefox, webkit)" and "Install Playwright OS
+# deps (cache hit)" in the E2E Cross-Browser job of .github/workflows/ci.yml),
+# each with a step timeout sized to match. Set it on the step, never at job or
+# workflow level: the suite pairs each budget with its own step's timeout and
+# fails on a budget it cannot attribute to one step.
 TOTAL_BUDGET_SECONDS="${PLAYWRIGHT_INSTALL_BUDGET_SECONDS:-660}"
 # The smallest attempt worth starting. After an orphaned apt-get has finished
 # the packages, a retry is an `apt-get update`, a no-op install and the browser
@@ -161,8 +172,10 @@ dpkg_lock_holders() {
     return 2
   fi
   # fuser writes the PIDs to stdout and the file names and access letters to
-  # stderr; keep only the digits.
-  out="$(printf '%s' "$out" | tr -cs '0-9' ' ' | sed 's/^ *//; s/ *$//')"
+  # stderr; keep only the digits. It prints a PID once PER LOCK FILE that
+  # process holds, and apt-get holds several, so dedupe or the log reads
+  # "PID 2614 2614".
+  out="$(printf '%s\n' "$out" | tr -cs '0-9' '\n' | grep -E '^[0-9]+$' | sort -un | paste -sd ' ' -)"
   if [ -z "$out" ]; then return 1; fi
   printf '%s\n' "$out"
   return 0

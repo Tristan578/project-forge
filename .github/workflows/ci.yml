@@ -2469,8 +2469,10 @@ jobs:
       # 2026-10-01 a slow runner needed 445s for the deps step alone, and four
       # jobs failed when the 660s default budget ran out while a timed-out
       # attempt's orphaned apt-get was still finishing the install. The job's
-      # 30-minute timeout has room for a larger budget; the install script's
-      # suite checks that budget + 15s kill grace fits the step timeout.
+      # 30-minute timeout has room for a larger budget. Keep the budget on the
+      # step: scripts/__tests__/install-playwright-ci.test.sh checks that each
+      # step's budget + 45s (15s kill grace + 30s step startup) fits its
+      # timeout-minutes, and fails on a budget set at job or workflow level.
       - name: Install Playwright browsers (chromium, firefox, webkit)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 18

@@ -36,10 +36,12 @@ readonly -f assert_grep
 # N; a hanging attempt advances it by its own timeout. That is what lets the
 # budget arithmetic be asserted in seconds rather than measured in minutes.
 #
-# The dpkg lock holder is SIMULATED from two numbers: it exists once
+# The dpkg lock holder is SIMULATED. It exists once
 # DPKG_TEST_HOLD_AFTER attempts have run (1 = the orphan a timed-out attempt
 # leaves behind; 0 = something already holding it at boot) and it exits when
-# the clock reaches DPKG_TEST_HOLD_UNTIL. `fuser` reports it, and `timeout`
+# the clock reaches DPKG_TEST_HOLD_UNTIL -- or, when DPKG_TEST_HOLD_PROBES=N
+# is set, once `fuser` has reported it N times, which releases the lock at a
+# chosen PROBE rather than a chosen second. `fuser` reports it, and `timeout`
 # records any attempt STARTED while it is alive -- the event this script must
 # never cause -- and fails that attempt the way apt does: after waiting out its
 # 180s lock timeout, with exit 100.
@@ -49,8 +51,14 @@ cat > "$STUB/clock.sh" <<'STUB'
 clock_get() { cat "$FAKE_CLOCK"; }
 clock_add() { printf '%s' "$(( $(clock_get) + $1 ))" > "$FAKE_CLOCK"; }
 attempts_so_far() { if [ -f "$PLAYWRIGHT_TEST_COUNT" ]; then cat "$PLAYWRIGHT_TEST_COUNT"; else echo 0; fi; }
+held_probes() { if [ -f "$DPKG_TEST_PROBE_COUNT" ]; then cat "$DPKG_TEST_PROBE_COUNT"; else echo 0; fi; }
 lock_held() {
-  [ "$(attempts_so_far)" -ge "${DPKG_TEST_HOLD_AFTER:-0}" ] && [ "$(clock_get)" -lt "${DPKG_TEST_HOLD_UNTIL:-0}" ]
+  [ "$(attempts_so_far)" -ge "${DPKG_TEST_HOLD_AFTER:-0}" ] || return 1
+  [ "$(clock_get)" -lt "${DPKG_TEST_HOLD_UNTIL:-0}" ] || return 1
+  if [ -n "${DPKG_TEST_HOLD_PROBES:-}" ] && [ "$(held_probes)" -ge "$DPKG_TEST_HOLD_PROBES" ]; then
+    return 1
+  fi
+  return 0
 }
 STUB
 cat > "$STUB/date" <<'STUB'
@@ -100,8 +108,14 @@ cat > "$STUB/fuser" <<'STUB'
 . "$(dirname "$0")/clock.sh"
 printf '%s\n' "$*" >> "$DPKG_TEST_FUSER_LOG"
 if lock_held; then
-  printf ' 2614'
-  printf '%s: F\n' "$1" >&2
+  printf '%s' "$(( $(held_probes) + 1 ))" > "$DPKG_TEST_PROBE_COUNT"
+  # Real fuser prints the holder's PID once PER FILE it holds (apt-get holds
+  # every lock file), with each file name and access letter on stderr.
+  for f in "$@"; do
+    printf '%s:' "$f" >&2
+    printf ' 2614'
+    printf 'F\n' >&2
+  done
   exit 0
 fi
 exit 1
@@ -142,6 +156,7 @@ export PLAYWRIGHT_SLEEP_LOG="$TMP/sleep-log"
 export DPKG_TEST_FIGHT_LOG="$TMP/fight-log"
 export DPKG_TEST_FUSER_LOG="$TMP/fuser-log"
 export DPKG_TEST_SUDO_LOG="$TMP/sudo-log"
+export DPKG_TEST_PROBE_COUNT="$TMP/probe-count"
 
 reset_fixtures() {
   printf '0' > "$FAKE_CLOCK"
@@ -151,7 +166,7 @@ reset_fixtures() {
   : > "$TMP/fight-log"
   : > "$TMP/fuser-log"
   : > "$TMP/sudo-log"
-  rm -f "$TMP/count"
+  rm -f "$TMP/count" "$TMP/probe-count"
 }
 readonly -f reset_fixtures
 
@@ -293,7 +308,9 @@ assert_eq "the retry starts once the holder has exited, capped to the rest of th
   "140s" "$(attempt_timeout 2)"
 assert_eq "waiting for the holder replaces the backoff (polls only)" \
   "" "$(grep -vx '5' "$TMP/sleep-log" | tr '\n' ' ' | sed 's/ *$//')"
-assert_grep "the holder is named in the log" "held by PID 2614 (apt-get)" "$TMP/out"
+# The fuser stub prints 2614 once per lock file, as real fuser does, so this
+# also pins the dedupe: without it the log reads "PID 2614 2614 (apt-get)".
+assert_grep "the holder is named in the log, once" "held by PID 2614 (apt-get)" "$TMP/out"
 assert_grep "the release is reported" "the dpkg lock was released after" "$TMP/out"
 # Vacuity guard: the cases above prove nothing unless the probe really ran.
 if [ -s "$TMP/fuser-log" ]; then pass "the lock probe ran (fuser was consulted)"; else
@@ -315,6 +332,38 @@ assert_eq "the wait stops where one minimum attempt would still fit" "540" "$(cl
 assert_grep "the error names the holder it gave up on" \
   "still held by PID 2614 (apt-get)" "$TMP/err"
 assert_grep "the final error counts one attempt" "failed after 1 of 5 attempts" "$TMP/err"
+
+# The same holder present AT BOOT and outliving the budget ends the run before
+# any attempt, so nothing has set an exit code yet: the script's initial
+# exit_code is the only thing standing between this path and a green step.
+# A 150s budget keeps the wait to 150 - 120 = 30s (six polls): the suite runs
+# inside the 5-minute CI Self-Defense job, and the 540s wait is covered above.
+DPKG_TEST_HOLD_AFTER=0 DPKG_TEST_HOLD_UNTIL=99999 PLAYWRIGHT_INSTALL_BUDGET_SECONDS=150 \
+  run_case browsers 0
+assert_eq "a boot-time holder that outlives the budget fails the install" "1" "$?"
+assert_eq "a boot-time holder that outlives the budget runs no npx" "" "$(cat "$TMP/log")"
+if [ -e "$TMP/count" ]; then fail "a boot-time holder that outlives the budget still started an attempt"; else
+  pass "a boot-time holder that outlives the budget starts no attempt"
+fi
+assert_grep "a boot-time holder that outlives the budget is named in the error" \
+  "still held by PID 2614 (apt-get) after waiting 30s" "$TMP/err"
+assert_grep "the final error counts zero attempts" "failed after 0 of 5 attempts" "$TMP/err"
+
+# The minimum-attempt guard on a round that follows a failure. Attempt 1 hangs
+# to its 300s timeout and leaves the orphan; the post-failure probe sees it
+# (skipping the backoff), and the next round's probe sees it gone -- released
+# by PROBE COUNT, not by the clock, so the release lands with only 400 - 300 =
+# 100s of the budget left. That is under the 120s minimum, so no attempt 2 may
+# start, even though it would succeed (only one failure is queued).
+DPKG_TEST_HOLD_AFTER=1 DPKG_TEST_HOLD_UNTIL=99999 DPKG_TEST_HOLD_PROBES=1 \
+  PLAYWRIGHT_INSTALL_BUDGET_SECONDS=400 run_case browsers 1 124
+assert_eq "a release that leaves under a minimum attempt ends the run with exit 124" "124" "$?"
+assert_eq "a release that leaves under a minimum attempt starts no further attempt" "1" "$(cat "$TMP/count")"
+assert_eq "the post-failure probe saw the holder exactly once" "1" "$(cat "$TMP/probe-count" 2>/dev/null)"
+assert_grep "the post-failure probe skipped the backoff for the holder" \
+  "the dpkg lock is still held; waiting for the holder instead of backing off" "$TMP/out"
+assert_grep "the minimum-attempt guard reports the exhausted budget" \
+  "exhausted its 400s retry budget after 300s; 100s is under the 120s minimum attempt" "$TMP/out"
 
 # A holder already there at boot (the unattended-upgrades timer) is waited for
 # BEFORE attempt 1, so that wait does not eat the attempt's own timeout.
@@ -417,30 +466,111 @@ install_steps() {
       if (!in_step) next
       if ($0 ~ /scripts\/install-playwright-ci\.sh (browsers|deps)/) uses = 1
       if ($0 ~ /^ *timeout-minutes: *[0-9]+ *$/) { t = $0; sub(/^ *timeout-minutes: */, "", t); sub(/ *$/, "", t); tmo = t }
-      if ($0 ~ /^ *PLAYWRIGHT_INSTALL_BUDGET_SECONDS:/) { b = $0; sub(/^ *PLAYWRIGHT_INSTALL_BUDGET_SECONDS: */, "", b); gsub(/[^0-9]/, "", b); budget = b }
+      # A value that is not a plain (optionally quoted) integer -- an
+      # expression, a typo -- is reported as such, never read as "default".
+      if ($0 ~ /^ *PLAYWRIGHT_INSTALL_BUDGET_SECONDS:/) {
+        b = $0; sub(/^ *PLAYWRIGHT_INSTALL_BUDGET_SECONDS: */, "", b); sub(/ +#.*$/, "", b); gsub(/["'"'"' ]/, "", b)
+        budget = (b ~ /^[0-9]+$/) ? b : "unparseable"
+      }
     }
     END { flush() }
   ' "$1"
 }
 readonly -f install_steps
+
+# Print one line per budget/timeout problem across the given workflows, and
+# nothing when they are all sound. Kept separate from the assertions so the
+# fixtures below can prove each rule is capable of firing.
+budget_problems() {
+  local f steps where minutes budget occurrences=0 n step_budgets
+  steps="$(for f in "$@"; do install_steps "$f"; done)"
+  while IFS=$'\t' read -r where minutes budget; do
+    [ -n "$where" ] || continue
+    if [ "$budget" = "unparseable" ]; then
+      echo "$where: PLAYWRIGHT_INSTALL_BUDGET_SECONDS is set to something other than a number of seconds (unparseable)"
+      continue
+    fi
+    if [ "$budget" = "default" ]; then budget="$DEFAULT_BUDGET"; fi
+    if [ "$minutes" = "none" ] || [ -z "$budget" ]; then
+      echo "$where: install step has no timeout-minutes or no derivable budget"
+      continue
+    fi
+    # budget + timeout's 15s SIGKILL grace + 30s for the step's own startup.
+    if [ $((budget + 15 + 30)) -gt $((minutes * 60)) ]; then
+      echo "$where: a ${budget}s budget plus 45s of grace overruns timeout-minutes: $minutes"
+    fi
+  done <<< "$steps"
+  # A budget set at job or workflow level (or anywhere but an install step's
+  # own env) reaches the script, but the derivation above reads it as the
+  # default and pairs the default with the step timeout. So every non-comment
+  # mention of the knob must be one of the step-level budgets just read.
+  for f in "$@"; do
+    n="$(grep -vE '^[[:space:]]*#' "$f" | grep -c 'PLAYWRIGHT_INSTALL_BUDGET_SECONDS')"
+    occurrences=$((occurrences + n))
+  done
+  step_budgets="$(printf '%s\n' "$steps" | awk -F'\t' 'NF == 3 && $3 != "default"' | wc -l | tr -d ' ')"
+  if [ "$occurrences" -ne "$step_budgets" ]; then
+    echo "PLAYWRIGHT_INSTALL_BUDGET_SECONDS appears on $occurrences non-comment line(s) but only $step_budgets install step(s) set it: a budget outside an install step's env is invisible to the timeout pairing"
+  fi
+}
+readonly -f budget_problems
+
 { install_steps "$CI_YML"; install_steps "$QG_YML"; install_steps "$CD_YML"; } > "$TMP/steps"
 # Vacuity guard: the derivation must find every step counted above.
 assert_eq "the step derivation found all fifteen install steps" "15" "$(wc -l < "$TMP/steps" | tr -d ' ')"
-bad_steps=0
-while IFS=$'\t' read -r where minutes budget; do
-  if [ "$budget" = "default" ]; then budget="$DEFAULT_BUDGET"; fi
-  if [ "$minutes" = "none" ] || [ -z "$budget" ]; then
-    fail "$where: install step has no timeout-minutes or no derivable budget"
-    bad_steps=$((bad_steps + 1))
-    continue
+assert_eq "every install step's budget fits inside its own step timeout, and every budget belongs to a step" \
+  "" "$(budget_problems "$CI_YML" "$QG_YML" "$CD_YML")"
+
+# The rules above must be able to fail. Each fixture breaks exactly one of
+# them, in a shape the step-level reader alone would accept as "default".
+WF_FIX="$TMP/workflow-fixtures"
+mkdir -p "$WF_FIX"
+cat > "$WF_FIX/sound.yml" <<'YAML'
+jobs:
+  e2e:
+    steps:
+      - name: Install Playwright browsers
+        timeout-minutes: 18
+        env:
+          PLAYWRIGHT_INSTALL_BUDGET_SECONDS: '1020'
+        run: bash ../scripts/install-playwright-ci.sh browsers chromium
+YAML
+cat > "$WF_FIX/job-level.yml" <<'YAML'
+jobs:
+  e2e:
+    env:
+      PLAYWRIGHT_INSTALL_BUDGET_SECONDS: '1020'
+    steps:
+      - name: Install Playwright browsers
+        timeout-minutes: 12
+        run: bash ../scripts/install-playwright-ci.sh browsers chromium
+YAML
+cat > "$WF_FIX/expression.yml" <<'YAML'
+jobs:
+  e2e:
+    steps:
+      - name: Install Playwright browsers
+        timeout-minutes: 12
+        env:
+          PLAYWRIGHT_INSTALL_BUDGET_SECONDS: ${{ vars.PLAYWRIGHT_BUDGET }}
+        run: bash ../scripts/install-playwright-ci.sh browsers chromium
+YAML
+assert_eq "control: a step-level budget is read from its step" \
+  "$WF_FIX/sound.yml:4"$'\t'"18"$'\t'"1020" "$(install_steps "$WF_FIX/sound.yml")"
+assert_eq "control: a sound step-level budget reports no problem" "" "$(budget_problems "$WF_FIX/sound.yml")"
+assert_grep_text() {
+  local description="$1" pattern="$2" text="$3"
+  if printf '%s\n' "$text" | grep -qF -- "$pattern"; then pass "$description"; else
+    fail "$description (no '$pattern' in: ${text:-<empty>})"
   fi
-  # budget + timeout's 15s SIGKILL grace + 30s for the step's own startup.
-  if [ $((budget + 15 + 30)) -gt $((minutes * 60)) ]; then
-    fail "$where: a ${budget}s budget plus 45s of grace overruns timeout-minutes: $minutes"
-    bad_steps=$((bad_steps + 1))
-  fi
-done < "$TMP/steps"
-if [ "$bad_steps" -eq 0 ]; then pass "every install step's budget fits inside its own step timeout"; fi
+}
+readonly -f assert_grep_text
+assert_grep_text "a job-level budget is reported as outside an install step" \
+  "appears on 1 non-comment line(s) but only 0 install step(s) set it" \
+  "$(budget_problems "$WF_FIX/job-level.yml")"
+assert_grep_text "an expression budget is reported as unparseable, not read as the default" \
+  "expression.yml:4: PLAYWRIGHT_INSTALL_BUDGET_SECONDS is set to something other than a number of seconds (unparseable)" \
+  "$(budget_problems "$WF_FIX/expression.yml")"
 # The cross-browser job's larger budget is the fix for 2026-10-01; pin that it
 # is still applied to both of its install steps.
 assert_eq "both cross-browser install steps carry the 1020s budget" "2" \
