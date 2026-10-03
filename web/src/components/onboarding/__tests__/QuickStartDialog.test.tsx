@@ -544,8 +544,13 @@ describe('QuickStartDialog', () => {
 
     const approve = screen.getByRole('button', { name: 'Approve' });
     expect(document.activeElement).toBe(approve);
-    // Still there once the Dialog's deferred initial-focus frame has run.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Still there once the Dialog's deferred initial-focus frame has run:
+    // `useDialogA11y` schedules it with requestAnimationFrame at open, and
+    // frame callbacks run in the order they were scheduled, so this one runs
+    // after it.
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
     expect(document.activeElement).toBe(approve);
   });
 
