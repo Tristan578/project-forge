@@ -1166,7 +1166,7 @@ else
   if [ -z "$missing_ids" ]; then
     pass "every ALLOWED_ADVISORIES id is mirrored in check-security-alerts.sh ALLOWED_GHSA ($(grep -c . <<<"$audit_ids" || true) id(s))"
   else
-    fail "waived here but missing from ALLOWED_GHSA in scripts/check-security-alerts.sh:$missing_ids — add (or, on a prune, remove) it there in the same commit, or the daily Security Alerts cron stays red on an alert this gate already waives"
+    fail "waived in the gate but absent from ALLOWED_GHSA in scripts/check-security-alerts.sh:$missing_ids — add it there in the same commit, or the daily Security Alerts cron stays red on an alert this gate already waives (a prune removes the id from the gate as well; follow the REMOVAL PATH checklist beside the entry)"
   fi
 fi
 # Every read of the allowlist array must go through the empty-array guard. This
