@@ -498,6 +498,34 @@ describe('gameCameraPayload', () => {
       },
     );
 
+    // Both directions of the parser's `damping` gate, swept over every mode the
+    // table names: a mode in `MODE_READS_DAMPING` reads `damping` into
+    // `followSmoothing`, and every other mode keeps it as an opaque engine
+    // parameter. A gate widened to every mode would hand First Person, Orbital
+    // and Fixed a follow rate they never use, which `ModeDefaults` forbids.
+    it.each(Object.keys(MODE_READS_DAMPING) as GameCameraMode[])(
+      'parses damping for %s according to MODE_READS_DAMPING',
+      (mode) => {
+        const parsed = parseGameCameraWire({ mode, targetEntity: 'p', damping: 3 });
+        expect(parsed).not.toBeNull();
+        expect(Object.hasOwn(parsed!, 'followSmoothing')).toBe(MODE_READS_DAMPING[mode]);
+        if (MODE_READS_DAMPING[mode]) {
+          expect(parsed!.followSmoothing).toBe(3);
+          expect(parsed!.engineParams?.damping).toBeUndefined();
+        } else {
+          expect(parsed!.engineParams?.damping).toBe(3);
+        }
+      },
+    );
+
+    it('sweeps both a follow mode and a non-follow mode', () => {
+      // Vacuity guard for the sweep above: it only pins both directions while
+      // the table holds at least one mode of each kind.
+      const values = Object.values(MODE_READS_DAMPING);
+      expect(values).toContain(true);
+      expect(values).toContain(false);
+    });
+
     it('does not read values off the prototype chain (Object.hasOwn guard)', () => {
       // A field on the prototype, not an own property. If `num()` ever
       // regressed to a bare `data[key]` read, this value would leak through.

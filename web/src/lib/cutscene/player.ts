@@ -174,8 +174,8 @@ export function readCameraData(payload: Record<string, unknown>): GameCameraData
     // stays: `sanitizeKeyframePayload` applies the identical policy ahead of
     // this, but the guarantee belongs to the caller, and the parameter promises
     // only `Record<string, unknown>`. Seven of the nine fields cannot hold a
-    // negative — a negative `followSmoothing` makes the follow diverge instead
-    // of converge — while `followHeight` and `orbitalAutoRotateSpeed` can.
+    // negative — a negative `followSmoothing` asks the follow to move away from
+    // its target, which the engine clamps to a frozen camera — while `followHeight` and `orbitalAutoRotateSpeed` can.
     const value = readCameraFieldValue(key, payload[key]);
     if (value !== undefined) data[key] = value;
   }

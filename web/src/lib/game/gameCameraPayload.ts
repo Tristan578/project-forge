@@ -234,7 +234,7 @@ export const ENGINE_CAMERA_DEFAULTS = {
  * is converging, by a fixed fraction of the remaining gap, every frame. That
  * compounds into a view receding toward infinity while still pointing at the
  * target, so nothing looks wrong at the target itself. (The engine now clamps
- * the factor to `[0, 1]` in `damping_t` as well — a public `from_flat` cannot
+ * the factor to `[0, 1]` in `follow_lerp_factor` as well — a public `from_flat` cannot
  * assume it was reached through this module — but a value that can only ever
  * mean "the author made a mistake" should not be dispatched in the first place.)
  * The remaining seven are incoherent rather than divergent: a negative

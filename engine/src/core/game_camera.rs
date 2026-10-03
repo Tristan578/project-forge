@@ -1199,7 +1199,7 @@ mod from_flat_tests {
         match third_person {
             GameCameraMode::ThirdPersonFollow { damping, .. } => {
                 // Damping is a RATE PER SECOND, not a 0..1 blend factor: the follow
-                // systems compute `t = damping_t(damping, delta)`, so 0.0 yields
+                // systems compute `t = follow_lerp_factor(damping, delta)`, so 0.0 yields
                 // t = 0 and the camera never converges on its target — it freezes
                 // where it is. That is a legitimate thing to ask for and a
                 // completely different outcome from the 5.0 default, which is

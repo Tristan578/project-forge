@@ -90,8 +90,8 @@ const readTargetEntity: FieldReader = (value) => {
  *
  * Their READER comes from the same module for the same reason. Mapping every
  * field to a plain finite-number check was uniform and wrong: seven of the ten
- * cannot hold a negative (a negative `followSmoothing` makes the follow diverge
- * rather than converge), and three legitimately can (`followHeight` frames from
+ * cannot hold a negative (a negative `followSmoothing` asks the follow to move
+ * away from its target, which the engine clamps to a frozen camera), and three legitimately can (`followHeight` frames from
  * below, `followOffsetX` picks a shoulder, `orbitalAutoRotateSpeed` orbits the
  * other way). Only `gameCameraPayload`, which owns the engine mapping, can say
  * which is which.
