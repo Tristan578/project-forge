@@ -709,3 +709,31 @@ consumer keys when required. Validate forge_engine_bg.wasm with WebAssembly.vali
 and syntax-check the glue before every save/upload. Exercise the production CLI
 with valid, wrong-filename, missing-glue and corrupted-module fixtures.
 **Ticket:** #9525
+
+### 23. An unscoped "any finding fails" review board never converges
+**Applies:** review-board|review-protocol|board-verdict|post-board-verdict|seat|round
+**What happens:** A PR loops through review rounds indefinitely. Each round, five
+adversarial seats find one more wording nit, one more hypothetical, or one more
+edge case outside the diff. Every finding is a FAIL, every fix is a new head,
+and every new head starts a full new round. On 2026-10-03 this cost #10298
+sixteen rounds, #10294 twelve and #10307 nine, about 41% of one user's weekly
+budget. Meanwhile, CI on 16 open PRs stayed red on one shared audit failure.
+Its fix was already written (#10322) and was never ported. Earlier, #10130 had
+also run sixteen rounds.
+**Why:** Three rules compounded:
+- Every severity blocked.
+- Seats were briefed to sweep open-endedly and build test apps.
+- Re-reviews covered the whole PR again rather than the fix.
+
+The orchestrator also optimised a proxy (a 5/5 verdict comment) instead of the
+user's definition of done (green CI), so the cheap thing went undone.
+**Prevention:** Follow `.claude/skills/review-protocol/SKILL.md` → "Scope,
+severity and the round cap":
+- Seats review the diff and the code it touches.
+- Only blockers and majors fail.
+- Minors are fixed in the same push or filed.
+- Re-reviews cover the fix diff with only the seats that failed.
+- After round 3, stop and ask the user.
+
+Check CI first, and port a shared failure's fix before running any board.
+**Ticket:** #10325

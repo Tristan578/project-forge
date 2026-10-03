@@ -5,7 +5,27 @@ description: "Use when dispatching code reviews, spec reviews, or PR reviews. De
 
 # Review Protocol — 5 Specialized Reviewers (Mandatory)
 
-All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. Reviews are PASS or FAIL only — any issue at any severity is a FAIL. Loop until all 5 pass clean.
+All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. Each verdict is PASS or FAIL, never "pass with issues". The rules below decide what a seat may raise, what blocks, and when the loop stops.
+
+## Scope, severity and the round cap
+
+These rules exist because an unscoped "any finding fails" board does not converge. Five adversarial seats always find one more nit or one more hypothetical, so every round produces a fix and the fix produces another round. That cost #10130 sixteen rounds, and on 2026-10-03 it cost #10298 sixteen rounds, #10294 twelve and #10307 nine, for one user's weekly budget. In the same period CI on every open PR stayed red on a one-line shared fix that nobody ported (lessons-learned #23).
+
+1. **Scope is the diff and the code it touches.** A seat reviews the changed lines and the code they directly interact with: the changed files, plus the callers and callees of changed functions. These are not findings:
+   - a pre-existing defect outside that scope;
+   - a hypothetical the seat has not tied to a changed line;
+   - a "while you're here" improvement.
+
+   A seat that notices a real pre-existing bug reports it under `followups` in its verdict, and the orchestrator files ONE GitHub issue per PR for all of them.
+2. **No open-ended hunting.** A seat does not build scratch apps or harnesses, or run production builds, to search for new attack shapes. It may run one to CONFIRM a specific defect it has already tied to a changed line, and must say which line.
+3. **Severity decides what blocks.**
+   - `blocker` and `major` fail the board: a correctness or security defect in the diff, a broken or vacuous test of the changed code, or a claim in the PR that is false.
+   - `minor` does not fail the board: wording, comment style, a missing nice-to-have test, docs drift. The builder fixes minors in the SAME push when they are cheap, or files them in the follow-up issue. A minor alone never triggers another round.
+4. **A re-review covers the fix, not the PR again.** After round 1, the board reviews `git diff <last-reviewed-sha>..HEAD` and checks that the previous blocking findings are closed. Seats re-run as follows:
+   - only the seats that failed, plus any seat whose domain the fix touches;
+   - a comment-, docs- or test-only fix diff gets ONE seat on a cheaper model.
+5. **Three rounds, then stop.** If a PR still has a blocker or major after round 3, the orchestrator stops and brings it to the user with the open findings and a recommendation: fix, split, accept with a documented limit, or close. It does not start round 4 on its own.
+6. **Ready means the user's definition, checked first.** CI green on the head, review threads answered and resolved, and a board PASS. Read the PR's CI before spending anything on review. A failure shared across PRs (one red job on every PR) gets its fix ported into each PR, or merged once to main, before any board runs.
 
 ## The 5 Reviewers
 

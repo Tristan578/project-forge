@@ -186,7 +186,7 @@ The UI must be:
 
 ## Review Verdict
 
-**PASS or FAIL only.** Any issue = FAIL. The review loops until clean.
+**PASS or FAIL only**, under the scope, severity and round-cap rules in `.claude/skills/review-protocol/SKILL.md`: review the diff and the code it touches; a blocker or major fails, a minor is listed but does not; pre-existing issues outside the diff go under follow-ups, not findings.
 
 Severity:
 
