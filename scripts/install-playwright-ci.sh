@@ -70,8 +70,8 @@ BACKOFF_SECONDS=(15 30 60 90)
 # `timeout` signals its own process group as a non-root user, and Playwright's
 # apt-get runs under sudo, so the ROOT-owned grandchild survives TERM with
 # EPERM and keeps the dpkg frontend lock. It is not stuck: it is still
-# installing the packages we asked for. On 2026-10-01 that took out the
-# cross-browser jobs four times across #10314, #10302 and #10307: attempt 1
+# installing the packages we asked for. On 2026-10-01 that took out nine
+# cross-browser job runs across #10314, #10302 and #10307: attempt 1
 # reached its 300s timeout mid-install, attempt 2 started a SECOND apt-get
 # that waited out the lock timeout below and died with "Unable to acquire the
 # dpkg frontend lock ... held by process 2614 (apt-get)" at 498s, and the
