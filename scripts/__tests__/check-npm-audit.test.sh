@@ -1142,11 +1142,11 @@ fi
 # column-0 body. Subset only: ALLOWED_GHSA's pre-existing esbuild drift is
 # documented beside it and tolerated here.
 #
-# The elements come from BASH'S OWN PARSE of each column-0 declaration (cut,
-# then evaluated in a subshell), not from a per-line regex: two quoted entries
-# on one line are two waivers to the gate, and a line-oriented extraction read
-# only the first (measured: an unmirrored second id on the braces line scored
-# "1 id(s)" and passed).
+# The elements are every quoted word of each validated column-0 body, read as
+# text, not the first quoted run per line: two quoted entries on one line are
+# two waivers to the gate, and a line-oriented extraction read only the first
+# (measured: an unmirrored second id on the braces line scored "1 id(s)" and
+# passed).
 #
 # Nothing is evaluated. The cut must open with exactly NAME=( and close with
 # a column-0 ")", and every line between must be blank, a comment, or plain
@@ -1194,8 +1194,9 @@ else
     fail "waived in the gate but absent from ALLOWED_GHSA in scripts/check-security-alerts.sh:$missing_ids — add it there in the same commit, or the daily Security Alerts cron stays red on an alert this gate already waives (a prune removes the id from the gate as well; follow the REMOVAL PATH checklist beside the entry)"
   fi
 fi
-# array_elements refuses before it evaluates. Each refusal fixture would run a
-# command if it were evaluated, and the marker it would create must not exist.
+# array_elements refuses these shapes, and nothing it reads is ever evaluated.
+# Each refusal fixture would run a command if it were evaluated, and the marker
+# it would create must not exist.
 f="$FIX/lockstep-indented-close.sh"
 printf '%s\n' 'ALLOWED_GHSA=(' '  "GHSA-aaaa-aaaa-aaaa"' '  )' "touch '$FIX/lockstep-ran-indented'" > "$f"
 rc=0; out="$(array_elements "$f" ALLOWED_GHSA)" || rc=$?
