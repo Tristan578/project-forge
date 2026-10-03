@@ -10,16 +10,19 @@
 # for every other advisory at or above the fail threshold, AND hard for the same
 # id reappearing at a node_modules path it was never waived for.
 #
-# History: THE ALLOWLIST IS CURRENTLY EMPTY — every advisory ever waived here was
-# eventually relocked away, and each waiver was pruned once the gate's anti-rot
-# note reported it gone. First went two esbuild advisories under drizzle-kit's
+# History: THE ALLOWLIST HOLDS ONE ENTRY, braces (GHSA-vfj7-8cjw-p6xm, added
+# 2026-10-03; its justification and removal path sit beside it below). Before it
+# the list was empty: every advisory ever waived here was eventually relocked
+# away, and each waiver was pruned once the gate's anti-rot note reported it gone.
+# First went two esbuild advisories under drizzle-kit's
 # deprecated @esbuild-kit/* chain (GHSA-gv7w-rqvm-qjhr, GHSA-g7r4-m6w7-qqqr,
 # pruned in PF-1002/#9007 when that cohort left the tree). Then brace-expansion
 # (GHSA-mh99-v99m-4gvg), waived on the premise that it was "patched ONLY in 5.0.8,
 # no 1.x backport exists" — which made the root copy under the minimatch@3 /
 # eslint-9 lint toolchain un-relockable. Upstream then shipped 1.1.17; PF-1045
 # relocked the root copy to 1.1.18 inside its existing "^1.1.7" range with no
-# eslint-major migration, and PF-1046 pruned the entry.
+# eslint-major migration, and PF-1046 pruned the entry. Expect the braces entry
+# to go the same way, and re-run its relock check rather than trusting it.
 #
 # The lesson that generalizes: "un-relockable" is a claim about a moment, not a
 # property of the dependency. It expires silently the day upstream backports, and
@@ -90,16 +93,18 @@ set -uo pipefail
 # advisory is legitimately un-relockable at more than one location) are
 # comma-separated. GHSA ids and node_modules paths never contain `:` or `,`.
 # EMPTY IS THE CORRECT STEADY STATE — see the History note above for why the
-# three former occupants were pruned rather than carried. Do NOT add an entry
+# three former occupants were pruned rather than carried, and why the one entry
+# below is an exception with an expiry rather than a new normal. Do NOT add an entry
 # back "to get the pipeline green": try relocking FIRST (`npm view <pkg>
 # versions` against the advisory's patched range). Every waiver ever added here
 # was justified as un-relockable and every one of them stopped being so; that is
 # the base rate. An entry is warranted only once a relock is proven impossible.
 #
-# The empty array is expanded through the `${ARR[@]+"${ARR[@]}"}` guard at all
+# The array is expanded through the `${ARR[@]+"${ARR[@]}"}` guard at all
 # three read sites below: under `set -u`, bash 3.2 (the macOS system bash, which
 # `#!/usr/bin/env bash` resolves to) aborts on a plain `"${ARR[@]}"` expansion of
-# an empty array. Unguarded, the abort happens INSIDE a command substitution, so
+# an empty array — the steady state, and the state it returns to the day the
+# entry below is pruned. Unguarded, the abort happens INSIDE a command substitution, so
 # the crashed capture reads as an empty result — which the caller scores as
 # WAIVED. A crash that fails OPEN is exactly what this gate must not do; the
 # suite greps every gate run for `unbound variable` to keep it that way.
@@ -109,7 +114,24 @@ set -uo pipefail
 # pruned-waiver assertions to entries rather than prose, and fails closed if the
 # cut reads nothing.
 ALLOWED_ADVISORIES=(
-  # (no waivers in effect)
+  # braces <=3.0.3 — stack-exhaustion DoS through deeply nested brace patterns.
+  # TRANSITIVE + DEV-ONLY: eslint-config-next -> @next/eslint-plugin-next (pins
+  # fast-glob 3.3.1 exactly) -> micromatch 4.0.8 -> braces 3.0.3, the tree's only
+  # braces copy, and absent from `npm audit --omit=dev`. Not exploitable here:
+  # the plugin's one fast-glob call (get-root-dirs, `globSync` of the ESLint
+  # `settings.next.rootDir` patterns) globs patterns from this repo's OWN lint
+  # config — never user input — and web/eslint.config.mjs sets no rootDir.
+  # UN-RELOCKABLE as of 2026-10-03: no braces release > 3.0.3 exists (every
+  # published version is in range); micromatch 4.0.8 and fast-glob 3.3.3 are each
+  # the latest and both still resolve braces 3.0.3; the plugin's latest and canary
+  # (16.3.8, 16.4.0-canary.58) and backport (15.5.27) all pin fast-glob 3.3.1; and
+  # npm's only offered fix is eslint-config-next 14.2.35, a two-major downgrade
+  # whose eslint ^7||^8 peer this repo's eslint 9 cannot satisfy.
+  # REMOVAL PATH: a braces release that fixes it (micromatch's "^3.0.3" range
+  # takes a 3.0.x patch by relock alone), or upstream fast-glob/micromatch, or
+  # @next/eslint-plugin-next, dropping braces from the chain. Then relock and
+  # prune this entry.
+  "GHSA-vfj7-8cjw-p6xm:node_modules/braces"
 )
 
 # Severities that BLOCK when not allowlisted — mirrors the prior gate's
