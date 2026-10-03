@@ -8,6 +8,7 @@ import { rateLimit } from '@/lib/rateLimit';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { refundTokens } from '@/lib/tokens/service';
+import { bindProviderJob } from '@/lib/generate/jobOwnership';
 import type { User } from '@/lib/db/schema';
 
 vi.mock('@/lib/auth/api-auth');
@@ -34,6 +35,9 @@ vi.mock('@/lib/ai/contentSafety', () => ({
 }));
 vi.mock('@/lib/tokens/service', () => ({
   refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
+}));
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn().mockResolvedValue(undefined),
 }));
 
 function makeRequest(body: unknown): NextRequest {
@@ -137,6 +141,11 @@ describe('POST /api/generate/sprite-sheet', () => {
     expect(data.provider).toBe('replicate');
     expect(data.status).toBe('pending');
     expect(data.estimatedSeconds).toBe(40);
+  });
+
+  it('binds the returned jobId to the caller for ownership (#10262)', async () => {
+    await POST(makeRequest({ prompt: 'walk cycle', frameCount: 4 }));
+    expect(vi.mocked(bindProviderJob)).toHaveBeenCalledWith('user_1', 'replicate', 'task-1');
   });
 
   // PF-762: prompt that is composed entirely of injection patterns strips to empty

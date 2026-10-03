@@ -9,6 +9,8 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
+import { findOtherProviderJobOwnerId } from '@/lib/generate/jobOwnership';
+import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +34,8 @@ const createJobSchema = z.object({
  * Optional resultUrl preserves an inline synchronous artifact: HTTP URL at
  * most 2000 chars or non-empty PNG data URL at most 4 MiB characters.
  * Returns HTTP 201 {job:{id}}; auth/rate/validation errors use middleware,
- * and persistence failures return a fixed 500 response.
+ * a providerJobId bound to another account returns 404 (#10262), and
+ * persistence failures return a fixed 500 response.
  */
 async function POST_impl(req: NextRequest) {
   try {
@@ -46,6 +49,34 @@ async function POST_impl(req: NextRequest) {
 
     const { providerJobId, provider, type, prompt, parameters, tokenCost, tokenUsageId, entityId, resultUrl } =
       mid.body as z.infer<typeof createJobSchema>;
+
+    // #10262: this row is CLIENT-reported (fire-and-forget, client-supplied
+    // providerJobId), so it is never the ownership record status routes trust
+    // — see `src/lib/generate/jobOwnership.ts`. But it must not let a caller
+    // plant a row that CLAIMS someone else's already-bound job id, which would
+    // otherwise surface a stranger's job in this caller's own `GET /api/jobs`
+    // list (their id, but bound provider/providerJobId belonging to another
+    // account). Bound-to-this-user and never-bound are both accepted.
+    //
+    // Keyed on providerJobId ALONE, never on the reported `provider`: that
+    // field is client-supplied and is not the binding's namespace (sprite
+    // reports 'sdxl' for a job bound under 'replicate'), so scoping by it let
+    // any caller skip this check by changing one string.
+    //
+    // Refused with the SAME 404 body the status routes send for a job that is
+    // not the caller's, rather than a distinct 409 naming "another account".
+    // That is NOT oracle-free, and is not claimed to be: an unbound or
+    // own-bound id gets 201 and a foreign-bound id gets 404, so a caller can
+    // still learn that SOME other account has bound a given id. The residual
+    // is accepted because provider job ids are unguessable provider-issued
+    // tokens a caller can only hold if one was leaked to them, and the 404
+    // reveals nothing further: not which account owns the id, and not the
+    // job's status or result (the status routes refuse it). Closing it would
+    // mean accepting the planted row, which is what this check exists to stop.
+    const otherOwnerId = await findOtherProviderJobOwnerId(providerJobId, mid.userId!);
+    if (otherOwnerId) {
+      return redactedJson({ error: JOB_NOT_FOUND_MESSAGE }, { status: 404 });
+    }
 
     const [job] = await queryWithResilience(() =>
       getDb()

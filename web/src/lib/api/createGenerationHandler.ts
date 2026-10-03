@@ -36,6 +36,7 @@ import {
 } from '@/lib/config/timeouts';
 import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
 import type { AsyncGenerationType } from '@/lib/generate/pollProviderStatus';
+import { bindProviderJob } from '@/lib/generate/jobOwnership';
 import { isProviderKilled } from '@/lib/flags/posthogFlags';
 import { withGenerationMetrics } from '@/lib/monitoring/generationMetrics';
 import { EmptyArtifactError } from '@/lib/generate/emptyArtifactError';
@@ -271,6 +272,22 @@ export interface GenerationHandlerConfig<TParams, TResult> {
     /** Initial callback delay in seconds (defaults to DEFAULT_CALLBACK_DELAY_SECONDS). */
     estimatedSeconds?: number;
   };
+
+  /**
+   * Extract the provider job id from a successful result for ownership
+   * binding (#10262): the id is bound to the calling user, server-side,
+   * BEFORE the response is sent — so the matching `/status` route can
+   * refuse a poll from anyone else. Return null for a result that needs no
+   * polling (e.g. a synchronous completion).
+   *
+   * Defaults to `asyncJob.providerJobId` when `asyncJob` is set, since both
+   * extract the same id from the same result shape — most routes need only
+   * one of the two. Set this explicitly when the route has no `asyncJob`
+   * (e.g. pixel-art, which has no `generation_type` enum member and
+   * therefore no durable QStash callback, but still exposes a status route
+   * that accepts a caller-supplied jobId).
+   */
+  jobIdForOwnership?: (result: TResult) => string | null;
 }
 
 /**
@@ -313,6 +330,7 @@ export function createGenerationHandler<TParams, TResult>(
     maxDurationSeconds = API_MAX_DURATION_STANDARD_GEN_S,
     enforceRequestDeadline = false,
     asyncJob,
+    jobIdForOwnership = asyncJob?.providerJobId,
   } = config;
 
   /**
@@ -352,6 +370,45 @@ export function createGenerationHandler<TParams, TResult>(
       );
     } catch (err) {
       captureException(err, { route, action: 'qstash_publish' });
+    }
+  }
+
+  /**
+   * Bind a just-issued provider job id to the calling user (#10262). Awaited
+   * inline — never via `after()` — because the whole point is for the
+   * binding to exist BEFORE the response (and the job id inside it) reaches
+   * the client; a poll can arrive the instant the client has the id. No-ops
+   * when the route declared no extractor, or the result carries no pollable
+   * job id (a synchronous completion). `bindProviderJob` itself never throws.
+   */
+  async function maybeBindJobOwnership(
+    result: TResult,
+    userId: string,
+    resolvedProvider: Provider,
+  ): Promise<void> {
+    if (!jobIdForOwnership) return;
+    let providerJobId: string | null;
+    try {
+      providerJobId = jobIdForOwnership(result);
+    } catch (err) {
+      // No providerJobId here by definition — extracting it is what threw —
+      // but the user is known, and an extractor that throws leaves THEIR job
+      // unbound (so their own next poll answers 404). Report enough to find
+      // them, matching the bind-failure catch below.
+      captureException(err, { route, action: 'job_ownership_extract', userId });
+      return;
+    }
+    if (!providerJobId) return;
+    try {
+      // `bindProviderJob` already never throws on its own (it reports a write
+      // failure to Sentry and swallows it), but this call site never trusts
+      // that from the outside: a failed bind must not turn this submit into a
+      // 5xx. It does NOT save the job — with no binding row the owner's first
+      // poll gets a terminal 404 and a refund — and it is not a security gap,
+      // because an unbound id is refused to every caller.
+      await bindProviderJob(userId, resolvedProvider, providerJobId);
+    } catch (err) {
+      captureException(err, { route, action: 'job_ownership_bind', providerJobId, userId });
     }
   }
 
@@ -631,6 +688,7 @@ export function createGenerationHandler<TParams, TResult>(
 
             try {
               const generated = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost }, requestDeadlineAt);
+              await maybeBindJobOwnership(generated, userId, resolvedProvider);
               cacheMiss = { result: generated, usageId };
               return generated;
             } catch (err) {
@@ -734,6 +792,7 @@ export function createGenerationHandler<TParams, TResult>(
 
     try {
       const result = await runExecute(params, apiKey, { userId, tier, usageId, tokenCost }, requestDeadlineAt);
+      await maybeBindJobOwnership(result, userId, resolvedProvider);
       // Run the durable publish post-response (see cached path). Same asyncJob +
       // QStash gate so the dormant/non-async path never touches `after()`.
       const durableSubmission = asyncJob !== undefined && isQstashConfigured();

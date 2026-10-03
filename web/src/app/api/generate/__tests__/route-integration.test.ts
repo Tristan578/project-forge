@@ -99,6 +99,14 @@ vi.mock('@/lib/db/client', () => ({
   ),
 }));
 
+// Job-ownership binding (#10262) is covered by its own unit tests
+// (jobOwnership.test.ts) and by createGenerationHandler.qstash.test.ts;
+// isolate it here so the mocked `getDb()` above (no `insert`) doesn't
+// silently fail inside `bindProviderJob` on every async route's success path.
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Provider client mocks
 vi.mock('@/lib/generate/elevenlabsClient', () => ({
   ElevenLabsClient: vi.fn(function (this: Record<string, unknown>) {

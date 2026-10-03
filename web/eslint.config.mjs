@@ -364,6 +364,9 @@ const eslintConfig = defineConfig([
       'src/app/api/**/*.ts',
       'src/lib/api/**/*.ts',
       'src/lib/play/notFoundDocument.ts',
+      // Builds the 404/503 every `/api/generate/<type>/status` route returns
+      // when a poll fails the job-ownership check (#10262).
+      'src/lib/generate/jobOwnershipResponse.ts',
       'src/lib/auth/api-auth.ts',
       'src/lib/auth/step-up.ts',
       'src/lib/rateLimit.ts',

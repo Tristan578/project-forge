@@ -133,6 +133,14 @@ vi.mock('@/lib/security/botId', () => ({
   checkBotIdGate: vi.fn().mockResolvedValue(null),
 }));
 
+// #10262: createGenerationHandler now binds ownership after a successful
+// execute(). Its real implementation imports 'server-only' — same reason as
+// checkBotIdGate above — so it must be mocked here too, even though none of
+// this file's negative-case routes ever reach a successful execute().
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('fs/promises', () => ({
   readdir: vi.fn().mockResolvedValue([]),
   readFile: vi.fn().mockResolvedValue(''),

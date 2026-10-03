@@ -9,7 +9,7 @@ const EXPECTED_TABLE_NAMES = [
   'gameTags', 'gameForks', 'featuredGames', 'marketplaceAssets',
   'assetPurchases', 'assetReviews', 'sellerProfiles', 'feedback', 'generationJobs',
   'webhookEvents', 'leaderboards', 'leaderboardEntries', 'moderationAppeals',
-  'waitlistSignups', 'graphNodes', 'graphEdges',
+  'waitlistSignups', 'graphNodes', 'graphEdges', 'providerJobOwners',
 ] as const;
 
 describe('database schema', () => {
@@ -84,5 +84,16 @@ describe('database schema', () => {
     expect(keys).toContain('id');
     expect(keys).toContain('userId');
     expect(keys).toContain('name');
+  });
+
+  // #10262: the ownership binding jobOwnership.ts writes/reads is keyed on
+  // (provider, providerJobId), scoped to userId.
+  it('providerJobOwners table has expected column structure', () => {
+    const { providerJobOwners } = schema;
+    const keys = Object.keys(providerJobOwners);
+    expect(keys).toContain('id');
+    expect(keys).toContain('provider');
+    expect(keys).toContain('providerJobId');
+    expect(keys).toContain('userId');
   });
 });
