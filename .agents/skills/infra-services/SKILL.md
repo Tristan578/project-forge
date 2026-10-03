@@ -4,7 +4,7 @@ description: Infrastructure specialist for SpawnForge. Use when working with Ver
 user-invocable: true
 allowed-tools: Bash, Read, Glob, Grep, Agent, WebFetch
 argument-hint: "[service: vercel|r2|neon|upstash|clerk|stripe|sentry|posthog|github|ci-status]"
-paths: ".github/workflows/**, infra/**, vercel.json"
+paths: ".github/workflows/**, infra/**, vercel.json, vercel.ts"
 ---
 
 # Infrastructure & Services Guide
@@ -43,7 +43,7 @@ ever disagree, that one is right — fix this one.
 - **Sibling projects**: `spawnforge-staging`, `spawnforge-docs`, `spawnforge-design`
 - **Scope**: `--scope tnolan` on EVERY Vercel CLI command
 - **CLI commands**: `vercel ls --scope tnolan`, `vercel logs --scope tnolan`, `vercel env ls|pull --scope tnolan`
-- **Config**: `vercel.json` (crons, headers, rewrites)
+- **Config**: `web/vercel.ts` (typed `VercelConfig`: install/build commands, region, `git.deploymentEnabled: false`, the health-monitor cron; replaced `vercel.json`, PF-1060/#9097). Response headers live in `web/next.config.ts`, not here
 - **Key env vars**: `VERCEL_URL`, `NEXT_PUBLIC_SITE_URL`
 - **Gotchas**:
   - `vercel dev` runs all services locally
