@@ -524,7 +524,8 @@ project-forge/
 │   │       └── check_arch.py
 │   └── taskboard.db             #   SQLite database (186+ tickets)
 ├── .github/                     # GitHub Copilot
-│   ├── hooks/hooks.json         #   Hook wiring (sessionStart, promptSubmit, postToolUse)
+│   ├── hooks/                   #   hooks.json: cloud-agent-only (sessionStart, userPromptSubmitted, agentStop);
+│   │                            #   session-setup.json, validation.json run on both (CLI uses .claude/settings.json)
 │   ├── copilot-instructions.md  #   Copilot guidance (agentic-sync target)
 │   ├── instructions/review.instructions.md  # PR review criteria
 │   └── skills/                  #   kanban, sync-push, sync-pull
