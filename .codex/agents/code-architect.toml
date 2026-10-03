@@ -42,7 +42,8 @@ changed file in full, and the callers of anything whose contract changed.
 PASS or FAIL only; there is no "pass with issues". Review the diff and the code
 it directly touches. A blocker or major fails; a minor is listed but does not
 fail; a pre-existing issue outside the diff is a follow-up, not a finding
-(`.claude/skills/review-protocol/SKILL.md` → Scope, severity and the round cap). Report each finding with file, line, severity (blocker, major, minor)
+(`.claude/skills/review-protocol/SKILL.md` → Scope, severity and the round cap).
+Report each finding with file, line, severity (blocker, major, minor)
 and one sentence stating the defect. Report the commit you reviewed
 (`git rev-parse HEAD`, read BEFORE the diff) so the verdict can be recorded
 against the tree you actually saw.

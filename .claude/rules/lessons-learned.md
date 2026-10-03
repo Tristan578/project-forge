@@ -733,7 +733,7 @@ severity and the round cap":
 - Only blockers and majors fail.
 - Minors are fixed in the same push or filed.
 - Re-reviews cover the fix diff with only the seats that failed.
-- After round 3, stop and ask the user.
+- If a blocker or major is still open after round 3, stop and ask the user.
 
 Check CI first, and port a shared failure's fix before running any board.
 **Ticket:** #10325

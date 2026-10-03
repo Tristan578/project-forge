@@ -60,6 +60,12 @@ reported, and `scripts/board-verdict.sh` renders a PASS that carries a partial
 count, or no count at all, as `pending` — never `success`. A reduced board can
 post `FAIL 3/5`; it cannot post a pass.
 
+After a reduced re-review round, the published count is the five seats' LATEST
+verdicts: a seat that passed an earlier round on this PR and was not re-run
+carries its PASS forward, and every re-run seat must pass the fix diff. So
+`PASS 5/5` after round 2 means each seat's most recent review passed, not that
+all five re-read the final head. Say which seats re-ran in the summary.
+
 `.claude/workflows/review-board.js` runs this itself in its Publish phase; run
 it by hand when the board was run by hand. Pass the sha the board **actually
 reviewed**, not the current head — if a push landed mid-review they differ, and
