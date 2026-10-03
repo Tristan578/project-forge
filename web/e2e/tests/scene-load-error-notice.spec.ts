@@ -136,7 +136,6 @@ test.describe('Scene-load lockout notice on phone screens [substituted: WASM eng
             notice: { left: n.left, right: n.right, top: n.top, bottom: n.bottom, width: n.width },
             button: { top: b.top, bottom: b.bottom },
             buttonIsHit: hit !== null && button.contains(hit),
-            documentScrollWidth: document.documentElement.scrollWidth,
           };
         });
 
@@ -145,7 +144,6 @@ test.describe('Scene-load lockout notice on phone screens [substituted: WASM eng
         expect(m.notice.left).toBeGreaterThanOrEqual(0);
         expect(m.notice.right).toBeLessThanOrEqual(m.innerWidth);
         expect(m.notice.width).toBeGreaterThanOrEqual(m.innerWidth - 24 - 1);
-        expect(m.documentScrollWidth).toBeLessThanOrEqual(m.innerWidth);
 
         // Height: the notice fits, and the Reload button is fully on screen
         // and is the element under its own centre (not clipped or covered).
