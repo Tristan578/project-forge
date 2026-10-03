@@ -1067,20 +1067,24 @@ function isTypePosition(n: ts.Node): boolean {
  * Does `d` create a binding AT RUN TIME? This is an ALLOWLIST: a declaration
  * counts as local only when it is a kind known to emit a binding, and every
  * other kind — one nobody has thought of included — leaves the name the real
- * global, so a read of it is reported. (Board rounds 8-11 each found one more
- * non-binding kind that a denylist let through: an ambient declaration, a
- * type-only import, a bodiless signature, then an interface, type alias, type
- * parameter or uninstantiated namespace MERGED with one of those — one
- * symbol, which the checker lists for the value read.)
+ * global, so a read of it is reported. (Successive review rounds each found
+ * one more kind a denylist let through: type declarations MERGED with a
+ * non-binding value declaration, then an uninstantiated namespace, a const
+ * enum, an import-equals of a type, and a member of a merged namespace.)
  *
  * Nothing in an ambient context counts: `declare const process: any`,
  * `declare function eval(...)`, anything inside `declare global { ... }` or
- * `declare module '...' { ... }` emits nothing. Nor does any namespace
- * (an uninstantiated one emits nothing; no route declares an instantiated
- * one, so treating every namespace as non-binding costs nothing), a const
- * enum (SWC, the emitter Next uses, drops it), or `import x = N.T` (elided
- * when `N.T` is a type). Each of those is at worst a false positive, as is
- * `export default <local type name>`, which both emitters drop.
+ * `declare module '...' { ... }` emits nothing. Nor does anything to do with
+ * a namespace: the namespace itself (an uninstantiated one emits nothing),
+ * or any declaration INSIDE one. An exported member is emitted as `N.x`, so
+ * a bare `x` read from a sibling block of the same merged namespace, which
+ * the checker resolves to that member, still reads the real global (SWC does
+ * not rewrite it). No route declares a namespace, so this costs nothing.
+ * Nor does a const enum (SWC, the emitter Next uses, drops it), or
+ * `import x = N.T` (tsc elides it when `N.T` is a type; SWC emits
+ * `const x = N.T`; either way it is never relied on as a binding). Each of
+ * those is at worst a false positive, as is `export default <local type
+ * name>`, which both emitters drop.
  */
 function emitsRuntimeBinding(d: ts.Declaration): boolean {
   // In an ambient context: the declaration, or any node enclosing it (the
@@ -1088,6 +1092,8 @@ function emitsRuntimeBinding(d: ts.Declaration): boolean {
   // block), carries a `declare` modifier.
   for (let n: ts.Node | undefined = d; n; n = n.parent) {
     if (ts.canHaveModifiers(n) && (ts.getModifiers(n) ?? []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) return false;
+    // Anything declared inside a namespace (see above).
+    if (n !== d && ts.isModuleDeclaration(n)) return false;
   }
   if (ts.isVariableDeclaration(d) || ts.isParameter(d) || ts.isBindingElement(d)) return true;
   if (ts.isFunctionDeclaration(d) || ts.isFunctionExpression(d)) return d.body !== undefined;
@@ -1971,6 +1977,16 @@ describe('job-id ownership coverage (#10262)', () => {
           ['an empty namespace merged with a type-only import', "import type { NextRequest as process } from 'next/server';\nnamespace process {}", 'process', `const nh = process${FETCH};`],
           ['an empty namespace merged with a bodiless signature', 'function process(): void;\nnamespace process {}', 'process', `const nh = (process as any)${FETCH};`],
           ['a const enum', 'const enum process { A = 1 }', 'process', `const nh = (process as any)${FETCH};`],
+          // A member EXPORTED from one block of a merged namespace and read bare
+          // from a sibling block: the checker resolves the read to the
+          // member, but the member is emitted as `N.process`, so the bare
+          // read is the real global. One spelling per binding kind.
+          ...(['export var process: any = undefined;', 'export const process: any = 0;', 'export function process(): any { return undefined; }',
+            'export class process {}', 'export enum process { A = 1 }'] as const).map((member): [string, string, string, string] => [
+            `a namespace member read from a sibling block (${member.split(' ')[1]})`,
+            `let box: any;\nnamespace N { ${member} }\nnamespace N { box = (process as any)${FETCH}; }`,
+            'process', 'const nh = box;',
+          ]),
           ['an import-equals of a type entity', 'import process = NodeJS;', 'process', `const nh = (process as any)${FETCH};`],
           ['an import-equals of a nested type entity', 'import process = NodeJS.Process;', 'process', `const nh = (process as any)${FETCH};`],
         ] as const).map(([name, prelude, global, read]): [string, string, RegExp] => [
@@ -2026,6 +2042,14 @@ describe('job-id ownership coverage (#10262)', () => {
       expect(src, name).toContain(prelude);
       expect(analyseStatusRoute(src, model!.file).foreignInputs, name).toEqual([]);
     }
+    // `import x = require('m')` is a real binding too. The MODULE rule still
+    // reports the require, so the case asserts only that the GLOBAL rule does
+    // not also call the read a global (the allowlist's import-equals entry).
+    const viaRequire = mutate(mutate(model!.source, POLLED_ID, '$&\n$1void process;'), HANDLER_OPEN,
+      "import process = require('next/server');\n$1");
+    const requireReport = analyseStatusRoute(viaRequire, model!.file).foreignInputs.join('\n');
+    expect(requireReport).toMatch(/an import-equals require/);
+    expect(requireReport).not.toMatch(/reads the global 'process'/);
   });
 
   it('SELECTS each real status route that takes its key from ANY key-returning resolver export', () => {
