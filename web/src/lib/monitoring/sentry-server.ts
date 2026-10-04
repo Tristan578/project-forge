@@ -85,9 +85,9 @@ export function startSpan<T>(
  * Structured Sentry log (server-side; PF-967 / #8956).
  *
  * Routes through Sentry's Logs pipeline (`Sentry.logger.*`), which is
- * SEPARATE from event capture (`captureException`/`captureMessage` above) —
- * it requires `enableLogs: true` in the Sentry init (already set in all
- * three init files) and is scrubbed by its own `beforeSendLog` hook
+ * SEPARATE from event capture (`captureException`/`captureMessage` above).
+ * Since @sentry v11 there is no `enableLogs` switch — logs ship whenever the
+ * logger is called — and they are scrubbed by their own `beforeSendLog` hook
  * (`scrubSentryLog` in sentryConfig.ts), NOT `beforeSend`/`scrubSentryEvent`.
  * No-ops when Sentry is not configured, matching every other export here.
  *

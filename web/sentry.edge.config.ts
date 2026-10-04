@@ -4,6 +4,7 @@ import {
   scrubSentryEvent,
   scrubSentryLog,
   scrubSentryMetric,
+  scrubSentrySpan,
   setSentryDeepRedactor,
 } from '@/lib/monitoring/sentryConfig';
 import { redactSecrets } from '@/lib/security/redactSecrets';
@@ -43,22 +44,41 @@ if (DSN) {
     dataCollection: {
       userInfo: false,
       cookies: false,
-      queryParams: false,
+      urlQueryParams: false,
       httpHeaders: { request: false, response: false },
       httpBodies: [],
       genAI: { inputs: false, outputs: false },
       stackFrameVariables: false,
+      // Also default-ON in @sentry v11 and absent until now: bound DB query
+      // parameters / write payloads / result rows, GraphQL documents and
+      // variables, and queue task arguments.
+      databaseQueryData: false,
+      graphQL: { document: false, variables: false },
+      queues: false,
     },
-    enableLogs: true,
     beforeSend: scrubSentryEvent,
+    // @sentry v11 streams spans by default, so no transaction event is built
+    // and beforeSendTransaction is NOT called; streamed spans are scrubbed by
+    // beforeSendSpan instead. Each hook runs in exactly one lifecycle: an
+    // unwrapped beforeSendSpan is ignored under `traceLifecycle: 'static'`,
+    // which on Node and Edge can also be switched on by the
+    // SENTRY_TRACE_LIFECYCLE=static env var with no code change. Keeping both
+    // wired means spans are scrubbed in either lifecycle. Pinned by
+    // sentry-regressions.test.ts. Cost: under the default 'stream' lifecycle
+    // v11's Client.init() prints one console.warn per init (per isolate here)
+    // saying beforeSendTransaction is ignored. That is expected; the browser
+    // config omits the hook because it cannot reach 'static'.
     beforeSendTransaction: scrubSentryEvent,
+    beforeSendSpan: scrubSentrySpan,
     // Sentry Logs bypass beforeSend/scrubSentryEvent — scrub them on their own
-    // pipeline so a stray Sentry.logger.* call can't leak secrets/PII (see
-    // sentry.server.config.ts for the full rationale).
+    // pipeline so a stray Sentry.logger.* call can't leak secrets/PII. @sentry
+    // v11 has no `enableLogs` switch: logs ship whenever the logger is called,
+    // so this pin is unconditional (see sentry.server.config.ts for the full
+    // rationale).
     beforeSendLog: scrubSentryLog,
-    // Metrics are a THIRD pipeline, and `enableMetrics` defaults to ON — the SDK
-    // stamps user.id/email/name onto every metric, so this hook is what keeps
-    // them inside the F03/F04 posture (see sentry.server.config.ts for the full
+    // Metrics are a THIRD pipeline with no enable flag either — the SDK stamps
+    // user.id/email/name onto every metric, so this hook is what keeps them
+    // inside the F03/F04 posture (see sentry.server.config.ts for the full
     // rationale).
     beforeSendMetric: scrubSentryMetric,
   });
