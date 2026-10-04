@@ -22,7 +22,8 @@
 #      (the cloud proxy's REST route), else the GraphQL `reviewThreads` query
 #      (a local session, where gh can reach GraphQL);
 #   2. no check run on the head failed, timed out, was cancelled, failed to
-#      start or needs action, and none is still queued or running;
+#      start or needs action, and none is still queued or running — each
+#      check judged by its latest run (a re-run replaces a failed attempt);
 #   3. GitHub reports no merge conflict (`mergeable_state` is not `dirty`,
 #      and not `unknown` — still computing; retry in a few seconds).
 # FAIL-CLOSED: a fact that cannot be read blocks, and the message says which.
@@ -114,7 +115,10 @@ for pr in "${PRS[@]}"; do
   # 2. Checks on the current head.
   checks=$(gh api --paginate "repos/$REPO/commits/$head/check-runs?per_page=100" 2>/dev/null) \
     || block "PR #$pr: cannot read the check runs on ${head:0:8}"
-  checks=$(jq -s '[.[].check_runs[]?]' <<<"$checks" 2>/dev/null) \
+  # A check that ran more than once (a re-run, or a run superseded by a newer
+  # trigger and cancelled) is judged by its LATEST run, as GitHub does: one
+  # check per name and app, the highest run id.
+  checks=$(jq -s '[.[].check_runs[]?] | group_by([.name, (.app.id // 0)]) | map(max_by(.id))' <<<"$checks" 2>/dev/null) \
     || block "PR #$pr: the check-run answer for ${head:0:8} was not JSON"
   [ "$(jq length <<<"$checks")" -gt 0 ] || block "PR #$pr: no check has run on ${head:0:8} yet"
   failed=$(jq -r '[.[] | select(.conclusion | IN("failure","timed_out","cancelled","startup_failure","action_required")) | .name] | unique | join(", ")' <<<"$checks")

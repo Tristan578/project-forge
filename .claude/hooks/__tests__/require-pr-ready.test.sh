@@ -138,6 +138,15 @@ expect_block "a merge conflict blocks" "$READY" 'has a merge conflict'
 fixtures unknown "$RESOLVED" "$GREEN"
 expect_block "mergeability still computing blocks" "$READY" 'not finished computing mergeability'
 
+# --- A check judged by its LATEST run: a re-run that passed replaces a
+# cancelled or failed attempt; a re-run that failed replaces a pass.
+fixtures clean "$RESOLVED" '{"check_runs":[{"id":1,"name":"Require Changeset","status":"completed","conclusion":"cancelled","app":{"id":15368}},{"id":2,"name":"Require Changeset","status":"completed","conclusion":"success","app":{"id":15368}}]}'
+expect_allow "a cancelled run superseded by a passing re-run does not block" "$READY"
+fixtures clean "$RESOLVED" '{"check_runs":[{"id":2,"name":"Lint","status":"completed","conclusion":"failure","app":{"id":15368}},{"id":1,"name":"Lint","status":"completed","conclusion":"success","app":{"id":15368}}]}'
+expect_block "a failed re-run after a pass blocks" "$READY" 'checks did not pass on 01234567: Lint'
+fixtures clean "$RESOLVED" '{"check_runs":[{"id":1,"name":"Scan","status":"completed","conclusion":"failure","app":{"id":1}},{"id":2,"name":"Scan","status":"completed","conclusion":"success","app":{"id":2}}]}'
+expect_block "a same-named check from a DIFFERENT app is judged separately" "$READY" 'checks did not pass on 01234567: Scan'
+
 # --- Pagination: a failure on the SECOND page of check runs still blocks.
 fixtures clean "$RESOLVED" "$GREEN"
 printf '%s\n%s\n' "$GREEN" '{"check_runs":[{"name":"Late","status":"completed","conclusion":"failure"}]}' > "$FAKE/checks.json"
