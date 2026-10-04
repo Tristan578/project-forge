@@ -251,9 +251,9 @@ scan() { # <shell text> <depth>
       post-board-verdict.sh)
         local verdict=${a[1]:-}
         if [ "$verdict" = PASS ]; then
-          add_target "$ORIGIN#$(pr_number "${a[0]:-}")" "$stmt_text"
+          add_target "$repo#$(pr_number "${a[0]:-}")" "$stmt_text"
         elif [[ "$verdict" == *'$'* || "$verdict" == *"$UNKNOWN"* ]]; then
-          add_target "$ORIGIN#?" "$stmt_text"
+          add_target "$repo#?" "$stmt_text"
         fi
         ;;
       gh)
@@ -313,7 +313,7 @@ scan_gh() { # <default repo> <statement text> <args after gh...>
       while [ "$i" -lt "${#a[@]}" ]; do
         v=${a[$i]}
         case "$v" in
-          -X|--method) i=$((i + 1)); [ "${a[$i]:-}" = GET ] || write=1 ;;
+          -X|--method) i=$((i + 1)); [ "${a[$i]:-GET}" = GET ] || write=1 ;;
           -f|-F|--field|--raw-field) i=$((i + 1)); write=1; body+=$'\n'"$(field_text "${a[$i]:-}")" ;;
           -f*|-F*) write=1; body+=$'\n'"$(field_text "${v:2}")" ;;
           --field=*|--raw-field=*) write=1; body+=$'\n'"$(field_text "${v#*=}")" ;;

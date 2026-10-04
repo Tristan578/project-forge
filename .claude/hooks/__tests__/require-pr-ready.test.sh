@@ -297,6 +297,15 @@ if [ "$RC" -eq 0 ] && grep -qx 'repos/other/project/pulls/34' "$FAKE/calls.log";
 else
   bad "GH_REPO= prefix (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
 fi
+# post-board-verdict.sh posts to ${GH_REPO:-Tristan578/project-forge}, so a
+# GH_REPO= prefix names the repository its PASS is checked against (#10329 Sentry).
+fixtures clean "$RESOLVED" "$GREEN"
+run_hook 'GH_REPO=other/project bash scripts/post-board-verdict.sh 34 PASS abc 5/5 ok'
+if [ "$RC" -eq 0 ] && grep -qx 'repos/other/project/pulls/34' "$FAKE/calls.log" && ! grep -q 'Tristan578/project-forge' "$FAKE/calls.log"; then
+  ok "a GH_REPO= prefix on post-board-verdict.sh is the repository checked"
+else
+  bad "GH_REPO= on post-board-verdict.sh (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
+fi
 # The block message names the statement it matched.
 fixtures clean "$OPEN" "$GREEN"
 expect_block "the message names the matched call" 'true && bash -c "gh pr ready 10305"' 'Matched: gh pr ready 10305'
