@@ -17,7 +17,9 @@ done
 PASS=0
 FAIL=0
 ok() { echo "  ok    $1"; PASS=$((PASS + 1)); }
+readonly -f ok
 bad() { echo "  FAIL  $1"; FAIL=$((FAIL + 1)); }
+readonly -f bad
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -60,6 +62,7 @@ fixtures() {
   [ "$3" = "-" ] || printf '%s\n' "$3" > "$FAKE/checks.json"
   [ -z "${4:-}" ] || printf '%s\n' "$4" > "$FAKE/graphql.json"
 }
+readonly -f fixtures
 
 GREEN='{"check_runs":[{"name":"Lint","status":"completed","conclusion":"success"},{"name":"Docs","status":"completed","conclusion":"skipped"}]}'
 RESOLVED='[{"resolved":true,"path":"a.ts","line":3,"comment_ids":[11,12]}]'
@@ -72,14 +75,17 @@ run_hook() {
     | (cd "$HERE" && PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" bash "$HOOK" 2>&1))
   RC=$?
 }
+readonly -f run_hook
 expect_block() { # <label> <command> <stderr substring>
   run_hook "$2"
   if [ "$RC" -eq 2 ] && grep -qF -- "$3" <<<"$OUT"; then ok "$1"; else bad "$1 (rc=$RC): $OUT"; fi
 }
+readonly -f expect_block
 expect_allow() { # <label> <command>
   run_hook "$2"
   if [ "$RC" -eq 0 ]; then ok "$1"; else bad "$1 (rc=$RC): $OUT"; fi
 }
+readonly -f expect_allow
 
 READY='gh api -X POST repos/Tristan578/project-forge/pulls/10305/ccr/ready_for_review'
 echo "=== require-pr-ready.sh ==="
