@@ -245,6 +245,7 @@ expect_allow "a commit message that mentions a board PASS" 'git commit -m "fix: 
 expect_allow "a grep for a board PASS" "grep -n 'post-board-verdict.sh 10305 PASS' notes.md"
 expect_allow "a heredoc commit message is not read as commands" $'git commit -F - <<\'EOF\'\nfix: gate\n\ngh pr ready 10305\nEOF'
 expect_allow "a comment with no PASS marker" 'gh pr comment 10305 --body "thanks"'
+expect_allow "a cat-heredoc comment body with no PASS marker" $'gh pr comment 10305 --body "$(cat <<\'EOF\'\nstanding down: CI red\nEOF\n)"'
 expect_allow "a stdin comment with no PASS marker" $'gh pr comment 10305 --body-file - <<\'EOF\'\nstanding down: CI red\nEOF'
 
 # --- Round-1 board (#10329): wrapped and alternative spellings ARE ready calls.
@@ -260,7 +261,11 @@ for c in 'bash -c "gh pr ready 10305"' "sh -c 'gh pr ready 10305'" 'bash -lc "cd
   "gh api repos/Tristan578/project-forge/issues/10305/comments --input $TMP/verdict.md" \
   'gh api repos/Tristan578/project-forge/issues/10305/comments -f "body=<!-- board-verdict: PASS -->"' \
   "gh api repos/Tristan578/project-forge/issues/10305/comments -fbody='board-verdict: PASS'" \
-  "gh api -X POST 'repos/{owner}/{repo}/pulls/10305/ccr/ready_for_review'"; do
+  "gh api -X POST 'repos/{owner}/{repo}/pulls/10305/ccr/ready_for_review'" \
+  $'gh pr comment 10305 --body "$(cat <<\'EOF\'\n<!-- board-verdict: PASS sha=abc seats=5/5 -->\nEOF\n)"' \
+  $'gh api repos/Tristan578/project-forge/issues/10305/comments -f body="$(cat <<EOF\nboard-verdict: PASS\nEOF\n)"' \
+  'BODY="<!-- board-verdict: PASS -->"; gh pr comment 10305 --body "$BODY"' \
+  'timeout 30 gh pr ready 10305' 'timeout -s KILL 30 gh pr ready 10305'; do
   fixtures clean "$OPEN" "$GREEN"
   expect_block "is a ready call: $c" "$c" 'unresolved review threads'
 done
@@ -271,7 +276,8 @@ for c in 'for pr in 10304 10305; do gh api -X POST repos/Tristan578/project-forg
   'PR=10305; bash scripts/post-board-verdict.sh $PR PASS abc 5/5 ok' \
   'bash scripts/post-board-verdict.sh 10305 $VERDICT abc 5/5 ok' \
   "gh api graphql -f query='mutation { markPullRequestReadyForReview(input:{pullRequestId:\"X\"}) { clientMutationId } }'" \
-  'gh pr comment --body "board-verdict: PASS"'; do
+  'gh pr comment --body "board-verdict: PASS"' \
+  'echo 10305 | xargs gh pr ready' 'xargs -n 1 gh pr ready < prs.txt'; do
   expect_block "an unreadable PR blocks: $c" "$c" 'without a PR number'
 done
 # A GH_REPO= prefix names the repository.

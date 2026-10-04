@@ -29,7 +29,9 @@
 # newlines OUTSIDE quotes, with $(...) and `...` as statements of their own and
 # the script given to bash/sh/zsh -c or eval read again. Only a call in COMMAND
 # POSITION counts (after VAR=value assignments and sudo/env/command/exec/time/
-# nohup), so a commit message or echo that mentions `gh pr ready` is not a call.
+# nohup, and the command after timeout or xargs), so a commit message or echo
+# that mentions `gh pr ready` is not a call. A body built from $(...), a
+# heredoc or a variable is searched for the marker across the whole command.
 # The repository is the one the call names (-R/--repo, a URL, the route's
 # repos/<o>/<r>, a GH_REPO= prefix), else $GH_REPO, else the origin remote.
 # A PR named by a variable, or not named at all, cannot be checked and blocks.
@@ -167,6 +169,14 @@ add_target() { TARGETS+=("$1"); MATCHES+=("$2"); }
 # board_marker <text>: does it carry a PASS marker?
 board_marker() { grep -qE 'board-verdict:[[:space:]]*PASS' <<<"$1"; }
 
+# resolve_body <body>: a body built from a $(...) (the repo's own
+# `--body "$(cat <<'EOF' ... EOF)"` idiom), a backtick or a variable is text
+# the hook cannot read from the word itself, so the whole command, heredoc
+# bodies and assignments included, is searched in its place.
+resolve_body() {
+  if [[ "$1" == *"$UNKNOWN"* || "$1" == *'$'* ]]; then printf '%s\n%s' "$1" "$COMMAND"; else printf '%s' "$1"; fi
+}
+
 # A number as written in a call: digits (optionally #), else "?".
 pr_number() { if [[ "$1" =~ ^#?([0-9]+)$ ]]; then echo "${BASH_REMATCH[1]}"; else echo "?"; fi; }
 
@@ -200,6 +210,26 @@ scan() { # <shell text> <depth>
     done
     [ "$k" -lt "${#w[@]}" ] || continue
     local cmd=${w[$k]##*/}
+    # `timeout [opts] <duration> cmd` and `xargs [opts] cmd` run the command
+    # that follows. (xargs feeds it arguments from stdin, so a gh pr ready
+    # behind it names no PR the hook can read, and blocks.)
+    case "$cmd" in
+      timeout)
+        k=$((k + 1))
+        while [ "$k" -lt "${#w[@]}" ] && [[ "${w[$k]}" == -* ]]; do
+          case "${w[$k]}" in -s|-k|--signal|--kill-after) k=$((k + 1)) ;; esac
+          k=$((k + 1))
+        done
+        k=$((k + 1)) ;;
+      xargs)
+        k=$((k + 1))
+        while [ "$k" -lt "${#w[@]}" ] && [[ "${w[$k]}" == -* ]]; do
+          case "${w[$k]}" in -n|-I|-L|-P|-d|-E|-s|-a) k=$((k + 1)) ;; esac
+          k=$((k + 1))
+        done ;;
+    esac
+    [ "$k" -lt "${#w[@]}" ] || continue
+    cmd=${w[$k]##*/}
     # A script handed to a shell or eval is read again.
     case "$cmd" in
       bash|sh|zsh|dash|ksh)
@@ -271,7 +301,7 @@ scan_gh() { # <default repo> <statement text> <args after gh...>
         esac
         i=$((i + 1))
       done
-      board_marker "$body" || return 0
+      board_marker "$(resolve_body "$body")" || return 0
       if [[ "$sel" =~ ^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/(pull|issues)/([0-9]+) ]]; then
         add_target "${BASH_REMATCH[1]}#${BASH_REMATCH[3]}" "$stmt_text"
       else
@@ -298,9 +328,9 @@ scan_gh() { # <default repo> <statement text> <args after gh...>
       route=${route/\{owner\}\/\{repo\}/$ORIGIN}
       if [[ "$route" =~ ^repos/([^/]+/[^/]+)/pulls/([^/]+)/ccr/ready_for_review$ ]]; then
         add_target "${BASH_REMATCH[1]}#$(pr_number "${BASH_REMATCH[2]}")" "$stmt_text"
-      elif [ "$route" = graphql ] && grep -q 'markPullRequestReadyForReview' <<<"$body"; then
+      elif [ "$route" = graphql ] && grep -q 'markPullRequestReadyForReview' <<<"$(resolve_body "$body")"; then
         add_target "$repo#?" "$stmt_text"
-      elif [ "$write" -eq 1 ] && board_marker "$body"; then
+      elif [ "$write" -eq 1 ] && board_marker "$(resolve_body "$body")"; then
         if [[ "$route" =~ ^repos/([^/]+/[^/]+)/issues/([^/]+)/comments$ ]]; then
           add_target "${BASH_REMATCH[1]}#$(pr_number "${BASH_REMATCH[2]}")" "$stmt_text"
         else
