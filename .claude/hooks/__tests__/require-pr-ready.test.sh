@@ -274,7 +274,10 @@ for c in 'bash -c "gh pr ready 10305"' "sh -c 'gh pr ready 10305'" 'bash -lc "cd
   $'gh pr comment 10305 --body "$(cat <<\'EOF\'\n<!-- board-verdict: PASS sha=abc seats=5/5 -->\nEOF\n)"' \
   $'gh api repos/Tristan578/project-forge/issues/10305/comments -f body="$(cat <<EOF\nboard-verdict: PASS\nEOF\n)"' \
   'BODY="<!-- board-verdict: PASS -->"; gh pr comment 10305 --body "$BODY"' \
-  'timeout 30 gh pr ready 10305' 'timeout -s KILL 30 gh pr ready 10305'; do
+  'timeout 30 gh pr ready 10305' 'timeout -s KILL 30 gh pr ready 10305' \
+  'env -u FOO gh pr ready 10305' 'env -C /tmp gh pr ready 10305' "env -S 'gh pr ready 10305'" \
+  'sudo -u root gh pr ready 10305' 'nice -n 5 gh pr ready 10305' 'time -f %e gh pr ready 10305' \
+  'stdbuf -o L gh pr ready 10305' 'env -- gh pr ready 10305' 'env -i FOO=1 gh pr ready 10305'; do
   fixtures clean "$OPEN" "$GREEN"
   expect_block "is a ready call: $c" "$c" 'unresolved review threads'
 done

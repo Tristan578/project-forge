@@ -166,6 +166,20 @@ TARGETS=()   # "owner/repo#number" (number "?" when it cannot be read)
 MATCHES=()   # the statement that produced each target, for the message
 add_target() { TARGETS+=("$1"); MATCHES+=("$2"); }
 
+# wrapper_opt_takes_arg <wrapper> <option>: does this wrapper option consume
+# the next word as its value?
+wrapper_opt_takes_arg() {
+  case "$1:$2" in
+    env:-u|env:--unset|env:-C|env:--chdir|env:-S|env:--split-string) return 0 ;;
+    sudo:-u|sudo:-g|sudo:-h|sudo:-p|sudo:-C|sudo:-D|sudo:-R|sudo:-T|sudo:-U|sudo:-r|sudo:-t) return 0 ;;
+    sudo:--user|sudo:--group|sudo:--host|sudo:--prompt|sudo:--chdir|sudo:--chroot) return 0 ;;
+    time:-f|time:-o|time:--format|time:--output|nice:-n|nice:--adjustment) return 0 ;;
+    ionice:-c|ionice:-n|ionice:-p|ionice:-P|ionice:-u|ionice:--class|ionice:--classdata) return 0 ;;
+    stdbuf:-i|stdbuf:-o|stdbuf:-e) return 0 ;;
+  esac
+  return 1
+}
+
 # board_marker <text>: does it carry a PASS marker?
 board_marker() { grep -qE 'board-verdict:[[:space:]]*PASS' <<<"$1"; }
 
@@ -197,14 +211,24 @@ scan() { # <shell text> <depth>
     local -a w=()
     IFS="$US" read -r -a w <<<"$line"
     local stmt_text=${line//$US/ } repo=$DEFAULT_REPO k=0
-    # Leading assignments and wrappers.
+    # Leading assignments and wrappers. An option is skipped only inside a
+    # wrapper, and an option that takes a value skips that value too
+    # (`env -u NAME gh ...` would otherwise read NAME as the command).
+    local wrap=""
     while [ "$k" -lt "${#w[@]}" ]; do
       case "${w[$k]}" in
         # gh treats an empty GH_REPO as unset: the current repository.
         GH_REPO=*) repo=${w[$k]#GH_REPO=}; repo=${repo:-$ORIGIN} ;;
         [A-Za-z_]*=*) ;;
-        sudo|command|exec|time|nohup|env|then|do|else|elif|if|while|until|'!'|'{') ;;
-        -*) if [ "$k" -eq 0 ] || [ "${w[$((k - 1))]}" != env ]; then break; fi ;;
+        sudo|command|exec|time|nohup|env|nice|ionice|stdbuf) wrap=${w[$k]} ;;
+        then|do|else|elif|if|while|until|'!'|'{') wrap="" ;;
+        -*)
+          [ -n "$wrap" ] || break
+          if wrapper_opt_takes_arg "$wrap" "${w[$k]}"; then
+            # `env -S 'cmd args'` runs the string it is given.
+            case "$wrap:${w[$k]}" in env:-S|env:--split-string) scan "${w[$((k + 1))]:-}" $((depth + 1)) ;; esac
+            k=$((k + 1))
+          fi ;;
         *) break ;;
       esac
       k=$((k + 1))
