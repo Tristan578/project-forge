@@ -151,6 +151,16 @@
         ]
       },
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/require-pr-ready.sh\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
         "matcher": "Edit|Write",
         "hooks": [
           {

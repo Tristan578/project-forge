@@ -18,7 +18,7 @@ Monitor open pull requests for CI failures and review comments (Sentry, Copilot,
 
 ## Process
 
-Begin and end each PR with `pwsh -NoProfile -File scripts/audit-pr-readiness.ps1 -PullRequest <number> -Json`. Exit `0` is the only readiness signal. Exit `1` means blockers remain; exit `2` means safety could not be established. Results apply only to their reported head and main SHAs, so rerun after every push, rebase, branch update, or review.
+Begin and end each PR with `pwsh -NoProfile -File scripts/audit-pr-readiness.ps1 -PullRequest <number> -Json`. Exit `0` is the only readiness signal. Exit `1` means blockers remain; exit `2` means safety could not be established. Results apply only to their reported head and main SHAs, so rerun after every push, rebase, branch update, or review. Where `pwsh` or GitHub GraphQL is unavailable (a Claude Code cloud session has neither), the audit cannot run; `.claude/hooks/require-pr-ready.sh` then blocks marking a PR ready, and posting a board PASS for it, until GitHub shows every review thread resolved, no failed or pending check on the head and no merge conflict (#10328). It covers those three facts only, not the audit's other checks.
 
 ### Step 1: Discover PRs
 
