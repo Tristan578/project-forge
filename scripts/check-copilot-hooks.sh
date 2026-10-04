@@ -176,7 +176,10 @@ function inCommandPosition(before) {
 function scriptRefs(cmd) {
   return [...cmd.matchAll(SCRIPT_REF)].map((m) => {
     const before = cmd.slice(0, m.index + m[0].length - m[1].length);
-    return { ref: m[1], runs: !/(?:^|\s)#/.test(before) && inCommandPosition(before) };
+    // A `#` comments out only the rest of ITS line: a comment on an earlier
+    // line of a multi-line command does not reach this reference.
+    const line = before.slice(before.lastIndexOf('\n') + 1);
+    return { ref: m[1], runs: !/(?:^|\s)#/.test(line) && inCommandPosition(before) };
   });
 }
 

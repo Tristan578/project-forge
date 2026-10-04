@@ -193,6 +193,15 @@ expect_pass direct-run \
 expect_pass bash-flags \
   '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash -eu .claude/hooks/on-stop.sh"}]}}' \
   "bash with flags before on-stop.sh runs it"
+# A comment ends at its newline: one on an earlier line of a multi-line
+# command does not comment out a script on a later line.
+expect_pass comment-on-earlier-line \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"# commit and sync\nbash .claude/hooks/on-stop.sh"}]}}' \
+  "a # comment on an earlier line does not comment out on-stop.sh"
+expect_one_fail comment-same-line-after-newline \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"true\ntrue # bash .claude/hooks/on-stop.sh"}]}}' \
+  'no hook runs on-stop.sh on an end-of-turn event' \
+  "a # earlier on on-stop.sh's own line still comments it out"
 # A path that runs nothing is not required to exist.
 expect_pass commented-missing \
   '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh # was: bash scripts/gone.sh"}]}}' \
