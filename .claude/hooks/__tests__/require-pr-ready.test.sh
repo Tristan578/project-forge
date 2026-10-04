@@ -46,7 +46,7 @@ case "$route" in
   graphql) f=graphql.json ;;
   repos/*/pulls/*/ccr/review_threads) f=threads.json ;;
   repos/*/commits/*/check-runs*) f=checks.json ;;
-  repos/*/commits/*/status) f=status.json ;;
+  repos/*/commits/*/status*) f=status.json ;;
   repos/*/pulls/*) f=pr.json ;;
   *) exit 1 ;;
 esac
@@ -109,7 +109,9 @@ expect_allow "a comment without a PASS marker is not a ready call" \
 fixtures clean "$RESOLVED" "$GREEN"
 expect_allow "ready route: resolved threads, green checks, clean merge" "$READY"
 expect_allow "gh pr ready <n>" 'gh pr ready 10305'
-expect_allow "gh pr ready #<n>" 'gh pr ready #10305'
+# Unquoted, `#10305` starts a shell comment, so gh is called with NO number.
+expect_block "gh pr ready #<n> is a ready call with no number (the # starts a comment)" 'gh pr ready #10305' 'without a PR number'
+expect_allow "gh pr ready '#<n>' (quoted) names the PR" "gh pr ready '#10305'"
 expect_allow "post-board-verdict.sh <n> PASS" 'bash scripts/post-board-verdict.sh 10305 PASS abc 5/5 "ok"'
 fixtures blocked "$RESOLVED" "$GREEN"
 expect_allow "mergeable_state blocked (waiting on approval) is not a conflict" "$READY"
@@ -226,12 +228,79 @@ expect_block "check runs unreadable blocks" "$READY" 'cannot read the check runs
 fixtures clean "$RESOLVED" 'not json'
 expect_block "a check-run answer that is not JSON blocks" "$READY" 'was not JSON'
 rm -f "$FAKE"/*.json
-expect_block "the PR itself unreadable blocks" "$READY" 'cannot read PR #10305'
+expect_block "the PR itself unreadable blocks" "$READY" 'cannot read PR Tristan578/project-forge#10305'
 printf '{"head":{},"mergeable_state":"clean"}\n' > "$FAKE/pr.json"
 expect_block "a PR answer with no head commit blocks" "$READY" 'no head commit'
 fixtures clean "$RESOLVED" "$GREEN"
 expect_block "gh pr ready with no number blocks" 'gh pr ready' 'without a PR number'
 expect_block "gh pr ready with only flags blocks" 'gh pr ready --repo x/y' 'without a PR number'
+
+# --- Round-1 board (#10329): commands that only MENTION a ready call are not one.
+fixtures clean "$OPEN" "$GREEN"
+expect_allow "a commit message that mentions gh pr ready" 'git commit -m "docs: gh pr ready is now gated"'
+expect_allow "a ; inside a quoted message does not split the statement" 'git commit -m "x; gh pr ready 10305"'
+expect_allow "...nor inside single quotes" "git commit -m 'x; gh pr ready 10305'"
+expect_allow "echo of the words" 'echo gh pr ready 10305'
+expect_allow "a commit message that mentions a board PASS" 'git commit -m "fix: post-board-verdict.sh 10305 PASS now gated"'
+expect_allow "a grep for a board PASS" "grep -n 'post-board-verdict.sh 10305 PASS' notes.md"
+expect_allow "a heredoc commit message is not read as commands" $'git commit -F - <<\'EOF\'\nfix: gate\n\ngh pr ready 10305\nEOF'
+expect_allow "a comment with no PASS marker" 'gh pr comment 10305 --body "thanks"'
+expect_allow "a stdin comment with no PASS marker" $'gh pr comment 10305 --body-file - <<\'EOF\'\nstanding down: CI red\nEOF'
+
+# --- Round-1 board (#10329): wrapped and alternative spellings ARE ready calls.
+# shellcheck disable=SC2016  # the $ is the point: these are commands the hook reads, not expansions
+for c in 'bash -c "gh pr ready 10305"' "sh -c 'gh pr ready 10305'" 'bash -lc "cd x && gh pr ready 10305"' \
+  '(gh pr ready 10305)' 'echo $(gh pr ready 10305)' 'echo "$(gh pr ready 10305)"' 'echo `gh pr ready 10305`' \
+  '/usr/bin/gh pr ready 10305' 'eval "gh pr ready 10305"' 'FOO=1 gh pr ready 10305' \
+  'bash scripts/post-board-verdict.sh "10305" PASS abc 5/5 ok' 'bash scripts/post-board-verdict.sh 10305 "PASS" abc 5/5 ok' \
+  'gh pr comment 10305 --body "<!-- board-verdict: PASS sha=abc seats=5/5 -->"' \
+  'gh issue comment 10305 -b "board-verdict: PASS"' \
+  "gh pr comment 10305 --body-file $TMP/verdict.md" \
+  $'gh pr comment 10305 --body-file - <<\'EOF\'\n<!-- board-verdict: PASS sha=abc seats=5/5 -->\nEOF' \
+  "gh api repos/Tristan578/project-forge/issues/10305/comments --input $TMP/verdict.md" \
+  'gh api repos/Tristan578/project-forge/issues/10305/comments -f "body=<!-- board-verdict: PASS -->"' \
+  "gh api repos/Tristan578/project-forge/issues/10305/comments -fbody='board-verdict: PASS'" \
+  "gh api -X POST 'repos/{owner}/{repo}/pulls/10305/ccr/ready_for_review'"; do
+  fixtures clean "$OPEN" "$GREEN"
+  expect_block "is a ready call: $c" "$c" 'unresolved review threads'
+done
+# A PR that cannot be read from the call blocks, whatever the trigger.
+fixtures clean "$RESOLVED" "$GREEN"
+# shellcheck disable=SC2016  # the $ is the point: these are commands the hook reads, not expansions
+for c in 'for pr in 10304 10305; do gh api -X POST repos/Tristan578/project-forge/pulls/$pr/ccr/ready_for_review; done' \
+  'PR=10305; bash scripts/post-board-verdict.sh $PR PASS abc 5/5 ok' \
+  'bash scripts/post-board-verdict.sh 10305 $VERDICT abc 5/5 ok' \
+  "gh api graphql -f query='mutation { markPullRequestReadyForReview(input:{pullRequestId:\"X\"}) { clientMutationId } }'" \
+  'gh pr comment --body "board-verdict: PASS"'; do
+  expect_block "an unreadable PR blocks: $c" "$c" 'without a PR number'
+done
+# A GH_REPO= prefix names the repository.
+fixtures clean "$RESOLVED" "$GREEN"
+run_hook 'GH_REPO=other/project gh pr ready 34'
+if [ "$RC" -eq 0 ] && grep -qx 'repos/other/project/pulls/34' "$FAKE/calls.log"; then
+  ok "a GH_REPO= prefix is the repository checked"
+else
+  bad "GH_REPO= prefix (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
+fi
+# The block message names the statement it matched.
+fixtures clean "$OPEN" "$GREEN"
+expect_block "the message names the matched call" 'true && bash -c "gh pr ready 10305"' 'Matched: gh pr ready 10305'
+
+# --- Mergeability arms: a draft PR is the normal state here; null is unknown.
+fixtures draft "$RESOLVED" "$GREEN"
+expect_allow "mergeable_state draft is not a conflict" "$READY"
+fixtures clean "$RESOLVED" "$GREEN"
+printf '{"head":{"sha":"%s"},"mergeable_state":null}\n' "$HEAD_SHA" > "$FAKE/pr.json"
+expect_block "a null mergeable_state blocks as still computing" "$READY" 'not finished computing mergeability'
+# --- More commit statuses than one page blocks.
+fixtures clean "$RESOLVED" "$GREEN"
+printf '%s\n' '{"total_count":101,"statuses":[{"context":"Vercel","state":"success"}]}' > "$FAKE/status.json"
+expect_block "more statuses than were read blocks" "$READY" 'more than 100 commit statuses'
+
+# --- The hook is wired: exactly one Bash PreToolUse entry runs it.
+SETTINGS="$HERE/../../settings.json"
+wired=$(jq '[.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[] | select((.command // "") | test("/\\.claude/hooks/require-pr-ready\\.sh"))] | length' "$SETTINGS" 2>/dev/null)
+if [ "$wired" = 1 ]; then ok "settings.json runs the hook on every Bash call"; else bad "settings.json wiring count is '$wired', want 1"; fi
 
 # --- Several PRs in one command: each is checked; one bad one blocks.
 fixtures clean "$OPEN" "$GREEN"

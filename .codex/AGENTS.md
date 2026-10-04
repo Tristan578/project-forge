@@ -280,6 +280,6 @@ All hooks live in `.claude/hooks/` and are shared across Claude Code, Copilot, G
 | `on-prompt-submit.sh` | Ticket enforcement + stale reminders | `UserPromptSubmit` |
 | `on-stop.sh` | Ticket validation + GitHub push | `Stop` |
 | `post-edit-lint.sh` | ESLint on changed files | `PostToolUse` (`apply_patch`) |
-| `block-main-commits.sh`, `check-pr-metadata.sh`, `pre-push-quality-gate.sh`, `block-deferred-fixes.sh` | Commit, PR and push policy | `PreToolUse` (`Bash`) |
+| `block-main-commits.sh`, `check-pr-metadata.sh`, `pre-push-quality-gate.sh`, `block-deferred-fixes.sh`, `require-pr-ready.sh` | Commit, PR and push policy; a PR is not marked ready or passed while threads, checks or a conflict remain | `PreToolUse` (`Bash`) |
 | `sync-to-github.sh` | Push to GitHub Project | run by `on-stop.sh` |
 | `sync-from-github.sh` | Pull from GitHub Project | run by `on-session-start.sh` |
