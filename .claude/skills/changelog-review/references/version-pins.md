@@ -120,9 +120,9 @@ Audit ticket: #9975.
 | `vitest` | ^5.0.0 | LOW | Check for workspace config changes; 5.x brought `@rolldown/binding` in as a native dep — see `scripts/check-native-bindings.sh` |
 | `zod` | ^4.5.4 | LOW | Already on v4 |
 | `typescript` | ^6.0.3 | **HIGH (no programmatic API in 7.0)** | Do not bump to 7 without the audit — see the TypeScript section above and #9975 |
-| `@sentry/nextjs` + `@sentry/profiling-node` | `^10.73.0` (both) | MEDIUM | The two **declared ranges** must stay byte-identical; a skew fails silently at load. Pinned by `sentry-regressions.test.ts:863` |
+| `@sentry/nextjs` + `@sentry/profiling-node` | `^11.0.0` (both) | MEDIUM | The two **declared ranges** must stay byte-identical; a skew fails silently at load. Pinned by the `sentry-regressions.test.ts` case "pins @sentry/profiling-node to the same declared range as @sentry/nextjs" |
 
-> **This column is the declared range, not the locked version.** The range in `web/package.json` is usually behind what `package-lock.json` resolves: `@sentry/*` declares `^10.73.0` and locks `10.74.0`; `@clerk/nextjs` declares `^7.9.1` and locks `7.9.2`. Compare like with like before concluding something is out of date — reading a range against a registry `latest` is how a routine bump gets mistaken for a major one.
+> **This column is the declared range, not the locked version.** The range in `web/package.json` is usually behind what `package-lock.json` resolves: `@clerk/nextjs` declares `^7.9.1` and locks `7.9.2` (the two can also coincide: `@sentry/*` declares `^11.0.0` and locks `11.0.0` as of #10302). Compare like with like before concluding something is out of date — reading a range against a registry `latest` is how a routine bump gets mistaken for a major one.
 >
 > Last verified against `origin/main` on **2026-09-11**. Read `web/package.json` and `package-lock.json` for live values rather than trusting this snapshot.
 

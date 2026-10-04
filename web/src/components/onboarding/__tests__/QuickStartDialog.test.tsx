@@ -1168,8 +1168,9 @@ describe('QuickStartDialog', () => {
 
       expect((await screen.findByRole('alert')).textContent).toContain(SIGNED_OUT_MESSAGE);
       expect(screen.getByText(/may cost more than your token balance/)).toBeTruthy();
-      // The alert names no link of its own; the bar's is the one.
+      // The bar keeps the only Buy tokens link; the alert's own link is Sign in.
       expect(screen.getAllByRole('link', { name: /buy tokens/i })).toHaveLength(1);
+      expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toMatch(/^\/sign-in(\?|$)/);
     });
 
     // No reply, or a 2xx the client could not read: the hold may already have

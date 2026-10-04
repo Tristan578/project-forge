@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event';
 
 import { McpBridgeIndicator } from '../McpBridgeIndicator';
 import { announceBridgeActivity, resetBridgeActivity } from '@/lib/mcp/bridgeActivity';
+import { MCP_TOKEN_PARAM } from '@/lib/mcp/tokenParam';
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -50,7 +51,7 @@ describe('McpBridgeIndicator', () => {
     resetBridgeActivity();
     vi.stubGlobal('WebSocket', FakeWebSocket);
     vi.stubEnv('NODE_ENV', 'development');
-    window.history.replaceState({}, '', '/editor?mcp=abc123');
+    window.history.replaceState({}, '', `/editor?${MCP_TOKEN_PARAM}=abc123`);
   });
   afterEach(() => {
     // globals are off in this workspace, so RTL's automatic cleanup never

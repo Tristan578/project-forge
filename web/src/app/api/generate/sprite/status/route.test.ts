@@ -6,9 +6,11 @@ import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
+import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { JOB_NOT_FOUND_MESSAGE, JOB_OWNERSHIP_UNAVAILABLE_MESSAGE } from '@/lib/generate/jobNotFound';
 
 const mockGetReplicateStatus = vi.hoisted(() => vi.fn());
 
@@ -17,6 +19,9 @@ vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/keys/resolver')>();
   return { ...mod, resolveApiKey: vi.fn() };
 });
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  verifyProviderJobOwner: vi.fn(),
+}));
 vi.mock('@/lib/generate/spriteClient', () => ({
   SpriteClient: class MockSpriteClient {
     getReplicateStatus = mockGetReplicateStatus;
@@ -32,6 +37,7 @@ const makeRequest = (params: Record<string, string>) => {
 describe('GET /api/generate/sprite/status', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(verifyProviderJobOwner).mockResolvedValue('owner');
   });
 
   it('returns 401 if unauthenticated', async () => {
@@ -80,6 +86,60 @@ describe('GET /api/generate/sprite/status', () => {
     const data = await res.json();
     expect(res.status).toBe(402);
     expect(data.error).toBe('Not enough tokens');
+  });
+
+  // Ownership check (#10262): without this, any signed-in caller admitted past
+  // the tier gate could poll a job id they never created and read back another
+  // user's result via the platform key `resolveApiKey` returns by default.
+  // (The dalle3-sync:/dalle3: branches above never resolve a key or touch the
+  // provider, so they need no ownership check.)
+  describe('job ownership (#10262)', () => {
+    it('returns 404 without resolving a key when the caller does not own the job', async () => {
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(verifyProviderJobOwner).mockResolvedValue('not_owner');
+
+      const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+      const data = await res.json();
+
+      expect(res.status).toBe(404);
+      expect(data.error).toBe(JOB_NOT_FOUND_MESSAGE);
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(mockGetReplicateStatus).not.toHaveBeenCalled();
+    });
+
+    // A lookup that failed (DB error, open circuit breaker) is NOT a verdict
+    // on the job: still fail-closed (no key resolved), but 503, which the
+    // poller keeps polling through, never the 404 it treats as terminal.
+    it('returns a retryable 503, not a terminal 404, and resolves no key when the ownership lookup FAILS', async () => {
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(verifyProviderJobOwner).mockResolvedValue('unverifiable');
+
+      const res = await GET(makeRequest({ jobId: 'pred_abc123' }));
+      const data = await res.json();
+
+      expect(res.status).toBe(503);
+      expect(data.error).toBe(JOB_OWNERSHIP_UNAVAILABLE_MESSAGE);
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(mockGetReplicateStatus).not.toHaveBeenCalled();
+    });
+
+    it('checks ownership with the authenticated userId, the sprite provider, and the polled jobId', async () => {
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+      mockGetReplicateStatus.mockResolvedValue({ status: 'processing', output: undefined });
+
+      // Decoy ids beside the polled one: the provider must be sent the id the
+      // ownership check ran on, never another caller-chosen value (#10262).
+      await GET(makeRequest({ jobId: 'pred_abc123', predictionId: 'decoy_other', taskId: 'decoy_other', id: 'decoy_other' }));
+
+      expect(verifyProviderJobOwner).toHaveBeenCalledTimes(1);
+      expect(verifyProviderJobOwner).toHaveBeenCalledWith(user.id, 'replicate', 'pred_abc123');
+      expect(mockGetReplicateStatus).toHaveBeenCalledTimes(1);
+      expect(mockGetReplicateStatus).toHaveBeenCalledWith('pred_abc123');
+    });
   });
 
   it('returns completed status with resultUrl when prediction succeeded', async () => {
@@ -242,9 +302,10 @@ describe('GET /api/generate/sprite/status', () => {
   // starter that has HELD tokens (monthlyTokens > 0 or addonTokens > 0) counts
   // as the trial tier (hobbyist) whether or not it has tokens left. A starter
   // that never held any (a never-granted signup) is refused before any key is
-  // resolved — the status route does not bind jobId to the caller, so that
-  // refusal is what keeps a $0 account from polling arbitrary job ids with the
-  // platform key. The creator-only status suites (model, skybox) pin that a
+  // resolved. The job-ownership check (#10262, above) is what keeps a signed-in
+  // caller from polling an arbitrary job id it never created; this tier gate is
+  // a separate, independent refusal for accounts with no trial grant at all.
+  // The creator-only status suites (model, skybox) pin that a
   // starter at any balance is refused there and that each of those routes
   // calls the POLL variant, not the create one.
   describe('panel tier gate (generate-sprite, hobbyist)', () => {

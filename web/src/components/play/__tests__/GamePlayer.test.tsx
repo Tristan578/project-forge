@@ -163,7 +163,7 @@ describe('GamePlayer', () => {
       expect(screen.queryByLabelText('Report this game')).toBeNull();
       const link = screen.getByLabelText('Sign in to report this game');
       expect(link.getAttribute('href')).toBe(
-        '/sign-in?redirect_url=/play/user-1/my-awesome-game'
+        '/sign-in?redirect_url=%2Fplay%2Fuser-1%2Fmy-awesome-game'
       );
     });
   });

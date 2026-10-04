@@ -100,7 +100,7 @@ export function TutorialOverlay() {
       // end the tour. Modified keys and keys another handler consumed are
       // left alone for the same reason.
       if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-      if (isEditableTarget(e.target)) return;
+      if (targetOwnsKey(e.target, e.key)) return;
       const s = keyHandlerState.current;
       switch (e.key) {
         case 'Escape':
@@ -311,7 +311,7 @@ type TargetRect = Pick<DOMRect, 'top' | 'bottom' | 'left' | 'right' | 'width' | 
  * set: `top` (bubble below or beside its target), `bottom` (bubble above its
  * target, so it grows upward away from it), or `centred` (no usable target).
  */
-export interface BubblePlacement {
+interface BubblePlacement {
   left: number;
   width: number;
   maxHeight: number;
@@ -320,7 +320,7 @@ export interface BubblePlacement {
   centred?: true;
 }
 
-export function placeBubble(
+function placeBubble(
   rect: TargetRect | null,
   position: TutorialStep['targetPosition'],
   viewportW: number,
@@ -378,16 +378,52 @@ export function placeBubble(
   }
 }
 
-/** A field the user types into: its keys are theirs, not the tour's. */
-function isEditableTarget(target: EventTarget | null): boolean {
+/**
+ * Input types that take no keys of their own: arrows and Escape are free there.
+ * Exported so the test can hold its own literal list equal to this set.
+ */
+export const KEYLESS_INPUT_TYPES: ReadonlySet<string> = new Set([
+  'button', 'submit', 'reset', 'checkbox', 'color', 'file', 'image',
+]);
+
+/**
+ * ARIA widgets whose arrow keys ARE the interaction (WAI-ARIA APG): a slider
+ * moves, a radio group or tab list changes selection, a tree or list moves
+ * focus. The browser's own range and radio inputs behave the same way.
+ * `application` is a surface that handles its own keys: the editor viewport
+ * canvas (`CanvasArea.tsx`), where the engine steers with ArrowLeft/ArrowRight
+ * in play mode (`engine/src/core/input.rs`) without consuming the event, so on
+ * a "Press Stop" card steering would otherwise also step the tour.
+ * Exported so the test can hold its own literal list equal to this set.
+ */
+export const ARROW_KEY_ROLES: ReadonlySet<string> = new Set([
+  'slider', 'spinbutton', 'radio', 'radiogroup', 'tab', 'tablist', 'tree', 'treeitem',
+  'listbox', 'option', 'menu', 'menubar', 'menuitem', 'menuitemradio', 'menuitemcheckbox',
+  'grid', 'gridcell', 'combobox', 'application',
+]);
+
+/**
+ * Does the focused element (or a surface it sits in) own this key? Then the
+ * tour must not also act on it:
+ * - a field the user types into owns every key;
+ * - a range or radio input, or an arrow-driven ARIA widget, owns the arrows;
+ * - anything inside ANOTHER dialog (the Export dialog a tour step points at)
+ *   owns its keys, so Escape there closes that dialog and not the tour.
+ */
+function targetOwnsKey(target: EventTarget | null, key: string): boolean {
   if (!(target instanceof HTMLElement)) return false;
+  const dialog = target.closest('[role="dialog"],[role="alertdialog"]');
+  if (dialog && !dialog.hasAttribute('data-tutorial-bubble')) return true;
   if (target.isContentEditable) return true;
   if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
+  const isArrow = key === 'ArrowLeft' || key === 'ArrowRight';
   if (target instanceof HTMLInputElement) {
-    // Buttons, checkboxes and the like take no text, so arrows are free there.
-    return !['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'color', 'file', 'image'].includes(
-      target.type,
-    );
+    if (target.type === 'range' || target.type === 'radio') return isArrow;
+    return !KEYLESS_INPUT_TYPES.has(target.type);
+  }
+  if (isArrow) {
+    const widget = target.closest('[role]');
+    if (widget && ARROW_KEY_ROLES.has(widget.getAttribute('role') ?? '')) return true;
   }
   return false;
 }
@@ -537,6 +573,7 @@ function TutorialBubble({
       ref={dialogRef}
       data-testid="tutorial-bubble"
       role="dialog"
+      data-tutorial-bubble=""
       aria-modal={blocksPage ? true : undefined}
       aria-labelledby={titleId}
       aria-describedby={`${bodyId} ${hintId}`}
