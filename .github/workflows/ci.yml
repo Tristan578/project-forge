@@ -167,7 +167,7 @@ jobs:
           # them, which carries a hash per mirrored file and so changes with every
           # skill or agent text edit; matching it would put the ~27-minute Windows
           # job on every SKILL.md change.
-          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/settings\.json$|^\.codex/hooks/|^tools/agentic-sync/port\.(mjs|json)$' && hooks=true
+          echo "$CHANGED" | grep -qE '^\.claude/hooks/|^\.claude/workflows/|^\.claude/settings\.json$|^\.codex/hooks/|^tools/agentic-sync/port\.(mjs|json)$' && hooks=true
           # Any package.json at ANY depth (web/, mcp-server/, apps/*, packages/*,
           # root) or the single root lockfile → run the lockfile-sync gate. Kept
           # ORTHOGONAL to any-code (like hooks): the gate is a ~30s self-contained

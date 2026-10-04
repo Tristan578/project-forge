@@ -57,7 +57,7 @@ Reviewers (dispatch in parallel, max 3 concurrent on M2):
 ```
 
 - Skip reviewers whose domain wasn't touched (e.g. skip ux-reviewer for pure API fixes).
-- PASS/FAIL only. Any issue at any severity = FAIL. Fix and re-review.
+- PASS/FAIL only, under the scope, severity and round-cap rules in `.claude/skills/review-protocol/SKILL.md`: blockers and majors in the diff fail; minors are fixed in the same push or filed; re-reviews cover only the fix diff; stop and ask the user if a blocker or major is still open after round 3.
 - NEVER use a generic `code-reviewer` in place of the 5 specialists.
 
 ### Phase 3: Quality Gate (BEFORE push)
@@ -88,7 +88,7 @@ sleep 180
 
 This invokes the full protocol: checkout each PR branch, read current code (not stale diffs), fix real bugs before replying, post threaded replies with commit SHAs, verify 0 unreplied remaining.
 
-**If `/resolve-all-pr-comments` finds real bugs:** fix them → re-run review board → push → wait → resolve again. Loop until clean.
+**If `/resolve-all-pr-comments` finds real bugs:** fix them → re-review only the fix diff → push → wait → resolve again. Stop and ask the user if a blocker or major is still open after round 3 (`.claude/skills/review-protocol/SKILL.md` → Scope, severity and the round cap).
 
 ### Phase 6: Verify Green
 
@@ -104,8 +104,8 @@ Move to the next item in the priority queue. Repeat the loop.
 
 ## Hard Rules
 
-1. **PASS or FAIL only.** Any issue = FAIL. No "pass with issues."
-2. **Boy Scout Rule.** See a bug, fix a bug. "Pre-existing" is never an excuse.
+1. **PASS or FAIL only.** No "pass with issues." What blocks, and when the loop stops, is set by the scope, severity and round-cap rules in `.claude/skills/review-protocol/SKILL.md`.
+2. **Boy Scout Rule.** See a bug, fix a bug — in the code you are changing. A pre-existing bug elsewhere is filed as an issue, not folded into this PR and not raised as a board finding.
 3. **NEVER merge PRs.** User reviews and merges. You ship to merge-ready.
 4. **NEVER weaken tests.** Fix the violations, not the assertions.
 5. **Every PR:** `Closes #NNNN` (GitHub issue number, not PF-XXX), changeset, quality gate.

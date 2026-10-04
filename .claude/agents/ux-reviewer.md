@@ -186,7 +186,7 @@ The UI must be:
 
 ## Review Verdict
 
-**PASS or FAIL only.** Any issue = FAIL. The review loops until clean.
+**PASS or FAIL only**, under the scope, severity and round-cap rules in `.claude/skills/review-protocol/SKILL.md`: review the diff and the code it touches; a blocker or major fails, a minor is listed but does not; pre-existing issues outside the diff go under follow-ups, not findings.
 
 Severity:
 
@@ -194,6 +194,8 @@ Severity:
 - **HIGH** — Inconsistency, missing interaction pattern, poor error UX
 - **MEDIUM** — Suboptimal layout, missing edge case, typography issue
 - **LOW** — Nitpick, style preference
+
+On the review board, CRITICAL and HIGH map to `blocker` or `major` and fail the board; MEDIUM and LOW map to `minor` and do not.
 
 ## When Reviewing Specs
 

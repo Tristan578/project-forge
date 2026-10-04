@@ -46,7 +46,7 @@ You MUST NOT move tickets or edit ticket metadata (priority, labels, team). You 
 
 ## Verdict Format
 
-Reviews are PASS or FAIL only. Any finding at any severity is a FAIL — there is no "pass with warnings."
+Reviews are PASS or FAIL only — there is no "pass with warnings". Under the scope, severity and round-cap rules in `.claude/skills/review-protocol/SKILL.md`, a blocker or major in the diff fails; a minor is listed and fixed or filed, and does not fail; a pre-existing issue outside the diff is a follow-up, not a finding.
 
 ```
 VERDICT: PASS / FAIL
