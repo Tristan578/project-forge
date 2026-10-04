@@ -1703,7 +1703,7 @@ export interface RouteAudit {
   file: string;
   source: string;
   analysis: StatusRouteAnalysis;
-  exemption?: Exemption;
+  exemption?: Exemption | undefined;
   problems: string[];
 }
 
