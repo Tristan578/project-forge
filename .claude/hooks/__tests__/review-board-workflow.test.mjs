@@ -107,6 +107,7 @@ test('round 3 still runs; round 4 does not run and returns STOP', async () => {
 
 for (const [name, args] of [
   ['since without seats', { round: 2, since: SINCE }],
+  ['since with an empty seats list', { round: 2, since: SINCE, seats: [], carried: ['architect', 'security', 'dx', 'ux', 'test'] }],
   ['since at round 1', { round: 1, since: SINCE, seats: ['dx'] }],
   ['since that is not a sha', { round: 2, since: 'HEAD~1', seats: ['dx'] }],
   ['an unknown seat', { round: 2, since: SINCE, seats: ['qa'] }],

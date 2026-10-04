@@ -95,7 +95,7 @@ for (const [name, list] of [['seats', seatsArg || []], ['carried', carried]]) {
   if (new Set(list).size !== list.length) argProblems.push(`${name} lists a seat twice`)
 }
 if (since && !/^[0-9a-f]{7,40}$/.test(since)) argProblems.push(`since "${since}" is not a commit sha`)
-if (since && !seatsArg) argProblems.push('a re-review (since) must name the seats to re-run')
+if (since && !(seatsArg && seatsArg.length)) argProblems.push('a re-review (since) must name at least one seat to re-run')
 if (since && round < 2) argProblems.push('a re-review (since) is round 2 or later; pass round')
 if (!since && (seatsArg || carried.length)) argProblems.push('seats and carried apply only to a re-review (since)')
 for (const k of [...(seatsArg || []), ...carried]) if (!KEYS.includes(k)) argProblems.push(`unknown seat "${k}"`)
