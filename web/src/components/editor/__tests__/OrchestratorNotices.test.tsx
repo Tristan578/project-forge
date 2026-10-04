@@ -20,6 +20,7 @@ import {
   RESERVATION_UNCONFIRMED_MESSAGE,
   SIGNED_OUT_MESSAGE,
 } from '@/stores/slices/orchestratorSlice';
+import { MCP_TOKEN_PARAM } from '@/lib/mcp/tokenParam';
 
 // A client-side Link keeps the editor's in-memory state (a plan waiting to be
 // built) across the trip to settings; a plain <a> would reload and drop it.
@@ -37,10 +38,63 @@ describe('orchestratorErrorAction', () => {
   it.each([
     [INSUFFICIENT_TOKENS_MESSAGE, { label: 'Buy tokens', href: '/settings?tab=tokens' }],
     [RESERVATION_UNCONFIRMED_MESSAGE, { label: 'Check balance', href: '/settings?tab=tokens' }],
-    // Building again is refused until they sign in.
-    [SIGNED_OUT_MESSAGE, { label: 'Sign in', href: '/sign-in' }],
   ])('names the follow-up for %s', (error, action) => {
     expect(orchestratorErrorAction(error)).toEqual(action);
+  });
+
+  // Building again is refused until they sign in, and sign-in must bring them
+  // back to the editor, not the dashboard.
+  it('sends a signed-out user to sign-in and back to where they were building', () => {
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, '/editor/p1?x=1')).toEqual({
+      label: 'Sign in',
+      href: '/sign-in?redirect_url=%2Feditor%2Fp1%3Fx%3D1',
+    });
+  });
+
+  // Anything that resolves off this origin would be an open redirect. The
+  // middle three start with '/' but a browser's URL parser reads them as
+  // another host: it treats '\' as '/' and drops tabs and newlines.
+  // '/..//evil.example/x' and '/a/..//evil.example' parse ON this origin, yet
+  // their pathname collapses to '//evil.example' (a '..' segment eats the one
+  // before it), which Clerk would then resolve as a protocol-relative URL — so
+  // the emitted value is checked, not the input. '//[x' and '/\[x' make the
+  // URL parser THROW (an unterminated IPv6 host); the helper must catch that
+  // and fall back rather than throw during render.
+  it.each([
+    undefined,
+    null,
+    '',
+    'https://evil.example/',
+    '//evil.example/x',
+    '/\\evil.example/x',
+    '/\t/evil.example/x',
+    '/\n/evil.example/x',
+    '/..//evil.example/x',
+    '/a/..//evil.example',
+    '//[x',
+    '/\\[x',
+  ])('falls back to plain sign-in for return path %j', (returnTo) => {
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, returnTo)?.href).toBe('/sign-in');
+  });
+
+  // The fragment is part of where they were (a deep link into a panel).
+  it('carries the hash of the return path', () => {
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, '/editor/p1#scene')?.href).toBe(
+      '/sign-in?redirect_url=%2Feditor%2Fp1%23scene',
+    );
+  });
+
+  // The MCP relay token must not be copied into a second URL.
+  it('drops the mcp relay token from the return path and keeps the rest', () => {
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, `/editor/p1?${MCP_TOKEN_PARAM}=secret-token&tab=scene`)?.href).toBe(
+      '/sign-in?redirect_url=%2Feditor%2Fp1%3Ftab%3Dscene',
+    );
+  });
+
+  it('leaves no dangling ? when the token was the only query parameter', () => {
+    expect(orchestratorErrorAction(SIGNED_OUT_MESSAGE, `/editor/p1?${MCP_TOKEN_PARAM}=tok`)?.href).toBe(
+      '/sign-in?redirect_url=%2Feditor%2Fp1',
+    );
   });
 
   // Their own sentence carries the next step; a token link would mislead.
@@ -71,6 +125,18 @@ describe('OrchestratorErrorNotice', () => {
     const link = screen.getByRole('link', { name: 'Buy tokens' });
     expect(link.getAttribute('href')).toBe('/settings?tab=tokens');
     expect(link.hasAttribute('data-next-link')).toBe(true);
+  });
+
+  it('renders the Sign in link client-side, returning to the current page', () => {
+    window.history.pushState({}, '', '/editor/proj-7?tab=scene');
+    try {
+      render(<OrchestratorErrorNotice error={SIGNED_OUT_MESSAGE} />);
+      const link = screen.getByRole('link', { name: 'Sign in' });
+      expect(link.getAttribute('href')).toBe('/sign-in?redirect_url=%2Feditor%2Fproj-7%3Ftab%3Dscene');
+      expect(link.hasAttribute('data-next-link')).toBe(true);
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
   });
 
   it('renders a linkless error as text alone', () => {

@@ -39,10 +39,21 @@ describe('RemixButton', () => {
     expect(screen.getByText('Remix')).toBeDefined();
   });
 
-  it('links to sign-in when not authenticated', () => {
+  // Built by signInHrefReturningToPlay, the same helper as the editor's Sign in
+  // follow-up: the return path is encoded once as a path and once more as the
+  // redirect_url value, so Clerk's single decode yields the play route.
+  it('links to sign-in, returning to this game, when not authenticated', () => {
     render(<RemixButton userId="user-1" slug="my-game" isAuthenticated={false} />);
     const link = screen.getByText('Sign up to remix').closest('a');
-    expect(link?.getAttribute('href')).toContain('/sign-in');
+    expect(link?.getAttribute('href')).toBe('/sign-in?redirect_url=%2Fplay%2Fuser-1%2Fmy-game');
+  });
+
+  it('encodes a slug with a slash and a space as one path segment', () => {
+    render(<RemixButton userId="user-1" slug="my game/x" isAuthenticated={false} />);
+    const link = screen.getByText('Sign up to remix').closest('a');
+    expect(link?.getAttribute('href')).toBe(
+      '/sign-in?redirect_url=%2Fplay%2Fuser-1%2Fmy%2520game%252Fx',
+    );
   });
 
   it('calls remix API when clicked (authenticated)', async () => {

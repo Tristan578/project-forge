@@ -191,9 +191,12 @@ describe('ReportGameDialog', () => {
     expect(fetchMock).not.toHaveBeenCalled();
 
     // Returns the viewer to the game they were reporting, with both segments
-    // encoded (the slug here contains a '/' and a space).
+    // encoded (the slug here contains a '/' and a space), then the whole path
+    // encoded once more as the redirect_url value — built by
+    // signInHrefReturningToPlay, so Clerk's single decode yields
+    // /play/user_2abcDEF/my%20awesome%2Fgame.
     expect(link.getAttribute('href')).toBe(
-      '/sign-in?redirect_url=/play/user_2abcDEF/my%20awesome%2Fgame'
+      '/sign-in?redirect_url=%2Fplay%2Fuser_2abcDEF%2Fmy%2520awesome%252Fgame'
     );
   });
 
