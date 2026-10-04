@@ -161,7 +161,7 @@ describe('scrubSentrySpan (beforeSendSpan, @sentry v11 streamed spans)', () => {
           span_id: 'fedcba9876543210',
           attributes: { reason: `retry after ${ANTHROPIC_KEY}` },
         },
-      ] as StreamedSpan['links'],
+      ] as NonNullable<StreamedSpan['links']>,
     });
 
     const out = scrubSentrySpan(span);
@@ -232,7 +232,7 @@ describe('scrubSentrySpan (beforeSendSpan, @sentry v11 streamed spans)', () => {
         'gen_ai.usage.input_tokens': 1234,
         'http.request.same_origin': true,
       } as unknown as StreamedSpan['attributes'],
-      links: [{ trace_id: 't', span_id: 's', attributes: { 'sentry.link.type': 'previous_trace' } }] as StreamedSpan['links'],
+      links: [{ trace_id: 't', span_id: 's', attributes: { 'sentry.link.type': 'previous_trace' } }] as NonNullable<StreamedSpan['links']>,
     });
     const before = structuredClone(span);
 
