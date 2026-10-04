@@ -18,7 +18,12 @@ PASS=0
 FAIL=0
 ok() { echo "  ok    $1"; PASS=$((PASS + 1)); }
 readonly -f ok
-bad() { echo "  FAIL  $1"; FAIL=$((FAIL + 1)); }
+# In GitHub Actions a failure is also an annotation, so the failing case is
+# named on the check run even when the job log is too long to read in full.
+bad() {
+  echo "  FAIL  $1"; FAIL=$((FAIL + 1))
+  [ "${GITHUB_ACTIONS:-}" != true ] || echo "::error title=require-pr-ready.test.sh::${1%%$'\n'*}"
+}
 readonly -f bad
 
 TMP="$(mktemp -d)"
@@ -74,8 +79,12 @@ OPEN='[{"resolved":true,"path":"a.ts","line":3,"comment_ids":[11]},{"resolved":f
 
 # run_hook <command> — runs the hook as Claude Code does (stdin JSON), with the
 # fake gh first on PATH and the repo's origin remote available.
+# MSYS_NO_PATHCONV / MSYS2_ARG_CONV_EXCL: under Git Bash on Windows, jq is a
+# native .exe and the MSYS runtime rewrites an argument that starts with / as
+# a Windows path ('/usr/bin/gh ...' -> 'C:/Program Files/Git/usr/bin/gh ...'),
+# so the command under test would not reach the hook verbatim. No-op elsewhere.
 run_hook() {
-  OUT=$(jq -nc --arg c "$1" '{tool_input:{command:$c}}' \
+  OUT=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -nc --arg c "$1" '{tool_input:{command:$c}}' \
     | (cd "$HERE" && PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" bash "$HOOK" 2>&1))
   RC=$?
 }
