@@ -306,6 +306,14 @@ if [ "$RC" -eq 0 ] && grep -qx 'repos/other/project/pulls/34' "$FAKE/calls.log" 
 else
   bad "GH_REPO= on post-board-verdict.sh (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
 fi
+# gh api fills {owner}/{repo} from GH_REPO, so that is the repository checked (#10329 Sentry).
+fixtures clean "$RESOLVED" "$GREEN"
+run_hook "GH_REPO=other/project gh api -X POST 'repos/{owner}/{repo}/pulls/34/ccr/ready_for_review'"
+if [ "$RC" -eq 0 ] && grep -qx 'repos/other/project/pulls/34' "$FAKE/calls.log" && ! grep -q 'Tristan578/project-forge' "$FAKE/calls.log"; then
+  ok "a {owner}/{repo} route under GH_REPO is checked against GH_REPO"
+else
+  bad "{owner}/{repo} under GH_REPO (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
+fi
 # The block message names the statement it matched.
 fixtures clean "$OPEN" "$GREEN"
 expect_block "the message names the matched call" 'true && bash -c "gh pr ready 10305"' 'Matched: gh pr ready 10305'

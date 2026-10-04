@@ -325,7 +325,8 @@ scan_gh() { # <default repo> <statement text> <args after gh...>
         i=$((i + 1))
       done
       route=${route#/}; route=${route%%\?*}
-      route=${route/\{owner\}\/\{repo\}/$ORIGIN}
+      # gh fills {owner}/{repo} from GH_REPO when set, else the current repository.
+      route=${route/\{owner\}\/\{repo\}/$repo}
       if [[ "$route" =~ ^repos/([^/]+/[^/]+)/pulls/([^/]+)/ccr/ready_for_review$ ]]; then
         add_target "${BASH_REMATCH[1]}#$(pr_number "${BASH_REMATCH[2]}")" "$stmt_text"
       elif [ "$route" = graphql ] && grep -q 'markPullRequestReadyForReview' <<<"$(resolve_body "$body")"; then
