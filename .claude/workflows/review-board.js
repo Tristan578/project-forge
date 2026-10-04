@@ -1,7 +1,7 @@
 export const meta = {
   name: 'review-board',
   description: 'Run the 5 specialized reviewers (architect/security/dx/ux/test) in parallel on the current branch; PASS only if all five PASS',
-  whenToUse: 'Before opening a PR, or when /review-protocol asks for the review board. args: optional {base: "main", focus: "free text"}',
+  whenToUse: 'Before opening a PR, or when /review-protocol asks for the review board. args: optional {base: "main", focus: "free text", round: 1, since: "<last reviewed sha>", seats: ["security"], carried: ["ux", "test"]}',
   phases: [
     { title: 'Review', detail: 'one agent per reviewer definition', model: 'sonnet' },
     { title: 'Publish', detail: 'post the verdict marker onto the PR so it becomes the review-board commit status', model: 'haiku' },
@@ -52,6 +52,9 @@ const VERDICT = {
         },
       },
     },
+    // Pre-existing defects the seat noticed OUTSIDE the diff's scope. Never a
+    // finding and never a FAIL: the orchestrator files them as ONE follow-up issue.
+    followups: { type: 'array', items: { type: 'string' } },
   },
 }
 
@@ -69,20 +72,69 @@ const VERDICT = {
 // only a bare branch name is rewritten.
 const rawBase = (args && args.base) || 'main'
 const base = rawBase.includes('/') ? rawBase : `origin/${rawBase}`
-const focus = (args && args.focus) ? `\nFocus area from the orchestrator: ${args.focus}\n` : ''
+// ROUNDS (review-protocol SKILL.md, "Scope, severity and the round cap").
+// Round 1 is the whole PR with all five seats. A re-review passes `since` (the
+// sha the last round reviewed), `round`, and `seats` (the seats that failed,
+// plus any whose domain the fix touches): those seats review `since..HEAD`
+// only. `carried` names the seats whose earlier PASS stands, so the published
+// count stays honest: a PASS needs every seat's LATEST verdict to be a pass.
+// Past round 3 the board does not run at all; the open findings go to the user
+// (lessons-learned #23).
+const KEYS = REVIEWERS.map(r => r.key)
+const round = (args && args.round !== undefined) ? args.round : 1
+const since = (args && typeof args.since === 'string') ? args.since : null
+const seatsArg = (args && Array.isArray(args.seats)) ? args.seats : null
+const carried = (args && Array.isArray(args.carried)) ? args.carried : []
+const argProblems = []
+// A round that is not an integer ("4", 3.5) must not fall back to round 1 and
+// slip past the cap.
+if (!Number.isInteger(round) || round < 1) argProblems.push(`round ${JSON.stringify(round)} is not a positive integer`)
+// Duplicates would inflate the published count: carried ['ux','ux','dx','test']
+// plus one re-run seat read as 5/5 with architect never accounted for.
+for (const [name, list] of [['seats', seatsArg || []], ['carried', carried]]) {
+  if (new Set(list).size !== list.length) argProblems.push(`${name} lists a seat twice`)
+}
+if (since && !/^[0-9a-f]{7,40}$/.test(since)) argProblems.push(`since "${since}" is not a commit sha`)
+if (since && !(seatsArg && seatsArg.length)) argProblems.push('a re-review (since) must name at least one seat to re-run')
+if (since && round < 2) argProblems.push('a re-review (since) is round 2 or later; pass round')
+if (!since && (seatsArg || carried.length)) argProblems.push('seats and carried apply only to a re-review (since)')
+for (const k of [...(seatsArg || []), ...carried]) if (!KEYS.includes(k)) argProblems.push(`unknown seat "${k}"`)
+if ((seatsArg || []).some(k => carried.includes(k))) argProblems.push('a seat cannot be both re-run and carried')
+// Every seat is accounted for exactly once on a re-review: re-run now, or
+// carried from an earlier PASS. `carried` is the orchestrator's assertion and
+// is not verified here, so the published line names it for a reader to audit.
+if (since && new Set([...(seatsArg || []), ...carried]).size !== KEYS.length) {
+  const unaccounted = KEYS.filter(k => !(seatsArg || []).includes(k) && !carried.includes(k))
+  argProblems.push(`a re-review must re-run or carry every seat; unaccounted: ${unaccounted.join(', ')}`)
+}
+if (argProblems.length) {
+  log(`review-board: NOT RUN — ${argProblems.join('; ')}`)
+  return { overall: 'FAIL', notRun: argProblems }
+}
+if (round > 3) {
+  log(`review-board: NOT RUN — round ${round} is past the cap of 3. Stop and bring the open blockers/majors to the user with a recommendation (fix, split, accept with a documented limit, or close).`)
+  return { overall: 'STOP', round }
+}
+const seated = seatsArg ? REVIEWERS.filter(r => seatsArg.includes(r.key)) : REVIEWERS
+const range = since ? `${since}..HEAD` : `${base}...HEAD`
+const scopeNote = since
+  ? `\n   THIS IS ROUND ${round}, A RE-REVIEW OF A FIX: review ONLY \`git diff ${range}\` (the fix since the last reviewed sha) and the code it directly touches, and check that the blocking findings it claims to close are closed. Do not re-review the rest of the PR.`
+  : ''
+const focus = (args && args.focus) ? `\nFocus area from the orchestrator: ${args.focus}\nA focus narrows where you look first; it never excuses a blocker or major elsewhere in the diff.\n` : ''
 
 phase('Review')
-const results = await parallel(REVIEWERS.map(r => () =>
+const results = await parallel(seated.map(r => () =>
   agent(
     `You are the ${r.key} reviewer on the SpawnForge review board. This is a READ-ONLY review: do NOT create, edit or delete files, commit, push, or move taskboard tickets — this rule overrides anything in the role definition below that tells you to write tests, fix code or commit. Where the definition would have you write something, record it as a finding instead.\n` +
     `1. Resolve the agent definition \`${r.def}\` — it may be a shell glob, so run \`ls ${r.def}\` first; exactly one file must match. Read that file and adopt its role, standards and checklist as a reviewer. If zero or more than one file matches, return verdict FAIL with a single finding naming the unresolved definition — never substitute a generic reviewer.\n` +
     `2. Run \`git rev-parse HEAD\` FIRST and return it as \`sha\`. That is the commit your review covers, and it is what the published verdict is recorded against — so read it before you read the diff, not after.\n` +
     `3. Run \`git fetch origin --quiet\` before anything else, so ${base} is the trunk as it stands NOW rather than as this worktree last saw it.\n` +
-    `4. Review the diff of the current branch against ${base}: run \`git diff ${base}...HEAD --stat\` first, then \`git diff ${base}...HEAD\`, and read every changed file in full.\n` +
+    `4. Review the diff ${range}: run \`git diff ${range} --stat\` first, then \`git diff ${range}\`, and read every changed file in full.${scopeNote}\n` +
     `   If that diff contains work plainly UNRELATED to what the orchestrator described — other features, other tickets' files, commits that look already-merged — STOP and return FAIL with one finding naming two or three of those unrelated paths, because the base is wrong and every finding you would write is about somebody else's work. Check it with \`git merge-base ${base} HEAD\` before you conclude that: a three-dot diff is measured from the merge base, so a busy trunk does NOT pull other people's commits into it.\n` +
     `   SIZE ALONE IS NOT THAT SIGNAL. A large PR is legitimately large, and the orchestrator may describe only the latest increment of one — being handed a 150-file diff after a note about a 2-file change is the expected shape of a long-running branch, not evidence of a wrong base. Judge by whether the CONTENT belongs to the described work.\n` +
-    `5. Verdict is PASS or FAIL only — ANY finding at ANY severity is a FAIL (no "pass with issues").\n` +
-    `6. Before returning, run \`git status --porcelain\`; if it shows anything you changed, revert it and add a finding saying the review attempted a write.${focus}\n` +
+    `5. SCOPE (.claude/skills/review-protocol/SKILL.md, "Scope, severity and the round cap"): review the changed lines and the code they directly interact with — the changed files, and the callers and callees of changed functions. A pre-existing defect outside that scope, a hypothetical you have not tied to a changed line, or a "while you're here" improvement is NOT a finding; put a real pre-existing bug in \`followups\`. Do not build scratch apps, harnesses or production builds to hunt for new attack shapes; run one only to CONFIRM a defect you have already tied to a specific changed line, and name that line.\n` +
+    `6. SEVERITY: \`blocker\`/\`major\` = a correctness or security defect in the diff, a broken or vacuous test of the changed code, or a false claim in the PR. \`minor\` = wording, comment style, docs drift, a nice-to-have test. A security finding rated CRITICAL, HIGH or MEDIUM is a blocker or major, never a minor; a UX finding rated CRITICAL or HIGH is a blocker or major, UX MEDIUM or LOW is minor. Verdict is FAIL if you have any blocker or major, else PASS — list minors either way; they do not fail the board.\n` +
+    `7. Before returning, run \`git status --porcelain\`; if it shows anything you changed, revert it and add a blocker finding saying the review attempted a write.${focus}\n` +
     `Return the structured verdict.`,
     // A REVIEWER SEAT IS A SONNET SEAT. Left unset, every seat inherits the
     // orchestrator's model, and five frontier agents re-reading a whole diff is
@@ -98,8 +150,19 @@ const results = await parallel(REVIEWERS.map(r => () =>
 ))
 
 const boards = results.filter(Boolean)
-const missing = REVIEWERS.map(r => r.key).filter(k => !boards.some(b => b.reviewer === k))
-const failed = boards.filter(b => b.verdict !== 'PASS' || (b.findings && b.findings.length > 0))
+const missing = seated.map(r => r.key).filter(k => !boards.some(b => b.reviewer === k))
+// Only a blocker or major fails the board; minors are fixed in the same push or
+// filed (review-protocol SKILL.md, "Scope, severity and the round cap"). Counting
+// every minor as a FAIL is what made boards loop for 9-16 rounds (lessons-learned #23).
+const blocking = f => f && (f.severity === 'blocker' || f.severity === 'major')
+// The FINDINGS decide, not the seat's own verdict word: a seat that says FAIL
+// over minors only has found nothing that blocks. A FAIL that names no finding
+// at all cannot be checked, so it still fails (fail closed).
+// The security seat is the exception: its FAIL stands whatever severity it
+// gave its findings, because a security defect is never `minor` (item 6), so
+// a security FAIL over minors contradicts its own rule and deserves a stop.
+const failed = boards.filter(b => (b.findings || []).some(blocking)
+  || (b.verdict !== 'PASS' && (!(b.findings || []).length || b.reviewer === 'security')))
 
 // THE SHA THE BOARD REVIEWED, taken from the reviewers rather than from GitHub.
 // Each measured `git rev-parse HEAD` before reading its diff, so if they do not
@@ -108,8 +171,12 @@ const failed = boards.filter(b => b.verdict !== 'PASS' || (b.findings && b.findi
 // verdict is a statement about one tree.
 const shas = [...new Set(boards.map(b => b.sha).filter(Boolean))]
 const reviewedSha = shas.length === 1 ? shas[0] : null
-const overall = missing.length === 0 && failed.length === 0 && reviewedSha ? 'PASS' : 'FAIL'
-log(`review-board: ${overall} (${boards.length}/${REVIEWERS.length} reported, ${failed.length} failed, ${missing.length} missing, ${shas.length} distinct sha(s))`)
+// Seats counted toward the published total: the DISTINCT seats that reported
+// now, plus the ones whose earlier PASS was carried. It is a reported/total
+// count, so a FAIL can read 5/5 too; only a PASS needs all five.
+const counted = new Set([...boards.map(b => b.reviewer), ...carried]).size
+const overall = missing.length === 0 && failed.length === 0 && reviewedSha && counted === REVIEWERS.length ? 'PASS' : 'FAIL'
+log(`review-board: round ${round}: ${overall} (${boards.length}/${seated.length} seats reported, ${carried.length} carried, ${failed.length} failed, ${missing.length} missing, ${shas.length} distinct sha(s))`)
 if (!reviewedSha) {
   log(`review-board: NOT PUBLISHING — reviewers reported ${shas.length} distinct shas (${shas.join(', ') || 'none'}); re-run the board on a still branch`)
 }
@@ -133,9 +200,9 @@ if (reviewedSha) {
   published = await agent(
     `Publish the review board's verdict onto the pull request for the current branch.\n` +
     `1. \`gh pr view --json number --jq .number\`. If there is no PR for this branch, report that and STOP — do not create one, and do not substitute another sha.\n` +
-    `2. Run EXACTLY: bash scripts/post-board-verdict.sh <pr number> ${overall} ${reviewedSha} ${boards.length}/${REVIEWERS.length} "<one line: how many reviewers reported and how many failed>"\n` +
+    `2. Run EXACTLY: bash scripts/post-board-verdict.sh <pr number> ${overall} ${reviewedSha} ${counted}/${REVIEWERS.length} "<one line: round ${round}${since ? `, fix diff since ${since.slice(0, 8)}, re-run: ${seated.map(r => r.key).join(' ')}, carried: ${carried.join(' ') || 'none'}` : ''}; how many seats reported and how many failed>"\n` +
     `   The sha is fixed above. It is the commit the reviewers actually read. Do NOT look up the PR's current head and do NOT substitute it — if they differ, that difference is the signal, and the check reports the verdict as stale on purpose.\n` +
-    `   The seat count is fixed above too (${boards.length} of ${REVIEWERS.length} seats reported): the script refuses a PASS with a seat missing, and \`board-verdict.sh\` reads a partial or countless PASS as pending (#10141). Do NOT change it.\n` +
+    `   The seat count is fixed above too (${counted} of ${REVIEWERS.length}: ${boards.length} reported this round, ${carried.length} carried from earlier rounds): the script refuses a PASS with a seat missing, and \`board-verdict.sh\` reads a partial or countless PASS as pending (#10141). Do NOT change it.\n` +
     `3. Report the script's output verbatim. Do not edit any file, and do not post any other comment.`,
     // Mechanical: read a PR number, run one fixed script, echo its output.
     { label: 'publish:verdict', phase: 'Publish', model: 'haiku', effort: 'low' }
@@ -150,4 +217,6 @@ if (reviewedSha) {
     : `review-board: published ${overall} for ${reviewedSha}`)
 }
 
-return { overall, missing, reviewedSha, reviews: boards, published }
+const followups = [...new Set(boards.flatMap(b => b.followups || []))]
+const minors = boards.flatMap(b => (b.findings || []).filter(f => !blocking(f)).map(f => ({ reviewer: b.reviewer, ...f })))
+return { overall, round, since, carried, missing, reviewedSha, reviews: boards, minors, followups, published }
