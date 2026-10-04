@@ -313,6 +313,16 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   // Catch-all: jobs that reference the user directly but may not be linked to a project
   statements.push(neonSql`DELETE FROM generation_jobs WHERE user_id = ${userId}`);
 
+  // 7b. Provider job ownership bindings (#10262). provider_job_owners.user_id
+  //     is a FK to users.id with no ON DELETE CASCADE, and every async
+  //     generation the user ran wrote one row server-side. Without this delete
+  //     the final `DELETE FROM users` violates that FK, the whole transaction
+  //     rolls back, and account deletion (both /api/user/delete and the Clerk
+  //     `user.deleted` webhook) fails for anyone who ever generated an asset.
+  //     The schema-driven test in user-service.test.ts derives this list from
+  //     schema.ts, so the next such table cannot be forgotten here.
+  statements.push(neonSql`DELETE FROM provider_job_owners WHERE user_id = ${userId}`);
+
   // 8. Projects (after generation_jobs)
   if (projectIds.length > 0) {
     statements.push(neonSql`DELETE FROM projects WHERE user_id = ${userId}`);

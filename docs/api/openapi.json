@@ -1922,7 +1922,9 @@
             }
           },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "The jobId is not bound to the caller (another account's job, or one created before ownership binding shipped). Terminal: do not retry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We lost track of this generation, so it was stopped. Try generating it again." } } } },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We could not check on this generation because a service was temporarily unavailable. Try generating it again." } } } }
         }
       }
     },
@@ -1988,7 +1990,9 @@
             }
           },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "The jobId is not bound to the caller (another account's job, or one created before ownership binding shipped). Terminal: do not retry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We lost track of this generation, so it was stopped. Try generating it again." } } } },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We could not check on this generation because a service was temporarily unavailable. Try generating it again." } } } }
         }
       }
     },
@@ -2197,7 +2201,9 @@
         "responses": {
           "200": { "description": "Job status with equirectangular image URL in resultUrl", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationStatus" } } } },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "The jobId is not bound to the caller (another account's job, or one created before ownership binding shipped). Terminal: do not retry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We lost track of this generation, so it was stopped. Try generating it again." } } } },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We could not check on this generation because a service was temporarily unavailable. Try generating it again." } } } }
         }
       }
     },
@@ -2246,7 +2252,9 @@
         "responses": {
           "200": { "description": "Job status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationStatus" } } } },
           "400": { "description": "Missing jobId" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "description": "The jobId is not bound to the caller (another account's job, or one created before ownership binding shipped). Terminal: do not retry.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We lost track of this generation, so it was stopped. Try generating it again." } } } },
+          "503": { "description": "The job-ownership lookup failed, so the poll was refused without resolving a key. Retryable: poll again (a 404 is the terminal ownership refusal).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "We could not check on this generation because a service was temporarily unavailable. Try generating it again." } } } }
         }
       }
     },

@@ -186,8 +186,13 @@ export async function resolveApiKey(
   // polls is the per-route poll gate (`panelTierGateResponseForPoll` in
   // `@/lib/api/panelTierGate`), which still refuses a $0 account on a
   // creator-or-above panel and a starter that never held tokens on every
-  // hobbyist panel. It is NOT a job-ownership check: the status routes do not
-  // bind jobId to the caller (pre-existing, tracked in #10262). BYOK was already preferred above, and
+  // hobbyist panel. It is NOT a job-ownership check. Ownership is checked
+  // separately (#10262): every status route that resolves a key calls
+  // `verifyProviderJobOwner` (`@/lib/generate/jobOwnership`) after its poll
+  // gate and before this call, and refuses a job the caller does not own
+  // (`music/status` resolves no key). The QStash `generation-complete`
+  // callback has no signed-in caller; it verifies the QStash signature on its
+  // payload before this call instead. BYOK was already preferred above, and
   // `getPlatformKey` still throws when the platform key is not configured.
   // BOTH halves are required: a charged call named `status_check`, or a free
   // call named anything else, still goes through every check.
