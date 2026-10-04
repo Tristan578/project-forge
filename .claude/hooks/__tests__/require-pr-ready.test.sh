@@ -41,6 +41,7 @@ for a in "$@"; do
     *) [ -z "$route" ] && route="$a" ;;
   esac
 done
+printf '%s\n' "$route" >> "$FAKE_DIR/calls.log"
 case "$route" in
   graphql) f=graphql.json ;;
   repos/*/pulls/*/ccr/review_threads) f=threads.json ;;
@@ -58,6 +59,7 @@ chmod +x "$TMP/bin/gh"
 # Writes a fresh fixture set; "-" leaves that route unanswered.
 fixtures() {
   rm -f "$FAKE"/*.json
+  : > "$FAKE/calls.log"
   jq -nc --arg s "$1" --arg h "$HEAD_SHA" '{head:{sha:$h}, mergeable_state:$s}' > "$FAKE/pr.json"
   [ "$2" = "-" ] || printf '%s\n' "$2" > "$FAKE/threads.json"
   [ "$3" = "-" ] || printf '%s\n' "$3" > "$FAKE/checks.json"
@@ -162,11 +164,39 @@ expect_allow "a pending commit status (review-board before its PASS) does not bl
 for s in failure error; do
   fixtures clean "$RESOLVED" "$GREEN"
   printf '{"statuses":[{"context":"Vercel","state":"%s"}]}\n' "$s" > "$FAKE/status.json"
-  expect_block "a commit status in $s blocks, naming it" "$READY" 'commit statuses failed on 01234567: Vercel'
+  expect_block "a commit status in $s blocks, naming it" "$READY" "commit statuses not passing on 01234567: Vercel ($s)"
 done
 fixtures clean "$RESOLVED" "$GREEN"
 rm -f "$FAKE/status.json"
 expect_block "commit statuses unreadable blocks" "$READY" 'cannot read the commit statuses'
+fixtures clean "$RESOLVED" "$GREEN"
+printf '%s\n' '{"statuses":[{"context":"review-board","state":"pending"},{"context":"Vercel","state":"pending"}]}' > "$FAKE/status.json"
+expect_block "a pending status other than review-board blocks (#10329 review)" "$READY" 'commit statuses not passing on 01234567: Vercel (pending)'
+
+# --- Each statement is read on its own (#10329 review).
+fixtures clean "$OPEN" "$GREEN"
+expect_block "an --undo in one statement does not hide a ready call in the next" 'gh pr ready 12 --undo; gh pr ready 10305' 'unresolved review threads'
+expect_block "...nor in the previous one" 'gh pr ready 10305 && gh pr ready 12 --undo' 'unresolved review threads'
+expect_allow "gh pr ready --undo with the number after the flag is still not a ready call" 'gh pr ready --undo 10305'
+# The repository each call names is the one checked.
+for c in 'gh pr ready 34 --repo other/project' 'gh pr ready -R other/project 34' 'gh pr ready --repo=other/project 34' 'gh pr ready https://github.com/other/project/pull/34'; do
+  fixtures clean "$RESOLVED" "$GREEN"
+  run_hook "$c"
+  if [ "$RC" -eq 0 ] && grep -qx 'repos/other/project/pulls/34' "$FAKE/calls.log" \
+    && ! grep -q 'Tristan578/project-forge' "$FAKE/calls.log"; then
+    ok "'$c' is checked against other/project, not the origin"
+  else
+    bad "'$c' (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
+  fi
+done
+fixtures clean "$RESOLVED" "$GREEN"
+run_hook 'gh pr ready 1 -R a/one; gh pr ready 2 -R b/two'
+if [ "$RC" -eq 0 ] && grep -qx 'repos/a/one/pulls/1' "$FAKE/calls.log" && grep -qx 'repos/b/two/pulls/2' "$FAKE/calls.log" \
+  && ! grep -qE 'repos/(a/one/pulls/2|b/two/pulls/1)$' "$FAKE/calls.log"; then
+  ok "two ready calls each check their own repository"
+else
+  bad "two ready calls, two repos (rc=$RC): $(tr '\n' ' ' < "$FAKE/calls.log")"
+fi
 
 # --- Pagination: a failure on the SECOND page of check runs still blocks.
 fixtures clean "$RESOLVED" "$GREEN"
