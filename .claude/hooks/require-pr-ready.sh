@@ -24,6 +24,9 @@
 #   2. no check run on the head failed, timed out, was cancelled, failed to
 #      start or needs action, and none is still queued or running — each
 #      check judged by its latest run (a re-run replaces a failed attempt);
+#   2b. no legacy commit status on the head (Vercel, review-board, ...) is in
+#      `failure` or `error`. A `pending` status does not block: review-board
+#      reads pending until the very PASS this hook guards is posted;
 #   3. GitHub reports no merge conflict (`mergeable_state` is not `dirty`,
 #      and not `unknown` — still computing; retry in a few seconds).
 # FAIL-CLOSED: a fact that cannot be read blocks, and the message says which.
@@ -125,6 +128,13 @@ for pr in "${PRS[@]}"; do
   [ -z "$failed" ] || block "PR #$pr: checks did not pass on ${head:0:8}: $failed"
   pending=$(jq -r '[.[] | select(.status != "completed") | .name] | unique | join(", ")' <<<"$checks")
   [ -z "$pending" ] || block "PR #$pr: checks still running on ${head:0:8}: $pending"
+
+  # 2b. Legacy commit statuses: a failed one blocks, a pending one does not.
+  statuses=$(gh api "repos/$REPO/commits/$head/status" 2>/dev/null) \
+    || block "PR #$pr: cannot read the commit statuses on ${head:0:8}"
+  bad_status=$(jq -r '[.statuses[]? | select(.state == "failure" or .state == "error") | .context] | unique | join(", ")' <<<"$statuses" 2>/dev/null) \
+    || block "PR #$pr: the commit-status answer for ${head:0:8} was not JSON"
+  [ -z "$bad_status" ] || block "PR #$pr: commit statuses failed on ${head:0:8}: $bad_status"
 
   # 3. Mergeability.
   case "$state" in

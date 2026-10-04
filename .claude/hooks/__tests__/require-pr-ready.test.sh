@@ -45,6 +45,7 @@ case "$route" in
   graphql) f=graphql.json ;;
   repos/*/pulls/*/ccr/review_threads) f=threads.json ;;
   repos/*/commits/*/check-runs*) f=checks.json ;;
+  repos/*/commits/*/status) f=status.json ;;
   repos/*/pulls/*) f=pr.json ;;
   *) exit 1 ;;
 esac
@@ -60,6 +61,7 @@ fixtures() {
   jq -nc --arg s "$1" --arg h "$HEAD_SHA" '{head:{sha:$h}, mergeable_state:$s}' > "$FAKE/pr.json"
   [ "$2" = "-" ] || printf '%s\n' "$2" > "$FAKE/threads.json"
   [ "$3" = "-" ] || printf '%s\n' "$3" > "$FAKE/checks.json"
+  printf '%s\n' '{"state":"success","statuses":[]}' > "$FAKE/status.json"
   [ -z "${4:-}" ] || printf '%s\n' "$4" > "$FAKE/graphql.json"
 }
 readonly -f fixtures
@@ -152,6 +154,19 @@ fixtures clean "$RESOLVED" '{"check_runs":[{"id":2,"name":"Lint","status":"compl
 expect_block "a failed re-run after a pass blocks" "$READY" 'checks did not pass on 01234567: Lint'
 fixtures clean "$RESOLVED" '{"check_runs":[{"id":1,"name":"Scan","status":"completed","conclusion":"failure","app":{"id":1}},{"id":2,"name":"Scan","status":"completed","conclusion":"success","app":{"id":2}}]}'
 expect_block "a same-named check from a DIFFERENT app is judged separately" "$READY" 'checks did not pass on 01234567: Scan'
+
+# --- Legacy commit statuses: failure/error block, pending does not.
+fixtures clean "$RESOLVED" "$GREEN"
+printf '%s\n' '{"statuses":[{"context":"review-board","state":"pending"},{"context":"Vercel","state":"success"}]}' > "$FAKE/status.json"
+expect_allow "a pending commit status (review-board before its PASS) does not block" "$READY"
+for s in failure error; do
+  fixtures clean "$RESOLVED" "$GREEN"
+  printf '{"statuses":[{"context":"Vercel","state":"%s"}]}\n' "$s" > "$FAKE/status.json"
+  expect_block "a commit status in $s blocks, naming it" "$READY" 'commit statuses failed on 01234567: Vercel'
+done
+fixtures clean "$RESOLVED" "$GREEN"
+rm -f "$FAKE/status.json"
+expect_block "commit statuses unreadable blocks" "$READY" 'cannot read the commit statuses'
 
 # --- Pagination: a failure on the SECOND page of check runs still blocks.
 fixtures clean "$RESOLVED" "$GREEN"
