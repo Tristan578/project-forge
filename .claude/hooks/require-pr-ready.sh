@@ -200,7 +200,8 @@ scan() { # <shell text> <depth>
     # Leading assignments and wrappers.
     while [ "$k" -lt "${#w[@]}" ]; do
       case "${w[$k]}" in
-        GH_REPO=*) repo=${w[$k]#GH_REPO=} ;;
+        # gh treats an empty GH_REPO as unset: the current repository.
+        GH_REPO=*) repo=${w[$k]#GH_REPO=}; repo=${repo:-$ORIGIN} ;;
         [A-Za-z_]*=*) ;;
         sudo|command|exec|time|nohup|env|then|do|else|elif|if|while|until|'!'|'{') ;;
         -*) if [ "$k" -eq 0 ] || [ "${w[$((k - 1))]}" != env ]; then break; fi ;;
@@ -329,6 +330,10 @@ scan_gh() { # <default repo> <statement text> <args after gh...>
       route=${route/\{owner\}\/\{repo\}/$repo}
       if [[ "$route" =~ ^repos/([^/]+/[^/]+)/pulls/([^/]+)/ccr/ready_for_review$ ]]; then
         add_target "${BASH_REMATCH[1]}#$(pr_number "${BASH_REMATCH[2]}")" "$stmt_text"
+      elif [[ "$route" == */ccr/ready_for_review ]]; then
+        # A ready route the hook cannot read (repos//..., an odd placeholder)
+        # names no PR it can check, so it blocks.
+        add_target "$repo#?" "$stmt_text"
       elif [ "$route" = graphql ] && grep -q 'markPullRequestReadyForReview' <<<"$(resolve_body "$body")"; then
         add_target "$repo#?" "$stmt_text"
       elif [ "$write" -eq 1 ] && board_marker "$(resolve_body "$body")"; then

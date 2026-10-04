@@ -314,6 +314,17 @@ if [ "$RC" -eq 0 ] && grep -qx 'repos/other/project/pulls/34' "$FAKE/calls.log" 
 else
   bad "{owner}/{repo} under GH_REPO (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
 fi
+# An empty GH_REPO= is unset to gh, so the call is checked against origin (#10329 board).
+fixtures clean "$RESOLVED" "$GREEN"
+run_hook "GH_REPO= gh api -X POST 'repos/{owner}/{repo}/pulls/34/ccr/ready_for_review'"
+if [ "$RC" -eq 0 ] && grep -qx 'repos/Tristan578/project-forge/pulls/34' "$FAKE/calls.log"; then
+  ok "an empty GH_REPO= prefix falls back to origin"
+else
+  bad "empty GH_REPO= prefix (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
+fi
+# A ready route the hook cannot parse blocks rather than passing.
+fixtures clean "$RESOLVED" "$GREEN"
+expect_block "an unparseable ready route blocks" 'gh api -X POST repos//pulls/34/ccr/ready_for_review' 'without a PR number'
 # The block message names the statement it matched.
 fixtures clean "$OPEN" "$GREEN"
 expect_block "the message names the matched call" 'true && bash -c "gh pr ready 10305"' 'Matched: gh pr ready 10305'
