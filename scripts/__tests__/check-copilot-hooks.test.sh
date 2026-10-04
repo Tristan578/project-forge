@@ -202,6 +202,14 @@ expect_one_fail comment-same-line-after-newline \
   '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"true\ntrue # bash .claude/hooks/on-stop.sh"}]}}' \
   'no hook runs on-stop.sh on an end-of-turn event' \
   "a # earlier on on-stop.sh's own line still comments it out"
+# The value of a variable assignment runs nothing.
+expect_one_fail assigned \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"HOOK=.claude/hooks/on-stop.sh"}]}}' \
+  'no hook runs on-stop.sh on an end-of-turn event' \
+  "on-stop.sh assigned to a variable does not count as running it"
+expect_pass assigned-missing \
+  '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"HOOK=\"scripts/gone.sh\"; bash .claude/hooks/on-stop.sh"}]}}' \
+  "a missing script assigned (quoted) to a variable does not fail the existence check"
 # A path that runs nothing is not required to exist.
 expect_pass commented-missing \
   '{"version":1,"hooks":{"agentStop":[{"type":"command","bash":"bash .claude/hooks/on-stop.sh # was: bash scripts/gone.sh"}]}}' \

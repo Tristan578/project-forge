@@ -158,6 +158,8 @@ const KEYWORDS = new Set(['then', 'do', 'else', '!', '{']);
 const LEADERS = new Set(['exec', 'command']);
 const RUNNERS = new Set(['bash', 'sh', 'source', '.']);
 function inCommandPosition(before) {
+  // The value of an assignment (`X=path.sh`, `X="path.sh"`) runs nothing.
+  if (/=["']?$/.test(before)) return false;
   const words = before
     .split(/;|&&|\|\||\||\n|\(|`/)
     .pop()
