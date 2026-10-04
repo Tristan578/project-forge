@@ -203,7 +203,7 @@ scan() { # <shell text> <depth>
         GH_REPO=*) repo=${w[$k]#GH_REPO=} ;;
         [A-Za-z_]*=*) ;;
         sudo|command|exec|time|nohup|env|then|do|else|elif|if|while|until|'!'|'{') ;;
-        -*) [ "$k" -gt 0 ] && [ "${w[$((k - 1))]}" = env ] || break ;;
+        -*) if [ "$k" -eq 0 ] || [ "${w[$((k - 1))]}" != env ]; then break; fi ;;
         *) break ;;
       esac
       k=$((k + 1))
