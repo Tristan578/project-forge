@@ -81,17 +81,32 @@ const base = rawBase.includes('/') ? rawBase : `origin/${rawBase}`
 // Past round 3 the board does not run at all; the open findings go to the user
 // (lessons-learned #23).
 const KEYS = REVIEWERS.map(r => r.key)
-const round = (args && Number.isInteger(args.round)) ? args.round : 1
+const round = (args && args.round !== undefined) ? args.round : 1
 const since = (args && typeof args.since === 'string') ? args.since : null
 const seatsArg = (args && Array.isArray(args.seats)) ? args.seats : null
 const carried = (args && Array.isArray(args.carried)) ? args.carried : []
 const argProblems = []
+// A round that is not an integer ("4", 3.5) must not fall back to round 1 and
+// slip past the cap.
+if (!Number.isInteger(round) || round < 1) argProblems.push(`round ${JSON.stringify(round)} is not a positive integer`)
+// Duplicates would inflate the published count: carried ['ux','ux','dx','test']
+// plus one re-run seat read as 5/5 with architect never accounted for.
+for (const [name, list] of [['seats', seatsArg || []], ['carried', carried]]) {
+  if (new Set(list).size !== list.length) argProblems.push(`${name} lists a seat twice`)
+}
 if (since && !/^[0-9a-f]{7,40}$/.test(since)) argProblems.push(`since "${since}" is not a commit sha`)
 if (since && !seatsArg) argProblems.push('a re-review (since) must name the seats to re-run')
 if (since && round < 2) argProblems.push('a re-review (since) is round 2 or later; pass round')
 if (!since && (seatsArg || carried.length)) argProblems.push('seats and carried apply only to a re-review (since)')
 for (const k of [...(seatsArg || []), ...carried]) if (!KEYS.includes(k)) argProblems.push(`unknown seat "${k}"`)
 if ((seatsArg || []).some(k => carried.includes(k))) argProblems.push('a seat cannot be both re-run and carried')
+// Every seat is accounted for exactly once on a re-review: re-run now, or
+// carried from an earlier PASS. `carried` is the orchestrator's assertion and
+// is not verified here, so the published line names it for a reader to audit.
+if (since && new Set([...(seatsArg || []), ...carried]).size !== KEYS.length) {
+  const unaccounted = KEYS.filter(k => !(seatsArg || []).includes(k) && !carried.includes(k))
+  argProblems.push(`a re-review must re-run or carry every seat; unaccounted: ${unaccounted.join(', ')}`)
+}
 if (argProblems.length) {
   log(`review-board: NOT RUN — ${argProblems.join('; ')}`)
   return { overall: 'FAIL', notRun: argProblems }
@@ -143,7 +158,11 @@ const blocking = f => f && (f.severity === 'blocker' || f.severity === 'major')
 // The FINDINGS decide, not the seat's own verdict word: a seat that says FAIL
 // over minors only has found nothing that blocks. A FAIL that names no finding
 // at all cannot be checked, so it still fails (fail closed).
-const failed = boards.filter(b => (b.findings || []).some(blocking) || (b.verdict !== 'PASS' && !(b.findings || []).length))
+// The security seat is the exception: its FAIL stands whatever severity it
+// gave its findings, because a security defect is never `minor` (item 6), so
+// a security FAIL over minors contradicts its own rule and deserves a stop.
+const failed = boards.filter(b => (b.findings || []).some(blocking)
+  || (b.verdict !== 'PASS' && (!(b.findings || []).length || b.reviewer === 'security')))
 
 // THE SHA THE BOARD REVIEWED, taken from the reviewers rather than from GitHub.
 // Each measured `git rev-parse HEAD` before reading its diff, so if they do not
@@ -152,9 +171,10 @@ const failed = boards.filter(b => (b.findings || []).some(blocking) || (b.verdic
 // verdict is a statement about one tree.
 const shas = [...new Set(boards.map(b => b.sha).filter(Boolean))]
 const reviewedSha = shas.length === 1 ? shas[0] : null
-// Seats counted toward the published total: the ones that reported now, plus
-// the ones whose earlier PASS was carried. A PASS needs all five.
-const counted = boards.length + carried.length
+// Seats counted toward the published total: the DISTINCT seats that reported
+// now, plus the ones whose earlier PASS was carried. It is a reported/total
+// count, so a FAIL can read 5/5 too; only a PASS needs all five.
+const counted = new Set([...boards.map(b => b.reviewer), ...carried]).size
 const overall = missing.length === 0 && failed.length === 0 && reviewedSha && counted === REVIEWERS.length ? 'PASS' : 'FAIL'
 log(`review-board: round ${round}: ${overall} (${boards.length}/${seated.length} seats reported, ${carried.length} carried, ${failed.length} failed, ${missing.length} missing, ${shas.length} distinct sha(s))`)
 if (!reviewedSha) {
@@ -180,7 +200,7 @@ if (reviewedSha) {
   published = await agent(
     `Publish the review board's verdict onto the pull request for the current branch.\n` +
     `1. \`gh pr view --json number --jq .number\`. If there is no PR for this branch, report that and STOP — do not create one, and do not substitute another sha.\n` +
-    `2. Run EXACTLY: bash scripts/post-board-verdict.sh <pr number> ${overall} ${reviewedSha} ${counted}/${REVIEWERS.length} "<one line: round ${round}; how many seats reported, how many were carried, how many failed>"\n` +
+    `2. Run EXACTLY: bash scripts/post-board-verdict.sh <pr number> ${overall} ${reviewedSha} ${counted}/${REVIEWERS.length} "<one line: round ${round}${since ? `, fix diff since ${since.slice(0, 8)}, re-run: ${seated.map(r => r.key).join(' ')}, carried: ${carried.join(' ') || 'none'}` : ''}; how many seats reported and how many failed>"\n` +
     `   The sha is fixed above. It is the commit the reviewers actually read. Do NOT look up the PR's current head and do NOT substitute it — if they differ, that difference is the signal, and the check reports the verdict as stale on purpose.\n` +
     `   The seat count is fixed above too (${counted} of ${REVIEWERS.length}: ${boards.length} reported this round, ${carried.length} carried from earlier rounds): the script refuses a PASS with a seat missing, and \`board-verdict.sh\` reads a partial or countless PASS as pending (#10141). Do NOT change it.\n` +
     `3. Report the script's output verbatim. Do not edit any file, and do not post any other comment.`,

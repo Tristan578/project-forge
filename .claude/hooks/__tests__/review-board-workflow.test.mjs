@@ -50,9 +50,18 @@ test('a FAIL that names no finding still fails (fail closed)', async () => {
   assert.equal(r.out.overall, 'FAIL')
 })
 
-test('a major fails the board even under a PASS verdict word', async () => {
-  const r = await board({}, { test: { verdict: 'PASS', findings: [{ file: 'a', summary: 'x', severity: 'major' }] } })
+for (const severity of ['blocker', 'major']) {
+  test(`a ${severity} fails the board even under a PASS verdict word`, async () => {
+    const r = await board({}, { test: { verdict: 'PASS', findings: [{ file: 'a', summary: 'x', severity }] } })
+    assert.equal(r.out.overall, 'FAIL')
+  })
+}
+
+test('seats that read different commits do not publish anything', async () => {
+  const r = await board({}, { dx: { sha: 'c'.repeat(40), verdict: 'PASS', findings: [] } })
   assert.equal(r.out.overall, 'FAIL')
+  assert.equal(r.out.reviewedSha, null)
+  assert.equal(r.published, null)
 })
 
 test('a re-review runs only the named seats, on since..HEAD only', async () => {
@@ -69,16 +78,28 @@ test('carried seats complete the count, so a re-review can publish PASS 5/5', as
   assert.match(r.published, /PASS a{40} 5\/5/)
 })
 
-test('a re-review with seats unaccounted for cannot publish a PASS', async () => {
-  const r = await board({ round: 2, since: SINCE, seats: ['security'] }, {})
+test('a re-review that leaves a seat unaccounted for does not run', async () => {
+  const r = await board({ round: 2, since: SINCE, seats: ['security'], carried: ['ux', 'dx', 'test'] }, {})
   assert.equal(r.out.overall, 'FAIL')
-  assert.match(r.published, /FAIL a{40} 1\/5/)
+  assert.match(r.out.notRun.join(' '), /unaccounted: architect/)
+  assert.deepEqual(Object.keys(r.prompts), [])
+  assert.equal(r.published, null)
+})
+
+test('the published line names the fix range, the re-run seats and the carried seats', async () => {
+  const r = await board({ round: 2, since: SINCE, seats: ['security'], carried: ALL_BUT_SECURITY }, {})
+  assert.match(r.published, /fix diff since bbbbbbbb, re-run: security, carried: architect dx ux test/)
+})
+
+test('a security FAIL stands even when its findings are rated minor', async () => {
+  const r = await board({}, { security: { verdict: 'FAIL', findings: [{ file: 'a', summary: 'x', severity: 'minor' }] } })
+  assert.equal(r.out.overall, 'FAIL')
 })
 
 test('round 3 still runs; round 4 does not run and returns STOP', async () => {
   const r3 = await board({ round: 3, since: SINCE, seats: ['security'], carried: ALL_BUT_SECURITY }, {})
   assert.equal(r3.out.overall, 'PASS')
-  const r4 = await board({ round: 4, since: SINCE, seats: ['security'] }, {})
+  const r4 = await board({ round: 4, since: SINCE, seats: ['security'], carried: ALL_BUT_SECURITY }, {})
   assert.equal(r4.out.overall, 'STOP')
   assert.deepEqual(Object.keys(r4.prompts), [])
   assert.equal(r4.published, null)
@@ -91,6 +112,13 @@ for (const [name, args] of [
   ['an unknown seat', { round: 2, since: SINCE, seats: ['qa'] }],
   ['a seat both re-run and carried', { round: 2, since: SINCE, seats: ['dx'], carried: ['dx'] }],
   ['seats without since', { seats: ['dx'] }],
+  ['carried without since', { carried: ['ux'] }],
+  ['an unknown carried seat', { round: 2, since: SINCE, seats: ['security'], carried: ['architect', 'dx', 'ux', 'qa'] }],
+  ['a seat carried twice', { round: 2, since: SINCE, seats: ['security'], carried: ['ux', 'ux', 'dx', 'test'] }],
+  ['a seat re-run twice', { round: 2, since: SINCE, seats: ['security', 'security'], carried: ALL_BUT_SECURITY }],
+  ['a round given as a string', { round: '4', since: SINCE, seats: ['security'], carried: ALL_BUT_SECURITY }],
+  ['a round given as a string with no since', { round: '4' }],
+  ['a fractional round', { round: 2.5, since: SINCE, seats: ['security'], carried: ALL_BUT_SECURITY }],
 ]) {
   test(`bad args (${name}): nothing runs, nothing is published`, async () => {
     const r = await board(args, {})
