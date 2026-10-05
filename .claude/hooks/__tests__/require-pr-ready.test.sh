@@ -416,6 +416,10 @@ printf '3\n' > "$FAKE/sleep"
 OUT=$(jq -nc --arg c 'gh pr ready 10305' '{tool_input:{command:$c}}' \
   | (cd "$HERE" && PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" REQUIRE_PR_READY_BUDGET_SECONDS=2 bash "$HOOK" 2>&1)); RC=$?
 if [ "$RC" -eq 2 ] && grep -qF 'ran out of time' <<<"$OUT"; then ok "a slow GitHub blocks once the budget is spent"; else bad "time budget (rc=$RC): $OUT"; fi
+fixtures clean "$RESOLVED" "$GREEN"
+OUT=$(jq -nc --arg c 'gh pr ready 10305' '{tool_input:{command:$c}}' \
+  | (cd "$HERE" && PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" REQUIRE_PR_READY_BUDGET_SECONDS=08 bash "$HOOK" 2>&1)); RC=$?
+if [ "$RC" -eq 0 ]; then ok "a budget of 08 is read as base 10, not an octal error"; else bad "budget 08 (rc=$RC): $OUT"; fi
 # A gh that hangs is CUT OFF at the budget, not waited out: the harness's own
 # 30 s timeout would otherwise let the call through. Needs a coreutils timeout,
 # which is what the hook uses; without one the cut-off does not exist to test.
@@ -439,6 +443,7 @@ fi
 fixtures clean "$RESOLVED" "$GREEN"
 expect_block "a heredoc fed to bash that names a ready call blocks" $'bash <<\'EOF\'\ngh pr ready 10305\nEOF' 'Run the ready call as a plain command'
 expect_block "...and a pipe into sh" "printf 'gh pr ready 10305' | sh" 'a script fed to a shell on stdin'
+expect_block "...and bash -s with arguments" $'bash -s -- 5 <<\'EOF\'\ngh pr ready 10305\nEOF' 'a script fed to a shell on stdin'
 fixtures clean "$OPEN" "$GREEN"
 for c in 'bash <<< "gh pr ready 10305"' "bash <<<'gh pr ready 10305'" 'zsh <<< "gh pr ready 10305"; echo done' \
   'bash -o pipefail -c "gh pr ready 10305"' '/usr/bin/env gh pr ready 10305'; do
@@ -465,6 +470,12 @@ for c in "gh pr comment 10305 --body \"\$(cat $TMP/v.md)\"" "gh pr comment 10305
   fixtures clean "$OPEN" "$GREEN"
   expect_block "a marker in a file the command reads: $c" "$c" 'unresolved review threads'
 done
+# A ~/ path is read the way the shell would expand it.
+HOME_DIR=$(mktemp -d "$TMP/home.XXXXXX"); cp "$TMP/v.md" "$HOME_DIR/v.md"
+fixtures clean "$OPEN" "$GREEN"
+OUT=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -nc --arg c 'gh pr comment 10305 --body "$(cat ~/v.md)"' '{tool_input:{command:$c}}' \
+  | (cd "$HERE" && HOME="$HOME_DIR" PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" bash "$HOOK" 2>&1)); RC=$?
+if [ "$RC" -eq 2 ] && grep -qF 'unresolved review threads' <<<"$OUT"; then ok "a marker in ~/v.md is read"; else bad "~ body file (rc=$RC): $OUT"; fi
 fixtures clean "$OPEN" "$GREEN"
 expect_allow "a body read from a file with no marker is not a ready call" "gh pr comment 10305 --body \"\$(cat $TMP/plain.md)\""
 # A file the body only NAMES is not read: a reply citing a script that holds the marker text is not a PASS.
@@ -478,12 +489,13 @@ done
 # shellcheck disable=SC2016  # the $ is the point: these are commands the hook reads, not expansions
 for c in 'timeout 30 env X=1 gh pr ready 10305' "env -S'gh pr ready 10305'" 'env --split-string="gh pr ready 10305"' \
   'sudo -nu root gh pr ready 10305' 'env -iu FOO gh pr ready 10305' 'env -uFOO gh pr ready 10305' \
-  'exec -a name gh pr ready 10305'; do
+  'exec -a name gh pr ready 10305' '/usr/bin/timeout 5 gh pr ready 10305' '/usr/bin/sudo gh pr ready 10305'; do
   fixtures clean "$OPEN" "$GREEN"
   expect_block "is a ready call: $c" "$c" 'unresolved review threads'
 done
 fixtures clean "$OPEN" "$GREEN"
 expect_block "xargs --max-args N gh pr ready names no PR" 'echo 1 | xargs --max-args 1 gh pr ready' 'without a PR number'
+expect_block "...and by path" 'echo 1 | /usr/bin/xargs gh pr ready' 'without a PR number'
 expect_allow "command -v only prints where gh is" 'command -v gh pr ready 10305'
 expect_allow "...and command -V" 'command -V gh pr ready 10305'
 

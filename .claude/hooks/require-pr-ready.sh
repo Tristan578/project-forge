@@ -63,7 +63,7 @@
 #      and not `unknown` — still computing; retry in a few seconds).
 # FAIL-CLOSED: a fact that cannot be read blocks, and the message says which.
 # TIME-BOUNDED: Claude Code lets a command through when its hook times out, so
-# the hook stops itself first: past REQUIRE_PR_READY_BUDGET_SECONDS (default 25,
+# the hook stops itself first: past REQUIRE_PR_READY_BUDGET_SECONDS (default and maximum 25,
 # under the 30 s timeout in .claude/settings.json) it BLOCKS instead of asking
 # GitHub again, and each gh call is cut off at the time left.
 #
@@ -93,7 +93,9 @@ case "$TOOL_NAME" in
 esac
 
 BUDGET=${REQUIRE_PR_READY_BUDGET_SECONDS:-25}
-[[ "$BUDGET" =~ ^[0-9]+$ ]] || BUDGET=25
+# Base 10 (`08` is not octal) and at most 25, under the harness's 30 s timeout.
+[[ "$BUDGET" =~ ^[0-9]+$ ]] && BUDGET=$((10#$BUDGET)) || BUDGET=25
+[ "$BUDGET" -le 25 ] || BUDGET=25
 DEADLINE=$((SECONDS + BUDGET))
 
 FIX_ADVICE="Answer and resolve each review thread, fix or re-run a failed check, merge the base on a conflict, then retry."
@@ -272,6 +274,8 @@ command_and_files() {
   printf '%s\n' "$COMMAND"
   local f
   while IFS= read -r f; do
+    # shellcheck disable=SC2016,SC2088  # matching the literal text, not expanding it
+    case "$f" in '~/'*) f="$HOME/${f#'~/'}" ;; '$HOME/'*|'${HOME}/'*) f="$HOME/${f#*/}" ;; esac
     [ -n "$f" ] && [ -f "$f" ] && [ -r "$f" ] || continue
     head -c 1048576 "$f" 2>/dev/null; printf '\n'
   done < <(body_files | sort -u)
@@ -362,6 +366,8 @@ scan() { # <shell text> <depth>
         while [ "$j" -lt "${#w[@]}" ]; do
           if [[ "${w[$j]}" =~ ^-[A-Za-z]*c[A-Za-z]*$ ]]; then script=${w[$((j + 1))]:-}; break; fi
           [[ "${w[$j]}" == [-+]* ]] || break
+          # -s: the script is read from stdin, every word after it is an argument.
+          if [[ "${w[$j]}" =~ ^-[A-Za-z]*s[A-Za-z]*$ ]]; then j=${#w[@]}; break; fi
           # -o/+o/-O/+O take an option name (`bash -o pipefail -c ...`).
           case "${w[$j]}" in -o|+o|-O|+O) j=$((j + 1)) ;; esac
           j=$((j + 1))
