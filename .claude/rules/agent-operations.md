@@ -81,7 +81,7 @@ cd web && PORTLESS=0 npm run dev
 
 ## 2. Testing (CPU-Aware)
 
-**NEVER run the full vitest suite when you only changed a few files.** M2 has limited CPU — full suites block other agents.
+**Never run the full vitest suite for a small change.** It is CPU-heavy, concurrent runs block other agents and cause phantom failures, and the full suite runs before every PR anyway.
 
 ### Targeted Tests (PREFERRED during development)
 ```bash

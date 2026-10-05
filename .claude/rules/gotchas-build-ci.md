@@ -21,7 +21,7 @@ paths:
 - **`vercel build` in CI** — can't find npm. Use `vercel deploy` (remote build) instead.
 - **Artifact versions** — the v4+ artifact format is cross-compatible, so `upload-artifact` and `download-artifact` do NOT have to share a major: the tree runs `upload-artifact@v7.0.1` + `download-artifact@v8.0.1`, both on the Node24 runtime. The real constraint is the RUNTIME, not the shared major — never pin an artifact action to a major still on the **deprecated Node20** (runners removed Node20 in fall 2026). The old "must match `@v4`" rule is stale. The `upload-artifact` v4(Node20)→v7(Node24) bump is done (#8854, closed).
 - **Reusable workflow permissions** — `quality-gates.yml` must use `permissions: contents: read`. Never `write`.
-- **Full vitest in worktrees kills M2** — use `npx vitest run <specific-file>` or `npm run test:changed`.
+- **Never run the full vitest suite for a small change** — use `npx vitest run <specific-file>` or `npm run test:changed`; the full suite is the pre-PR gate.
 - **Cherry-pick + lockfile** — Always regenerate `package-lock.json` after cherry-picks that touch dependencies.
 - **`nodeVersion` is invalid in `vercel.json`** — Configure Node version in Vercel project settings instead.
 - **`lhci collect` flags differ from Lighthouse CLI** — Use `--outputDir`, `--numberOfRuns`, `--settings.chromeFlags`.

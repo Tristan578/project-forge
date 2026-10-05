@@ -20,7 +20,9 @@ cd web && npm install && npm run dev
 ## Test Commands
 
 ```bash
-# Quick validation (after every change)
+# After each change: only the tests for what you changed. Never the full suite for a small change.
+cd web && npx vitest run <changed test files>   # or: npm run test:changed
+# Before a PR: the full gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # Other suites

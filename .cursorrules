@@ -33,7 +33,9 @@ powershell -ExecutionPolicy Bypass -File build_wasm.ps1
 # Web dev server
 cd web && npm install && npm run dev
 
-# Quick validation (run after every feature change)
+# After each change: only the tests for what you changed (never the full suite for a small change)
+cd web && npm run test:changed
+# Before a PR: the full gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # MCP server tests
@@ -88,7 +90,7 @@ See `AGENTS.md` for full taskboard setup, required ticket fields, GitHub Project
 
 **Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 81 · lines 87
 
-**Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
+**Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
 
 Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria (3+ GWT scenarios), Priority, Team (Engineering or PM — use the team IDs in **Canonical Project Facts** above), Subtasks (3+).

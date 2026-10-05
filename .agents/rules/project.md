@@ -47,7 +47,9 @@ powershell -ExecutionPolicy Bypass -File build_wasm.ps1
 # Web dev server
 cd web && npm install && npm run dev
 
-# Quick validation (run after every feature change)
+# After each change: only the tests for what you changed (never the full suite for a small change)
+cd web && npm run test:changed
+# Before a PR: the full gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # MCP server tests

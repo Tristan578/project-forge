@@ -133,7 +133,7 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 
 **Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 81 · lines 87
 
-**Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
+**Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
 
 See `AGENTS.md` for full taskboard setup, workflow, and GitHub Project sync details.
