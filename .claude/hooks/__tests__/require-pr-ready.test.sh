@@ -482,7 +482,9 @@ expect_block "...but a 2>&1 redirect does not split a pipe" "printf 'gh pr ready
 # shellcheck disable=SC2016  # the $ is the point: the command the hook reads
 for c in 'for n in 10305; do echo "gh pr ready $n"; done | bash' '{ echo gh pr ready 10305; } | bash' \
   'while read -r n; do echo gh pr ready "$n"; done < list | sh' 'echo gh pr ready 10305 |& bash' \
-  $'echo gh pr ready 10305 |\nbash' $'for n in 10305\ndo\n  echo gh pr ready $n\ndone | bash'; do
+  $'echo gh pr ready 10305 |\nbash' $'for n in 10305\ndo\n  echo gh pr ready $n\ndone | bash' \
+  "(echo 'gh pr ready 10305'; echo ok) | bash" "printf 'gh pr ready 10305; echo ok' | bash" \
+  'printf "gh pr ready 10305; echo ok" | bash' 'echo `echo gh pr ready 10305; true` | bash'; do
   expect_block "a script on stdin from one segment: $c" "$c" 'a script fed to a shell on stdin'
 done
 expect_allow "...nor one after it" $'bash <<\'EOF\'\necho ok\nEOF\ngit commit -m \'document gh pr ready\''
