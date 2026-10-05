@@ -13,7 +13,7 @@ The orchestrator (main session) owns ticket lifecycle and dispatch. This skill i
    ```bash
    curl -s http://localhost:3010/api/tickets?projectId=01KMM9ZA6SBZ7RKJZJTZS9VR4R
    ```
-   If it fails: `taskboard start --port 3010` (NEVER pass `--db`), wait 2s, re-check. Ticket count of 0 means wrong DB path — stop and investigate, the board is not actually empty.
+   If it fails: `node .claude/hooks/taskboard-launch.mjs start` (the launcher resolves and passes the shared DB path itself and waits for the API — never start the binary by hand or pass your own `--db`), then re-check. Ticket count of 0 means wrong DB path — stop and investigate, the board is not actually empty.
 2. **Batch size:** 5–7 tickets max per builder. More causes rushed anti-patterns. Max 3 concurrent heavy agents on this machine.
 3. **Move each ticket to `in_progress`** (orchestrator only — builders MUST NOT move tickets):
    `POST /api/tickets/{id}/move` with `{"status":"in_progress"}`.

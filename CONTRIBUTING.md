@@ -77,8 +77,15 @@ Three rules flow from this architecture:
 All work requires a ticket before any code is written. The taskboard is the single source of truth.
 
 ```bash
-# Start the taskboard server (auto-started by Claude Code hooks)
-taskboard start --port 3010
+# First run on a new machine (no taskboard database yet), once, instead of
+# start: init is the only command that creates the shared database.
+node .claude/hooks/taskboard-launch.mjs init
+python3 .claude/hooks/github_project_sync.py pull
+
+# Every time after that (auto-started by Claude Code hooks). The launcher
+# resolves the shared database path and passes it to the binary itself —
+# never start the binary by hand.
+node .claude/hooks/taskboard-launch.mjs start
 ```
 
 - Web UI: http://localhost:3010
@@ -273,7 +280,7 @@ green and no surface drifts.
 
 `tools/agentic-sync/canonical.json` is the single source of truth for the synced
 facts. Change the value there — e.g. under `facts.taskboard` (`projectId`, the
-`teams` map, `startCommand`, `apiBaseUrl`) or `facts.coverageThresholds`.
+`teams` map, `startCommand`, `initCommand`, `apiBaseUrl`) or `facts.coverageThresholds`.
 
 > The taskboard has exactly two teams — **Engineering** and **PM**. There is no
 > "Leadership" team; never reintroduce one.
@@ -321,7 +328,7 @@ Typical hand-edit homes (the project ID in particular recurs in `curl` examples)
 Two required CI gates enforce this so a missed surface fails the PR instead of
 silently onboarding the next contributor against a broken board:
 
-- **`agentic-sync`** — runs two checks, with two different fixes:
+- **`agentic-sync`** — runs three checks, with three different fixes:
   - `sync.mjs --check` fails if any of the four generated targets drifts from
     `canonical.json`. Fix: re-run step 2 and commit.
   - `scripts/check-codex-port.sh` fails if the generated Codex CLI surface
@@ -332,12 +339,26 @@ silently onboarding the next contributor against a broken board:
     new source file (only tracked files are mirrored), run
     `node tools/agentic-sync/port.mjs --write`, and commit what it regenerates.
     The gate's output names each problem and the recipe for its kind.
+  - `scripts/check-copilot-hooks.sh` fails if a Copilot hook file in
+    `.github/hooks/` names an event that is not a documented Copilot event or
+    alias; wires `on-stop.sh` to anything but `agentStop`/`Stop` (or, as an
+    extra run, `sessionEnd`), or to no `agentStop`/`Stop` handler at all;
+    runs a `*.sh` that does not exist; or runs a
+    script on the same event as `.claude/settings.json` without the
+    `COPILOT_AGENT_PROMPT` guard (Copilot CLI reads both files and would run it
+    twice), or with the guard on a script `.claude/settings.json` does not run
+    on that event (Copilot CLI would then never run it). Fix: the gate names
+    each problem and what to change; the rule for which file owns each event
+    is in the Hooks section of `.github/copilot-instructions.md`.
 - **`taskboard-onboarding-guard`** (`scripts/check-taskboard-onboarding-hygiene.sh`)
   — greps the **whole tree** and fails on a known-dead taskboard ULID *or* a
-  taskboard start command carrying the forbidden `--db` flag (which points the
-  board at a throwaway local `.claude/taskboard.db` copy and shows zero tickets —
-  always use `taskboard start --port 3010`, letting it use the OS-default DB
-  path). Both gates are wired into the required **CI Success** aggregate.
+  taskboard start command carrying the forbidden relative `--db` path (a hand-typed
+  `--db .claude/taskboard.db` points the board at a throwaway local copy and shows
+  zero tickets). The fix is never to drop `--db` and start the binary by hand: go
+  through `node .claude/hooks/taskboard-launch.mjs start`, which resolves the
+  shared database path (an absolute path the tripwire's regex does not match) and
+  passes it to the binary itself. Both gates are wired into the required
+  **CI Success** aggregate.
 
 ## Machine-local absolute paths
 

@@ -20,6 +20,85 @@ fn default_ior() -> f32 { 1.5 }
 fn default_attenuation_distance() -> f32 { f32::INFINITY }
 fn default_attenuation_color() -> [f32; 3] { [1.0, 1.0, 1.0] }
 
+/// Field-level deserializer for [`MaterialData::attenuation_distance`] (#10267).
+///
+/// `default_attenuation_distance()` above is `f32::INFINITY`. JSON has no
+/// infinity literal, and serde_json's derived `Serialize` writes `null` for
+/// EVERY non-finite float — while `#[serde(default = ...)]` only substitutes
+/// a *missing* key, never an explicit `null`. So the derived `Deserialize`
+/// rejected every scene carrying a default (untouched) material with
+/// `invalid type: null, expected f32`, and nothing mapped the default back.
+///
+/// What it reads:
+/// - `null` → `f32::INFINITY`: the on-disk spelling of the default, both
+///   before and after this fix. The wire format is deliberately UNCHANGED.
+///   A rolled-back engine (or a lagging CDN prefix) still refuses a
+///   default-material scene, exactly as it always refused its own output;
+///   nothing written here makes that worse, and nothing here fixes it there.
+/// - a finite, non-negative JSON number, integer- or float-formatted (`5`
+///   and `5.0` are different `serde_json` number variants; both must work),
+///   kept as written.
+/// - any OTHER number — negative, or non-finite once narrowed to `f32` (e.g.
+///   `1e300`) — loads as the default, `f32::INFINITY`, with a warning. This
+///   is TOLERANT on purpose: before #10267 the derived `f32` deserializer
+///   loaded these verbatim and `update_material` stored them unchecked, so
+///   scenes carrying them exist. Refusing them here would lock a creator out
+///   of a scene that opened yesterday. The default is the one value whose
+///   meaning ("no attenuation") is well defined; a negative distance has none.
+///
+/// Anything that is not a number or `null` is still refused, as it always
+/// was. No string sentinel (`"Infinity"`, `"-Infinity"`, `"NaN"`) is
+/// recognised: scene JSON crosses the remix / published-play trust boundary,
+/// nothing produces those spellings, and accepting them would only widen the
+/// input domain.
+///
+/// `Serialize` stays derived on purpose. `null` remains the encoding of
+/// `+Infinity`, which is also what the live `MATERIAL_CHANGED` /
+/// `QUERY_ENTITY_DETAILS` events emit and what the web side contracts as
+/// `attenuationDistance: number | null` — this attribute changes only what
+/// the struct ACCEPTS, never what it emits.
+///
+/// The live `update_material` command stays STRICT about numbers (it refuses
+/// anything [`is_valid_attenuation_distance`] refuses), so nothing written
+/// from now on is a value this function would have to replace on reload.
+fn deserialize_attenuation_distance<'de, D>(deserializer: D) -> Result<f32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match Option::<f32>::deserialize(deserializer)? {
+        None => f32::INFINITY,
+        Some(value) => attenuation_distance_on_load(value),
+    })
+}
+
+/// The loader's reading of an explicit `attenuationDistance` number: the value
+/// itself when [`is_valid_attenuation_distance`] accepts it, otherwise the
+/// default `f32::INFINITY`, with a warning naming the replaced value.
+fn attenuation_distance_on_load(value: f32) -> f32 {
+    if is_valid_attenuation_distance(value) {
+        return value;
+    }
+    tracing::warn!(
+        "Scene material attenuationDistance {} is not a finite number >= 0; loading it as infinity (no attenuation)",
+        value
+    );
+    f32::INFINITY
+}
+
+/// The ONE definition of an explicit `attenuation_distance` NUMBER the engine
+/// keeps as written: finite and non-negative. The default, `f32::INFINITY`
+/// ("no attenuation"), is never spelled as a number — it is `null` in a scene
+/// file and `null` on `update_material` — so a value that narrows to `inf`
+/// (JSON `1e300`, a JS `Infinity`) fails here too.
+///
+/// Shared by both boundaries (#10267), which differ only in what they do with
+/// a failure: `update_material` refuses it (nothing new gets written), and the
+/// scene loader replaces it with the default (nothing already saved is locked
+/// out) — see [`attenuation_distance_on_load`].
+pub(crate) fn is_valid_attenuation_distance(value: f32) -> bool {
+    value.is_finite() && value >= 0.0
+}
+
 /// Serializable parallax mapping method (mirror of Bevy's `ParallaxMappingMethod`).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -110,7 +189,17 @@ pub struct MaterialData {
     pub ior: f32,
     #[serde(default)]
     pub thickness: f32,
-    #[serde(default = "default_attenuation_distance")]
+    // Defaults to `f32::INFINITY`, which the derived `Serialize` writes as
+    // `null`. `default = ...` covers a MISSING key; `deserialize_with` is what
+    // reads that `null` back as infinity, keeps a finite non-negative number,
+    // and loads any other number as infinity with a warning — see
+    // `deserialize_attenuation_distance` (#10267). Serialize is left derived so
+    // the on-disk `.forge` shape and the live `MATERIAL_CHANGED` /
+    // `QUERY_ENTITY_DETAILS` contract (`number | null`) are unchanged.
+    #[serde(
+        default = "default_attenuation_distance",
+        deserialize_with = "deserialize_attenuation_distance"
+    )]
     pub attenuation_distance: f32,
     #[serde(default = "default_attenuation_color")]
     pub attenuation_color: [f32; 3],
@@ -276,6 +365,182 @@ fn sync_material_data(
     for (data, handle) in query.iter() {
         if let Some(mut material) = materials.get_mut(handle) {
             apply_material_data_to_standard(&mut material, data, &texture_handles);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// #10267: `attenuation_distance` defaults to `f32::INFINITY`, which the
+// derived Serialize writes as `null`; `deserialize_attenuation_distance` is
+// what reads it back. These tests drive `MaterialData`'s real
+// Serialize/Deserialize on JSON TEXT (never a pre-built `Value`), so an
+// integer literal is a genuine `5` on the wire. The scene-level round trip
+// through `build_scene_file` / `parse_scene_file` lives in `scene_file.rs`.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod attenuation_distance_serde_tests {
+    use super::*;
+
+    const NULL_FIELD: &str = "\"attenuationDistance\":null";
+
+    /// The default material's own JSON, with the `attenuationDistance` value
+    /// swapped for `literal` — asserting the swap actually happened, so a
+    /// renamed key cannot turn every test below into a missing-key test.
+    fn default_material_json_with(literal: &str) -> String {
+        let json = serde_json::to_string(&MaterialData::default()).expect("serialize default");
+        assert_eq!(
+            json.matches(NULL_FIELD).count(),
+            1,
+            "the default material must serialize attenuationDistance as null exactly once: {json}"
+        );
+        json.replace(NULL_FIELD, &format!("\"attenuationDistance\":{literal}"))
+    }
+
+    fn attenuation_from(json: &str) -> Result<f32, serde_json::Error> {
+        serde_json::from_str::<MaterialData>(json).map(|m| m.attenuation_distance)
+    }
+
+    // --- Wire format: Serialize is derived, `null` is the default's spelling ---
+
+    #[test]
+    fn default_material_serializes_attenuation_distance_as_null() {
+        // Pinned on purpose: `null` is what every scene saved before #10267
+        // holds and what the live MATERIAL_CHANGED / QUERY_ENTITY_DETAILS
+        // contract (`number | null`) expects. (A rolled-back engine still
+        // refuses it, as it always refused its own output.) Re-attaching a
+        // `serialize_with` would turn this red.
+        let json = serde_json::to_string(&MaterialData::default()).expect("serialize default");
+        assert!(json.contains(NULL_FIELD), "{json}");
+    }
+
+    #[test]
+    fn default_material_round_trips_through_its_own_json() {
+        let json = serde_json::to_string(&MaterialData::default()).expect("serialize default");
+        assert_eq!(
+            attenuation_from(&json).expect("default must load"),
+            f32::INFINITY
+        );
+    }
+
+    // --- Accepted inputs ---
+
+    #[test]
+    fn explicit_null_deserializes_as_infinity() {
+        assert_eq!(
+            attenuation_from(&default_material_json_with("null")).unwrap(),
+            f32::INFINITY
+        );
+    }
+
+    #[test]
+    fn missing_key_deserializes_as_infinity() {
+        // `#[serde(default = ...)]` still owns the missing-key case.
+        let json = serde_json::to_string(&MaterialData::default())
+            .expect("serialize default")
+            .replace(&format!(",{NULL_FIELD}"), "");
+        assert!(!json.contains("attenuationDistance"), "{json}");
+        assert_eq!(attenuation_from(&json).unwrap(), f32::INFINITY);
+    }
+
+    #[test]
+    fn integer_literal_deserializes() {
+        // A hand-written or minified scene writes `5`, which serde_json
+        // parses as an integer, not a float; the deserializer must take both.
+        assert_eq!(
+            attenuation_from(&default_material_json_with("5")).unwrap(),
+            5.0
+        );
+    }
+
+    #[test]
+    fn float_literal_deserializes() {
+        assert_eq!(
+            attenuation_from(&default_material_json_with("4.5")).unwrap(),
+            4.5
+        );
+    }
+
+    #[test]
+    fn zero_is_accepted() {
+        assert_eq!(
+            attenuation_from(&default_material_json_with("0")).unwrap(),
+            0.0
+        );
+    }
+
+    // --- Tolerated on load: a number the live command refuses loads as the default ---
+    //
+    // Before #10267 the derived `f32` deserializer loaded these verbatim and
+    // `update_material` stored them unchecked, so saved scenes can carry them.
+    // Refusing them would lock a creator out of a scene that used to open.
+
+    #[test]
+    fn negative_number_loads_as_infinity() {
+        for literal in ["-1", "-0.5"] {
+            assert_eq!(
+                attenuation_from(&default_material_json_with(literal)).unwrap_or_else(|e| panic!(
+                    "attenuationDistance {literal} must still load: {e}"
+                )),
+                f32::INFINITY,
+                "{literal}"
+            );
+        }
+    }
+
+    #[test]
+    fn number_that_overflows_f32_loads_as_infinity() {
+        // `1e300` is a legal JSON number and a legal f64, but narrows to
+        // `+inf` as f32. It loads as the default rather than locking the
+        // scene out; the live command still refuses it (commands/material.rs).
+        assert_eq!(
+            attenuation_from(&default_material_json_with("1e300")).unwrap(),
+            f32::INFINITY
+        );
+    }
+
+    #[test]
+    fn load_reading_keeps_valid_numbers_and_replaces_the_rest() {
+        // The predicate split, pinned directly: what the live command accepts
+        // is kept as written, what it refuses becomes the default.
+        for value in [0.0_f32, 4.5, 10.0, f32::MAX] {
+            assert!(is_valid_attenuation_distance(value), "{value}");
+            assert_eq!(attenuation_distance_on_load(value), value);
+        }
+        for value in [
+            -1.0_f32,
+            -0.0001,
+            f32::NEG_INFINITY,
+            f32::INFINITY,
+            f32::NAN,
+        ] {
+            assert!(!is_valid_attenuation_distance(value), "{value}");
+            assert_eq!(
+                attenuation_distance_on_load(value),
+                f32::INFINITY,
+                "{value}"
+            );
+        }
+    }
+
+    // --- Still refused: anything that is not a number or null ---
+
+    #[test]
+    fn string_sentinels_are_rejected() {
+        // Nothing writes these, and scene JSON crosses the remix /
+        // published-play trust boundary — no domain widening. The derived
+        // `f32` deserializer refused them before #10267 too.
+        for literal in ["\"Infinity\"", "\"-Infinity\"", "\"NaN\"", "\"10\""] {
+            let error = attenuation_from(&default_material_json_with(literal))
+                .expect_err(&format!("attenuationDistance {literal} must be rejected"));
+            assert!(error.to_string().contains("invalid type"), "{error}");
+        }
+    }
+
+    #[test]
+    fn non_numeric_values_are_rejected() {
+        for literal in ["true", "[1]", "{}"] {
+            attenuation_from(&default_material_json_with(literal))
+                .expect_err(&format!("attenuationDistance {literal} must be rejected"));
         }
     }
 }

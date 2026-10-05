@@ -65,6 +65,15 @@ else
   bad "audit does not run scripts/check-codex-port.sh"
 fi
 if echo "$audit_out" | grep -qF "Codex CLI surface in sync with .claude/"; then ok "audit reports the Codex CLI surface in sync"; else bad "audit did not report the Codex surface status: $(echo "$audit_out" | grep -i codex | head -3)"; fi
+# The THIRD gate of CI's Agentic Config Sync job (scripts/check-copilot-hooks.sh).
+# Same reasoning: the audit must agree with CI, so it must run every gate CI runs.
+# shellcheck disable=SC2016  # the $NAMES are literal text searched for in the audit script
+if grep -qE '^[[:space:]]*if bash "\$COPILOT_GATE" > /dev/null 2>&1; then$' "$AUDIT" && grep -qE '^COPILOT_GATE="\$PROJECT_ROOT/scripts/check-copilot-hooks\.sh"$' "$AUDIT"; then
+  ok "audit delegates to scripts/check-copilot-hooks.sh on an executable line"
+else
+  bad "audit does not run scripts/check-copilot-hooks.sh"
+fi
+if echo "$audit_out" | grep -qF "Copilot hook files valid (.github/hooks, cross-checked with .claude/settings.json)"; then ok "audit reports the Copilot hook files valid"; else bad "audit did not report the Copilot hook gate status: $(echo "$audit_out" | grep -i copilot | head -3)"; fi
 
 echo "== structural: this suite is wired into CI (anti-unwiring) =="
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"

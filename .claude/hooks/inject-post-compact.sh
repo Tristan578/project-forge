@@ -73,8 +73,12 @@ compaction. Treat the items below with the same authority as CLAUDE.md.
 
 # Reviews
 
-- PASS or FAIL only. No "pass with issues." Any finding at any severity
-  blocks. Boy Scout Rule: fix every bug you find, regardless of fault.
+- PASS or FAIL only. No "pass with issues." The board reviews the diff and
+  the code it touches: a blocker or major there fails; a minor is fixed in
+  the same push or filed. Re-reviews cover the fix diff only. Stop and ask
+  the user if a blocker or major is still open after round 3.
+- Boy Scout Rule: fix bugs in the code you are changing; a pre-existing bug
+  elsewhere gets an issue, not a detour.
 
 # Quality gate (run before any push)
 

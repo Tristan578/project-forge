@@ -150,6 +150,12 @@ pub fn parse_scene_file(json: &str) -> Result<SceneFile, String> {
     if json.len() > MAX_SCENE_JSON_BYTES {
         return Err("Scene JSON exceeds the 50 MiB limit".to_string());
     }
+    // One typed parse, straight from text. `materialData.attenuationDistance`
+    // arrives as `null` for every default material (serde_json writes `null`
+    // for `f32::INFINITY`); the field-level deserializer on
+    // `MaterialData::attenuation_distance` maps it back (#10267), so no
+    // `Value` rewrite is needed here — and a rewrite would widen every f32 to
+    // its f64 digits and re-sort keys on the way out.
     let scene: SceneFile =
         serde_json::from_str(json).map_err(|error| format!("Invalid scene file: {error}"))?;
     if !(1..=3).contains(&scene.format_version) {
@@ -319,6 +325,308 @@ mod validation_tests {
             })
             .collect();
         assert!(parse_entities(entities).is_ok());
+    }
+
+    // #10267: `MaterialData::default()` sets `attenuation_distance` to
+    // `f32::INFINITY`, which serde_json serializes as `null`. A scene
+    // carrying an entity with a default, unmodified material must still
+    // save-and-load, end to end through `build_scene_file` /
+    // `serde_json::to_string` / `parse_scene_file` — the same derived
+    // serializer the bridge export path uses, with the field-level
+    // deserializer on `MaterialData::attenuation_distance` doing the work.
+    mod attenuation_distance_scene_round_trip {
+        use super::*;
+        use crate::core::material::MaterialData;
+
+        const NULL_FIELD: &str = "\"attenuationDistance\":null";
+
+        fn scene_with_material(material: MaterialData) -> SceneFile {
+            let mut snapshot = entity("root", None);
+            snapshot.material_data = Some(material);
+            build_scene_file(
+                "Recovery",
+                &EnvironmentSettings::default(),
+                &GlobalAmbientLight::default(),
+                &InputMap::default(),
+                HashMap::new(),
+                &PostProcessingSettings::default(),
+                &AudioBusConfig::default(),
+                vec![snapshot],
+                None,
+                None,
+            )
+        }
+
+        /// The scene's own JSON text, with the single-entity
+        /// `attenuationDistance` value swapped for `literal` — asserting the
+        /// swap happened, so a renamed key cannot silently turn a test into a
+        /// missing-key test.
+        fn default_scene_json_with(literal: &str) -> String {
+            let json = serde_json::to_string(&scene_with_material(MaterialData::default()))
+                .expect("serialize scene");
+            assert_eq!(json.matches(NULL_FIELD).count(), 1, "{json}");
+            json.replace(NULL_FIELD, &format!("\"attenuationDistance\":{literal}"))
+        }
+
+        fn attenuation_of(parsed: &SceneFile, index: usize) -> f32 {
+            parsed.entities[index]
+                .material_data
+                .as_ref()
+                .expect("material_data must survive the round trip")
+                .attenuation_distance
+        }
+
+        fn round_trip(material: MaterialData) -> f32 {
+            let json = serde_json::to_string(&scene_with_material(material))
+                .expect("serialize scene with a material");
+            let parsed = parse_scene_file(&json).expect("a scene with this material must load");
+            attenuation_of(&parsed, 0)
+        }
+
+        #[test]
+        fn default_infinity_material_round_trips() {
+            assert_eq!(round_trip(MaterialData::default()), f32::INFINITY);
+        }
+
+        #[test]
+        fn finite_fractional_value_round_trips() {
+            let mut material = MaterialData::default();
+            material.attenuation_distance = 4.5;
+            assert_eq!(round_trip(material), 4.5);
+        }
+
+        #[test]
+        fn finite_integer_literal_in_scene_json_loads() {
+            // A hand-written or minified scene spells the value `5`, which
+            // serde_json parses as an integer — a different `Number` variant
+            // from the `5.0` the engine itself would write. Fed as TEXT, not
+            // via a Rust `5.0` that would serialize back to a float.
+            let json = default_scene_json_with("5");
+            assert!(
+                json.contains("\"attenuationDistance\":5,")
+                    || json.ends_with("\"attenuationDistance\":5}"),
+                "{json}"
+            );
+            let parsed = parse_scene_file(&json).expect("an integer literal must load");
+            assert_eq!(attenuation_of(&parsed, 0), 5.0);
+        }
+
+        #[test]
+        fn legacy_null_attenuation_distance_loads_as_infinity() {
+            // The exact shape every scene saved before #10267 held — and,
+            // since the wire format is unchanged, every scene saved after it
+            // too. Spelled explicitly rather than relying on the serializer
+            // so this test keeps meaning `null` even if Serialize changes.
+            let json = default_scene_json_with("null");
+            let parsed =
+                parse_scene_file(&json).expect("a legacy null attenuationDistance must still load");
+            assert_eq!(attenuation_of(&parsed, 0), f32::INFINITY);
+        }
+
+        #[test]
+        fn missing_attenuation_distance_key_defaults_to_infinity() {
+            // Scenes saved before the field existed at all.
+            let scene_file = scene_with_material(MaterialData::default());
+            let mut value = serde_json::to_value(&scene_file).expect("serialize scene to a Value");
+            value["entities"][0]["materialData"]
+                .as_object_mut()
+                .unwrap()
+                .remove("attenuationDistance");
+            let parsed = parse_scene_file(&value.to_string())
+                .expect("a missing attenuationDistance key must still load");
+            assert_eq!(attenuation_of(&parsed, 0), f32::INFINITY);
+        }
+
+        #[test]
+        fn legacy_negative_or_overflowing_attenuation_distance_loads_as_infinity() {
+            // Before #10267 the engine loaded these verbatim, and
+            // update_material stored them unchecked, so saved scenes can
+            // carry them. Refusing them now would lock a creator out of a
+            // scene that used to open, so the loader reads them as the
+            // default instead (with a warning). `1e300` is finite as f64 but
+            // `+inf` as f32.
+            for literal in ["-1", "-0.5", "1e300"] {
+                let parsed =
+                    parse_scene_file(&default_scene_json_with(literal)).unwrap_or_else(|e| {
+                        panic!("attenuationDistance {literal} must still load: {e}")
+                    });
+                assert_eq!(attenuation_of(&parsed, 0), f32::INFINITY, "{literal}");
+            }
+        }
+
+        #[test]
+        fn string_spellings_are_rejected() {
+            // `null` is the ONLY spelling of infinity. The string sentinels
+            // are never produced, the engine refused them before #10267 too,
+            // and scene JSON crosses the remix / published-play trust
+            // boundary, so none of them may load.
+            for literal in ["\"Infinity\"", "\"-Infinity\"", "\"NaN\""] {
+                let error = parse_scene_file(&default_scene_json_with(literal))
+                    .expect_err(&format!("attenuationDistance {literal} must be rejected"));
+                assert!(error.starts_with("Invalid scene file:"), "{error}");
+            }
+        }
+
+        // --- Byte-for-byte pins on the scene TEXT ---
+        //
+        // The export path is `serde_json::to_string(&scene_file)` and nothing
+        // else. A `Value` round trip in between would widen every f32 to its
+        // f64 digits (`0.35` → `0.3499999940395355`) and re-sort keys, which
+        // is a silent change to every saved scene. These tests pin the text.
+
+        fn pinned_scene(attenuation_distance: f32) -> SceneFile {
+            let mut snapshot = entity("root", None);
+            snapshot.transform.position = [0.1, 0.35, 0.7];
+            let mut material = MaterialData::default();
+            material.metallic = 0.35;
+            material.attenuation_distance = attenuation_distance;
+            snapshot.material_data = Some(material);
+            build_scene_file(
+                "Recovery",
+                &EnvironmentSettings::default(),
+                &GlobalAmbientLight::default(),
+                &InputMap::default(),
+                HashMap::new(),
+                &PostProcessingSettings::default(),
+                &AudioBusConfig::default(),
+                vec![snapshot],
+                None,
+                None,
+            )
+        }
+
+        /// The scene text from `"entities":` to the end. `inputBindings.actions`
+        /// is a `HashMap`, so two serializations of the SAME scene can order
+        /// that section differently — nothing in the format promises map
+        /// order, and it is not what this pin is about. The entity section is
+        /// a `Vec` of derived structs and is byte-stable.
+        fn entities_tail(json: &str) -> &str {
+            let start = json
+                .find("\"entities\":")
+                .expect("scene text must carry entities");
+            &json[start..]
+        }
+
+        #[test]
+        fn finite_material_scene_text_keeps_f32_digits_and_round_trips_byte_for_byte() {
+            let scene = pinned_scene(4.5);
+            let json = serde_json::to_string(&scene).expect("serialize scene");
+            assert!(json.contains("\"metallic\":0.35,"), "{json}");
+            assert!(json.contains("\"position\":[0.1,0.35,0.7]"), "{json}");
+            assert!(json.contains("\"attenuationDistance\":4.5"), "{json}");
+            assert!(
+                !json.contains("0.3499999940395355"),
+                "f64-widened digits leaked: {json}"
+            );
+
+            let parsed = parse_scene_file(&json).expect("the pinned scene must load");
+            assert_eq!(attenuation_of(&parsed, 0), 4.5);
+            let reserialized = serde_json::to_string(&parsed).expect("re-serialize");
+            assert_eq!(
+                entities_tail(&reserialized),
+                entities_tail(&json),
+                "load → save must be byte-identical for the entity section"
+            );
+        }
+
+        #[test]
+        fn default_material_scene_text_writes_null_and_round_trips_byte_for_byte() {
+            let scene = pinned_scene(f32::INFINITY);
+            let json = serde_json::to_string(&scene).expect("serialize scene");
+            assert!(json.contains(NULL_FIELD), "{json}");
+            assert!(json.contains("\"metallic\":0.35,"), "{json}");
+            assert!(
+                !json.contains("Infinity"),
+                "no string sentinel on the wire: {json}"
+            );
+
+            let parsed = parse_scene_file(&json).expect("the default material must load");
+            assert_eq!(attenuation_of(&parsed, 0), f32::INFINITY);
+            let reserialized = serde_json::to_string(&parsed).expect("re-serialize");
+            assert_eq!(
+                entities_tail(&reserialized),
+                entities_tail(&json),
+                "load → save must be byte-identical for the entity section"
+            );
+        }
+
+        #[test]
+        fn bridge_scene_export_serializes_with_the_derived_serializer() {
+            // `bridge/` is wasm32-only and cannot be unit-tested natively, so
+            // the export call site is pinned textually: exactly one
+            // EXECUTABLE (non-comment) line hands `scene_file` to
+            // `serde_json::to_string`, and nothing in the file routes it
+            // through a `Value` or a scene-specific serializer.
+            let source = include_str!("../bridge/scene_io.rs");
+            let executable: Vec<&str> = source
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.starts_with("//"))
+                .collect();
+            let direct = executable
+                .iter()
+                .filter(|line| line.contains("serde_json::to_string(&scene_file)"))
+                .count();
+            assert_eq!(
+                direct, 1,
+                "apply_scene_export must serialize the scene exactly once, directly"
+            );
+            for forbidden in ["to_value(&scene_file)", "serialize_scene_file"] {
+                assert!(
+                    !executable.iter().any(|line| line.contains(forbidden)),
+                    "scene_io.rs must not route the export through {forbidden}"
+                );
+            }
+        }
+
+        #[test]
+        fn sparse_mixed_materials_across_multiple_entities_round_trip_independently() {
+            // Entity 0 has no material_data; 1 has a finite value; 2 is a
+            // default (null on the wire); 3 is zero. Each must come back on
+            // its own entity, with a `null` neighbour never bleeding over.
+            let mut without_material = entity("no-material", None);
+            without_material.material_data = None;
+
+            let mut finite = entity("finite", Some("no-material"));
+            let mut finite_material = MaterialData::default();
+            finite_material.attenuation_distance = 10.0;
+            finite.material_data = Some(finite_material);
+
+            let mut default = entity("default", Some("no-material"));
+            default.material_data = Some(MaterialData::default());
+
+            let mut zero = entity("zero", Some("no-material"));
+            let mut zero_material = MaterialData::default();
+            zero_material.attenuation_distance = 0.0;
+            zero.material_data = Some(zero_material);
+
+            let scene_file = build_scene_file(
+                "Recovery",
+                &EnvironmentSettings::default(),
+                &GlobalAmbientLight::default(),
+                &InputMap::default(),
+                HashMap::new(),
+                &PostProcessingSettings::default(),
+                &AudioBusConfig::default(),
+                vec![without_material, finite, default, zero],
+                None,
+                None,
+            );
+
+            let json = serde_json::to_string(&scene_file)
+                .expect("serialize a scene with sparse, mixed materials");
+            assert_eq!(json.matches(NULL_FIELD).count(), 1, "{json}");
+            let parsed =
+                parse_scene_file(&json).expect("a scene with sparse, mixed materials must load");
+
+            assert!(
+                parsed.entities[0].material_data.is_none(),
+                "an entity with no material_data must stay that way"
+            );
+            assert_eq!(attenuation_of(&parsed, 1), 10.0);
+            assert_eq!(attenuation_of(&parsed, 2), f32::INFINITY);
+            assert_eq!(attenuation_of(&parsed, 3), 0.0);
+        }
     }
 }
 

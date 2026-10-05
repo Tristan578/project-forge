@@ -268,6 +268,9 @@ function loadManifest() {
   for (const k of ['skills.independent', 'agents.handAuthored', 'agents.droppedFrontmatterKeys', 'hooks.toolAliases', 'hooks.unsupportedEvents', 'hooks.skipScripts', 'hooks.droppedHandlerKeys']) {
     need(k, isObj, 'an object');
   }
+  // Optional: hook groups whose matcher names tools Codex has no alias for
+  // (the GitHub MCP tools), kept Claude-only with a reason a reader can audit.
+  need('hooks.claudeOnlyMatchers', (v) => v === undefined || (isObj(v) && Object.values(v).every(str)), 'an object of matcher -> non-empty reason, when present');
   need('hooks.patchTimeoutFactor', (v) => Number.isInteger(v) && v >= 1, 'a positive integer');
   need('hooks.maxTimeoutSeconds', (v) => Number.isInteger(v) && v >= 1, 'a positive integer');
   need('hooks.adapterOverheadSeconds', (v) => Number.isInteger(v) && v >= 2, 'an integer of at least 2');
@@ -428,6 +431,7 @@ function planHooks(m, plan) {
   const out = {};
   const conditions = {};
   const report = { ported: 0, skipped: [], unsupported: [], bothChannels: [] };
+  const claudeOnlyUsed = new Set();
   // Every key on a group or a handler is classified, exactly like events and
   // scripts. `.claude/settings.json` already carries two the first cut of this
   // generator dropped without a word: a group-level `if` on six groups and
@@ -443,6 +447,14 @@ function planHooks(m, plan) {
     for (const group of groups) {
       for (const k of Object.keys(group)) {
         if (!GROUP_KEYS.includes(k)) die(`hooks: ${event} group carries key "${k}", which this generator does not know how to port — classify it in port.mjs`);
+      }
+      // A Claude-only group (port.json hooks.claudeOnlyMatchers) is reported and
+      // left out: mapping its matcher would need a Codex tool name nobody has
+      // verified, and mapMatcher would refuse it anyway.
+      if (supported && Object.hasOwn(h.claudeOnlyMatchers || {}, group.matcher)) {
+        claudeOnlyUsed.add(group.matcher);
+        report.skipped.push(`${event}:[${group.matcher}]`);
+        continue;
       }
       const handlers = [];
       // null = no matcher reaches Codex, so every tool is matched.
@@ -578,6 +590,9 @@ function planHooks(m, plan) {
       entry.hooks = handlers;
       (out[event] ||= []).push(entry);
     }
+  }
+  for (const m of Object.keys(h.claudeOnlyMatchers || {})) {
+    if (!claudeOnlyUsed.has(m)) die(`hooks: port.json hooks.claudeOnlyMatchers names "${m}", which no supported-event group in ${h.source} uses — remove the stale entry`);
   }
   if (report.ported === 0) die('hooks: nothing was ported — refusing to emit an empty hooks.json');
   const doc = {

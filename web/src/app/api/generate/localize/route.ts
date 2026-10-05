@@ -14,6 +14,7 @@ import {
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
+import { omitUndefinedValues } from '@/lib/utils/omitUndefined';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
@@ -125,7 +126,11 @@ const POST_impl = createGenerationHandler<
   execute: async (params, apiKey, { userId, usageId, abortSignal }) => {
     // A platform key can be a federated Bearer token (#8858); passing it as
     // `apiKey` would send it as `x-api-key`, which Anthropic rejects.
-    const anthropicProvider = createAnthropic(anthropicClientAuthForKey(apiKey));
+    // omitUndefinedValues: `AnthropicClientAuth` admits an explicit
+    // `apiKey: undefined` (another caller relies on that), but the vendor
+    // `AnthropicProviderSettings` this feeds doesn't accept the key at all
+    // when its value is undefined.
+    const anthropicProvider = createAnthropic(omitUndefinedValues(anthropicClientAuthForKey(apiKey)));
     const result: Record<string, LocaleBundle> = {};
 
     // Resolve consent + a single trace id once for the whole localize op — every
@@ -146,7 +151,9 @@ const POST_impl = createGenerationHandler<
           prompt,
           maxOutputTokens: 4096,
           experimental_telemetry: { isEnabled: true },
-          abortSignal,
+          // `ai`'s AbortSignal option is a vendor type without `| undefined`;
+          // conditional spread omits the key entirely rather than casting.
+          ...(abortSignal !== undefined ? { abortSignal } : {}),
         });
 
         captureAiGeneration({

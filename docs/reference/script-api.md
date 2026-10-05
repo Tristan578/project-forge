@@ -314,7 +314,7 @@ function onUpdate() {
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `forge.camera.setMode(mode)` | `void` | `'thirdPersonFollow'｜'firstPerson'｜'sideScroller'｜'topDown'｜'fixed'｜'orbital'` |
-| `forge.camera.setTarget(entityId)` | `void` | Set follow target by entity ID |
+| `forge.camera.setTarget(entityId)` | `void` | Set the camera's target (the entity it tracks) by entity ID |
 | `forge.camera.shake(intensity, duration)` | `void` | Trigger camera shake |
 | `forge.camera.getMode()` | `string` | Current camera mode |
 | `forge.camera.setProperty(property, value)` | `void` | Set a camera property |

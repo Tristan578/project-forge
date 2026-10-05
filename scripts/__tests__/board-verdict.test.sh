@@ -324,7 +324,9 @@ for f in "$SCRIPT" "$POST"; do
   fi
 done
 # The workflow must hand the count to the producer, or every published PASS is refused.
-if grep -qF "post-board-verdict.sh <pr number> \${overall} \${reviewedSha} \${boards.length}/\${REVIEWERS.length}" "$WORKFLOW_JS"; then
+# The count is `counted`: the distinct seats that reported this round plus the
+# ones carried from an earlier round (review-protocol, re-reviews).
+if grep -qF "post-board-verdict.sh <pr number> \${overall} \${reviewedSha} \${counted}/\${REVIEWERS.length}" "$WORKFLOW_JS"; then
   PASS=$((PASS+1)); echo "  ok   review-board.js passes <reported>/<total> to the producer"
 else
   FAIL=$((FAIL+1)); echo "  FAIL review-board.js does not pass the seat count to post-board-verdict.sh"

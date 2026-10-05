@@ -33,7 +33,7 @@ export interface AttachGeneratedAudioOptions {
   prompt: string;
   audioBase64: string;
   /** Absent means "import it, attach it to nothing". */
-  entityId?: string;
+  entityId?: string | undefined;
   sink: GeneratedAudioSink;
 }
 

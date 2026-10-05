@@ -203,6 +203,33 @@ assert_output "api route fires api" "web/src/app/api/generate/gdd/route.ts" api 
 assert_output "published spec fires api" "docs/api/openapi.json" api true
 assert_output "SKILL.md fires skills" ".claude/skills/kanban/SKILL.md" skills true
 
+# ---- exactOptionalPropertyTypes pin (#7592, #10230) -------------------------
+#
+# The pin runs in CI Self-Defense Tests, which is gated on needs-ci. Every
+# tsconfig it pins must fire `ci`, or a PR deleting only that flag skips its own
+# pin. The list is READ from the pin's PINNED array, not restated here, so a
+# package added to the pin without a matching ci.yml filter goes red.
+echo "--- exactOptionalPropertyTypes pinned tsconfigs fire ci ---"
+EOPT_PIN="$REPO_ROOT/scripts/__tests__/exact-optional-property-types.test.mjs"
+eopt_pinned="$(grep -E '^const PINNED = \[' "$EOPT_PIN" | grep -oE "'[^']+'" | tr -d "'")"
+eopt_count="$(printf '%s\n' "$eopt_pinned" | grep -c 'tsconfig\.json$')"
+if [ "$eopt_count" -lt 4 ]; then
+  fail "read ${eopt_count} tsconfig paths from PINNED in $EOPT_PIN (expected >= 4: apps/docs, mcp-server, packages/ui, web) -- the array moved or changed shape; update this reader"
+else
+  pass "read ${eopt_count} pinned tsconfig paths from $EOPT_PIN"
+fi
+case "$eopt_pinned" in
+  *web/tsconfig.json*) pass "web/tsconfig.json is in the pin's PINNED list" ;;
+  *) fail "web/tsconfig.json is missing from the pin's PINNED list (#10230)" ;;
+esac
+while IFS= read -r eopt_path; do
+  [ -n "$eopt_path" ] || continue
+  assert_output "pinned $eopt_path fires ci" "$eopt_path" ci true
+done <<< "$eopt_pinned"
+assert_output "web/tsconfig.json alone fires ci" "web/tsconfig.json" ci true
+assert_output "a nested web tsconfig does NOT fire ci" "web/e2e/tsconfig.json" ci false
+assert_output "near-miss web tsconfig does NOT fire ci" "web/tsconfig.jsonx" ci false
+
 # ---- Orthogonality pins -----------------------------------------------------
 #
 # ci.yml documents in prose that hooks/deps/agentic/onboarding/codex/skills are
@@ -261,6 +288,11 @@ assert_output "the hand-written Codex config fires agentic" ".codex/config.toml"
 assert_output "the generator fires agentic" "tools/agentic-sync/port.mjs" agentic true
 assert_output "the gate script fires agentic" "scripts/check-codex-port.sh" agentic true
 assert_output "the gate's suite fires agentic" "scripts/__tests__/check-codex-port.test.sh" agentic true
+assert_output "the Copilot hook gate fires agentic" "scripts/check-copilot-hooks.sh" agentic true
+assert_output "the Copilot hook gate's suite fires agentic" "scripts/__tests__/check-copilot-hooks.test.sh" agentic true
+# .github/hooks/validation.json runs it, and the gate fails when a wired script
+# is missing: without this, renaming it merges green and breaks the next .github PR.
+assert_output "the script a Copilot hook file runs fires agentic" "scripts/copilot-arch-check.sh" agentic true
 assert_output ".mcp.json fires agentic (MCP parity)" ".mcp.json" agentic true
 assert_output "a hook SCRIPT the surface names fires agentic" ".claude/hooks/block-main-commits.sh" agentic true
 assert_output "a rule file the agents name fires agentic" ".claude/rules/lessons-learned.md" agentic true

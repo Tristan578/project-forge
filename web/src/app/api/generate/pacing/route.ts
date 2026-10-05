@@ -7,6 +7,7 @@ import { DB_PROVIDER } from '@/lib/config/providers';
 import { generateText, Output } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { anthropicClientAuthForKey } from '@/lib/ai/wifCredential';
+import { omitUndefinedValues } from '@/lib/utils/omitUndefined';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { captureAiGeneration, hasAnalyticsConsent } from '@/lib/analytics/posthog-server';
 import { z } from 'zod';
@@ -115,7 +116,11 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
 
     // A platform key can be a federated Bearer token (#8858); passing it as
     // `apiKey` would send it as `x-api-key`, which Anthropic rejects.
-    const anthropicClient = createAnthropic(anthropicClientAuthForKey(apiKey));
+    // omitUndefinedValues: `AnthropicClientAuth` admits an explicit
+    // `apiKey: undefined` (another caller relies on that), but the vendor
+    // `AnthropicProviderSettings` this feeds doesn't accept the key at all
+    // when its value is undefined.
+    const anthropicClient = createAnthropic(omitUndefinedValues(anthropicClientAuthForKey(apiKey)));
     const startedAt = Date.now();
     const aiResult = await generateText({
       model: anthropicClient(AI_MODEL_FAST),
@@ -125,7 +130,9 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
       temperature: 0.4,
       output: Output.object({ schema: PacingSuggestionSchema }),
       experimental_telemetry: { isEnabled: true },
-      abortSignal,
+      // `ai`'s AbortSignal option is a vendor type without `| undefined`;
+      // conditional spread omits the key entirely rather than casting.
+      ...(abortSignal !== undefined ? { abortSignal } : {}),
     });
 
     captureAiGeneration({

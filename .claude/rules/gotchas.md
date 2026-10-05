@@ -15,7 +15,7 @@ the table below.
 | UI & Frontend | `rules/gotchas-web.md` | same as above |
 | E2E & Scripts | `rules/gotchas-web.md` | same as above |
 | Engine & Game Loop | `rules/gotchas-engine.md` | `engine/**`, `web/src/lib/{engine,game-creation,physics,cutscene,scripting}/**`, `web/src/stores/**`, `web/src/hooks/**` |
-| Claude Code Config | `rules/gotchas-ops.md` | `.claude/**`, `.github/**`, `vercel.json` |
+| Claude Code Config | `rules/gotchas-ops.md` | `.claude/**`, `.github/**`, `vercel.json`, `vercel.ts` |
 | Infrastructure | `rules/gotchas-ops.md` | same as above |
 | Enforcement Hooks | `rules/gotchas-ops.md` | same as above |
 

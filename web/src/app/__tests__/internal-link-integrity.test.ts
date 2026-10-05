@@ -65,6 +65,13 @@ describe('internal link integrity (web)', () => {
     ]);
   });
 
+  // The Sign in follow-up is built from this constant at runtime; only the
+  // hoisted declaration puts the route in front of this gate.
+  it('sees the hoisted auth route constant', () => {
+    const seen = links.filter((l) => l.file === 'lib/navigation/authRoutes.ts');
+    expect(seen.map((l) => l.raw)).toEqual(['/sign-in']);
+  });
+
   it('has no internal link pointing at a route that does not exist', () => {
     expect(
       report.dead,

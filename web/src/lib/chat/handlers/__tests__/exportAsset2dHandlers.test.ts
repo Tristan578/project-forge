@@ -1062,6 +1062,16 @@ describe('handlers2d project and camera commands', () => {
       const { result } = await invoke2d('set_grid_2d', {});
       expect(result.success).toBe(true);
     });
+
+    it('never forwards an explicit undefined key (setGrid2d spreads it over existing settings)', async () => {
+      const { result, store } = await invoke2d('set_grid_2d', { size: 16, enabled: undefined });
+      expect(result.success).toBe(true);
+      expect(store.setGrid2d).toHaveBeenCalledTimes(1);
+      const settings = vi.mocked(store.setGrid2d).mock.calls[0]?.[0];
+      // Own keys, not toEqual: toEqual treats `{ enabled: undefined }` as `{}`.
+      expect(Object.keys(settings ?? {})).toEqual(['size']);
+      expect(settings).toStrictEqual({ size: 16 });
+    });
   });
 });
 
@@ -1811,6 +1821,20 @@ describe('handlers2d 2D physics commands', () => {
         mass: 5,
         bodyType: 'dynamic',
       }), true);
+    });
+
+    it('keeps the existing value when an input key is explicitly undefined (#10306)', async () => {
+      // zod keeps an input key that is present with `undefined` as an own key,
+      // so a raw spread of the parsed args would erase `friction` here.
+      const existing = { bodyType: 'dynamic' as const, colliderShape: 'box' as const, size: [1, 1] as [number, number], radius: 0.5, vertices: [] as [number, number][], mass: 2, friction: 0.5, restitution: 0, gravityScale: 1, isSensor: false, lockRotation: false, continuousDetection: false, oneWayPlatform: false, surfaceVelocity: [0, 0] as [number, number] };
+      const { store } = await invoke2d(
+        'set_physics2d',
+        { entityId: 'ent-1', mass: 5, friction: undefined },
+        { physics2d: { 'ent-1': existing }, setPhysics2d: vi.fn() },
+      );
+      const data = vi.mocked(store.setPhysics2d).mock.calls[0]?.[1];
+      expect(data?.mass).toBe(5);
+      expect(data?.friction).toBe(0.5);
     });
 
     it('returns error when entityId is missing', async () => {

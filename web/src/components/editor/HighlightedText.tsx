@@ -14,7 +14,7 @@ interface HighlightedTextProps {
   /** The full text to display */
   text: string;
   /** The substring to highlight (case-insensitive) */
-  highlight?: string;
+  highlight?: string | undefined;
   /** Additional CSS classes for the container span */
   className?: string;
 }

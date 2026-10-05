@@ -18,7 +18,7 @@ import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
 interface GenerateMusicDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  entityId?: string;
+  entityId?: string | undefined;
 }
 
 export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusicDialogProps) {

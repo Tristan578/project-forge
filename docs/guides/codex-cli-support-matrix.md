@@ -171,14 +171,14 @@ above fail *silently* if ignored:
   honour, `Bash(word [word…] *)`; `Bash(git push:*)` or `Bash(git push*)` stops
   it rather than being ported into a condition that can never match.
 
-### Ported (29 handlers)
+### Ported (30 handlers)
 
 | Claude event | Codex event | Scripts |
 |---|---|---|
 | `SessionStart` | `SessionStart` | `on-session-start.sh` |
 | `UserPromptSubmit` | `UserPromptSubmit` | `on-prompt-submit.sh` |
 | `PreToolUse` `Edit\|Write\|Bash` | `PreToolUse` `apply_patch\|Bash` | `inject-lessons-learned.sh` |
-| `PreToolUse` `Bash` | `PreToolUse` `Bash` | `pre-push-quality-gate.sh`, `block-main-commits.sh`, `check-pr-metadata.sh`, `check-docs-quality.sh`, `block-deferred-fixes.sh`. Each has an `if` in `.claude/settings.json`; under Codex it is **not applied** — the script always starts and routes on the command itself (see "`if` conditions" above). `block-deferred-fixes.sh` loses its `statusMessage` ("Checking for Boy Scout Rule violations") — see the note under this table |
+| `PreToolUse` `Bash` | `PreToolUse` `Bash` | `pre-push-quality-gate.sh`, `block-main-commits.sh`, `check-pr-metadata.sh`, `check-docs-quality.sh`, `block-deferred-fixes.sh`, `require-pr-ready.sh`. Each but `require-pr-ready.sh` (#10328) has an `if` in `.claude/settings.json`; under Codex it is **not applied** — the script always starts and routes on the command itself (see "`if` conditions" above). `block-deferred-fixes.sh` loses its `statusMessage` ("Checking for Boy Scout Rule violations") — see the note under this table. `require-pr-ready.sh` also runs on three GitHub MCP tools under Claude; that group is listed in `port.json` `hooks.claudeOnlyMatchers` and is not ported, because no Codex name for those tools has been verified (#10330) |
 | `PreToolUse` `Edit\|Write` | `PreToolUse` `apply_patch\|Bash`, mode `edit` (see "Two edit channels") | `verify-branch.sh`, `check-db-transaction.sh`, `check-sanitization-patterns.sh`, `check-vercel-json.sh`. Their `statusMessage` is dropped: matched for every shell command, a line like "Checking sanitization patterns" would be false |
 | `PostToolUse` `Edit\|Write` | `PostToolUse` `apply_patch` | `auto-lockfile-sync.sh`, `post-edit-lint.sh`, `check-arch.sh`, `check-route-has-test.sh`, `cargo-check-wasm.sh` |
 | `PostToolUse` `Bash` | `PostToolUse` `Bash` | `post-commit-clean.sh`, `post-merge-doc-check.sh`, `post-push-resolve-comments.sh` (`if: Bash(git push *)`; `async` dropped, so it runs synchronously for up to 30 s after a push — and, its `statusMessage` being dropped too, **with no status line explaining the wait**; see the note under this table) |
@@ -278,9 +278,9 @@ until someone decides where it belongs. That is deliberate: the first port wired
   1, which Codex reports as Failed **and proceeds**. Blocking hooks then do not
   block. Start Codex at the root.
 - **`[features] shell_tool = false` is set in the committed `.codex/config.toml`.**
-  Thirteen of the 29 handlers match `Bash` — nine shell hooks, including the
-  four policy hooks (`block-main-commits`, `check-pr-metadata`,
-  `pre-push-quality-gate`, `block-deferred-fixes`), plus the four `PreToolUse`
+  Fourteen of the 30 handlers match `Bash` — ten shell hooks, including the
+  five policy hooks (`block-main-commits`, `check-pr-metadata`,
+  `pre-push-quality-gate`, `block-deferred-fixes`, `require-pr-ready`), plus the four `PreToolUse`
   edit hooks, which are offered `Bash` payloads so they can see a patch carried
   in a command — and every generated agent is told to use shell commands. What that flag leaves available under 0.144.1, and therefore whether
   those hooks can ever fire under this profile, was **not** established. It is
@@ -505,7 +505,7 @@ Codex env_vars cannot implement a Claude variable alias.
 
 Unverified until someone does it; correct this file with what you find.
 
-1. Started at the repo root and trusted, does `/hooks` list 29 handlers, and do
+1. Started at the repo root and trusted, does `/hooks` list 30 handlers, and do
    they run once approved?
 2. On Windows, which shell runs `commandWindows`, and does the relative path
    resolve?
