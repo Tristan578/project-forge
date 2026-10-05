@@ -278,13 +278,17 @@ command_and_files() {
     case "$f" in '~/'*) f="$HOME/${f#'~/'}" ;; '$HOME/'*|'${HOME}/'*) f="$HOME/${f#*/}" ;; esac
     if [ -z "$f" ] || [ ! -f "$f" ] || [ ! -r "$f" ]; then continue; fi
     head -c 1048576 "$f" 2>/dev/null; printf '\n'
-  done < <(body_files | sort -u)
+  done < <({ body_files "$WORD_RE"; body_files "$QUOTED_RE|$WORD_RE"; } | sort -u)
 }
 
-# body_files: the paths command_and_files reads, one per line. cat's
-# arguments run until a separator or a heredoc (<<), whose body is text, not
-# file names. A quoted word ('a b', or "a b" holding no $ or parentheses) is
-# one word, so a path with a space is read whole.
+# body_files <token regex>: the paths command_and_files reads, one per line.
+# cat's arguments run until a separator or a heredoc (<<), whose body is text,
+# not file names. It runs twice: once splitting at every space, which also
+# reads inside a quoted script (bash -c 'gh pr comment N -F - < v.md'), and
+# once keeping a quoted word ('a b', or "a b" holding no $ or parentheses)
+# whole, so a path with a space is read too.
+WORD_RE="<<<|<<|<|[|;&()]|[^[:space:]\"'<>|;&()]+"
+QUOTED_RE="'[^']*'|\"[^\"\$()]*\""
 body_files() {
   local tok prev="" incat=0
   while IFS= read -r tok; do
@@ -301,7 +305,7 @@ body_files() {
     esac
     [ "${tok##*/}" != cat ] || incat=1
     prev=$tok
-  done < <(grep -oE "'[^']*'|\"[^\"\$()]*\"|<<<|<<|<|[|;&()]|[^[:space:]\"'<>|;&()]+" <<<"$COMMAND")
+  done < <(grep -oE "$1" <<<"$COMMAND")
 }
 
 # A number as written in a call: digits (optionally #), else "?".

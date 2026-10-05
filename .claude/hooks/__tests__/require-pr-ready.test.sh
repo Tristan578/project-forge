@@ -482,10 +482,16 @@ for c in "gh pr comment 10305 --body \"\$(cat $TMP/v.md)\"" "gh pr comment 10305
 done
 # A quoted path with a space is one path (Devin review on #10333).
 printf '<!-- board-verdict: PASS sha=abc seats=5/5 -->\n' > "$TMP/board verdict.md"
-for c in "gh pr comment 10305 --body \"\$(cat '$TMP/board verdict.md')\"" "gh pr comment 10305 -F '$TMP/board verdict.md'" \
+# (-F <path> is read by the -F handling itself; these three only body_files reads.)
+for c in "gh pr comment 10305 --body \"\$(cat '$TMP/board verdict.md')\"" "cat '$TMP/board verdict.md' | gh pr comment 10305 -F -" \
   "gh pr comment 10305 -F - < \"$TMP/board verdict.md\""; do
   fixtures clean "$OPEN" "$GREEN"
   expect_block "a quoted body path with a space is read: $c" "$c" 'unresolved review threads'
+done
+# ...and keeping a quoted word whole must not hide the reads INSIDE a quoted script.
+for c in "bash -c 'gh pr comment 10305 -F - < $TMP/v.md'" "bash -c 'gh pr comment 10305 --body \"\$(cat $TMP/v.md)\"'"; do
+  fixtures clean "$OPEN" "$GREEN"
+  expect_block "a body file inside a bash -c script is read: $c" "$c" 'unresolved review threads'
 done
 # A ~/ path is read the way the shell would expand it.
 HOME_DIR=$(mktemp -d "$TMP/home.XXXXXX"); cp "$TMP/v.md" "$HOME_DIR/v.md"
