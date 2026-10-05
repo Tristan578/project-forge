@@ -90,7 +90,7 @@ Apply fixes for:
 Rules:
 - Commit after each logical fix (not batched)
 - Run targeted lint + tsc after each edit
-- Reply to every Sentry comment with: commit SHA (fixed), PF-ticket (deferred), or technical explanation (false positive)
+- Reply to every Sentry comment with: commit SHA (fixed), GitHub issue `#NNNN` (deferred), or technical explanation (false positive)
 - No banned phrases without a ticket: "will fix later", "known issue", "out of scope"
 
 ### Phase 6: Multi-Domain Validation (Post-Fix)

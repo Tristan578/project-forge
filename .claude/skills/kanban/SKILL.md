@@ -5,7 +5,7 @@ description: "Manage SpawnForge taskboard tickets — create, view, move, and sy
 
 # Taskboard Management Protocol
 
-You manage project work via the **taskboard MCP server** (22 tools). The taskboard is the single source of truth for all project work.
+You manage project work via the **taskboard MCP server** (22 tools). GitHub issues are the backlog of record; the taskboard is a local working view synced with them, and when the two disagree the GitHub issue is correct.
 
 ## Taskboard Ownership Model
 

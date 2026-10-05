@@ -25,7 +25,7 @@ If you are asked to write code and no ticket exists, **create the ticket first**
 
 ## Taskboard Setup
 
-The taskboard (tcarac/taskboard) is the single source of truth for all project work.
+GitHub issues are the backlog of record. The taskboard (tcarac/taskboard) is a local working view synced with them; when the two disagree, the GitHub issue is correct.
 
 ### Installation
 ```bash
@@ -55,7 +55,7 @@ The session start hook auto-starts the server if the binary is found. If it fail
 
 ### Canonical Project Facts
 
-**Taskboard** — the single source of truth for all work:
+**Taskboard** — the local working view of the backlog. GitHub issues are the backlog of record; when the two disagree, the issue is correct:
 - Project: **Project Forge** (`01KMM9ZA6SBZ7RKJZJTZS9VR4R`, prefix `PF`)
 - Teams: Engineering `01KMR5E36TP59PRQA8GQEWJVM1`, PM `01KMR5E3852BWXAZ219W47CSKS`
 - API: `http://localhost:3010/api` · Web UI: `http://localhost:3010`

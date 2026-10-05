@@ -142,9 +142,9 @@ drops the prior dismissal.
 - **Substitution naming (#10158)**: a Playwright test or describe that stands store injection or a mock in for the component it names declares it twice — `{ annotation: { type: 'substitution', description: '<component>' } }`, written literally, AND `[substituted: <component>]` in its title. `web/scripts/check-substitution-naming.ts` (CI: `test-e2e-journey`) fails an unpaired annotation or marker, and `capabilityMatrix.test.ts` keeps such specs out of `proven` cells. Conventions and rules: `web/e2e/lib/substitution.ts`.
 - **mock*Once leak guard** (`web/vitest.mockOnceGuard.ts`, loaded by `vitest.setup.ts`): a test that queues `mock*Once` on a mock it did not create — a module-scoped `vi.fn`, a `vi.mock` factory mock (however lazily the factory ran), or a bare automock — and never consumes it FAILS, naming the still-armed queueing line. Consume the value, or build the mock inside the test. `MOCK_ONCE_GUARD=off` disables it for a local run (bisecting); it is ignored under CI. Under CI's `retry: 1`, a transient failure between queueing and consuming shows up on the retry as this guard's error — chase the original failure.
 
-## Taskboard
+## Backlog
 
-All work tracked via taskboard. Use `/kanban` skill for full protocol.
+GitHub issues are the backlog of record. The taskboard is a local working view synced with them (`/kanban` has the protocol); when the two disagree, the GitHub issue is correct.
 
 ## Working Principles
 

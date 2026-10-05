@@ -43,7 +43,7 @@ Declared in `engine/Cargo.toml` (`webgl2`, `webgpu`, `runtime`; `default = []`).
 1. **Spec-First:** Never implement without an approved spec in `specs/`
 2. **Test-First:** Never write logic without a failing test case
 3. **Bridge Isolation:** Only `bridge/` may import `web_sys`/`js_sys`/`wasm_bindgen`
-4. **Taskboard-Driven:** ALL work tracked on taskboard. Use `/kanban` skill.
+4. **Issue-Driven:** All work is tracked as GitHub issues, the backlog of record. The taskboard (`/kanban`) is a local view synced with them.
 5. **Worktree Commit Safety:** Commit after every logical chunk. Uncommitted work is permanently lost.
 6. **Keep Context Current:** Update `.claude/rules/` and `MEMORY.md` as part of every iteration
 
