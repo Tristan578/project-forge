@@ -283,12 +283,14 @@ command_and_files() {
 
 # body_files: the paths command_and_files reads, one per line. cat's
 # arguments run until a separator or a heredoc (<<), whose body is text, not
-# file names.
+# file names. A quoted word ('a b', or "a b" holding no $ or parentheses) is
+# one word, so a path with a space is read whole.
 body_files() {
   local tok prev="" incat=0
   while IFS= read -r tok; do
     case "$tok" in
       '|'|';'|'&'|'('|')'|'<<'|'<<<') incat=0; prev=$tok; continue ;;
+      \'*\'|\"*\") tok=${tok:1:${#tok}-2} ;;
     esac
     case "$prev" in -F|--body-file|--input|'<') printf '%s\n' "$tok" ;; esac
     case "$tok" in
@@ -299,7 +301,7 @@ body_files() {
     esac
     [ "${tok##*/}" != cat ] || incat=1
     prev=$tok
-  done < <(grep -oE "<<<|<<|<|[|;&()]|[^[:space:]\"'<>|;&()]+" <<<"$COMMAND")
+  done < <(grep -oE "'[^']*'|\"[^\"\$()]*\"|<<<|<<|<|[|;&()]|[^[:space:]\"'<>|;&()]+" <<<"$COMMAND")
 }
 
 # A number as written in a call: digits (optionally #), else "?".
@@ -609,4 +611,7 @@ for idx in "${!TARGETS[@]}"; do
     unknown|"") block "$P: GitHub has not finished computing mergeability" "Retry in a few seconds." ;;
   esac
 done
+# Without a working `timeout`, a gh call is not cut off, so the last answer can
+# arrive after the budget; an answer that late does not authorise the call.
+budget_check
 exit 0

@@ -61,6 +61,7 @@ case "$route" in
   repos/*/pulls/*) f=pr.json ;;
   *) exit 1 ;;
 esac
+[ ! -f "$FAKE_DIR/sleep.$f" ] || sleep "$(cat "$FAKE_DIR/sleep.$f")"
 [ -f "$FAKE_DIR/$f" ] || exit 1
 cat "$FAKE_DIR/$f"
 FAKEGH
@@ -69,7 +70,7 @@ chmod +x "$TMP/bin/gh"
 # fixtures <mergeable_state> <threads-json|-> <checks-json|-> [graphql-json]
 # Writes a fresh fixture set; "-" leaves that route unanswered.
 fixtures() {
-  rm -f "$FAKE"/*.json "$FAKE/sleep"
+  rm -f "$FAKE"/*.json "$FAKE/sleep" "$FAKE"/sleep.*
   : > "$FAKE/calls.log"
   jq -nc --arg s "$1" --arg h "$HEAD_SHA" '{head:{sha:$h}, mergeable_state:$s}' > "$FAKE/pr.json"
   [ "$2" = "-" ] || printf '%s\n' "$2" > "$FAKE/threads.json"
@@ -438,6 +439,15 @@ if timeout 5 true </dev/null >/dev/null 2>&1; then
 else
   echo "  note  no coreutils timeout here: the per-call cut-off is not used, so it is not tested"
 fi
+# Without a working timeout, the LAST answer can arrive after the budget; it must
+# not authorise the call (Devin review on #10333). A failing `timeout` stands in
+# for a host without one, the way System32's timeout.exe would.
+mkdir -p "$TMP/notimeout"; printf '#!/bin/sh\nexit 1\n' > "$TMP/notimeout/timeout"; chmod +x "$TMP/notimeout/timeout"
+fixtures clean "$RESOLVED" "$GREEN"
+printf '3\n' > "$FAKE/sleep.status.json"
+OUT=$(jq -nc --arg c 'gh pr ready 10305' '{tool_input:{command:$c}}' \
+  | (cd "$HERE" && PATH="$TMP/notimeout:$TMP/bin:$PATH" FAKE_DIR="$FAKE" REQUIRE_PR_READY_BUDGET_SECONDS=2 bash "$HOOK" 2>&1)); RC=$?
+if [ "$RC" -eq 2 ] && grep -qF 'ran out of time' <<<"$OUT"; then ok "a late last answer (no timeout) does not authorise the call"; else bad "late last answer (rc=$RC): $OUT"; fi
 
 # --- #10330: a script a shell reads from stdin.
 fixtures clean "$RESOLVED" "$GREEN"
@@ -469,6 +479,13 @@ for c in "gh pr comment 10305 --body \"\$(cat $TMP/v.md)\"" "gh pr comment 10305
   "cat $TMP/v.md | gh pr comment 10305 -F -"; do
   fixtures clean "$OPEN" "$GREEN"
   expect_block "a marker in a file the command reads: $c" "$c" 'unresolved review threads'
+done
+# A quoted path with a space is one path (Devin review on #10333).
+printf '<!-- board-verdict: PASS sha=abc seats=5/5 -->\n' > "$TMP/board verdict.md"
+for c in "gh pr comment 10305 --body \"\$(cat '$TMP/board verdict.md')\"" "gh pr comment 10305 -F '$TMP/board verdict.md'" \
+  "gh pr comment 10305 -F - < \"$TMP/board verdict.md\""; do
+  fixtures clean "$OPEN" "$GREEN"
+  expect_block "a quoted body path with a space is read: $c" "$c" 'unresolved review threads'
 done
 # A ~/ path is read the way the shell would expand it.
 HOME_DIR=$(mktemp -d "$TMP/home.XXXXXX"); cp "$TMP/v.md" "$HOME_DIR/v.md"
