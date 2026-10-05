@@ -262,8 +262,8 @@ segments() {
         seg = seg substr(src, i, j - i); i = j - 1; continue
       }
       if (c == "\n") {
-        # A line ending in | continues the pipe on the next line.
-        piped = (seg ~ /[|][ \t]*$/); seg = seg c
+        # A line ending in | or |& continues the pipe on the next line.
+        piped = (seg ~ /[|]&?[ \t]*$/); seg = seg c
         for (h = 1; h <= nhd; h++) {
           while (i < n) {
             e = index(substr(src, i + 1), "\n"); line = (e ? substr(src, i + 1, e - 1) : substr(src, i + 1))
@@ -278,7 +278,10 @@ segments() {
       }
       if (d > 0 || bt || blk > 0) { seg = seg c; continue }
       # ; and || end a list; & (and so &&) too, unless it is a >& or &>
-      # redirect or the & of a |& pipe.
+      # redirect or the & of a |& pipe. Not while a heredoc opened on this
+      # line is pending: its body (on the next lines) belongs to the command
+      # that opened it, so the split waits for the line end.
+      if (nhd > 0) { seg = seg c; continue }
       if (c == ";" || (c == "|" && nx == "|")) { printf "%s\036", seg; seg = ""; if (c == "|") i++; continue }
       if (c == "&" && nx != ">" && substr(src, i - 1, 1) !~ /[>|]/) { printf "%s\036", seg; seg = ""; continue }
       seg = seg c

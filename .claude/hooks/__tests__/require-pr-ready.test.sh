@@ -485,7 +485,9 @@ for c in 'for n in 10305; do echo "gh pr ready $n"; done | bash' '{ echo gh pr r
   $'echo gh pr ready 10305 |\nbash' $'for n in 10305\ndo\n  echo gh pr ready $n\ndone | bash' \
   "(echo 'gh pr ready 10305'; echo ok) | bash" "printf 'gh pr ready 10305; echo ok' | bash" \
   'printf "gh pr ready 10305; echo ok" | bash' 'echo `echo gh pr ready 10305; true` | bash' \
-  $'(\n  echo gh pr ready 10305\n) | bash' $'echo `echo gh pr ready 10305\ntrue` | bash'; do
+  $'(\n  echo gh pr ready 10305\n) | bash' $'echo `echo gh pr ready 10305\ntrue` | bash' \
+  $'printf \'gh pr ready 10305\' |&\nbash' $'bash <<\'EOF\'; echo ok\ngh pr ready 10305\nEOF' \
+  $'bash <<\'EOF\' && echo ok\ngh pr ready 10305\nEOF'; do
   expect_block "a script on stdin from one segment: $c" "$c" 'a script fed to a shell on stdin'
 done
 expect_allow "a compound command ends, so a later statement is its own segment" \
