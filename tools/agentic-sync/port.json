@@ -66,7 +66,10 @@
       "CwdChanged": "no Codex hook event",
       "PostToolUseFailure": "no Codex hook event; rate-limit backoff is advisory context only"
     },
-    "skipScripts": {
+    "claudeOnlyMatchers": {
+    "mcp__github__(update_pull_request|add_issue_comment|update_issue_comment)": "require-pr-ready.sh on the GitHub MCP tools that mark a PR ready or post a board PASS (#10330). Codex names MCP tools in its own scheme and no alias has been verified, so the group stays Claude-only; under Codex those MCP calls are not gated, and the Bash group still is"
+  },
+  "skipScripts": {
       "restore-context-hints.sh": "exists only to put context back in front of the model after compaction. Codex's PostCompact output accepts neither additionalContext nor any hookSpecificOutput (hooks/src/schema.rs, PostCompactCommandOutputWire, deny_unknown_fields) and drops plain stdout, so under Codex it could run and change nothing. Not wired rather than wired-and-inert",
       "inject-post-compact.sh": "same as restore-context-hints.sh: a PostCompact context injector, and Codex's PostCompact cannot carry context to the model. Compensating control: the root AGENTS.md (the file Codex actually loads; .codex/AGENTS.md it does not) instructs the agent to re-read .claude/rules/lessons-learned.md after a compaction — an instruction, not enforcement",
       "auto-approve-safe-commands.sh": "its whole output is permissionDecision=allow, which Codex rejects as unsupported (the hook run is marked Failed). Codex has no hook-driven approval; approvals come from approval_policy and the sandbox"
