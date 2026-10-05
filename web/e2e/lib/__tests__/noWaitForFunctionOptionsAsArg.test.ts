@@ -56,6 +56,17 @@ ruleTester.run('no-wait-for-function-options-as-arg', rule as unknown as Rule.Ru
     'page.evaluate(() => ready(), { timeout: 5_000 });',
     // Computed member access is not matched by name.
     'page["waitForFunction"](() => ready(), { timeout: 5_000 });',
+    // A page function that READS its argument: the object is data, not options.
+    // Reporting it would be wrong, and the autofix would hand the predicate
+    // `undefined` (Devin review on #10335).
+    'page.waitForFunction(({ timeout }) => elapsed() > timeout, { timeout: 100 });',
+    'page.waitForFunction((t) => ready(t), { timeout: 1 });',
+    'page.waitForFunction((...args) => ready(args), { timeout: 1 });',
+    'page.waitForFunction(function (o) { return o.polling; }, { polling: 1 });',
+    // A parameterless `function` that reads `arguments` still consumes the arg.
+    'page.waitForFunction(function () { return arguments[0].timeout > 0; }, { timeout: 1 });',
+    // A page function passed by reference: its parameters are not visible here.
+    'page.waitForFunction(isReady, { timeout: 1 });',
   ],
   invalid: [
     {
@@ -100,10 +111,15 @@ ruleTester.run('no-wait-for-function-options-as-arg', rule as unknown as Rule.Ru
       errors,
     },
     {
-      // A page function that DOES take a parameter still never receives an
-      // options bag on purpose; the timeout is lost either way.
-      code: 'page.waitForFunction((t) => ready(t), { timeout: 1 });',
-      output: 'page.waitForFunction((t) => ready(t), undefined, { timeout: 1 });',
+      // A parameterless `function` expression that never touches `arguments`.
+      code: 'page.waitForFunction(function () { return ready(); }, { timeout: 1 });',
+      output: 'page.waitForFunction(function () { return ready(); }, undefined, { timeout: 1 });',
+      errors,
+    },
+    {
+      // A template-literal page function is an expression string; no arg.
+      code: 'page.waitForFunction(`window.ready`, { timeout: 1 });',
+      output: 'page.waitForFunction(`window.ready`, undefined, { timeout: 1 });',
       errors,
     },
     {

@@ -13,16 +13,28 @@
  * 10s-then-10s.
  *
  * Reported shape: exactly two arguments, the second an object literal (through
- * `as` / `satisfies`) with a `timeout` or `polling` key. Those are the only
- * `WaitForFunctionOptions` keys, and a page function that genuinely wants an
- * argument with one of those names can pass it third-position-safe as
- * `waitForFunction(fn, { timeout }, {})` — rare enough not to special-case.
+ * `as` / `satisfies`) with a `timeout` or `polling` key — the only
+ * `WaitForFunctionOptions` keys — AND a page function that cannot read its
+ * argument: an inline function with no parameters (a `function` expression
+ * must not reference `arguments` either), or a string, which Playwright
+ * evaluates as an expression and never hands an argument.
  *
- * NOT reported: a second argument that is an identifier holding options
- * (`waitForFunction(fn, opts)`). Whether `opts` is an arg or options is a type
- * question this syntactic rule cannot answer; write the options inline.
+ * That second condition is what makes the report certain and the fix safe.
+ * `waitForFunction(({ timeout }) => elapsed() > timeout, { timeout: 100 })` is
+ * VALID Playwright: the predicate reads the object it was given, and moving it
+ * to the options slot would hand the predicate `undefined`. Whether a page
+ * function that takes a parameter meant its object as data or as options is a
+ * question of intent this rule cannot answer, so such calls are not reported.
  *
- * The fix inserts `undefined, ` so the object lands in the options slot.
+ * NOT reported either: a page function passed by reference
+ * (`waitForFunction(isReady, { timeout })`) — its parameters are not visible
+ * here — and a second argument that is an identifier holding options
+ * (`waitForFunction(fn, opts)`), which is a type question. Write the page
+ * function and the options inline.
+ *
+ * The fix inserts `undefined, ` so the object lands in the options slot. It is
+ * only offered where the page function provably ignores its argument, so it
+ * cannot change what the page function sees.
  * Tests: `e2e/lib/__tests__/noWaitForFunctionOptionsAsArg.test.ts`.
  */
 
@@ -56,6 +68,27 @@ function isWaitForFunctionCallee(callee) {
   );
 }
 
+/**
+ * True only when the page function provably cannot read the `arg` Playwright
+ * passes it. Anything this cannot decide returns false, so the rule stays
+ * silent rather than report — or autofix — a call that may be correct.
+ */
+function pageFunctionIgnoresArg(node, sourceCode) {
+  const fn = unwrap(node);
+  if (!fn) return false;
+  // A string page function is evaluated as an expression; it receives no arg.
+  if (fn.type === 'Literal' && typeof fn.value === 'string') return true;
+  if (fn.type === 'TemplateLiteral') return true;
+  // An arrow has no `arguments` of its own, so no parameters means no arg.
+  if (fn.type === 'ArrowFunctionExpression') return fn.params.length === 0;
+  if (fn.type === 'FunctionExpression') {
+    if (fn.params.length !== 0) return false;
+    const argumentsVar = sourceCode.getScope(fn).set.get('arguments');
+    return !argumentsVar || argumentsVar.references.length === 0;
+  }
+  return false;
+}
+
 const rule = {
   meta: {
     type: 'problem',
@@ -76,6 +109,7 @@ const rule = {
         if (object?.type !== 'ObjectExpression') return;
         const hasOptionKey = object.properties.some((p) => OPTION_KEYS.has(keyName(p)));
         if (!hasOptionKey) return;
+        if (!pageFunctionIgnoresArg(node.arguments[0], context.sourceCode)) return;
         context.report({
           node: second,
           messageId: 'optionsAsArg',
