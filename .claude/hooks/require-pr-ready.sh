@@ -110,11 +110,16 @@ budget_check() {
   [ "$SECONDS" -lt "$DEADLINE" ] \
     || block "ran out of time (${BUDGET}s) before GitHub answered, so readiness was not checked" "Retry; if it persists, check the PR on GitHub by hand."
 }
-# ghc: gh, cut off at the time left in the budget where `timeout` exists.
+# ghc: gh, cut off at the time left in the budget where a coreutils-style
+# `timeout` exists. Probed by running it once: on Windows a PATH can resolve
+# `timeout` to System32's timeout.exe (`timeout /t N`), which would fail every
+# call and block every ready call as "cannot read PR".
+# HAVE_TIMEOUT is set once, below, when there is a PR to check.
+HAVE_TIMEOUT=0
 ghc() {
   local left=$((DEADLINE - SECONDS))
   [ "$left" -gt 0 ] || return 124
-  if command -v timeout >/dev/null 2>&1; then timeout "$left" gh "$@"; else gh "$@"; fi
+  if [ "$HAVE_TIMEOUT" = 1 ]; then timeout "$left" gh "$@"; else gh "$@"; fi
 }
 # fail <reason> [advice]: a GitHub read failed; say so, unless time ran out.
 fail() { budget_check; block "$@"; }
@@ -515,6 +520,7 @@ if [ -n "$COMMAND" ]; then scan "$COMMAND" 0; else scan_mcp; fi
 
 command -v gh >/dev/null 2>&1 || block "gh is not installed, so readiness cannot be checked" "Install gh, or check the PR by hand."
 command -v jq >/dev/null 2>&1 || block "jq is not installed, so readiness cannot be checked" "Install jq, or check the PR by hand."
+if timeout 5 true </dev/null >/dev/null 2>&1; then HAVE_TIMEOUT=1; fi
 
 SEEN=" "
 for idx in "${!TARGETS[@]}"; do

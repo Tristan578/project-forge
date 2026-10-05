@@ -384,6 +384,10 @@ fi
 fixtures clean "$OPEN" "$GREEN"
 expect_mcp "MCP update_pull_request draft:false is a ready call" 2 mcp__github__update_pull_request \
   '{"owner":"Tristan578","repo":"project-forge","pullNumber":10305,"draft":false}' 'unresolved review threads'
+expect_mcp "MCP update_pull_request with pull_number (snake case)" 2 mcp__github__update_pull_request \
+  '{"owner":"Tristan578","repo":"project-forge","pull_number":10305,"draft":false}' 'unresolved review threads'
+expect_mcp "MCP add_issue_comment with issueNumber (camel case)" 2 mcp__github__add_issue_comment \
+  '{"owner":"Tristan578","repo":"project-forge","issueNumber":10305,"body":"board-verdict: PASS"}' 'unresolved review threads'
 expect_mcp "MCP update_pull_request draft:true is not" 0 mcp__github__update_pull_request \
   '{"owner":"Tristan578","repo":"project-forge","pullNumber":10305,"draft":true}'
 expect_mcp "MCP update_pull_request without draft (a title edit) is not" 0 mcp__github__update_pull_request \
@@ -412,6 +416,24 @@ printf '3\n' > "$FAKE/sleep"
 OUT=$(jq -nc --arg c 'gh pr ready 10305' '{tool_input:{command:$c}}' \
   | (cd "$HERE" && PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" REQUIRE_PR_READY_BUDGET_SECONDS=2 bash "$HOOK" 2>&1)); RC=$?
 if [ "$RC" -eq 2 ] && grep -qF 'ran out of time' <<<"$OUT"; then ok "a slow GitHub blocks once the budget is spent"; else bad "time budget (rc=$RC): $OUT"; fi
+# A gh that hangs is CUT OFF at the budget, not waited out: the harness's own
+# 30 s timeout would otherwise let the call through. Needs a coreutils timeout,
+# which is what the hook uses; without one the cut-off does not exist to test.
+if timeout 5 true </dev/null >/dev/null 2>&1; then
+  fixtures clean "$RESOLVED" "$GREEN"
+  printf '20\n' > "$FAKE/sleep"
+  START=$SECONDS
+  OUT=$(jq -nc --arg c 'gh pr ready 10305' '{tool_input:{command:$c}}' \
+    | (cd "$HERE" && PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" REQUIRE_PR_READY_BUDGET_SECONDS=2 bash "$HOOK" 2>&1)); RC=$?
+  ELAPSED=$((SECONDS - START))
+  if [ "$RC" -eq 2 ] && grep -qF 'ran out of time' <<<"$OUT" && [ "$ELAPSED" -le 6 ]; then
+    ok "a hanging gh is cut off at the budget (${ELAPSED}s)"
+  else
+    bad "hanging gh (rc=$RC, ${ELAPSED}s): $OUT"
+  fi
+else
+  echo "  note  no coreutils timeout here: the per-call cut-off is not used, so it is not tested"
+fi
 
 # --- #10330: a script a shell reads from stdin.
 fixtures clean "$RESOLVED" "$GREEN"
@@ -424,7 +446,16 @@ for c in 'bash <<< "gh pr ready 10305"' "bash <<<'gh pr ready 10305'" 'zsh <<< "
 done
 expect_allow "a here-string with no ready call is allowed" 'bash <<< "echo hi"'
 expect_allow "a here-string to a non-shell is not a call" 'grep -c x <<< "gh pr ready 10305"'
-expect_allow "a heredoc fed to bash that names no ready call is allowed" $'bash <<\'EOF\'\necho hi\nEOF'
+# gh is in the text so the hook's cheap early exit cannot answer for the stdin branch.
+expect_allow "a heredoc fed to bash that names no ready call is allowed" $'bash <<\'EOF\'\ngh pr view 10305\nEOF'
+# shellcheck disable=SC2016  # the $ is the point: these are commands the hook reads, not expansions
+for c in $'bash <<\'EOF\'\ngh api -X POST repos/o/r/pulls/5/ccr/ready_for_review\nEOF' \
+  $'bash <<\'EOF\'\nbash scripts/post-board-verdict.sh 5 PASS abc 5/5 ok\nEOF' \
+  $'bash <<\'EOF\'\ngh api graphql -f query=\'mutation{markPullRequestReadyForReview(input:{pullRequestId:"x"}){clientMutationId}}\'\nEOF' \
+  $'bash <<\'EOF\'\ngh pr comment 5 --body "board-verdict: PASS"\nEOF'; do
+  l=${c#*$'\n'}; l=${l%%$'\n'*}
+  expect_block "a stdin script naming a ready call blocks: $l" "$c" 'a script fed to a shell on stdin'
+done
 
 # --- #10330: a marker read from a file the command names.
 printf '<!-- board-verdict: PASS sha=abc seats=5/5 -->\n' > "$TMP/v.md"
@@ -454,6 +485,7 @@ done
 fixtures clean "$OPEN" "$GREEN"
 expect_block "xargs --max-args N gh pr ready names no PR" 'echo 1 | xargs --max-args 1 gh pr ready' 'without a PR number'
 expect_allow "command -v only prints where gh is" 'command -v gh pr ready 10305'
+expect_allow "...and command -V" 'command -V gh pr ready 10305'
 
 # --- #10330: variable PRs, the comment URL selector, the thread-list cap, the origin default.
 fixtures clean "$RESOLVED" "$GREEN"

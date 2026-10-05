@@ -1267,6 +1267,7 @@ F="$(mkfix)"
 json_set "$F/.claude/settings.json" hooks "$MCP_HOOKS"
 json_set "$F/tools/agentic-sync/port.json" hooks.claudeOnlyMatchers '{"mcp__x__(a|b)":"fixture: no Codex alias"}'
 gen "$F" --write; expect_rc 0 "a group listed in hooks.claudeOnlyMatchers does not stop the generator"
+expect_out "1 skipped by name" "…and is reported as skipped"
 if [ "$(json_get "$F/.codex/hooks.json" 'hooks.@keys')" = "Stop" ]; then
   ok "…and is left out of hooks.json, while the rest is ported"
 else
