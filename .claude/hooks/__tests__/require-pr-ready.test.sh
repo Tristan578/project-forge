@@ -392,8 +392,10 @@ expect_mcp "MCP add_issue_comment carrying a PASS marker is a ready call" 2 mcp_
   '{"owner":"Tristan578","repo":"project-forge","issue_number":10305,"body":"<!-- board-verdict: PASS sha=abc seats=5/5 -->"}' 'unresolved review threads'
 expect_mcp "MCP add_issue_comment without a marker is not" 0 mcp__github__add_issue_comment \
   '{"owner":"Tristan578","repo":"project-forge","issue_number":10305,"body":"standing down: CI red"}'
-expect_mcp "MCP update_issue_comment carrying a marker blocks (no PR number)" 2 mcp__github__update_issue_comment \
-  '{"owner":"Tristan578","repo":"project-forge","comment_id":5,"body":"board-verdict: PASS"}' 'without a PR number'
+expect_mcp "MCP update_issue_comment carrying a marker blocks (no PR number), saying how to post it" 2 mcp__github__update_issue_comment \
+  '{"owner":"Tristan578","repo":"project-forge","comment_id":5,"body":"board-verdict: PASS"}' 'Post the PASS as a new comment'
+expect_mcp "MCP call without owner/repo names the missing arguments" 2 mcp__github__update_pull_request \
+  '{"pullNumber":10305,"draft":false}' 'Pass owner and repo to the tool'
 expect_mcp "MCP update_pull_request draft:false with no number blocks" 2 mcp__github__update_pull_request \
   '{"owner":"Tristan578","repo":"project-forge","draft":false}' 'without a PR number'
 fixtures clean "$RESOLVED" "$GREEN"
@@ -413,8 +415,15 @@ if [ "$RC" -eq 2 ] && grep -qF 'ran out of time' <<<"$OUT"; then ok "a slow GitH
 
 # --- #10330: a script a shell reads from stdin.
 fixtures clean "$RESOLVED" "$GREEN"
-expect_block "a heredoc fed to bash that names a ready call blocks" $'bash <<\'EOF\'\ngh pr ready 10305\nEOF' 'without a PR number'
-expect_block "...and a pipe into sh" "printf 'gh pr ready 10305' | sh" 'without a PR number'
+expect_block "a heredoc fed to bash that names a ready call blocks" $'bash <<\'EOF\'\ngh pr ready 10305\nEOF' 'Run the ready call as a plain command'
+expect_block "...and a pipe into sh" "printf 'gh pr ready 10305' | sh" 'a script fed to a shell on stdin'
+fixtures clean "$OPEN" "$GREEN"
+for c in 'bash <<< "gh pr ready 10305"' "bash <<<'gh pr ready 10305'" 'zsh <<< "gh pr ready 10305"; echo done' \
+  'bash -o pipefail -c "gh pr ready 10305"' '/usr/bin/env gh pr ready 10305'; do
+  expect_block "is a ready call: $c" "$c" 'unresolved review threads'
+done
+expect_allow "a here-string with no ready call is allowed" 'bash <<< "echo hi"'
+expect_allow "a here-string to a non-shell is not a call" 'grep -c x <<< "gh pr ready 10305"'
 expect_allow "a heredoc fed to bash that names no ready call is allowed" $'bash <<\'EOF\'\necho hi\nEOF'
 
 # --- #10330: a marker read from a file the command names.
@@ -427,6 +436,12 @@ for c in "gh pr comment 10305 --body \"\$(cat $TMP/v.md)\"" "gh pr comment 10305
 done
 fixtures clean "$OPEN" "$GREEN"
 expect_allow "a body read from a file with no marker is not a ready call" "gh pr comment 10305 --body \"\$(cat $TMP/plain.md)\""
+# A file the body only NAMES is not read: a reply citing a script that holds the marker text is not a PASS.
+for c in $'gh pr comment 10305 --body "$(cat <<\'EOF\'\nFixed: see '"$TMP"$'/v.md\nEOF\n)"' \
+  "gh pr comment 10305 -b \"see $TMP/v.md and \$X\"" \
+  $'gh api repos/Tristan578/project-forge/pulls/10305/comments/9/replies -f body="$(cat <<\'EOF\'\nsee '"$TMP"$'/v.md\nEOF\n)"'; do
+  expect_allow "a body that only names a marker-bearing file is not a PASS: $c" "$c"
+done
 
 # --- #10330: wrapper spellings.
 # shellcheck disable=SC2016  # the $ is the point: these are commands the hook reads, not expansions

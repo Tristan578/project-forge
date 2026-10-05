@@ -14,10 +14,12 @@
 # a boundary against one that is trying to get around them. It reads a shell
 # command, and no reader of shell text covers every way to spell a call
 # (lessons-learned #21). It covers the spellings below. Known gaps: a script a
-# shell reads from a FILE (`bash ready.sh`, `cat x | bash`) is not read; a
-# script fed to a shell on stdin blocks only when the command text itself
-# names a ready call; a gh call that hangs is bounded by `timeout` where the
-# system has it (GNU coreutils), else only between calls (#10330).
+# shell reads from a FILE (`bash ready.sh`, `bash < x`, `cat x | bash`) is not
+# read; a script fed to a shell on stdin (heredoc, pipe) blocks only when the
+# command text itself names a ready call; a body file is read only when cat,
+# a < redirect or a body option feeds it; a gh call that hangs is bounded by
+# `timeout` where the system has it (GNU coreutils), else only between calls
+# (#10330).
 #
 # FIRES ON a Bash command that marks a PR ready or publishes a PASS for it:
 #   - gh pr ready <n|url> [-R|--repo o/r] (not --undo, which moves to draft)
@@ -29,18 +31,18 @@
 #     (--body/-b, --body-file/-F), or gh api with -f/-F/--field/--raw-field
 #     body=... (body=@file is read) or --input <file>, on .../issues/<n>/comments
 #     (a body built from $(...), a variable or stdin is searched across the
-#     whole command AND every readable file the command names)
+#     whole command AND each file it feeds as a body: an argument of cat, a
+#     < redirect target, the value of -F/--body-file/--input, a key=@file)
 # and on the GitHub MCP tools (matcher in .claude/settings.json):
 #   - update_pull_request with draft: false (marks the PR ready)
 #   - add_issue_comment / update_issue_comment whose body carries the marker
 # The command is split into statements the way the shell splits it: ; & | and
 # newlines OUTSIDE quotes, with $(...) and `...` as statements of their own and
-# the script given to bash/sh/zsh -c or eval read again. Only a call in COMMAND
-# POSITION counts (after VAR=value assignments and the wrappers sudo, env,
-# command, exec, time, nohup, nice, ionice, stdbuf, timeout and xargs, each
-# option's value skipped), so a commit message or echo that mentions
-# `gh pr ready` is not a call. A body built from $(...), a
-# heredoc or a variable is searched for the marker across the whole command.
+# the script given to bash/sh/zsh -c, a here-string (<<<) or eval read again.
+# Only a call in COMMAND POSITION counts (after VAR=value assignments and the
+# wrappers sudo, env, command, exec, time, nohup, nice, ionice, stdbuf, timeout
+# and xargs, by name or absolute path, each option's value skipped), so a
+# commit message or echo that mentions `gh pr ready` is not a call.
 # The repository is the one the call names (-R/--repo, a URL, the route's
 # repos/<o>/<r>, a GH_REPO= prefix), else $GH_REPO, else the origin remote.
 # A PR named by a variable, or not named at all, cannot be checked and blocks.
@@ -166,6 +168,8 @@ split_statements() {
         if (c == "(") { ends(); par[d]++; continue }
         if (c == ")") { ends(); if (par[d] > 0) par[d]--; continue }
         if (c == "#" && !inw[d]) { while (i < n && substr(src, i + 1, 1) != "\n") i++; continue }
+        # A here-string (<<<) is a word of its own, not a heredoc.
+        if (c == "<" && nx == "<" && substr(src, i + 2, 1) == "<") { endw(); addc("<<<"); i += 2; endw(); continue }
         if (c == "<" && nx == "<" && substr(src, i + 2, 1) != "<") {
           # Heredoc: remember its delimiter; the body starts after this line.
           endw(); j = i + 2
@@ -252,17 +256,41 @@ resolve_body() {
   if [[ "$1" == *"$UNKNOWN"* || "$1" == *'$'* ]]; then printf '%s\n' "$1"; command_and_files; else printf '%s' "$1"; fi
 }
 
-# command_and_files: the command's own text, then every readable regular file
-# it names (up to 1 MiB each). A body from `$(cat v.md)`, `-F - < v.md` or
-# `cat v.md | gh pr comment N -F -` lives in such a file, not in the command.
+# command_and_files: the command's own text, then each readable regular file
+# the command feeds as a body (up to 1 MiB each): an argument of cat, a <
+# redirect target, the value of -F/--body-file/--input, a key=@file. A body
+# from `$(cat v.md)`, `-F - < v.md` or `cat v.md | gh pr comment N -F -` lives
+# in such a file, not in the command. A file the command merely NAMES is not
+# read: a reply saying "see scripts/board-verdict.sh" is not a PASS because
+# that script contains the marker text.
 command_and_files() {
   printf '%s\n' "$COMMAND"
   local f
   while IFS= read -r f; do
-    f=${f#@}
     [ -n "$f" ] && [ -f "$f" ] && [ -r "$f" ] || continue
     head -c 1048576 "$f" 2>/dev/null; printf '\n'
-  done < <(grep -oE "[^[:space:]\"'<>|;&()=]+" <<<"$COMMAND" | sort -u)
+  done < <(body_files | sort -u)
+}
+
+# body_files: the paths command_and_files reads, one per line. cat's
+# arguments run until a separator or a heredoc (<<), whose body is text, not
+# file names.
+body_files() {
+  local tok prev="" incat=0
+  while IFS= read -r tok; do
+    case "$tok" in
+      '|'|';'|'&'|'('|')'|'<<'|'<<<') incat=0; prev=$tok; continue ;;
+    esac
+    case "$prev" in -F|--body-file|--input|'<') printf '%s\n' "$tok" ;; esac
+    case "$tok" in
+      --body-file=*|--input=*) printf '%s\n' "${tok#*=}" ;;
+      *=@*) printf '%s\n' "${tok#*=@}" ;;
+      -*) ;;
+      *) [ "$incat" -eq 0 ] || printf '%s\n' "$tok" ;;
+    esac
+    [ "${tok##*/}" != cat ] || incat=1
+    prev=$tok
+  done < <(grep -oE "<<<|<<|<|[|;&()]|[^[:space:]\"'<>|;&()]+" <<<"$COMMAND")
 }
 
 # A number as written in a call: digits (optionally #), else "?".
@@ -294,11 +322,13 @@ scan() { # <shell text> <depth>
     local wrap="" duration=0 runs=1 word
     while [ "$k" -lt "${#w[@]}" ]; do
       word=${w[$k]}
+      # /usr/bin/env is env; an assignment's value may hold a / (GH_REPO=o/r).
+      [[ "$word" != /* ]] || word=${word##*/}
       case "$word" in
         # gh treats an empty GH_REPO as unset: the current repository.
         GH_REPO=*) repo=${word#GH_REPO=}; repo=${repo:-$ORIGIN} ;;
         [A-Za-z_]*=*) ;;
-        sudo|command|exec|time|nohup|env|nice|ionice|stdbuf|xargs) wrap=${word##*/}; duration=0 ;;
+        sudo|command|exec|time|nohup|env|nice|ionice|stdbuf|xargs) wrap=$word; duration=0 ;;
         timeout) wrap=timeout; duration=1 ;;
         then|do|else|elif|if|while|until|'!'|'{') wrap=""; duration=0 ;;
         -*)
@@ -326,15 +356,24 @@ scan() { # <shell text> <depth>
         local j=$((k + 1)) script=""
         while [ "$j" -lt "${#w[@]}" ]; do
           if [[ "${w[$j]}" =~ ^-[A-Za-z]*c[A-Za-z]*$ ]]; then script=${w[$((j + 1))]:-}; break; fi
-          [[ "${w[$j]}" == -* ]] || break
+          [[ "${w[$j]}" == [-+]* ]] || break
+          # -o/+o/-O/+O take an option name (`bash -o pipefail -c ...`).
+          case "${w[$j]}" in -o|+o|-O|+O) j=$((j + 1)) ;; esac
           j=$((j + 1))
         done
+        # A here-string is the script itself: `bash <<< "gh pr ready N"`.
+        if [ -z "$script" ] && [ "$j" -lt "${#w[@]}" ]; then
+          case "${w[$j]}" in
+            '<<<') script=${w[$((j + 1))]:-} ;;
+            '<<<'?*) script=${w[$j]#<<<} ;;
+          esac
+        fi
         if [ -n "$script" ]; then scan "$script" $((depth + 1)); continue; fi
         # No -c and no script file: the shell reads its script from stdin (a
         # heredoc or a pipe). The hook does not run that text, so if the
         # command names a ready call anywhere, it blocks.
         if [ "$j" -ge "${#w[@]}" ] && grep -qE "$STDIN_TRIGGERS" <<<"$COMMAND"; then
-          add_target "$repo#?" "$stmt_text (a script on stdin)"
+          add_target "$repo#stdin" "$stmt_text (a script on stdin)"
           continue
         fi
         # `bash scripts/post-board-verdict.sh ...`: the script is the command.
@@ -460,7 +499,8 @@ scan_mcp() {
       board_marker "$body" || return 0
       # An edited comment is named by comment id, not by PR, so it blocks.
       n=$(jq -r '.tool_input.issue_number // .tool_input.issueNumber // empty' <<<"$_HOOK_INPUT" 2>/dev/null)
-      add_target "$repo#$(pr_number "$n")" "$TOOL_NAME (board-verdict: PASS)" ;;
+      if [ "$name" = update_issue_comment ] && [ -z "$n" ]; then n=comment; else n=$(pr_number "$n"); fi
+      add_target "$repo#$n" "$TOOL_NAME (board-verdict: PASS)" ;;
   esac
 }
 
@@ -483,8 +523,16 @@ for idx in "${!TARGETS[@]}"; do
   SEEN+="$target "
   MATCHED=${MATCHES[$idx]//$UNKNOWN/\$(...)}
   REPO=${target%#*}; pr=${target##*#}
-  [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] \
-    || block "cannot tell which repository this PR is in (got '$REPO')" "Name the repository with -R owner/repo."
+  if [[ ! "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    if [ -z "$COMMAND" ]; then
+      block "$TOOL_NAME was called without its owner and repo arguments, so the repository cannot be told" "Pass owner and repo to the tool."
+    fi
+    block "cannot tell which repository this PR is in (got '$REPO')" "Name the repository with -R owner/repo."
+  fi
+  [ "$pr" != "stdin" ] \
+    || block "a script fed to a shell on stdin names a ready call, and the hook cannot read which PR it marks" "Run the ready call as a plain command (gh pr ready N), not inside a script on stdin."
+  [ "$pr" != "comment" ] \
+    || block "an edited comment is named by its comment id, so the PR its PASS marker is for cannot be read" "Post the PASS as a new comment instead (add_issue_comment with issue_number, or gh pr comment N)."
   [ "$pr" != "?" ] \
     || block "cannot read which PR this call marks ready or passes: it is without a PR number (none given, a variable, or a GraphQL node id)" "Name each PR as a literal number, one call per PR."
   P="$REPO#$pr"
