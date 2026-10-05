@@ -595,6 +595,9 @@ jobs:
           # definitions stay invisible to the analysis. The tree is also clean
           # under plain shellcheck (every dynamic `source` carries a line-level
           # SC1091 disable), so a local run without -x agrees with this gate.
+          # The version is the runner's, not pinned: a newer local shellcheck can
+          # pass where this one fails (#10334), so name it in the log.
+          shellcheck --version
           shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 
   # ---- Skills Lint ----

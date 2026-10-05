@@ -161,7 +161,7 @@
         ]
       },
       {
-        "matcher": "mcp__github__(update_pull_request|add_issue_comment|update_issue_comment)",
+        "matcher": "mcp__[A-Za-z0-9_-]*github[A-Za-z0-9_-]*__(update_pull_request|add_issue_comment|update_issue_comment)",
         "hooks": [
           {
             "type": "command",

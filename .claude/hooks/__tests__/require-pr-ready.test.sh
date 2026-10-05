@@ -368,14 +368,22 @@ wired=$(jq '[.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[] | selec
 if [ "$wired" = 1 ]; then ok "settings.json runs the hook on every Bash call"; else bad "settings.json wiring count is '$wired', want 1"; fi
 # ...and once more for the GitHub MCP tools that mark ready or post a comment (#10330).
 mcp_matcher=$(jq -r '[.hooks.PreToolUse[] | select(.hooks[]? | (.command // "") | test("/\\.claude/hooks/require-pr-ready\\.sh")) | .matcher | select(. != "Bash")] | .[0] // ""' "$SETTINGS" 2>/dev/null)
-for tool in update_pull_request add_issue_comment update_issue_comment; do
-  if [ -n "$mcp_matcher" ] && grep -qE "^(${mcp_matcher})\$" <<<"mcp__github__$tool"; then
-    ok "settings.json runs the hook on mcp__github__$tool"
-  else
-    bad "settings.json MCP matcher '$mcp_matcher' does not match mcp__github__$tool"
-  fi
+# The GitHub server can be installed under another name (a plugin's is
+# mcp__plugin_github_github__...); the hook reads only the part after the last __.
+for server in github plugin_github_github; do
+  for tool in update_pull_request add_issue_comment update_issue_comment; do
+    if [ -n "$mcp_matcher" ] && grep -qE "^(${mcp_matcher})\$" <<<"mcp__${server}__$tool"; then
+      ok "settings.json runs the hook on mcp__${server}__$tool"
+    else
+      bad "settings.json MCP matcher '$mcp_matcher' does not match mcp__${server}__$tool"
+    fi
+  done
 done
-if [ -n "$mcp_matcher" ] && ! grep -qE "^(${mcp_matcher})\$" <<<"mcp__github__get_pull_request"; then
+fixtures clean "$OPEN" "$GREEN"
+expect_mcp "MCP update_pull_request under a plugin server name is a ready call" 2 mcp__plugin_github_github__update_pull_request \
+  '{"owner":"Tristan578","repo":"project-forge","pullNumber":10305,"draft":false}' 'unresolved review threads' 
+if [ -n "$mcp_matcher" ] && ! grep -qE "^(${mcp_matcher})\$" <<<"mcp__github__get_pull_request" \
+  && ! grep -qE "^(${mcp_matcher})\$" <<<"mcp__github__update_pull_request_branch"; then
   ok "...and not on a read-only GitHub MCP tool"
 else
   bad "MCP matcher '$mcp_matcher' also matches mcp__github__get_pull_request"
@@ -460,6 +468,19 @@ for c in 'bash <<< "gh pr ready 10305"' "bash <<<'gh pr ready 10305'" 'zsh <<< "
   expect_block "is a ready call: $c" "$c" 'unresolved review threads'
 done
 expect_allow "a here-string with no ready call is allowed" 'bash <<< "echo hi"'
+# #10334: the stdin script comes from its own segment (its pipe or heredoc);
+# a ready call named in ANOTHER segment is not that script.
+fixtures clean "$OPEN" "$GREEN"
+expect_allow "a ready call named in another statement does not make a stdin script one" \
+  "git commit -m 'document gh pr ready'; printf 'echo ok\\n' | bash"
+for c in "git commit -m 'document gh pr ready' && printf 'echo ok' | bash" "grep -q 'gh pr ready' notes.md || printf 'echo ok' | bash"; do
+  expect_allow "a list operator also separates the stdin script: $c" "$c"
+done
+expect_block "...but a 2>&1 redirect does not split a pipe" "printf 'gh pr ready 10305' 2>&1 | bash" 'a script fed to a shell on stdin'
+expect_allow "...nor one after it" $'bash <<\'EOF\'\necho ok\nEOF\ngit commit -m \'document gh pr ready\''
+# shellcheck disable=SC2016  # the $ is the point: the command the hook reads
+expect_block "a variable fed to a shell can carry a ready call from elsewhere" \
+  'X="gh pr ready 10305"; echo "$X" | bash' 'a script fed to a shell on stdin'
 expect_allow "a here-string to a non-shell is not a call" 'grep -c x <<< "gh pr ready 10305"'
 # gh is in the text so the hook's cheap early exit cannot answer for the stdin branch.
 expect_allow "a heredoc fed to bash that names no ready call is allowed" $'bash <<\'EOF\'\ngh pr view 10305\nEOF'
@@ -489,10 +510,15 @@ for c in "gh pr comment 10305 --body \"\$(cat '$TMP/board verdict.md')\"" "cat '
   expect_block "a quoted body path with a space is read: $c" "$c" 'unresolved review threads'
 done
 # ...and keeping a quoted word whole must not hide the reads INSIDE a quoted script.
-for c in "bash -c 'gh pr comment 10305 -F - < $TMP/v.md'" "bash -c 'gh pr comment 10305 --body \"\$(cat $TMP/v.md)\"'"; do
+for c in "bash -c 'gh pr comment 10305 -F - < $TMP/v.md'" "bash -c 'gh pr comment 10305 --body \"\$(cat $TMP/v.md)\"'" \
+  "bash -c 'cat $TMP/v.md | gh pr comment 10305 -F -'"; do
   fixtures clean "$OPEN" "$GREEN"
   expect_block "a body file inside a bash -c script is read: $c" "$c" 'unresolved review threads'
 done
+# #10334: only a cat in command position reads a file; "cat" in prose does not.
+fixtures clean "$OPEN" "$GREEN"
+expect_allow "the word cat in a reply's prose does not read the file after it" \
+  "gh pr comment 10305 --body \"\$(echo hi) run cat $TMP/v.md to see\""
 # A ~/ path is read the way the shell would expand it.
 HOME_DIR=$(mktemp -d "$TMP/home.XXXXXX"); cp "$TMP/v.md" "$HOME_DIR/v.md"
 fixtures clean "$OPEN" "$GREEN"
