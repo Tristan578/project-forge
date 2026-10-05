@@ -276,7 +276,7 @@ command_and_files() {
   while IFS= read -r f; do
     # shellcheck disable=SC2016,SC2088  # matching the literal text, not expanding it
     case "$f" in '~/'*) f="$HOME/${f#'~/'}" ;; '$HOME/'*|'${HOME}/'*) f="$HOME/${f#*/}" ;; esac
-    [ -n "$f" ] && [ -f "$f" ] && [ -r "$f" ] || continue
+    if [ -z "$f" ] || [ ! -f "$f" ] || [ ! -r "$f" ]; then continue; fi
     head -c 1048576 "$f" 2>/dev/null; printf '\n'
   done < <(body_files | sort -u)
 }
@@ -376,7 +376,6 @@ scan() { # <shell text> <depth>
         if [ -z "$script" ] && [ "$j" -lt "${#w[@]}" ]; then
           case "${w[$j]}" in
             '<<<') script=${w[$((j + 1))]:-} ;;
-            '<<<'?*) script=${w[$j]#<<<} ;;
           esac
         fi
         if [ -n "$script" ]; then scan "$script" $((depth + 1)); continue; fi
