@@ -222,12 +222,13 @@ STDIN_SHELL_RE='(^|[^A-Za-z0-9_.-])(bash|sh|zsh|dash|ksh)([^A-Za-z0-9_.-]|$)'
 MATCHES=()   # the statement that produced each target, for the message
 
 # segments: the command split where one command list ends and the next begins
-# (; && || & and newlines, outside quotes, $(...), (...) and backticks), each
-# segment keeping its pipes and the heredoc bodies its lines open. Records
-# end in \036.
+# (; && || & and newlines, outside quotes, $(...), (...), backticks and a
+# compound command's body, so `for ...; do ...; done | bash` stays whole),
+# each segment keeping its pipes (| and |&, also continued on the next line)
+# and the heredoc bodies its lines open. Records end in \036.
 segments() {
   awk 'BEGIN { RS = "\001" } {
-    src = $0; n = length(src); seg = ""; q = ""; d = 0; bt = 0; nhd = 0
+    src = $0; n = length(src); seg = ""; q = ""; d = 0; bt = 0; blk = 0; nhd = 0
     for (i = 1; i <= n; i++) {
       c = substr(src, i, 1); nx = substr(src, i + 1, 1)
       if (q == "s") { seg = seg c; if (c == "\047") q = ""; continue }
@@ -240,6 +241,11 @@ segments() {
       if (c == "\047") { q = "s"; seg = seg c; continue }
       if (c == "\"") { q = "d"; seg = seg c; continue }
       if (c == "`") { bt = !bt; seg = seg c; continue }
+      if (i == 1 || substr(src, i - 1, 1) ~ /[ \t\n;&|(]/) {
+        w = substr(src, i); if (match(w, /^[^ \t\n;&|()<>]+/)) w = substr(w, 1, RLENGTH); else w = ""
+        if (w ~ /^(for|while|until|if|case|select|[{])$/) blk++
+        else if (w ~ /^(done|fi|esac|[}])$/ && blk > 0) blk--
+      }
       if (c == "(") { d++; seg = seg c; continue }
       if (c == ")") { if (d > 0) d--; seg = seg c; continue }
       if (c == "<" && nx == "<" && substr(src, i + 2, 1) != "<") {
@@ -255,9 +261,9 @@ segments() {
         if (delim != "") hd[++nhd] = delim
         seg = seg substr(src, i, j - i); i = j - 1; continue
       }
-      if (d > 0 || bt) { seg = seg c; continue }
       if (c == "\n") {
-        seg = seg c
+        # A line ending in | continues the pipe on the next line.
+        piped = (seg ~ /[|][ \t]*$/); seg = seg c
         for (h = 1; h <= nhd; h++) {
           while (i < n) {
             e = index(substr(src, i + 1), "\n"); line = (e ? substr(src, i + 1, e - 1) : substr(src, i + 1))
@@ -266,11 +272,15 @@ segments() {
             if (line == hd[h]) break
           }
         }
-        nhd = 0; printf "%s\036", seg; seg = ""; continue
+        nhd = 0
+        if (d > 0 || bt || blk > 0 || piped) continue
+        printf "%s\036", seg; seg = ""; continue
       }
-      # ; and || end a list; & (and so &&) too, unless it is a >& or &> redirect.
+      if (d > 0 || bt || blk > 0) { seg = seg c; continue }
+      # ; and || end a list; & (and so &&) too, unless it is a >& or &>
+      # redirect or the & of a |& pipe.
       if (c == ";" || (c == "|" && nx == "|")) { printf "%s\036", seg; seg = ""; if (c == "|") i++; continue }
-      if (c == "&" && nx != ">" && substr(src, i - 1, 1) != ">") { printf "%s\036", seg; seg = ""; continue }
+      if (c == "&" && nx != ">" && substr(src, i - 1, 1) !~ /[>|]/) { printf "%s\036", seg; seg = ""; continue }
       seg = seg c
     }
     printf "%s\036", seg
@@ -365,10 +375,15 @@ command_and_files() {
 WORD_RE="<<<|<<|<|[|;&()]|[^[:space:]\"'<>|;&()]+"
 QUOTED_RE="'[^']*'|\"[^\"\$()]*\""
 body_files() {
-  local tok prev="" incat=0
+  # cmdpos: the next word could be a command (start of a statement, after
+  # assignments, wrappers and their options, timeout's duration, or a script
+  # handed to bash -c / eval). Each line ends in a ; token, since grep -o
+  # never matches the newline itself.
+  local tok prev="" incat=0 cmdpos=1 dur=0 skip=0 wrap=""
   while IFS= read -r tok; do
     case "$tok" in
-      '|'|';'|'&'|'('|')'|'<<'|'<<<') incat=0; prev=$tok; continue ;;
+      ')') incat=0; cmdpos=0; prev=$tok; continue ;;
+      '|'|';'|'&'|'('|'<<'|'<<<') incat=0; cmdpos=1; dur=0; skip=0; wrap=""; prev=$tok; continue ;;
       \'*\'|\"*\") tok=${tok:1:${#tok}-2} ;;
     esac
     case "$prev" in -F|--body-file|--input|'<') printf '%s\n' "$tok" ;; esac
@@ -378,13 +393,22 @@ body_files() {
       -*) ;;
       *) [ "$incat" -eq 0 ] || printf '%s\n' "$tok" ;;
     esac
-    if [ "${tok##*/}" = cat ]; then
-      case "$prev" in
-        ''|'|'|';'|'&'|'('|-c|eval|then|do|else|'{'|'!'|sudo|command|exec|env|nice|nohup|time|xargs) incat=1 ;;
+    if [ "$cmdpos" -eq 1 ] && [ "$skip" -eq 1 ]; then
+      skip=0   # the value of a wrapper option (`nice -n 5`, `sudo -u x`)
+    elif [ "$cmdpos" -eq 1 ]; then
+      case "${tok##*/}" in
+        cat) incat=1; cmdpos=0 ;;
+        sudo|command|builtin|exec|env|nice|nohup|time|xargs|ionice|stdbuf) wrap=${tok##*/} ;;
+        timeout) wrap=timeout; dur=1 ;;
+        eval|then|do|else|'{'|'!'|[A-Za-z_]*=*) ;;
+        -*) if wrapper_opt_skips_next "$wrap" "$tok"; then skip=1; fi ;;
+        *) if [ "$dur" -eq 1 ]; then dur=0; else cmdpos=0; fi ;;
       esac
+    elif [ "$tok" = -c ] || [ "$tok" = eval ]; then
+      cmdpos=1
     fi
     prev=$tok
-  done < <(grep -oE "$1" <<<"$COMMAND")
+  done < <(grep -oE "$1" <<<"${COMMAND//$'\n'/ ;$'\n'} ;")
 }
 
 # A number as written in a call: digits (optionally #), else "?".

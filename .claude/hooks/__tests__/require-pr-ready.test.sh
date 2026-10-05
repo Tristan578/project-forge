@@ -370,7 +370,7 @@ if [ "$wired" = 1 ]; then ok "settings.json runs the hook on every Bash call"; e
 mcp_matcher=$(jq -r '[.hooks.PreToolUse[] | select(.hooks[]? | (.command // "") | test("/\\.claude/hooks/require-pr-ready\\.sh")) | .matcher | select(. != "Bash")] | .[0] // ""' "$SETTINGS" 2>/dev/null)
 # The GitHub server can be installed under another name (a plugin's is
 # mcp__plugin_github_github__...); the hook reads only the part after the last __.
-for server in github plugin_github_github; do
+for server in github plugin_github_github GitHub; do
   for tool in update_pull_request add_issue_comment update_issue_comment; do
     if [ -n "$mcp_matcher" ] && grep -qE "^(${mcp_matcher})\$" <<<"mcp__${server}__$tool"; then
       ok "settings.json runs the hook on mcp__${server}__$tool"
@@ -477,6 +477,14 @@ for c in "git commit -m 'document gh pr ready' && printf 'echo ok' | bash" "grep
   expect_allow "a list operator also separates the stdin script: $c" "$c"
 done
 expect_block "...but a 2>&1 redirect does not split a pipe" "printf 'gh pr ready 10305' 2>&1 | bash" 'a script fed to a shell on stdin'
+# ...but a compound command or a group piped to the shell is one segment, and
+# so is a |& pipe or a pipe continued on the next line (#10337 board).
+# shellcheck disable=SC2016  # the $ is the point: the command the hook reads
+for c in 'for n in 10305; do echo "gh pr ready $n"; done | bash' '{ echo gh pr ready 10305; } | bash' \
+  'while read -r n; do echo gh pr ready "$n"; done < list | sh' 'echo gh pr ready 10305 |& bash' \
+  $'echo gh pr ready 10305 |\nbash' $'for n in 10305\ndo\n  echo gh pr ready $n\ndone | bash'; do
+  expect_block "a script on stdin from one segment: $c" "$c" 'a script fed to a shell on stdin'
+done
 expect_allow "...nor one after it" $'bash <<\'EOF\'\necho ok\nEOF\ngit commit -m \'document gh pr ready\''
 # shellcheck disable=SC2016  # the $ is the point: the command the hook reads
 expect_block "a variable fed to a shell can carry a ready call from elsewhere" \
@@ -516,6 +524,14 @@ for c in "bash -c 'gh pr comment 10305 -F - < $TMP/v.md'" "bash -c 'gh pr commen
   expect_block "a body file inside a bash -c script is read: $c" "$c" 'unresolved review threads'
 done
 # #10334: only a cat in command position reads a file; "cat" in prose does not.
+# Command position follows a line break, an assignment, and a wrapper with
+# its options and their values (#10337 board).
+for c in $'gh pr view 10305\ncat '"$TMP"$'/v.md | gh pr comment 10305 -F -' "X=1 cat $TMP/v.md | gh pr comment 10305 -F -" \
+  "timeout 5 cat $TMP/v.md | gh pr comment 10305 -F -" "gh pr comment 10305 --body \"\$(nice -n 5 cat $TMP/v.md)\"" \
+  "gh pr comment 10305 --body \"\$(env LC_ALL=C cat $TMP/v.md)\"" "gh pr comment 10305 --body \"\$(sudo -u x cat $TMP/v.md)\""; do
+  fixtures clean "$OPEN" "$GREEN"
+  expect_block "a cat in command position reads its file: $c" "$c" 'unresolved review threads'
+done
 fixtures clean "$OPEN" "$GREEN"
 expect_allow "the word cat in a reply's prose does not read the file after it" \
   "gh pr comment 10305 --body \"\$(echo hi) run cat $TMP/v.md to see\""
