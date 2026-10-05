@@ -484,9 +484,12 @@ for c in 'for n in 10305; do echo "gh pr ready $n"; done | bash' '{ echo gh pr r
   'while read -r n; do echo gh pr ready "$n"; done < list | sh' 'echo gh pr ready 10305 |& bash' \
   $'echo gh pr ready 10305 |\nbash' $'for n in 10305\ndo\n  echo gh pr ready $n\ndone | bash' \
   "(echo 'gh pr ready 10305'; echo ok) | bash" "printf 'gh pr ready 10305; echo ok' | bash" \
-  'printf "gh pr ready 10305; echo ok" | bash' 'echo `echo gh pr ready 10305; true` | bash'; do
+  'printf "gh pr ready 10305; echo ok" | bash' 'echo `echo gh pr ready 10305; true` | bash' \
+  $'(\n  echo gh pr ready 10305\n) | bash' $'echo `echo gh pr ready 10305\ntrue` | bash'; do
   expect_block "a script on stdin from one segment: $c" "$c" 'a script fed to a shell on stdin'
 done
+expect_allow "a compound command ends, so a later statement is its own segment" \
+  "for n in 1; do :; done; git commit -m 'document gh pr ready'; echo ok | bash"
 expect_allow "...nor one after it" $'bash <<\'EOF\'\necho ok\nEOF\ngit commit -m \'document gh pr ready\''
 # shellcheck disable=SC2016  # the $ is the point: the command the hook reads
 expect_block "a variable fed to a shell can carry a ready call from elsewhere" \
@@ -530,7 +533,8 @@ done
 # its options and their values (#10337 board).
 for c in $'gh pr view 10305\ncat '"$TMP"$'/v.md | gh pr comment 10305 -F -' "X=1 cat $TMP/v.md | gh pr comment 10305 -F -" \
   "timeout 5 cat $TMP/v.md | gh pr comment 10305 -F -" "gh pr comment 10305 --body \"\$(nice -n 5 cat $TMP/v.md)\"" \
-  "gh pr comment 10305 --body \"\$(env LC_ALL=C cat $TMP/v.md)\"" "gh pr comment 10305 --body \"\$(sudo -u x cat $TMP/v.md)\""; do
+  "gh pr comment 10305 --body \"\$(env LC_ALL=C cat $TMP/v.md)\"" "gh pr comment 10305 --body \"\$(sudo -u x cat $TMP/v.md)\"" \
+  "if cat $TMP/v.md | gh pr comment 10305 -F -; then echo ok; fi"; do
   fixtures clean "$OPEN" "$GREEN"
   expect_block "a cat in command position reads its file: $c" "$c" 'unresolved review threads'
 done

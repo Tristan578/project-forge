@@ -400,7 +400,7 @@ body_files() {
         cat) incat=1; cmdpos=0 ;;
         sudo|command|builtin|exec|env|nice|nohup|time|xargs|ionice|stdbuf) wrap=${tok##*/} ;;
         timeout) wrap=timeout; dur=1 ;;
-        eval|then|do|else|'{'|'!'|[A-Za-z_]*=*) ;;
+        eval|if|elif|while|until|then|do|else|'{'|'!'|[A-Za-z_]*=*) ;;
         -*) if wrapper_opt_skips_next "$wrap" "$tok"; then skip=1; fi ;;
         *) if [ "$dur" -eq 1 ]; then dur=0; else cmdpos=0; fi ;;
       esac
