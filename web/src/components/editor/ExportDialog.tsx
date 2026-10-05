@@ -15,6 +15,16 @@ function parseResolution(res: string): [number, number] {
   return [parseInt(parts[0], 10), parseInt(parts[1], 10)];
 }
 
+// Escape belongs to the layer that has focus. The tutorial bubble renders above
+// this dialog (z-[102] against z-50), so an Escape from inside it is the tour's
+// to handle. This dialog takes the key only when it comes from inside the
+// dialog, or from no focused element at all (the document or its body).
+function ownsEscape(target: EventTarget | null, dialog: HTMLElement | null): boolean {
+  if (!(target instanceof Node)) return true;
+  if (target === document || target === document.body || target === document.documentElement) return true;
+  return !!dialog && dialog.contains(target);
+}
+
 interface ExportDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -54,7 +64,10 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isExporting) {
+      if (e.key === 'Escape' && !isExporting && ownsEscape(e.target, dialogRef.current)) {
+        // Consumed, so window-level listeners (the tutorial overlay's Escape =
+        // skip) know this key closed a dialog and was not meant for them.
+        e.preventDefault();
         onClose();
         return;
       }
@@ -201,7 +214,9 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   if (embedSnippet) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={(e) => { if (e.target === e.currentTarget) { setEmbedSnippet(null); onClose(); } }}>
-        <div role="dialog" aria-labelledby="embed-dialog-title" aria-modal="true" className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
+        {/* dialogRef marks whichever panel is showing, so Escape and the Tab
+            trap (ownsEscape, the focus loop) see this one as the dialog too. */}
+        <div ref={dialogRef} role="dialog" aria-labelledby="embed-dialog-title" aria-modal="true" className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
           <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
             <h2 id="embed-dialog-title" className="text-base font-semibold text-zinc-100">Embed Code</h2>
             <button

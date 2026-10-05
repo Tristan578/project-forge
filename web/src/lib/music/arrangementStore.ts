@@ -47,8 +47,8 @@ export interface AddClipInput {
   trackId: string;
   sourceUrl: string;
   sourceDurationSeconds: number;
-  startOffset?: number;
-  name?: string;
+  startOffset?: number | undefined;
+  name?: string | undefined;
 }
 
 /** Input for the generated/imported-audio hand-off. */
@@ -92,11 +92,11 @@ export interface ArrangementSlice {
   /** Move a clip along its track's timeline (and optionally to another track). */
   moveClip: (clipId: string, startOffset: number, trackId?: string) => void;
   /** Adjust a clip's trimmed source window (clamped to legal bounds). */
-  trimClip: (clipId: string, trim: { trimStart?: number; trimEnd?: number }) => void;
+  trimClip: (clipId: string, trim: { trimStart?: number | undefined; trimEnd?: number | undefined }) => void;
   /** Toggle looping and optionally set the loop window in one operation. */
   setLoopPoints: (
     clipId: string,
-    loop: { loopEnabled: boolean; trimStart?: number; trimEnd?: number },
+    loop: { loopEnabled: boolean; trimStart?: number | undefined; trimEnd?: number | undefined },
   ) => void;
   deleteClip: (clipId: string) => void;
 

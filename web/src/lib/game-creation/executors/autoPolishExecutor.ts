@@ -111,7 +111,7 @@ export const autoPolishExecutor: ExecutorDefinition = {
         //
         // No `followSmoothing` here. It used to send 0.8, read as a 0..1 blend
         // factor — but the engine's `damping` is a RATE PER SECOND
-        // (`let t = (damping * delta).min(1.0)`), so 0.8 is roughly six times
+        // (`t = damping * delta`, clamped to [0, 1]), so 0.8 is roughly six times
         // slower than the default 5.0, and every auto-polished 3D game shipped a
         // sluggish follow camera. Omitting the field is how you ask for the
         // engine default, and it carries no second copy of that number to drift.

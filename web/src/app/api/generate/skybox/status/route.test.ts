@@ -6,16 +6,21 @@ import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
+import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { panelTierGateResponse, panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import type { User } from '@/lib/db/schema';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { JOB_NOT_FOUND_MESSAGE, JOB_OWNERSHIP_UNAVAILABLE_MESSAGE } from '@/lib/generate/jobNotFound';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/keys/resolver')>();
   return { ...mod, resolveApiKey: vi.fn() };
 });
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  verifyProviderJobOwner: vi.fn(),
+}));
 // Both gate variants refuse every starter and hobbyist on a creator panel, so
 // no response can tell them apart here. Spy on the module (real behaviour
 // passed through) so a test can pin WHICH variant the route calls (#7715).
@@ -48,6 +53,7 @@ describe('GET /api/generate/skybox/status', () => {
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as unknown as User },
     });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
+    vi.mocked(verifyProviderJobOwner).mockResolvedValue('owner');
   });
 
   it('returns 401 when unauthenticated', async () => {
@@ -76,6 +82,77 @@ describe('GET /api/generate/skybox/status', () => {
     expect(res.status).toBe(402);
     const data = await res.json();
     expect(data.code).toBe('INSUFFICIENT_TOKENS');
+  });
+
+  // Ownership check (#10262): without this, any signed-in caller admitted past
+  // the tier gate could poll a job id they never created and read back another
+  // user's result via the platform key `resolveApiKey` returns by default.
+  describe('job ownership (#10262)', () => {
+    it('returns 404 without resolving a key when the caller does not own the job', async () => {
+      vi.mocked(verifyProviderJobOwner).mockResolvedValue('not_owner');
+
+      const res = await GET(makeRequest('someone-elses-job'));
+
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toBe(JOB_NOT_FOUND_MESSAGE);
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
+    // A lookup that failed (DB error, open circuit breaker) is NOT a verdict
+    // on the job: still fail-closed (no key resolved), but 503, which the
+    // poller keeps polling through, never the 404 it treats as terminal.
+    it('returns a retryable 503, not a terminal 404, and resolves no key when the ownership lookup FAILS', async () => {
+      vi.mocked(verifyProviderJobOwner).mockResolvedValue('unverifiable');
+
+      const res = await GET(makeRequest('someone-elses-job'));
+
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe(JOB_OWNERSHIP_UNAVAILABLE_MESSAGE);
+      expect(resolveApiKey).not.toHaveBeenCalled();
+      expect(MeshyClient).not.toHaveBeenCalled();
+    });
+
+    it('checks ownership with the authenticated userId, the texture provider, and the polled jobId', async () => {
+      const getTextureStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 10 });
+      vi.mocked(MeshyClient).mockImplementation(
+        function (this: InstanceType<typeof MeshyClient>) {
+          this.getTextureStatus = getTextureStatus;
+        } as unknown as typeof MeshyClient
+      );
+
+      // Decoy ids beside the polled one: the provider must be sent the id the
+      // ownership check ran on, never another caller-chosen value (#10262).
+      await GET(new NextRequest(
+        'http://test/api/generate/skybox/status?jobId=job-123&predictionId=decoy_other&taskId=decoy_other&id=decoy_other',
+      ));
+
+      expect(verifyProviderJobOwner).toHaveBeenCalledTimes(1);
+      expect(verifyProviderJobOwner).toHaveBeenCalledWith('user_1', 'meshy', 'job-123');
+      expect(getTextureStatus).toHaveBeenCalledTimes(1);
+      expect(getTextureStatus).toHaveBeenCalledWith('job-123');
+    });
+
+    it('checks ownership BEFORE resolving the API key', async () => {
+      const callOrder: string[] = [];
+      vi.mocked(verifyProviderJobOwner).mockImplementation(async () => {
+        callOrder.push('verifyProviderJobOwner');
+        return 'owner';
+      });
+      vi.mocked(resolveApiKey).mockImplementation(async () => {
+        callOrder.push('resolveApiKey');
+        return { type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' };
+      });
+      vi.mocked(MeshyClient).mockImplementation(
+        function (this: InstanceType<typeof MeshyClient>) {
+          this.getTextureStatus = vi.fn().mockResolvedValue({ status: 'IN_PROGRESS', progress: 10 });
+        } as unknown as typeof MeshyClient
+      );
+
+      await GET(makeRequest('job-123'));
+
+      expect(callOrder).toEqual(['verifyProviderJobOwner', 'resolveApiKey']);
+    });
   });
 
   it('returns completed status with first map URL for SUCCEEDED task', async () => {

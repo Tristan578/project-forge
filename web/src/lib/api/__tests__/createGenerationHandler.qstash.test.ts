@@ -49,6 +49,12 @@ vi.mock('@/lib/qstash/client', () => ({
   isQstashConfigured: vi.fn(() => true),
   publishGenerationCallback: vi.fn(async () => {}),
 }));
+// Job-ownership binding (#10262) is a separate concern from the QStash
+// callback wiring this file covers — isolate it so a mocked `getDb()` with no
+// `insert` doesn't silently fail inside `bindProviderJob` on every test here.
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn(async () => {}),
+}));
 // Mocked only to drive the cache HIT/MISS branches that gate the second after()
 // publish site. Inert for the no-cacheKeyParams tests (they never call it).
 vi.mock('@/lib/api/responseCache', () => ({ cachedGenerate: vi.fn() }));
@@ -60,6 +66,7 @@ import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { isQstashConfigured, publishGenerationCallback } from '@/lib/qstash/client';
 import { cachedGenerate } from '@/lib/api/responseCache';
+import { bindProviderJob } from '@/lib/generate/jobOwnership';
 import { createGenerationHandler } from '../createGenerationHandler';
 
 const mockAuth = vi.mocked(authenticateRequest);
@@ -71,6 +78,7 @@ const mockCapture = vi.mocked(captureException);
 const mockConfigured = vi.mocked(isQstashConfigured);
 const mockPublish = vi.mocked(publishGenerationCallback);
 const mockCachedGenerate = vi.mocked(cachedGenerate);
+const mockBindProviderJob = vi.mocked(bindProviderJob);
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/generate/model', {
@@ -190,6 +198,144 @@ describe('createGenerationHandler — durable QStash callback (PF-906)', () => {
     await expect(res.json()).resolves.not.toHaveProperty('durable');
     expect(afterCallbacks).toHaveLength(0);
     expect(mockPublish).not.toHaveBeenCalled();
+  });
+
+  // Job-ownership binding (#10262): independent of the QStash callback wiring
+  // above, but the SAME `asyncJob.providerJobId` extractor doubles as the
+  // ownership extractor by default — see `jobIdForOwnership` in
+  // createGenerationHandler.ts.
+  describe('job ownership binding (#10262)', () => {
+    /**
+     * Drive the handler with `bindProviderJob` held open on a test-controlled
+     * deferred, and report whether the handler's promise settled while the
+     * bind was still pending. The mock records COMPLETION, not invocation:
+     * `maybeBindJobOwnership` calls `bindProviderJob` synchronously before its
+     * first await, so an invocation marker reads 'bind' first even when the
+     * call is fire-and-forget (`void maybeBindJobOwnership(...)`) and the
+     * response leaves before the row exists.
+     */
+    async function runWithBindHeldOpen(handler: (req: NextRequest) => Promise<Response>) {
+      const events: string[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      mockBindProviderJob.mockImplementation(async () => {
+        events.push('bind-start');
+        await gate;
+        events.push('bind-complete');
+      });
+      let settled = false;
+      const pending = handler(makeRequest({ prompt: 'a castle' })).then((res) => {
+        settled = true;
+        events.push('response');
+        return res;
+      });
+      let settledWhileBindPending: boolean;
+      try {
+        await vi.waitFor(() => expect(events).toContain('bind-start'));
+        // Give the handler a bounded window to settle while the bind is held
+        // open. Its other dependencies resolve immediately, so a handler that
+        // does not await the bind settles well inside it; one that does cannot
+        // settle at all until `release()`. `waitFor` rejecting = never settled.
+        settledWhileBindPending = await vi
+          .waitFor(() => { if (!settled) throw new Error('not settled'); }, { timeout: 150, interval: 5 })
+          .then(() => true, () => false);
+      } finally {
+        // Always open the gate and restore an inert bind, so a failure here
+        // cannot leave a held promise behind for the next test to hang on.
+        release();
+        mockBindProviderJob.mockImplementation(async () => {});
+      }
+      const res = await pending;
+      return { res, events, settledWhileBindPending };
+    }
+
+    it('binds the resolved provider and extracted job id, and the response waits for the bind to COMPLETE', async () => {
+      const { res, events, settledWhileBindPending } = await runWithBindHeldOpen(makeAsyncHandler());
+
+      expect(mockBindProviderJob).toHaveBeenCalledWith('user-1', 'elevenlabs', 'task-123');
+      // Awaited inline (never via after() or `void`), unlike the QStash publish
+      // above: the binding must exist before the client can ever see the job
+      // id, because a poll can arrive the instant it does.
+      expect(settledWhileBindPending).toBe(false);
+      expect(events).toEqual(['bind-start', 'bind-complete', 'response']);
+      expect(res.status).toBe(200);
+    });
+
+    it('cached path, cache MISS: binds before the response, and the response waits for the bind to COMPLETE', async () => {
+      mockCachedGenerate.mockImplementation(async (_op, _params, factory) => {
+        const result = await (factory as () => Promise<ModelResult>)();
+        return { cached: false, result };
+      });
+      const { res, events, settledWhileBindPending } = await runWithBindHeldOpen(makeCachedAsyncHandler());
+
+      expect(res.headers.get('X-Cache')).toBe('MISS');
+      expect(mockBindProviderJob).toHaveBeenCalledTimes(1);
+      expect(mockBindProviderJob).toHaveBeenCalledWith('user-1', 'elevenlabs', 'task-123');
+      expect(settledWhileBindPending).toBe(false);
+      expect(events).toEqual(['bind-start', 'bind-complete', 'response']);
+    });
+
+    it('cached path, cache HIT: binds nothing (no new provider job was issued)', async () => {
+      mockCachedGenerate.mockResolvedValue({
+        cached: true,
+        result: { jobId: 'task-123', provider: 'sdxl', status: 'pending' },
+      });
+      const res = await makeCachedAsyncHandler()(makeRequest({ prompt: 'a castle' }));
+
+      expect(res.headers.get('X-Cache')).toBe('HIT');
+      expect(mockBindProviderJob).not.toHaveBeenCalled();
+    });
+
+    it('does not bind when the extractor returns null (synchronous result — nothing to poll)', async () => {
+      // The request SUCCEEDS and the extractor RUNS and yields no id, so the
+      // only thing between it and a bind of `null` is the no-id early return
+      // in maybeBindJobOwnership. (A route-level case cannot reach that line
+      // when execute throws first — see the pixel-art route test.)
+      const extractor = vi.fn((r: ModelResult) => (r.provider === 'sdxl' ? r.jobId : null));
+      const handler = makeAsyncHandler({ provider: 'dalle3', providerJobId: extractor });
+      const res = await handler(makeRequest({ prompt: 'a hero' }));
+      expect(res.status).toBe(200);
+      expect(extractor).toHaveBeenCalled();
+      expect(extractor.mock.results.every((r) => r.type === 'return' && r.value === null)).toBe(true);
+      expect(mockBindProviderJob).not.toHaveBeenCalled();
+    });
+
+    it('never fails the request when the bind write throws (bindProviderJob itself swallows and reports), and reports enough to identify the job and user', async () => {
+      mockBindProviderJob.mockRejectedValueOnce(new Error('db down'));
+      const res = await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
+      expect(res.status).toBe(200);
+      expect(mockCapture).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({
+          action: 'job_ownership_bind',
+          providerJobId: 'task-123',
+          userId: 'user-1',
+        }),
+      );
+    });
+
+    it('never binds and never fails the request when the ownership extractor throws, and reports the user it left unbound', async () => {
+      // The generic extractor-throws test below only asserts SOME capture
+      // happened — the QStash extract site captures too, so it could not see
+      // this catch losing the userId. There is no providerJobId to report
+      // (extracting it is what threw), but the user whose job is now unbound
+      // is in scope and is what whoever investigates the Sentry event needs to find them.
+      const handler = makeAsyncHandler({ providerJobId: () => { throw new Error('bad result shape'); } });
+      const res = await handler(makeRequest({ prompt: 'a castle' }));
+
+      expect(res.status).toBe(200);
+      expect(mockBindProviderJob).not.toHaveBeenCalled();
+      expect(mockCapture).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ action: 'job_ownership_extract', userId: 'user-1' }),
+      );
+    });
+
+    it('still binds when QStash is unconfigured — ownership binding does not depend on the durable-callback feature flag', async () => {
+      mockConfigured.mockReturnValue(false);
+      await makeAsyncHandler()(makeRequest({ prompt: 'a castle' }));
+      expect(mockBindProviderJob).toHaveBeenCalledWith('user-1', 'elevenlabs', 'task-123');
+    });
   });
 
   it('does not publish when the extractor returns null (synchronous result)', async () => {

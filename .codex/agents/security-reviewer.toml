@@ -69,6 +69,8 @@ Recommendations:
 - ...
 ```
 
+On the review board this scale maps onto the board's severities (`.claude/skills/review-protocol/SKILL.md` → Scope, severity and the round cap): CRITICAL, HIGH and MEDIUM are `blocker` or `major` and fail the board. A security defect is never `minor`; `minor` is for wording, style and docs only.
+
 ## Taskboard Permissions
 
 You MUST NOT move tickets. Create tickets for findings, add subtasks. Report to orchestrator.

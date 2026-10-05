@@ -13,7 +13,7 @@ const POST_impl = createGenerationHandler<
   {
     prompt: string;
     frameCount: number;
-    style?: SpriteStyle;
+    style?: SpriteStyle | undefined;
     size: SpriteSize;
   },
   { jobId: string; provider: string; status: string; estimatedSeconds: number; usageId: string | undefined }

@@ -9,6 +9,7 @@ import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit } from '@/lib/rateLimit';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { refundTokens } from '@/lib/tokens/service';
+import { bindProviderJob } from '@/lib/generate/jobOwnership';
 
 const mockGenerateTileset = vi.hoisted(() => vi.fn());
 
@@ -36,6 +37,9 @@ vi.mock('@/lib/ai/contentSafety', () => ({
 }));
 vi.mock('@/lib/tokens/service', () => ({
   refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
+}));
+vi.mock('@/lib/generate/jobOwnership', () => ({
+  bindProviderJob: vi.fn().mockResolvedValue(undefined),
 }));
 
 const makeRequest = (body: Record<string, unknown>) =>
@@ -131,6 +135,17 @@ describe('POST /api/generate/tileset-gen', () => {
     expect(data.jobId).toBe('pred_tile_001');
     expect(data.provider).toBe('replicate');
     expect(data.status).toBe('starting');
+  });
+
+  it('binds the returned jobId to the caller for ownership (#10262)', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    mockGenerateTileset.mockResolvedValue({ taskId: 'pred_tile_001', status: 'starting' });
+
+    await POST(makeRequest({ prompt: 'forest tileset texture' }));
+
+    expect(vi.mocked(bindProviderJob)).toHaveBeenCalledWith(user.id, 'replicate', 'pred_tile_001');
   });
 
   it('returns 500 and captures exception on provider error', async () => {

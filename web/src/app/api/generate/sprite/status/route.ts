@@ -3,12 +3,14 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { panelTierGateResponseForPoll } from '@/lib/api/panelTierGate';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { STATUS_CHECK_OPERATION } from '@/lib/keys/statusCheckOperation';
+import { verifyProviderJobOwner } from '@/lib/generate/jobOwnership';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { DB_PROVIDER } from '@/lib/config/providers';
 import { redactedJson } from '@/lib/api/errors';
 import { withEgressGuard } from '@/lib/security/egressGuard';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
+import { jobOwnershipRefusal } from '@/lib/generate/jobOwnershipResponse';
 
 async function GET_impl(request: NextRequest) {
   const mid = await withApiMiddleware(request, {
@@ -50,6 +52,18 @@ async function GET_impl(request: NextRequest) {
       resultUrl,
     });
   }
+
+  // Ownership check (#10262): resolveApiKey below returns the PLATFORM key by
+  // default, so without this ANY signed-in caller admitted past the tier gate
+  // above could poll a job id they never created and read back another user's
+  // result. Checked BEFORE any provider key is resolved. See
+  // `src/lib/generate/jobOwnership.ts`. (The dalle3-sync:/dalle3: branches
+  // above never resolve a key or touch the provider, so they need no check.)
+  // A confirmed miss answers a terminal 404; a lookup that FAILED answers a
+  // retryable 503 — both refuse, but only the first is a verdict on the job
+  // (`jobOwnershipRefusal`).
+  const ownership = await verifyProviderJobOwner(mid.userId!, DB_PROVIDER.sprite, jobId);
+  if (ownership !== 'owner') return jobOwnershipRefusal(ownership);
 
   // Poll Replicate for prediction status
   let apiKey: string;

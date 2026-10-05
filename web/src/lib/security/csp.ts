@@ -105,7 +105,7 @@ export interface CspOptions {
   /** Optional engine CDN origin to allow for `script-src` / `connect-src`. */
   engineCdn?: string;
   /** Clerk publishable key, used to derive the deployment's exact Clerk host. */
-  clerkPublishableKey?: string;
+  clerkPublishableKey?: string | undefined;
   /** Admit the pinned Swagger UI CDN assets. Only `/api-docs` may set this. */
   allowSwaggerUiCdn?: boolean;
 }
@@ -293,7 +293,7 @@ export interface PlayCspOptions {
    */
   nonce?: string;
   /** Clerk publishable key, used to derive the Clerk host to allowlist. */
-  clerkPublishableKey?: string;
+  clerkPublishableKey?: string | undefined;
   /**
    * Admit `'unsafe-eval'` for the dev server's Fast Refresh runtime only.
    * Callers pass {@link isDevEvalAllowed}; never `true` in a production build.

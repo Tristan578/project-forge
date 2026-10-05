@@ -15,16 +15,16 @@ export interface MeshyConfig {
 
 export interface TextTo3DParams {
   prompt: string;
-  artStyle?: string;
-  negativePrompt?: string;
-  quality?: 'standard' | 'high';
-  signal?: AbortSignal;
+  artStyle?: string | undefined;
+  negativePrompt?: string | undefined;
+  quality?: 'standard' | 'high' | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface ImageTo3DParams {
   imageBase64: string;
-  prompt?: string;
-  signal?: AbortSignal;
+  prompt?: string | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface TextToTextureParams {
@@ -32,8 +32,8 @@ export interface TextToTextureParams {
   resolution?: string;
   style?: string;
   tiling?: boolean;
-  generateMaps?: Record<string, boolean>;
-  signal?: AbortSignal;
+  generateMaps?: Record<string, boolean> | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface TaskStatus {
@@ -111,7 +111,7 @@ export class MeshyClient {
     return { taskId: data.result };
   }
 
-  async getTaskStatus(taskId: string, opts?: { signal?: AbortSignal }): Promise<TaskStatus> {
+  async getTaskStatus(taskId: string, opts?: { signal?: AbortSignal | undefined }): Promise<TaskStatus> {
     validateResourceId(taskId);
     const safeTaskId = encodeURIComponent(taskId);
     const url = new URL(`/openapi/v2/text-to-3d/${safeTaskId}`, 'https://api.meshy.ai');
@@ -165,7 +165,7 @@ export class MeshyClient {
     return { taskId: data.result };
   }
 
-  async getTextureStatus(taskId: string, opts?: { signal?: AbortSignal }): Promise<TextureStatus> {
+  async getTextureStatus(taskId: string, opts?: { signal?: AbortSignal | undefined }): Promise<TextureStatus> {
     validateResourceId(taskId);
     const safeTaskId = encodeURIComponent(taskId);
     const url = new URL(`/openapi/v2/text-to-texture/${safeTaskId}`, 'https://api.meshy.ai');

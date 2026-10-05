@@ -246,6 +246,40 @@ describe('chatStore deep tests', () => {
       expect(tc.status).toBe('error');
       expect(tc.error).toBe('Entity limit reached');
     });
+
+    // #10306: `error` admits undefined DELIBERATELY. An execution writes its
+    // outcome as a unit, so `error: undefined` on a success must clear the
+    // stale error rather than leave it under a 'success' status. This pins
+    // the sanctioned clear documented on ToolCallStatus.error and in
+    // .claude/rules/web-quality.md.
+    it('clears a stale error when an outcome patch carries error: undefined', async () => {
+      const msg = makeAssistantMessage({ id: 'msg1' }, [{ id: 'tc1', status: 'pending' }]);
+      useChatStore.setState({ messages: [msg] });
+      useChatStore.getState().updateToolCall('msg1', 'tc1', { status: 'error', error: 'first try failed' });
+      await new Promise<void>((r) => queueMicrotask(r));
+      expect(useChatStore.getState().messages[0].toolCalls![0].error).toBe('first try failed');
+
+      useChatStore.getState().updateToolCall('msg1', 'tc1', { status: 'success', result: { ok: true }, error: undefined });
+      await new Promise<void>((r) => queueMicrotask(r));
+
+      const tc = useChatStore.getState().messages[0].toolCalls![0];
+      expect(tc.status).toBe('success');
+      expect(tc.error).toBeUndefined();
+    });
+
+    // #10306: TYPE-LEVEL gate, enforced by `tsc --noEmit` (which type-checks
+    // test files), not by this test's runtime. `approvalId` stays exact, so a
+    // tool-call patch cannot erase it through the bare-spread merge. Widening
+    // the field leaves the directive unused, and tsc fails TS2578. The closure
+    // is never called.
+    it('rejects an explicit-undefined approvalId patch at compile time', () => {
+      const mustNotCompile = () => {
+        // @ts-expect-error -- approvalId is exact: undefined would erase it on the merge
+        useChatStore.getState().updateToolCall('msg1', 'tc1', { approvalId: undefined });
+      };
+      // Reporting-only at runtime (lessons #11): the gate is the directive.
+      expect(typeof mustNotCompile).toBe('function');
+    });
   });
 
   describe('rejectToolCalls', () => {

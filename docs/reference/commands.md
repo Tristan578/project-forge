@@ -783,7 +783,7 @@ Update PBR material properties on an entity. Supports core PBR, UV transform, pa
 | `diffuseTransmission` | number | No |  |
 | `ior` | number | No | Index of refraction (1.0=air, 1.33=water, 1.5=glass, 2.42=diamond) |
 | `thickness` | number | No | Optical depth for transmission |
-| `attenuationDistance` | number | No | Distance light travels before being attenuated. Use null for infinity. |
+| `attenuationDistance` | number,null | No | Distance light travels before being attenuated: a finite number >= 0. Send null for infinity (no attenuation), which is the default. |
 | `attenuationColor` | number[3] | No | [r, g, b] 0-1 attenuation tint |
 
 **Example:**

@@ -306,7 +306,7 @@ export interface ChatStreamOptions {
    * labels the $ai_generation event `route: '/api/chat#<surface>'`.
    */
   surface?: DeepGenSurface;
-  callbacks?: StreamCallbacks;
+  callbacks?: StreamCallbacks | undefined;
 }
 
 /**

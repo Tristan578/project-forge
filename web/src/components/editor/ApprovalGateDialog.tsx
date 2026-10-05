@@ -8,6 +8,23 @@
  * `gate_plan` ONLY, so `gate_assets` / `gate_final` still stop the run: whoever
  * started it has to be able to answer them from where they are standing.
  *
+ * Two layouts share one markup:
+ * - `ApprovalGateDialog` (the orchestrator panel): the gate's summary in its
+ *   own bounded scroll region, with the buttons below it (and any `children`
+ *   between the two). The panel shows the plan's cost in its own
+ *   `TokenCostBar`, above the gate, so it passes no children.
+ * - `ApprovalGateSummary` + `ApprovalGateActions` (the quick-start dialog):
+ *   the summary flows into the `@spawnforge/ui` Dialog body, which is the
+ *   one scroller, and the buttons go in the Dialog's `actions` footer, which
+ *   does not scroll. PR #10294 first pinned the buttons inside the body
+ *   (`sticky`) and kept focus clear of them with the body's scroll padding;
+ *   board rounds 3 and 4 showed that every layer of that fought the
+ *   scroller: Firefox does not honour the padding for focus scrolling the
+ *   way Chromium does, focusing a pinned button scrolled the body, and on a
+ *   320px-tall viewport the row covered the very prompt it was confirming.
+ *   A row outside the scroller has none of those failure modes, in any
+ *   browser, because nothing scrolls under it.
+ *
  * Every colour here is a `--sf-*` token, not a Tailwind palette shade. The
  * previous zinc/amber/green markup was rendered inside the token-themed
  * `@spawnforge/ui` Dialog, so on the light theme `text-amber-200` on
@@ -21,68 +38,46 @@ import type { ApprovalGate } from '@/lib/game-creation/types';
 
 const ROW = 'rounded-[var(--sf-radius-sm)] bg-[var(--sf-bg-elevated)] px-2 py-1 text-xs text-[var(--sf-text-secondary)]';
 
-export function ApprovalGateDialog({
+/** The card around a gate's heading, summary and extras. */
+const CARD = 'rounded-[var(--sf-radius-md)] border border-[var(--sf-warning)] bg-[var(--sf-bg-surface)] p-4';
+
+/** Marks a gate's cancel button inside its action row (rendered literally below). */
+const CANCEL_ATTR = 'data-gate-cancel';
+
+/**
+ * Whether focus is on a control the user could have chosen: one in the Tab
+ * order (`tabIndex` 0 or more). Focus that is nowhere, or on an element
+ * outside the Tab order (`tabIndex` -1: the page body, or a status line
+ * handed focus as a fallback), is not treated as a choice, even if it was
+ * clicked, and may be moved.
+ */
+function focusIsUserChosen(active: Element | null): boolean {
+  return active instanceof HTMLElement && active.tabIndex >= 0;
+}
+
+/** The id of a gate's heading, which also labels its summary region and its action group. */
+function headingIdFor(gate: ApprovalGate): string {
+  return `approval-gate-heading-${gate.id}`;
+}
+
+/**
+ * The gate's heading, description, plan summary and extras. `bounded` gives
+ * the summary its own scroll region (the panel); otherwise it flows into the
+ * enclosing scroller.
+ */
+function GateContent({
   gate,
-  onApprove,
-  onCancel,
-  autoFocus = false,
-  approveLabel = 'Approve',
-  cancelLabel = 'Cancel',
-  cancelVariant = 'ghost',
-  cancelRef,
-  approveDisabled = false,
+  bounded,
   children,
 }: {
   gate: ApprovalGate;
-  onApprove: () => void;
-  onCancel: () => void;
-  /**
-   * Focus Approve on mount. Set by the quick-start dialog, where the gate
-   * replaces the content the user was last focused on — without this, focus
-   * falls to `document.body` inside an `aria-modal` region and keyboard users
-   * have nothing to tab from. The panel leaves it off: the gate appears
-   * beside other content there and stealing focus would be a hijack.
-   */
-  autoFocus?: boolean;
-  /**
-   * Label for the approve button. The quick-start plan review says "Build it":
-   * that click is what starts spending tokens, so it names the action (#6831).
-   */
-  approveLabel?: string;
-  /**
-   * Label for the cancel button. The plan review says "Discard plan" because
-   * its footer also has "Close", which keeps the plan: two exits with different
-   * consequences must not share a vague name.
-   */
-  cancelLabel?: string;
-  /**
-   * The cancel button's variant. The plan review arms Discard on the first
-   * press and shows the armed button as destructive.
-   */
-  cancelVariant?: 'ghost' | 'destructive';
-  /** Ref to the cancel button, so the plan review can return focus to Discard. */
-  cancelRef?: Ref<HTMLButtonElement>;
-  /** Disables approve, e.g. while the confirmed action is already starting. */
-  approveDisabled?: boolean;
-  /**
-   * Extra content between the scrollable summary and the buttons — the plan
-   * review's token cost. Outside the scroll region on purpose: a cost the user
-   * has to scroll to find is not a cost they confirmed.
-   */
+  bounded: boolean;
   children?: ReactNode;
 }) {
   const { displayData } = gate;
-  const approveRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (autoFocus) approveRef.current?.focus();
-    // gate.id so a second gate in the same run re-focuses.
-  }, [autoFocus, gate.id]);
-
-  const headingId = `approval-gate-heading-${gate.id}`;
-
+  const headingId = headingIdFor(gate);
   return (
-    <div className="rounded-[var(--sf-radius-md)] border border-[var(--sf-warning)] bg-[var(--sf-bg-surface)] p-4">
+    <>
       {/*
        * Text pairs with `--sf-text` rather than `--sf-warning`: the token is
        * pinned >= 3:1 as a non-text colour (the border above already uses it
@@ -100,21 +95,26 @@ export function ApprovalGateDialog({
 
       {/*
        * A large plan (many scenes / many generated assets) has no natural
-       * height limit, and this box sits inside a modal that does not scroll
-       * itself — without a bound here the Approve/Reject row below gets
-       * pushed off the bottom of the dialog with no way to reach it.
+       * height limit. In the panel nothing above this box bounds it, so it
+       * bounds itself — without that the Approve/Reject row below gets pushed
+       * out of reach.
        *
        * tabIndex + role="region" + aria-labelledby make the region itself
        * keyboard-reachable: without them a keyboard-only user has no way to
        * move focus into this box and scroll it (a mouse wheel/trackpad is
        * the only path to the content below the fold).
+       *
+       * Unbounded (the quick-start dialog), the enclosing scroller (the
+       * Dialog body) already does both jobs — it is bounded and becomes a
+       * labelled, focusable region while it overflows — so this box is plain
+       * content. A second bounded scroller there would nest one scroll box in
+       * another, and on a short viewport the outer one carries the inner box
+       * out of view.
        */}
       <div
-        data-testid="approval-gate-scroll"
-        className="mb-3 max-h-[50vh] overflow-y-auto pr-1"
-        tabIndex={0}
-        role="region"
-        aria-labelledby={headingId}
+        data-testid={bounded ? 'approval-gate-scroll' : 'approval-gate-summary'}
+        className={bounded ? 'mb-3 max-h-[50vh] overflow-y-auto pr-1' : 'mb-3'}
+        {...(bounded ? { tabIndex: 0, role: 'region', 'aria-labelledby': headingId } : {})}
       >
         {/* Scene summaries */}
         {displayData.sceneSummaries && displayData.sceneSummaries.length > 0 && (
@@ -161,23 +161,239 @@ export function ApprovalGateDialog({
         )}
       </div>
 
-      {children && <div className="mb-3">{children}</div>}
+      {children && (
+        <div data-testid="approval-gate-extra" className="mb-3">
+          {children}
+        </div>
+      )}
+    </>
+  );
+}
 
-      <div className="flex gap-2">
+export interface ApprovalGateActionsProps {
+  gate: ApprovalGate;
+  onApprove: () => void;
+  onCancel: () => void;
+  /**
+   * Focus Approve on mount (Cancel instead while Approve is destructive:
+   * focus is never handed to a destructive answer). While Approve is
+   * disabled the focus waits, and is taken when Approve is enabled unless
+   * the user has put focus on a control of their own meanwhile. Set by the
+   * quick-start dialog, where the gate replaces the content the user was
+   * last focused on — without this, focus falls to `document.body` inside an
+   * `aria-modal` region and keyboard users have nothing to tab from. The
+   * panel leaves it off: the gate appears beside other content there and
+   * stealing focus would be a hijack.
+   */
+  autoFocus?: boolean;
+  /**
+   * Label for the approve button. The quick-start plan review says "Build it":
+   * that click is what starts spending tokens, so it names the action (#6831).
+   * While its Discard is armed the same button reads "Discard it".
+   */
+  approveLabel?: string;
+  /**
+   * The approve button's variant: the primary action by default, destructive
+   * while the plan review's armed Discard puts "Discard it" in this place.
+   */
+  approveVariant?: 'default' | 'destructive';
+  /**
+   * Label for the cancel button. The plan review says "Discard plan" because
+   * its footer also has "Close", which keeps the plan: two exits with different
+   * consequences must not share a vague name.
+   */
+  cancelLabel?: string;
+  /**
+   * The cancel button's variant. The panel's plan review arms Discard on the
+   * first press and shows the armed button as destructive; the quick-start
+   * review's armed row puts an outlined "Keep plan" here instead.
+   */
+  cancelVariant?: 'ghost' | 'destructive' | 'outline';
+  /** Ref to the cancel button, so the plan review can return focus to Discard. */
+  cancelRef?: Ref<HTMLButtonElement>;
+  /** Disables approve, e.g. while the confirmed action is already starting. */
+  approveDisabled?: boolean;
+  /**
+   * One short line above the buttons, in the same group: the plan review's
+   * token total, or, while its Discard is armed, the "Discard this plan?"
+   * question. In the quick-start dialog this row is the non-scrolling footer,
+   * so whatever is here is in view whenever the buttons are (PR #10294: a
+   * cost the user has to scroll to find is not a cost they confirmed). Keep
+   * it to a line or two: it takes height from the scroller above it, and on
+   * a 320px-tall viewport that is all the height there is. Text only; it
+   * must hold nothing that takes focus.
+   */
+  summary?: ReactNode;
+  className?: string;
+}
+
+/**
+ * A gate's Approve / Cancel row, with an optional one-line summary above the
+ * buttons. A `role="group"` named by the gate's heading, so a screen reader
+ * hears which gate the buttons answer even when the row is rendered apart
+ * from that heading (the quick-start dialog puts it in the Dialog footer).
+ */
+export function ApprovalGateActions({
+  gate,
+  onApprove,
+  onCancel,
+  autoFocus = false,
+  approveLabel = 'Approve',
+  approveVariant = 'default',
+  cancelLabel = 'Cancel',
+  cancelVariant = 'ghost',
+  cancelRef,
+  approveDisabled = false,
+  summary,
+  className,
+}: ApprovalGateActionsProps) {
+  const approveRef = useRef<HTMLButtonElement>(null);
+  // The button row, to find the cancel button for the destructive case below.
+  // `cancelRef` belongs to the caller and a prop may not be written to, so the
+  // cancel button is looked up in the row rather than sharing that ref.
+  const buttonsRef = useRef<HTMLDivElement>(null);
+
+  // Focus once per gate (gate.id, so a second gate in the same run re-focuses).
+  // The `approveVariant` and `approveDisabled` dependencies re-run this effect
+  // when the same gate's approve button changes, and the latch below keeps
+  // those re-runs from taking focus again: the plan review's Keep plan
+  // returns focus to its own button, and a second focus here would pull it
+  // onto "Build it".
+  //
+  // Never onto a destructive approve, the same rule as the re-enable below: if
+  // the row mounts with "Discard it" in this place (the plan review reopened
+  // while its Discard was still armed, PR #10294 board round 9), focus goes to
+  // the cancel button ("Keep plan"), the answer that loses nothing. Skipping
+  // the focus is not enough: the Dialog's deferred initial focus picks the
+  // first focusable control in the dialog, which is this one when the body
+  // holds no focusable control of its own.
+  //
+  // Not latched while a non-destructive approve is disabled (the plan review
+  // reopened while its "Build it" is still starting, PR #10294 board round
+  // 10). Focusing a disabled button does nothing, so latching then spent the
+  // gate's one focus on a no-op: the Dialog's initial focus went to the first
+  // enabled control ("Buy tokens" or "Discard plan"), and when the start was
+  // refused nothing put focus back on "Build it". The latch waits for the
+  // button to be enabled, and the focus is taken then unless the user has
+  // since put focus on a control of their own (`focusIsUserChosen`; focus
+  // nowhere, or on a target outside the Tab order such as the caller's
+  // status line, is not treated as a choice).
+  const autoFocusedGateRef = useRef<string | null>(null);
+  // The gate whose focus is waiting for its disabled approve to be enabled.
+  const deferredGateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoFocus) {
+      autoFocusedGateRef.current = null;
+      deferredGateRef.current = null;
+      return;
+    }
+    if (autoFocusedGateRef.current === gate.id) return;
+    if (approveVariant === 'destructive') {
+      autoFocusedGateRef.current = gate.id;
+      buttonsRef.current?.querySelector<HTMLButtonElement>(`[${CANCEL_ATTR}]`)?.focus();
+      return;
+    }
+    if (approveDisabled) {
+      deferredGateRef.current = gate.id;
+      return;
+    }
+    autoFocusedGateRef.current = gate.id;
+    const waited = deferredGateRef.current === gate.id;
+    if (waited && focusIsUserChosen(approveRef.current?.ownerDocument.activeElement ?? null)) return;
+    approveRef.current?.focus();
+  }, [autoFocus, gate.id, approveVariant, approveDisabled]);
+
+  // Pressing Approve can disable it while the action starts (the plan
+  // review's "Build it"), and a browser drops focus from a button that
+  // becomes disabled: Chromium moves it to <body>, outside the `aria-modal`
+  // dialog. If the action is refused the gate stays, the button comes back
+  // enabled, and focus is still nowhere (measured, PR #10294 board round 4). Put it
+  // back on the button, unless the user has since focused something else.
+  // Never onto a destructive button: the plan review re-enables this place as
+  // "Discard it" when Discard is armed during an in-flight Build it, and
+  // focus handed to it unasked is one Enter away from throwing the plan out.
+  const wasDisabledRef = useRef(approveDisabled);
+  useEffect(() => {
+    const wasDisabled = wasDisabledRef.current;
+    wasDisabledRef.current = approveDisabled;
+    if (!wasDisabled || approveDisabled || approveVariant === 'destructive') return;
+    const active = approveRef.current?.ownerDocument.activeElement;
+    if (!active || active === approveRef.current?.ownerDocument.body) approveRef.current?.focus();
+  }, [approveDisabled, approveVariant]);
+
+  return (
+    <div
+      data-testid="approval-gate-actions"
+      role="group"
+      aria-labelledby={headingIdFor(gate)}
+      className={className}
+    >
+      {summary && (
+        <div data-testid="approval-gate-action-summary" className="mb-2">
+          {summary}
+        </div>
+      )}
+      <div ref={buttonsRef} data-testid="approval-gate-buttons" className="flex gap-2">
         <Button
           ref={approveRef}
           type="button"
           size="sm"
+          variant={approveVariant}
           onClick={onApprove}
           disabled={approveDisabled}
           className="flex-1"
         >
           {approveLabel}
         </Button>
-        <Button ref={cancelRef} type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
+        <Button ref={cancelRef} data-gate-cancel="" type="button" size="sm" variant={cancelVariant} onClick={onCancel} className="flex-1">
           {cancelLabel}
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A gate's card WITHOUT its buttons, for a container that already scrolls
+ * (the quick-start dialog's Dialog body). The summary is not bounded: it
+ * flows into that one scroll. Render the same gate's `ApprovalGateActions`
+ * in the container's non-scrolling footer; this card has no buttons of its
+ * own, so a gate rendered without them cannot be answered.
+ */
+export function ApprovalGateSummary({ gate, children }: { gate: ApprovalGate; children?: ReactNode }) {
+  return (
+    <div className={CARD}>
+      <GateContent gate={gate} bounded={false}>
+        {children}
+      </GateContent>
+    </div>
+  );
+}
+
+/**
+ * The whole gate in one card, buttons included, for the orchestrator panel:
+ * the summary bounds itself and the buttons (and any `children`) sit below
+ * that bound, so they are never scrolled away with it.
+ */
+export function ApprovalGateDialog({
+  children,
+  ...actions
+}: Omit<ApprovalGateActionsProps, 'summary' | 'className'> & {
+  /**
+   * Optional extra content, rendered between the bounded summary and the
+   * buttons: outside the summary's scroll region, so it stays beside the
+   * buttons however long the summary is. No caller in the app passes it
+   * today (the panel's cost is its own `TokenCostBar`; the quick-start
+   * review passes its cost to `ApprovalGateSummary`).
+   */
+  children?: ReactNode;
+}) {
+  return (
+    <div className={CARD}>
+      <GateContent gate={actions.gate} bounded>
+        {children}
+      </GateContent>
+      <ApprovalGateActions {...actions} />
     </div>
   );
 }

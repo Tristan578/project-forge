@@ -129,6 +129,17 @@
         ]
       },
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-hook.mjs\" require-pr-ready.sh 30 35",
+            "commandWindows": "node .codex/hooks/run-claude-hook.mjs require-pr-ready.sh 30 35",
+            "timeout": 35
+          }
+        ]
+      },
+      {
         "matcher": "apply_patch|Bash",
         "hooks": [
           {

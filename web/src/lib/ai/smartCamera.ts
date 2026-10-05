@@ -54,7 +54,7 @@ export interface CameraPreset {
   fov: number;
   lookAhead: number;
   deadZone: DeadZone;
-  bounds?: CameraBounds;
+  bounds?: CameraBounds | undefined;
   shake: ShakeConfig;
 }
 
@@ -359,12 +359,18 @@ export function presetToGameCameraData(preset: CameraPreset): GameCameraData {
       break;
     case 'sideScroller':
       // `SideScroller` is z_offset/follow_y/y_bounds/damping — there is no height
-      // to set; vertical framing comes from follow_y.
+      // to set; vertical framing comes from follow_y. `damping` IS read here,
+      // so the preset's follow rate goes through: this arm used to set the
+      // distance only, and every 2D preset ran at the engine's 5 whatever its
+      // `followSmoothing` said (review-board finding on #10295).
       data.sideScrollerDistance = preset.followDistance;
+      data.followSmoothing = preset.followSmoothing;
       break;
     case 'topDown':
-      // `TopDown` is height/damping/follow_rotation — it has no angle.
+      // `TopDown` is height/damping/follow_rotation — it has no angle, and the
+      // same `damping` note as sideScroller applies.
       data.topDownHeight = preset.followHeight;
+      data.followSmoothing = preset.followSmoothing;
       break;
     case 'orbital':
       data.orbitalDistance = preset.followDistance;

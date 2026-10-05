@@ -12,7 +12,7 @@ Drive every open PR to GREEN — CI passing, Sentry resolved, conflicts gone —
 
 **Evidence before assertions.** Never claim a PR is green without running the checks. Never assume a cached CI result is current. Never skip a validation domain because "it probably passes." Every claim must have a command output backing it.
 
-The authoritative gate is `pwsh -NoProfile -File scripts/audit-pr-readiness.ps1 -PullRequest <N> -Json`. Exit `0` means ready, `1` means verified blockers remain, and `2` means the audit failed. Never translate exit `1` or `2` into a green claim. It paginates GitHub evidence and validates the exact current head SHA, current main, metadata, reviews, ownership, overlap, and CI.
+The authoritative gate is `pwsh -NoProfile -File scripts/audit-pr-readiness.ps1 -PullRequest <N> -Json`. Exit `0` means ready, `1` means verified blockers remain, and `2` means the audit failed. Never translate exit `1` or `2` into a green claim. It paginates GitHub evidence and validates the exact current head SHA, current main, metadata, reviews, ownership, overlap, and CI. Where `pwsh` or GitHub GraphQL is unavailable (a Claude Code cloud session has neither), the audit cannot run; `.claude/hooks/require-pr-ready.sh` then blocks marking a PR ready, and posting a board PASS for it, until GitHub shows every review thread resolved, no failed or pending check on the head and no merge conflict (#10328). It covers those three facts only, not the audit's other checks.
 
 ## Pipeline (per PR)
 
