@@ -428,7 +428,7 @@ When sweeping a whole directory, strip backticks from comment lines inside every
 **Ticket:** #9763
 
 ### 21. Upstream error text is not yours to forward
-**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|redactKeys|jsonUnescapeWithMap|redactJsonEscaped|reportGuardFailure|generate-route|nextjs-conventions|api-middleware-migrate|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
+**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|redactKeys|jsonUnescapeWithMap|redactJsonEscaped|reportGuardFailure|generate-route|nextjs-conventions|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
 **What happens:** A route answers a failure with the upstream provider's own
 words. It reads like good diagnostics and it is an egress channel: on the
 platform path the credential in play is the PLATFORM's, so a provider that

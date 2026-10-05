@@ -58,7 +58,7 @@ Reviewers (dispatch in parallel, max 3 concurrent on M2):
 
 - Skip reviewers whose domain wasn't touched (e.g. skip ux-reviewer for pure API fixes).
 - PASS/FAIL only, under the scope, severity and round-cap rules in `.claude/skills/review-protocol/SKILL.md`: blockers and majors in the diff fail; minors are fixed in the same push or filed; re-reviews cover only the fix diff; stop and ask the user if a blocker or major is still open after round 3.
-- NEVER use a generic `code-reviewer` in place of the 5 specialists.
+- Never use a single generic reviewer in place of the 5 specialists.
 
 ### Phase 3: Quality Gate (BEFORE push)
 
