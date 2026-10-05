@@ -5,7 +5,12 @@
 # from fixture files in $FAKE, so the hook itself carries no test seam (there
 # is no override variable for CI to wire). The fake fails any route it was not
 # given a fixture for, which is how the fail-closed paths are driven.
+# REQUIRE_PR_READY_BUDGET_SECONDS is the hook's operator knob, not a test seam;
+# the time-budget case below shortens it rather than waiting 25 s.
 set -uo pipefail
+# A GH_REPO in the caller's environment would change which repository every
+# case is checked against.
+unset GH_REPO
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOOK="$HERE/../require-pr-ready.sh"
@@ -47,6 +52,7 @@ for a in "$@"; do
   esac
 done
 printf '%s\n' "$route" >> "$FAKE_DIR/calls.log"
+[ ! -f "$FAKE_DIR/sleep" ] || sleep "$(cat "$FAKE_DIR/sleep")"
 case "$route" in
   graphql) f=graphql.json ;;
   repos/*/pulls/*/ccr/review_threads) f=threads.json ;;
@@ -55,6 +61,7 @@ case "$route" in
   repos/*/pulls/*) f=pr.json ;;
   *) exit 1 ;;
 esac
+[ ! -f "$FAKE_DIR/sleep.$f" ] || sleep "$(cat "$FAKE_DIR/sleep.$f")"
 [ -f "$FAKE_DIR/$f" ] || exit 1
 cat "$FAKE_DIR/$f"
 FAKEGH
@@ -63,7 +70,7 @@ chmod +x "$TMP/bin/gh"
 # fixtures <mergeable_state> <threads-json|-> <checks-json|-> [graphql-json]
 # Writes a fresh fixture set; "-" leaves that route unanswered.
 fixtures() {
-  rm -f "$FAKE"/*.json
+  rm -f "$FAKE"/*.json "$FAKE/sleep" "$FAKE"/sleep.*
   : > "$FAKE/calls.log"
   jq -nc --arg s "$1" --arg h "$HEAD_SHA" '{head:{sha:$h}, mergeable_state:$s}' > "$FAKE/pr.json"
   [ "$2" = "-" ] || printf '%s\n' "$2" > "$FAKE/threads.json"
@@ -99,6 +106,18 @@ expect_allow() { # <label> <command>
   if [ "$RC" -eq 0 ]; then ok "$1"; else bad "$1 (rc=$RC): $OUT"; fi
 }
 readonly -f expect_allow
+# run_mcp <tool name> <tool_input JSON> — the hook as Claude Code runs it for an MCP tool.
+run_mcp() {
+  OUT=$(jq -nc --arg t "$1" --argjson i "$2" '{tool_name:$t, tool_input:$i}' \
+    | (cd "$HERE" && PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" bash "$HOOK" 2>&1))
+  RC=$?
+}
+readonly -f run_mcp
+expect_mcp() { # <label> <want rc> <tool> <input JSON> [stderr substring]
+  run_mcp "$3" "$4"
+  if [ "$RC" -eq "$2" ] && { [ -z "${5:-}" ] || grep -qF -- "$5" <<<"$OUT"; }; then ok "$1"; else bad "$1 (rc=$RC): $OUT"; fi
+}
+readonly -f expect_mcp
 
 READY='gh api -X POST repos/Tristan578/project-forge/pulls/10305/ccr/ready_for_review'
 echo "=== require-pr-ready.sh ==="
@@ -347,6 +366,191 @@ expect_block "more statuses than were read blocks" "$READY" 'more than 100 commi
 SETTINGS="$HERE/../../settings.json"
 wired=$(jq '[.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[] | select((.command // "") | test("/\\.claude/hooks/require-pr-ready\\.sh"))] | length' "$SETTINGS" 2>/dev/null)
 if [ "$wired" = 1 ]; then ok "settings.json runs the hook on every Bash call"; else bad "settings.json wiring count is '$wired', want 1"; fi
+# ...and once more for the GitHub MCP tools that mark ready or post a comment (#10330).
+mcp_matcher=$(jq -r '[.hooks.PreToolUse[] | select(.hooks[]? | (.command // "") | test("/\\.claude/hooks/require-pr-ready\\.sh")) | .matcher | select(. != "Bash")] | .[0] // ""' "$SETTINGS" 2>/dev/null)
+for tool in update_pull_request add_issue_comment update_issue_comment; do
+  if [ -n "$mcp_matcher" ] && grep -qE "^(${mcp_matcher})\$" <<<"mcp__github__$tool"; then
+    ok "settings.json runs the hook on mcp__github__$tool"
+  else
+    bad "settings.json MCP matcher '$mcp_matcher' does not match mcp__github__$tool"
+  fi
+done
+if [ -n "$mcp_matcher" ] && ! grep -qE "^(${mcp_matcher})\$" <<<"mcp__github__get_pull_request"; then
+  ok "...and not on a read-only GitHub MCP tool"
+else
+  bad "MCP matcher '$mcp_matcher' also matches mcp__github__get_pull_request"
+fi
+
+# --- #10330: the GitHub MCP tools.
+fixtures clean "$OPEN" "$GREEN"
+expect_mcp "MCP update_pull_request draft:false is a ready call" 2 mcp__github__update_pull_request \
+  '{"owner":"Tristan578","repo":"project-forge","pullNumber":10305,"draft":false}' 'unresolved review threads'
+expect_mcp "MCP update_pull_request with pull_number (snake case)" 2 mcp__github__update_pull_request \
+  '{"owner":"Tristan578","repo":"project-forge","pull_number":10305,"draft":false}' 'unresolved review threads'
+expect_mcp "MCP add_issue_comment with issueNumber (camel case)" 2 mcp__github__add_issue_comment \
+  '{"owner":"Tristan578","repo":"project-forge","issueNumber":10305,"body":"board-verdict: PASS"}' 'unresolved review threads'
+expect_mcp "MCP update_pull_request draft:true is not" 0 mcp__github__update_pull_request \
+  '{"owner":"Tristan578","repo":"project-forge","pullNumber":10305,"draft":true}'
+expect_mcp "MCP update_pull_request without draft (a title edit) is not" 0 mcp__github__update_pull_request \
+  '{"owner":"Tristan578","repo":"project-forge","pullNumber":10305,"title":"x"}'
+expect_mcp "MCP add_issue_comment carrying a PASS marker is a ready call" 2 mcp__github__add_issue_comment \
+  '{"owner":"Tristan578","repo":"project-forge","issue_number":10305,"body":"<!-- board-verdict: PASS sha=abc seats=5/5 -->"}' 'unresolved review threads'
+expect_mcp "MCP add_issue_comment without a marker is not" 0 mcp__github__add_issue_comment \
+  '{"owner":"Tristan578","repo":"project-forge","issue_number":10305,"body":"standing down: CI red"}'
+expect_mcp "MCP update_issue_comment carrying a marker blocks (no PR number), saying how to post it" 2 mcp__github__update_issue_comment \
+  '{"owner":"Tristan578","repo":"project-forge","comment_id":5,"body":"board-verdict: PASS"}' 'Post the PASS as a new comment'
+expect_mcp "MCP call without owner/repo names the missing arguments" 2 mcp__github__update_pull_request \
+  '{"pullNumber":10305,"draft":false}' 'Pass owner and repo to the tool'
+expect_mcp "MCP update_pull_request draft:false with no number blocks" 2 mcp__github__update_pull_request \
+  '{"owner":"Tristan578","repo":"project-forge","draft":false}' 'without a PR number'
+fixtures clean "$RESOLVED" "$GREEN"
+run_mcp mcp__github__update_pull_request '{"owner":"other","repo":"project","pullNumber":34,"draft":false}'
+if [ "$RC" -eq 0 ] && grep -qx 'repos/other/project/pulls/34' "$FAKE/calls.log" && ! grep -q 'Tristan578/project-forge' "$FAKE/calls.log"; then
+  ok "an MCP call is checked against the repository it names"
+else
+  bad "MCP repository (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
+fi
+
+# --- #10330: the hook stops itself before the harness's own timeout lets the call through.
+fixtures clean "$RESOLVED" "$GREEN"
+printf '3\n' > "$FAKE/sleep"
+OUT=$(jq -nc --arg c 'gh pr ready 10305' '{tool_input:{command:$c}}' \
+  | (cd "$HERE" && PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" REQUIRE_PR_READY_BUDGET_SECONDS=2 bash "$HOOK" 2>&1)); RC=$?
+if [ "$RC" -eq 2 ] && grep -qF 'ran out of time' <<<"$OUT"; then ok "a slow GitHub blocks once the budget is spent"; else bad "time budget (rc=$RC): $OUT"; fi
+fixtures clean "$RESOLVED" "$GREEN"
+OUT=$(jq -nc --arg c 'gh pr ready 10305' '{tool_input:{command:$c}}' \
+  | (cd "$HERE" && PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" REQUIRE_PR_READY_BUDGET_SECONDS=08 bash "$HOOK" 2>&1)); RC=$?
+if [ "$RC" -eq 0 ]; then ok "a budget of 08 is read as base 10, not an octal error"; else bad "budget 08 (rc=$RC): $OUT"; fi
+# A gh that hangs is CUT OFF at the budget, not waited out: the harness's own
+# 30 s timeout would otherwise let the call through. Needs a coreutils timeout,
+# which is what the hook uses; without one the cut-off does not exist to test.
+if timeout 5 true </dev/null >/dev/null 2>&1; then
+  fixtures clean "$RESOLVED" "$GREEN"
+  printf '20\n' > "$FAKE/sleep"
+  START=$SECONDS
+  OUT=$(jq -nc --arg c 'gh pr ready 10305' '{tool_input:{command:$c}}' \
+    | (cd "$HERE" && PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" REQUIRE_PR_READY_BUDGET_SECONDS=2 bash "$HOOK" 2>&1)); RC=$?
+  ELAPSED=$((SECONDS - START))
+  if [ "$RC" -eq 2 ] && grep -qF 'ran out of time' <<<"$OUT" && [ "$ELAPSED" -le 6 ]; then
+    ok "a hanging gh is cut off at the budget (${ELAPSED}s)"
+  else
+    bad "hanging gh (rc=$RC, ${ELAPSED}s): $OUT"
+  fi
+else
+  echo "  note  no coreutils timeout here: the per-call cut-off is not used, so it is not tested"
+fi
+# Without a working timeout, the LAST answer can arrive after the budget; it must
+# not authorise the call (Devin review on #10333). A failing `timeout` stands in
+# for a host without one, the way System32's timeout.exe would.
+mkdir -p "$TMP/notimeout"; printf '#!/bin/sh\nexit 1\n' > "$TMP/notimeout/timeout"; chmod +x "$TMP/notimeout/timeout"
+fixtures clean "$RESOLVED" "$GREEN"
+printf '3\n' > "$FAKE/sleep.status.json"
+OUT=$(jq -nc --arg c 'gh pr ready 10305' '{tool_input:{command:$c}}' \
+  | (cd "$HERE" && PATH="$TMP/notimeout:$TMP/bin:$PATH" FAKE_DIR="$FAKE" REQUIRE_PR_READY_BUDGET_SECONDS=2 bash "$HOOK" 2>&1)); RC=$?
+if [ "$RC" -eq 2 ] && grep -qF 'ran out of time' <<<"$OUT"; then ok "a late last answer (no timeout) does not authorise the call"; else bad "late last answer (rc=$RC): $OUT"; fi
+
+# --- #10330: a script a shell reads from stdin.
+fixtures clean "$RESOLVED" "$GREEN"
+expect_block "a heredoc fed to bash that names a ready call blocks" $'bash <<\'EOF\'\ngh pr ready 10305\nEOF' 'Run the ready call as a plain command'
+expect_block "...and a pipe into sh" "printf 'gh pr ready 10305' | sh" 'a script fed to a shell on stdin'
+expect_block "...and bash -s with arguments" $'bash -s -- 5 <<\'EOF\'\ngh pr ready 10305\nEOF' 'a script fed to a shell on stdin'
+fixtures clean "$OPEN" "$GREEN"
+for c in 'bash <<< "gh pr ready 10305"' "bash <<<'gh pr ready 10305'" 'zsh <<< "gh pr ready 10305"; echo done' \
+  'bash -o pipefail -c "gh pr ready 10305"' '/usr/bin/env gh pr ready 10305'; do
+  expect_block "is a ready call: $c" "$c" 'unresolved review threads'
+done
+expect_allow "a here-string with no ready call is allowed" 'bash <<< "echo hi"'
+expect_allow "a here-string to a non-shell is not a call" 'grep -c x <<< "gh pr ready 10305"'
+# gh is in the text so the hook's cheap early exit cannot answer for the stdin branch.
+expect_allow "a heredoc fed to bash that names no ready call is allowed" $'bash <<\'EOF\'\ngh pr view 10305\nEOF'
+# shellcheck disable=SC2016  # the $ is the point: these are commands the hook reads, not expansions
+for c in $'bash <<\'EOF\'\ngh api -X POST repos/o/r/pulls/5/ccr/ready_for_review\nEOF' \
+  $'bash <<\'EOF\'\nbash scripts/post-board-verdict.sh 5 PASS abc 5/5 ok\nEOF' \
+  $'bash <<\'EOF\'\ngh api graphql -f query=\'mutation{markPullRequestReadyForReview(input:{pullRequestId:"x"}){clientMutationId}}\'\nEOF' \
+  $'bash <<\'EOF\'\ngh pr comment 5 --body "board-verdict: PASS"\nEOF'; do
+  l=${c#*$'\n'}; l=${l%%$'\n'*}
+  expect_block "a stdin script naming a ready call blocks: $l" "$c" 'a script fed to a shell on stdin'
+done
+
+# --- #10330: a marker read from a file the command names.
+printf '<!-- board-verdict: PASS sha=abc seats=5/5 -->\n' > "$TMP/v.md"
+printf 'standing down: CI red\n' > "$TMP/plain.md"
+for c in "gh pr comment 10305 --body \"\$(cat $TMP/v.md)\"" "gh pr comment 10305 -F - < $TMP/v.md" \
+  "cat $TMP/v.md | gh pr comment 10305 -F -"; do
+  fixtures clean "$OPEN" "$GREEN"
+  expect_block "a marker in a file the command reads: $c" "$c" 'unresolved review threads'
+done
+# A quoted path with a space is one path (Devin review on #10333).
+printf '<!-- board-verdict: PASS sha=abc seats=5/5 -->\n' > "$TMP/board verdict.md"
+# (-F <path> is read by the -F handling itself; these three only body_files reads.)
+for c in "gh pr comment 10305 --body \"\$(cat '$TMP/board verdict.md')\"" "cat '$TMP/board verdict.md' | gh pr comment 10305 -F -" \
+  "gh pr comment 10305 -F - < \"$TMP/board verdict.md\""; do
+  fixtures clean "$OPEN" "$GREEN"
+  expect_block "a quoted body path with a space is read: $c" "$c" 'unresolved review threads'
+done
+# ...and keeping a quoted word whole must not hide the reads INSIDE a quoted script.
+for c in "bash -c 'gh pr comment 10305 -F - < $TMP/v.md'" "bash -c 'gh pr comment 10305 --body \"\$(cat $TMP/v.md)\"'"; do
+  fixtures clean "$OPEN" "$GREEN"
+  expect_block "a body file inside a bash -c script is read: $c" "$c" 'unresolved review threads'
+done
+# A ~/ path is read the way the shell would expand it.
+HOME_DIR=$(mktemp -d "$TMP/home.XXXXXX"); cp "$TMP/v.md" "$HOME_DIR/v.md"
+fixtures clean "$OPEN" "$GREEN"
+OUT=$(MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -nc --arg c 'gh pr comment 10305 --body "$(cat ~/v.md)"' '{tool_input:{command:$c}}' \
+  | (cd "$HERE" && HOME="$HOME_DIR" PATH="$TMP/bin:$PATH" FAKE_DIR="$FAKE" bash "$HOOK" 2>&1)); RC=$?
+if [ "$RC" -eq 2 ] && grep -qF 'unresolved review threads' <<<"$OUT"; then ok "a marker in ~/v.md is read"; else bad "~ body file (rc=$RC): $OUT"; fi
+fixtures clean "$OPEN" "$GREEN"
+expect_allow "a body read from a file with no marker is not a ready call" "gh pr comment 10305 --body \"\$(cat $TMP/plain.md)\""
+# A file the body only NAMES is not read: a reply citing a script that holds the marker text is not a PASS.
+for c in $'gh pr comment 10305 --body "$(cat <<\'EOF\'\nFixed: see '"$TMP"$'/v.md\nEOF\n)"' \
+  "gh pr comment 10305 -b \"see $TMP/v.md and \$X\"" \
+  $'gh api repos/Tristan578/project-forge/pulls/10305/comments/9/replies -f body="$(cat <<\'EOF\'\nsee '"$TMP"$'/v.md\nEOF\n)"'; do
+  expect_allow "a body that only names a marker-bearing file is not a PASS: $c" "$c"
+done
+
+# --- #10330: wrapper spellings.
+# shellcheck disable=SC2016  # the $ is the point: these are commands the hook reads, not expansions
+for c in 'timeout 30 env X=1 gh pr ready 10305' "env -S'gh pr ready 10305'" 'env --split-string="gh pr ready 10305"' \
+  'sudo -nu root gh pr ready 10305' 'env -iu FOO gh pr ready 10305' 'env -uFOO gh pr ready 10305' \
+  'exec -a name gh pr ready 10305' '/usr/bin/timeout 5 gh pr ready 10305' '/usr/bin/sudo gh pr ready 10305'; do
+  fixtures clean "$OPEN" "$GREEN"
+  expect_block "is a ready call: $c" "$c" 'unresolved review threads'
+done
+fixtures clean "$OPEN" "$GREEN"
+expect_block "xargs --max-args N gh pr ready names no PR" 'echo 1 | xargs --max-args 1 gh pr ready' 'without a PR number'
+expect_block "...and by path" 'echo 1 | /usr/bin/xargs gh pr ready' 'without a PR number'
+expect_allow "command -v only prints where gh is" 'command -v gh pr ready 10305'
+expect_allow "...and command -V" 'command -V gh pr ready 10305'
+
+# --- #10330: variable PRs, the comment URL selector, the thread-list cap, the origin default.
+fixtures clean "$RESOLVED" "$GREEN"
+# shellcheck disable=SC2016  # the $ is the point: these are commands the hook reads, not expansions
+for c in 'gh pr ready $PR' 'gh pr comment $PR --body "board-verdict: PASS"' \
+  "gh api repos/Tristan578/project-forge/issues/\$PR/comments -f body='board-verdict: PASS'"; do
+  expect_block "a variable PR blocks: $c" "$c" 'without a PR number'
+done
+fixtures clean "$RESOLVED" "$GREEN"
+run_hook 'gh pr comment https://github.com/other/project/pull/34 --body "board-verdict: PASS"'
+if [ "$RC" -eq 0 ] && grep -qx 'repos/other/project/pulls/34' "$FAKE/calls.log"; then
+  ok "a comment's PR URL names the repository and PR checked"
+else
+  bad "comment URL selector (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
+fi
+SEVEN=$(jq -nc '[range(1;8) | {resolved:false, path:"f\(.).ts", line:., comment_ids:[.]}]')
+fixtures clean "$SEVEN" "$GREEN"
+run_hook "$READY"
+if [ "$RC" -eq 2 ] && grep -qF 'f5.ts:5 (comment 5), ... (7 open)' <<<"$OUT" && ! grep -qF 'f6.ts' <<<"$OUT"; then
+  ok "the open-thread list names five and counts the rest"
+else
+  bad "thread-list cap (rc=$RC): $OUT"
+fi
+fixtures clean "$RESOLVED" "$GREEN"
+run_hook 'bash scripts/post-board-verdict.sh 34 PASS abc 5/5 ok'
+if [ "$RC" -eq 0 ] && grep -qx 'repos/Tristan578/project-forge/pulls/34' "$FAKE/calls.log"; then
+  ok "a board PASS with no GH_REPO is checked against origin"
+else
+  bad "origin default (rc=$RC) asked for: $(tr '\n' ' ' < "$FAKE/calls.log")"
+fi
 
 # --- Several PRs in one command: each is checked; one bad one blocks.
 fixtures clean "$OPEN" "$GREEN"

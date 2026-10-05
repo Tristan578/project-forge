@@ -89,6 +89,9 @@ mkfix() {
   # both sides) rather than borrowing one from the real manifest, whose
   # `skills.independent` is empty by design since #10131.
   json_set "$d/tools/agentic-sync/port.json" skills.independent.kanban '"fixture: exists on both sides on purpose"'
+  # The real manifest's Claude-only MCP matcher names a group the fixture's own
+  # settings.json does not have, which the generator rightly calls stale.
+  json_set "$d/tools/agentic-sync/port.json" hooks.claudeOnlyMatchers '{}'
   cp "$ADAPTER" "$d/.codex/hooks/run-claude-hook.mjs"
   # The real adapter's messages send readers to this file, and the reference
   # validator resolves every path a .codex/ file names — so the fixture has one.
@@ -1256,6 +1259,33 @@ if [ "$(cat "$F/tools/agentic-sync/port.lock.json")" = '{ broken' ]; then
 else
   bad "--write rewrote an unparseable lock: $(head -c 120 "$F/tools/agentic-sync/port.lock.json")"
 fi
+# hooks.claudeOnlyMatchers (#10330): a group whose matcher names tools Codex has
+# no alias for is reported and left out, never mapped and never fatal; an
+# unlisted one still stops the generator; a stale or reasonless entry stops it.
+MCP_HOOKS='{"Stop":[{"hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}],"PreToolUse":[{"matcher":"mcp__x__(a|b)","hooks":[{"type":"command","command":"bash .claude/hooks/ok.sh"}]}]}'
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks "$MCP_HOOKS"
+json_set "$F/tools/agentic-sync/port.json" hooks.claudeOnlyMatchers '{"mcp__x__(a|b)":"fixture: no Codex alias"}'
+gen "$F" --write; expect_rc 0 "a group listed in hooks.claudeOnlyMatchers does not stop the generator"
+expect_out "1 skipped by name" "…and is reported as skipped"
+if [ "$(json_get "$F/.codex/hooks.json" 'hooks.@keys')" = "Stop" ]; then
+  ok "…and is left out of hooks.json, while the rest is ported"
+else
+  bad "a Claude-only group reached hooks.json: $(json_get "$F/.codex/hooks.json" 'hooks.@keys')"
+fi
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks "$MCP_HOOKS"
+gen "$F" --check; expect_rc 2 "the same group NOT listed still stops the generator"
+expect_out "no entry in port.json hooks.toolAliases" "…naming the missing alias"
+F="$(mkfix)"
+json_set "$F/tools/agentic-sync/port.json" hooks.claudeOnlyMatchers '{"mcp__gone__x":"fixture: stale"}'
+gen "$F" --check; expect_rc 2 "a claudeOnlyMatchers entry no group uses stops the generator"
+expect_out "remove the stale entry" "…saying it is stale"
+F="$(mkfix)"
+json_set "$F/.claude/settings.json" hooks "$MCP_HOOKS"
+json_set "$F/tools/agentic-sync/port.json" hooks.claudeOnlyMatchers '{"mcp__x__(a|b)":""}'
+gen "$F" --check; expect_rc 2 "a claudeOnlyMatchers entry with no reason stops the generator"
+expect_out "manifest.hooks.claudeOnlyMatchers" "…naming the field"
 F="$(mkfix)"; printf '{"skills":{},"agents":{},"hooks":{}}' > "$F/tools/agentic-sync/port.json"
 gen "$F" --check; expect_rc 2 "a valid-JSON manifest missing required keys is exit 2 (it used to be a TypeError and exit 1, which the gate reads as drift)"
 expect_out "manifest.skills.source" "…naming the first missing field"
