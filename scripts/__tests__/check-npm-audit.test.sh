@@ -3643,7 +3643,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=688
+readonly SELF_EXEC_EXPECTED_DROP=694
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -4166,6 +4166,12 @@ IFS= read -r -d '' expected_steps_pp <<'STEPS_EOF' || true
         run: shellcheck -x scripts/check-portable-paths.sh scripts/__tests__/check-portable-paths.test.sh
       - name: Check for machine-local absolute paths in tracked files
         run: bash scripts/check-portable-paths.sh
+      - name: Test the symlinks gate's decision logic
+        run: bash scripts/__tests__/check-symlinks.test.sh
+      - name: Shellcheck the symlinks gate and its suite
+        run: shellcheck -x scripts/check-symlinks.sh scripts/__tests__/check-symlinks.test.sh
+      - name: Check that every tracked symlink resolves to a tracked file
+        run: bash scripts/check-symlinks.sh
 STEPS_EOF
 readonly expected_steps_pp
 assert_steps_block "${ci_pp_block:-}" "ci.yml portable-paths job steps:" "${expected_steps_pp%$'\n'}"

@@ -37,6 +37,8 @@ vercel env pull                        # Pull env vars to .env.local
 cd web && npm run db:push              # Push schema to Neon (dev only)
 ```
 
+**Symlinks are required.** Skills and references are shared by symlink so each has one source. On a clone with `core.symlinks=false` (the Git for Windows default) every link is a text file holding its path, and those skills do not load. Fix once per clone: `git config core.symlinks true` (Windows also needs Developer Mode), then re-check-out the links — `bash scripts/check-symlinks.sh` prints the exact commands. CI runs the same script, and `on-session-start.sh` reports a broken checkout at the start of every session.
+
 Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `UPSTASH_REDIS_REST_URL`.
 
 Optional feature flags (defaults noted below):

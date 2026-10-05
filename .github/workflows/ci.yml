@@ -824,6 +824,16 @@ jobs:
   # It IS in the required `CI Success` aggregate, asserted by that verifier's
   # `check_unconditional` — there is no ci-gate trigger to map it to, and a gate
   # outside the aggregate reports rather than gates.
+  #
+  # The same job runs scripts/check-symlinks.sh, the other half of "the checkout
+  # works for everyone": every path git records as a symlink must resolve to a
+  # tracked file inside the repository. Skills and references are shared by
+  # symlink so each has one source, and a link to a moved, untracked or
+  # out-of-repo target breaks every fresh clone the same silent way. It is
+  # unconditional for the same reason: an edit anywhere (a renamed .agents skill,
+  # a deleted rule) can break a link. On this Linux runner every link is checked
+  # out as a real symlink; the stub case (core.symlinks=false) is caught at
+  # session start by on-session-start.sh, which runs the same script.
   portable-paths:
     name: Portable Paths
     runs-on: ubuntu-latest
@@ -847,6 +857,15 @@ jobs:
 
       - name: Check for machine-local absolute paths in tracked files
         run: bash scripts/check-portable-paths.sh
+
+      - name: Test the symlinks gate's decision logic
+        run: bash scripts/__tests__/check-symlinks.test.sh
+
+      - name: Shellcheck the symlinks gate and its suite
+        run: shellcheck -x scripts/check-symlinks.sh scripts/__tests__/check-symlinks.test.sh
+
+      - name: Check that every tracked symlink resolves to a tracked file
+        run: bash scripts/check-symlinks.sh
 
   # ---- Agentic Config Sync ----
   # Runs when the single source of truth (tools/agentic-sync/canonical.json), the

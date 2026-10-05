@@ -15,10 +15,12 @@
 //      Codex discovers repo skills from `.agents/skills` — and from the project
 //      layer's `.codex/skills`, which this repository does not use — and has no
 //      configurable extra directory (codex-rs core-skills/src/loader.rs). A
-//      symlink would avoid the copy, but this repo is developed on Windows with
-//      `core.symlinks=false`, where a git symlink checks out as a text stub —
-//      the skills would silently not exist for the one platform Codex is
-//      installed on here. Bodies are NOT rewritten: a path like
+//      symlink would avoid the copy, but on a checkout with
+//      `core.symlinks=false` (the Git for Windows default) a git symlink checks
+//      out as a text stub, and the skills would silently not exist there. This
+//      repo requires real symlinks (scripts/check-symlinks.sh, run in CI and at
+//      session start), but the mirror does not depend on that requirement
+//      being met. Bodies are NOT rewritten: a path like
 //      `.claude/rules/x.md` inside a skill is a real path, and rewriting it is
 //      precisely what produced the 143 dead references.
 //   2. `.codex/agents/<name>.toml`  from `.claude/agents/<name>.md`. Codex needs
@@ -65,8 +67,9 @@
 // DESIGN NOTES
 //  * Zero dependencies, like sync.mjs. `git` is used when present, and it
 //    decides four things: WHICH source files are mirrored at all (only tracked
-//    ones — see planSkills), which are symlinks (mode 120000; on Windows those
-//    are text stubs and must be dereferenced by hand), what the executable bit
+//    ones — see planSkills), which are symlinks (mode 120000; on a
+//    `core.symlinks=false` checkout those are text stubs and must be
+//    dereferenced by hand), what the executable bit
 //    should be where the filesystem cannot say (core.fileMode=false), and what
 //    `.codex/config.toml` DECLARES (the committed blob, for MCP parity). With
 //    no repository — the hermetic fixtures — every file on disk is taken.
