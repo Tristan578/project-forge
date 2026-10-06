@@ -554,6 +554,27 @@ if [ -f "$CD_YML" ]; then
     fail "a drizzle-kit push outside the dry run reappeared in cd.yml: ${stray_push}"
   fi
 
+  # THE DRY RUN MUST CALL THE DRIVER THE WAY 1.x REQUIRES (#10352). The dry-run
+  # step's inline node script uses @neondatabase/serverless. Since 1.0 the bare
+  # function it returns is tagged-template only; a conventional call has to be
+  # `sql.query(...)`. `await sql('CREATE EXTENSION ...')` threw on the deploy of
+  # #10298 (run 37174125364) and the job died before migrating or deploying, so
+  # migration 0015 reached production only through a later deploy. Nothing
+  # executes that node snippet before a real deploy, so this pin is the only
+  # guard. Pin the EXECUTABLE form, not the comment that explains it (lesson 16):
+  # the step's `// sql.query(), not sql():` comment names both spellings, and a
+  # plain substring match would pass on that comment with the call reverted.
+  # `cd_exec` has YAML `#` comments stripped but keeps the JS `//` lines, so strip
+  # those here before counting.
+  dryrun_js="$(grep -vE '^[[:space:]]*//' <<<"$cd_exec" || true)"
+  bare_sql_calls="$(grep -nE 'await sql\(' <<<"$dryrun_js" || true)"
+  query_calls="$(grep -cE 'await sql\.query\(' <<<"$dryrun_js" || true)"
+  if [ -z "$bare_sql_calls" ] && [ "${query_calls:-0}" -ge 1 ]; then
+    pass "the migration dry-run calls the neon driver through sql.query(), never the tagged-template-only bare sql() (#10352)"
+  else
+    fail "cd.yml calls the neon driver as a plain function, which @neondatabase/serverless 1.x rejects at deploy time (bare: ${bare_sql_calls:-none}; sql.query count: ${query_calls:-0}) — #10352"
+  fi
+
   # The rollback step must be honest that `vercel promote` reverts CODE ONLY.
   if grep -qF 'does NOT revert the database schema' <<<"$cd_yml"; then
     pass "the rollback step states plainly that the schema is not reverted"
