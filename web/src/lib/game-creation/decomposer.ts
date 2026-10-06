@@ -11,24 +11,33 @@
  * not prose — there is no markdown-fence stripping and no `JSON.parse` here
  * any more (PF-1216 / #9339).
  *
+ * The schema the model is asked for, and the cross-field invariants its
+ * object is checked against, live in `briefSchema.ts` (#10174): the SAME
+ * shape and the SAME checks the manual brief editor validates with, so a
+ * brief valid in one path is valid in the other.
+ *
  * Spec: specs/2026-03-25-game-creation-orchestrator-phase2a-v4.md (lines 322–578)
  */
 
-import { z } from 'zod';
 import { generateDecomposition } from './decomposerLlm';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
-// [FIX: V4-4] Import zSystemCategory from types.ts (single source of truth)
-import { zSystemCategory, zEntityRole } from './types';
 import type { OrchestratorGDD, SystemCategory } from './types';
 // The closed per-entity behaviour vocabulary (PF-1114). The prompt below
 // enumerates it from the SAME constant the schema validates against, so the
 // model is never offered a verb the planner cannot build.
-import { BEHAVIOR_VOCAB, behaviorPromptLines, zBehavior } from './behaviorVocabulary';
+import { BEHAVIOR_VOCAB, behaviorPromptLines } from './behaviorVocabulary';
 // Server-safe home of the completion-mode vocabulary (`stores/` is client-only).
 import { COMPLETION_MODES, COMPLETION_MODE_INFO } from '@/lib/playMode/completionMode';
+// The provider-facing shape and the refined output schema (#10174). The
+// provider is handed `zBriefContent` because the cross-field refinement in
+// `zBriefOutput` is not expressible in JSON Schema — the provider would
+// silently drop it. The split is deliberate: the provider enforces the
+// shape, the re-validation below enforces the invariants.
+import { briefCodeOf, zBriefContent, zBriefOutput } from './briefSchema';
+import type { BriefOutput } from './briefSchema';
 
 // ---------------------------------------------------------------------------
-// Zod schemas for LLM output validation
+// Prompt vocabulary
 // ---------------------------------------------------------------------------
 
 const SYSTEM_CATEGORIES: SystemCategory[] = [
@@ -37,110 +46,7 @@ const SYSTEM_CATEGORIES: SystemCategory[] = [
   'audio', 'visual', 'physics',
 ];
 
-const zGameSystem = z.object({
-  category: zSystemCategory,
-  type: z.string().min(1).max(100),
-  config: z.record(z.string(), z.unknown()),
-  priority: z.enum(['core', 'secondary', 'polish']),
-  dependsOn: z.array(zSystemCategory).default([]),
-});
-
-const zFeelDirective = z.object({
-  mood: z.string().min(1).max(100),
-  pacing: z.enum(['slow', 'medium', 'fast']),
-  weight: z.enum(['floaty', 'light', 'medium', 'heavy', 'weighty']),
-  referenceGames: z.array(z.string().max(100)).max(5).default([]),
-  oneLiner: z.string().min(1).max(200),
-});
-
-const zEntityBlueprint = z.object({
-  name: z.string().min(1).max(100),
-  // Shared with `EntityBlueprint['role']` and `physicsRoles.ts` rather than
-  // restated: a role this schema accepts but the physics table does not know
-  // spawns with no collider and nothing collides with it (PF-1213).
-  role: zEntityRole,
-  systems: z.array(zSystemCategory),
-  // Free text, but `primitive:<shape>` is the form `entity_setup` acts on — it
-  // picks the spawned mesh from it. Anything else falls back to the role default.
-  // (`behaviors` used to live here too: prose the model spent tokens writing and
-  // no stage of the pipeline ever read — PF-1111.)
-  appearance: z.string().max(300),
-  // SINGULAR and CLOSED (PF-1114). `zBehavior` is a `z.enum` over
-  // `BEHAVIOR_VOCAB`, so a verb outside the vocabulary fails validation and the
-  // retry loop below asks the model again — rather than being sanitized into a
-  // string that reaches the plan builder and means nothing there. Optional
-  // because most entities are scenery, and because every GDD written before the
-  // field existed must still parse.
-  behavior: zBehavior.optional(),
-});
-
-const zSceneBlueprint = z.object({
-  name: z.string().min(1).max(100),
-  purpose: z.string().max(200),
-  systems: z.array(zSystemCategory),
-  entities: z.array(zEntityBlueprint),
-  transitions: z.array(z.object({
-    to: z.string().min(1),
-    trigger: z.string().min(1),
-  })),
-});
-
-const zAssetNeed = z.object({
-  type: z.enum(['3d-model', 'texture', 'sound', 'music', 'voice', 'sprite']),
-  description: z.string().min(1).max(300),
-  entityRef: z.string().optional(),
-  styleDirective: z.string().max(300),
-  priority: z.enum(['required', 'nice-to-have']),
-  fallback: z.string().regex(/^(primitive|builtin):[a-z][a-z0-9_-]{0,63}$/),
-});
-
-/**
- * The plain object shape, handed to the provider as the structured-output
- * schema. Kept separate from `zDecompositionOutput` below because the
- * cross-field refinement it carries is not expressible in JSON Schema — the
- * provider would silently drop it. Splitting the two makes the split
- * deliberate: the provider enforces the shape, we enforce the invariant.
- */
-const zDecompositionShape = z.object({
-  title: z.string().min(1).max(200),
-  systems: z.array(zGameSystem).min(1),
-  scenes: z.array(zSceneBlueprint).min(1),
-  assetManifest: z.array(zAssetNeed),
-  estimatedScope: z.enum(['small', 'medium', 'large']),
-  styleDirective: z.string().max(500),
-  feelDirective: zFeelDirective,
-  constraints: z.array(z.string().max(200)),
-  // How the game is "complete" (idea.FR-1.OP-04, #9998). CLOSED to the shared
-  // `COMPLETION_MODES` — the list the manual picker offers and the
-  // `set_completion_mode` tool validates against — so an unknown mode fails
-  // validation and the retry loop asks again instead of guessing. Optional:
-  // omitted means the legacy `win`, which keeps every older brief valid.
-  completionMode: z.enum(COMPLETION_MODES).optional(),
-});
-
-const zDecompositionOutput = zDecompositionShape.superRefine((gdd, ctx) => {
-  // A movement system needs something to move. `role` and `category` are each
-  // valid in isolation, so nothing below this point can tell that the design is
-  // internally nonsense: the plan builder drops the character_setup step and
-  // warns, and the user gets a game where the thing they asked to move does not
-  // exist. Reject here so the model is asked again instead (PF-1113).
-  if (!gdd.systems.some(s => s.category === 'movement')) {
-    return;
-  }
-  const hasPlayer = gdd.scenes.some(scene =>
-    scene.entities.some(entity => entity.role === 'player'),
-  );
-  if (!hasPlayer) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['scenes'],
-      message:
-        'a movement system was declared but no entity in any scene has role "player" — add a player entity or drop the movement system',
-    });
-  }
-});
-
-export type DecompositionOutput = z.infer<typeof zDecompositionOutput>;
+export type DecompositionOutput = BriefOutput;
 
 // ---------------------------------------------------------------------------
 // LLM prompt template
@@ -245,7 +151,7 @@ export async function decomposeIntoSystems(
         : '',
     ].filter(Boolean).join('\n');
 
-    // The provider validates the object against `zDecompositionShape` before
+    // The provider validates the object against `zBriefContent` before
     // returning it, so a shape failure surfaces here as a throw rather than as
     // unparseable text. Same retry, one fewer way to lose an attempt.
     let parsed: unknown;
@@ -253,7 +159,7 @@ export async function decomposeIntoSystems(
       parsed = await generateDecomposition(
         userMessage,
         DECOMPOSITION_SYSTEM_PROMPT,
-        zDecompositionShape,
+        zBriefContent,
       );
     } catch (err) {
       lastError = new Error(
@@ -263,13 +169,23 @@ export async function decomposeIntoSystems(
     }
 
     // Re-validate locally. The provider enforced the SHAPE; this run adds the
-    // cross-field invariant that JSON Schema cannot express (a movement system
-    // needs a player entity), and re-narrows an `unknown` the seam's mock could
-    // otherwise smuggle a wrong type through in tests.
-    const result = zDecompositionOutput.safeParse(parsed);
+    // BUILD-BLOCKING cross-field invariants that JSON Schema cannot express
+    // (a movement system needs a player entity, scene names are unique, the
+    // dependsOn graph is acyclic — `BUILD_BLOCKING_BRIEF_ISSUE_CODES`), shared
+    // with `validateBrief` through `zBriefOutput`, and re-narrows an `unknown`
+    // the seam's mock could otherwise smuggle a wrong type through in tests.
+    // Each failure is named by the same code `validateBrief` reports. The
+    // advisory rules (a dangling transition, an entityRef naming no entity, a
+    // progression system in a goal-free mode) are the editor's, not a retry:
+    // the plan builder copes with each, and the model is never told about
+    // them, so the generic hint below could not help it fix one.
+    const result = zBriefOutput.safeParse(parsed);
     if (!result.success) {
       const issues = result.error.issues
-        .map(i => `${i.path.join('.')}: ${i.message}`)
+        .map(i => {
+          const code = briefCodeOf(i);
+          return `${i.path.join('.')}: ${i.message}${code ? ` [${code}]` : ''}`;
+        })
         .join('; ');
       lastError = new Error(
         `Attempt ${attempt + 1}: Schema validation failed: ${issues}`,
