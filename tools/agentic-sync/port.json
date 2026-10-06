@@ -67,7 +67,7 @@
       "PostToolUseFailure": "no Codex hook event; rate-limit backoff is advisory context only"
     },
     "claudeOnlyMatchers": {
-      "mcp__github__(update_pull_request|add_issue_comment|update_issue_comment)": "require-pr-ready.sh on the GitHub MCP tools that mark a PR ready or post a board PASS (#10330). Codex names MCP tools in its own scheme and no alias has been verified, so the group stays Claude-only; under Codex those MCP calls are not gated, and the Bash group still is"
+      "mcp__[A-Za-z0-9_-]*[Gg][Ii][Tt][Hh][Uu][Bb][A-Za-z0-9_-]*__(update_pull_request|add_issue_comment|update_issue_comment)": "require-pr-ready.sh on the GitHub MCP tools that mark a PR ready or post a board PASS (#10330), under any server name containing github in any case (#10334). Codex names MCP tools in its own scheme and no alias has been verified, so the group stays Claude-only; under Codex those MCP calls are not gated, and the Bash group still is"
     },
     "skipScripts": {
       "restore-context-hints.sh": "exists only to put context back in front of the model after compaction. Codex's PostCompact output accepts neither additionalContext nor any hookSpecificOutput (hooks/src/schema.rs, PostCompactCommandOutputWire, deny_unknown_fields) and drops plain stdout, so under Codex it could run and change nothing. Not wired rather than wired-and-inert",
