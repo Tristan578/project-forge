@@ -24,6 +24,7 @@ import {
   resolveCollectibles,
 } from './collectibles';
 import { readNameList, readPositiveNumber, resolveNames } from './configRead';
+import { progressionPlansWinCondition } from './progressionPrecondition';
 
 /** Config keys an LLM plausibly uses for "the places progress is saved". */
 const CHECKPOINT_NAME_KEYS = ['checkpoints', 'savePoints', 'respawnPoints', 'flags'];
@@ -166,7 +167,11 @@ registerSystem({
     gdd: OrchestratorGDD,
     ctx: SystemStepContext,
   ): SystemStepInput[] {
-    if (ctx.entities.length === 0) {
+    // The SAME predicate `checkBriefInvariants` asks before it reports a
+    // goal-free brief's progression system as a conflict (`briefSchema.ts`,
+    // COMPLETION_MODE_CONFLICT): a win condition is planned exactly when this
+    // says so, and the editor's warning cannot fire for a brief this drops.
+    if (!progressionPlansWinCondition(ctx.entities)) {
       ctx.warn(
         'The design asked for a progression system but placed no objects in the world, so there was nothing to win with.',
       );

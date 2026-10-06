@@ -17,7 +17,9 @@
  *     fills in afterwards (`id`, `description`, `projectType`), the schema
  *     version, an optional brief-local `id` on every system, scene, entity and
  *     asset need (addressing keys that #9806 consumes as requirement ids), an
- *     optional `openDecisions` list, and explicit size caps.
+ *     optional `openDecisions` list, and explicit size caps. Every object in
+ *     it is STRICT: a field the schema does not name is a `SCHEMA` issue on
+ *     that field, never a silent drop (see the note above `zBriefSystem`).
  *
  * One set of cross-field checks (`checkBriefInvariants`), reached two ways:
  *
@@ -51,6 +53,7 @@ import { zBehavior } from './behaviorVocabulary';
 import { COMPLETION_MODES } from '@/lib/playMode/completionMode';
 import type { CompletionMode } from '@/lib/playMode/completionMode';
 import { findSystemDependencyCycle, formatDependencyCycle } from './systemDependencies';
+import { progressionPlansWinCondition } from './systems/progressionPrecondition';
 
 // ---------------------------------------------------------------------------
 // Version and caps
@@ -196,20 +199,53 @@ export type BriefContent = z.infer<typeof zBriefContent>;
 
 const zItemId = z.string().min(1).max(BRIEF_LIMITS.id);
 
+/**
+ * Every object in the brief is STRICT — the root and each nested object:
+ * systems, scenes, entities, transitions, asset needs, the feel directive and
+ * open decisions. A key the schema does not name is reported as a `SCHEMA`
+ * issue on that key (`fromZodIssue` turns Zod's one `unrecognized_keys` issue
+ * into one issue per key, on the key's own path), never silently dropped.
+ *
+ * Zod's default object STRIPS unknown keys. That is right for the provider
+ * path and wrong for the brief, which is why the two differ here:
+ *
+ *   - The model is told `additionalProperties: false` on every object, so a
+ *     stray key in its output is provider noise; stripping it is free, and a
+ *     retry spent on it would be a retry spent on nothing. The shared leaves
+ *     stay as they are, and the provider schema stays byte-identical
+ *     (`decomposerProviderSchema.test.ts`).
+ *   - A brief a person wrote, and #10176 will persist, is author data. With
+ *     stripping, `styleDirectve` validated and the returned brief had lost
+ *     the field with nothing to say so — a validator that backs persistence
+ *     must not do that.
+ *
+ * So strictness is applied to the brief's composition only: on the `.extend`
+ * copies below, and on a strict copy of each leaf the brief reuses whole
+ * (`zBriefTransition`, `zBriefFeelDirective`). `.strict()` clones the leaf's
+ * `shape` container but keeps every field schema in it by reference, so the
+ * FIELDS are still the provider's own — `briefSchema.test.ts` pins that
+ * identity field by field.
+ */
 const zBriefSystem = zGameSystem.extend({
   id: zItemId.optional(),
   dependsOn: zDependsOn.max(BRIEF_LIMITS.dependsOn).default([]),
-});
+}).strict();
 
-const zBriefEntity = zEntityBlueprint.extend({ id: zItemId.optional() });
+const zBriefEntity = zEntityBlueprint.extend({ id: zItemId.optional() }).strict();
+
+// The leaf's own element, made strict: the brief adds no field to a transition.
+const zBriefTransition = zSceneBlueprint.shape.transitions.element.strict();
 
 const zBriefScene = zSceneBlueprint.extend({
   id: zItemId.optional(),
   entities: z.array(zBriefEntity).max(BRIEF_LIMITS.entitiesPerScene),
-  transitions: zSceneBlueprint.shape.transitions.max(BRIEF_LIMITS.transitionsPerScene),
-});
+  transitions: z.array(zBriefTransition).max(BRIEF_LIMITS.transitionsPerScene),
+}).strict();
 
-const zBriefAsset = zAssetNeed.extend({ id: zItemId.optional() });
+const zBriefAsset = zAssetNeed.extend({ id: zItemId.optional() }).strict();
+
+// Reused whole, so a strict copy rather than an extension.
+const zBriefFeelDirective = zBriefContent.shape.feelDirective.strict();
 
 /**
  * A choice the author of the brief could not make: the AI flags it rather
@@ -217,6 +253,10 @@ const zBriefAsset = zAssetNeed.extend({ id: zItemId.optional() });
  * editor shows it as a `decision` issue until it is resolved or dismissed
  * (#10175). `path` names the part of the brief the question is about, in
  * dotted form such as `systems.0.type`.
+ *
+ * Strict like the rest of the brief. Brief-only today; when #10180 puts it in
+ * the provider shape, give that shape a stripping copy (the leaf rule above)
+ * rather than loosening this one.
  */
 export const zOpenDecision = z.object({
   id: zItemId,
@@ -226,7 +266,7 @@ export const zOpenDecision = z.object({
     .array(z.string().min(1).max(BRIEF_LIMITS.decisionText))
     .min(1)
     .max(BRIEF_LIMITS.decisionOptions),
-});
+}).strict();
 
 export type OpenDecision = z.infer<typeof zOpenDecision>;
 
@@ -234,6 +274,7 @@ export type OpenDecision = z.infer<typeof zOpenDecision>;
  * The editable, versioned brief. Built from the same leaf schemas as
  * `zBriefContent` (by reference, pinned in `briefSchema.test.ts`), plus the
  * fields the content shape leaves to the decomposer and the caps above.
+ * Strict at the root too: an unknown top-level field is a `SCHEMA` issue.
  *
  * Structurally an `OrchestratorGDD`, so a validated brief feeds `buildPlan`
  * with no conversion in between.
@@ -249,11 +290,11 @@ export const zGameBrief = z.object({
   assetManifest: z.array(zBriefAsset).max(BRIEF_LIMITS.assets),
   estimatedScope: zBriefContent.shape.estimatedScope,
   styleDirective: zBriefContent.shape.styleDirective,
-  feelDirective: zBriefContent.shape.feelDirective,
+  feelDirective: zBriefFeelDirective,
   constraints: zBriefContent.shape.constraints.max(BRIEF_LIMITS.constraints),
   completionMode: zBriefContent.shape.completionMode,
   openDecisions: z.array(zOpenDecision).max(BRIEF_LIMITS.openDecisions).optional(),
-});
+}).strict();
 
 export type GameBrief = z.infer<typeof zGameBrief>;
 
@@ -376,10 +417,13 @@ export interface BriefInvariantInput {
 /**
  * Modes that rule out a final goal. The progression system is the only
  * definition that plans a win condition (`systems/progression.ts`), and it
- * always does so when the world has anything in it — so a brief in one of
- * these modes that also declares progression gets exactly the artificial win
- * the mode exists to refuse. `narrative` is not here: it ends through
- * authored progression, which is that system's job.
+ * does so exactly when `progressionPlansWinCondition` says so — when the
+ * world has anything in it. So a brief in one of these modes that also
+ * declares progression gets exactly the artificial win the mode exists to
+ * refuse, and the conflict is reported only under that same predicate: an
+ * empty sandbox with a progression system builds without a goal, and is not
+ * a contradiction. `narrative` is not here: it ends through authored
+ * progression, which is that system's job.
  *
  * The plan builder does NOT refuse the pairing: a progression system the
  * brief declares is planned in every mode (`planBuilder.ts`, Phase 3b — the
@@ -470,11 +514,17 @@ export function checkBriefInvariants(brief: BriefInvariantInput): BriefIssue[] {
   }
 
   const entityNames = new Set<string>();
+  // Every entity in every scene, in declaration order: the list `planBuilder`
+  // (Phase 2) hands each system definition as `ctx.entities`, so the
+  // progression precondition below is asked the question the planner asks.
+  const worldEntities: Array<{ readonly name: string; readonly role: string }> = [];
   for (let i = 0; i < scenes.length; i += 1) {
     const entities = scenes[i]?.entities ?? [];
     for (let j = 0; j < entities.length; j += 1) {
       const entity = entities[j];
-      if (entity) entityNames.add(entity.name);
+      if (!entity) continue;
+      entityNames.add(entity.name);
+      worldEntities.push(entity);
     }
   }
   for (let i = 0; i < assetManifest.length; i += 1) {
@@ -500,8 +550,12 @@ export function checkBriefInvariants(brief: BriefInvariantInput): BriefIssue[] {
     ));
   }
 
+  // Only where progression would actually plan the goal (`systems/progression.ts`
+  // drops every step for an empty world — the SAME predicate, so the two
+  // cannot drift): a goal-free brief with no entities builds without a win
+  // condition however many progression systems it declares.
   const mode = brief.completionMode;
-  if (mode !== undefined && GOAL_FREE_MODES.has(mode)) {
+  if (mode !== undefined && GOAL_FREE_MODES.has(mode) && progressionPlansWinCondition(worldEntities)) {
     for (let i = 0; i < systems.length; i += 1) {
       const system = systems[i];
       if (!system || system.category !== 'progression') continue;
@@ -656,25 +710,45 @@ function fieldLabel(path: BriefIssuePath): string {
   return path.length === 0 ? 'the brief' : path.join('.');
 }
 
-/** A Zod shape issue as a `BriefIssue` with a stable code. */
-function fromZodIssue(issue: z.core.$ZodIssue): BriefIssue {
+/**
+ * A Zod shape issue as `BriefIssue`s with stable codes. One in, one out —
+ * except `unrecognized_keys`, which Zod raises ONCE per object naming every
+ * unknown key on it, and which comes out as one `SCHEMA` issue PER key, on
+ * that key's own path (`['scenes', 0, 'purpos']`, not `['scenes', 0]`), so an
+ * editor can focus the field the author actually typed.
+ */
+function fromZodIssue(issue: z.core.$ZodIssue): BriefIssue[] {
   const path = toPath(issue.path);
+  if (issue.code === 'unrecognized_keys') {
+    const issues: BriefIssue[] = [];
+    for (let i = 0; i < issue.keys.length; i += 1) {
+      const key = issue.keys[i];
+      if (key === undefined) continue;
+      const keyPath = [...path, key];
+      issues.push(error(
+        keyPath,
+        'SCHEMA',
+        `${fieldLabel(keyPath)}: the brief has no field "${key}" here — remove it or fix its spelling`,
+      ));
+    }
+    return issues;
+  }
   if (path[0] === 'briefVersion') {
-    return error(
+    return [error(
       path,
       'UNSUPPORTED_VERSION',
       `briefVersion must be ${BRIEF_SCHEMA_VERSION}; this build cannot read any other version`,
-    );
+    )];
   }
   if (issue.code === 'too_big') {
     const unit = issue.origin === 'array' ? 'items' : 'characters';
-    return error(
+    return [error(
       path,
       'LIMIT_EXCEEDED',
       `${fieldLabel(path)} is over the limit of ${String(issue.maximum)} ${unit}`,
-    );
+    )];
   }
-  return error(path, 'SCHEMA', `${fieldLabel(path)}: ${issue.message}`);
+  return [error(path, 'SCHEMA', `${fieldLabel(path)}: ${issue.message}`)];
 }
 
 /**
@@ -697,7 +771,14 @@ export function validateBrief(input: unknown): BriefValidation {
       const issues: BriefIssue[] = [];
       for (let i = 0; i < parsed.error.issues.length; i += 1) {
         const issue = parsed.error.issues[i];
-        if (issue) issues.push(fromZodIssue(issue));
+        if (!issue) continue;
+        // Indexed, not `push(...spread)`: an `unrecognized_keys` issue carries
+        // one entry per unknown key, and the key count is the caller's.
+        const converted = fromZodIssue(issue);
+        for (let j = 0; j < converted.length; j += 1) {
+          const item = converted[j];
+          if (item) issues.push(item);
+        }
       }
       return { brief: null, issues };
     }

@@ -22,7 +22,7 @@ import {
   zBriefContent,
   zGameBrief,
 } from '../briefSchema';
-import type { BriefIssue, BriefIssueCode, GameBrief } from '../briefSchema';
+import type { BriefIssue, BriefIssueCode, GameBrief, OpenDecision } from '../briefSchema';
 import { COMPLETION_MODES } from '@/lib/playMode/completionMode';
 
 // ---------------------------------------------------------------------------
@@ -576,10 +576,106 @@ describe('versioning and shape', () => {
     // shape and the brief, which is what "one contract" means at the schema
     // level. `title` and friends are pinned by identity, not by behaviour.
     expect(zGameBrief.shape.title).toBe(zBriefContent.shape.title);
-    expect(zGameBrief.shape.feelDirective).toBe(zBriefContent.shape.feelDirective);
     expect(zGameBrief.shape.estimatedScope).toBe(zBriefContent.shape.estimatedScope);
     expect(zGameBrief.shape.styleDirective).toBe(zBriefContent.shape.styleDirective);
     expect(zGameBrief.shape.completionMode).toBe(zBriefContent.shape.completionMode);
+
+    // The objects the brief makes STRICT are copies of the leaf (`.strict()`
+    // or `.extend().strict()`) — but a copy that keeps the leaf's FIELDS by
+    // reference (Zod clones the `shape` container, not the schemas in it), so
+    // each field is still the provider's own schema and a change to one still
+    // reaches both sides. Walked over the leaf's keys, and the walk must be
+    // non-empty: a zero-key loop would pin nothing.
+    expect(zGameBrief.shape.feelDirective).not.toBe(zBriefContent.shape.feelDirective);
+    const feelFields = Object.keys(zBriefContent.shape.feelDirective.shape);
+    expect(feelFields.length).toBeGreaterThan(0);
+    expect(Object.keys(zGameBrief.shape.feelDirective.shape)).toEqual(feelFields);
+    for (const field of feelFields) {
+      expect(
+        (zGameBrief.shape.feelDirective.shape as Record<string, unknown>)[field],
+        `feelDirective.${field}`,
+      ).toBe((zBriefContent.shape.feelDirective.shape as Record<string, unknown>)[field]);
+    }
+    const content = zBriefContent.shape;
+    const brief = zGameBrief.shape;
+    expect(brief.systems.element.shape.category).toBe(content.systems.element.shape.category);
+    expect(brief.scenes.element.shape.name).toBe(content.scenes.element.shape.name);
+    expect(brief.scenes.element.shape.entities.element.shape.role).toBe(
+      content.scenes.element.shape.entities.element.shape.role,
+    );
+    expect(brief.scenes.element.shape.transitions.element.shape.to).toBe(
+      content.scenes.element.shape.transitions.element.shape.to,
+    );
+    expect(brief.assetManifest.element.shape.fallback).toBe(content.assetManifest.element.shape.fallback);
+  });
+
+  it('reports an unknown root field as SCHEMA on that field rather than dropping it', () => {
+    // The field an author misspelled. Before the brief was strict,
+    // `styleDirectve` validated and the returned brief had silently lost the
+    // author's text — a validator that will back persistence (#10176) must
+    // not do that (Devin review of 14f543b6). Both halves are reported, the
+    // typo as an unknown field and the real field as missing, so the author
+    // sees exactly what happened to the data.
+    const brief = validBrief() as Record<string, unknown>;
+    brief.styleDirectve = brief.styleDirective;
+    delete brief.styleDirective;
+
+    let result: ReturnType<typeof validateBrief> | undefined;
+    expect(() => {
+      result = validateBrief(brief);
+    }).not.toThrow();
+
+    expect(result?.brief).toBeNull();
+    expect(located(result?.issues ?? [])).toEqual([
+      { code: 'SCHEMA', path: ['styleDirective'] },
+      { code: 'SCHEMA', path: ['styleDirectve'] },
+    ]);
+    const unknown = result?.issues.find(issue => issue.path[0] === 'styleDirectve');
+    expect(unknown?.message).toContain('"styleDirectve"');
+  });
+
+  it.each<[string, (brief: GameBrief) => void, Array<string | number>]>([
+    ['system', brief => { (brief.systems[0] as Record<string, unknown>).priorty = 'core'; }, ['systems', 0, 'priorty']],
+    ['scene', brief => { (brief.scenes[0] as Record<string, unknown>).purpos = 'The yard'; }, ['scenes', 0, 'purpos']],
+    [
+      // `behaviors` is the field PF-1111 removed from entities: exactly the
+      // key an older hand-written brief would still carry.
+      'entity',
+      brief => { (brief.scenes[0].entities[0] as Record<string, unknown>).behaviors = ['wander']; },
+      ['scenes', 0, 'entities', 0, 'behaviors'],
+    ],
+    [
+      'transition',
+      brief => {
+        brief.scenes[0].transitions = [
+          { to: 'Yard', trigger: 'loop', triger: 'loop' } as GameBrief['scenes'][number]['transitions'][number],
+        ];
+      },
+      ['scenes', 0, 'transitions', 0, 'triger'],
+    ],
+    ['asset need', brief => { (brief.assetManifest[0] as Record<string, unknown>).styleDirectve = 'warm'; }, ['assetManifest', 0, 'styleDirectve']],
+    ['feel directive', brief => { (brief.feelDirective as Record<string, unknown>).paceing = 'slow'; }, ['feelDirective', 'paceing']],
+    [
+      'open decision',
+      brief => {
+        brief.openDecisions = [
+          { id: 'd1', path: 'systems.0.type', question: 'Walk or run?', options: ['walk'], answr: 'walk' } as OpenDecision,
+        ];
+      },
+      ['openDecisions', 0, 'answr'],
+    ],
+  ])('reports an unknown field inside a %s as SCHEMA on that field', (_kind, mutate, path) => {
+    // Every nested object, not only the root: strictness that stopped at the
+    // root would still drop a misspelled field inside a scene. The path is
+    // the KEY's path, so an editor can focus the field the author typed.
+    const brief = validBrief();
+    mutate(brief);
+
+    const result = validateBrief(brief);
+
+    expect(result.brief).toBeNull();
+    expect(located(result.issues)).toEqual([{ code: 'SCHEMA', path }]);
+    expect(result.issues[0].message).toContain(`"${String(path[path.length - 1])}"`);
   });
 });
 
@@ -715,6 +811,55 @@ describe('cross-field checks', () => {
     const brief = validBrief();
     brief.completionMode = 'sandbox';
     expect(validateBrief(brief).issues).toEqual([]);
+  });
+
+  it('reports a goal-free conflict only once progression has something to win with', () => {
+    // `systems/progression.ts` plans no win condition for an empty world — it
+    // drops every step and warns — so a sandbox brief that declares progression
+    // and places nothing is built exactly as the mode asks, and flagging it
+    // would send the author to fix a contradiction the build never produces
+    // (Devin review of 14f543b6). The invariant asks the SAME predicate the
+    // planner does, `progressionPlansWinCondition`, and the plan built from
+    // each brief below is the evidence that the two agree.
+    const brief = validBrief();
+    brief.completionMode = 'sandbox';
+    // No movement system (it would need a player) and no asset entityRef (it
+    // would need an entity): this case is about the world being EMPTY.
+    brief.systems = brief.systems.filter(s => s.category !== 'movement');
+    brief.systems.push({
+      id: 'sys-progression',
+      category: 'progression',
+      type: 'levels',
+      config: {},
+      priority: 'secondary',
+      dependsOn: [],
+    });
+    for (const scene of brief.scenes) scene.entities = [];
+    for (const asset of brief.assetManifest) delete asset.entityRef;
+    const progressionIndex = brief.systems.length - 1;
+
+    const empty = validateBrief(brief);
+    expect(empty.brief).not.toBeNull();
+    expect(empty.issues).toEqual([]);
+    const emptyPlan = buildPlan(brief, 'proj', 'pro', 1_000_000);
+    expect(
+      emptyPlan.steps.some(step => step.executor === 'game_component' && step.input.type === 'winCondition'),
+    ).toBe(false);
+
+    // One entity anywhere is enough for progression to plan the goal the
+    // mode refuses — and so enough for the conflict.
+    brief.scenes[0].entities = [
+      { id: 'ent-crate', name: 'Crate', role: 'decoration', systems: [], appearance: 'primitive:cube' },
+    ];
+
+    const one = validateBrief(brief);
+    expect(located(one.issues)).toEqual([
+      { code: 'COMPLETION_MODE_CONFLICT', path: ['systems', progressionIndex] },
+    ]);
+    const onePlan = buildPlan(brief, 'proj', 'pro', 1_000_000);
+    expect(
+      onePlan.steps.some(step => step.executor === 'game_component' && step.input.type === 'winCondition'),
+    ).toBe(true);
   });
 
   it('reports a later item that reuses an id, on its id field, across every item kind', () => {
