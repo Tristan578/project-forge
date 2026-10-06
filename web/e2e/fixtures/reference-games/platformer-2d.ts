@@ -35,6 +35,24 @@
  * plays it (#10152) is where the outcome is observed. Loading it, which is all
  * #10159 asserts, never depended on the contacts.
  *
+ * JUMP — `jumpHeight: 6` is NOT an apex height here. The kinematic character
+ * controller (`engine/src/core/character_controller.rs`: a gravity integrator
+ * and a launch speed derived from the authored height) is attached on
+ * Edit→Play only when the project is not 2D (`entering_play && !is_2d`) and
+ * the character has a collider. A 2D project therefore takes the legacy
+ * direct-translation branch of `system_character_controller`
+ * (`engine/src/core/game_components.rs`), which writes the transform itself:
+ * walking moves `speed * dt` per frame, and a jump is a single-frame nudge of
+ * `jump_height * 0.5 * dt` with no vertical velocity and no gravity integrator
+ * of its own — pinned by `in_2d_a_jump_adds_to_the_vertical_walk_on_the_same_axis`
+ * and recorded as an unresolved divergence on `CharacterControllerData`. The
+ * only gravity acting on the player is the 2D simulation's, through its
+ * dynamic body's `gravityScale: 1` (`physics_2d_sim.rs` inserts Rapier's
+ * `GravityScale`). So the layout above describes the intended game, not a
+ * traversal these numbers establish: whether the player can reach the floating
+ * platform and cross the pit is #10152's job (the journey that plays this
+ * game), and #10159 does not assert it.
+ *
  * Coordinates are world units in the XY plane (a 2D project's camera looks down
  * -Z); each entity's 2D collider size equals its X/Y scale.
  */

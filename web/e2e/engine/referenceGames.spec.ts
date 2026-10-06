@@ -290,9 +290,14 @@ function expectedGameState(expected: ReferenceGameExpectedState): EngineGameStat
  * Empty the scene through the engine and return the ids of what survives.
  *
  * `new_scene` despawns every entity except the undeletable editor camera, and
- * the export skips that camera (`snapshot_scene` records only entities with an
- * `EntityType`). So an export with ZERO entities is the engine itself saying
- * the scene is empty, and the scene-graph nodes left at that point are the
+ * the export leaves that camera out: `export_scene` is served by
+ * `apply_scene_export` (`engine/src/bridge/scene_io.rs`), whose entity query is
+ * filtered `Without<entity_factory::Undeletable>`, and the Main Camera is
+ * spawned with `Undeletable` (`engine/src/core/scene.rs`). It is not a missing
+ * `EntityType` that excludes it — the export defaults one (from the light data,
+ * else `Cube`) rather than skipping the entity. So an export with ZERO entities
+ * is the engine itself saying the scene is empty, and the scene-graph nodes
+ * left at that point are the
  * engine-internal ones — none of which may carry a mesh, light, physics or
  * game component, which is what separates them from a game's entities.
  */
@@ -397,6 +402,11 @@ async function configureGame(page: Page, game: ReferenceGame, ids: Record<string
  * engine accepted but could not build shows up as a count mismatch in the
  * round that added it, beside the rejection lines, rather than as one
  * undifferentiated diff after every component went in at once.
+ *
+ * The flip side of one component per entity per frame: this spec never adds
+ * two components to one entity in the same frame, so it does NOT exercise the
+ * #10193 regression. That fix is pinned only by the native
+ * `two_adds_for_one_entity_share_one_insert` test, not by anything here.
  *
  * Each round's polled value carries the engine-rejection lines collected so
  * far, beside the counts. Console events reach the test asynchronously, so a
