@@ -266,6 +266,13 @@ describe('a thrown scene load through the dispatcher useEngineEvents registers (
 
       expectThrewLockout();
       await expectSavingLocked(engine);
+      // The tracked dispatcher saw the `threw` answer first and used to toast
+      // "Couldn't create a new scene. The engine ran into an error." from
+      // there — a second notice beside the lockout the slice has just set
+      // and the reload sentence the caller shows. It is withheld for the
+      // scene-replacing commands (#10202 review, round 2); the lockout notice
+      // is the report here, where no caller toasts.
+      expect(toastModule.showError).not.toHaveBeenCalled();
     });
 
     it('control: a clean { success: false } returns false and locks nothing, exactly as before', () => {
@@ -289,7 +296,11 @@ describe('a thrown scene load through the dispatcher useEngineEvents registers (
 
       expect(engine.handle_command).toHaveBeenCalledWith('load_scene', expect.anything());
       expectThrewLockout();
-      expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
+      // ONE user-facing report: the Scene Browser's reload sentence. The
+      // tracked dispatcher's generic "Couldn't load the scene. The engine ran
+      // into an error." used to land beside it for the same failure; it is
+      // withheld for a thrown scene-replacing command (#10202 review, round 2).
+      expect(toastModule.showError).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
       expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('unchanged'));
       await expectSavingLocked(engine);
     });

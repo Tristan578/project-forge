@@ -144,28 +144,51 @@ describe('engine command rejection reporting', () => {
   });
 
   // #10202 review, m4: a `threw: true` answer is the dispatcher reporting a
-  // CAUGHT throw, not a refusal (the engine may already have acted). For a
-  // scene command the store then toasts "due to an engine error … reload",
-  // so this toast must not say "rejected the change" right before it — the
-  // two surfaces have to agree. The console line and the Sentry report are
-  // unchanged: they carry the raw engine text either way.
+  // CAUGHT throw, not a refusal (the engine may already have acted), so the
+  // generic toast must not say "rejected the change". The console line and
+  // the Sentry report are unchanged: they carry the raw engine text either way.
   it('says the engine ran into an error, not that it rejected the change, for a threw: true answer', async () => {
     const { store, notifications, sentry } = await loadStore();
     store.setCommandDispatcher(() => ({ success: false, error: 'JsValue("serialize failed")', threw: true }));
 
-    store.getCommandDispatcher()?.('load_scene', { json: '{}' });
+    store.getCommandDispatcher()?.('spawn_entity', { type: 'cube' });
 
     expect(notifications.showError).toHaveBeenCalledExactlyOnceWith(
-      "Couldn't load the scene. The engine ran into an error.",
+      "Couldn't add the entity. The engine ran into an error.",
     );
     expect(notifications.showError).not.toHaveBeenCalledWith(expect.stringContaining('rejected'));
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining('JsValue("serialize failed")'));
     expect(sentry.captureException).toHaveBeenCalledTimes(1);
     expect(vi.mocked(sentry.captureException).mock.calls[0][1]).toEqual({
-      command: 'load_scene',
+      command: 'spawn_entity',
       engineError: 'JsValue("serialize failed")',
     });
   });
+
+  // #10202 review, round 2: for the two scene-replacing commands a `threw`
+  // answer is re-raised by `sceneSlice.dispatchSceneCommand`, so the slice
+  // sets the save lockout (the notice shows it) and the caller shows the one
+  // reload sentence. A generic toast here as well put TWO notices on screen
+  // for one failure. It is withheld — the console line and the Sentry report,
+  // the record of the event, still fire. `sceneLoadThrowLockout.test.ts`
+  // pins the other half on the real store: exactly one toast, the caller's.
+  it.each(['load_scene', 'new_scene'])(
+    'shows no generic toast for a threw: true answer to %s, which the scene slice reports itself',
+    async (command) => {
+      const { store, notifications, sentry } = await loadStore();
+      store.setCommandDispatcher(() => ({ success: false, error: 'JsValue("serialize failed")', threw: true }));
+
+      store.getCommandDispatcher()?.(command, {});
+
+      expect(notifications.showError).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining('JsValue("serialize failed")'));
+      expect(sentry.captureException).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(sentry.captureException).mock.calls[0][1]).toEqual({
+        command,
+        engineError: 'JsValue("serialize failed")',
+      });
+    },
+  );
 
   it('control: a clean refusal of the same command still says the engine rejected the change', async () => {
     const { store, notifications } = await loadStore();
