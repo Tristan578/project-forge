@@ -11,8 +11,18 @@ import { expect, test } from '@playwright/test';
  * the same `applyE2eNeonEndpointOverride()` the app's queries go through, and
  * reports `database: 'connected'` ONLY when that probe succeeded —
  * `not_configured` when DATABASE_URL is absent, `unavailable` when the query
- * failed. Nothing here can pass against a server with no database, which is
- * what makes it a gate rather than a label (lessons-learned 1 and 11).
+ * failed.
+ *
+ * Only the FIRST test is that database gate: it is the one assertion in this
+ * file that reads the database result, and it cannot pass against a server with
+ * no database, which is what makes it a gate rather than a label
+ * (lessons-learned 1 and 11). The SECOND test is not a database check. It
+ * asserts the server under test is THIS run's build (its `commit` equals the
+ * run's SHA) and reads nothing from the database: against a server whose
+ * DATABASE_URL is unset, `/api/health` reports `database: 'not_configured'`, a
+ * `degraded` critical service, which is still HTTP 200 with `status: 'ok'`, so
+ * that test would pass. It sits beside the gate as a build-identity check, not
+ * as a second proof of the database.
  *
  * `@engine-journey` is the selector of playwright.journeys.config.ts; it is
  * carried on the describe title so every test in this file is selected. The
