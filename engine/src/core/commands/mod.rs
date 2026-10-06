@@ -37,8 +37,12 @@ mod sprites;
 mod edit_mode;
 
 use serde::Serialize;
-use super::pending_commands::{QueryRequest, queue_query_from_bridge, queue_mode_change_from_bridge};
+use super::pending_commands::{
+    QueryRequest, queue_frame_rate_pin_from_bridge, queue_mode_change_from_bridge,
+    queue_query_from_bridge,
+};
 use super::engine_mode::ModeChangeRequest;
+use super::simulation_clock::{parse_pin_hz, FrameRatePinRequest};
 
 /// Result type for command execution
 pub type CommandResult = Result<(), String>;
@@ -220,7 +224,9 @@ fn route_domain(command: &str) -> u8 {
         // --- engine-mode and query commands handled inline ---
         "play" | "stop" | "pause" | "resume" | "get_mode"
         | "get_scene_graph" | "get_selection" | "get_entity_details"
-        | "get_camera_state" => 12,
+        | "get_camera_state"
+        // Simulation clock (#10007): pinned for deterministic input replay.
+        | "pin_frame_rate" | "unpin_frame_rate" => 12,
 
         _ => 255,
     }
@@ -283,9 +289,25 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
                 handle_query(QueryRequest::EntityDetails { entity_id })
             },
             "get_camera_state" => handle_query(QueryRequest::CameraState),
+            "pin_frame_rate" => {
+                let hz = parse_pin_hz(payload.get("hz"))?;
+                handle_frame_rate_pin(FrameRatePinRequest::Pin { hz })
+            },
+            "unpin_frame_rate" => handle_frame_rate_pin(FrameRatePinRequest::Unpin),
             _ => Err(format!("Unknown command: {}", command)),
         },
         _ => Err(format!("Unknown command: {}", command)),
+    }
+}
+
+/// Handle a simulation-clock command (`pin_frame_rate` / `unpin_frame_rate`),
+/// queuing it for `core::simulation_clock::apply_frame_rate_pin_requests`.
+fn handle_frame_rate_pin(request: FrameRatePinRequest) -> CommandResult {
+    if queue_frame_rate_pin_from_bridge(request) {
+        tracing::info!("Queued simulation clock request: {:?}", request);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
     }
 }
 
@@ -1508,5 +1530,86 @@ mod tests {
         let err = result[0].error.as_deref().unwrap_or("");
         assert!(err.contains("too long"), "unexpected error: {}", err);
         assert!(!err.contains(&name), "error echoes the oversized name: {}", err);
+    }
+}
+
+/// `pin_frame_rate` / `unpin_frame_rate` (#10007): the two inline arms that
+/// pin the simulation clock for deterministic input replay. Tested through
+/// `dispatch` — router AND arm — with a live queue, so the assertions are on
+/// what was actually enqueued, never only on `Ok`.
+#[cfg(test)]
+mod simulation_clock_commands {
+    use super::*;
+    use crate::core::pending::{
+        register_pending_commands, unregister_pending_commands, PendingCommands,
+    };
+    use crate::core::simulation_clock::{FrameRatePinRequest, DEFAULT_PIN_HZ};
+    use serde_json::json;
+
+    /// Clears the thread-local pointer whatever the test did, including on a
+    /// panic — a stale pointer would hand the next test on this thread a
+    /// dangling reference into a dropped stack frame.
+    struct PendingGuard;
+
+    impl Drop for PendingGuard {
+        fn drop(&mut self) {
+            unregister_pending_commands();
+        }
+    }
+
+    fn dispatch_with_queue(
+        command: &str,
+        payload: serde_json::Value,
+    ) -> (CommandResult, Vec<FrameRatePinRequest>) {
+        let mut pending = PendingCommands::default();
+        register_pending_commands(&mut pending as *mut _);
+        let _guard = PendingGuard;
+        let result = dispatch(command, payload);
+        (result, pending.frame_rate_pin_requests.clone())
+    }
+
+    #[test]
+    fn both_names_are_routed_to_the_inline_domain() {
+        assert_eq!(route_domain("pin_frame_rate"), 12);
+        assert_eq!(route_domain("unpin_frame_rate"), 12);
+    }
+
+    #[test]
+    fn pin_without_hz_queues_the_default_rate() {
+        let (result, queued) = dispatch_with_queue("pin_frame_rate", json!({}));
+        assert_eq!(result, Ok(()));
+        assert_eq!(queued, vec![FrameRatePinRequest::Pin { hz: DEFAULT_PIN_HZ }]);
+    }
+
+    #[test]
+    fn pin_with_hz_queues_that_rate() {
+        let (result, queued) = dispatch_with_queue("pin_frame_rate", json!({ "hz": 30 }));
+        assert_eq!(result, Ok(()));
+        assert_eq!(queued, vec![FrameRatePinRequest::Pin { hz: 30 }]);
+    }
+
+    #[test]
+    fn an_invalid_hz_is_refused_and_nothing_is_queued() {
+        for bad in [json!({ "hz": 0 }), json!({ "hz": 1000 }), json!({ "hz": "60" }), json!({ "hz": 59.5 })] {
+            let (result, queued) = dispatch_with_queue("pin_frame_rate", bad.clone());
+            let err = result.unwrap_err();
+            assert!(err.contains("hz must be an integer between"), "{bad}: {err}");
+            assert!(queued.is_empty(), "{bad} queued {queued:?}");
+        }
+    }
+
+    #[test]
+    fn unpin_queues_an_unpin_and_ignores_its_payload() {
+        let (result, queued) = dispatch_with_queue("unpin_frame_rate", json!({ "hz": "ignored" }));
+        assert_eq!(result, Ok(()));
+        assert_eq!(queued, vec![FrameRatePinRequest::Unpin]);
+    }
+
+    #[test]
+    fn without_a_registered_queue_the_commands_report_not_initialized() {
+        for command in ["pin_frame_rate", "unpin_frame_rate"] {
+            let err = dispatch(command, json!({})).unwrap_err();
+            assert!(err.contains("not initialized"), "{command}: {err}");
+        }
     }
 }
