@@ -89,6 +89,14 @@ export default defineConfig({
   // Software rendering is CPU-bound; keep workers low so parallel WASM inits
   // don't starve each other and trip the engine-ready timeout.
   workers: 1,
+  // Stop after ten failed tests. `editor.load()` now really waits
+  // E2E_HYDRATION_TIMEOUT_MS (45s) for __FORGE_ENGINE_READY (it used to get
+  // actionTimeout's 10s, see #10336), so with a genuinely broken engine every
+  // test in this gate fails at ~45s, twice (retries: 1), on one worker: 42
+  // listed tests x 2 x 45s is ~63 minutes, past the job's 60-minute limit, and
+  // a job timeout skips the `!cancelled()` report upload. Ten failures cost
+  // ~15 minutes and still ship the report. A healthy engine never gets near it.
+  maxFailures: 10,
   // The journey evidence reporter (#10157) writes web/journey-evidence/: one
   // record per @release-journey test plus each attempt's trace and video. The
   // CI job's post-run check (scripts/check-journey-evidence.ts) fails when a

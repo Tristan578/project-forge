@@ -4,9 +4,43 @@ import {
   E2E_TIMEOUT_ELEMENT_MS,
   E2E_TIMEOUT_LOAD_MS,
   E2E_TIMEOUT_TEST_MS,
-  E2E_TIMEOUT_ENGINE_INIT_MS,
-  E2E_TIMEOUT_ENGINE_FULL_MS,
+  E2E_TIMEOUT_TEST_MARGIN_MS,
 } from '../constants';
+
+/**
+ * Wait for React hydration of the editor page (`__REACT_HYDRATED`), sized to
+ * the running config.
+ *
+ * Why one helper and no reload fallback: `loadPage()` and nine inline copies in
+ * `template-flow.spec.ts` used to ask for a 90s wait and, on timeout, reload and
+ * wait 40s more — for the webpack cold compile of a `next dev` server. Both
+ * waits passed `{ timeout }` as the page function's ARGUMENT, so each was really
+ * `actionTimeout` (10s). Honouring the numbers does not make the fallback
+ * reachable: every shipped config ends the TEST first (30s ci, 45s journey, 60s
+ * default, 90s engine), and CI serves `next start`, where there is no cold
+ * compile. A fixed 90s wait inside a 30s test can only ever die as the generic
+ * "Test timeout of 30000ms exceeded", pointing at nothing.
+ *
+ * So the wait asks for `E2E_HYDRATION_TIMEOUT_MS` or the current test's own
+ * budget minus `E2E_TIMEOUT_TEST_MARGIN_MS`, whichever is smaller. A hydration
+ * that never completes then fails HERE, naming `__REACT_HYDRATED`, with the
+ * margin left for Playwright to report it. Outside a test (timeout 0) the full
+ * hydration budget applies.
+ */
+export async function waitForEditorHydration(page: Page): Promise<void> {
+  const testTimeoutMs = base.info().timeout;
+  const budgetMs = testTimeoutMs - E2E_TIMEOUT_TEST_MARGIN_MS;
+  const timeout =
+    testTimeoutMs > 0 && budgetMs > 0
+      ? Math.min(E2E_HYDRATION_TIMEOUT_MS, budgetMs)
+      : E2E_HYDRATION_TIMEOUT_MS;
+  await page.waitForFunction(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    () => (window as any).__REACT_HYDRATED === true,
+    undefined,
+    { timeout }
+  );
+}
 
 /**
  * Page Object Model for the Project Forge editor.
@@ -143,38 +177,9 @@ export class EditorPage {
     await this.page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await this.page.waitForLoadState('domcontentloaded');
     // Wait for React hydration — ensures all event handlers (keyboard shortcuts,
-    // button clicks) are attached. This fires after EditorLayout mounts.
-    // On cold dev-server starts (CI), the first page load triggers webpack chunk
-    // compilation for the dynamically-imported EditorLayout bundle. GitHub-hosted
-    // runners typically take 60-90s for this cold compile. We give it 90s on first
-    // attempt; if that times out, reload once (chunks are now compiled) and wait
-    // a further 40s.
-    //
-    // Options go THIRD — waitForFunction(fn, arg, options). These calls used to
-    // pass `{ timeout }` second, as the page function's arg, so both waits were
-    // really actionTimeout (10s). The waits are now real, but the TEST timeout
-    // still bounds them: 30s under playwright.ci.config.ts, 45s journey, 60s
-    // default, 90s engine. Under every config the test ends before 90s, so the
-    // reload fallback below is only reachable by a spec that raises its own
-    // timeout (test.setTimeout / test.slow) past ~95s. CI serves `next start`,
-    // where there is no cold compile to wait out.
-    try {
-      await this.page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS }
-      );
-    } catch {
-      // Reload — chunks should be compiled by now
-      await this.page.reload({ waitUntil: 'domcontentloaded' });
-      await this.page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS }
-      );
-    }
+    // button clicks) are attached. This fires after EditorLayout mounts. The
+    // wait is sized to the running config; see waitForEditorHydration.
+    await waitForEditorHydration(this.page);
   }
 
   /** Wait for a minimum entity count in the scene graph */

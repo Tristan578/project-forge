@@ -1,12 +1,10 @@
-import { test, expect } from '../fixtures/editor.fixture';
+import { test, expect, waitForEditorHydration } from '../fixtures/editor.fixture';
 import type { Page } from '@playwright/test';
 import {
   E2E_TIMEOUT_SHORT_MS,
   E2E_TIMEOUT_ELEMENT_MS,
   E2E_TIMEOUT_INTERACTION_MS,
   E2E_TIMEOUT_TEST_MS,
-  E2E_TIMEOUT_ENGINE_INIT_MS,
-  E2E_TIMEOUT_ENGINE_FULL_MS,
 } from '../constants';
 
 /**
@@ -38,22 +36,7 @@ test.describe('Template Gallery @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     // WelcomeModal should appear — it shows when forge-welcomed is absent
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
@@ -91,22 +74,7 @@ test.describe('Template Gallery @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await expect(welcomeModal).toBeVisible({ timeout: E2E_TIMEOUT_INTERACTION_MS });
@@ -142,22 +110,7 @@ test.describe('Template Gallery @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.getByRole('button', { name: /browse templates/i }).click();
@@ -192,22 +145,7 @@ test.describe('Template Gallery @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.getByRole('button', { name: /browse templates/i }).click();
@@ -235,22 +173,7 @@ test.describe('Template Gallery @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.getByRole('button', { name: /browse templates/i }).click();
@@ -281,22 +204,7 @@ test.describe('Template selection flow @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await welcomeModal.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
@@ -455,22 +363,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     // WelcomeModal should be visible
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
@@ -509,22 +402,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await welcomeModal.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
@@ -566,22 +444,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await welcomeModal.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
@@ -614,22 +477,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await welcomeModal.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
@@ -660,22 +508,7 @@ test.describe('Template gallery ARIA structure @ui @dev', () => {
     await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_TEST_MS });
     await page.waitForLoadState('domcontentloaded');
 
-    try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
-      );
-    } catch {
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        undefined,
-        { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
-      );
-    }
+    await waitForEditorHydration(page);
 
     await page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]').waitFor({ state: 'visible', timeout: E2E_TIMEOUT_INTERACTION_MS });
     await page.getByRole('button', { name: /browse templates/i }).click();
