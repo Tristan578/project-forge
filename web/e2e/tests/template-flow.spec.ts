@@ -42,6 +42,7 @@ test.describe('Template Gallery @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -49,6 +50,7 @@ test.describe('Template Gallery @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
@@ -93,6 +95,7 @@ test.describe('Template Gallery @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -100,6 +103,7 @@ test.describe('Template Gallery @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
@@ -142,6 +146,7 @@ test.describe('Template Gallery @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -149,6 +154,7 @@ test.describe('Template Gallery @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
@@ -190,6 +196,7 @@ test.describe('Template Gallery @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -197,6 +204,7 @@ test.describe('Template Gallery @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
@@ -231,6 +239,7 @@ test.describe('Template Gallery @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -238,6 +247,7 @@ test.describe('Template Gallery @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
@@ -275,6 +285,7 @@ test.describe('Template selection flow @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -282,6 +293,7 @@ test.describe('Template selection flow @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
@@ -375,6 +387,7 @@ test.describe('Template application @engine', () => {
     await page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => !!(window as any).__EDITOR_STORE,
+      undefined,
       { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
@@ -401,6 +414,7 @@ test.describe('Template application @engine', () => {
     await page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => !!(window as any).__EDITOR_STORE,
+      undefined,
       { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
@@ -445,6 +459,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -452,6 +467,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
@@ -497,6 +513,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -504,6 +521,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
@@ -552,6 +570,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -559,6 +578,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
@@ -598,6 +618,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -605,6 +626,7 @@ test.describe('Welcome modal onboarding gate @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }
@@ -642,6 +664,7 @@ test.describe('Template gallery ARIA structure @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS },
       );
     } catch {
@@ -649,6 +672,7 @@ test.describe('Template gallery ARIA structure @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS },
       );
     }

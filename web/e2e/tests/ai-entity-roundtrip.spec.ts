@@ -237,6 +237,7 @@ test.describe('AI → Entity Round-trip: Engine Pipeline @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_INTERACTION_MS },
     );
 
@@ -262,6 +263,7 @@ test.describe('AI → Entity Round-trip: Engine Pipeline @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 
