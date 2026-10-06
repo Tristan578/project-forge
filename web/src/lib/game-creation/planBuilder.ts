@@ -543,7 +543,12 @@ export function buildPlan(
   // brief states. `requiresWinCondition` is the predicate the gate itself uses,
   // so what is planned here and what Play accepts cannot drift apart. A goal
   // the brief DOES declare (a progression system) is still planned above and
-  // still validated in every mode.
+  // still validated in every mode: the builder honours a declaration rather
+  // than second-guessing it. In a sandbox or endless brief that pairing is a
+  // contradiction for the brief's AUTHOR to resolve — `validateBrief` reports
+  // it to the editor as COMPLETION_MODE_CONFLICT (#10174) and the decomposer
+  // accepts it — so a brief can reach here carrying it, and what is built is
+  // what was declared.
   if (requiresWinCondition(gdd.completionMode) && !plansAWinCondition(steps)) {
     // The condition is a rule about the game rather than about a particular
     // prop, so it rides on the player where there is one — that is where a user

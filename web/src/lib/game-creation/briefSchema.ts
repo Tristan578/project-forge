@@ -35,6 +35,10 @@
  *     builder copes with each, and the model is never told about them, so a
  *     retry on one would be a retry spent on nothing.
  *
+ * One check is the brief's alone: item ids (`checkItemIds`, reported as
+ * `DUPLICATE_ITEM_ID`). The provider shape carries no ids, so there is nothing
+ * for the AI gate to see; `validateBrief` runs it after the shared checks.
+ *
  * Server-safe on purpose: `decomposer.ts` runs inside `/api/game/decompose`,
  * so nothing here may import from `stores/` (`serverSafeImports.test.ts`).
  * The completion-mode vocabulary comes from `lib/playMode/completionMode`.
@@ -265,7 +269,12 @@ export type GameBrief = z.infer<typeof zGameBrief>;
 export const BRIEF_ISSUE_CODES = [
   /** The value does not match the schema (wrong type, unknown enum value, missing field). */
   'SCHEMA',
-  /** A string or list is longer than its cap in `BRIEF_LIMITS`. */
+  /**
+   * A string or list is longer than its cap: one of the `BRIEF_LIMITS` caps
+   * on the brief, or a leaf cap shared with the provider shape (`title` 200,
+   * `referenceGames` 5, the free-text fields' lengths). Every Zod `too_big`
+   * maps here.
+   */
   'LIMIT_EXCEEDED',
   /** `briefVersion` is one this build does not read. */
   'UNSUPPORTED_VERSION',
@@ -279,8 +288,19 @@ export const BRIEF_ISSUE_CODES = [
   'ENTITY_REF_MISSING',
   /** The systems' `dependsOn` graph has a cycle, so they cannot be ordered. */
   'DEPENDENCY_CYCLE',
-  /** The completion mode rules out a goal and a system plans one anyway. */
+  /**
+   * The completion mode rules out a goal and a declared progression system
+   * plans one anyway. Advisory: the plan builder honours the declaration in
+   * every mode, so this is the editor's to resolve.
+   */
   'COMPLETION_MODE_CONFLICT',
+  /**
+   * Two items share a brief-local `id`. Ids are the addressing keys #9806
+   * consumes as requirement ids, so one id must name exactly one item across
+   * systems, scenes, entities, asset needs and open decisions. Brief only:
+   * the provider shape carries no ids, so the decomposer never meets it.
+   */
+  'DUPLICATE_ITEM_ID',
   /** An `openDecisions` entry, reported so it stays visible until resolved. */
   'OPEN_DECISION',
 ] as const;
@@ -295,9 +315,10 @@ export type BriefIssueCode = (typeof BRIEF_ISSUE_CODES)[number];
  * `dependsOn` cycle (`buildPlan` throws), two scenes with one name
  * (`buildPlan` keys scenes by name, so the second silently replaces the
  * first). Every other error code is advisory: `validateBrief` reports it for
- * the editor, and the AI path accepts the brief. Widening this list costs
- * the model a retry on a rule it is never told, with a generic hint — see
- * `decomposer.test.ts`, which pins both sides.
+ * the editor, and the AI path accepts the brief (`DUPLICATE_ITEM_ID` could
+ * not be here at all — the provider shape has no ids). Widening this list
+ * costs the model a retry on a rule it is never told, with a generic hint —
+ * see `decomposer.test.ts`, which pins both sides.
  */
 export const BUILD_BLOCKING_BRIEF_ISSUE_CODES = [
   'MOVEMENT_WITHOUT_PLAYER',
@@ -359,6 +380,12 @@ export interface BriefInvariantInput {
  * these modes that also declares progression gets exactly the artificial win
  * the mode exists to refuse. `narrative` is not here: it ends through
  * authored progression, which is that system's job.
+ *
+ * The plan builder does NOT refuse the pairing: a progression system the
+ * brief declares is planned in every mode (`planBuilder.ts`, Phase 3b — the
+ * builder honours a declaration rather than second-guessing it), which is
+ * why the conflict is reported to the editor as the author's call and is
+ * not in `BUILD_BLOCKING_BRIEF_ISSUE_CODES`; the decomposer accepts it.
  */
 const GOAL_FREE_MODES: ReadonlySet<CompletionMode> = new Set<CompletionMode>(['sandbox', 'endless']);
 
@@ -517,6 +544,59 @@ function cycleEdgePath(
 }
 
 // ---------------------------------------------------------------------------
+// Brief-only checks — fields the provider shape does not have
+// ---------------------------------------------------------------------------
+
+/**
+ * Every brief-local `id` names exactly one item. Systems, scenes, entities,
+ * asset needs and open decisions share ONE namespace, because #9806 consumes
+ * the ids as requirement ids and a requirement that names two items names
+ * neither. Walked in document order — systems, then each scene and its
+ * entities, then asset needs, then open decisions — and the LATER use is the
+ * one reported, so the first keeps its id (the choice `DUPLICATE_SCENE_NAME`
+ * makes too). An item with no id is not in the namespace, and the brief's own
+ * `id` names the brief, not an item in it.
+ *
+ * `validateBrief` only, and not a candidate for `BUILD_BLOCKING_BRIEF_ISSUE_CODES`:
+ * `zBriefContent` carries no ids, so the decomposer's `zBriefOutput` has
+ * nothing to check here.
+ */
+function checkItemIds(brief: GameBrief): BriefIssue[] {
+  const issues: BriefIssue[] = [];
+  const firstUseOf = new Map<string, BriefIssuePath>();
+
+  const claim = (id: string | undefined, item: BriefIssuePath): void => {
+    if (id === undefined) return;
+    const first = firstUseOf.get(id);
+    if (first === undefined) {
+      firstUseOf.set(id, item);
+      return;
+    }
+    issues.push(error(
+      [...item, 'id'],
+      'DUPLICATE_ITEM_ID',
+      `id "${id}" is already used by ${fieldLabel(first)} — every item id must name exactly one item`,
+    ));
+  };
+
+  const { systems, scenes, assetManifest } = brief;
+  for (let i = 0; i < systems.length; i += 1) claim(systems[i]?.id, ['systems', i]);
+  for (let i = 0; i < scenes.length; i += 1) {
+    const scene = scenes[i];
+    if (!scene) continue;
+    claim(scene.id, ['scenes', i]);
+    for (let j = 0; j < scene.entities.length; j += 1) {
+      claim(scene.entities[j]?.id, ['scenes', i, 'entities', j]);
+    }
+  }
+  for (let i = 0; i < assetManifest.length; i += 1) claim(assetManifest[i]?.id, ['assetManifest', i]);
+  const decisions = brief.openDecisions ?? [];
+  for (let i = 0; i < decisions.length; i += 1) claim(decisions[i]?.id, ['openDecisions', i]);
+
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
 // The decomposer's refined shape
 // ---------------------------------------------------------------------------
 
@@ -603,7 +683,8 @@ function fromZodIssue(issue: z.core.$ZodIssue): BriefIssue {
  * Shape first: a value that is not a brief gets `SCHEMA`, `LIMIT_EXCEEDED` or
  * `UNSUPPORTED_VERSION` issues on the exact fields and `brief: null`. Then
  * the cross-field invariants, reported alongside the parsed brief so an
- * editor can keep it; and each `openDecisions` entry as a `decision` issue.
+ * editor can keep it; then the brief-only id check; and each `openDecisions`
+ * entry as a `decision` issue.
  */
 export function validateBrief(input: unknown): BriefValidation {
   // One try/catch over the whole read, not only the shape parse: the cycle
@@ -623,6 +704,13 @@ export function validateBrief(input: unknown): BriefValidation {
 
     const brief = parsed.data;
     const issues = checkBriefInvariants(brief);
+
+    // The shared checks never see ids; this one is the brief's alone.
+    const idIssues = checkItemIds(brief);
+    for (let i = 0; i < idIssues.length; i += 1) {
+      const issue = idIssues[i];
+      if (issue) issues.push(issue);
+    }
 
     const decisions = brief.openDecisions ?? [];
     for (let i = 0; i < decisions.length; i += 1) {

@@ -17,6 +17,7 @@ import {
   BRIEF_ISSUE_CODES,
   BRIEF_LIMITS,
   BRIEF_SCHEMA_VERSION,
+  BUILD_BLOCKING_BRIEF_ISSUE_CODES,
   validateBrief,
   zBriefContent,
   zGameBrief,
@@ -367,6 +368,73 @@ describe('size caps', () => {
     expect(located(result.issues)).toEqual([{ code: 'LIMIT_EXCEEDED', path: ['openDecisions'] }]);
   });
 
+  it.each<[string, (brief: GameBrief) => void, Array<string | number>]>([
+    [
+      'entitiesPerScene',
+      brief => {
+        brief.scenes[0].entities = Array.from({ length: BRIEF_LIMITS.entitiesPerScene + 1 }, (_, i) => ({
+          ...brief.scenes[0].entities[0],
+          id: `ent-${i}`,
+          name: `Lantern ${i}`,
+        }));
+      },
+      ['scenes', 0, 'entities'],
+    ],
+    [
+      'transitionsPerScene',
+      brief => {
+        brief.scenes[0].transitions = Array.from({ length: BRIEF_LIMITS.transitionsPerScene + 1 }, () => ({
+          to: 'Yard',
+          trigger: 'loop',
+        }));
+      },
+      ['scenes', 0, 'transitions'],
+    ],
+    ['id, on the brief', brief => { brief.id = 'x'.repeat(BRIEF_LIMITS.id + 1); }, ['id']],
+    ['id, on an item', brief => { brief.systems[0].id = 'x'.repeat(BRIEF_LIMITS.id + 1); }, ['systems', 0, 'id']],
+    [
+      'dependsOn',
+      brief => {
+        brief.systems[0].dependsOn = Array.from({ length: BRIEF_LIMITS.dependsOn + 1 }, () => 'physics' as const);
+      },
+      ['systems', 0, 'dependsOn'],
+    ],
+    [
+      'decisionOptions',
+      brief => {
+        brief.openDecisions = [{
+          id: 'd1',
+          path: 'systems.0.type',
+          question: 'Walk or run?',
+          options: Array.from({ length: BRIEF_LIMITS.decisionOptions + 1 }, (_, i) => `option ${i}`),
+        }];
+      },
+      ['openDecisions', 0, 'options'],
+    ],
+    [
+      'decisionPath',
+      brief => {
+        brief.openDecisions = [{ id: 'd1', path: 'x'.repeat(BRIEF_LIMITS.decisionPath + 1), question: 'Walk or run?', options: ['walk'] }];
+      },
+      ['openDecisions', 0, 'path'],
+    ],
+    [
+      'decisionText',
+      brief => {
+        brief.openDecisions = [{ id: 'd1', path: 'systems.0.type', question: 'x'.repeat(BRIEF_LIMITS.decisionText + 1), options: ['walk'] }];
+      },
+      ['openDecisions', 0, 'question'],
+    ],
+  ])('names the field for a %s over its cap', (_cap, mutate, path) => {
+    const brief = validBrief();
+    mutate(brief);
+
+    const result = validateBrief(brief);
+
+    expect(result.brief).toBeNull();
+    expect(located(result.issues)).toEqual([{ code: 'LIMIT_EXCEEDED', path }]);
+  });
+
   it('names the field for an oversized dependsOn list, and never throws on one', () => {
     // There are twelve categories, so a list this long is not a design, it is
     // a payload. Before the cap existed a million-entry `dependsOn` on a
@@ -466,8 +534,40 @@ describe('versioning and shape', () => {
     ]);
   });
 
-  it('exports the closed list of issue codes, and every code is one of them', () => {
-    expect(BRIEF_ISSUE_CODES).toContain('LIMIT_EXCEEDED');
+  it('exports the closed list of issue codes, and the validator emits exactly those', () => {
+    // One input per producer. Every code the validator can emit must be in
+    // the exported list (a UI keys copy by it), and every exported code must
+    // have a producer here (a code nothing emits is a code with no meaning).
+    const withDanglingTransition = validBrief();
+    withDanglingTransition.scenes[0].transitions = [{ to: 'Cellar', trigger: 'trapdoor' }];
+    const withGhostRef = validBrief();
+    withGhostRef.assetManifest[0].entityRef = 'Ghost';
+    const withDecision = validBrief();
+    withDecision.openDecisions = [{ id: 'd1', path: 'systems.0.type', question: 'Walk or float?', options: ['walk', 'float'] }];
+    const withDuplicateId = validBrief();
+    withDuplicateId.systems[1].id = withDuplicateId.systems[0].id;
+    const tooManySystems = validBrief();
+    tooManySystems.systems = Array.from({ length: BRIEF_LIMITS.systems + 1 }, (_, i) => ({ ...tooManySystems.systems[0], id: `sys-${i}` }));
+
+    const inputs: unknown[] = [
+      ...listJson(INVALID_DIR).map(file => readJson(INVALID_DIR, file)),
+      'not a brief',
+      { ...validBrief(), briefVersion: 2 },
+      tooManySystems,
+      withDanglingTransition,
+      withGhostRef,
+      withDecision,
+      withDuplicateId,
+    ];
+
+    const emitted = new Set<BriefIssueCode>();
+    for (const input of inputs) {
+      for (const issue of validateBrief(input).issues) emitted.add(issue.code);
+    }
+
+    expect(emitted.size).toBeGreaterThan(0);
+    for (const code of emitted) expect(BRIEF_ISSUE_CODES).toContain(code);
+    expect([...emitted].sort()).toEqual([...BRIEF_ISSUE_CODES].sort());
     expect(new Set(BRIEF_ISSUE_CODES).size).toBe(BRIEF_ISSUE_CODES.length);
   });
 
@@ -569,7 +669,15 @@ describe('cross-field checks', () => {
   it('reports every later scene that reuses an earlier name, on its name field', () => {
     const brief = validBrief();
     const yard = brief.scenes[0];
-    brief.scenes = [yard, { ...structuredClone(yard), id: 'scene-2' }, { ...structuredClone(yard), id: 'scene-3' }];
+    // Fresh ids on the copies and their entities: this case is about the
+    // NAME, and reused ids are a separate issue (DUPLICATE_ITEM_ID).
+    const copyOf = (suffix: string) => {
+      const copy = structuredClone(yard);
+      copy.id = `${yard.id}-${suffix}`;
+      copy.entities = copy.entities.map(entity => ({ ...entity, id: `${entity.id}-${suffix}` }));
+      return copy;
+    };
+    brief.scenes = [yard, copyOf('2'), copyOf('3')];
 
     const result = validateBrief(brief);
 
@@ -607,6 +715,52 @@ describe('cross-field checks', () => {
     const brief = validBrief();
     brief.completionMode = 'sandbox';
     expect(validateBrief(brief).issues).toEqual([]);
+  });
+
+  it('reports a later item that reuses an id, on its id field, across every item kind', () => {
+    // Item ids are the addressing keys #9806 consumes as requirement ids, so
+    // an id resolves to exactly one item: systems, scenes, entities, assets
+    // and open decisions share ONE namespace. The later use is the one
+    // reported; the first keeps the id (round 1 m7).
+    const brief = validBrief();
+    brief.systems[1].id = 'sys-movement'; // a second system
+    brief.scenes[0].entities[1].id = 'sys-camera'; // an entity reusing a system id
+    brief.assetManifest[0].id = 'ent-keeper'; // an asset reusing an entity id
+    brief.openDecisions = [{ id: 'scene-yard', path: 'scenes.0', question: 'Bigger?', options: ['yes'] }]; // a decision reusing a scene id
+
+    const result = validateBrief(brief);
+
+    expect(result.brief).not.toBeNull();
+    expect(located(errorsOf(result.issues))).toEqual([
+      { code: 'DUPLICATE_ITEM_ID', path: ['assetManifest', 0, 'id'] },
+      { code: 'DUPLICATE_ITEM_ID', path: ['openDecisions', 0, 'id'] },
+      { code: 'DUPLICATE_ITEM_ID', path: ['scenes', 0, 'entities', 1, 'id'] },
+      { code: 'DUPLICATE_ITEM_ID', path: ['systems', 1, 'id'] },
+    ]);
+    const onSystem = result.issues.find(issue => issue.path[0] === 'systems');
+    expect(onSystem?.message).toContain('sys-movement');
+    expect(onSystem?.message).toContain('systems.0');
+  });
+
+  it('does not treat items with no id, or the brief id, as duplicates', () => {
+    const anonymous = validBrief();
+    for (const system of anonymous.systems) delete system.id;
+    for (const scene of anonymous.scenes) {
+      delete scene.id;
+      for (const entity of scene.entities) delete entity.id;
+    }
+    for (const asset of anonymous.assetManifest) delete asset.id;
+    expect(validateBrief(anonymous).issues).toEqual([]);
+
+    // The brief's own id names the brief, not an item in it.
+    const sameAsBrief = validBrief();
+    sameAsBrief.systems[0].id = sameAsBrief.id;
+    expect(validateBrief(sameAsBrief).issues).toEqual([]);
+  });
+
+  it('keeps duplicate item ids out of the AI gate: the provider shape carries no ids', () => {
+    expect(BUILD_BLOCKING_BRIEF_ISSUE_CODES).not.toContain('DUPLICATE_ITEM_ID');
+    expect('id' in zBriefContent.shape.systems.element.shape).toBe(false);
   });
 
   it('reports each open decision as a decision issue, never an error', () => {
