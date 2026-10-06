@@ -20,6 +20,14 @@ export const E2E_TIMEOUT_INTERACTION_MS = 8_000;
 /** Page / component load timeout */
 export const E2E_TIMEOUT_LOAD_MS = 10_000;
 
+/**
+ * Slack kept between a wait and the test's own timeout, so a wait sized to
+ * the running config fails on its own line (naming what it waited for) instead
+ * of as the generic "Test timeout of Nms exceeded". See
+ * `waitForEditorHydration` in `e2e/fixtures/editor.fixture.ts`.
+ */
+export const E2E_TIMEOUT_TEST_MARGIN_MS = 2_000;
+
 /** Navigation timeout (page.goto) */
 export const E2E_TIMEOUT_NAV_MS = 15_000;
 

@@ -13,8 +13,9 @@
  * 10s-then-10s.
  *
  * Reported shape: exactly two arguments, the second an object literal (through
- * `as` / `satisfies`) with a `timeout` or `polling` key — the only
- * `WaitForFunctionOptions` keys — AND a page function that cannot read its
+ * `as` / `satisfies`) with a `timeout`, `polling` or `signal` key — the keys of
+ * `PageWaitForFunctionOptions` (`Locator.waitForFunction` takes `timeout` and
+ * `signal`) — AND a page function that cannot read its
  * argument: an inline function with no parameters (a `function` expression
  * must not reference `arguments` either), or a string, which Playwright
  * evaluates as an expression and never hands an argument.
@@ -38,7 +39,7 @@
  * Tests: `e2e/lib/__tests__/noWaitForFunctionOptionsAsArg.test.ts`.
  */
 
-const OPTION_KEYS = new Set(['timeout', 'polling']);
+const OPTION_KEYS = new Set(['timeout', 'polling', 'signal']);
 
 const MESSAGE =
   'waitForFunction(fn, { timeout }) passes the options as the page function\'s ARGUMENT — the timeout is ignored and the wait uses actionTimeout (10s). Options go third: waitForFunction(fn, undefined, { timeout }).';
