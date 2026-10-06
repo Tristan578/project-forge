@@ -1,0 +1,356 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "systems": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "movement",
+              "input",
+              "camera",
+              "world",
+              "challenge",
+              "entities",
+              "progression",
+              "feedback",
+              "narrative",
+              "audio",
+              "visual",
+              "physics"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "config": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "core",
+              "secondary",
+              "polish"
+            ]
+          },
+          "dependsOn": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "movement",
+                "input",
+                "camera",
+                "world",
+                "challenge",
+                "entities",
+                "progression",
+                "feedback",
+                "narrative",
+                "audio",
+                "visual",
+                "physics"
+              ]
+            }
+          }
+        },
+        "required": [
+          "category",
+          "type",
+          "config",
+          "priority"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "scenes": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "systems": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "movement",
+                "input",
+                "camera",
+                "world",
+                "challenge",
+                "entities",
+                "progression",
+                "feedback",
+                "narrative",
+                "audio",
+                "visual",
+                "physics"
+              ]
+            }
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "player",
+                    "enemy",
+                    "npc",
+                    "decoration",
+                    "trigger",
+                    "interactable",
+                    "projectile"
+                  ]
+                },
+                "systems": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "movement",
+                      "input",
+                      "camera",
+                      "world",
+                      "challenge",
+                      "entities",
+                      "progression",
+                      "feedback",
+                      "narrative",
+                      "audio",
+                      "visual",
+                      "physics"
+                    ]
+                  }
+                },
+                "appearance": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "behavior": {
+                  "type": "string",
+                  "enum": [
+                    "chase",
+                    "patrol",
+                    "flee",
+                    "idle",
+                    "projectile_fire"
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "role",
+                "systems",
+                "appearance"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "trigger": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "to",
+                "trigger"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "name",
+          "purpose",
+          "systems",
+          "entities",
+          "transitions"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "assetManifest": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "3d-model",
+              "texture",
+              "sound",
+              "music",
+              "voice",
+              "sprite"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "entityRef": {
+            "type": "string"
+          },
+          "styleDirective": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "required",
+              "nice-to-have"
+            ]
+          },
+          "fallback": {
+            "type": "string",
+            "pattern": "^(primitive|builtin):[a-z][a-z0-9_-]{0,63}$"
+          }
+        },
+        "required": [
+          "type",
+          "description",
+          "styleDirective",
+          "priority",
+          "fallback"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "estimatedScope": {
+      "type": "string",
+      "enum": [
+        "small",
+        "medium",
+        "large"
+      ]
+    },
+    "styleDirective": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "feelDirective": {
+      "type": "object",
+      "properties": {
+        "mood": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "pacing": {
+          "type": "string",
+          "enum": [
+            "slow",
+            "medium",
+            "fast"
+          ]
+        },
+        "weight": {
+          "type": "string",
+          "enum": [
+            "floaty",
+            "light",
+            "medium",
+            "heavy",
+            "weighty"
+          ]
+        },
+        "referenceGames": {
+          "default": [],
+          "maxItems": 5,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "oneLiner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "mood",
+        "pacing",
+        "weight",
+        "oneLiner"
+      ],
+      "additionalProperties": false
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    },
+    "completionMode": {
+      "type": "string",
+      "enum": [
+        "win",
+        "endless",
+        "sandbox",
+        "narrative"
+      ]
+    }
+  },
+  "required": [
+    "title",
+    "systems",
+    "scenes",
+    "assetManifest",
+    "estimatedScope",
+    "styleDirective",
+    "feelDirective",
+    "constraints"
+  ],
+  "additionalProperties": false
+}
