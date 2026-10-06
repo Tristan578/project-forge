@@ -21,11 +21,11 @@ Before writing ANY code, you MUST:
 3. Move the ticket to `in_progress`
 4. Only then begin implementation
 
-If you are asked to write code and no ticket exists, **create the ticket first**. This is not optional — it ensures all three contributors can monitor progress through the shared GitHub Project board.
+If you are asked to write code and no ticket exists, **create the ticket first**. It keeps progress visible on the shared GitHub Project board.
 
 ## Taskboard Setup
 
-The taskboard (tcarac/taskboard) is the single source of truth for all project work.
+GitHub issues are the backlog of record. The taskboard (tcarac/taskboard) is a local working view synced with them; when the two disagree, the GitHub issue is correct.
 
 ### Installation
 ```bash
@@ -55,7 +55,7 @@ The session start hook auto-starts the server if the binary is found. If it fail
 
 ### Canonical Project Facts
 
-**Taskboard** — the single source of truth for all work:
+**Taskboard** — the local working view of the backlog. GitHub issues are the backlog of record; when the two disagree, the issue is correct:
 - Project: **Project Forge** (`01KMM9ZA6SBZ7RKJZJTZS9VR4R`, prefix `PF`)
 - Teams: Engineering `01KMR5E36TP59PRQA8GQEWJVM1`, PM `01KMR5E3852BWXAZ219W47CSKS`
 - API: `http://localhost:3010/api` · Web UI: `http://localhost:3010`
@@ -67,7 +67,7 @@ The session start hook auto-starts the server if the binary is found. If it fail
 
 **Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 81 · lines 87
 
-**Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
+**Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
 
 ### Required Ticket Fields
@@ -96,7 +96,7 @@ Tickets sync bidirectionally with GitHub Project "SpawnForge" (#2, owner: Trista
 - **Automatic pull**: At session start via SessionStart hook
 - **Manual sync**: `python3 .claude/hooks/github_project_sync.py push|pull|status`
 
-All three contributors see the same board on GitHub regardless of which AI tool they use.
+Every AI tool syncs to the same GitHub board.
 
 ### Sync Source of Truth: `github_issue_number` + `sync_repo`
 
@@ -169,7 +169,9 @@ powershell.exe -File ".\build_wasm.ps1"
 # Web dev server
 cd web && npm install && npm run dev
 
-# Quick validation
+# After each change: only the tests for what you changed (never the full suite for a small change)
+cd web && npm run test:changed
+# Before a PR: the full gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 ```
 

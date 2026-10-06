@@ -76,8 +76,8 @@
 <div role="alertdialog" aria-modal="true" aria-labelledby="alert-title" aria-describedby="alert-desc">
   <h2 id="alert-title">Delete Entity</h2>
   <p id="alert-desc">This will permanently delete "Player" and all children. This cannot be undone.</p>
-  <button>Cancel</button>
-  <button autofocus>Delete</button>
+  <button autofocus>Cancel</button>
+  <button>Delete</button>
 </div>
 ```
 

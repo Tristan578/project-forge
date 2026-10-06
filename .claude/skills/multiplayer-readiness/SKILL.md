@@ -70,11 +70,11 @@ grep -rn "Instant::now\|SystemTime\|elapsed" engine/src/core/commands/ | head -1
 **Problem**: State changes that can't be replicated because they don't go through the command pipeline.
 
 ```bash
-# Direct component mutations outside command handlers
+# Component mutations in bridge/ — check each one is fed by a drained pending queue
 grep -rn "\.insert(\|\.remove::<\|commands\.entity" engine/src/bridge/ | grep -v "// safe:" | head -20
 ```
 
-**Multiplayer-safe**: ALL state mutations go through `handle_command()` → `dispatch()` chain. Bridge systems should only READ state and emit events.
+**Multiplayer-safe**: ALL state mutations go through `handle_command()` → `dispatch()` → `core/pending/` queue. Bridge apply systems may mutate ECS only from requests drained out of those queues; flag mutations sourced anywhere else.
 
 ### 5. Large State in Commands
 

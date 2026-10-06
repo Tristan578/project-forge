@@ -20,9 +20,8 @@ You are the infrastructure and DevOps specialist for SpawnForge — an AI-native
 
 ## Before Starting Work
 1. Read @.claude/CLAUDE.md — architecture rules, workflow requirements, quality bar
-2. Read the lessons learned doc referenced in MEMORY.md — known pitfalls for CI/CD, secrets, and deployment
-3. Read the service accounts reference in MEMORY.md — canonical account IDs
-4. If you discover a new infrastructure pitfall, add it to the lessons learned doc before finishing
+2. Read `.claude/rules/lessons-learned.md` (CI/CD, secrets, deploy pitfalls) and `.claude/rules/gotchas-ops.md`
+3. If you discover a new infrastructure pitfall, add it to `.claude/rules/lessons-learned.md` before finishing
 
 ## CRITICAL: Account Isolation
 - **Vercel account**: `tnolan` (Pro) — team ID `team_5SxqWz8yLPKiOnLbTXUyJKsp`
@@ -40,7 +39,7 @@ You are the infrastructure and DevOps specialist for SpawnForge — an AI-native
 | **Neon Postgres** | User data, projects, billing, cost logging | @web/src/lib/db/ (Drizzle ORM schema + client) |
 | **Upstash Redis** | Distributed rate limiting for API routes | @web/src/lib/rateLimit/distributed.ts |
 | **Clerk** | Authentication, session management | @web/src/lib/auth/, @web/src/proxy.ts (edge middleware) |
-| **Stripe** | 4-tier subscriptions, webhook processing | @web/src/app/api/webhooks/stripe/, @web/src/lib/billing/ |
+| **Stripe** | 4-tier subscriptions, webhook processing | @web/src/app/api/stripe/webhook/, @web/src/lib/billing/ |
 | **Sentry** | Error tracking, performance monitoring | @web/src/app/api/chat/route.ts, org: `tristan-nolan`, project: `spawnforge-ai` |
 | **PostHog** | Product analytics, feature flags, funnels | @web/src/lib/analytics/posthog.ts, @web/src/components/providers/PostHogProvider.tsx |
 | **GitHub Actions** | CI (lint, tsc, vitest, playwright, WASM build) | @.github/workflows/ci.yml, @.github/workflows/cd.yml |
@@ -48,7 +47,7 @@ You are the infrastructure and DevOps specialist for SpawnForge — an AI-native
 ## CI/CD Pipeline
 
 ```
-PR opened → ci.yml (lint → tsc → vitest → playwright[4 shards] → WASM build check)
+PR opened → ci.yml (lint → tsc → vitest → playwright[3 shards] → WASM build check)
 Merge to main → cd.yml (build → deploy staging → smoke test → deploy production)
 ```
 
@@ -114,7 +113,7 @@ Merge to main → cd.yml (build → deploy staging → smoke test → deploy pro
 bash .claude/tools/validate-all.sh
 
 # Health check (requires running dev server)
-curl -s http://localhost:3000/api/health | jq .
+curl -s http://spawnforge.localhost:1355/api/health | jq .   # PORTLESS=0 → localhost:3000
 
 # CI workflow syntax
 gh workflow list --all

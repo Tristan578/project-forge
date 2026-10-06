@@ -21,7 +21,7 @@ paths:
 - **`vercel build` in CI** — can't find npm. Use `vercel deploy` (remote build) instead.
 - **Artifact versions** — the v4+ artifact format is cross-compatible, so `upload-artifact` and `download-artifact` do NOT have to share a major: the tree runs `upload-artifact@v7.0.1` + `download-artifact@v8.0.1`, both on the Node24 runtime. The real constraint is the RUNTIME, not the shared major — never pin an artifact action to a major still on the **deprecated Node20** (runners removed Node20 in fall 2026). The old "must match `@v4`" rule is stale. The `upload-artifact` v4(Node20)→v7(Node24) bump is done (#8854, closed).
 - **Reusable workflow permissions** — `quality-gates.yml` must use `permissions: contents: read`. Never `write`.
-- **Full vitest in worktrees kills M2** — use `npx vitest run <specific-file>` or `npm run test:changed`.
+- **Never run the full vitest suite for a small change** — use `npx vitest run <specific-file>` or `npm run test:changed`; the full suite is the pre-PR gate.
 - **Cherry-pick + lockfile** — Always regenerate `package-lock.json` after cherry-picks that touch dependencies.
 - **`nodeVersion` is invalid in `vercel.json`** — Configure Node version in Vercel project settings instead.
 - **`lhci collect` flags differ from Lighthouse CLI** — Use `--outputDir`, `--numberOfRuns`, `--settings.chromeFlags`.
@@ -44,7 +44,7 @@ paths:
   - **Loading a route manifest is fiddly:** it assigns into `globalThis.__RSC_MANIFEST[<routeKey>]`, needs `globalThis.self = globalThis` set first, and the stored value is an object in this Next version but a JSON string in others — handle both, reset `__RSC_MANIFEST` and `delete require.cache[abs]` per file, and fail closed unless exactly one route key is present.
   - Reference implementation: `web/scripts/check-bundle-size.js`, thresholds in `web/src/lib/config/performanceTargets.ts` and pinned against it by `web/scripts/__tests__/check-bundle-size.test.ts` (PF-1132 / #9212).
 - **Sentry/Copilot re-review on every push** — Fix ALL issues in ONE commit, run `security-reviewer` BEFORE pushing.
-- **Vitest 4.x jest-dom matcher registration** — Use explicit `expect.extend(matchers)` in vitest.setup.ts.
+- **Vitest jest-dom matcher registration** — Use explicit `expect.extend(matchers)` in vitest.setup.ts.
 - **Storybook build target is `es2022`** — `apps/design/vite.config.ts` sets `build.target: 'es2022'`. Do NOT use `esnext` (not a real target) or legacy targets like `safari14` (esbuild 0.28 can't transform destructuring for it). No legacy browser support for internal tooling.
 - **`secrets` context forbidden in workflow_call step `if:`** — Use an env var in a prior step and check step outputs instead. GitHub Actions only allows `env`, `github`, `inputs`, `steps` etc. in step conditions inside reusable workflows.
 - **Single-root-lockfile monorepo: a `package.json` bump WITHOUT regenerating the ROOT lockfile breaks `npm ci` on main.** There is exactly ONE `package-lock.json` (repo root); `web/package-lock.json` does not exist. Dependabot's npm updater is `directory: /web`, so it edits `web/package.json` but **cannot** relock the root → the manifest range stops matching the pinned lockfile version → every `npm ci` (all of CI + the Quality Gates jobs that run it as setup, e.g. Rust Security Audit, Lighthouse) fails with `EUSAGE Missing: <pkg>@<ver> from lock file`. A caret bump is enough: `^0.12.0`→`^0.13.0` resolves to the newest satisfying version the stale lockfile doesn't carry. Shipped twice (#8655, #8658 → #8683).

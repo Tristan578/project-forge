@@ -1,21 +1,11 @@
 # Agent Standard Operating Procedures
 
-Every agent MUST follow these procedures. Violations of these rules have caused real bugs, lost work, and wasted sessions.
+## Lessons Learned
 
-## MANDATORY: Read Before Acting
-
-Before writing any code, read:
-1. **This file** — common operations and anti-pattern avoidance
-2. **`.claude/rules/lessons-learned.md`** — anti-patterns from real bugs in this repo, and the
-   file `.claude/hooks/inject-lessons-learned.sh` reads to warn you before any Edit, Write, or
-   mutating Bash call.
-
-   It lives IN THE REPO, deliberately. It used to sit under the user-level memory directory at
-   an absolute path containing one machine's username, so on every other machine it resolved to
-   nothing: the hook took its silent `exit 0` and enforcement was off for entire sessions, while
-   the hook's own test skipped the check that would have noticed and reported success (#9605).
-   Knowledge that gates a hook belongs where the hook is — version-controlled, reviewed in PRs,
-   and portable across machines and contributors.
+`.claude/rules/lessons-learned.md` holds anti-patterns from real bugs in this repo, and
+`.claude/hooks/inject-lessons-learned.sh` reads it to warn you before any Edit, Write, or
+mutating Bash call. Both this file and that one load in every session. Keep it in the repo
+(its own header explains why).
 
 ## Taskboard Ownership
 
@@ -81,7 +71,7 @@ cd web && PORTLESS=0 npm run dev
 
 ## 2. Testing (CPU-Aware)
 
-**NEVER run the full vitest suite when you only changed a few files.** M2 has limited CPU — full suites block other agents.
+**Never run the full vitest suite for a small change.** It is CPU-heavy, concurrent runs block other agents and cause phantom failures, and the full suite runs before every PR anyway.
 
 ### Targeted Tests (PREFERRED during development)
 ```bash
@@ -221,30 +211,30 @@ vercel logs <deployment-url> --since 1h
 ```bash
 stripe logs tail                    # Live API logs
 stripe events list --limit 5       # Recent events
-stripe listen --forward-to http://spawnforge.localhost:1355/api/webhooks/stripe  # Local testing
+stripe listen --forward-to http://spawnforge.localhost:1355/api/stripe/webhook  # Local testing
 ```
 
 ## 7. Anti-Pattern Prevention
 
-These are the top anti-patterns from `.claude/rules/lessons-learned.md`. Check EVERY time.
+Check these before the matching edit.
 
 ### Before Editing panelRegistry.ts
-Read 10 lines before AND after the insertion point. Run `npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts` after. (#1 bug — 21 instances)
+Read 10 lines before AND after the insertion point. Run `npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts` after.
 
 ### Before Any rateLimit Call
-Verify `await` is present. `rateLimitPublicRoute()` is async. (#2 bug)
+Verify `await` is present. `rateLimitPublicRoute()` is async.
 
 ### Before Using `||` for Defaults
-Is the value ever legitimately `0`? Use `??`. Is the value from `Number()`? Check for NaN: `Number.isFinite()`. (#3 bug)
+Is the value ever legitimately `0`? Use `??`. Is the value from `Number()`? Check for NaN: `Number.isFinite()`.
 
 ### Before Creating a New Module
-Grep for the call sites that SHOULD use it. The module is not done until callers are wired. (#23 bug)
+Grep for the call sites that SHOULD use it. The module is not done until callers are wired.
 
 ### Before Any `forge.*` API Call in Generated Scripts
-Check `web/src/lib/scripting/forgeTypes.ts` — verify method exists, correct namespace, property vs function. (#28 bug)
+Check `web/src/lib/scripting/forgeTypes.ts` — verify method exists, correct namespace, property vs function.
 
 ### Before PR Body
-Use `Closes #NNNN` (GitHub issue number), NOT `Closes PF-XXX`. Run sync-push first. (#26 bug)
+Use `Closes #NNNN` (GitHub issue number), NOT `Closes PF-XXX`. Run sync-push first.
 
 ## 8. Browser Verification
 

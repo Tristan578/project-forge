@@ -20,7 +20,9 @@ cd web && npm install && npm run dev
 ## Test Commands
 
 ```bash
-# Quick validation (after every change)
+# After each change: only the tests for what you changed. Never the full suite for a small change.
+cd web && npx vitest run <changed test files>   # or: npm run test:changed
+# Before a PR: the full gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # Other suites
@@ -36,6 +38,8 @@ cd web && npx playwright test          # E2E (needs WASM)
 vercel env pull                        # Pull env vars to .env.local
 cd web && npm run db:push              # Push schema to Neon (dev only)
 ```
+
+**Symlinks are required.** Skills and references are shared by symlink so each has one source. On a clone with `core.symlinks=false` (the Git for Windows default) every link is a text file holding its path, and those skills do not load. Fix once per clone: `git config core.symlinks true` (Windows also needs Developer Mode), then re-check-out the links — `bash scripts/check-symlinks.sh` prints the exact commands. CI runs the same script, and `on-session-start.sh` reports a broken checkout at the start of every session.
 
 Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `UPSTASH_REDIS_REST_URL`.
 
@@ -138,9 +142,9 @@ drops the prior dismissal.
 - **Substitution naming (#10158)**: a Playwright test or describe that stands store injection or a mock in for the component it names declares it twice — `{ annotation: { type: 'substitution', description: '<component>' } }`, written literally, AND `[substituted: <component>]` in its title. `web/scripts/check-substitution-naming.ts` (CI: `test-e2e-journey`) fails an unpaired annotation or marker, and `capabilityMatrix.test.ts` keeps such specs out of `proven` cells. Conventions and rules: `web/e2e/lib/substitution.ts`.
 - **mock*Once leak guard** (`web/vitest.mockOnceGuard.ts`, loaded by `vitest.setup.ts`): a test that queues `mock*Once` on a mock it did not create — a module-scoped `vi.fn`, a `vi.mock` factory mock (however lazily the factory ran), or a bare automock — and never consumes it FAILS, naming the still-armed queueing line. Consume the value, or build the mock inside the test. `MOCK_ONCE_GUARD=off` disables it for a local run (bisecting); it is ignored under CI. Under CI's `retry: 1`, a transient failure between queueing and consuming shows up on the retry as this guard's error — chase the original failure.
 
-## Taskboard
+## Backlog
 
-All work tracked via taskboard. Use `/kanban` skill for full protocol.
+GitHub issues are the backlog of record. The taskboard is a local working view synced with them (`/kanban` has the protocol); when the two disagree, the GitHub issue is correct.
 
 ## Working Principles
 
@@ -154,7 +158,7 @@ All work tracked via taskboard. Use `/kanban` skill for full protocol.
 - **`createGenerationHandler` is a single point of failure** — all 12 generate routes use this factory. A bug breaks every `/api/generate/*` route. Always run integration tests after changes.
 - **`cd web/` + git diff = double prefix** — `git diff --name-only` returns `web/src/...`. Strip `web/` with `sed 's|^web/||'` before invoking tools inside `web/`.
 - **Subagent hooks don't inherit settings.json** — Add critical hooks to every agent's frontmatter PreToolUse.
-- **panelRegistry insertion** — #1 agent bug (21 instances). Read 10 lines before AND after insertion point. Run `npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts` after editing.
+- **panelRegistry insertion** — the most frequent agent bug. Read 10 lines before AND after insertion point. Run `npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts` after editing.
 - **Missing `await` on rate limiting** — `rateLimitPublicRoute()` is async. Without `await`, rate limits silently bypassed.
 - **`||` vs `??` for defaults** — `||` treats `0` as falsy. `Number(undefined)` is `NaN`. Use `Number.isFinite()`.
 - **`auth()` crashes without Clerk keys** — Use `safeAuth()` from `@/lib/auth/safe-auth.ts`, not `auth()` from `@clerk/nextjs/server`.

@@ -22,8 +22,8 @@ Read `.claude/rules/lessons-learned.md` — several lessons involve stale docume
 | Claude instructions | `CLAUDE.md`, `.claude/CLAUDE.md` | MCP count (count `mcp-server/manifest/commands.json` — never trust a doc snapshot), dev URLs, skill list accuracy |
 | Rules reference | `.claude/rules/*.md` | File paths exist, API patterns current, version numbers match |
 | Testing docs | `TESTING.md` | Dev URL, test count, build commands, manual test cases |
-| User-facing docs | `docs/content/` | Served by `/api/docs` route, title/section extraction works |
-| ADRs | `docs/architecture/` | Format: `NNNN-title.md`, Status/Context/Decision/Consequences |
+| User-facing docs | `docs/` (+ `docs/_meta.json`) | Served by `/api/docs` (`DOCS_ROOT = ../docs`), title/section extraction works |
+| ADRs | `docs/decisions/` | Format: `YYYY-MM-DD-title.md`, Status/Context/Decision/Consequences |
 | Known limitations | `docs/known-limitations.md` | Last-updated date, removed items that are now shipped |
 | Production support | `docs/production-support.md` | Service URLs, runbooks, env var names match validateEnv.ts |
 
@@ -39,7 +39,7 @@ grep -rn '\\[.*\\](.*\\.md)' docs/ README.md TESTING.md | while read line; do
 done
 
 # Verify version numbers
-grep -r "0\\.2\\.108\\|Bevy 0\\.18\\|345 commands\\|13,600" CLAUDE.md .claude/CLAUDE.md README.md
+grep -rnE "wasm-bindgen[^0-9]*0\\.2\\.[0-9]+|[0-9]+ (MCP )?commands" CLAUDE.md .claude/CLAUDE.md README.md   # compare against engine/Cargo.toml and the manifest count below
 
 # Check MCP command count matches
 python3 -c "import json; print(len(json.load(open('mcp-server/manifest/commands.json'))['commands']))"

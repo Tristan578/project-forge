@@ -428,7 +428,7 @@ When sweeping a whole directory, strip backticks from comment lines inside every
 **Ticket:** #9763
 
 ### 21. Upstream error text is not yours to forward
-**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|redactKeys|jsonUnescapeWithMap|redactJsonEscaped|reportGuardFailure|generate-route|nextjs-conventions|api-middleware-migrate|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
+**Applies:** app/api/|route.ts|lib/api/errors|createGenerationHandler|lib/generate/|redactSecrets|sentryConfig|no-raw-response-in-catch|egressGuard|withEgressGuard|MAX_DEPTH|redactWith|hasCandidate|bench-egress-guard|redactKeys|jsonUnescapeWithMap|redactJsonEscaped|reportGuardFailure|generate-route|nextjs-conventions|opengraph-image|sitemap.ts|presigned|getSignedDownloadUrl
 **What happens:** A route answers a failure with the upstream provider's own
 words. It reads like good diagnostics and it is an egress channel: on the
 platform path the credential in play is the PLATFORM's, so a provider that
@@ -737,3 +737,21 @@ severity and the round cap":
 
 Check CI first, and port a shared failure's fix before running any board.
 **Ticket:** #10325
+
+### 24. A symlink checked out as a text file drops the skill behind it, silently
+**Applies:** .claude/skills|.agents/skills|.windsurf/skills|symlink|core.symlinks|120000|ln -s
+**What happens:** 16 skills and one rule reference (17 of the repo's 25
+tracked links; `git status` showed all 25 as type changes once
+`core.symlinks` was set true) were missing from every
+session on the main Windows checkout, and nothing said so. The agents that
+preload those skills (builder, test-writer, infra-devops, ux-reviewer) ran
+without them.
+**Why:** Git for Windows defaults to `core.symlinks=false`, which writes each
+mode-120000 entry as a one-line text file holding its target. Claude Code finds
+a file where it expects a skill directory and skips it. `git status` is clean,
+because git considers the stub correct for that setting.
+**Prevention:** Run `bash scripts/check-symlinks.sh`. It fails on a stub, a
+dangling or absolute target, a target outside the repository, or an untracked
+target, and it prints the fix. It runs in CI and at session start. When you add
+a symlink, point it at a tracked file inside the repository.
+**Ticket:** #10343

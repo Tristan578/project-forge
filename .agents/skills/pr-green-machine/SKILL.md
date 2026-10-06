@@ -39,7 +39,7 @@ Output a triage summary table:
 Dispatch a code-review agent (use `/pr-code-review <N>`) that:
 - Reads the FULL diff and every changed file in context
 - Checks for: logic errors, security, API contracts, performance, conventions
-- Cross-references against `.claude/rules/lessons-learned.md` (45+ anti-patterns)
+- Cross-references against `.claude/rules/lessons-learned.md`
 - Verifies findings against actual code before reporting
 - Posts findings as a GitHub PR comment (not APPROVE/REQUEST_CHANGES)
 
@@ -48,7 +48,7 @@ Dispatch a code-review agent (use `/pr-code-review <N>`) that:
 For every failing CI check:
 1. `gh run view <RUN_ID> --log-failed` — read the actual error
 2. Identify the root cause (not the symptom)
-3. Check lessons learned for known patterns (e.g., #29 action versions, #15 maxDuration, #1 panelRegistry)
+3. Check `.claude/rules/lessons-learned.md` and the anti-pattern checklist below for known patterns (e.g., action versions, maxDuration, panelRegistry)
 
 For every unreplied Sentry comment:
 1. Read the full comment body
@@ -90,7 +90,7 @@ Apply fixes for:
 Rules:
 - Commit after each logical fix (not batched)
 - Run targeted lint + tsc after each edit
-- Reply to every Sentry comment with: commit SHA (fixed), PF-ticket (deferred), or technical explanation (false positive)
+- Reply to every Sentry comment with: commit SHA (fixed), GitHub issue `#NNNN` (deferred), or technical explanation (false positive)
 - No banned phrases without a ticket: "will fix later", "known issue", "out of scope"
 
 ### Phase 6: Multi-Domain Validation (Post-Fix)
@@ -126,7 +126,8 @@ PR #NNNN — GREEN
   CI: All N checks passed (list each)
   Sentry: 0 unreplied comments
   Conflicts: MERGEABLE
-  Evidence: gh pr checks NNNN output attached
+  Evidence: audit-pr-readiness.ps1 exit 0 for head_sha <sha> / main_sha <sha>
+            (where the audit cannot run: the three facts require-pr-ready.sh checks, for that head)
 ```
 
 Only after this output is produced, move to the next PR.
@@ -134,13 +135,13 @@ Only after this output is produced, move to the next PR.
 ## Anti-Pattern Checklist (Check Before Every Fix)
 
 Before editing ANY file, check if the file type has a known anti-pattern:
-- `.github/workflows/` → #29: verify action versions exist, #30: no GNU-only patterns
-- `api/generate/*/route.ts` → #15: maxDuration, #16: refundTokens in catch
-- `components/**/*.tsx` → #1: panelRegistry, #4: useRef in render, #5: Date.now in render
-- `chat/handlers/` → #28: forge API exists, #10: sceneGraph.nodes not sceneGraph
-- `tokens/` → #16: refund in all paths, #20: webhook idempotent
-- Callbacks → #45: audit all call sites that trigger the callback
-- Stacked branches → #46: fix on the branch that introduced the code
+- `.github/workflows/` → verify action versions exist; no GNU-only patterns
+- `api/generate/*/route.ts` → maxDuration; refundTokens in catch
+- `components/**/*.tsx` → panelRegistry insertion; no useRef in render; no Date.now in render
+- `chat/handlers/` → forge API exists (`forgeTypes.ts`); sceneGraph.nodes not sceneGraph
+- `tokens/` → refund in all paths; webhook idempotent
+- Callbacks → audit all call sites that trigger the callback
+- Stacked branches → fix on the branch that introduced the code
 
 ## Execution Order
 

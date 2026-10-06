@@ -47,7 +47,7 @@ else
   cat > "$COMPONENT_FILE" <<COMPONENT
 'use client';
 
-import { cn } from '@/lib/utils';
+import { cn } from '@spawnforge/ui';
 
 // Props interface — add domain-specific props here.
 interface ${COMPONENT_NAME}Props {

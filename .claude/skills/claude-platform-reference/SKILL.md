@@ -12,7 +12,7 @@ description: "Use when you need details about SpawnForge's Claude Code platform 
 **Web:** `/frontend`, `/mcp-commands`, `/web-accessibility`, `/shadcn`, `/vercel-react-best-practices`, `/vercel-composition-patterns`, `/vercel-react-view-transitions`
 **Next.js:** `/next-best-practices`, `/next-cache-components`, `/next-upgrade`
 **Testing:** `/testing`, `/playwright-best-practices`, `/tdd`
-**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`, `/env-health-check`, `/changelog-review`, `/deploy-to-vercel`, `/resolve-pr-comments`, `/resolve-all-pr-comments`, `/api-middleware-migrate`, `/autonomous-sprint`
+**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`, `/env-health-check`, `/changelog-review`, `/deploy-to-vercel`, `/resolve-pr-comments`, `/resolve-all-pr-comments`, `/autonomous-sprint`
 **Database:** `/db-migrate`, `/neon-postgres`, `/claimable-postgres`, `/neon-postgres-egress-optimizer`
 **Deployment:** `/deploy-engine` (user-only)
 **Billing:** `/stripe-webhooks` (background, auto-loads on billing edits)

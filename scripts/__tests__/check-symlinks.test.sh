@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+# Tests for scripts/check-symlinks.sh — the gate that every path git records as
+# a symlink (mode 120000) is a REAL symlink in the working tree and resolves to
+# something git tracks inside the repository.
+#
+# Hermetic: each case builds a throwaway git repository. Fixtures need real
+# symlinks, so on Windows (Git Bash) MSYS is told to create native ones; a host
+# that cannot create symlinks fails this suite instead of skipping it, because
+# this repository requires symlinks and a host without them is the defect the
+# gate exists to catch (lessons-learned #9).
+set -uo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GATE="$HERE/../check-symlinks.sh"
+[ -f "$GATE" ] || { echo "FAIL gate not found: $GATE"; exit 1; }
+command -v git >/dev/null 2>&1 || { echo "FAIL git is required"; exit 1; }
+export MSYS=winsymlinks:nativestrict
+
+pass=0
+fail=0
+ok()  { echo "  PASS: $1"; pass=$((pass + 1)); }
+readonly -f ok
+bad() { echo "  FAIL: $1"; fail=$((fail + 1)); }
+readonly -f bad
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# Probe: can this host create a symlink at all?
+mkdir -p "$TMP/probe" && : > "$TMP/probe/t" && ln -s t "$TMP/probe/l" 2>/dev/null
+if [ ! -L "$TMP/probe/l" ]; then
+  echo "FAIL this host cannot create symlinks (on Windows: enable Developer Mode)."
+  exit 1
+fi
+
+# repo <name> — a fresh repository with symlinks enabled and one tracked target
+# file plus one tracked target directory.
+repo() {
+  local d="$TMP/$1"
+  mkdir -p "$d/shared/dir" "$d/links"
+  git -C "$d" init -q
+  git -C "$d" config user.email fixture@example.invalid
+  git -C "$d" config user.name fixture
+  git -C "$d" config core.symlinks true
+  git -C "$d" config core.autocrlf false
+  printf 'TARGET\n' > "$d/shared/file.md"
+  printf 'IN DIR\n' > "$d/shared/dir/SKILL.md"
+  echo "$d"
+}
+readonly -f repo
+
+# commit_all <repo>
+commit_all() { git -C "$1" add -A && git -C "$1" commit -qm fixture; }
+readonly -f commit_all
+
+# run_gate <repo> — prints "<exit>|<output>", running from a subdirectory to
+# prove the gate finds the repository root itself.
+run_gate() {
+  local out rc
+  out="$(cd "$1/links" && bash "$GATE" 2>&1)"
+  rc=$?
+  printf '%s|%s' "$rc" "$out"
+}
+readonly -f run_gate
+
+# expect <case> <result> <want-exit> <needle>... — "~needle" must be absent.
+expect() {
+  local desc="$1" res="$2" want="$3"; shift 3
+  local rc="${res%%|*}" out="${res#*|}" needle good=1
+  if [ "$rc" != "$want" ]; then
+    bad "$desc — expected exit $want, got $rc: $out"
+    return
+  fi
+  for needle in "$@"; do
+    case "$needle" in
+      "~"*) if grep -qF -- "${needle#\~}" <<<"$out"; then bad "$desc — output must not contain '${needle#\~}'"; good=0; fi ;;
+      *)  if ! grep -qF -- "$needle" <<<"$out"; then bad "$desc — output lacks '$needle': $out"; good=0; fi ;;
+    esac
+  done
+  [ "$good" -eq 1 ] && ok "$desc"
+}
+readonly -f expect
+
+echo "=== check-symlinks.sh tests ==="
+
+# ---- 1. healthy: a file link and a directory link both resolve --------------
+R="$(repo healthy)"
+ln -s ../shared/file.md "$R/links/file.md"
+ln -s ../shared/dir "$R/links/dir"
+commit_all "$R"
+expect "1. real symlinks to tracked targets pass" "$(run_gate "$R")" 0 "2 symlinks OK"
+
+# ---- 2. a stub: recorded as a symlink, checked out as a regular file --------
+# This is exactly a core.symlinks=false checkout. Build it by recording the
+# index entry by hand and leaving the working-tree file regular.
+R="$(repo stub)"
+ln -s ../shared/file.md "$R/links/good.md"
+printf '../shared/dir' > "$R/links/stub"
+commit_all "$R"
+blob="$(git -C "$R" hash-object -w "$R/links/stub")"
+git -C "$R" update-index --cacheinfo "120000,$blob,links/stub"
+git -C "$R" config core.symlinks false
+expect "2. a symlink checked out as a text stub fails and names the path" \
+  "$(run_gate "$R")" 1 "links/stub" "core.symlinks true" "~links/good.md"
+
+# ---- 3. dangling: the target does not exist ---------------------------------
+R="$(repo dangling)"
+ln -s ../shared/file.md "$R/links/ok.md"
+ln -s ../shared/missing.md "$R/links/gone.md"
+commit_all "$R"
+expect "3. a link whose target does not exist fails" "$(run_gate "$R")" 1 "links/gone.md" "does not resolve"
+
+# ---- 4. absolute target -------------------------------------------------------
+R="$(repo absolute)"
+ln -s "$R/shared/file.md" "$R/links/abs.md"
+commit_all "$R"
+expect "4. a link with an absolute target fails" "$(run_gate "$R")" 1 "links/abs.md" "absolute"
+
+# ---- 5. escapes the repository ------------------------------------------------
+R="$(repo escape)"
+printf 'OUTSIDE\n' > "$TMP/outside.md"
+ln -s ../../outside.md "$R/links/out.md"
+commit_all "$R"
+expect "5. a link that resolves outside the repository fails" "$(run_gate "$R")" 1 "links/out.md" "outside the repository"
+
+# ---- 6. untracked target (would not exist in a fresh clone) -----------------
+R="$(repo untracked)"
+printf 'local only\n' > "$R/shared/local.md"
+printf 'shared/local.md\n' > "$R/.gitignore"
+ln -s ../shared/local.md "$R/links/local.md"
+commit_all "$R"
+expect "6. a link to a file git does not track fails" "$(run_gate "$R")" 1 "links/local.md" "not tracked"
+
+# ---- 7. vacuous: no symlinks recorded at all --------------------------------
+R="$(repo empty)"
+commit_all "$R"
+expect "7. a repository with no recorded symlinks fails rather than passing vacuously" \
+  "$(run_gate "$R")" 1 "no symlinks"
+
+# ---- 8. not a git work tree -------------------------------------------------
+mkdir -p "$TMP/norepo/links"
+expect "8. outside a git work tree exits 2" "$(run_gate "$TMP/norepo")" 2 "not inside a git work tree"
+
+# ---- 9. paths with spaces survive the -z parsing ------------------------------
+R="$(repo spaces)"
+ln -s "../shared/file.md" "$R/links/with space.md"
+commit_all "$R"
+expect "9. a link path containing a space is checked, not split" "$(run_gate "$R")" 0 "1 symlinks OK"
+
+# ---- 10. a tracked link deleted from the working tree ---------------------
+# Not a stub: the core.symlinks remedy would be wrong advice for it.
+R="$(repo deleted)"
+ln -s ../shared/file.md "$R/links/ok.md"
+ln -s ../shared/dir "$R/links/gone"
+commit_all "$R"
+rm "$R/links/gone"
+expect "10. a tracked link missing from the working tree is reported as missing, not as a stub" \
+  "$(run_gate "$R")" 1 "links/gone" "missing from the working tree" "~plain text files"
+
+# ---- 11. the printed fix quotes each stub path ------------------------------
+# A path with a space must survive the printed remedy, so the remedy names
+# each stub as a quoted argument instead of re-deriving the list with awk.
+R="$(repo stubspace)"
+printf '../shared/file.md' > "$R/links/with space.md"
+commit_all "$R"
+blob="$(git -C "$R" hash-object -w "$R/links/with space.md")"
+git -C "$R" update-index --cacheinfo "120000,$blob,links/with space.md"
+git -C "$R" config core.symlinks false
+SPACE_RES="$(run_gate "$R")"
+readonly SPACE_RES
+expect "11. a stub with a space in its path fails the gate" "$SPACE_RES" 1 "links/with space.md"
+
+# remedy_arg_roundtrips <case> <result> <path> — the printed remedy is shell
+# text someone will paste, and paths come from the repository. Take every
+# printed `git checkout -- <arg>` line, let bash parse <arg>, and require it to
+# be exactly ONE word equal to <path>, with nothing executed along the way.
+remedy_arg_roundtrips() {
+  local desc="$1" res="$2" want="$3" out line arg got n=0 ok_all=1
+  out="${res#*|}"
+  while IFS= read -r line; do
+    case "$line" in *"git checkout -- "*) ;; *) continue ;; esac
+    arg="${line##*git checkout -- }"
+    arg="${arg%)}"
+    n=$((n + 1))
+    got="$(bash -c 'printf "%s\n" "$#"; printf "%s" "$1"' _ "$(bash -c "set -f; eval \"set -- $arg\"; printf '%s' \"\$1\"; [ \"\$#\" -eq 1 ] || printf 'EXTRA'")" 2>&1)"
+    if [ "${got#*$'\n'}" != "$want" ]; then
+      bad "$desc — remedy argument [$arg] parses to [${got#*$'\n'}], want [$want]"
+      ok_all=0
+    fi
+  done <<<"$out"
+  if [ "$n" -eq 0 ]; then bad "$desc — no 'git checkout --' remedy line printed"; return; fi
+  [ "$ok_all" -eq 1 ] && ok "$desc"
+}
+readonly -f remedy_arg_roundtrips
+
+remedy_arg_roundtrips "11a. the stub remedy keeps a path with a space as one argument" "$SPACE_RES" "links/with space.md"
+
+EVIL="a'; echo INJECTED; echo '"
+readonly EVIL
+
+# ---- 11b. an apostrophe in a stub path cannot break out of the remedy -------
+R="$(repo stubquote)"
+printf '../shared/file.md' > "$R/links/$EVIL"
+commit_all "$R"
+# Relative path: Git Bash rewrites an absolute argument containing ";" as a
+# Windows path list, and git then cannot open it.
+blob="$(git -C "$R" hash-object -w "links/$EVIL")"
+git -C "$R" update-index --cacheinfo "120000,$blob,links/$EVIL"
+git -C "$R" config core.symlinks false
+res="$(run_gate "$R")"
+expect "11b. a stub whose path holds an apostrophe still fails the gate" "$res" 1 "plain text files"
+remedy_arg_roundtrips "11c. the stub remedy quotes an apostrophe path as one literal argument" "$res" "links/$EVIL"
+
+# ---- 11d. same for the missing-link remedy ----------------------------------
+R="$(repo missingquote)"
+ln -s ../shared/file.md "$R/links/$EVIL"
+commit_all "$R"
+rm "$R/links/$EVIL"
+res="$(run_gate "$R")"
+expect "11d. a missing link whose path holds an apostrophe is reported missing" "$res" 1 "missing from the working tree"
+remedy_arg_roundtrips "11e. the missing-link remedy quotes an apostrophe path as one literal argument" "$res" "links/$EVIL"
+
+echo ""
+echo "=== $pass passed, $fail failed ==="
+[ "$fail" -eq 0 ]

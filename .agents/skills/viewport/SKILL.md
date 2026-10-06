@@ -89,7 +89,7 @@ const summary = formatVerificationResult(result);
 
 ## Security
 
-`__FORGE_DISPATCH` is only exposed when `NODE_ENV !== 'production'`. In production builds, the window global is undefined and `sendCommand()` returns `{ success: false, error: '__FORGE_DISPATCH not available' }`.
+`__FORGE_DISPATCH` is only exposed when `e2eHooksEnabled()` is true (non-production, or a build with `NEXT_PUBLIC_E2E_HOOKS=true` baked in — see `web/src/lib/e2e/testHooks.ts`). Otherwise the window global is undefined and `sendCommand()` returns `{ success: false, error: '__FORGE_DISPATCH not available' }`.
 
 ## Running Agent Tests
 
