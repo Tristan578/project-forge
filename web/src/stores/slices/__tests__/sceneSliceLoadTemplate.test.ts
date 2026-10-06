@@ -21,6 +21,7 @@ import {
 import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
 import { stageSceneCompletionMode, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
+import { ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string; threw?: true } | void;
 
@@ -285,7 +286,8 @@ describe('sceneSlice.loadTemplate', () => {
       const result = await harness.store.getState().loadTemplate('2d-platformer');
 
       expect(result).toEqual({ success: false, error: expect.stringContaining('JsValue("serialize failed")') });
-      expect(result).toEqual({ success: false, error: expect.stringContaining('Reload the editor') });
+      // The one reload sentence every surface imports (#10202 review, m6).
+      expect(result).toEqual({ success: false, error: expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE) });
       expect(harness.store.getState().sceneLoadError).toEqual({
         reason: expect.stringContaining('the engine failed while loading it'),
         at: expect.any(Number),

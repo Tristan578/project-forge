@@ -6,6 +6,7 @@ import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
 import { saveSceneToCloud } from '@/lib/projects/cloudSave';
 import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, stagePrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
+import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
 import { showError } from '@/lib/toast';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
@@ -28,16 +29,12 @@ import {
 // instead, so the upstream fold reflects what was active when the save was
 // asked for rather than whatever is active when the answer happens to land.
 
-/**
- * The toast for a scene command the engine THREW on. `loadScene`/`newScene`
- * re-raise such a dispatch after locking every save path (#10079, #10202), so
- * the toast says so and tells the user to reload — not that the scene is
- * unchanged, which it may not be. Same sentence `sceneSlice.switchScene` shows
- * for the Scene Browser, with the lead varied by what was attempted.
- * @param lead What failed, as a clause: `'The scene could not be opened'`.
- */
-const ENGINE_THREW_TOAST = (lead: string): string =>
-  `${lead} due to an engine error. Reload the editor before continuing — the viewport can no longer be trusted, and saving is locked to protect your stored scene.`;
+// The toast for a `loadScene`/`newScene` that THREW is `sceneDispatchFailureMessage`
+// (`@/lib/scenes/engineDispatchThrew`): the store re-raises an engine throw as
+// `EngineDispatchThrewError` after locking every save path (#10079, #10202),
+// and that helper is where the lockout claim is narrowed to that class — a
+// plain error (a storage write refused) set no lockout and is reported as the
+// failure it is. Same sentence the Scene Browser's `switchScene` shows.
 
 export function SceneToolbar() {
   const sceneName = useEditorStore((s) => s.sceneName);
@@ -152,14 +149,13 @@ export function SceneToolbar() {
     let accepted: boolean;
     try {
       accepted = loadScene(json, { rejectionStrandsEditor: false });
-    } catch {
+    } catch (error) {
       // A THROWN dispatch is re-raised after `loadScene` has locked saving
       // (#10079, #10202): the import may have half-applied over the current
       // scene, so "try again" would be the wrong advice and an uncaught throw
-      // here would be an unhandled rejection. Same sentence the Scene
-      // Browser's `switchScene` shows; the dispatcher has already logged the
-      // error itself.
-      showError(ENGINE_THREW_TOAST('The scene could not be opened'));
+      // here would be an unhandled rejection. The helper narrows: only the
+      // engine throw gets the reload-and-locked sentence (#10202 review).
+      showError(sceneDispatchFailureMessage('The scene could not be opened', error));
       return;
     }
     if (accepted === false) {
@@ -201,8 +197,8 @@ export function SceneToolbar() {
     let accepted: boolean;
     try {
       accepted = newScene();
-    } catch {
-      showError(ENGINE_THREW_TOAST('A new scene could not be created'));
+    } catch (error) {
+      showError(sceneDispatchFailureMessage('A new scene could not be created', error));
       return;
     }
     if (accepted === false) reportNewSceneFailure();

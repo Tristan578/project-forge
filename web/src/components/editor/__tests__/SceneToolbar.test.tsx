@@ -56,6 +56,7 @@ vi.mock('@/lib/projects/cloudSave', () => ({
 import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
 import { showError } from '@/lib/toast';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 function mockEditorStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -347,11 +348,14 @@ describe('SceneToolbar', () => {
     // catch it and tell the user to reload — not claim the scene is unchanged,
     // not ask them to retry, and not let it escape as an uncaught error.
     describe('a thrown dispatch (#10202)', () => {
-      const engineFailure = () => { throw new Error('engine unreachable'); };
+      /** What the real store throws when the engine call threw. */
+      const engineFailure = (command: string) => () => { throw new EngineDispatchThrewError(command, 'engine unreachable'); };
+      /** A failure that is NOT the engine: no lockout was set, so no toast may claim one (#10202 review, M3). */
+      const storageFailure = () => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
 
-      it('tells the user to reload when a picked scene load throws', async () => {
+      it('tells the user to reload when a picked scene load throws the engine error', async () => {
         vi.mocked(openSceneFilePicker).mockResolvedValue('{"entities":[]}');
-        const loadScene = vi.fn(engineFailure);
+        const loadScene = vi.fn(engineFailure('load_scene'));
         mockEditorStore({ loadScene });
         render(<SceneToolbar />);
 
@@ -361,12 +365,14 @@ describe('SceneToolbar', () => {
 
         expect(loadScene).toHaveBeenCalledTimes(1);
         expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
-        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining('Reload the editor'));
+        // The one reload sentence every surface imports (#10202 review, m6).
+        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
+        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining('engine unreachable'));
         expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining('try again'));
       });
 
-      it('tells the user to reload when newScene throws via the New Scene button', async () => {
-        const newScene = vi.fn(engineFailure);
+      it('tells the user to reload when newScene throws the engine error via the New Scene button', async () => {
+        const newScene = vi.fn(engineFailure('new_scene'));
         mockEditorStore({ newScene, sceneModified: false });
         render(<SceneToolbar />);
 
@@ -376,12 +382,12 @@ describe('SceneToolbar', () => {
 
         expect(newScene).toHaveBeenCalledTimes(1);
         expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
-        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining('Reload the editor'));
+        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
         expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining('unchanged'));
       });
 
-      it('tells the user to reload when newScene throws via the Ctrl+Shift+N shortcut', () => {
-        const newScene = vi.fn(engineFailure);
+      it('tells the user to reload when newScene throws the engine error via the Ctrl+Shift+N shortcut', () => {
+        const newScene = vi.fn(engineFailure('new_scene'));
         mockEditorStore({ newScene });
         render(<SceneToolbar />);
 
@@ -391,8 +397,40 @@ describe('SceneToolbar', () => {
 
         expect(newScene).toHaveBeenCalledTimes(1);
         expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
-        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining('Reload the editor'));
+        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
         expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining('unchanged'));
+      });
+
+      // #10202 review, M3: the catches above used to claim "due to an engine
+      // error … saving is locked" for ANY throw. A plain error out of the
+      // store set no lockout, so it is reported with its own message — and
+      // still caught, so it does not escape the event handler.
+      it('reports a non-engine throw from a picked scene load as a plain failure, never as an engine error', async () => {
+        vi.mocked(openSceneFilePicker).mockResolvedValue('{"entities":[]}');
+        const loadScene = vi.fn(storageFailure);
+        mockEditorStore({ loadScene });
+        render(<SceneToolbar />);
+
+        await act(async () => {
+          screen.getByRole('button', { name: /load scene/i }).click();
+        });
+
+        expect(vi.mocked(showError)).toHaveBeenCalledExactlyOnceWith('The scene could not be opened: Quota exceeded');
+        expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining('engine error'));
+        expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
+      });
+
+      it('reports a non-engine throw from newScene as a plain failure, never as an engine error', async () => {
+        const newScene = vi.fn(storageFailure);
+        mockEditorStore({ newScene, sceneModified: false });
+        render(<SceneToolbar />);
+
+        await act(async () => {
+          screen.getByRole('button', { name: /new scene/i }).click();
+        });
+
+        expect(vi.mocked(showError)).toHaveBeenCalledExactlyOnceWith('A new scene could not be created: Quota exceeded');
+        expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
       });
     });
 

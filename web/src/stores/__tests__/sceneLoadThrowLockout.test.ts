@@ -53,6 +53,7 @@ import { loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager'
 import { SCENE_EXPORTED_EVENT } from '@/lib/scenes/captureScene';
 import { clearStagedSceneAudio } from '@/lib/audio/sceneAudioManifest';
 import { sceneFixture } from '@/lib/scenes/__tests__/sceneFixture';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 import * as toastModule from '@/lib/toast';
 
 /** What `handle_command` throws when serializing its answer fails. */
@@ -134,6 +135,16 @@ function chatContext() {
   return { store: useEditorStore.getState(), dispatchCommand: getCommandDispatcher()! };
 }
 
+/** Run `fn` and return what it threw, so the SAME throw can be inspected for class, fields and message. */
+function catchThrow(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected the call to throw');
+}
+
 /**
  * Add a second scene to the (null-id) project and return its id. `withData`
  * stores a scene file on it so a switch takes the `loadScene` branch; with
@@ -188,11 +199,17 @@ describe('a thrown scene load through the dispatcher useEngineEvents registers (
       expectSavingReachesEngine(engine);
 
       // The caught throw is re-raised: a thrown dispatch is the documented
-      // `@throws` of `loadScene`, however the dispatcher reported it.
-      expect(() => useEditorStore.getState().loadScene(
+      // `@throws` of `loadScene`, however the dispatcher reported it — and it
+      // is re-raised as the ONE typed error every caller narrows on, so the
+      // production dispatcher's answer and the lockout claim stay coupled
+      // (#10202 review, M3).
+      const thrown = catchThrow(() => useEditorStore.getState().loadScene(
         JSON.stringify(sceneFixture('Target')),
         { rejectionStrandsEditor: false },
-      )).toThrow(ENGINE_FAILURE);
+      ));
+      expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+      expect((thrown as EngineDispatchThrewError).command).toBe('load_scene');
+      expect((thrown as Error).message).toBe(ENGINE_FAILURE);
 
       expectThrewLockout();
       await expectSavingLocked(engine);
@@ -242,7 +259,10 @@ describe('a thrown scene load through the dispatcher useEngineEvents registers (
       attach(engine);
       expectSavingReachesEngine(engine);
 
-      expect(() => useEditorStore.getState().newScene()).toThrow(ENGINE_FAILURE);
+      const thrown = catchThrow(() => useEditorStore.getState().newScene());
+      expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+      expect((thrown as EngineDispatchThrewError).command).toBe('new_scene');
+      expect((thrown as Error).message).toBe(ENGINE_FAILURE);
 
       expectThrewLockout();
       await expectSavingLocked(engine);
@@ -269,7 +289,7 @@ describe('a thrown scene load through the dispatcher useEngineEvents registers (
 
       expect(engine.handle_command).toHaveBeenCalledWith('load_scene', expect.anything());
       expectThrewLockout();
-      expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining('Reload the editor'));
+      expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
       expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('unchanged'));
       await expectSavingLocked(engine);
     });
@@ -285,7 +305,7 @@ describe('a thrown scene load through the dispatcher useEngineEvents registers (
 
       expect(engine.handle_command).toHaveBeenCalledWith('load_scene', expect.anything());
       expect(result.success).toBe(false);
-      expect(result.error).toContain('Reload the editor');
+      expect(result.error).toContain(ENGINE_THREW_RELOAD_GUIDANCE);
       expect(result.error).toContain(ENGINE_FAILURE);
       expect(result.error).not.toContain('unchanged');
       expectThrewLockout();

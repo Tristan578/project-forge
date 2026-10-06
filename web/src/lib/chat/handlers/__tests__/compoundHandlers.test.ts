@@ -6,6 +6,7 @@ import { createMockStore } from './handlerTestUtils';
 import { compoundHandlers } from '../compoundHandlers';
 import { generationHandlers } from '../generationHandlers';
 import type { ToolCallContext, ExecutionResult } from '../types';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 // Capture jobs registered by the REAL generate_texture handler so the compound
 // flow can be exercised end-to-end against the handler that actually consumes
@@ -412,20 +413,38 @@ describe('create_scene_from_description', () => {
     // locking saving (#10079). The handler must stop before spawning anything
     // onto a viewport that may be half-cleared, and tell the user to reload
     // rather than let the executor's generic catch relay the raw engine text.
-    it('fails without spawning and tells the user to reload when clearing the scene throws', async () => {
+    it('fails without spawning and tells the user to reload when clearing the scene throws the engine error', async () => {
       const spawnEntity = vi.fn(() => 'spawned-1');
       const { result, store } = await invoke('create_scene_from_description', {
         entities: [{ type: 'cube', name: 'Box' }],
         clearExisting: true,
       }, {
-        newScene: vi.fn(() => { throw new Error('engine unreachable'); }),
+        newScene: vi.fn(() => { throw new EngineDispatchThrewError('new_scene', 'engine unreachable'); }),
         spawnEntity,
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('Reload the editor');
+      expect(result.error).toContain(ENGINE_THREW_RELOAD_GUIDANCE);
       expect(result.error).toContain('engine unreachable');
+      expect(result.error).toContain('Nothing was created.');
       expect(store.newScene).toHaveBeenCalled();
+      expect(spawnEntity).not.toHaveBeenCalled();
+    });
+
+    // #10202 review, M3: a plain throw out of `newScene` (a storage write
+    // refused under quota) set no lockout, so this catch must not claim one.
+    // It rethrows — still before spawning anything — and the executor's
+    // generic catch reports the plain message.
+    it('rethrows a non-engine throw without spawning and without claiming a lockout', async () => {
+      const spawnEntity = vi.fn(() => 'spawned-1');
+      await expect(invoke('create_scene_from_description', {
+        entities: [{ type: 'cube', name: 'Box' }],
+        clearExisting: true,
+      }, {
+        newScene: vi.fn(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); }),
+        spawnEntity,
+      })).rejects.toThrow('Quota exceeded');
+
       expect(spawnEntity).not.toHaveBeenCalled();
     });
 

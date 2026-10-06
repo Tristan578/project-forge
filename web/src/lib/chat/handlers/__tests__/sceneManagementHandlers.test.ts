@@ -12,6 +12,16 @@ import { emptySceneFile, setSceneValidator } from '@/lib/scenes/sceneValidation'
 import { foldExportedSceneJson } from '@/lib/prefabs/prefabSceneFold';
 import type { PrefabInstance } from '@/lib/prefabs/prefabInstance';
 import type { SceneFileData } from '@/lib/scenes/sceneManager';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
+
+/** What the real store throws when the engine call behind `command` threw (#10202). */
+const engineThrew = (command: string) => () => {
+  throw new EngineDispatchThrewError(command, 'engine unreachable');
+};
+/** A failure that is NOT the engine: no lockout was set, and no catch may claim one. */
+const storageFailed = () => {
+  throw new DOMException('Quota exceeded', 'QuotaExceededError');
+};
 
 // ---------------------------------------------------------------------------
 // Module mocks for dynamic imports inside the handlers
@@ -222,17 +232,31 @@ describe('load_scene', () => {
   // generic catch, which relayed the raw engine text and said nothing about
   // the lockout — and "try again" is the wrong advice for a viewport that may
   // be half-applied. Parity with `switch_scene`'s own catch.
-  it('tells the user to reload, not to retry, when loadScene throws', async () => {
+  it('tells the user to reload, not to retry, when loadScene throws the engine error', async () => {
     const { result } = await invokeHandler(
       sceneManagementHandlers,
       'load_scene',
       { json: '{}' },
-      { loadScene: vi.fn(() => { throw new Error('engine unreachable'); }) },
+      { loadScene: vi.fn(engineThrew('load_scene')) },
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Reload the editor');
+    expect(result.error).toContain(ENGINE_THREW_RELOAD_GUIDANCE);
     expect(result.error).toContain('engine unreachable');
     expect(result.error).not.toContain('try again');
+  });
+
+  // #10202 review, M3: only the typed engine throw carries a lockout. A plain
+  // error out of the store (a storage write refused under quota) set none, so
+  // the handler must not answer "due to an engine error … saving is locked"
+  // for it — it rethrows, and the executor's generic catch reports the plain
+  // message with no lockout claim.
+  it('rethrows a non-engine throw instead of claiming an engine error and a lockout', async () => {
+    await expect(invokeHandler(
+      sceneManagementHandlers,
+      'load_scene',
+      { json: '{}' },
+      { loadScene: vi.fn(storageFailed) },
+    )).rejects.toThrow('Quota exceeded');
   });
 });
 
@@ -256,17 +280,27 @@ describe('new_scene', () => {
 
   // #10202: same as `load_scene` above. A thrown `new_scene` can have
   // despawned the outgoing scene mid-apply, so "unchanged" would be a lie.
-  it('tells the user to reload, not that the scene is unchanged, when newScene throws', async () => {
+  it('tells the user to reload, not that the scene is unchanged, when newScene throws the engine error', async () => {
     const { result } = await invokeHandler(
       sceneManagementHandlers,
       'new_scene',
       {},
-      { newScene: vi.fn(() => { throw new Error('engine unreachable'); }) },
+      { newScene: vi.fn(engineThrew('new_scene')) },
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Reload the editor');
+    expect(result.error).toContain(ENGINE_THREW_RELOAD_GUIDANCE);
     expect(result.error).toContain('engine unreachable');
     expect(result.error).not.toContain('unchanged');
+  });
+
+  // #10202 review, M3: same narrowing as `load_scene` above.
+  it('rethrows a non-engine throw instead of claiming an engine error and a lockout', async () => {
+    await expect(invokeHandler(
+      sceneManagementHandlers,
+      'new_scene',
+      {},
+      { newScene: vi.fn(storageFailed) },
+    )).rejects.toThrow('Quota exceeded');
   });
 });
 
@@ -723,7 +757,7 @@ describe('switch_scene', () => {
       sceneManagementHandlers,
       'switch_scene',
       { sceneId: 'scene_2' },
-      { loadScene: vi.fn(() => { throw new Error('engine unreachable'); }) }
+      { loadScene: vi.fn(engineThrew('load_scene')) }
     );
 
     expect(result.success).toBe(false);
@@ -731,7 +765,7 @@ describe('switch_scene', () => {
     // unchanged: a thrown dispatch can have wrecked the viewport, and the real
     // store's `loadScene` sets `sceneLoadError(ENGINE_LOAD_THREW)` before
     // rethrowing so saving is already locked (#10079).
-    expect(result.error).toContain('Reload the editor');
+    expect(result.error).toContain(ENGINE_THREW_RELOAD_GUIDANCE);
     expect(result.error).not.toContain('unchanged');
     expect(store.loadScene).toHaveBeenCalledWith(
       JSON.stringify(sceneData),
@@ -755,15 +789,31 @@ describe('switch_scene', () => {
       sceneManagementHandlers,
       'switch_scene',
       { sceneId: 'scene_2' },
-      { newScene: vi.fn(() => { throw new Error('engine unreachable'); }) }
+      { newScene: vi.fn(engineThrew('new_scene')) }
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Reload the editor');
+    expect(result.error).toContain(ENGINE_THREW_RELOAD_GUIDANCE);
     expect(result.error).not.toContain('unchanged');
     expect(store.newScene).toHaveBeenCalled();
     expect(store.loadScene).not.toHaveBeenCalled();
     // The pre-switch (outgoing) project is persisted rather than discarded.
+    expect(mockSaveProjectScenes).toHaveBeenCalledWith(baseProject, undefined);
+  });
+
+  // #10202 review, M3(c): this catch shared the exposure. A non-engine throw
+  // still persists the outgoing capture (that data is already in hand) but is
+  // rethrown rather than reported as an engine error with a lockout.
+  it('persists the outgoing scene and rethrows a non-engine throw without claiming a lockout', async () => {
+    mockSwitchScene.mockReturnValue({ project: { ...baseProject, activeSceneId: 'scene_2' }, sceneToLoad: null });
+
+    await expect(invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' },
+      { newScene: vi.fn(storageFailed) }
+    )).rejects.toThrow('Quota exceeded');
+
     expect(mockSaveProjectScenes).toHaveBeenCalledWith(baseProject, undefined);
   });
 });

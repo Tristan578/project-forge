@@ -220,7 +220,8 @@ describe('checkpoint recovery transaction', () => {
       if (command === 'load_scene') throw thrown;
       return { success: true };
     });
-    expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Wrecking load')))).toThrow(thrown);
+    // Re-raised as the typed engine error with the same message (#10202 review).
+    expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Wrecking load')))).toThrow(thrown.message);
     const lockout = store.getState().sceneLoadError;
     setSceneDispatcher(engine.dispatch);
     engine.setMode('reject');

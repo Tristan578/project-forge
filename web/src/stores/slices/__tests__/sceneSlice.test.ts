@@ -10,6 +10,7 @@ import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/mu
 import { loadPrefabInstances, savePrefabInstancesToStorage, savePrefab, getPrefab } from '@/lib/prefabs/prefabStore';
 import * as prefabStoreModule from '@/lib/prefabs/prefabStore';
 import * as toastModule from '@/lib/toast';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 // `switchScene` surfaces a thrown-dispatch failure through `showError`. Mock the
 // toast module so the message can be asserted without sonner's DOM host (#10079).
@@ -19,6 +20,16 @@ vi.mock('@/lib/toast', () => ({
   showSuccess: vi.fn(),
   showInfo: vi.fn(),
 }));
+
+/** Run `fn` and return what it threw, so the SAME throw can be inspected for class, fields and message. */
+function catchThrow(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected the call to throw');
+}
 
 describe('sceneSlice', () => {
   let store: ReturnType<typeof createSceneTestStore>['store'];
@@ -87,7 +98,12 @@ describe('sceneSlice', () => {
         return { success: true };
       });
       try {
-        expect(() => store.getState().newScene()).toThrow(engineError);
+        // The engine error is preserved: as the typed error's message and as
+        // its `cause` (#10202 review wrapped the rethrowing shape too).
+        const thrown = catchThrow(() => store.getState().newScene());
+        expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+        expect((thrown as Error).message).toBe(engineError.message);
+        expect((thrown as Error).cause).toBe(engineError);
         expect(write).toHaveBeenCalledTimes(2);
         expect(store.getState().sceneLoadError?.reason).toContain(engineError.message);
         mockDispatch.mockClear();
@@ -131,9 +147,120 @@ describe('sceneSlice', () => {
       store.setState({ sceneLoadError: prior });
       const failure = new Error('engine failed mid-apply');
       setSceneDispatcher(dispatcher(failure));
-      expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Target')), opts)).toThrow(failure.message);
+      // Both shapes surface as the ONE typed error every caller narrows on
+      // (#10202 review): the class is the fact "the engine threw", however
+      // the dispatcher reported it, and it still carries the engine's text.
+      const thrown = catchThrow(() => store.getState().loadScene(JSON.stringify(sceneFixture('Target')), opts));
+      expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+      expect((thrown as EngineDispatchThrewError).command).toBe('load_scene');
+      expect((thrown as Error).message).toBe(failure.message);
       if (locks) expect(store.getState().sceneLoadError?.reason).toContain(failure.message);
       else expect(store.getState().sceneLoadError).toEqual(prior);
+    });
+
+    // The two message branches of the `threw: true` conversion, pinned
+    // (#10202 review, m5). The text ends up in the non-dismissible lockout
+    // notice and the model's tool result, and a remixed scene is a
+    // stranger's input, so it is bounded like a rejection's `error` (#10267).
+    it('bounds a multi-KiB threw: true answer in the lockout reason, keeping the head and a visible marker', async () => {
+      const { MAX_ENGINE_ERROR_CHARS, ENGINE_ERROR_TRUNCATED } = await import('@/lib/scenes/sceneValidation');
+      const hostile = `JsValue("${'A'.repeat(64 * 1024)}")`;
+      setSceneDispatcher((command) => (command === 'load_scene'
+        ? { success: false, error: hostile, threw: true as const }
+        : { success: true }));
+
+      const thrown = catchThrow(() => store.getState().loadScene(JSON.stringify(sceneFixture('Hostile'))));
+
+      expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+      expect((thrown as Error).message.length).toBe(MAX_ENGINE_ERROR_CHARS);
+      const reason = store.getState().sceneLoadError?.reason ?? '';
+      const prefix = 'This scene could not be opened: the engine failed while loading it. ';
+      expect(reason.startsWith(`${prefix}JsValue("AAAA`)).toBe(true);
+      expect(reason.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+      expect(reason.length).toBe(prefix.length + MAX_ENGINE_ERROR_CHARS);
+    });
+
+    it('bounds a multi-KiB message from a dispatcher that RETHROWS the same way', async () => {
+      const { MAX_ENGINE_ERROR_CHARS, ENGINE_ERROR_TRUNCATED } = await import('@/lib/scenes/sceneValidation');
+      const hostile = new Error(`JsValue("${'A'.repeat(64 * 1024)}")`);
+      setSceneDispatcher((command) => {
+        if (command === 'load_scene') throw hostile;
+        return { success: true };
+      });
+
+      const thrown = catchThrow(() => store.getState().loadScene(JSON.stringify(sceneFixture('Hostile'))));
+
+      expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+      expect((thrown as Error).cause).toBe(hostile);
+      expect((thrown as Error).message.length).toBe(MAX_ENGINE_ERROR_CHARS);
+      expect((thrown as Error).message.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+      expect(store.getState().sceneLoadError?.reason.endsWith(ENGINE_ERROR_TRUNCATED)).toBe(true);
+    });
+
+    it('says so when a threw: true answer carries no message at all', () => {
+      setSceneDispatcher((command) => (command === 'load_scene'
+        ? { success: false, threw: true as const }
+        : { success: true }));
+
+      const thrown = catchThrow(() => store.getState().loadScene(JSON.stringify(sceneFixture('Silent throw'))));
+
+      expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+      expect((thrown as Error).message).toBe('the engine call threw without a message');
+      expect(store.getState().sceneLoadError?.reason).toBe(
+        'This scene could not be opened: the engine failed while loading it. the engine call threw without a message',
+      );
+    });
+
+    // #10202 review, M3(b): `newScene` wrote the empty registry BEFORE the
+    // try that sets the lockout, and that write is documented `@throws` on a
+    // storage failure. The plain error then reached every caller's catch,
+    // which claimed an engine error and a lockout that did not exist.
+    // `loadScene` already treats a failed pre-dispatch registry write as a
+    // refusal (`restorePrefabInstances` → `false`); this is the same contract.
+    it('refuses a new scene without dispatching when the registry cannot be cleared first, and locks nothing', () => {
+      const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+        .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      // Staged by a previous caller; a refusal must put it back, as the
+      // engine-refusal branch does.
+      const unstage = stageSceneCompletionMode('endless');
+      try {
+        let accepted: boolean | undefined;
+        expect(() => { accepted = store.getState().newScene(); }).not.toThrow();
+
+        expect(accepted).toBe(false);
+        expect(mockDispatch).not.toHaveBeenCalledWith('new_scene', expect.anything());
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(takeStagedSceneCompletionMode()).toBe('endless');
+        expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('registry'), expect.any(DOMException));
+      } finally {
+        unstage();
+        write.mockRestore();
+        errorLog.mockRestore();
+      }
+    });
+
+    it('still returns false, without throwing, when restoring the registry after an engine refusal fails', () => {
+      // The pre-dispatch clear succeeds (real write); the restore after the
+      // refusal is what fails.
+      const saveInstances = prefabStoreModule.savePrefabInstancesToStorage;
+      const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+        .mockImplementationOnce(saveInstances)
+        .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      setSceneDispatcher((command) => (command === 'new_scene' ? { success: false, error: 'Refused' } : { success: true }));
+      try {
+        let accepted: boolean | undefined;
+        expect(() => { accepted = store.getState().newScene(); }).not.toThrow();
+
+        expect(accepted).toBe(false);
+        expect(write).toHaveBeenCalledTimes(2);
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('refused'), expect.any(DOMException));
+      } finally {
+        write.mockRestore();
+        errorLog.mockRestore();
+      }
     });
 
     // #10267: the engine's `error` says what a scene failed on. It used to be
@@ -211,7 +338,7 @@ describe('sceneSlice', () => {
         if (command === 'load_scene') throw failure;
         return { success: true };
       });
-      expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Throwing load')))).toThrow(failure);
+      expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Throwing load')))).toThrow(failure.message);
       const prior = store.getState().sceneLoadError;
       setSceneDispatcher(() => ({ success: false }));
       expect(store.getState().loadScene(JSON.stringify(sceneFixture('Rejected load')))).toBe(false);
@@ -1293,8 +1420,9 @@ describe('sceneSlice', () => {
       mockDispatch.mockClear();
       store.getState().saveScene();
       expect(mockDispatch).not.toHaveBeenCalledWith('export_scene', expect.anything());
-      // The user is told to reload, not that the scene is unchanged.
-      expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining('Reload the editor'));
+      // The user is told to reload, not that the scene is unchanged — in the
+      // one sentence every surface imports (#10202 review, m6).
+      expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
       expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('unchanged'));
     });
 
@@ -1343,7 +1471,69 @@ describe('sceneSlice', () => {
       mockDispatch.mockClear();
       store.getState().saveScene();
       expect(mockDispatch).not.toHaveBeenCalledWith('export_scene', expect.anything());
-      expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining('Reload the editor'));
+      expect(toastModule.showError).toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
+    });
+
+    // #10202 review, M3(c): the catch above used to claim "due to an engine
+    // error … saving is locked" for ANY throw out of `loadScene`/`newScene`.
+    // Only the typed engine throw carries that lockout; anything else — here a
+    // JS-side step after the engine accepted — is reported as the plain
+    // failure it is, with the outgoing capture still persisted.
+    it('reports a non-engine throw from the switch as a plain failure, never as an engine error with a lockout', async () => {
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+      const project = loadProjectScenes(store.getState().projectId);
+      // `data: null` takes the `newScene()` branch, whose last step is the
+      // arrangement sync — a store action, not the engine.
+      saveProjectScenes(
+        { ...project, scenes: project.scenes.map((s) => (s.id === target!.id ? { ...s, data: null } : s)) },
+        store.getState().projectId
+      );
+      vi.mocked(toastModule.showError).mockClear();
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const hydrate = vi.spyOn(useMusicArrangementStore.getState(), 'hydrate')
+        .mockImplementation(() => { throw new Error('hydrate failed'); });
+      try {
+        await expect(store.getState().switchScene(target!.id)).resolves.toBeUndefined();
+
+        expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
+        expect(hydrate).toHaveBeenCalled();
+        // No lockout: the engine accepted the command, so nothing is wrecked.
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(toastModule.showError).toHaveBeenCalledExactlyOnceWith('The scene could not be opened: hydrate failed');
+        expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('engine error'));
+        expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining(ENGINE_THREW_RELOAD_GUIDANCE));
+        // The outgoing capture was persisted either way.
+        expect(loadProjectScenes().scenes[0].data?.metadata?.name).toBe('Live');
+      } finally {
+        hydrate.mockRestore();
+        errorLog.mockRestore();
+      }
+    });
+
+    it('reports a refusal, not an engine error, when the registry cannot be cleared before the newScene() fallback', async () => {
+      store.getState().createNewScene('Second');
+      const target = store.getState().scenes.find((s) => s.name === 'Second');
+      const project = loadProjectScenes(store.getState().projectId);
+      saveProjectScenes(
+        { ...project, scenes: project.scenes.map((s) => (s.id === target!.id ? { ...s, data: null } : s)) },
+        store.getState().projectId
+      );
+      vi.mocked(toastModule.showError).mockClear();
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+        .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+      try {
+        await expect(store.getState().switchScene(target!.id)).resolves.toBeUndefined();
+
+        expect(mockDispatch).not.toHaveBeenCalledWith('new_scene', expect.anything());
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(toastModule.showError).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('unchanged'));
+        expect(toastModule.showError).not.toHaveBeenCalledWith(expect.stringContaining('engine error'));
+      } finally {
+        write.mockRestore();
+        errorLog.mockRestore();
+      }
     });
 
     it('duplicateScene adds a copy', async () => {

@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import type { EditorState } from '@/stores/editorStore';
+import { type EngineDispatchThrewError, engineThrewMessage } from '@/lib/scenes/engineDispatchThrew';
 
 export interface ToolCallContext {
   store: EditorState;
@@ -133,12 +134,15 @@ export function ownEntry<T>(record: Record<string, T>, key: string): T | undefin
  * (`handle_command` dispatches before it serializes its answer), so the
  * viewport may be half-applied. Shared so the manual and AI paths say the
  * same thing (`sceneSlice.switchScene` shows the same sentence as a toast).
+ *
+ * The parameter type is the narrowing (#10202 review, M3): the store throws
+ * `EngineDispatchThrewError` for an engine throw and a plain error for
+ * anything else (which sets no lockout), so a handler's `catch` must
+ * `instanceof` before calling this — and rethrow the rest to the executor's
+ * generic catch, which reports a plain failure with no lockout claim.
  * @param lead What failed, as a clause: `'The scene could not be opened'`.
- * @param error The error the store re-raised; its message is relayed.
+ * @param error The engine throw the store re-raised; its message is relayed.
  */
-export function sceneDispatchThrewResult(lead: string, error: unknown): ExecutionResult {
-  return {
-    success: false,
-    error: `${lead} due to an engine error (${error instanceof Error ? error.message : String(error)}). Reload the editor before continuing — the viewport can no longer be trusted and saving is locked to protect your stored scene.`,
-  };
+export function sceneDispatchThrewResult(lead: string, error: EngineDispatchThrewError): ExecutionResult {
+  return { success: false, error: engineThrewMessage(lead, error) };
 }

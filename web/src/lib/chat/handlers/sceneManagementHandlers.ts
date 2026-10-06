@@ -8,6 +8,7 @@ import type { ToolHandler, ExecutionResult, InputBinding } from './types';
 import { parseArgs, sceneDispatchThrewResult } from './types';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
+import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
 import { validateSceneFile, type SceneValidation } from '@/lib/scenes/sceneValidation';
 import { COMPLETION_MODE_INFO } from '@/lib/playMode/completionMode';
@@ -92,7 +93,10 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       // A rejection returns `false`; a THROWN dispatch is re-raised after the
       // store has locked saving (#10079, #10202). "Try again" is the wrong
       // advice for a viewport that may be half-applied, so this says reload —
-      // parity with `switch_scene` below.
+      // parity with `switch_scene` below. Only the typed engine throw carries
+      // that lockout: anything else set none, so it goes to the executor's
+      // generic catch as the plain failure it is (#10202 review).
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
       return sceneDispatchThrewResult('The scene could not be opened', error);
     }
     if (accepted === false) {
@@ -107,7 +111,9 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       accepted = ctx.store.newScene();
     } catch (error) {
       // Same as `load_scene`: a thrown `new_scene` can have despawned the
-      // outgoing scene mid-apply, so "unchanged" below would be a lie (#10202).
+      // outgoing scene mid-apply, so "unchanged" below would be a lie (#10202)
+      // — and the same narrowing, for the same reason.
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
       return sceneDispatchThrewResult('A new scene could not be created', error);
     }
     if (accepted === false) {
@@ -255,8 +261,12 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       // outgoing scene's unsaved work, parity with the store's `switchScene`.
       // The persist writes the already-captured outgoing data, not a fresh
       // export of the wrecked engine scene, so it is safe under the lockout
-      // both `loadScene` and `newScene` have by now set.
+      // both `loadScene` and `newScene` have by now set — or, for a throw
+      // that was NOT the engine's (no lockout), simply correct. That one is
+      // rethrown: only the typed engine throw may be reported as an engine
+      // error with saving locked (#10202 review).
       saveProjectScenes(project, ctx.store.projectId);
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
       return sceneDispatchThrewResult('The scene could not be opened', error);
     }
     if (accepted === false) {

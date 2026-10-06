@@ -18,6 +18,7 @@ import type { EntityType, InputBinding, SceneNode } from './types';
 import { ownEntry, parseArgs, sceneDispatchThrewResult, zSetupGameFromDescription } from './types';
 import { getPresetById } from '@/lib/materialPresets';
 import { getCapabilityUnavailability } from '@/lib/config/providers';
+import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
 import { buildStoreComponent, buildStoreComponentWithReport } from '@/lib/engine/gameComponentWire';
 import { withCorrectionSummary, type GameComponentFieldCorrection } from '@/lib/engine/gameComponentCorrections';
@@ -459,7 +460,11 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       } catch (error) {
         // A THROWN `new_scene` is re-raised after the store has locked saving
         // (#10079, #10202): the viewport may be half-cleared, so nothing may
-        // be spawned onto it and the user is told to reload.
+        // be spawned onto it and the user is told to reload. Only the typed
+        // engine throw carries that lockout; anything else is rethrown —
+        // still before spawning — for the executor's generic catch to report
+        // as the plain failure it is (#10202 review).
+        if (!(error instanceof EngineDispatchThrewError)) throw error;
         const threw = sceneDispatchThrewResult('The existing scene could not be cleared', error);
         return { ...threw, error: `${threw.error} Nothing was created.` };
       }
