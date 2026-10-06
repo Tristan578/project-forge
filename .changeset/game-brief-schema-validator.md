@@ -1,0 +1,7 @@
+---
+"web": patch
+---
+
+The AI game decomposer now checks its design against the same rules a hand-written brief will be checked against, and asks the model again when one is broken instead of handing a broken design to the plan builder. Before, only one rule was checked (a movement system needs a player entity). Now a design is also sent back when two scenes share a name (the plan addresses scenes by name, so the second silently replaced the first), when a scene transition points at a scene that does not exist, when an asset names an entity that does not exist, when the systems' dependencies form a cycle (which used to surface as a crash while building the plan), and when a sandbox or endless design also declares a progression system (which would have given a game with no goal an artificial win condition). When every attempt fails, the error names each rule by a stable code. What the model is asked for has not changed: the structured-output schema it receives is byte-identical, pinned by a snapshot test.
+
+The same schema and validator are now a shared module (`briefSchema.ts`, version 1) ready for the manual brief editor, with explicit size caps that admit a 100-system design, optional per-item ids for requirement tracing, and an `openDecisions` list reported as decisions rather than errors. Nothing a person can see changes yet beyond the decomposer behaviour above; the editor arrives in later work.
