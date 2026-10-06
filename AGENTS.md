@@ -21,7 +21,7 @@ Before writing ANY code, you MUST:
 3. Move the ticket to `in_progress`
 4. Only then begin implementation
 
-If you are asked to write code and no ticket exists, **create the ticket first**. This is not optional — it ensures all three contributors can monitor progress through the shared GitHub Project board.
+If you are asked to write code and no ticket exists, **create the ticket first**. It keeps progress visible on the shared GitHub Project board.
 
 ## Taskboard Setup
 
@@ -96,7 +96,7 @@ Tickets sync bidirectionally with GitHub Project "SpawnForge" (#2, owner: Trista
 - **Automatic pull**: At session start via SessionStart hook
 - **Manual sync**: `python3 .claude/hooks/github_project_sync.py push|pull|status`
 
-All three contributors see the same board on GitHub regardless of which AI tool they use.
+Every AI tool syncs to the same GitHub board.
 
 ### Sync Source of Truth: `github_issue_number` + `sync_repo`
 

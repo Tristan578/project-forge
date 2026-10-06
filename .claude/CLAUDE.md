@@ -76,6 +76,7 @@ Key: `_` prefix for unused params, no `useRef.current` during render, no blanket
 | `rules/gotchas-codex-port.md` | The generated Codex CLI surface: what `tools/agentic-sync/port.mjs` derives from `.claude/`, the regen recipe, adding a hook |
 | `rules/agent-operations.md` | Agent SOPs, testing, committing, PR creation |
 | `rules/hook-testing.md` | Conventions for the bash suites under `.claude/hooks/__tests__/` |
+| `rules/lessons-learned.md` | Anti-patterns from real bugs; read by `inject-lessons-learned.sh` before Edit/Write/Bash |
 
-Every file except `gotchas.md` carries `paths:` frontmatter and loads only in sessions that
-touch its area; `Read` one directly if you need it outside those paths.
+`gotchas.md`, `agent-operations.md` and `lessons-learned.md` load in every session. Every other
+file carries `paths:` frontmatter and loads only in sessions that touch its area; `Read` one directly if you need it outside those paths.
