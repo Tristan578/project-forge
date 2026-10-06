@@ -246,6 +246,45 @@ describe('checkpoint recovery transaction', () => {
     expect(engine.getScene().metadata?.name).toBe('Recovered');
   });
 
+  // #10202 review, m7: `dispatchRestoreLoad` now receives the re-raised throw
+  // for a `threw: true` answer — the shape the editor's own dispatcher
+  // produces — so its lockout reason is ENGINE_LOAD_THREW where it read as a
+  // clean ENGINE_LOAD_REJECTION before. That changes what the NEXT restore
+  // sees in `priorCapturedUnderThrowLockout`: a capture taken under the throw
+  // lockout is of a possibly-wrecked viewport, so re-applying and confirming
+  // it must NOT clear the lockout (#10079, finding 4). The control is the
+  // clean-rejection test below, where the same second restore clears it.
+  it('a threw: true answer to the restore load locks with the THREW reason, and a later recovery of that untrusted prior keeps the lockout', async () => {
+    const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
+    const previousSave = localStorage.getItem('forge-project-scenes:v2:unsaved');
+
+    // Restore 1: the checkpoint load THROWS, then the recovery of `prior`
+    // fails its readback, so the lockout the throw raised survives.
+    engine.setModes(['threw', 'wrong']);
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    const lockout = store.getState().sceneLoadError;
+    expect(lockout?.reason).toContain('the engine failed while loading it');
+    expect(lockout?.reason).toContain('Engine failed');
+    expect(lockout?.reason).not.toContain('the engine refused to load it');
+    expect(store.getState().checkpointError).toContain('could not be recovered');
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(previousSave);
+
+    // Restore 2: the checkpoint load applies the wrong scene, and the recovery
+    // of `prior` — captured under the THREW lockout — is confirmed. Before
+    // #10202 the first answer read as a refusal, this flag was false, and
+    // this recovery cleared the lockout over a capture the throw may have
+    // wrecked; now it stands.
+    engine.dispatch.mockClear();
+    engine.setMode('wrong');
+    await expect(store.getState().restoreCheckpoint(cp.id)).resolves.toBe(false);
+    expect(engine.dispatch.mock.calls.filter(([command]) => command === 'load_scene')).toHaveLength(2);
+    expect(store.getState().sceneLoadError).toEqual(lockout);
+    expect(localStorage.getItem('forge-project-scenes:v2:unsaved')).toBe(previousSave);
+    // The consequence the lockout gates: saving still refuses.
+    store.getState().saveScene('after-threw-answer-recovery');
+    expect(exported('after-threw-answer-recovery')).toBe(false);
+  });
+
   it('clears a clean-rejection lockout after confirming recovery of the trusted prior capture', async () => {
     const cp = createCheckpoint(projectFixture('Recovered')).checkpoint;
     const saved = localStorage.getItem('forge-project-scenes:v2:unsaved');

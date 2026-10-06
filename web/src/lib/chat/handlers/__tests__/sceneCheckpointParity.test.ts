@@ -59,6 +59,29 @@ describe('checkpoint UI and AI parity', () => {
     expect(engine.getScene().metadata?.name).toBe('Later live');
   });
 
+  // #10202 review, m7: through the AI tool, a restore load the engine THREW on
+  // (as the editor's dispatcher reports it: `threw: true`) fails the restore
+  // and leaves the THREW save lockout standing — not the clean-refusal one —
+  // with storage untouched. The recovery of the prior scene fails its
+  // readback here so the lockout is observable after the tool returns; with
+  // a confirmed recovery it is cleared, since `prior` was captured before the
+  // throw.
+  it('reports a thrown restore load through the AI with the THREW save lockout, without replacing storage', async () => {
+    const checkpoint = await store.getState().createCheckpoint('Keep');
+    saveProjectScenes(projectFixture('Later'));
+    engine.setScene(sceneFixture('Later live'));
+    engine.setModes(['threw', 'wrong']);
+
+    const result = await invoke('restore_checkpoint', { checkpointId: checkpoint!.id });
+
+    expect(result.success).toBe(false);
+    expect(loadProjectScenes().scenes[0].name).toBe('Later');
+    expect(store.getState().sceneLoadError?.reason).toContain('the engine failed while loading it');
+    expect(store.getState().sceneLoadError?.reason).not.toContain('the engine refused to load it');
+    // The lockout gates the AI export too.
+    expect((await invoke('export_scene')).success).toBe(false);
+  });
+
   it('deletes through either surface and uses the current project namespace', async () => {
     const first = await store.getState().createCheckpoint('First');
     const second = await store.getState().createCheckpoint('Second');
