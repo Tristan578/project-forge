@@ -78,6 +78,27 @@ describe('findSystemDependencyCycle', () => {
     ]);
     expect(cycle).toEqual(['audio', 'visual', 'audio']);
   });
+
+  it('handles a million-entry dependsOn on a shared category without throwing', () => {
+    // Two systems in one category merge their edges into one bucket. That
+    // merge used to be `bucket.push(...dependsOn)`, and a spread into an
+    // argument list is bounded by the call stack: a RangeError at ~150k
+    // entries on Node's main thread, and at ~800k under vitest's worker
+    // threads, which get a bigger stack — hence a million here, so the test
+    // is red in both. The provider shape puts no cap on `dependsOn`, so the
+    // decomposer's re-validation reached this with whatever the model (or a
+    // mocked seam) returned, and `validateBrief`'s try/catch did not cover it.
+    const huge = new Array<SystemCategory>(1_000_000).fill('physics');
+    const systems = [sys('movement', ['camera']), sys('movement', huge), sys('camera', ['movement'])];
+
+    let cycle: SystemCategory[] | null = null;
+    expect(() => {
+      cycle = findSystemDependencyCycle(systems);
+    }).not.toThrow();
+    // And the merge still happened: the second movement system's edges are
+    // in the graph, and so is the cycle the first one introduces.
+    expect(cycle).toEqual(['movement', 'camera', 'movement']);
+  });
 });
 
 describe('formatDependencyCycle', () => {

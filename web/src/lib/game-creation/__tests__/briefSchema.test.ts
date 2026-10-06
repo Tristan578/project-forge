@@ -363,6 +363,34 @@ describe('size caps', () => {
     expect(result.brief).toBeNull();
     expect(located(result.issues)).toEqual([{ code: 'LIMIT_EXCEEDED', path: ['openDecisions'] }]);
   });
+
+  it('names the field for an oversized dependsOn list, and never throws on one', () => {
+    // There are twelve categories, so a list this long is not a design, it is
+    // a payload. Before the cap existed a million-entry `dependsOn` on a
+    // system that shares its category with another reached the cycle
+    // detector, whose edge merge was a spread into `push(...)` — a RangeError
+    // thrown from OUTSIDE validateBrief's try/catch, from a function that is
+    // documented to never throw. (A million rather than the ~150k that
+    // overflows Node's main thread because vitest's worker threads get a
+    // bigger stack, ~800k; the test has to be red in both.)
+    const brief = validBrief();
+    const movement = brief.systems[0];
+    const huge = new Array<typeof movement.dependsOn[number]>(1_000_000).fill('physics');
+    brief.systems = [movement, { ...movement, id: 'sys-movement-2', type: 'swim', dependsOn: huge }];
+
+    let result: ReturnType<typeof validateBrief> | undefined;
+    expect(() => {
+      result = validateBrief(brief);
+    }).not.toThrow();
+
+    expect(result?.brief).toBeNull();
+    expect(located(result?.issues ?? [])).toEqual([
+      { code: 'LIMIT_EXCEEDED', path: ['systems', 1, 'dependsOn'] },
+    ]);
+    expect(result?.issues[0]?.message).toContain(String(BRIEF_LIMITS.dependsOn));
+    // The input is reported on, never cut down to fit.
+    expect(brief.systems[1].dependsOn).toHaveLength(1_000_000);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -395,6 +423,32 @@ describe('versioning and shape', () => {
     const result = validateBrief(input);
     expect(result.brief).toBeNull();
     expect(located(result.issues)).toEqual([{ code: 'SCHEMA', path: [] }]);
+  });
+
+  it('answers SCHEMA on the brief itself when reading the value throws', () => {
+    // Zod rethrows a throwing getter rather than reporting it as an issue, so
+    // "never throws" is only true if validateBrief catches it. Both a getter
+    // and a Proxy, because they throw at different points of the read.
+    const hostileGetter = {
+      ...validBrief(),
+      get title(): string {
+        throw new Error('hostile getter');
+      },
+    };
+    const hostileProxy = new Proxy(validBrief(), {
+      get() {
+        throw new Error('hostile proxy');
+      },
+    });
+
+    for (const input of [hostileGetter, hostileProxy]) {
+      let result: ReturnType<typeof validateBrief> | undefined;
+      expect(() => {
+        result = validateBrief(input);
+      }).not.toThrow();
+      expect(result?.brief).toBeNull();
+      expect(located(result?.issues ?? [])).toEqual([{ code: 'SCHEMA', path: [] }]);
+    }
   });
 
   it('reports a shape error on the exact field', () => {

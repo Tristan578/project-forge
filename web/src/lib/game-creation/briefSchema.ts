@@ -68,6 +68,14 @@ export const BRIEF_LIMITS = Object.freeze({
   scenes: 64,
   entitiesPerScene: 128,
   transitionsPerScene: 32,
+  /**
+   * `dependsOn` entries per system. Twelve categories exist, so a system
+   * can meaningfully depend on at most eleven others; the slack is for the
+   * list growing. The cap is on the BRIEF only — the provider shape has no
+   * cap (a change there changes the model-facing schema) — so the cycle
+   * detector still has to cope with an unbounded list from the AI path.
+   */
+  dependsOn: 16,
   assets: 100,
   constraints: 50,
   openDecisions: 20,
@@ -80,12 +88,16 @@ export const BRIEF_LIMITS = Object.freeze({
 // Leaf schemas — moved from decomposer.ts, unchanged
 // ---------------------------------------------------------------------------
 
+// One array schema, so the brief's capped `dependsOn` below is the provider's
+// list with a cap, not a second list.
+const zDependsOn = z.array(zSystemCategory);
+
 const zGameSystem = z.object({
   category: zSystemCategory,
   type: z.string().min(1).max(100),
   config: z.record(z.string(), z.unknown()),
   priority: z.enum(['core', 'secondary', 'polish']),
-  dependsOn: z.array(zSystemCategory).default([]),
+  dependsOn: zDependsOn.default([]),
 });
 
 const zFeelDirective = z.object({
@@ -175,7 +187,10 @@ export type BriefContent = z.infer<typeof zBriefContent>;
 
 const zItemId = z.string().min(1).max(BRIEF_LIMITS.id);
 
-const zBriefSystem = zGameSystem.extend({ id: zItemId.optional() });
+const zBriefSystem = zGameSystem.extend({
+  id: zItemId.optional(),
+  dependsOn: zDependsOn.max(BRIEF_LIMITS.dependsOn).default([]),
+});
 
 const zBriefEntity = zEntityBlueprint.extend({ id: zItemId.optional() });
 
@@ -552,38 +567,40 @@ function fromZodIssue(issue: z.core.$ZodIssue): BriefIssue {
  * editor can keep it; and each `openDecisions` entry as a `decision` issue.
  */
 export function validateBrief(input: unknown): BriefValidation {
-  let parsed: ReturnType<typeof zGameBrief.safeParse>;
+  // One try/catch over the whole read, not only the shape parse: the cycle
+  // detector once threw a RangeError on an oversized `dependsOn` from
+  // OUTSIDE the catch, and "never throws" has to hold for every step.
   try {
-    parsed = zGameBrief.safeParse(input);
+    const parsed = zGameBrief.safeParse(input);
+
+    if (!parsed.success) {
+      const issues: BriefIssue[] = [];
+      for (let i = 0; i < parsed.error.issues.length; i += 1) {
+        const issue = parsed.error.issues[i];
+        if (issue) issues.push(fromZodIssue(issue));
+      }
+      return { brief: null, issues };
+    }
+
+    const brief = parsed.data;
+    const issues = checkBriefInvariants(brief);
+
+    const decisions = brief.openDecisions ?? [];
+    for (let i = 0; i < decisions.length; i += 1) {
+      const decision = decisions[i];
+      if (!decision) continue;
+      issues.push({
+        path: ['openDecisions', i],
+        code: 'OPEN_DECISION',
+        severity: 'decision',
+        message: `open decision about ${decision.path}: ${decision.question}`,
+      });
+    }
+
+    return { brief, issues };
   } catch {
-    // Reading the value itself threw (a hostile getter, say). Still an
-    // answer, not an exception.
+    // Reading the value threw (a hostile getter, say), or a check did. Still
+    // an answer, not an exception.
     return { brief: null, issues: [error([], 'SCHEMA', 'the brief could not be read')] };
   }
-
-  if (!parsed.success) {
-    const issues: BriefIssue[] = [];
-    for (let i = 0; i < parsed.error.issues.length; i += 1) {
-      const issue = parsed.error.issues[i];
-      if (issue) issues.push(fromZodIssue(issue));
-    }
-    return { brief: null, issues };
-  }
-
-  const brief = parsed.data;
-  const issues = checkBriefInvariants(brief);
-
-  const decisions = brief.openDecisions ?? [];
-  for (let i = 0; i < decisions.length; i += 1) {
-    const decision = decisions[i];
-    if (!decision) continue;
-    issues.push({
-      path: ['openDecisions', i],
-      code: 'OPEN_DECISION',
-      severity: 'decision',
-      message: `open decision about ${decision.path}: ${decision.question}`,
-    });
-  }
-
-  return { brief, issues };
 }

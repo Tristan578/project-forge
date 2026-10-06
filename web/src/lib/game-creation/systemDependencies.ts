@@ -47,18 +47,29 @@ export interface DependencyNode {
 export function findSystemDependencyCycle(
   systems: readonly DependencyNode[],
 ): SystemCategory[] | null {
-  // Adjacency by category. Indexed loop rather than a callback form: an array
-  // hole would be skipped by `.forEach`, and a skipped system is a skipped
-  // edge, which is a cycle this function would then fail to see.
+  // Adjacency by category. Indexed loops rather than a callback form: an
+  // array hole would be skipped by `.forEach`, and a skipped system is a
+  // skipped edge, which is a cycle this function would then fail to see.
+  //
+  // The merge is an indexed loop too, NOT `bucket.push(...dependsOn)`: a
+  // spread into an argument list is bounded by the call stack, so a
+  // `dependsOn` of a few hundred thousand entries threw a RangeError here.
+  // The provider shape puts no cap on the list, so the decomposer's
+  // re-validation reaches this with whatever the model returned, and a throw
+  // from here escaped `validateBrief`, which is documented to never throw.
   const edges = new Map<SystemCategory, SystemCategory[]>();
   for (let i = 0; i < systems.length; i += 1) {
     const system = systems[i];
     if (!system) continue;
-    const bucket = edges.get(system.category);
-    if (bucket) {
-      bucket.push(...system.dependsOn);
-    } else {
-      edges.set(system.category, [...system.dependsOn]);
+    let bucket = edges.get(system.category);
+    if (!bucket) {
+      bucket = [];
+      edges.set(system.category, bucket);
+    }
+    const deps = system.dependsOn;
+    for (let j = 0; j < deps.length; j += 1) {
+      const dep = deps[j];
+      if (dep !== undefined) bucket.push(dep);
     }
   }
 
