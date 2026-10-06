@@ -19,8 +19,6 @@ import {
   type EngineConsole,
 } from '../helpers/engine-console';
 import { SCENE_EXPORTED_EVENT } from '../../src/lib/engine/sceneExportWire';
-// TEMP #10159 AC3 MUTATION — do not merge.
-import { toWireComponent } from '../../src/lib/engine/gameComponentWire';
 import { formatWinnabilityMessage } from '../../src/lib/playMode/winnabilityValidator';
 import type { useEditorStore } from '@/stores/editorStore';
 
@@ -428,34 +426,13 @@ async function addGameComponentsInRounds(
   for (let round = 0; round < rounds; round++) {
     const adds = game.entities
       .filter((entity) => entity.gameComponents.length > round)
-      .map((entity) => {
-        const component = resolveEntityRefs(entity.gameComponents[round], (fixtureId) => ids[fixtureId]);
-        return {
-          id: ids[entity.id],
-          component,
-          // TEMP #10159 AC3 MUTATION — do not merge. The 2D player's first
-          // component payload is sent with `componentType` as a number instead
-          // of 'character_controller'. `handle_add_game_component`
-          // (engine/src/core/commands/game.rs) reads it with `as_str()` and
-          // answers "Missing componentType", which the production dispatcher
-          // reports as the `Engine rejected command` console line.
-          corruptedWire:
-            game.member === '2d' && round === 0 && entity.id === 'player'
-              ? { ...toWireComponent(component), componentType: 42 }
-              : null,
-        };
-      });
+      .map((entity) => ({
+        id: ids[entity.id],
+        component: resolveEntityRefs(entity.gameComponents[round], (fixtureId) => ids[fixtureId]),
+      }));
     await page.evaluate((batch) => {
       const state = (window.__EDITOR_STORE as Store).getState();
-      for (const { id, component, corruptedWire } of batch) {
-        if (corruptedWire) {
-          // TEMP #10159 AC3 MUTATION — the same production dispatcher the
-          // store's addGameComponent calls, with the corrupted payload.
-          window.__FORGE_DISPATCH?.('add_game_component', { entityId: id, ...corruptedWire });
-          continue;
-        }
-        state.addGameComponent(id, component);
-      }
+      for (const { id, component } of batch) state.addGameComponent(id, component);
     }, adds);
 
     const expectedCounts = Object.fromEntries(
