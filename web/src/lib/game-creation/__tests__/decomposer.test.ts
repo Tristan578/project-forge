@@ -5,8 +5,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { decomposeIntoSystems, PromptRejectedError } from '../decomposer';
 import { BEHAVIOR_VOCAB } from '../behaviorVocabulary';
+import { validateBrief, zBriefContent } from '../briefSchema';
 import { COMPLETION_MODES } from '@/lib/playMode/completionMode';
 
 // The decomposer asks the model for a typed object via `Output.object`
@@ -66,6 +69,17 @@ function makeValidDecomposition(
           },
         ],
         transitions: [{ to: 'Game Over', trigger: 'player dies' }],
+      },
+      // The transition above has to land somewhere: a transition to a scene
+      // the design does not have is one of the shared invariants
+      // (`TRANSITION_TARGET_MISSING`, #10174), and the decomposer asks the
+      // model again on it.
+      {
+        name: 'Game Over',
+        purpose: 'End screen',
+        systems: [],
+        entities: [],
+        transitions: [],
       },
     ],
     assetManifest: [
@@ -498,6 +512,10 @@ describe('decomposeIntoSystems', () => {
         makeValidDecomposition({
           systems: [CAMERA_SYSTEM],
           scenes: [sceneWith('Gallery', ['decoration', 'interactable'])],
+          // `sceneWith` names its entities by role, so the default asset's
+          // `entityRef: 'Player'` would fail the shared ENTITY_REF_MISSING
+          // check; this case is about the movement rule alone.
+          assetManifest: [],
         }),
       );
 
@@ -515,6 +533,8 @@ describe('decomposeIntoSystems', () => {
             sceneWith('Title Screen', ['decoration']),
             sceneWith('Main Level', ['player', 'enemy']),
           ],
+          // Same reason as above: role-named entities, so no "Player" to ref.
+          assetManifest: [],
         }),
       );
 
@@ -719,5 +739,76 @@ describe('decomposeIntoSystems — completionMode', () => {
     }
     expect(systemPrompt).toMatch(/completionMode/);
     expect(systemPrompt).toMatch(/omit[^.]*"win"/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One contract for manual and AI briefs (idea.FR-1.OP-02, #10174)
+//
+// The shape the model is asked for and the invariants its object is checked
+// against are the ones `briefSchema.ts` exports and `validateBrief` runs for
+// the manual editor. These pin the AI side of that agreement.
+// ---------------------------------------------------------------------------
+
+describe('decomposeIntoSystems — shared brief contract', () => {
+  const INVALID_FIXTURE = path.resolve(__dirname, '../__fixtures__/invalid/idea-score3-v1-invalid.json');
+
+  it('hands the provider the shared zBriefContent shape itself, not a copy', async () => {
+    await decomposeIntoSystems('make a game', '2d');
+
+    const [, , schema] = generateDecomposition.mock.calls[0] as [string, string, unknown];
+    // Identity, not equivalence: a second schema that merely agreed today
+    // is the drift #10174 removes.
+    expect(schema).toBe(zBriefContent);
+  });
+
+  it('retries an object that passes the shape but fails a shared invariant, and names the code', async () => {
+    // Two scenes called "Main Level": the provider's JSON Schema cannot say
+    // scene names are unique, so this object passes the shape and only the
+    // local re-validation can refuse it.
+    const main = (makeValidDecomposition().scenes as Array<Record<string, unknown>>)[0];
+    generateDecomposition.mockResolvedValue(
+      makeValidDecomposition({ scenes: [main, { ...main, transitions: [] }] }),
+    );
+
+    await expect(decomposeIntoSystems('make a game', '2d')).rejects.toThrow(
+      /scenes\.1\.name: .*\[DUPLICATE_SCENE_NAME\]/,
+    );
+    // The existing retry: one initial attempt plus MAX_RETRIES.
+    expect(generateDecomposition).toHaveBeenCalledTimes(3);
+  });
+
+  it('names the movement invariant by the code validateBrief uses', async () => {
+    const noPlayer = makeValidDecomposition();
+    (noPlayer.scenes as Array<{ entities: unknown[] }>)[0].entities = [];
+    generateDecomposition.mockResolvedValue(noPlayer);
+
+    await expect(decomposeIntoSystems('make a game', '2d')).rejects.toThrow(
+      /scenes: .*"player".*\[MOVEMENT_WITHOUT_PLAYER\]/,
+    );
+  });
+
+  it('reports exactly the codes validateBrief reports for the invalid domain fixture', async () => {
+    // The same object through both paths. `zBriefContent` strips the
+    // brief-only keys (`id`, `briefVersion`, item ids), so the model-shaped
+    // view of the fixture is what the decomposer re-validates.
+    const fixture = JSON.parse(fs.readFileSync(INVALID_FIXTURE, 'utf-8')) as Record<string, unknown>;
+    const manualCodes = validateBrief(fixture).issues.map(issue => issue.code).sort();
+    expect(manualCodes).toEqual(['DEPENDENCY_CYCLE', 'DUPLICATE_SCENE_NAME', 'MOVEMENT_WITHOUT_PLAYER']);
+
+    generateDecomposition.mockResolvedValue(fixture);
+
+    let thrown: unknown;
+    try {
+      await decomposeIntoSystems('make a game', '3d');
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const message = (thrown as Error).message;
+
+    const aiCodes = [...message.matchAll(/\[([A-Z_]+)\]/g)].map(match => match[1]).sort();
+    expect(aiCodes).toEqual(manualCodes);
+    expect(generateDecomposition).toHaveBeenCalledTimes(3);
   });
 });
