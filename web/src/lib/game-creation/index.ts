@@ -28,6 +28,7 @@ export {
   BRIEF_ISSUE_CODES,
   BRIEF_LIMITS,
   BRIEF_SCHEMA_VERSION,
+  BUILD_BLOCKING_BRIEF_ISSUE_CODES,
   validateBrief,
   zBriefContent,
   zGameBrief,

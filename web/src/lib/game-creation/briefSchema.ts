@@ -21,14 +21,19 @@
  *
  * One set of cross-field checks (`checkBriefInvariants`), reached two ways:
  *
- *   - `validateBrief` runs the shape, then the checks, and returns
+ *   - `validateBrief` runs the shape, then ALL the checks, and returns
  *     `{ brief, issues }` without ever throwing. The manual editor runs it on
  *     every edit.
- *   - `zBriefOutput` is `zBriefContent` refined with the same checks, raised as
- *     Zod custom issues carrying the issue code in `params`. The decomposer
- *     validates the model's object with it, so an invariant the editor would
- *     flag is one the model is asked to try again on, and the decomposer's
- *     error names the same code the editor shows.
+ *   - `zBriefOutput` is `zBriefContent` refined with the BUILD-BLOCKING subset
+ *     of the same checks (`BUILD_BLOCKING_BRIEF_ISSUE_CODES`), raised as Zod
+ *     custom issues carrying the issue code in `params`. The decomposer
+ *     validates the model's object with it, so a rule that would break the
+ *     build is one the model is asked to try again on, and the decomposer's
+ *     error names the same code the editor shows. The advisory rules (a
+ *     dangling transition, an `entityRef` naming no entity, a progression
+ *     system in a goal-free mode) are reported to the editor only: the plan
+ *     builder copes with each, and the model is never told about them, so a
+ *     retry on one would be a retry spent on nothing.
  *
  * Server-safe on purpose: `decomposer.ts` runs inside `/api/game/decompose`,
  * so nothing here may import from `stores/` (`serverSafeImports.test.ts`).
@@ -282,6 +287,26 @@ export const BRIEF_ISSUE_CODES = [
 
 export type BriefIssueCode = (typeof BRIEF_ISSUE_CODES)[number];
 
+/**
+ * The codes that BREAK A BUILD, and so the only ones the decomposer asks the
+ * model to try again on (`zBriefOutput`). Each is a rule `buildPlan` cannot
+ * absorb: no player to move (the character_setup step is dropped and the
+ * game has nothing to control — the one rule the prompt states), a
+ * `dependsOn` cycle (`buildPlan` throws), two scenes with one name
+ * (`buildPlan` keys scenes by name, so the second silently replaces the
+ * first). Every other error code is advisory: `validateBrief` reports it for
+ * the editor, and the AI path accepts the brief. Widening this list costs
+ * the model a retry on a rule it is never told, with a generic hint — see
+ * `decomposer.test.ts`, which pins both sides.
+ */
+export const BUILD_BLOCKING_BRIEF_ISSUE_CODES = [
+  'MOVEMENT_WITHOUT_PLAYER',
+  'DEPENDENCY_CYCLE',
+  'DUPLICATE_SCENE_NAME',
+] as const satisfies readonly BriefIssueCode[];
+
+const BUILD_BLOCKING: ReadonlySet<BriefIssueCode> = new Set<BriefIssueCode>(BUILD_BLOCKING_BRIEF_ISSUE_CODES);
+
 export type BriefIssuePath = Array<string | number>;
 
 export interface BriefIssue {
@@ -437,7 +462,8 @@ export function checkBriefInvariants(brief: BriefInvariantInput): BriefIssue[] {
 
   // The SAME detector `buildPlan` throws on (`systemDependencies.ts`), so the
   // two cannot disagree about what a cycle is. Reported on the `dependsOn`
-  // entry that closes the cycle, so an editor can focus it.
+  // entry that closes the cycle (the path's LAST edge — see `cycleEdgePath`),
+  // so an editor can focus it.
   const cycle = findSystemDependencyCycle(systems);
   if (cycle) {
     issues.push(error(
@@ -463,13 +489,23 @@ export function checkBriefInvariants(brief: BriefInvariantInput): BriefIssue[] {
   return issues;
 }
 
-/** The `dependsOn` entry that closes `cycle`: the first edge from its first node to its second. */
+/**
+ * The `dependsOn` entry that CLOSES `cycle`: its last edge, from the last
+ * distinct node back to the first. `findSystemDependencyCycle` returns the
+ * path as the walk found it, and the walk stops on the edge that leads back
+ * to a category already on its stack — so the last edge is the one that
+ * turned a chain into a loop, and the one an editor should focus. The first
+ * edge (`cycle[0] -> cycle[1]`) would name the system the walk happened to
+ * start from, which for a long cycle is a different system entirely
+ * (`briefSchema.test.ts` pins the difference on a three-node cycle). For a
+ * self-dependency the two coincide.
+ */
 function cycleEdgePath(
   systems: BriefInvariantInput['systems'],
   cycle: readonly SystemCategory[],
 ): BriefIssuePath {
-  const from = cycle[0];
-  const to = cycle[1];
+  const from = cycle[cycle.length - 2];
+  const to = cycle[cycle.length - 1];
   if (from === undefined || to === undefined) return ['systems'];
   for (let i = 0; i < systems.length; i += 1) {
     const system = systems[i];
@@ -488,17 +524,20 @@ function cycleEdgePath(
 export const BRIEF_CODE_PARAM = 'briefCode';
 
 /**
- * `zBriefContent` plus the shared invariants, for the decomposer's local
- * re-validation of the model's object. The provider enforced the shape; this
- * adds what JSON Schema cannot say. Each invariant failure becomes a Zod
- * custom issue at the same path `validateBrief` would report, with the code
- * in `params` so the decomposer's error can name it.
+ * `zBriefContent` plus the BUILD-BLOCKING shared invariants, for the
+ * decomposer's local re-validation of the model's object. The provider
+ * enforced the shape; this adds what JSON Schema cannot say and the plan
+ * builder cannot absorb. Each such failure becomes a Zod custom issue at the
+ * same path `validateBrief` would report, with the code in `params` so the
+ * decomposer's error can name it. The advisory codes are computed and
+ * dropped here, so the two paths share one check and differ only in the
+ * filter (`BUILD_BLOCKING_BRIEF_ISSUE_CODES`).
  */
 export const zBriefOutput = zBriefContent.superRefine((content, ctx) => {
   const issues = checkBriefInvariants(content);
   for (let i = 0; i < issues.length; i += 1) {
     const issue = issues[i];
-    if (!issue) continue;
+    if (!issue || !BUILD_BLOCKING.has(issue.code)) continue;
     ctx.addIssue({
       code: 'custom',
       path: [...issue.path],

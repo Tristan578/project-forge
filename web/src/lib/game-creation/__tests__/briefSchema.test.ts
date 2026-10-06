@@ -256,8 +256,10 @@ describe('invalid idea-score3-v1 fixtures (idea.FR-1 failure case)', () => {
     // an editor has to be able to hold a brief while the person fixes it.
     expect(result.brief).not.toBeNull();
     expect(located(errorsOf(result.issues))).toEqual([
-      // movement -> camera -> movement, closed by systems[0].dependsOn[0]
-      { code: 'DEPENDENCY_CYCLE', path: ['systems', 0, 'dependsOn', 0] },
+      // movement -> camera -> movement: the walk leaves movement for camera
+      // and meets movement again on camera's `dependsOn`, so the edge that
+      // CLOSES the cycle is systems[1] (camera) .dependsOn[0] (movement).
+      { code: 'DEPENDENCY_CYCLE', path: ['systems', 1, 'dependsOn', 0] },
       // the SECOND "Yard" is the duplicate; the first keeps its name
       { code: 'DUPLICATE_SCENE_NAME', path: ['scenes', 1, 'name'] },
       // the same path the pre-move superRefine used
@@ -273,8 +275,9 @@ describe('invalid idea-score3-v1 fixtures (idea.FR-1 failure case)', () => {
     const input = readJson(INVALID_DIR, 'idea-score3-v1-cyclic.json');
     const result = validateBrief(input);
 
+    // The closing edge: camera (systems[2]) depending on movement.
     expect(located(result.issues)).toEqual([
-      { code: 'DEPENDENCY_CYCLE', path: ['systems', 0, 'dependsOn', 0] },
+      { code: 'DEPENDENCY_CYCLE', path: ['systems', 2, 'dependsOn', 0] },
     ]);
     expect(result.issues[0].message).toContain('movement -> camera -> movement');
 
@@ -538,6 +541,29 @@ describe('cross-field checks', () => {
     brief.scenes[0].entities = brief.scenes[0].entities.filter(e => e.role !== 'player');
 
     expect(validateBrief(brief).issues).toEqual([]);
+  });
+
+  it('reports a dependency cycle on the dependsOn entry that CLOSES it, not the first edge', () => {
+    // movement -> camera -> world -> movement. The walk starts at movement
+    // (array order) and meets movement again on world's `dependsOn`, so the
+    // closing edge is world's entry — the last system in the cycle, which a
+    // first-edge report (movement's entry) would never name. Pins the choice
+    // documented on `cycleEdgePath` (round 1 m3).
+    const brief = validBrief();
+    const [movement, input, camera, world] = brief.systems;
+    brief.systems = [
+      { ...movement, dependsOn: ['camera'] },
+      input,
+      { ...camera, dependsOn: ['world'] },
+      { ...world, dependsOn: ['physics', 'movement'] },
+    ];
+
+    const result = validateBrief(brief);
+
+    expect(located(result.issues)).toEqual([
+      { code: 'DEPENDENCY_CYCLE', path: ['systems', 3, 'dependsOn', 1] },
+    ]);
+    expect(result.issues[0].message).toContain('movement -> camera -> world -> movement');
   });
 
   it('reports every later scene that reuses an earlier name, on its name field', () => {

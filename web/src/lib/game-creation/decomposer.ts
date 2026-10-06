@@ -169,11 +169,16 @@ export async function decomposeIntoSystems(
     }
 
     // Re-validate locally. The provider enforced the SHAPE; this run adds the
-    // cross-field invariants that JSON Schema cannot express (a movement
-    // system needs a player entity, scene names are unique, ...), shared with
-    // `validateBrief` through `zBriefOutput`, and re-narrows an `unknown` the
-    // seam's mock could otherwise smuggle a wrong type through in tests. Each
-    // invariant failure is named by the same code `validateBrief` reports.
+    // BUILD-BLOCKING cross-field invariants that JSON Schema cannot express
+    // (a movement system needs a player entity, scene names are unique, the
+    // dependsOn graph is acyclic — `BUILD_BLOCKING_BRIEF_ISSUE_CODES`), shared
+    // with `validateBrief` through `zBriefOutput`, and re-narrows an `unknown`
+    // the seam's mock could otherwise smuggle a wrong type through in tests.
+    // Each failure is named by the same code `validateBrief` reports. The
+    // advisory rules (a dangling transition, an entityRef naming no entity, a
+    // progression system in a goal-free mode) are the editor's, not a retry:
+    // the plan builder copes with each, and the model is never told about
+    // them, so the generic hint below could not help it fix one.
     const result = zBriefOutput.safeParse(parsed);
     if (!result.success) {
       const issues = result.error.issues
