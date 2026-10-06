@@ -124,6 +124,8 @@ describe('spriteSlice', () => {
   // project switches the store to 2D without an AI turn.
   describe('applyProjectTypeFromEngine', () => {
     it.each(['2d', '3d'] as const)('mirrors %s into the store', (type) => {
+      // Start on the OTHER type, so a no-op mirror cannot pass on the default.
+      store.setState({ projectType: type === '2d' ? '3d' : '2d' });
       store.getState().applyProjectTypeFromEngine(type);
       expect(store.getState().projectType).toBe(type);
     });
