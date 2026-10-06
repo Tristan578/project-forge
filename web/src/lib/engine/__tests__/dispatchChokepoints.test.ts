@@ -66,9 +66,9 @@ const ACCOUNTED_FOR: Record<string, { calls: number; reason: string }> = {
   },
   'hooks/usePointerLock.ts': { calls: 1, reason: 'fixed { dx, dy } literal' },
   'components/play/GamePlayer.tsx': {
-    calls: 3,
+    calls: 4,
     reason:
-      'fixed object literals built in the file: { preset } through sendReported, {} for set_quality, and {} for the explicit play whose refusal is a failed start; the scene goes through lib/engine/playSceneLoad.ts (#10196)',
+      "fixed object literals built in the file: { preset } through sendReported, {} for set_quality, { projectType: '2d' } for the set_project_type a 2D game sends after the scene is accepted (#10227), and {} for the explicit play whose refusal is a failed start; the scene goes through lib/engine/playSceneLoad.ts (#10196)",
   },
   'lib/engine/playSceneLoad.ts': {
     calls: 0,
