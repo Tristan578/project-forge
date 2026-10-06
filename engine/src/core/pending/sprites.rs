@@ -5,16 +5,24 @@ use crate::core::project_type::ProjectType;
 
 // === Request Structs ===
 
-/// Switch the engine's `ProjectType` resource (and with it the 2D camera).
+/// Switch the engine's `ProjectType` resource (and with it the 2D camera), or
+/// only re-report it.
 ///
 /// Typed, not a string: the `set_project_type` command parses its payload
-/// with `ProjectType::from_wire` and refuses anything else, and `load_scene`
-/// queues the scene file's own `metadata.projectType` (#10227). Nothing
-/// unrecognised can reach `apply_project_type_changes`, so the system has no
-/// branch that drops a request on the floor.
+/// with `ProjectType::from_wire` and refuses anything else, so it always
+/// queues `Some`. `load_scene` queues the scene file's own
+/// `metadata.projectType` as it stands (#10227): `Some` for a file that
+/// states its dimension, `None` for one saved before the field existed. The
+/// drain resolves either through `ProjectType::apply_request` — `None` leaves
+/// the resource alone — and emits `PROJECT_TYPE_CHANGED` with the resulting
+/// type for every request, so a key-less scene inherits the session's
+/// dimension while a store that drifted still converges on the engine.
+/// Nothing unrecognised can reach `apply_project_type_changes`, so the system
+/// has no branch that drops a request on the floor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetProjectTypeRequest {
-    pub project_type: ProjectType,
+    /// The type to apply, or `None` to re-report the current one unchanged.
+    pub project_type: Option<ProjectType>,
 }
 
 #[derive(Debug, Clone)]

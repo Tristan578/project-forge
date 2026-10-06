@@ -490,11 +490,21 @@ pub(super) fn apply_scene_load(
     // 16-parameter cap and cannot take `ResMut<ProjectType>`, so the saved
     // type goes through the queue `apply_project_type_changes` drains — the
     // one place that also spawns/despawns the 2D camera and emits
-    // `PROJECT_TYPE_CHANGED` for the web store. A scene saved before the field
-    // existed parses as 3D (serde default), which is the mode it always
-    // opened in. Queued for every load, changed or not, so a store that
-    // drifted converges on the engine.
-    pending.queue_set_project_type(SetProjectTypeRequest {
+    // `PROJECT_TYPE_CHANGED` for the web store. The file's value is passed
+    // through AS IT STANDS: `Some` applies that type; `None` (a scene saved
+    // before the field existed, or any producer that stated none) leaves the
+    // live resource alone, so switching to a key-less scene — a second scene
+    // created in a 2D project, a pre-#10227 save, a legacy import, an
+    // auto-save recovery — inherits the session's dimension instead of
+    // flipping the editor to 3D. The drain still emits the current type for
+    // `None`, so a store that drifted converges on the engine. A cold open of
+    // a key-less scene comes up 3D because a fresh engine starts there
+    // (`ProjectType::default`), not because the loader forces it.
+    //
+    // Direct `.push(` rather than the `queue_*` helper, like the WGSL
+    // hot-swap below: `pending/runtime_drains.rs` recognises a runtime
+    // producer by exactly this shape, and pins this one.
+    pending.set_project_type_requests.push(SetProjectTypeRequest {
         project_type: scene_file.metadata.project_type,
     });
 

@@ -322,14 +322,23 @@ pub(super) fn emit_sprite_on_selection(
 /// System that processes pending project type changes.
 /// Updates the ProjectType resource and manages Camera2d lifecycle.
 ///
-/// Requests come from the `set_project_type` command and from `apply_scene_load`,
-/// which queues the scene file's `metadata.projectType` so a reopened or
-/// published 2D game gets its 2D camera back (#10227). Every processed request
-/// — changed or not — is reported to the web layer as `PROJECT_TYPE_CHANGED`,
-/// so `spriteSlice.projectType` follows the engine rather than only the AI
-/// handlers that used to be its sole writers: a store that drifted (say, a
-/// `set_project_type` refused before the engine attached) converges on the
-/// next load instead of staying wrong until an AI turn.
+/// Requests come from the `set_project_type` command (always `Some`) and from
+/// `apply_scene_load`, which queues the scene file's `metadata.projectType` as
+/// it stands so a reopened or published 2D game gets its 2D camera back
+/// (#10227). `ProjectType::apply_request` decides: `Some` applies that type,
+/// `None` — a scene saved before the field existed — leaves the resource as it
+/// is, so a key-less scene inherits the session's dimension rather than
+/// flipping the editor to 3D. Every processed request — changed or not, `Some`
+/// or `None` — is reported to the web layer as `PROJECT_TYPE_CHANGED` carrying
+/// the RESOURCE's value, so `spriteSlice.projectType` follows the engine
+/// rather than only the AI handlers that used to be its sole writers: a store
+/// that drifted (say, a `set_project_type` refused before the engine attached)
+/// converges on the next load instead of staying wrong until an AI turn.
+///
+/// Ordered `.after(apply_scene_load)` and `.before(apply_scene_export)` in
+/// `bridge/mod.rs`, so the type a load carries is applied in the same frame
+/// and the export that `checkpointRecovery.matchesExpected` compares against
+/// the loaded scene already reflects it.
 pub(super) fn apply_project_type_changes(
     mut pending: ResMut<PendingCommands>,
     mut project_type: ResMut<ProjectType>,
@@ -338,16 +347,19 @@ pub(super) fn apply_project_type_changes(
     mut camera_3d_query: Query<&mut Camera, With<crate::core::camera::EditorCamera>>,
 ) {
     for request in pending.set_project_type_requests.drain(..) {
-        let new_type = request.project_type;
+        let (resolved, changed) = project_type.apply_request(request.project_type);
 
-        if *project_type != new_type {
-            *project_type = new_type;
-            switch_cameras_for(new_type, &mut commands, &camera_2d_query, &mut camera_3d_query);
+        if changed {
+            *project_type = resolved;
+            switch_cameras_for(resolved, &mut commands, &camera_2d_query, &mut camera_3d_query);
         }
 
-        // After the camera work, so a 2D switch's CAMERA_2D_CHANGED has landed
-        // in the store by the time the inspector flips to its 2D sections.
-        events::emit_project_type_changed(new_type);
+        // Inside the loop — once per request, including a `None` that changed
+        // nothing — and the RESOURCE rather than the request, so a key-less
+        // load reports the type the session actually has. After the camera
+        // work, so a 2D switch's CAMERA_2D_CHANGED has landed in the store by
+        // the time the inspector flips to its 2D sections.
+        events::emit_project_type_changed(*project_type);
     }
 }
 

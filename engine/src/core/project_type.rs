@@ -43,6 +43,27 @@ impl ProjectType {
             _ => None,
         }
     }
+
+    /// Resolve one project-type request against the live resource (`self`).
+    ///
+    /// Returns the type the resource should hold afterwards and whether that
+    /// is a change — the one case `apply_project_type_changes` switches the
+    /// cameras for. `Some(t)` asks for `t`; `None` asks for nothing and leaves
+    /// the resource as it is. `None` is what `load_scene` queues for a scene
+    /// file with no `metadata.projectType` (#10227): a scene saved before the
+    /// field existed INHERITS the session's dimension instead of forcing 3D,
+    /// so switching to such a scene in a 2D project keeps the 2D camera. A
+    /// fresh engine starts at [`ProjectType::default`] (3D), which is how a
+    /// cold open of the same scene still comes up 3D.
+    ///
+    /// Pure, so the rule is unit-tested natively although the system that
+    /// applies it lives in the wasm32-only bridge.
+    pub fn apply_request(self, requested: Option<ProjectType>) -> (ProjectType, bool) {
+        match requested {
+            Some(new_type) if new_type != self => (new_type, true),
+            _ => (self, false),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -94,5 +115,31 @@ mod tests {
         // are not accepted either: a file carrying one is malformed, not legacy.
         assert!(serde_json::from_str::<ProjectType>("\"TwoD\"").is_err());
         assert!(serde_json::from_str::<ProjectType>("\"ThreeD\"").is_err());
+    }
+
+    #[test]
+    fn apply_request_applies_some_and_leaves_none_alone() {
+        // `Some` of a different type is a change (the cameras switch); `Some`
+        // of the current type is not; `None` — a scene file with no
+        // `metadata.projectType` — changes nothing, whatever the session is
+        // in. That last row is the absent-aware rule: a key-less scene
+        // inherits the session's dimension instead of forcing 3D, so a second
+        // scene created in a 2D project, or a pre-#10227 save switched to
+        // mid-session, keeps the 2D camera.
+        assert_eq!(ProjectType::ThreeD.apply_request(Some(ProjectType::TwoD)), (ProjectType::TwoD, true));
+        assert_eq!(ProjectType::TwoD.apply_request(Some(ProjectType::ThreeD)), (ProjectType::ThreeD, true));
+        assert_eq!(ProjectType::TwoD.apply_request(Some(ProjectType::TwoD)), (ProjectType::TwoD, false));
+        assert_eq!(ProjectType::ThreeD.apply_request(Some(ProjectType::ThreeD)), (ProjectType::ThreeD, false));
+        for current in [ProjectType::TwoD, ProjectType::ThreeD] {
+            assert_eq!(current.apply_request(None), (current, false), "{current:?}: None must not move the resource");
+        }
+    }
+
+    #[test]
+    fn a_fresh_engine_opens_a_key_less_scene_as_3d_because_it_starts_there() {
+        // The migration rule for a cold open holds through the DEFAULT, not
+        // through the loader: a key-less scene resolves to whatever the
+        // session has, and a fresh session has `ProjectType::default()`.
+        assert_eq!(ProjectType::default().apply_request(None), (ProjectType::ThreeD, false));
     }
 }

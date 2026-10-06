@@ -17,7 +17,9 @@ fn handle_set_project_type(payload: serde_json::Value) -> super::CommandResult {
     let project_type = ProjectType::from_wire(spelling)
         .ok_or_else(|| format!("projectType must be \"2d\" or \"3d\", got {spelling:?}"))?;
 
-    if queue_set_project_type_from_bridge(SetProjectTypeRequest { project_type }) {
+    // Always `Some`: the command states a type. `None` exists for `load_scene`
+    // alone (a scene file with no `metadata.projectType`), never for a payload.
+    if queue_set_project_type_from_bridge(SetProjectTypeRequest { project_type: Some(project_type) }) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
