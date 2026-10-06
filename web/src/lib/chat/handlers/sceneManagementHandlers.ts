@@ -178,7 +178,8 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
     const { createScene, loadProjectScenes, saveProjectScenes } = await import('@/lib/scenes/sceneManager');
     const project = loadProjectScenes(ctx.store.projectId);
-    const result = createScene(project, p.data.name);
+    // The live type travels into the new scene so it is self-describing (#10227).
+    const result = createScene(project, p.data.name, ctx.store.projectType);
     saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),

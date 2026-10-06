@@ -108,6 +108,46 @@ describe('sceneManager', () => {
     });
   });
 
+  describe('Project type (#10227)', () => {
+    it('createScene states the type it is given as metadata.projectType', () => {
+      // A scene created in a 2D project is a 2D scene: the live type travels
+      // into the new scene so it is self-describing even on a cold open.
+      const project = createInitialProject();
+      const { project: twoD } = createScene(project, 'Level 2', '2d');
+      expect(twoD.scenes[1].data?.metadata?.projectType).toBe('2d');
+      const { project: threeD } = createScene(project, 'Level 3', '3d');
+      expect(threeD.scenes[1].data?.metadata?.projectType).toBe('3d');
+    });
+
+    it('createScene without a type leaves the key ABSENT, never a guessed 3d', () => {
+      // Absent means "keep the session's dimension" to the engine; a written
+      // '3d' would flip a 2D project to 3D on the first switch to the scene.
+      const { project: updated } = createScene(createInitialProject(), 'Level 2');
+      const metadata = updated.scenes[1].data?.metadata ?? {};
+      expect(metadata).toHaveProperty('name', 'Level 2');
+      expect(Object.keys(metadata)).not.toContain('projectType');
+    });
+
+    it('a legacy empty scene is normalised WITHOUT a project type', () => {
+      // The old producer's three-field shape, as an older editor stored it in
+      // a (possibly 2D) project. Normalisation runs when the project is read,
+      // before the engine has reported the session's type, so it must state
+      // none: the engine then keeps the session's dimension when the scene is
+      // switched to.
+      const project = createInitialProject();
+      project.scenes.push({
+        id: 'scene_legacy', name: 'Old Empty', isStartScene: false,
+        data: { formatVersion: 3, sceneName: 'Old Empty', entities: [] },
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      });
+      storage['forge-project-scenes:v2:unsaved'] = JSON.stringify(project);
+
+      const legacy = loadProjectScenes().scenes.find((s) => s.id === 'scene_legacy');
+      expect(legacy?.data?.metadata?.name).toBe('Old Empty');
+      expect(Object.keys(legacy?.data?.metadata ?? {})).not.toContain('projectType');
+    });
+  });
+
   describe('Delete', () => {
     it('deleteScene removes scene by ID', () => {
       const project = createInitialProject();

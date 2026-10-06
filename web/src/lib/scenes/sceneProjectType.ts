@@ -16,11 +16,17 @@
  * template translator writes the key from a template's category. Both read
  * or write the same key the engine does, through this module.
  *
- * MIGRATION RULE (documented in `docs/features/save-load.md`). No key means
- * 3D, at any `formatVersion` — the mode every scene saved before the field
- * existed was always opened in, and the engine's serde default. A value that
- * is not one of the two spellings reads as 3D here; the engine refuses the
- * whole scene for it (an unknown enum variant), so nothing downstream runs.
+ * ABSENCE IS A VALUE OF ITS OWN (documented in `docs/features/save-load.md`).
+ * The engine's field is `Option<ProjectType>`: a file with no key — every
+ * scene saved before the field existed, at any `formatVersion`, and any
+ * producer that stated none — does NOT change the engine's type on load; the
+ * engine keeps whatever the session is in and reports that. So a key-less
+ * scene switched to inside a 2D project keeps 2D, and only a fresh engine,
+ * which starts at 3D, opens it as 3D. The reader mirrors that with `null`,
+ * never `'3d'`: reading absence as 3D is what flipped a 2D project to 3D on
+ * every legacy load (review board round 1 on #10358). A value that is not
+ * one of the two spellings also reads as `null`; the engine refuses the whole
+ * scene for it (an unknown enum variant), so nothing downstream runs.
  *
  * Kept a leaf (no store, no hook imports): `/play` is the public,
  * unauthenticated bundle and must not pull in the editor's engine graph.
@@ -48,11 +54,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Read the project type out of parsed, untrusted scene data.
  * @param sceneData A parsed scene file or project `sceneData` object.
- * @returns `'2d'` when the file says so; `'3d'` for a legacy file with no key,
- *   for anything that is not a scene object, and for any other value.
+ * @returns `'2d'` or `'3d'` when the file states one; `null` when it does not —
+ *   a legacy file with no key, an explicit `null`, anything that is not a
+ *   scene object, or a spelling outside the vocabulary. `null` is the web
+ *   mirror of the engine's `None`: the engine leaves its current type alone
+ *   for such a scene, and a caller that needs a concrete type must decide
+ *   what absence means for ITS path rather than have `'3d'` chosen here.
  */
-export function readProjectTypeFromSceneData(sceneData: unknown): SceneProjectType {
-  if (!isRecord(sceneData) || !isRecord(sceneData.metadata)) return '3d';
+export function readProjectTypeFromSceneData(sceneData: unknown): SceneProjectType | null {
+  if (!isRecord(sceneData) || !isRecord(sceneData.metadata)) return null;
   const raw = sceneData.metadata[SCENE_PROJECT_TYPE_KEY];
-  return isSceneProjectType(raw) ? raw : '3d';
+  return isSceneProjectType(raw) ? raw : null;
 }

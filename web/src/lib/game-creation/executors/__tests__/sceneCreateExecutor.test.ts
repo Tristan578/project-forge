@@ -95,6 +95,19 @@ describe('sceneCreateExecutor', () => {
     );
   });
 
+  it.each(['2d', '3d'] as const)("states the game's dimension (%s) in the new scene (#10227)", async (projectType) => {
+    // The scene is created FOR the planned game, so it carries the GDD's
+    // dimension (`ctx.projectType`), not the store's mirror, which may still
+    // be at its 3D default this early in the pipeline. A 2D game's first
+    // scene is then a 2D scene wherever it is next opened.
+    const ctx = makeCtx({ projectType });
+    const result = await sceneCreateExecutor.execute({ name: 'Opening' }, ctx);
+
+    expect(result.success).toBe(true);
+    const entry = loadProjectScenes().scenes.find((s) => s.name === 'Opening');
+    expect(entry?.data?.metadata?.projectType).toBe(projectType);
+  });
+
   // Through the store, not a raw dispatch: `newScene` also drops scene audio
   // staged by an unconfirmed load, which the SCENE_LOADED this emits would
   // otherwise adopt onto the generated game's entity ids.
