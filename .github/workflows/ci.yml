@@ -2479,8 +2479,9 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/spawnforge_journeys
       E2E_NEON_HTTP_ENDPOINT: http://localhost:4444/sql
     services:
-      # Postgres 17 with pgvector: migration 0000 runs CREATE EXTENSION vector,
-      # which the stock postgres image does not ship. Pinned by digest like
+      # Postgres 17 with pgvector: migration 0010
+      # (web/drizzle/0010_graph_retrieval_nodes_edges.sql) runs CREATE EXTENSION
+      # vector, which the stock postgres image does not ship. Pinned by digest like
       # every action in this file (scripts/check-actions-pinned.sh does not
       # read `image:`, so this pin is held by review).
       postgres:
