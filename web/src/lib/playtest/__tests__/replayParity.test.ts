@@ -230,6 +230,10 @@ describe('manual and AI invocations are the same replay on the engine wire', () 
     expect(manual.outcome.pinHz).toBe(60);
     expect(manual.outcome.ticksReplayed).toBe(TICKS);
     expect(manual.outcome.collectiblesCollected).toBe(1);
+    expect(manual.outcome.assertions.map((a) => [a.operationId, a.passed])).toEqual([
+      ['qa.FR-1.OP-01', true],
+      ['qa.FR-1.OP-03', true],
+    ]);
     // The clock was returned to the wall clock by both.
     expect(manualEngine.getPinnedHz()).toBeNull();
     expect(aiEngine.getPinnedHz()).toBeNull();
@@ -251,6 +255,12 @@ describe('manual and AI invocations are the same replay on the engine wire', () 
     expect(manual.outcome.movedDistance).toBe(0);
     expect(manual.outcome.collectiblesCollected).toBe(0);
     expect(manual.outcome.pinned).toBe(true);
+    // Both assertions fail on their own, on both paths — not just the verdict
+    // they are AND-ed into.
+    expect(manual.outcome.assertions.map((a) => [a.operationId, a.passed])).toEqual([
+      ['qa.FR-1.OP-01', false],
+      ['qa.FR-1.OP-03', false],
+    ]);
     expect(manualEngine.keyLog).toEqual([]);
     expect(aiEngine.keyLog).toEqual([]);
     expect(aiEngine.commandLog).toEqual(manualEngine.commandLog);

@@ -190,6 +190,8 @@ describe('startReplay — the clock is pinned before the first tick', () => {
     expect(engine.log.filter((l) => l === 'unpin')).toHaveLength(1);
     expect(result.outcome.verdict).toBe('passed');
     expect(result.outcome.ticksReplayed).toBe(TICKS);
+    const byOp = Object.fromEntries(result.outcome.assertions.map((a) => [a.operationId, a.passed]));
+    expect(byOp).toEqual({ 'qa.FR-1.OP-01': true, 'qa.FR-1.OP-03': true });
   });
 
   it('honours an explicit pin rate', async () => {
@@ -456,6 +458,12 @@ describe('startReplay — the issue\'s own negative (dead input)', () => {
     expect(result.outcome.movedDistance).toBe(0);
     expect(result.outcome.collectiblesCollected).toBe(0);
     expect(engine.pressLog).toEqual([]);
+    // Each assertion must fail ON ITS OWN. The verdict is the AND of the two,
+    // so a verdict-only check would still pass if the move predicate were
+    // rewritten to `true` and only the collectible check failed — a mutation
+    // probe found exactly that gap.
+    const byOp = Object.fromEntries(result.outcome.assertions.map((a) => [a.operationId, a.passed]));
+    expect(byOp).toEqual({ 'qa.FR-1.OP-01': false, 'qa.FR-1.OP-03': false });
   });
 
   it('the pause boundary is a tick count, so dead input still pauses at tick 60', async () => {
