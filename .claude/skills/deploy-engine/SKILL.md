@@ -11,7 +11,7 @@ Build both WASM variants and upload to the `spawnforge-engine` R2 bucket.
 ## Steps
 
 1. **Build WASM** — `bash "${CLAUDE_SKILL_DIR}/scripts/build-and-upload.sh"`
-2. **Verify** — curl `https://engine.spawnforge.ai/engine-pkg-webgl2/spawnforge_engine_bg.wasm` returns 200
+2. **Verify** — curl `https://engine.spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm` returns 200 (the filename `build_wasm.ps1` produces)
 
 ## Prerequisites
 - Rust stable + `wasm32-unknown-unknown` target

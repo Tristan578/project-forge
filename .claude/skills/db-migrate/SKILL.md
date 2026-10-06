@@ -14,7 +14,7 @@ Safe database schema changes for SpawnForge (Drizzle ORM + Neon Postgres).
 ## Before ANY Schema Change
 
 1. Read the current schema: `web/src/lib/db/schema.ts`
-2. Read lessons learned — FK constraint bugs have caused real incidents (PF-976, PF-974)
+2. FK cascade gaps have caused real incidents (PF-976, PF-974) — work through the FK Cascade Checklist below
 3. Identify ALL tables that reference the table being modified
 
 ## Actions
@@ -75,7 +75,7 @@ Use only for local development. Never in production.
 ### `migrate` (production — applies migration files)
 
 ```bash
-cd web && npx drizzle-kit migrate
+cd web && npm run db:migrate   # runs the baseline-journal --guard-migrate check, then scripts/apply-migrations.ts
 ```
 
 ### `status`

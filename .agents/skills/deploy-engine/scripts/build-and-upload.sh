@@ -50,7 +50,7 @@ done
 echo ""
 echo "Verifying CDN..."
 for variant in webgl2 webgpu webgl2-runtime webgpu-runtime; do
-  url="$CDN_URL/engine-pkg-$variant/spawnforge_engine_bg.wasm"
+  url="$CDN_URL/engine-pkg-$variant/forge_engine_bg.wasm"
   status=$(curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
   if [[ "$status" == "200" ]]; then
     echo "  OK: engine-pkg-$variant"

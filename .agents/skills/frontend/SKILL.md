@@ -112,7 +112,7 @@ Every new user must feel guided, not abandoned:
 // Standard inspector structure
 export function MyInspector({ entityId }: { entityId: string }) {
   const data = useEditorStore(s => s.myDataMap[entityId]);
-  const dispatch = useEditorStore(s => s.dispatchCommand);
+  const dispatch = getCommandDispatcher(); // import { getCommandDispatcher } from '@/stores/editorStore'
 
   if (!data) return null;
 
@@ -133,7 +133,7 @@ export interface MySlice {
   setMyData: (entityId: string, data: MyData) => void;
 }
 
-export const createMySlice: StateCreator<EditorStore, [], [], MySlice> = (set) => ({
+export const createMySlice: StateCreator<MySlice, [], [], MySlice> = (set) => ({
   myDataMap: {},
   setMyData: (entityId, data) => set(state => ({
     myDataMap: { ...state.myDataMap, [entityId]: data },
@@ -144,9 +144,8 @@ export const createMySlice: StateCreator<EditorStore, [], [], MySlice> = (set) =
 ## Next.js Constraints
 
 - **Import boundary**: Cannot import outside `web/`. Shared data goes in `web/src/data/`.
-- **MCP manifest**: Source at `mcp-server/manifest/commands.json`, copy at `web/src/data/commands.json` — ALWAYS keep in sync.
+- **MCP manifest**: Source at `mcp-server/manifest/commands.json`, copies at `web/src/data/commands.json` and `apps/docs/data/commands.json` — ALWAYS keep all three in sync.
 - **Turbopack**: Default for builds. Dev uses `--webpack` for compatibility.
-- **Root layout**: Has `export const dynamic = "force-dynamic"` for CI without Clerk keys.
 
 ## Validation Tools
 

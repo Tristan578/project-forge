@@ -96,7 +96,7 @@ done
 # ---------------------------------------------------------------------------
 section "Node Version"
 
-REQUIRED_NODE_MAJOR=20
+REQUIRED_NODE_MAJOR=24
 NODE_VERSION=$(node --version 2>/dev/null || echo "not-found")
 
 if [ "$NODE_VERSION" = "not-found" ]; then
@@ -106,7 +106,7 @@ else
   if [ "$NODE_MAJOR" -ge "$REQUIRED_NODE_MAJOR" ]; then
     pass "Node ${NODE_VERSION} (>= ${REQUIRED_NODE_MAJOR}.x required)"
     if [ "$NODE_MAJOR" -ge 25 ]; then
-      warn "Node ${NODE_VERSION} — Node 25.x has intermittent V8 JIT segfaults. Prefer Node 20.x LTS."
+      warn "Node ${NODE_VERSION} — outside the supported range (engines: >=24.15 <25, .nvmrc 24). Use Node 24."
     fi
   else
     fail "Node ${NODE_VERSION} is too old — upgrade to Node ${REQUIRED_NODE_MAJOR}.x or later"
