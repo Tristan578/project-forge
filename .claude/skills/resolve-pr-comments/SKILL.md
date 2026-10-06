@@ -27,13 +27,16 @@ PR_BRANCH=$(gh pr view "$PR" --json headRefName --jq .headRefName)
 
 # 2. Use a dedicated worktree for the PR branch. Never stash or switch the checkout
 #    you are in — it may hold someone else's uncommitted work. Reuse the branch's
-#    worktree if one exists; otherwise add one next to the main checkout (never nested).
-git fetch origin "$PR_BRANCH"
+#    worktree if one exists; otherwise add one next to the main checkout (never nested)
+#    and let `gh pr checkout` fetch the head. That also works for a PR from a fork,
+#    whose branch does not exist on origin.
 MAIN_ROOT=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
 WT=$(git worktree list --porcelain | awk -v b="branch refs/heads/$PR_BRANCH" '/^worktree /{p=substr($0,10)} $0==b{print p}')
 if [ -z "$WT" ]; then
   WT="$MAIN_ROOT/.worktrees/pr-$PR"
-  git worktree add "$WT" "$PR_BRANCH"
+  git fetch origin
+  git worktree add --detach "$WT" origin/HEAD
+  (cd "$WT" && gh pr checkout "$PR")
 fi
 
 # 3. Work from that worktree for every later step
@@ -69,13 +72,14 @@ gh api "repos/$REPO/pulls/$PR/comments" --paginate \
 # (Sentry, Copilot, and human reviewers alike)
 import json, subprocess
 result = subprocess.run(
-    ['gh', 'api', f'repos/{REPO}/pulls/{PR}/comments', '--paginate'],
-    capture_output=True, text=True
+    ['gh', 'api', f'repos/{REPO}/pulls/{PR}/comments', '--paginate', '--slurp'],
+    capture_output=True, text=True, encoding='utf-8'
 )
-comments = json.loads(result.stdout)
+# --slurp returns one array of pages; flatten so replies on later pages count.
+comments = [c for page in json.loads(result.stdout) for c in page]
 author = subprocess.run(
     ['gh', 'pr', 'view', str(PR), '--json', 'author', '--jq', '.author.login'],
-    capture_output=True, text=True
+    capture_output=True, text=True, encoding='utf-8'
 ).stdout.strip()
 replied_to = {c['in_reply_to_id'] for c in comments if c.get('in_reply_to_id')}
 unreplied = [c for c in comments
@@ -145,12 +149,12 @@ After replying to every comment, verify:
 python3 -c "
 import json, subprocess
 result = subprocess.run(
-    ['gh', 'api', 'repos/$REPO/pulls/$PR/comments', '--paginate'],
-    capture_output=True, text=True)
-comments = json.loads(result.stdout)
+    ['gh', 'api', 'repos/$REPO/pulls/$PR/comments', '--paginate', '--slurp'],
+    capture_output=True, text=True, encoding='utf-8')
+comments = [c for page in json.loads(result.stdout) for c in page]
 author = subprocess.run(
     ['gh', 'pr', 'view', '$PR', '--json', 'author', '--jq', '.author.login'],
-    capture_output=True, text=True).stdout.strip()
+    capture_output=True, text=True, encoding='utf-8').stdout.strip()
 replied_to = {c['in_reply_to_id'] for c in comments if c.get('in_reply_to_id')}
 unreplied = [c for c in comments
              if not c.get('in_reply_to_id')
@@ -225,7 +229,7 @@ a commit SHA with an action verb ("Fixed in `abc1234`") or a GitHub issue number
 ## Anti-Patterns (What Went Wrong Before)
 
 1. **Only posting a summary comment without thread replies** — User has no way to see which specific comment was addressed without clicking through each thread
-2. **Not paginating** — PRs with 30+ comments lose the second page. ALWAYS use `--paginate`
+2. **Not paginating** — PRs with 30+ comments lose the second page. ALWAYS use `--paginate`, and add `--slurp` whenever the output is parsed as one JSON document (without it each page prints as a separate array, and `--jq` runs per page)
 3. **Counting wrong** — There may be multiple rounds of bot comments (Sentry/Copilot re-review on each push). Count ALL bot comments, not just the first batch
 4. **Replying to stale code** — The diff hunk in the comment is from when it was posted. Always read the CURRENT file before replying
 5. **Assuming prior replies covered everything** — New push = new bot comments. Check AFTER every push

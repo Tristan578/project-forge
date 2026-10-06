@@ -21,7 +21,11 @@ OPEN_PRS=$(gh pr list --repo "$REPO" --state open --json number --jq '.[].number
 # (same filter as /resolve-pr-comments Step 2)
 for PR in $OPEN_PRS; do
   AUTHOR=$(gh pr view "$PR" --repo "$REPO" --json author --jq .author.login)
-  UNREPLIED=$(AUTHOR="$AUTHOR" gh api "repos/$REPO/pulls/$PR/comments" --paginate --jq '
+  # --slurp collects every page into one array of pages; `add` flattens them.
+  # (--jq would run once PER PAGE, and a reply on page 2 must still count
+  # against its parent on page 1.)
+  UNREPLIED=$(gh api "repos/$REPO/pulls/$PR/comments" --paginate --slurp | AUTHOR="$AUTHOR" jq '
+    add // [] |
     [.[] | {id, user: .user.login, in_reply_to_id}] |
     [.[].in_reply_to_id // empty] as $replied |
     [.[] | select(.in_reply_to_id == null and .user != env.AUTHOR) | select(.id | IN($replied[]) | not)] |

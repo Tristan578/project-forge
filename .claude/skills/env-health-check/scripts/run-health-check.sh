@@ -96,20 +96,20 @@ done
 # ---------------------------------------------------------------------------
 section "Node Version"
 
-REQUIRED_NODE_MAJOR=24
+# Mirrors package.json "engines": ">=24.15 <25".
+NODE_MIN_MAJOR=24
+NODE_MIN_MINOR=15
 NODE_VERSION=$(node --version 2>/dev/null || echo "not-found")
 
 if [ "$NODE_VERSION" = "not-found" ]; then
-  fail "Node.js not found — install Node.js ${REQUIRED_NODE_MAJOR}.x"
+  fail "Node.js not found — install Node.js ${NODE_MIN_MAJOR}.x (>= ${NODE_MIN_MAJOR}.${NODE_MIN_MINOR})"
 else
   NODE_MAJOR=$(echo "$NODE_VERSION" | sed 's/v//' | cut -d'.' -f1)
-  if [ "$NODE_MAJOR" -ge "$REQUIRED_NODE_MAJOR" ]; then
-    pass "Node ${NODE_VERSION} (>= ${REQUIRED_NODE_MAJOR}.x required)"
-    if [ "$NODE_MAJOR" -ge 25 ]; then
-      warn "Node ${NODE_VERSION} — outside the supported range (engines: >=24.15 <25, .nvmrc 24). Use Node 24."
-    fi
+  NODE_MINOR=$(echo "$NODE_VERSION" | sed 's/v//' | cut -d'.' -f2)
+  if [ "$NODE_MAJOR" -eq "$NODE_MIN_MAJOR" ] && [ "$NODE_MINOR" -ge "$NODE_MIN_MINOR" ]; then
+    pass "Node ${NODE_VERSION} (engines: >=${NODE_MIN_MAJOR}.${NODE_MIN_MINOR} <$((NODE_MIN_MAJOR + 1)))"
   else
-    fail "Node ${NODE_VERSION} is too old — upgrade to Node ${REQUIRED_NODE_MAJOR}.x or later"
+    fail "Node ${NODE_VERSION} is outside the supported range (engines: >=${NODE_MIN_MAJOR}.${NODE_MIN_MINOR} <$((NODE_MIN_MAJOR + 1)), .nvmrc ${NODE_MIN_MAJOR}). Use Node ${NODE_MIN_MAJOR}."
   fi
 fi
 

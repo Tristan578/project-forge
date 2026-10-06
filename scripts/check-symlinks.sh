@@ -20,6 +20,10 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 }
 cd "$root" || exit 2
 real_root="$(pwd -P)"
+command -v realpath >/dev/null 2>&1 || {
+  echo "check-symlinks: realpath is required (coreutils; macOS 13+ ships it)" >&2
+  exit 2
+}
 
 total=0
 stubs=()
