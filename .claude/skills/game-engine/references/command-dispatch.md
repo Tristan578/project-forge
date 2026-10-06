@@ -83,9 +83,9 @@ fn handle_my_new_command(payload: serde_json::Value) -> super::CommandResult {
 }
 ```
 
-### 2. Add the MCP manifest entry (BOTH locations)
+### 2. Add the MCP manifest entry (all three copies)
 
-`mcp-server/manifest/commands.json` AND `web/src/data/commands.json` (keep in sync):
+Edit `mcp-server/manifest/commands.json` (source), then copy it to `web/src/data/commands.json` AND `apps/docs/data/commands.json`:
 
 ```json
 {
@@ -93,38 +93,38 @@ fn handle_my_new_command(payload: serde_json::Value) -> super::CommandResult {
   "category": "my_domain",
   "description": "What this does, what params affect, valid ranges.",
   "visibility": "public",
-  "parameters": [
-    {
-      "name": "entityId",
-      "type": "string",
-      "required": true,
-      "description": "ID of the target entity"
-    },
-    {
-      "name": "intensity",
-      "type": "number",
-      "required": false,
-      "default": 1.0,
-      "description": "Effect intensity (0.0–1.0)"
+  "parameters": {
+    "type": "object",
+    "required": ["entityId"],
+    "properties": {
+      "entityId": { "type": "string", "description": "ID of the target entity" },
+      "intensity": {
+        "type": "number",
+        "default": 1.0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "description": "Effect intensity (0.0–1.0)"
+      }
     }
-  ]
+  }
 }
 ```
 
 ### 3. Add the chat handler (web/src/lib/chat/handlers/<domain>Handlers.ts)
 
 ```typescript
+// parseArgs(zodSchema, args) and zEntityId come from './types'
 my_new_command: async (args, { dispatchCommand }) => {
-  const parsed = parseArgs(args, {
-    entityId: { type: 'string', required: true },
-    intensity: { type: 'number', required: false, default: 1.0 },
-  });
-  if (!parsed.success) return parsed;
+  const p = parseArgs(
+    z.object({ entityId: zEntityId, intensity: z.number().default(1.0) }),
+    args,
+  );
+  if (p.error) return p.error;
 
-  dispatchCommand('my_new_command', parsed.data);
+  dispatchCommand('my_new_command', p.data);
   return {
     success: true,
-    message: `Applied my_new_command to ${parsed.data.entityId} at intensity ${parsed.data.intensity}`,
+    message: `Applied my_new_command to ${p.data.entityId} at intensity ${p.data.intensity}`,
   };
 },
 ```

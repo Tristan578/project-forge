@@ -101,8 +101,8 @@ Use this template when adding any new ECS component to SpawnForge. Copy and fill
   - [ ] Description is specific (ranges, units, side effects — not just the name)
   - [ ] All parameters documented
 
-- [ ] **`web/src/data/commands.json`**
-  - [ ] IDENTICAL copy of manifest entries (sync with mcp-server/manifest/commands.json)
+- [ ] **`web/src/data/commands.json`** and **`apps/docs/data/commands.json`**
+  - [ ] IDENTICAL copies of mcp-server/manifest/commands.json (`bash .claude/tools/validate-mcp.sh sync`)
 
 - [ ] **`TESTING.md`**
   - [ ] Manual test cases added

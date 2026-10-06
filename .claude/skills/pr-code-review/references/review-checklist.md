@@ -6,10 +6,10 @@ Use this for every code review. Each section must be explicitly checked — do n
 
 ## Architecture
 
-- [ ] No imports outside `web/` in Next.js code (production builds hard-fail)
+- [ ] No imports outside `web/` in Next.js code except `@spawnforge/ui` via `transpilePackages` (production builds hard-fail)
 - [ ] Bridge isolation maintained: `engine/src/core/` has zero `web_sys`/`js_sys`/`wasm_bindgen` imports
-- [ ] New ECS components registered in all 8 required locations (see component checklist in CLAUDE.md)
-- [ ] `mcp-server/manifest/commands.json` and `web/src/data/commands.json` are in sync (run `scripts/check-manifest-sync.ts`)
+- [ ] New ECS components registered in every required location (see `/component-checklist`)
+- [ ] `mcp-server/manifest/commands.json`, `web/src/data/commands.json` and `apps/docs/data/commands.json` are identical (`npm run check:manifest-sync` / `bash .claude/tools/validate-mcp.sh sync`)
 - [ ] No `db.transaction()` usage with neon-http driver (use `getNeonSql()` → `neonSql.transaction([...])`)
 - [ ] No `auth()` directly in Server Components (use `safeAuth()` from `@/lib/auth/safe-auth.ts`)
 - [ ] New panels inserted correctly in `panelRegistry.ts` (read 10 lines before AND after insertion point)
@@ -30,7 +30,7 @@ Use this for every code review. Each section must be explicitly checked — do n
 - [ ] TypeScript `strict` mode compliant — no `@ts-ignore`, prefer `@ts-expect-error` with comment
 - [ ] New functions exported from their module's index if they are public API
 - [ ] Error messages are actionable (say what went wrong AND what to do)
-- [ ] No hardcoded magic numbers — use named constants from `web/src/lib/constants/`
+- [ ] No hardcoded magic numbers — use named constants (e.g. `web/src/lib/config/`)
 
 ## UX / Frontend
 

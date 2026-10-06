@@ -25,15 +25,20 @@ REPO="Tristan578/project-forge"
 # 1. Get the PR's head branch name
 PR_BRANCH=$(gh pr view "$PR" --json headRefName --jq .headRefName)
 
-# 2. Get current branch
-CURRENT_BRANCH=$(git branch --show-current)
-
-# 3. Switch if needed
-if [ "$CURRENT_BRANCH" != "$PR_BRANCH" ]; then
-  git stash --include-untracked 2>/dev/null || true
-  git checkout "$PR_BRANCH"
-  git pull --ff-only origin "$PR_BRANCH" 2>/dev/null || true
+# 2. Use a dedicated worktree for the PR branch. Never stash or switch the checkout
+#    you are in — it may hold someone else's uncommitted work. Reuse the branch's
+#    worktree if one exists; otherwise add one next to the main checkout (never nested).
+git fetch origin "$PR_BRANCH"
+MAIN_ROOT=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+WT=$(git worktree list --porcelain | awk -v b="branch refs/heads/$PR_BRANCH" '/^worktree /{p=substr($0,10)} $0==b{print p}')
+if [ -z "$WT" ]; then
+  WT="$MAIN_ROOT/.worktrees/pr-$PR"
+  git worktree add "$WT" "$PR_BRANCH"
 fi
+
+# 3. Work from that worktree for every later step
+cd "$WT"
+git pull --ff-only origin "$PR_BRANCH"
 
 # 4. VERIFY — print both and confirm they match
 echo "PR branch:      $PR_BRANCH"
@@ -57,19 +62,25 @@ gh api "repos/$REPO/pulls/$PR/comments" --paginate \
   --jq '.[] | {id, user: .user.login, path, line: (.line // .original_line), body: (.body | split("\n")[0:3] | join(" | ")), in_reply_to_id}'
 ```
 
-## Step 2: Identify Unreplied Bot Comments
+## Step 2: Identify Unreplied Review Comments
 
 ```python
-# Build replied-to set, find unreplied bot comments
+# Build replied-to set, find unreplied top-level comments from anyone but the PR author
+# (Sentry, Copilot, and human reviewers alike)
 import json, subprocess
 result = subprocess.run(
     ['gh', 'api', f'repos/{REPO}/pulls/{PR}/comments', '--paginate'],
     capture_output=True, text=True
 )
 comments = json.loads(result.stdout)
+author = subprocess.run(
+    ['gh', 'pr', 'view', str(PR), '--json', 'author', '--jq', '.author.login'],
+    capture_output=True, text=True
+).stdout.strip()
 replied_to = {c['in_reply_to_id'] for c in comments if c.get('in_reply_to_id')}
 unreplied = [c for c in comments
-             if c['user']['login'] in ('sentry[bot]', 'Copilot')
+             if not c.get('in_reply_to_id')
+             and c['user']['login'] != author
              and c['id'] not in replied_to]
 ```
 
@@ -130,16 +141,20 @@ This threads the reply under the original comment in GitHub's UI.
 After replying to every comment, verify:
 
 ```bash
-# Re-fetch and check for any remaining unreplied bot comments
+# Re-fetch and check for any remaining unreplied review comments (same filter as Step 2)
 python3 -c "
 import json, subprocess
 result = subprocess.run(
     ['gh', 'api', 'repos/$REPO/pulls/$PR/comments', '--paginate'],
     capture_output=True, text=True)
 comments = json.loads(result.stdout)
+author = subprocess.run(
+    ['gh', 'pr', 'view', '$PR', '--json', 'author', '--jq', '.author.login'],
+    capture_output=True, text=True).stdout.strip()
 replied_to = {c['in_reply_to_id'] for c in comments if c.get('in_reply_to_id')}
 unreplied = [c for c in comments
-             if c['user']['login'] in ('sentry[bot]', 'Copilot')
+             if not c.get('in_reply_to_id')
+             and c['user']['login'] != author
              and c['id'] not in replied_to]
 print(f'{len(unreplied)} unreplied comments remaining')
 for u in unreplied:

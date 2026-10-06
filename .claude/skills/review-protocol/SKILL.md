@@ -79,28 +79,28 @@ Until a verdict exists for the current head the status is `pending`, on purpose:
 
 - Never substitute a single generic reviewer for the 5 specialized agents
 - If concurrency is limited, dispatch in batches of 3 then 2 — all 5 MUST review
-- Each reviewer dispatched as a separate background agent
+- Run the board via `.claude/workflows/review-board.js`, which dispatches each seat as its own agent and publishes the verdict
 - For CI/CD/infra changes: **6 reviewers** — add `infra-devops`
 - For documentation changes: add `docs-guardian` (PASS/FAIL only)
 
 ## Agent Inventory (`.claude/agents/`)
 
-All agents have: `memory`, `effort`, `model`, `tools`, `skills`, and agent-scoped `hooks` in frontmatter.
+All agents have: `model` (alias), `effort`, `memory`, `skills`, and agent-scoped `hooks` in frontmatter.
 
 | Agent | Key Config | Trigger |
 |-------|-----------|---------|
 | `builder` | `isolation: worktree`, `memory: user` | Implementation tasks |
 | `validator` | `mcpServers: playwright` | QA gate, validation suite |
 | `planner` | `model: opus`, `memory: user` | Architecture, specs |
-| `docs-guardian` | `background: true`, read-only | Doc review (PASS/FAIL) |
-| `dx-guardian` | `background: true`, `model: haiku` | DX audits |
-| `security-reviewer` | `background: true`, read-only | Security audits |
+| `docs-guardian` | `model: haiku`, read-only | Doc review (PASS/FAIL) |
+| `dx-guardian` | `model: haiku`, read-only | DX audits |
+| `security-reviewer` | read-only | Security audits |
 | `test-writer` | `memory: project`, writes + commits | Vitest + RTL tests (builder, NOT a reviewer) |
 | `test-reviewer` | read-only, `block-writes.sh` | Test seat on the review board (PASS/FAIL) |
 | `infra-devops` | `mcpServers: github` | Deploy, CI/CD |
-| `ux-reviewer` | `background: true`, `mcpServers: playwright` | UX/a11y |
+| `ux-reviewer` | read-only, `mcpServers: playwright` | UX/a11y |
 | `docs-maintainer` | `memory: project` | Documentation |
 | `rust-engine` | `mcpServers: context7` | Bevy ECS, WASM |
 
-**All 5 reviewers** have: `background: true`, read-only tools, Stop hook validates PASS/FAIL, PreToolUse blocks writes.
+**All 5 reviewers** have: read-only tools, Stop hook validates PASS/FAIL, PreToolUse blocks writes.
 **Agent teams:** Enabled via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in settings.json.
