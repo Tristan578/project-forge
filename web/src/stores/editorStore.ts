@@ -216,9 +216,21 @@ const REJECTED_ACTION_LABELS: Readonly<Record<string, string>> = {
   delete_entity: 'delete the entity',
 };
 
-function rejectedActionMessage(command: string): string {
+/**
+ * The user-facing sentence for a command that did not go through.
+ *
+ * `threw` is the dispatcher reporting a CAUGHT throw from the engine call,
+ * not a refusal: the engine may already have acted, and for a scene command
+ * the store then shows "due to an engine error … reload" (#10202). Saying
+ * "rejected the change" right before that toast would contradict it, so the
+ * wording branches here while the console line and the Sentry report below
+ * carry the raw engine text unchanged either way (#10202 review, m4).
+ */
+function rejectedActionMessage(command: string, threw: boolean): string {
   const action = REJECTED_ACTION_LABELS[command] ?? 'complete that action';
-  return `Couldn't ${action}. The engine rejected the change.`;
+  return threw
+    ? `Couldn't ${action}. The engine ran into an error.`
+    : `Couldn't ${action}. The engine rejected the change.`;
 }
 
 /**
@@ -232,8 +244,10 @@ function rejectedActionMessage(command: string): string {
  * without touching a single caller.
  *
  * Monitoring must never break dispatch, so every step is guarded.
+ * @param threw Whether the answer was a caught throw (`CommandResponse.threw`)
+ *   rather than a refusal; only the notification wording reads it.
  */
-function reportCommandRejected(command: string, error: string | undefined): void {
+function reportCommandRejected(command: string, error: string | undefined, threw = false): void {
   const engineError = error ?? 'no error message';
   console.error(`Engine rejected command '${command}': ${engineError}`);
 
@@ -243,7 +257,7 @@ function reportCommandRejected(command: string, error: string | undefined): void
     try {
       // Product wording only: neither the internal command vocabulary nor the
       // raw engine error belongs in a user-visible notification.
-      showError(rejectedActionMessage(command));
+      showError(rejectedActionMessage(command, threw));
     } catch {
       /* notifications are best-effort — never let them break dispatch */
     }
@@ -357,7 +371,7 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
     // returns nothing (every test double, and any pre-PF-1098 caller) is not
     // reporting failure, and must not be treated as if it were.
     if (response && response.success === false) {
-      reportCommandRejected(command, response.error);
+      reportCommandRejected(command, response.error, response.threw === true);
     } else {
       observeCaptureCommand(command);
     }

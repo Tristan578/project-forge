@@ -143,6 +143,41 @@ describe('engine command rejection reporting', () => {
     expect(message).not.toContain('Not yet implemented');
   });
 
+  // #10202 review, m4: a `threw: true` answer is the dispatcher reporting a
+  // CAUGHT throw, not a refusal (the engine may already have acted). For a
+  // scene command the store then toasts "due to an engine error … reload",
+  // so this toast must not say "rejected the change" right before it — the
+  // two surfaces have to agree. The console line and the Sentry report are
+  // unchanged: they carry the raw engine text either way.
+  it('says the engine ran into an error, not that it rejected the change, for a threw: true answer', async () => {
+    const { store, notifications, sentry } = await loadStore();
+    store.setCommandDispatcher(() => ({ success: false, error: 'JsValue("serialize failed")', threw: true }));
+
+    store.getCommandDispatcher()?.('load_scene', { json: '{}' });
+
+    expect(notifications.showError).toHaveBeenCalledExactlyOnceWith(
+      "Couldn't load the scene. The engine ran into an error.",
+    );
+    expect(notifications.showError).not.toHaveBeenCalledWith(expect.stringContaining('rejected'));
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('JsValue("serialize failed")'));
+    expect(sentry.captureException).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sentry.captureException).mock.calls[0][1]).toEqual({
+      command: 'load_scene',
+      engineError: 'JsValue("serialize failed")',
+    });
+  });
+
+  it('control: a clean refusal of the same command still says the engine rejected the change', async () => {
+    const { store, notifications } = await loadStore();
+    store.setCommandDispatcher(() => ({ success: false, error: 'Scene JSON too large' }));
+
+    store.getCommandDispatcher()?.('load_scene', { json: '{}' });
+
+    expect(notifications.showError).toHaveBeenCalledExactlyOnceWith(
+      "Couldn't load the scene. The engine rejected the change.",
+    );
+  });
+
   it('uses safe generic wording for an unmapped internal command', async () => {
     const { store, notifications } = await loadStore();
     store.setCommandDispatcher(() => ({ success: false, error: 'secret diagnostic' }));
