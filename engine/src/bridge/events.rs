@@ -1055,6 +1055,23 @@ pub fn emit_reverb_zone_removed(entity_id: &str) {
     emit_event("REVERB_ZONE_REMOVED", &ReverbZoneRemovedPayload { entity_id });
 }
 
+/// Emit the project's dimension after `apply_project_type_changes` processed a
+/// request (#10227). Flat payload, `{ projectType: "2d" | "3d" }` — the same
+/// spelling as the `set_project_type` command and the web store, so
+/// `spriteSlice.projectType` can take it verbatim.
+pub fn emit_project_type_changed(project_type: crate::core::project_type::ProjectType) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ProjectTypePayload<'a> {
+        project_type: &'a str,
+    }
+
+    emit_event(
+        "PROJECT_TYPE_CHANGED",
+        &ProjectTypePayload { project_type: project_type.wire_name() },
+    );
+}
+
 /// Emit a camera 2D state changed event.
 pub fn emit_camera_2d_changed(data: &crate::core::camera_2d::Camera2dData) {
     #[derive(Serialize)]

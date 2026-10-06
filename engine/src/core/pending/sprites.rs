@@ -1,12 +1,20 @@
 //! Sprite and 2D camera pending commands.
 
 use super::PendingCommands;
+use crate::core::project_type::ProjectType;
 
 // === Request Structs ===
 
-#[derive(Debug, Clone)]
+/// Switch the engine's `ProjectType` resource (and with it the 2D camera).
+///
+/// Typed, not a string: the `set_project_type` command parses its payload
+/// with `ProjectType::from_wire` and refuses anything else, and `load_scene`
+/// queues the scene file's own `metadata.projectType` (#10227). Nothing
+/// unrecognised can reach `apply_project_type_changes`, so the system has no
+/// branch that drops a request on the floor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetProjectTypeRequest {
-    pub project_type: String,
+    pub project_type: ProjectType,
 }
 
 #[derive(Debug, Clone)]

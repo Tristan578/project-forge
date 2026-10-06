@@ -1,14 +1,21 @@
 //! 2D sprite and skeleton command handlers.
 
 use crate::core::pending_commands::*;
+use crate::core::project_type::ProjectType;
 
 /// Handle set_project_type command.
 /// Payload: { projectType: "2d" | "3d" }
+///
+/// Any other spelling is refused HERE. The handler used to queue whatever
+/// string arrived and `apply_project_type_changes` dropped the ones it did not
+/// recognise with a silent `continue`, so `{ projectType: "2D" }` answered
+/// `Ok` and changed nothing (#10227).
 fn handle_set_project_type(payload: serde_json::Value) -> super::CommandResult {
-    let project_type = payload.get("projectType")
+    let spelling = payload.get("projectType")
         .and_then(|v| v.as_str())
-        .ok_or("Missing projectType")?
-        .to_string();
+        .ok_or("Missing projectType")?;
+    let project_type = ProjectType::from_wire(spelling)
+        .ok_or_else(|| format!("projectType must be \"2d\" or \"3d\", got {spelling:?}"))?;
 
     if queue_set_project_type_from_bridge(SetProjectTypeRequest { project_type }) {
         Ok(())
@@ -1352,6 +1359,51 @@ fn handle_set_grid_2d(payload: serde_json::Value) -> super::CommandResult {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+#[cfg(test)]
+mod set_project_type_tests {
+    use super::dispatch;
+    use serde_json::json;
+
+    fn run(payload: serde_json::Value) -> Result<(), String> {
+        dispatch("set_project_type", &payload).expect("set_project_type must be routed")
+    }
+
+    #[test]
+    fn a_known_type_reaches_the_queue() {
+        // Under native test no `PendingCommands` is registered, so reaching
+        // the queue answers with that error — which is the proof the payload
+        // was accepted and nothing refused it earlier.
+        for spelling in ["2d", "3d"] {
+            assert_eq!(
+                run(json!({ "projectType": spelling })).expect_err("queue is absent in this test"),
+                "PendingCommands resource not initialized",
+                "{spelling}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_type_is_refused_before_queueing() {
+        assert_eq!(run(json!({})).expect_err("missing key"), "Missing projectType");
+        assert_eq!(run(json!({ "projectType": 2 })).expect_err("wrong JSON type"), "Missing projectType");
+    }
+
+    #[test]
+    fn an_unknown_spelling_is_refused_instead_of_being_silently_dropped() {
+        // #10227 (Boy Scout): the handler used to queue ANY string and the
+        // system dropped the ones it did not recognise with `continue`, so
+        // `{ projectType: "2D" }` answered `Ok` and changed nothing. The AI
+        // handler's zod schema and the MCP manifest both promise `2d | 3d`;
+        // the engine now holds the same line.
+        for bad in ["2D", "3D", "TwoD", "twod", ""] {
+            let error = run(json!({ "projectType": bad })).expect_err(bad);
+            assert!(error.contains("projectType must be \"2d\" or \"3d\""), "{bad:?}: {error}");
+            assert!(error.contains(bad), "the refusal names the value it refused: {error}");
+            assert!(!error.contains("not initialized"), "{bad:?} reached the queue: {error}");
+        }
     }
 }
 

@@ -14,6 +14,7 @@ use super::environment::EnvironmentSettings;
 use super::history::EntitySnapshot;
 use super::input::InputMap;
 use super::post_processing::PostProcessingSettings;
+use super::project_type::ProjectType;
 
 /// Maximum serialized scene size accepted by both preflight and load.
 pub const MAX_SCENE_JSON_BYTES: usize = 50 * 1024 * 1024;
@@ -57,7 +58,7 @@ pub struct SceneFile {
     pub custom_wgsl_source: Option<CustomWgslSource>,
 }
 
-/// Scene metadata (name, timestamps).
+/// Scene metadata (name, timestamps, project dimension).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneMetadata {
@@ -66,6 +67,23 @@ pub struct SceneMetadata {
     pub created_at: String,
     #[serde(default)]
     pub modified_at: String,
+    /// The project's dimension, `"2d"` or `"3d"` (#10227).
+    ///
+    /// Written from the engine's `ProjectType` resource on export and queued
+    /// back into it on load, so the 2D camera a 2D game's sprites render
+    /// through comes back with the scene — through save, publication
+    /// snapshots, the R2 bundle, remix, fork and export alike. Before this
+    /// field the resource was set only by the live `set_project_type` command,
+    /// and a reopened or published 2D game started in the default 3D mode with
+    /// nothing visible.
+    ///
+    /// `#[serde(default)]` so every scene saved before the field existed still
+    /// loads, as 3D: that is the mode those scenes were always opened in. No
+    /// `format_version` bump, for the same reason `completionMode` has none —
+    /// a bump is refused by every engine already deployed, and an optional
+    /// key's absence IS the legacy case.
+    #[serde(default)]
+    pub project_type: ProjectType,
 }
 
 /// Serializable representation of Bevy's AmbientLight.
@@ -104,8 +122,13 @@ impl Default for SceneName {
 // ---------------------------------------------------------------------------
 
 /// Build a `SceneFile` from pre-collected data.
+///
+/// `project_type` is the engine's live `ProjectType` resource: the export
+/// system passes it so the file records the dimension the scene was authored
+/// in (#10227), never a default.
 pub fn build_scene_file(
     scene_name: &str,
+    project_type: ProjectType,
     env: &EnvironmentSettings,
     ambient: &GlobalAmbientLight,
     input_map: &InputMap,
@@ -122,6 +145,7 @@ pub fn build_scene_file(
             name: scene_name.to_string(),
             created_at: String::new(),
             modified_at: String::new(),
+            project_type,
         },
         environment: env.clone(),
         ambient_light: AmbientLightData {
@@ -221,6 +245,7 @@ pub fn parse_scene_file(json: &str) -> Result<SceneFile, String> {
 pub(crate) fn test_scene_json() -> String {
     serde_json::to_string(&build_scene_file(
         "Recovery",
+        ProjectType::default(),
         &EnvironmentSettings::default(),
         &GlobalAmbientLight::default(),
         &InputMap::default(),
@@ -345,6 +370,7 @@ mod validation_tests {
             snapshot.material_data = Some(material);
             build_scene_file(
                 "Recovery",
+                ProjectType::default(),
                 &EnvironmentSettings::default(),
                 &GlobalAmbientLight::default(),
                 &InputMap::default(),
@@ -483,6 +509,7 @@ mod validation_tests {
             snapshot.material_data = Some(material);
             build_scene_file(
                 "Recovery",
+                ProjectType::default(),
                 &EnvironmentSettings::default(),
                 &GlobalAmbientLight::default(),
                 &InputMap::default(),
@@ -602,6 +629,7 @@ mod validation_tests {
 
             let scene_file = build_scene_file(
                 "Recovery",
+                ProjectType::default(),
                 &EnvironmentSettings::default(),
                 &GlobalAmbientLight::default(),
                 &InputMap::default(),
@@ -693,6 +721,7 @@ mod animation_round_trip_tests {
         // Save: the same builder and serializer the export path uses.
         let json = serde_json::to_string(&build_scene_file(
             "Animated",
+            ProjectType::default(),
             &EnvironmentSettings::default(),
             &GlobalAmbientLight::default(),
             &InputMap::default(),
@@ -802,5 +831,190 @@ mod animation_round_trip_tests {
         let mut transform = Transform::default();
         probe.sample(&mut transform, None, None);
         assert!((transform.translation.y - 7.5).abs() < 1e-5, "{}", transform.translation.y);
+    }
+}
+
+/// #10227: the project's dimension (`ProjectType`) lives in the scene file, in
+/// `metadata.projectType`, so it rides every path a scene takes — save,
+/// publication snapshot, R2 bundle, remix, fork and export — and `load_scene`
+/// restores it. Before this the resource was set only by the live
+/// `set_project_type` command, so a 2D game reopened or published came back in
+/// the engine's default 3D mode with no 2D camera and invisible sprites.
+#[cfg(test)]
+mod project_type_persistence_tests {
+    use super::*;
+
+    fn scene_json(project_type: ProjectType) -> String {
+        serde_json::to_string(&build_scene_file(
+            "Dimension",
+            project_type,
+            &EnvironmentSettings::default(),
+            &GlobalAmbientLight::default(),
+            &InputMap::default(),
+            HashMap::new(),
+            &PostProcessingSettings::default(),
+            &AudioBusConfig::default(),
+            Vec::new(),
+            None,
+            None,
+        ))
+        .expect("serialize scene")
+    }
+
+    #[test]
+    fn build_scene_file_writes_the_type_into_metadata_and_load_reads_it_back() {
+        for (project_type, spelling) in [(ProjectType::TwoD, "2d"), (ProjectType::ThreeD, "3d")] {
+            let json = scene_json(project_type);
+            // The TEXT, not just the parsed value: the web exporters and the
+            // `/play` page read this key straight out of the JSON.
+            assert!(
+                json.contains(&format!("\"projectType\":\"{spelling}\"")),
+                "{json}"
+            );
+            let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(value["metadata"]["projectType"], spelling, "it lives under metadata");
+            let parsed = parse_scene_file(&json).expect("a scene with a project type must load");
+            assert_eq!(parsed.metadata.project_type, project_type);
+        }
+    }
+
+    #[test]
+    fn a_scene_saved_before_the_field_existed_loads_as_3d() {
+        // Every `.forge` file, publication snapshot and R2 bundle written
+        // before #10227 — the key is simply absent, at every supported
+        // formatVersion. Spelled by REMOVING the key from a real export rather
+        // than hand-writing a file, so the fixture cannot drift from the format.
+        for version in 1..=3 {
+            let mut value: serde_json::Value = serde_json::from_str(&scene_json(ProjectType::TwoD)).unwrap();
+            value["formatVersion"] = version.into();
+            assert!(
+                value["metadata"].as_object_mut().unwrap().remove("projectType").is_some(),
+                "the fixture must have carried the key for its removal to mean anything"
+            );
+            let parsed = parse_scene_file(&value.to_string())
+                .unwrap_or_else(|e| panic!("a legacy scene at version {version} must still load: {e}"));
+            assert_eq!(parsed.metadata.project_type, ProjectType::ThreeD, "version {version}");
+        }
+    }
+
+    #[test]
+    fn the_field_needs_no_format_version_bump() {
+        // An optional key, like `completionMode`: every engine binary already
+        // deployed refuses a formatVersion outside 1..=3, so a bump would make
+        // new saves unreadable until a WASM rebuild shipped. The key is
+        // accepted at every supported version instead.
+        for version in 1..=3 {
+            let mut value: serde_json::Value = serde_json::from_str(&scene_json(ProjectType::TwoD)).unwrap();
+            value["formatVersion"] = version.into();
+            let parsed = parse_scene_file(&value.to_string()).unwrap();
+            assert_eq!(parsed.metadata.project_type, ProjectType::TwoD, "version {version}");
+        }
+        let current: serde_json::Value = serde_json::from_str(&scene_json(ProjectType::TwoD)).unwrap();
+        assert_eq!(current["formatVersion"], 3, "the writer still emits version 3");
+    }
+
+    #[test]
+    fn a_value_outside_the_vocabulary_refuses_the_whole_scene() {
+        // Scene JSON crosses the remix / published-play trust boundary. An
+        // unknown dimension is malformed input, refused with serde's own text
+        // naming the key and the accepted spellings — the same strictness every
+        // other enum in the file (entityType, anchor, …) already has.
+        for bad in ["\"4d\"", "\"2D\"", "\"TwoD\"", "2", "null", "true"] {
+            let json = scene_json(ProjectType::TwoD).replace("\"projectType\":\"2d\"", &format!("\"projectType\":{bad}"));
+            assert!(json.contains(&format!("\"projectType\":{bad}")), "replacement must have happened: {json}");
+            let error = parse_scene_file(&json).expect_err(&format!("projectType {bad} must be refused"));
+            assert!(error.starts_with("Invalid scene file:"), "{error}");
+        }
+    }
+
+    // --- Bridge wiring pins -------------------------------------------------
+    //
+    // The bridge is wasm32-only and cannot be reached by native `cargo test`
+    // (`lib.rs` gates the module), so the two systems that make the field DO
+    // anything are pinned textually, the way `pending/query.rs` pins its
+    // deferred-query systems. Each pin demands an EXECUTABLE occurrence — a
+    // line that is not a comment — inside the one function that must carry it
+    // (lessons-learned #16), and fails closed when it cannot find the function.
+
+    const BRIDGE_SCENE_IO: &str = include_str!("../bridge/scene_io.rs");
+    const BRIDGE_SPRITE: &str = include_str!("../bridge/sprite.rs");
+    const BRIDGE_EVENTS: &str = include_str!("../bridge/events.rs");
+
+    /// The body of `fn <name>(`, from its signature to the first `}` at column
+    /// zero. Panics when the function is not there: a renamed system must fail
+    /// this suite, not pass it vacuously.
+    fn fn_body<'a>(source: &'a str, file: &str, name: &str) -> &'a str {
+        let needle = format!("fn {name}(");
+        let start = source
+            .find(&needle)
+            .unwrap_or_else(|| panic!("{needle} not found in {file}"));
+        let rest = &source[start..];
+        let end = rest
+            .match_indices("\n}\n")
+            .next()
+            .map(|(i, _)| i + 3)
+            .unwrap_or_else(|| panic!("could not delimit {needle} in {file}"));
+        &rest[..end]
+    }
+
+    /// Lines of `body` that are code: not blank, not a `//` comment.
+    fn executable_lines(body: &str) -> impl Iterator<Item = &str> {
+        body.lines()
+            .map(str::trim_start)
+            .filter(|line| !line.is_empty() && !line.starts_with("//"))
+    }
+
+    fn count_executable(body: &str, needle: &str) -> usize {
+        executable_lines(body).filter(|line| line.contains(needle)).count()
+    }
+
+    #[test]
+    fn apply_scene_load_restores_the_saved_type_through_the_project_type_queue() {
+        // The load system is at Bevy's 16-parameter cap, so it cannot take
+        // `ResMut<ProjectType>`; it hands the saved type to the queue
+        // `apply_project_type_changes` already drains — which is also what
+        // creates the 2D camera. Exactly one request, from the parsed file.
+        let body = fn_body(BRIDGE_SCENE_IO, "bridge/scene_io.rs", "apply_scene_load");
+        assert_eq!(count_executable(body, "queue_set_project_type("), 1, "{body}");
+        assert_eq!(
+            count_executable(body, "scene_file.metadata.project_type"),
+            1,
+            "the request must carry the FILE's type, not a default"
+        );
+    }
+
+    #[test]
+    fn apply_scene_export_writes_the_live_resource_not_a_default() {
+        let body = fn_body(BRIDGE_SCENE_IO, "bridge/scene_io.rs", "apply_scene_export");
+        assert_eq!(count_executable(body, "Res<ProjectType>"), 1, "{body}");
+        assert_eq!(count_executable(body, "*project_type,"), 1, "the resource goes into build_scene_file");
+        assert_eq!(count_executable(body, "ProjectType::default()"), 0);
+        assert_eq!(count_executable(body, "ProjectType::ThreeD"), 0);
+        assert_eq!(count_executable(body, "ProjectType::TwoD"), 0);
+    }
+
+    #[test]
+    fn apply_project_type_changes_reports_every_processed_request_to_the_web_layer() {
+        // `PROJECT_TYPE_CHANGED` is how `spriteSlice.projectType` follows the
+        // engine instead of only the AI handlers (#10227). It is emitted for
+        // every request, changed or not, so a store that drifted (a dispatch
+        // refused before the engine attached) converges on the next load.
+        let body = fn_body(BRIDGE_SPRITE, "bridge/sprite.rs", "apply_project_type_changes");
+        assert_eq!(count_executable(body, "emit_project_type_changed("), 1, "{body}");
+        let emit = fn_body(BRIDGE_EVENTS, "bridge/events.rs", "emit_project_type_changed");
+        assert_eq!(count_executable(emit, "\"PROJECT_TYPE_CHANGED\""), 1, "{emit}");
+        assert_eq!(count_executable(emit, "wire_name()"), 1, "the payload spells the type as the web store does");
+    }
+
+    #[test]
+    fn the_pin_helpers_refuse_a_commented_out_line_and_a_missing_function() {
+        // The extractor is the one place this module can report a false pass,
+        // so it is asserted on a synthetic corpus (lessons-learned #16).
+        let corpus = "fn target(\n) {\n    // queue_set_project_type(gone);\n    live();\n}\n\nfn other() {\n    queue_set_project_type(real);\n}\n";
+        let body = fn_body(corpus, "corpus", "target");
+        assert_eq!(count_executable(body, "queue_set_project_type("), 0);
+        assert_eq!(count_executable(body, "live()"), 1);
+        assert_eq!(count_executable(fn_body(corpus, "corpus", "other"), "queue_set_project_type("), 1);
+        assert!(std::panic::catch_unwind(|| fn_body(corpus, "corpus", "absent")).is_err());
     }
 }
