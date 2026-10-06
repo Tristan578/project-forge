@@ -36,6 +36,7 @@
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { migrate } from 'drizzle-orm/neon-http/migrator';
+import { applyE2eNeonEndpointOverride } from '../src/lib/db/e2eNeonEndpoint.ts';
 
 const MIGRATIONS_FOLDER = 'drizzle';
 
@@ -46,6 +47,9 @@ async function main(): Promise<void> {
     );
   }
 
+  // The CI engine-journeys job migrates a per-run Postgres through a local
+  // Neon-protocol proxy; this is a no-op everywhere else (#10161).
+  applyE2eNeonEndpointOverride();
   const sql = neon(process.env.DATABASE_URL);
   const db = drizzle(sql);
 

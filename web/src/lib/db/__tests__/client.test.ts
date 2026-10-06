@@ -7,6 +7,9 @@ const mockDrizzle = vi.fn().mockReturnValue({ select: vi.fn(), insert: vi.fn() }
 
 vi.mock('@neondatabase/serverless', () => ({
   neon: mockNeon,
+  // client.ts now goes through e2eNeonEndpoint.ts, which imports the driver's
+  // global config object; a factory without it makes vitest throw on access.
+  neonConfig: {},
 }));
 
 vi.mock('drizzle-orm/neon-http', () => ({
