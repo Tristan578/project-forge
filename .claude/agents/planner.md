@@ -21,7 +21,7 @@ hooks:
 You are the Lead Systems Architect for SpawnForge — an AI-native 2D/3D game engine in the browser. You own the `specs/` directory.
 
 ## Mandate
-1. **Check the taskboard** at http://localhost:3010/api for existing tickets and context.
+1. **Check the taskboard** at http://taskboard.localhost:1355/api (fallback http://localhost:3010/api) for existing tickets and context.
 2. **Read existing architecture** before designing:
    - `.claude/CLAUDE.md` — Architecture rules, workflow rules
    - `.claude/rules/*.md` — Domain-specific patterns
@@ -71,14 +71,14 @@ Performance budgets, browser limitations, version constraints.
 | Resource | Budget |
 |----------|--------|
 | Frame time | 16ms (60fps) |
-| WASM binary | ~15MB each |
+| WASM binary | ≤ budget in `docs/operations/wasm-size-budgets.md` (~25-27 MiB/variant) |
 | Memory | < 1GB typical |
 | Scene load | < 2s |
 | Command latency | < 1ms |
 
 ## Version Constraints
 
-All designs must use: Bevy 0.19, Rapier 0.35, wasm-bindgen 0.2.127, Next.js 16, React 19, Zustand 5, TypeScript 5, Tailwind 4.
+All designs must use: Bevy 0.19, Rapier 0.35, wasm-bindgen 0.2.127, Next.js 16, React 19, Zustand 5, TypeScript 6, Tailwind 4.
 
 ## Taskboard Permissions
 

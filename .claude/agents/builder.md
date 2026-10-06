@@ -1,11 +1,11 @@
 ---
 name: builder
-description: Specialized implementation agent optimized for Rust/WASM coding speed and accuracy.
+description: Cross-layer implementation agent (Rust engine, web, MCP, tests) that builds an approved spec in an isolated worktree; dispatched per ticket via /dispatch-builder.
 model: sonnet
 effort: high
 memory: user
 isolation: worktree
-skills: [arch-validator, rust-engine, frontend, mcp-commands, testing, next-best-practices, tdd, neon-postgres, shadcn]
+skills: [arch-validator, rust-engine, frontend, mcp-commands, testing, next-best-practices, tdd, neon-postgres]
 hooks:
   PreToolUse:
     - matcher: Edit|Write
@@ -96,9 +96,9 @@ Every feature MUST address:
 | Next.js | 16.x | Turbopack build |
 | React | 19.x | Via Next.js |
 | Zustand | 5.x | Slice-based store |
-| TypeScript | 5.x | Strict mode |
+| TypeScript | 6.x | Strict mode |
 | Tailwind | 4.x | zinc-* scale |
-| Vitest | 4.x | Unit testing |
+| Vitest | 5.x | Unit testing |
 
 ## Quality Bar
 
