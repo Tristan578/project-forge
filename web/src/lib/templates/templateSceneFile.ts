@@ -42,6 +42,7 @@ import {
   buildPhysicsFromPartial,
 } from '@/lib/chat/handlers/helpers';
 import { buildStoreComponent } from '@/lib/engine/gameComponentWire';
+import { SCENE_PROJECT_TYPE_KEY } from '@/lib/scenes/sceneProjectType';
 import type { GameComponentData } from '@/stores/slices/types';
 
 /**
@@ -224,6 +225,12 @@ export function buildTemplateSceneFile(template: GameTemplate): TemplateSceneFil
       name: source.metadata?.name ?? template.name,
       createdAt: source.metadata?.createdAt ?? '',
       modifiedAt: source.metadata?.modifiedAt ?? '',
+      // The template's category is its only statement of dimension, and the
+      // engine restores `metadata.projectType` on `load_scene` (#10227). Before
+      // this, nothing on the template path set the engine's `ProjectType`, so
+      // every 2D template loaded in 3D mode with no 2D camera and its sprites
+      // invisible.
+      [SCENE_PROJECT_TYPE_KEY]: template.category.startsWith('2d_') ? '2d' : '3d',
     },
     environment: { ...ENGINE_ENVIRONMENT_DEFAULTS, ...(source.environment ?? {}) },
     ambientLight: { ...ENGINE_AMBIENT_DEFAULTS, ...(source.ambientLight ?? {}) },

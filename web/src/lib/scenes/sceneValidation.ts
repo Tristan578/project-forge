@@ -3,6 +3,7 @@
  * The browser checks the envelope first; Rust owns every component schema.
  */
 import { CURRENT_FORMAT_VERSION } from '@/lib/sceneFile';
+import type { SceneProjectType } from './sceneProjectType';
 
 /**
  * The engine decoder's verdict. `reason` is the engine's own error text
@@ -154,12 +155,20 @@ export function describeSceneRefusal(reason: string): string {
 /** Produce an empty scene using the same required fields as the engine.
  *
  * @param name Name to place in scene metadata.
+ * @param projectType The project's dimension to state as `metadata.projectType`
+ *   (#10227). Pass the LIVE type (`spriteSlice.projectType`) wherever one is
+ *   known, so the scene is self-describing: opened cold in a fresh engine it
+ *   comes up in the dimension it was created in. Omitted, the key is ABSENT,
+ *   and the engine then leaves its current type alone on load — the scene
+ *   inherits the session's dimension rather than forcing 3D. Never substitute
+ *   a default here: a guessed `'3d'` is exactly the flip-to-3D regression the
+ *   review board found on #10358.
  * @returns A new empty current-format scene with required environment and ambient-light defaults.
  */
-export function emptySceneFile(name: string) {
+export function emptySceneFile(name: string, projectType?: SceneProjectType) {
   return {
     formatVersion: CURRENT_FORMAT_VERSION,
-    metadata: { name, createdAt: '', modifiedAt: '' },
+    metadata: { name, createdAt: '', modifiedAt: '', ...(projectType === undefined ? {} : { projectType }) },
     environment: {
       skyboxBrightness: 1000, iblIntensity: 900, iblRotationDegrees: 0,
       clearColor: [0.1, 0.1, 0.12], fogEnabled: false, fogColor: [0.5, 0.5, 0.55],

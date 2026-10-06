@@ -892,6 +892,16 @@ app.add_systems(Update, runtime_call);
             pushes.iter().any(|(f, q)| f == "apply_scene_load" && q == "custom_wgsl_source_updates"),
             "the scan no longer sees apply_scene_load push custom_wgsl_source_updates — the producer model is broken: {pushes:?}"
         );
+        // #10227: the loader also hands the scene file's `metadata.projectType`
+        // to the project-type queue, through the same direct `.push(` shape so
+        // this scan sees it; a `pending.queue_*(..)` helper call is invisible
+        // to `pushed_fields` and would hide the producer from the orphan check
+        // below. The drain (`apply_project_type_changes`) is always-active, so
+        // the pair must be seen AND must not be orphaned.
+        assert!(
+            pushes.iter().any(|(f, q)| f == "apply_scene_load" && q == "set_project_type_requests"),
+            "the scan no longer sees apply_scene_load push set_project_type_requests (#10227) — a helper call hides the producer: {pushes:?}"
+        );
         let orphaned: Vec<&(String, String)> = pushes
             .iter()
             .filter(|(_, q)| !runtime_drained.iter().any(|d| d == q))

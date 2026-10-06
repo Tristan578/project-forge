@@ -10,6 +10,7 @@ import { PlayRenderErrorNotice } from './PlayRenderErrorNotice';
 import { withTimeout } from '@/lib/async/withTimeout';
 import { describeOrigin, isCdnOrigin, loadPlayEngine, type PlayEngineRuntime } from '@/lib/engine/loadPlayEngine';
 import { loadSceneWhenReady, refusalOf, settleDelay, SceneLoadCancelled } from '@/lib/engine/playSceneLoad';
+import { readProjectTypeFromSceneData } from '@/lib/scenes/sceneProjectType';
 import { addBreadcrumb, captureException, captureMessage, setTag } from '@/lib/monitoring/sentry-client';
 import {
   RENDER_ERROR_CLASS_LABEL,
@@ -306,6 +307,22 @@ export function GamePlayer({ userId, slug, isAuthenticated = false }: GamePlayer
       );
 
       if (cancelledRef.current) return;
+
+      // A 2D game's sprites render only through the engine's 2D camera, which
+      // exists only in 2D mode — and `/play` never asked for it, so every
+      // published 2D game loaded in the default 3D mode, reached "ready", and
+      // showed nothing (#10227). The scene file carries the type now and the
+      // engine queues it on `load_scene`; it is ALSO sent here, after the scene
+      // is accepted and before `play`, so the step is observable without an
+      // engine and a refusal is a failed start, like `play`'s, rather than a
+      // blank canvas. A 3D or legacy scene (no key) needs nothing: 3D is the
+      // engine's default.
+      if (readProjectTypeFromSceneData(gameData.sceneData) === '2d') {
+        const refusal = refusalOf(runtime.handle_command('set_project_type', { projectType: '2d' }));
+        if (refusal !== null) {
+          throw new Error(`The game could not start: 2D mode was refused: ${refusal}`);
+        }
+      }
 
       // Auto-reduce quality on mobile
       const isMobile =

@@ -29,7 +29,7 @@ use crate::core::{
     environment::EnvironmentSettings,
     history::{EntitySnapshot as HistEntitySnapshot, HistoryStack},
     input::InputMap,
-    pending_commands::{EntityType, PendingCommands},
+    pending_commands::{EntityType, PendingCommands, SetProjectTypeRequest},
     post_processing::PostProcessingSettings,
     scene_file::{self, SceneName},
     selection::{Selection, SelectionChangedEvent},
@@ -57,6 +57,7 @@ use crate::core::{
     physics::{JointData, PhysicsData, PhysicsEnabled},
     physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d},
     procedural_mesh::ProceduralMeshData,
+    project_type::ProjectType,
     reverb_zone::{ReverbZoneData, ReverbZoneEnabled},
     scripting::ScriptData,
     shader_effects::ShaderEffectData,
@@ -78,7 +79,10 @@ pub(super) fn apply_scene_export(
     asset_registry: Res<AssetRegistry>,
     post_processing_settings: Res<PostProcessingSettings>,
     bus_config: Res<AudioBusConfig>,
-    custom_wgsl_source: Res<CustomWgslSource>,
+    // Bundled: this system is at Bevy's 16-parameter cap. The project type is
+    // the live resource, written into `metadata.projectType` so the dimension a
+    // scene was authored in travels with it (#10227).
+    (custom_wgsl_source, project_type): (Res<CustomWgslSource>, Res<ProjectType>),
     entity_query: Query<(
         Entity,
         &EntityId,
@@ -288,6 +292,7 @@ pub(super) fn apply_scene_export(
 
     let scene_file = scene_file::build_scene_file(
         &scene_name.0,
+        *project_type,
         &env,
         &ambient,
         &input_map,
@@ -480,6 +485,28 @@ pub(super) fn apply_scene_load(
 
     // 9. Update scene name
     scene_name.0 = scene_file.metadata.name.clone();
+
+    // 9.1. Restore the project's dimension (#10227). This system is at the
+    // 16-parameter cap and cannot take `ResMut<ProjectType>`, so the saved
+    // type goes through the queue `apply_project_type_changes` drains — the
+    // one place that also spawns/despawns the 2D camera and emits
+    // `PROJECT_TYPE_CHANGED` for the web store. The file's value is passed
+    // through AS IT STANDS: `Some` applies that type; `None` (a scene saved
+    // before the field existed, or any producer that stated none) leaves the
+    // live resource alone, so switching to a key-less scene — a second scene
+    // created in a 2D project, a pre-#10227 save, a legacy import, an
+    // auto-save recovery — inherits the session's dimension instead of
+    // flipping the editor to 3D. The drain still emits the current type for
+    // `None`, so a store that drifted converges on the engine. A cold open of
+    // a key-less scene comes up 3D because a fresh engine starts there
+    // (`ProjectType::default`), not because the loader forces it.
+    //
+    // Direct `.push(` rather than the `queue_*` helper, like the WGSL
+    // hot-swap below: `pending/runtime_drains.rs` recognises a runtime
+    // producer by exactly this shape, and pins this one.
+    pending.set_project_type_requests.push(SetProjectTypeRequest {
+        project_type: scene_file.metadata.project_type,
+    });
 
     // 9.5. Restore post-processing settings
     *post_processing_settings = scene_file.post_processing;

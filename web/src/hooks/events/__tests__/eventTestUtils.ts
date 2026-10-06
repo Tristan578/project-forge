@@ -91,6 +91,7 @@ export function createMockActions() {
     // command straight back at the engine that just described the state.
     applySpriteFromEngine: vi.fn(),
     applyCamera2dFromEngine: vi.fn(),
+    applyProjectTypeFromEngine: vi.fn(),
     applyTilemapFromEngine: vi.fn(),
     applySkeleton2dFromEngine: vi.fn(),
     applySkeleton2dRemovedFromEngine: vi.fn(),

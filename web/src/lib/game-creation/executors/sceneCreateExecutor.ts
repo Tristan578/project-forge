@@ -74,7 +74,11 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // creation (PF-1138).
     const projectId = ctx.getStore().projectId;
     const project = loadProjectScenes(projectId);
-    const { project: withScene, sceneId } = createScene(project, name);
+    // `ctx.projectType` is the GDD's statement of the game's dimension — the
+    // scene is created FOR that game, so it states that type (#10227). The
+    // store's mirror may still be at its 3D default this early in the
+    // pipeline, which is why the plan's value is the right one here.
+    const { project: withScene, sceneId } = createScene(project, name, ctx.projectType);
     saveProjectScenes({ ...withScene, activeSceneId: sceneId }, projectId);
     ctx.getStore().setScenes(
       withScene.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),

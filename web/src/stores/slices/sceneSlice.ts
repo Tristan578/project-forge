@@ -3,7 +3,7 @@
  */
 
 import { StateCreator, StoreApi } from 'zustand';
-import type { CompletionMode, GameComponentData, SceneGraph, SceneTransitionConfig, TerrainDataState } from './types';
+import type { CompletionMode, GameComponentData, ProjectType, SceneGraph, SceneTransitionConfig, TerrainDataState } from './types';
 import type { LoosePartial } from '@/lib/types/looseOptional';
 import { DEFAULT_TRANSITION } from './types';
 import {
@@ -496,7 +496,8 @@ export type TemplateLoadResult =
 export const TEMPLATE_APPLY_TIMEOUT_MS = 10_000;
 
 /**
- * State `loadTemplate` reads and writes across slice boundaries.
+ * State `loadTemplate` and `createNewScene` read and write across slice
+ * boundaries.
  *
  * Widening the generic is how a slice reaches a neighbour without depending on
  * its whole interface — `createScriptSlice` does the same for `primaryId`.
@@ -504,6 +505,12 @@ export const TEMPLATE_APPLY_TIMEOUT_MS = 10_000;
 export type TemplateApplyDeps = {
   sceneGraph: SceneGraph;
   nodeCount: number;
+  /**
+   * `spriteSlice.projectType`, the store's mirror of the engine's dimension.
+   * `createNewScene` states it in the new scene's `metadata.projectType` so a
+   * scene created in a 2D project is a 2D scene (#10227).
+   */
+  projectType: ProjectType;
   setScript: (entityId: string, source: string, enabled: boolean, template?: string) => void;
   setInputPreset: (preset: 'fps' | 'platformer' | 'topdown' | 'racing') => void;
   addGameComponent: (entityId: string, component: GameComponentData) => void;
@@ -1381,7 +1388,12 @@ export const createSceneSlice: StateCreator<
   },
   createNewScene: (name) => {
     if (!dispatchCommand) return;
-    const { project } = createSceneIn(loadProjectScenes(get().projectId), name ?? 'New Scene');
+    // The live type travels into the new scene (#10227): a scene created in a
+    // 2D project states `metadata.projectType: '2d'`, so switching to it keeps
+    // the 2D camera and a cold open comes up 2D. Without the key the engine
+    // would still leave the session's type alone on a switch, but a fresh
+    // engine would open it 3D.
+    const { project } = createSceneIn(loadProjectScenes(get().projectId), name ?? 'New Scene', get().projectType);
     saveProjectScenes(project, get().projectId);
     get().setScenes(toSceneList(project), project.activeSceneId);
   },
