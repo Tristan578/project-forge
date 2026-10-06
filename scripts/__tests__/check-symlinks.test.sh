@@ -165,8 +165,59 @@ commit_all "$R"
 blob="$(git -C "$R" hash-object -w "$R/links/with space.md")"
 git -C "$R" update-index --cacheinfo "120000,$blob,links/with space.md"
 git -C "$R" config core.symlinks false
-expect "11. the remedy for a stub with a space in its path quotes that path" \
-  "$(run_gate "$R")" 1 "git checkout -- 'links/with space.md'"
+SPACE_RES="$(run_gate "$R")"
+readonly SPACE_RES
+expect "11. a stub with a space in its path fails the gate" "$SPACE_RES" 1 "links/with space.md"
+
+# remedy_arg_roundtrips <case> <result> <path> — the printed remedy is shell
+# text someone will paste, and paths come from the repository. Take every
+# printed `git checkout -- <arg>` line, let bash parse <arg>, and require it to
+# be exactly ONE word equal to <path>, with nothing executed along the way.
+remedy_arg_roundtrips() {
+  local desc="$1" res="$2" want="$3" out line arg got n=0 ok_all=1
+  out="${res#*|}"
+  while IFS= read -r line; do
+    case "$line" in *"git checkout -- "*) ;; *) continue ;; esac
+    arg="${line##*git checkout -- }"
+    arg="${arg%)}"
+    n=$((n + 1))
+    got="$(bash -c 'printf "%s\n" "$#"; printf "%s" "$1"' _ "$(bash -c "set -f; eval \"set -- $arg\"; printf '%s' \"\$1\"; [ \"\$#\" -eq 1 ] || printf 'EXTRA'")" 2>&1)"
+    if [ "${got#*$'\n'}" != "$want" ]; then
+      bad "$desc — remedy argument [$arg] parses to [${got#*$'\n'}], want [$want]"
+      ok_all=0
+    fi
+  done <<<"$out"
+  if [ "$n" -eq 0 ]; then bad "$desc — no 'git checkout --' remedy line printed"; return; fi
+  [ "$ok_all" -eq 1 ] && ok "$desc"
+}
+readonly -f remedy_arg_roundtrips
+
+remedy_arg_roundtrips "11a. the stub remedy keeps a path with a space as one argument" "$SPACE_RES" "links/with space.md"
+
+EVIL="a'; echo INJECTED; echo '"
+readonly EVIL
+
+# ---- 11b. an apostrophe in a stub path cannot break out of the remedy -------
+R="$(repo stubquote)"
+printf '../shared/file.md' > "$R/links/$EVIL"
+commit_all "$R"
+# Relative path: Git Bash rewrites an absolute argument containing ";" as a
+# Windows path list, and git then cannot open it.
+blob="$(git -C "$R" hash-object -w "links/$EVIL")"
+git -C "$R" update-index --cacheinfo "120000,$blob,links/$EVIL"
+git -C "$R" config core.symlinks false
+res="$(run_gate "$R")"
+expect "11b. a stub whose path holds an apostrophe still fails the gate" "$res" 1 "plain text files"
+remedy_arg_roundtrips "11c. the stub remedy quotes an apostrophe path as one literal argument" "$res" "links/$EVIL"
+
+# ---- 11d. same for the missing-link remedy ----------------------------------
+R="$(repo missingquote)"
+ln -s ../shared/file.md "$R/links/$EVIL"
+commit_all "$R"
+rm "$R/links/$EVIL"
+res="$(run_gate "$R")"
+expect "11d. a missing link whose path holds an apostrophe is reported missing" "$res" 1 "missing from the working tree"
+remedy_arg_roundtrips "11e. the missing-link remedy quotes an apostrophe path as one literal argument" "$res" "links/$EVIL"
 
 echo ""
 echo "=== $pass passed, $fail failed ==="

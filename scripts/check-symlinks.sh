@@ -32,7 +32,9 @@ while IFS= read -r -d '' rec; do
   total=$((total + 1))
 
   if [ ! -L "$path" ] && [ ! -e "$path" ]; then
-    problems+=("$path: missing from the working tree (restore it: git checkout -- '$path')")
+    # Paths come from the repository and the remedy is text people paste, so
+    # every path in a printed command goes through printf %q (never hand quoting).
+    problems+=("$path: missing from the working tree (restore it: git checkout -- $(printf '%q' "$path"))")
     continue
   fi
   if [ ! -L "$path" ]; then
@@ -80,8 +82,8 @@ if [ "${#stubs[@]}" -gt 0 ]; then
   echo "  (Windows: Settings > System > For developers > Developer Mode must be on.)"
   echo "Then re-create each link:"
   for p in "${stubs[@]}"; do
-    q="${p//\'/\'\\\'\'}"
-    echo "  rm -f -- '$q' && git checkout -- '$q'"
+    q="$(printf '%q' "$p")"
+    echo "  rm -f -- $q && git checkout -- $q"
   done
   echo ""
 fi
