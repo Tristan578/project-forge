@@ -145,6 +145,52 @@ if [ "$rc" = "0" ]; then pass "a bracketed IPv6 literal compares as its bare add
 out="$(DATABASE_URL="$LOCAL_URL" E2E_NEON_HTTP_ENDPOINT="$LOCAL_EP" bash "$GUARD" "$LOCAL_URL" 2>&1)"; rc=$?
 if [ "$rc" = "1" ]; then pass "an argument is refused (a connection string must never sit on a command line) (exit 1)"; else fail "expected exit 1 with an argument, got $rc: $out"; fi
 
+# --- 10. the authority is not the whole story: query overrides and backslashes -
+# libpq (and psql, which the proxy's start.sh runs against its own connection
+# string, and the Rust postgres config) honour `host=` / `hostaddr=` /
+# `service=` in the query string OVER the URL's authority, so
+# `postgres://u:p@localhost/db?host=evil.example` names `localhost` to a parser
+# that reads only the authority and connects to evil.example. The job's literal
+# carries no query at all, so ANY `?` on DATABASE_URL is refused rather than
+# enumerating the parameters that redirect a connection.
+#
+# A backslash is the other way two parsers read one URL as two hosts: the WHATWG
+# parser that fetch() uses treats `\` as `/` in an http URL, so
+# `http://evil.example\@localhost/sql` is host evil.example to the driver and
+# `localhost` to a last-`@` split. Neither URL in the job has a backslash, so
+# either variable carrying one is refused outright.
+for q in '?host=evil.example' '?hostaddr=203.0.113.9' '?service=prod' '?'; do
+  res="$(run_guard "postgres://postgres:postgres@localhost:5432/db${q}" "$LOCAL_EP")"
+  rc="${res%%|*}"; out="${res#*|}"
+  if [ "$rc" = "1" ]; then pass "a DATABASE_URL query string '${q}' is refused even though its authority is localhost (exit 1)"; else fail "DATABASE_URL query '${q}' passed the guard (exit $rc): $out"; fi
+  if grep -q "DATABASE_URL" <<<"$out" && grep -qi "query" <<<"$out"; then pass "the refusal for '${q}' names DATABASE_URL and says why (a query string)"; else fail "the refusal for '${q}' does not name DATABASE_URL and the query string: $out"; fi
+done
+# Even a benign parameter is refused: the rule is "no query", not a denylist.
+res="$(run_guard 'postgres://postgres:postgres@localhost:5432/db?sslmode=disable' "$LOCAL_EP")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "a benign '?sslmode=disable' is refused too — any query, not a denylist (exit 1)"; else fail "expected exit 1 for a benign query string, got $rc: $out"; fi
+# The refusal must not echo the query: it can carry a password= or a token.
+res="$(run_guard 'postgres://postgres:postgres@localhost:5432/db?host=evil.example&password=hunter2' "$LOCAL_EP")"
+rc="${res%%|*}"; out="${res#*|}"
+if grep -q "hunter2" <<<"$out" || grep -q "evil.example" <<<"$out"; then fail "the refusal echoed the query string: $out"; else pass "the refusal never echoes the query string"; fi
+# A '?' in the userinfo is still a '?' — refused, not parsed around.
+res="$(run_guard 'postgres://postgres:pa?ss@localhost:5432/db' "$LOCAL_EP")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "a raw '?' in the userinfo is refused (exit 1)"; else fail "expected exit 1 for a '?' in the password, got $rc: $out"; fi
+
+res="$(run_guard "$LOCAL_URL" 'http://evil.example\@localhost/sql')"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "a backslash-userinfo endpoint 'http://evil.example\\@localhost/sql' is refused (exit 1)"; else fail "the backslash-userinfo endpoint passed the guard (exit $rc): $out"; fi
+if grep -q "E2E_NEON_HTTP_ENDPOINT" <<<"$out" && grep -qi "backslash" <<<"$out"; then pass "the refusal names E2E_NEON_HTTP_ENDPOINT and the backslash"; else fail "the refusal does not name E2E_NEON_HTTP_ENDPOINT and the backslash: $out"; fi
+res="$(run_guard 'postgres://postgres:postgres@evil.example\@localhost:5432/db' "$LOCAL_EP")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "a backslash in DATABASE_URL is refused (exit 1)"; else fail "a backslash in DATABASE_URL passed the guard (exit $rc): $out"; fi
+if grep -q "DATABASE_URL" <<<"$out" && grep -qi "backslash" <<<"$out"; then pass "the refusal names DATABASE_URL and the backslash"; else fail "the refusal does not name DATABASE_URL and the backslash: $out"; fi
+# A backslash anywhere, not only in the userinfo.
+res="$(run_guard "$LOCAL_URL" 'http://localhost:4444\sql')"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "a backslash in the endpoint's path position is refused (exit 1)"; else fail "a backslash in the endpoint path passed the guard (exit $rc): $out"; fi
+
 echo ""
 echo "=== ci.yml wiring: the guard runs in the journeys job, before migrate ==="
 # Comment-stripped first. A deleted step with an explanatory comment left in
