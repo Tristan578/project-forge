@@ -1,7 +1,7 @@
 /**
  * Broad integration test for the chat executor — PF-8341 (#8341).
  *
- * Successor to `executorIntegration.test.ts`, which only covered 5 of the 29
+ * Successor to `executorIntegration.test.ts`, which only covered 5 of the 30
  * handler domains registered in `executor.ts`. This file drives real handler
  * code through `executeToolCall` against a real Zustand `useEditorStore`,
  * with only the WASM command dispatcher and `global.fetch` stubbed.
@@ -58,6 +58,7 @@ import { scriptLibraryHandlers } from '../handlers/scriptLibraryHandlers';
 import { physicsJointHandlers } from '../handlers/physicsJointHandlers';
 import { animationParticleHandlers } from '../handlers/animationParticleHandlers';
 import { gameplayHandlers } from '../handlers/gameplayHandlers';
+import { playtestHandlers } from '../handlers/playtestHandlers';
 import { assetHandlers } from '../handlers/assetHandlers';
 import { audioEntityHandlers } from '../handlers/audioEntityHandlers';
 import { pixelArtHandlers } from '../handlers/pixelArtHandlers';
@@ -90,6 +91,7 @@ const DOMAIN_SOURCES: Record<string, Record<string, unknown>> = {
   physicsJointHandlers,
   animationParticleHandlers,
   gameplayHandlers,
+  playtestHandlers,
   assetHandlers,
   audioEntityHandlers,
   pixelArtHandlers,
@@ -165,12 +167,13 @@ afterEach(() => {
 // ────────────────────────────────────────────────────────────────────────
 
 describe('executor: registry structural invariants (PF-8341)', () => {
-  it('exposes exactly 29 handler domain sources', () => {
+  it('exposes exactly 30 handler domain sources', () => {
     // Introspects the ACTUAL exported list from executor.ts — not a hardcoded
     // copy. If someone adds or removes a domain, this fails immediately.
-    expect(HANDLER_DOMAIN_SOURCES).toHaveLength(29);
+    // 29 -> 30: playtestHandlers (runtime input replay, #10007).
+    expect(HANDLER_DOMAIN_SOURCES).toHaveLength(30);
     const uniqueDomainNames = new Set(HANDLER_DOMAIN_SOURCES.map((d) => d.name));
-    expect(uniqueDomainNames.size).toBe(29);
+    expect(uniqueDomainNames.size).toBe(30);
   });
 
   it('every key in the merged handlerRegistry traces back to a source domain', () => {
@@ -311,6 +314,7 @@ const MUTATING_REPRESENTATIVES: ReadonlyArray<{
   { domain: 'physicsJointHandlers',      tool: 'toggle_physics',          args: { entityId: 'entity-1', enabled: true } },
   { domain: 'animationParticleHandlers', tool: 'play_animation',          args: { entityId: 'entity-1', clipName: 'idle' } },
   { domain: 'gameplayHandlers',          tool: 'add_game_component',      args: { entityId: 'entity-1', component: 'health' } },
+  { domain: 'playtestHandlers',          tool: 'unpin_frame_rate',        args: {} },
   { domain: 'pixelArtHandlers',          tool: 'set_pixel_art_palette',   args: { entityId: 'entity-1', palette: 'nes' } },
   { domain: 'leaderboardHandlers',       tool: 'list_leaderboards',       args: { gameId: 'game-1' } },
   { domain: 'ideaHandlers',              tool: 'generate_game_ideas',     args: { count: 1 } },
@@ -318,13 +322,13 @@ const MUTATING_REPRESENTATIVES: ReadonlyArray<{
   { domain: 'economyHandlers',           tool: 'design_economy',          args: { genre: 'rpg' } },
 ];
 
-describe('executor: representative-tool coverage covers all 29 domains (PF-8341)', () => {
-  it('read-only + mutating tables sum to 29 unique domains', () => {
+describe('executor: representative-tool coverage covers all 30 domains (PF-8341)', () => {
+  it('read-only + mutating tables sum to 30 unique domains', () => {
     const allDomains = new Set<string>([
       ...READ_ONLY_REPRESENTATIVES.map((r) => r.domain),
       ...MUTATING_REPRESENTATIVES.map((r) => r.domain),
     ]);
-    expect(allDomains.size).toBe(29);
+    expect(allDomains.size).toBe(30);
     expect(allDomains.size).toBe(HANDLER_DOMAIN_SOURCES.length);
   });
 
