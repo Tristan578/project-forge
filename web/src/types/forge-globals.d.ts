@@ -78,9 +78,10 @@ declare global {
 
     /**
      * Replays a bounded input trace through the REAL runtime runner and returns
-     * the observed-state outcome (#9902). Available only when E2E hooks are
-     * enabled (`e2eHooksEnabled()`). Used by `e2e/engine/inputReplay.spec.ts` to
-     * prove the record/replay path against the live WASM engine.
+     * the observed-state outcome (#9902, pinned runtime #10007). Available only
+     * when E2E hooks are enabled (`e2eHooksEnabled()`). Used by
+     * `e2e/engine/inputReplay.spec.ts` to prove the record/replay path against
+     * the live WASM engine.
      */
     __FORGE_REPLAY?: (
       trace: unknown,
@@ -90,9 +91,55 @@ declare global {
       verdict: 'passed' | 'failed';
       ticksReplayed: number;
       assertions: Array<{ operationId: string; description: string; passed: boolean }>;
+      startPosition: [number, number, number] | null;
+      endPosition: [number, number, number] | null;
       movedDistance: number | null;
       collectiblesCollected: number;
+      pinned: boolean;
+      pinHz: number | null;
     }>;
+
+    /**
+     * Controlled replay sessions — pause / resume / cancel — for the
+     * pause/cancel/restart scenario (#10007). Same gate as `__FORGE_REPLAY`.
+     * `state` joins the runner's progress with the engine's OWN evaluated
+     * input and the observed player position from the play-tick bus, so a spec
+     * asserts "cancellation released input" on what the engine reports rather
+     * than on the runner's bookkeeping.
+     */
+    __FORGE_REPLAY_CONTROL?: {
+      start(
+        trace: unknown,
+        config: { playerEntityId: string; collectibleEntityIds: string[] },
+        options?: { pauseAtTick?: number; pinHz?: number },
+      ): Promise<string>;
+      state(id: string): Promise<{
+        state: string;
+        tick: number;
+        totalTicks: number;
+        heldKeys: string[];
+        pinned: boolean | null;
+        engineInput: { pressed: Record<string, boolean>; axes: Record<string, number> } | null;
+        playerPosition: [number, number, number] | null;
+      }>;
+      control(id: string, action: 'pause' | 'resume' | 'cancel'): boolean;
+      result(id: string): Promise<
+        | {
+            status: 'completed';
+            outcome: {
+              verdict: 'passed' | 'failed';
+              ticksReplayed: number;
+              endPosition: [number, number, number] | null;
+              collectiblesCollected: number;
+              pinned: boolean;
+              pinHz: number | null;
+              assertions: Array<{ operationId: string; passed: boolean }>;
+            };
+          }
+        | { status: 'cancelled'; ticksReplayed: number }
+        | { status: 'failed'; error: string; ticksReplayed: number }
+      >;
+    };
 
     /**
      * When set to `true` before page load (via `addInitScript`), skips WASM

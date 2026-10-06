@@ -1,7 +1,19 @@
 'use client';
 
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
-import { Play, PlayCircle, AlertTriangle, CheckCircle, XCircle, Info, Loader2, Circle, Repeat } from 'lucide-react';
+import {
+  Play,
+  PlayCircle,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Info,
+  Loader2,
+  Circle,
+  Repeat,
+  Pause,
+  Square,
+} from 'lucide-react';
 import {
   BOT_STRATEGIES,
   simulatePlaytest,
@@ -15,10 +27,12 @@ import {
 import { useEditorStore } from '@/stores/editorStore';
 import { InputTraceRecorder, InputTraceValidationError, type InputTrace } from '@/lib/playtest/inputTrace';
 import {
-  invokeReplay,
-  createDomKeyboardEnvironment,
-} from '@/lib/playtest/replayInvocation';
-import type { ReplayOutcome } from '@/lib/playtest/replayRunner';
+  collectibleEntityIdsFrom,
+  runReplay,
+  startReplaySession,
+} from '@/lib/playtest/replayEntryPoints';
+import { botSessionToInputTrace } from '@/lib/playtest/botTrace';
+import type { ReplayHandle, ReplayOutcome, ReplayProgress } from '@/lib/playtest/replayRunner';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -195,11 +209,9 @@ function RuntimeReplaySection() {
   const bindings = useMemo(() => inputBindings ?? [], [inputBindings]);
   const actionNames = useMemo(() => bindings.map((b) => b.actionName), [bindings]);
 
+  // The same default observation set the AI tool derives (`replayEntryPoints`).
   const collectibleEntityIds = useMemo(
-    () =>
-      Object.entries(allGameComponents ?? {})
-        .filter(([, components]) => (components ?? []).some((c) => c.type === 'collectible'))
-        .map(([id]) => id),
+    () => collectibleEntityIdsFrom(allGameComponents),
     [allGameComponents],
   );
 
@@ -247,6 +259,12 @@ function RuntimeReplaySection() {
     }
   }, [actionNames, sceneName, failRecording]);
 
+  // A controlled replay session (#10007): the handle is what Pause / Resume /
+  // Cancel act on, and `progress` is what the pending/progress line renders.
+  const handleRef = useRef<ReplayHandle | null>(null);
+  const [progress, setProgress] = useState<ReplayProgress | null>(null);
+  const [cancelledAfter, setCancelledAfter] = useState<number | null>(null);
+
   useEffect(() => {
     if (!isPlaying) return;
     return () => {
@@ -255,31 +273,72 @@ function RuntimeReplaySection() {
     };
   }, [isPlaying]);
 
+  // Stop ends a replay in flight: the engine never ticks again, so the runner
+  // must release its synthetic keys and unpin NOW rather than wait for a frame.
+  // Keyed on 'edit' deliberately, not on leaving 'play': the runner's own Pause
+  // puts the engine in 'paused' (ENGINE_MODE_CHANGED), and a replay has to
+  // survive its own pause.
+  useEffect(() => {
+    if (engineMode === 'edit') handleRef.current?.cancel();
+  }, [engineMode]);
+
+  // Unmounting the panel mid-replay must not leave a synthetic key held either.
+  useEffect(
+    () => () => {
+      handleRef.current?.cancel();
+    },
+    [],
+  );
+
   const [previousMode, setPreviousMode] = useState(engineMode);
   if (previousMode !== engineMode) {
     setPreviousMode(engineMode);
     setIsRecording(false);
   }
 
-  const runReplay = useCallback(async () => {
+  const startReplay = useCallback(async () => {
     const trace = traceRef.current;
     if (!trace || !primaryId) return;
     setError(null);
+    setOutcome(null);
+    setCancelledAfter(null);
     setIsReplaying(true);
+    let unsubscribe: (() => void) | null = null;
     try {
-      const env = createDomKeyboardEnvironment({
-        bindings,
+      const session = startReplaySession('manual', {
+        trace,
         playerEntityId: primaryId,
         collectibleEntityIds,
       });
-      const result = await invokeReplay('manual', trace, env);
-      setOutcome(result.outcome);
+      handleRef.current = session.handle;
+      setProgress(session.handle.getProgress());
+      unsubscribe = session.handle.subscribe(setProgress);
+      const result = await session.handle.result;
+      if (result.status === 'completed') setOutcome(result.outcome);
+      else if (result.status === 'cancelled') setCancelledAfter(result.ticksReplayed);
+      else setError(result.error.message);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      unsubscribe?.();
+      handleRef.current = null;
+      setProgress(null);
       setIsReplaying(false);
     }
-  }, [bindings, primaryId, collectibleEntityIds]);
+  }, [primaryId, collectibleEntityIds]);
+
+  const pauseReplay = useCallback(() => {
+    handleRef.current?.pause();
+  }, []);
+  const resumeReplay = useCallback(() => {
+    handleRef.current?.resume();
+  }, []);
+  const cancelReplay = useCallback(() => {
+    handleRef.current?.cancel();
+  }, []);
+
+  const canPause = progress?.state === 'running' || progress?.state === 'pinning';
+  const showResume = progress?.state === 'paused' || progress?.state === 'pausing';
 
   return (
     <div>
@@ -314,7 +373,7 @@ function RuntimeReplaySection() {
           {isRecording ? 'Stop Recording' : 'Record'}
         </button>
         <button
-          onClick={runReplay}
+          onClick={startReplay}
           disabled={!isPlaying || !primaryId || !hasTrace || isRecording || isReplaying}
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
           aria-label="Replay recorded input"
@@ -324,55 +383,124 @@ function RuntimeReplaySection() {
         </button>
       </div>
 
+      {isReplaying && progress && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="replay-progress"
+          className="mt-2 flex items-center gap-2 px-2.5 py-1.5 bg-zinc-800 rounded text-xs"
+        >
+          <Loader2 size={14} className="animate-spin text-blue-400 shrink-0" />
+          <span className="flex-1 text-zinc-300">{replayStatusText(progress)}</span>
+          {showResume ? (
+            <button
+              onClick={resumeReplay}
+              disabled={progress.state === 'pausing'}
+              className="p-1 rounded hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Resume replay"
+            >
+              <Play size={14} />
+            </button>
+          ) : (
+            <button
+              onClick={pauseReplay}
+              disabled={!canPause}
+              className="p-1 rounded hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Pause replay"
+            >
+              <Pause size={14} />
+            </button>
+          )}
+          <button
+            onClick={cancelReplay}
+            disabled={progress.state === 'cancelling'}
+            className="p-1 rounded hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Cancel replay"
+          >
+            <Square size={14} />
+          </button>
+        </div>
+      )}
+
+      {cancelledAfter !== null && (
+        <div role="status" className="mt-2 px-2.5 py-1.5 bg-zinc-800 rounded text-xs text-zinc-400">
+          Replay cancelled after {cancelledAfter} ticks. Input was released; no verdict was recorded.
+        </div>
+      )}
+
       {error && (
         <div role="alert" className="mt-2 px-2.5 py-2 rounded border text-xs bg-red-500/20 text-red-400 border-red-500/30">
           {error}
         </div>
       )}
 
-      {outcome && (
-        <div role="status" aria-live="polite" className="mt-2 space-y-1.5">
-          <div
-            className={`flex items-center gap-2 px-3 py-2 rounded border ${
-              outcome.verdict === 'passed'
-                ? 'bg-green-500/10 border-green-500/30'
-                : 'bg-red-500/10 border-red-500/30'
-            }`}
-          >
-            {outcome.verdict === 'passed' ? (
-              <CheckCircle size={16} className="text-green-400" />
-            ) : (
-              <XCircle size={16} className="text-red-400" />
-            )}
-            <span
-              className={`text-sm font-semibold ${
-                outcome.verdict === 'passed' ? 'text-green-400' : 'text-red-400'
-              }`}
-            >
-              Replay {outcome.verdict}
-            </span>
-            <span className="text-xs text-zinc-400 ml-auto">
-              {outcome.ticksReplayed} ticks
-            </span>
+      <ReplayOutcomeView outcome={outcome} label="Replay" />
+    </div>
+  );
+}
+
+/** The progress line a replay shows while it runs: state, tick position, clock. */
+function replayStatusText(progress: ReplayProgress): string {
+  const clock = progress.pinned === true ? ' on the pinned clock' : '';
+  switch (progress.state) {
+    case 'pinning':
+      return 'Pinning the engine clock…';
+    case 'running':
+      return `Replaying tick ${progress.tick} of ${progress.totalTicks}${clock}`;
+    case 'pausing':
+      return `Pausing at tick ${progress.tick}…`;
+    case 'paused':
+      return `Paused at tick ${progress.tick} of ${progress.totalTicks}; input released`;
+    case 'cancelling':
+      return 'Cancelling and releasing input…';
+    default:
+      return progress.state;
+  }
+}
+
+/**
+ * Observed-state verdict of a runtime replay, used for both the manual Replay
+ * button and the AI bot's runtime run so the two read identically.
+ */
+function ReplayOutcomeView({ outcome, label }: { outcome: ReplayOutcome | null; label: string }) {
+  if (!outcome) return null;
+  const passed = outcome.verdict === 'passed';
+  return (
+    <div role="status" aria-live="polite" className="mt-2 space-y-1.5">
+      <div
+        className={`flex items-center gap-2 px-3 py-2 rounded border ${
+          passed ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'
+        }`}
+      >
+        {passed ? (
+          <CheckCircle size={16} className="text-green-400" />
+        ) : (
+          <XCircle size={16} className="text-red-400" />
+        )}
+        <span className={`text-sm font-semibold ${passed ? 'text-green-400' : 'text-red-400'}`}>
+          {label} {outcome.verdict}
+        </span>
+        <span className="text-xs text-zinc-400 ml-auto">
+          {outcome.ticksReplayed} ticks
+          {outcome.pinned ? ` · pinned ${outcome.pinHz} Hz` : ' · unpinned clock'}
+        </span>
+      </div>
+      {outcome.assertions.map((a) => (
+        <div
+          key={a.operationId}
+          className="flex items-start gap-1.5 px-2.5 py-1.5 bg-zinc-800 rounded text-xs"
+        >
+          {a.passed ? (
+            <CheckCircle size={14} className="text-green-400 mt-0.5 shrink-0" />
+          ) : (
+            <XCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
+          )}
+          <div>
+            <div className="text-zinc-300">{a.description}</div>
+            <div className="text-zinc-500 mt-0.5">{a.operationId}</div>
           </div>
-          {outcome.assertions.map((a) => (
-            <div
-              key={a.operationId}
-              className="flex items-start gap-1.5 px-2.5 py-1.5 bg-zinc-800 rounded text-xs"
-            >
-              {a.passed ? (
-                <CheckCircle size={14} className="text-green-400 mt-0.5 shrink-0" />
-              ) : (
-                <XCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
-              )}
-              <div>
-                <div className="text-zinc-300">{a.description}</div>
-                <div className="text-zinc-500 mt-0.5">{a.operationId}</div>
-              </div>
-            </div>
-          ))}
         </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -384,12 +512,35 @@ function RuntimeReplaySection() {
 export function PlaytestPanel() {
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
   const allGameComponents = useEditorStore((s) => s.allGameComponents);
+  const engineMode = useEditorStore((s) => s.engineMode);
+  const primaryId = useEditorStore((s) => s.primaryId);
+  const inputBindings = useEditorStore((s) => s.inputBindings);
+  const sceneName = useEditorStore((s) => s.sceneName);
 
   const [selectedStrategy, setSelectedStrategy] = useState<BotStrategy>('explorer');
   const [isRunning, setIsRunning] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
   const [sessions, setSessions] = useState<PlaytestSession[]>([]);
   const [report, setReport] = useState<PlaytestReport | null>(null);
+  // The bot's plan driven through the REAL engine (#10007): the same
+  // `replay_input_trace` command the manual Replay button runs, labelled 'ai'.
+  const [botOutcome, setBotOutcome] = useState<ReplayOutcome | null>(null);
+  const [botRuntimeError, setBotRuntimeError] = useState<string | null>(null);
+  const canRunInEngine = engineMode === 'play' && !!primaryId;
+
+  const runBotInEngine = useCallback(
+    async (session: PlaytestSession) => {
+      if (!primaryId) return;
+      const actionNames = (inputBindings ?? []).map((b) => b.actionName);
+      const trace = botSessionToInputTrace(session, {
+        fixtureId: sceneName || 'current-scene',
+        actionNames,
+      });
+      const result = await runReplay('ai', { trace, playerEntityId: primaryId });
+      setBotOutcome(result.outcome);
+    },
+    [primaryId, inputBindings, sceneName],
+  );
 
   const buildContext = useCallback((): SceneContext => {
     // Build a lightweight game-component map from store data
@@ -411,16 +562,25 @@ export function PlaytestPanel() {
 
   const runSingle = useCallback(async () => {
     setIsRunning(true);
+    setBotOutcome(null);
+    setBotRuntimeError(null);
     try {
       const ctx = buildContext();
       const session = await simulatePlaytest(ctx, selectedStrategy);
       const newSessions = [session];
       setSessions(newSessions);
       setReport(generatePlaytestReport(newSessions));
+      if (canRunInEngine) {
+        try {
+          await runBotInEngine(session);
+        } catch (e) {
+          setBotRuntimeError(e instanceof Error ? e.message : String(e));
+        }
+      }
     } finally {
       setIsRunning(false);
     }
-  }, [buildContext, selectedStrategy]);
+  }, [buildContext, selectedStrategy, canRunInEngine, runBotInEngine]);
 
   const runAll = useCallback(async () => {
     setIsRunningAll(true);
@@ -451,6 +611,9 @@ export function PlaytestPanel() {
           </h2>
           <p className="text-xs text-zinc-400 mt-1">
             Run AI bots to test your game for balance issues, soft-locks, and unreachable areas.
+            {canRunInEngine
+              ? ' Run Playtest also drives the bot’s plan through the running engine and reports what it observed.'
+              : ' Enter Play mode and select the player to also run the bot through the engine.'}
           </p>
         </div>
 
@@ -484,6 +647,14 @@ export function PlaytestPanel() {
 
         {/* Runtime replay (real engine) — separate from the heuristic bot above */}
         <RuntimeReplaySection />
+
+        {/* The bot's plan run through the real engine — a runtime verdict, never a rating */}
+        {botRuntimeError && (
+          <div role="alert" className="px-2.5 py-2 rounded border text-xs bg-red-500/20 text-red-400 border-red-500/30">
+            AI bot runtime replay: {botRuntimeError}
+          </div>
+        )}
+        <ReplayOutcomeView outcome={botOutcome} label="AI bot runtime replay" />
 
         {/* Results */}
         {report && (
