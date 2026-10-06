@@ -174,16 +174,22 @@ export interface OrchestratorGDD {
    * absent means the classic `win` default, preserving every GDD authored before
    * the field existed.
    *
-   * Set by the decomposer when the model states it (`zDecompositionShape`
-   * validates it against `COMPLETION_MODES`, the same list the manual picker and
-   * the `set_completion_mode` tool use). Propagated by `scene_create`, which
-   * reads it through `ExecutorContext.gdd` and stages it on `newScene`, so it
-   * lands on `SceneGraph.completionMode` as native editable data (#9998). It
-   * also tells `planBuilder` not to invent a default win condition for an
-   * endless/sandbox/narrative brief. Chosen explicitly, never inferred from
-   * entity names.
+   * Set by the decomposer when the model states it (`zBriefContent` in
+   * `briefSchema.ts` validates it against `COMPLETION_MODES`, the same list the
+   * manual picker and the `set_completion_mode` tool use). Propagated by
+   * `scene_create`, which reads it through `ExecutorContext.gdd` and stages it
+   * on `newScene`, so it lands on `SceneGraph.completionMode` as native
+   * editable data (#9998). It also tells `planBuilder` not to invent a default
+   * win condition for an endless/sandbox/narrative brief. Chosen explicitly,
+   * never inferred from entity names.
+   *
+   * `| undefined` is deliberate (`exactOptionalPropertyTypes`): a validated
+   * `GameBrief` (#10174) infers the key as `mode | undefined`, and the brief
+   * has to be assignable here so the manual path feeds `buildPlan` the same
+   * object the AI path does. Readers already treat absence and `undefined`
+   * alike (`requiresWinCondition` reads both as `win`).
    */
-  completionMode?: CompletionMode;
+  completionMode?: CompletionMode | undefined;
 }
 
 // ---------------------------------------------------------------------------
