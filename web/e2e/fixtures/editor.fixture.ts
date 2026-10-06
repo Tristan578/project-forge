@@ -4,16 +4,24 @@ import {
   E2E_TIMEOUT_ELEMENT_MS,
   E2E_TIMEOUT_LOAD_MS,
   E2E_TIMEOUT_TEST_MS,
-  E2E_TIMEOUT_TEST_MARGIN_MS,
 } from '../constants';
+import { hydrationWaitMs } from '../lib/hydrationWait';
+
+/**
+ * When the test that owns each page began, recorded by the `page` fixture
+ * override in `test` below and read by `waitForEditorHydration` to size its
+ * wait from the time the test has LEFT rather than its full timeout. Keyed by
+ * the Page so a stamp dies with its page.
+ */
+const TEST_START_MS = new WeakMap<Page, number>();
 
 /**
  * Wait for React hydration of the editor page (`__REACT_HYDRATED`), sized to
- * the running config.
+ * the running test's remaining budget.
  *
- * Why one helper and no reload fallback: `loadPage()` and nine inline copies in
- * `template-flow.spec.ts` used to ask for a 90s wait and, on timeout, reload and
- * wait 40s more — for the webpack cold compile of a `next dev` server. Both
+ * Why one helper and no reload fallback: `loadPage()` and eleven inline copies
+ * in `template-flow.spec.ts` used to ask for a 90s wait and, on timeout, reload
+ * and wait 40s more — for the webpack cold compile of a `next dev` server. Both
  * waits passed `{ timeout }` as the page function's ARGUMENT, so each was really
  * `actionTimeout` (10s). Honouring the numbers does not make the fallback
  * reachable: every shipped config ends the TEST first (30s ci, 45s journey, 60s
@@ -21,19 +29,44 @@ import {
  * compile. A fixed 90s wait inside a 30s test can only ever die as the generic
  * "Test timeout of 30000ms exceeded", pointing at nothing.
  *
- * So the wait asks for `E2E_HYDRATION_TIMEOUT_MS` or the current test's own
- * budget minus `E2E_TIMEOUT_TEST_MARGIN_MS`, whichever is smaller. A hydration
- * that never completes then fails HERE, naming `__REACT_HYDRATED`, with the
- * margin left for Playwright to report it. Outside a test (timeout 0) the full
- * hydration budget applies.
+ * The rule (`hydrationWaitMs`, e2e/lib/hydrationWait.ts): wait for
+ * `E2E_HYDRATION_TIMEOUT_MS` or
+ * `test.info().timeout - elapsed - E2E_TIMEOUT_TEST_MARGIN_MS`, whichever is
+ * smaller, where `elapsed` is the time since this test's `page` fixture came
+ * up. Remaining time, not the full timeout: fixture setup, `beforeEach` hooks,
+ * `page.goto(..., { waitUntil: 'commit' })` and
+ * `waitForLoadState('domcontentloaded')` have already spent part of the budget
+ * by the time this runs, and a wait sized to the whole of it would overrun the
+ * test by that much — the generic timeout again, the failure this helper exists
+ * to remove. A hydration that never completes fails HERE, naming
+ * `__REACT_HYDRATED`, with the margin left for Playwright to report it.
+ *
+ * The stamp is recorded for every spec that imports `test` from this module
+ * (as `template-flow.spec.ts` does). It is taken once the built-in `page`
+ * fixture has produced the page — context creation, a few hundred ms into the
+ * budget — which the margin absorbs. A page with no stamp (a spec using
+ * `@playwright/test`'s own `test`) counts `elapsed` as 0 and is sized from the
+ * full timeout.
+ *
+ * When the remaining budget is not positive the full hydration budget applies:
+ * a test with no timeout (`test.setTimeout(0)` or `--timeout=0`, where
+ * `test.info().timeout` is 0), or one too short to hold the margin at all.
+ * There is no "outside a test" case — `test.info()` throws there, so this
+ * helper is only callable from a running test, its hooks or its fixtures.
+ *
+ * Deliberate narrowing: under the 60s default config a local `next dev`
+ * webpack cold compile that finished after 45s but inside the test's 60s (the
+ * board for #10363 cited 45-58s) used to pass, because the old 90s first wait
+ * outlived the test and the compile only had to beat the test timeout; it now
+ * fails at `E2E_HYDRATION_TIMEOUT_MS` (45s). Nothing that passed in CI changes
+ * — `next start` has no cold compile, and the reload fallback was unreachable
+ * under every shipped config. Locally, warm the dev server (open /dev once) or
+ * run against `next start` before the @ui suite.
  */
 export async function waitForEditorHydration(page: Page): Promise<void> {
-  const testTimeoutMs = base.info().timeout;
-  const budgetMs = testTimeoutMs - E2E_TIMEOUT_TEST_MARGIN_MS;
-  const timeout =
-    testTimeoutMs > 0 && budgetMs > 0
-      ? Math.min(E2E_HYDRATION_TIMEOUT_MS, budgetMs)
-      : E2E_HYDRATION_TIMEOUT_MS;
+  const startedAtMs = TEST_START_MS.get(page);
+  const elapsedMs = startedAtMs === undefined ? 0 : Date.now() - startedAtMs;
+  const timeout = hydrationWaitMs(base.info().timeout, elapsedMs);
   await page.waitForFunction(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     () => (window as any).__REACT_HYDRATED === true,
@@ -278,6 +311,16 @@ export class EditorPage {
 }
 
 export const test = base.extend<{ editor: EditorPage }>({
+  // Wrap the built-in page fixture to stamp when this test's page came up.
+  // Test-scoped fixtures set up inside the test's timeout, right before its
+  // beforeEach hooks and body, so this is the closest thing to the test's start
+  // that Playwright exposes — `test.info()` carries no start time. Read by
+  // `waitForEditorHydration`; see its docblock for what the stamp misses.
+  page: async ({ page }, use) => {
+    TEST_START_MS.set(page, Date.now());
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    await use(page);
+  },
   editor: async ({ page }, use) => {
     const editor = new EditorPage(page);
     // eslint-disable-next-line react-hooks/rules-of-hooks

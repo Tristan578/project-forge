@@ -34,7 +34,14 @@ export const E2E_TIMEOUT_NAV_MS = 15_000;
 /** Auth flow timeout */
 export const E2E_TIMEOUT_AUTH_MS = 30_000;
 
-/** Engine init timeout (reload path after cold start) */
+/**
+ * Hydration wait after the reload in `accessibility-audit.spec.ts`'s
+ * cold-start fallback (the WelcomeModal audit) — its only remaining user.
+ * `EditorPage.loadPage()` and `template-flow.spec.ts` carried the same
+ * fallback until `waitForEditorHydration` (e2e/fixtures/editor.fixture.ts)
+ * replaced them in #10363; that last copy is unreachable under every shipped
+ * config for the same reason. Retiring it, and this constant with it: #10364.
+ */
 export const E2E_TIMEOUT_ENGINE_INIT_MS = 40_000;
 
 /** WASM engine init / hydration timeout */
