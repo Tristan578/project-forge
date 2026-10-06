@@ -216,6 +216,24 @@ describe('load_scene', () => {
     expect(result.success).toBe(false);
     expect(result.error).toBeDefined();
   });
+
+  // #10202: the real store's `loadScene` re-raises a dispatch the engine threw
+  // on, after locking saving. This handler let that escape to the executor's
+  // generic catch, which relayed the raw engine text and said nothing about
+  // the lockout — and "try again" is the wrong advice for a viewport that may
+  // be half-applied. Parity with `switch_scene`'s own catch.
+  it('tells the user to reload, not to retry, when loadScene throws', async () => {
+    const { result } = await invokeHandler(
+      sceneManagementHandlers,
+      'load_scene',
+      { json: '{}' },
+      { loadScene: vi.fn(() => { throw new Error('engine unreachable'); }) },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Reload the editor');
+    expect(result.error).toContain('engine unreachable');
+    expect(result.error).not.toContain('try again');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -234,6 +252,21 @@ describe('new_scene', () => {
     expect(result.success).toBe(true);
     expect((result.result as Record<string, unknown>).message).toBe('New scene created');
     expect(store.newScene).toHaveBeenCalled();
+  });
+
+  // #10202: same as `load_scene` above. A thrown `new_scene` can have
+  // despawned the outgoing scene mid-apply, so "unchanged" would be a lie.
+  it('tells the user to reload, not that the scene is unchanged, when newScene throws', async () => {
+    const { result } = await invokeHandler(
+      sceneManagementHandlers,
+      'new_scene',
+      {},
+      { newScene: vi.fn(() => { throw new Error('engine unreachable'); }) },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Reload the editor');
+    expect(result.error).toContain('engine unreachable');
+    expect(result.error).not.toContain('unchanged');
   });
 });
 

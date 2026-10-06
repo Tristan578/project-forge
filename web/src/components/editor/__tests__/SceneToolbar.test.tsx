@@ -341,6 +341,61 @@ describe('SceneToolbar', () => {
       );
     });
 
+    // #10202: `loadScene`/`newScene` re-raise a dispatch the engine threw on,
+    // after locking saving (#10079). Until #10202 the editor's dispatcher
+    // swallowed the throw, so these callbacks never saw one; now they must
+    // catch it and tell the user to reload — not claim the scene is unchanged,
+    // not ask them to retry, and not let it escape as an uncaught error.
+    describe('a thrown dispatch (#10202)', () => {
+      const engineFailure = () => { throw new Error('engine unreachable'); };
+
+      it('tells the user to reload when a picked scene load throws', async () => {
+        vi.mocked(openSceneFilePicker).mockResolvedValue('{"entities":[]}');
+        const loadScene = vi.fn(engineFailure);
+        mockEditorStore({ loadScene });
+        render(<SceneToolbar />);
+
+        await act(async () => {
+          screen.getByRole('button', { name: /load scene/i }).click();
+        });
+
+        expect(loadScene).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining('Reload the editor'));
+        expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining('try again'));
+      });
+
+      it('tells the user to reload when newScene throws via the New Scene button', async () => {
+        const newScene = vi.fn(engineFailure);
+        mockEditorStore({ newScene, sceneModified: false });
+        render(<SceneToolbar />);
+
+        await act(async () => {
+          screen.getByRole('button', { name: /new scene/i }).click();
+        });
+
+        expect(newScene).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining('Reload the editor'));
+        expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining('unchanged'));
+      });
+
+      it('tells the user to reload when newScene throws via the Ctrl+Shift+N shortcut', () => {
+        const newScene = vi.fn(engineFailure);
+        mockEditorStore({ newScene });
+        render(<SceneToolbar />);
+
+        act(() => {
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'N', ctrlKey: true, shiftKey: true }));
+        });
+
+        expect(newScene).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(showError)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(showError)).toHaveBeenCalledWith(expect.stringContaining('Reload the editor'));
+        expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining('unchanged'));
+      });
+    });
+
     // #10056: the toolbar renders as soon as the editor page does, while the
     // dispatcher is attached only once the WASM engine finishes loading — so a
     // fast click lands on a `newScene()` that returns false for "not here yet",

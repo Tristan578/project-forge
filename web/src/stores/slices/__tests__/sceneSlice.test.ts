@@ -99,18 +99,39 @@ describe('sceneSlice', () => {
       }
     });
 
-    it.each([
-      { opts: { rejectionStrandsEditor: false }, prior: null, locks: true },
-      { opts: { rejectionStrandsEditor: false, strandOnThrow: false }, prior: null, locks: false },
-      { opts: { strandOnThrow: false }, prior: { reason: 'Standing lockout', at: 12 }, locks: false },
-    ])('respects throw policy $opts while rethrowing the original engine failure', ({ opts, prior, locks }) => {
+    // Two dispatchers can report a throw: one that RETHROWS it, and the one the
+    // editor actually registers (`useEngineEvents`), which CATCHES it and
+    // answers `{ success: false, error, threw: true }`. The policy must read the
+    // same for both — before #10202 the second was taken for a clean rejection,
+    // so `rejectionStrandsEditor: false` left saving enabled over a wrecked
+    // viewport.
+    const throwReporters = [
+      {
+        via: 'rethrows',
+        dispatcher: (failure: Error) => (command: string) => {
+          if (command === 'load_scene') throw failure;
+          return { success: true };
+        },
+      },
+      {
+        via: 'answers threw: true',
+        dispatcher: (failure: Error) => (command: string) => (
+          command === 'load_scene'
+            ? { success: false, error: failure.message, threw: true as const }
+            : { success: true }
+        ),
+      },
+    ] as const;
+
+    it.each(throwReporters.flatMap(({ via, dispatcher }) => [
+      { via, dispatcher, opts: { rejectionStrandsEditor: false }, prior: null, locks: true },
+      { via, dispatcher, opts: { rejectionStrandsEditor: false, strandOnThrow: false }, prior: null, locks: false },
+      { via, dispatcher, opts: { strandOnThrow: false }, prior: { reason: 'Standing lockout', at: 12 }, locks: false },
+    ]))('respects throw policy $opts while rethrowing the original engine failure (dispatcher $via)', ({ dispatcher, opts, prior, locks }) => {
       store.setState({ sceneLoadError: prior });
       const failure = new Error('engine failed mid-apply');
-      setSceneDispatcher((command) => {
-        if (command === 'load_scene') throw failure;
-        return { success: true };
-      });
-      expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Target')), opts)).toThrow(failure);
+      setSceneDispatcher(dispatcher(failure));
+      expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('Target')), opts)).toThrow(failure.message);
       if (locks) expect(store.getState().sceneLoadError?.reason).toContain(failure.message);
       else expect(store.getState().sceneLoadError).toEqual(prior);
     });

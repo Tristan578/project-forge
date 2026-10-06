@@ -22,7 +22,7 @@ import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage } from '@/lib/prefabs/prefabStore';
 import { stageSceneCompletionMode, takeStagedSceneCompletionMode } from '@/lib/scenes/sceneCompletionMode';
 
-type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string } | void;
+type Dispatcher = (command: string, payload: unknown) => { success: boolean; error?: string; threw?: true } | void;
 
 function detachDispatcher() {
   setSceneDispatcher(null as unknown as Dispatcher);
@@ -264,6 +264,39 @@ describe('sceneSlice.loadTemplate', () => {
       expect(harness.setScript).not.toHaveBeenCalled();
       expect(harness.addGameComponent).not.toHaveBeenCalled();
       expect(harness.setInputPreset).not.toHaveBeenCalled();
+      // A clean refusal leaves the OUTGOING scene on screen and intact, so it
+      // locks nothing — the control for the thrown case below (#10202).
+      expect(harness.store.getState().sceneLoadError).toBeNull();
+    });
+
+    // #10079 / #10202: a THROWN `load_scene` can leave the outgoing scene
+    // despawned mid-apply, so saving must lock until reload — the lockout
+    // `loadScene` and `newScene` set on their throw paths. This action never
+    // set it. And the throw arrives two ways: a dispatcher that rethrows, or
+    // the one the editor registers (`useEngineEvents`), which catches it and
+    // answers `{ success: false, error, threw: true }`.
+    it.each([
+      ['rethrows', (): ReturnType<Dispatcher> => { throw new Error('JsValue("serialize failed")'); }],
+      ['answers threw: true', (): ReturnType<Dispatcher> => ({ success: false, error: 'JsValue("serialize failed")', threw: true })],
+    ])('locks saving with the ENGINE_LOAD_THREW reason and tells the user to reload when the dispatch throws (dispatcher %s)', async (_via, answer) => {
+      const dispatch = vi.fn<Dispatcher>((command) => (command === 'load_scene' ? answer() : undefined));
+      setSceneDispatcher(dispatch);
+
+      const result = await harness.store.getState().loadTemplate('2d-platformer');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('JsValue("serialize failed")');
+      expect(result.error).toContain('Reload the editor');
+      expect(harness.store.getState().sceneLoadError).toEqual({
+        reason: expect.stringContaining('the engine failed while loading it'),
+        at: expect.any(Number),
+      });
+      // The lockout is what it is for: saving now refuses to export.
+      dispatch.mockClear();
+      harness.store.getState().saveScene();
+      expect(dispatch).not.toHaveBeenCalledWith('export_scene', expect.anything());
+      expect(harness.setScript).not.toHaveBeenCalled();
+      expect(harness.addGameComponent).not.toHaveBeenCalled();
     });
 
     it('refuses when the engine acknowledges the load but never applies it', async () => {

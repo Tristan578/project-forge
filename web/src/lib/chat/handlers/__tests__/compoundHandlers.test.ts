@@ -408,6 +408,27 @@ describe('create_scene_from_description', () => {
       expect(spawnEntity).not.toHaveBeenCalled();
     });
 
+    // #10202: `newScene()` re-raises a dispatch the engine threw on, after
+    // locking saving (#10079). The handler must stop before spawning anything
+    // onto a viewport that may be half-cleared, and tell the user to reload
+    // rather than let the executor's generic catch relay the raw engine text.
+    it('fails without spawning and tells the user to reload when clearing the scene throws', async () => {
+      const spawnEntity = vi.fn(() => 'spawned-1');
+      const { result, store } = await invoke('create_scene_from_description', {
+        entities: [{ type: 'cube', name: 'Box' }],
+        clearExisting: true,
+      }, {
+        newScene: vi.fn(() => { throw new Error('engine unreachable'); }),
+        spawnEntity,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Reload the editor');
+      expect(result.error).toContain('engine unreachable');
+      expect(store.newScene).toHaveBeenCalled();
+      expect(spawnEntity).not.toHaveBeenCalled();
+    });
+
     it('applies environment settings', async () => {
       const { store } = await invoke('create_scene_from_description', {
         entities: [],
