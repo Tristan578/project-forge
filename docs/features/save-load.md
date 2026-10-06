@@ -41,7 +41,15 @@ The `.forge` file is a JSON document containing:
 - Input bindings
 - Environment settings
 - Post-processing settings
+- The project's dimension, 2D or 3D (see below)
 - The scene's completion mode, when one has been chosen (see below)
+
+### Project type (2D or 3D)
+Whether the project is 2D or 3D. In 2D mode the engine renders through an orthographic 2D camera — the only camera sprites are visible through — and the editor shows the 2D inspector sections and the tilemap tools. It is set by the AI (`set_project_type`), by a generated game's brief, or by loading a 2D template.
+
+It is stored as `metadata.projectType`, `"2d"` or `"3d"`, inside the `.forge` file. The engine writes it on every save from its own project-type state and restores it on every load, so it travels with the scene everywhere the scene goes: the `.forge` download, auto-save, cloud save, scene switching, checkpoints, the publication snapshot a `/play` link serves, remixes, forks and the HTML/ZIP exports. The engine reports the restored type to the editor, so a reopened 2D project comes back with its 2D tools available without an AI turn (#10227).
+
+**Migration rule for older files.** A file with no `metadata.projectType` key, at any `formatVersion`, is a 3D project — the mode every scene saved before the key existed was always opened in. It opens in 3D and gains the key on its next save. A value that is not `"2d"` or `"3d"` is refused by the engine as an invalid scene file, in the same way as any other unknown value in the format; the type is never guessed from the entities. No `formatVersion` change: the key is optional, and a bump would be refused by every engine already deployed.
 
 ### Completion mode
 How the game counts as complete: `win`, `endless`, `sandbox` or `narrative`. It is set from **Scene Settings → Completion mode** or by the AI (`set_completion_mode`, or a generated game's brief), and it decides whether **Play** and orchestrator verification require a win condition. Only `win` requires one; a win condition the scene does have is validated in every mode.
