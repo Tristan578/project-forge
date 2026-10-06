@@ -313,6 +313,7 @@ test.describe('Responsive Layout @ui @dev', () => {
     // Wait until the store is mounted before reading state
     await page.waitForFunction(
       () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
+      undefined,
       { timeout: E2E_TIMEOUT_ELEMENT_MS }
     );
 

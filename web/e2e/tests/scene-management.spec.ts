@@ -124,6 +124,7 @@ test.describe('Scene Management (engine) @engine', () => {
         if (!store) return false;
         return store.getState().selectedIds.size > 0;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 

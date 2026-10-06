@@ -24,7 +24,13 @@ for t in .claude/hooks/__tests__/*.test.sh; do echo "== $t =="; bash "$t" || bre
 # Lint every hook and every suite — zero findings required. The whole tree is
 # shellcheck-clean (#8676) and the CI `hook-tests` job
 # (.github/workflows/ci.yml, step "Shellcheck all hooks") runs exactly this
-# command, so a red result here IS your regression:
+# command, so a red result here IS your regression. A GREEN one is not proof:
+# CI uses the runner's preinstalled shellcheck (0.9.0 on ubuntu-latest; the
+# step prints `shellcheck --version`), and 0.9.0 reports SC2015 on
+# `[ a ] && [ b ] || continue` where 0.11 does not (#10333, #10334). Before
+# pushing a hook change, also run the CI version:
+#   python3 -m venv /tmp/sc09 && /tmp/sc09/bin/pip install shellcheck-py==0.9.0.6
+#   /tmp/sc09/bin/shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 shellcheck -x .claude/hooks/*.sh .claude/hooks/__tests__/*.test.sh
 # Plain `shellcheck` (no -x) is clean too: every dynamic `source` line carries a
 # line-level `# shellcheck disable=SC1091` with its reason, because a

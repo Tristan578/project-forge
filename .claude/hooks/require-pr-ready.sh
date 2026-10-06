@@ -16,8 +16,9 @@
 # (lessons-learned #21). It covers the spellings below. Known gaps: a script a
 # shell reads from a FILE (`bash ready.sh`, `bash < x`, `cat x | bash`) is not
 # read; a script fed to a shell on stdin (heredoc, pipe) blocks only when the
-# command text itself names a ready call; a body file is read only when cat,
-# a < redirect or a body option feeds it; a gh call that hangs is bounded by
+# segment feeding it names a ready call (stdin_names_ready); a body file is
+# read only when a cat in command position, a < redirect or a body option
+# feeds it; a gh call that hangs is bounded by
 # `timeout` where the system has it (GNU coreutils), else only between calls
 # (#10330).
 #
@@ -217,7 +218,92 @@ split_statements() {
 TARGETS=()   # "owner/repo#number" (number "?" when it cannot be read)
 # What a ready call looks like in raw text, for a script the hook cannot split.
 STDIN_TRIGGERS='gh[[:space:]]+pr[[:space:]]+ready|post-board-verdict|ccr/ready_for_review|markPullRequestReadyForReview|board-verdict:[[:space:]]*PASS'
+STDIN_SHELL_RE='(^|[^A-Za-z0-9_.-])(bash|sh|zsh|dash|ksh)([^A-Za-z0-9_.-]|$)'
 MATCHES=()   # the statement that produced each target, for the message
+
+# segments: the command split where one command list ends and the next begins
+# (; && || & and newlines, outside quotes, $(...), (...), backticks and a
+# compound command's body, so `for ...; do ...; done | bash` stays whole),
+# each segment keeping its pipes (| and |&, also continued on the next line)
+# and the heredoc bodies its lines open. Records end in \036.
+segments() {
+  awk 'BEGIN { RS = "\001" } {
+    src = $0; n = length(src); seg = ""; q = ""; d = 0; bt = 0; blk = 0; nhd = 0
+    for (i = 1; i <= n; i++) {
+      c = substr(src, i, 1); nx = substr(src, i + 1, 1)
+      if (q == "s") { seg = seg c; if (c == "\047") q = ""; continue }
+      if (q == "d") {
+        seg = seg c
+        if (c == "\\") { seg = seg nx; i++ } else if (c == "\"") q = ""
+        continue
+      }
+      if (c == "\\") { seg = seg c nx; i++; continue }
+      if (c == "\047") { q = "s"; seg = seg c; continue }
+      if (c == "\"") { q = "d"; seg = seg c; continue }
+      if (c == "`") { bt = !bt; seg = seg c; continue }
+      if (i == 1 || substr(src, i - 1, 1) ~ /[ \t\n;&|(]/) {
+        w = substr(src, i); if (match(w, /^[^ \t\n;&|()<>]+/)) w = substr(w, 1, RLENGTH); else w = ""
+        if (w ~ /^(for|while|until|if|case|select|[{])$/) blk++
+        else if (w ~ /^(done|fi|esac|[}])$/ && blk > 0) blk--
+      }
+      if (c == "(") { d++; seg = seg c; continue }
+      if (c == ")") { if (d > 0) d--; seg = seg c; continue }
+      if (c == "<" && nx == "<" && substr(src, i + 2, 1) != "<") {
+        j = i + 2; if (substr(src, j, 1) == "-") j++
+        while (substr(src, j, 1) == " " || substr(src, j, 1) == "\t") j++
+        delim = ""
+        while (j <= n) {
+          ch = substr(src, j, 1)
+          if (ch ~ /[ \t\n;&|)<>]/) break
+          if (ch != "\047" && ch != "\"" && ch != "\\") delim = delim ch
+          j++
+        }
+        if (delim != "") hd[++nhd] = delim
+        seg = seg substr(src, i, j - i); i = j - 1; continue
+      }
+      if (c == "\n") {
+        # A line ending in | or |& continues the pipe on the next line.
+        piped = (seg ~ /[|]&?[ \t]*$/); seg = seg c
+        for (h = 1; h <= nhd; h++) {
+          while (i < n) {
+            e = index(substr(src, i + 1), "\n"); line = (e ? substr(src, i + 1, e - 1) : substr(src, i + 1))
+            seg = seg line "\n"; i = (e ? i + e : n)
+            sub(/^\t+/, "", line)
+            if (line == hd[h]) break
+          }
+        }
+        nhd = 0
+        if (d > 0 || bt || blk > 0 || piped) continue
+        printf "%s\036", seg; seg = ""; continue
+      }
+      if (d > 0 || bt || blk > 0) { seg = seg c; continue }
+      # ; and || end a list; & (and so &&) too, unless it is a >& or &>
+      # redirect or the & of a |& pipe. Not while a heredoc opened on this
+      # line is pending: its body (on the next lines) belongs to the command
+      # that opened it, so the split waits for the line end.
+      if (nhd > 0) { seg = seg c; continue }
+      if (c == ";" || (c == "|" && nx == "|")) { printf "%s\036", seg; seg = ""; if (c == "|") i++; continue }
+      if (c == "&" && nx != ">" && substr(src, i - 1, 1) !~ /[>|]/) { printf "%s\036", seg; seg = ""; continue }
+      seg = seg c
+    }
+    printf "%s\036", seg
+  }'
+}
+
+# stdin_names_ready: does a segment that runs a shell also name a ready call?
+# A script fed to a shell on stdin comes from its own segment: the pipe before
+# it or its heredoc. A ready call named in a different segment (a commit
+# message) is not that script. A segment holding a $ can carry text from
+# elsewhere (`echo "$X" | bash`), so then the whole command is searched.
+stdin_names_ready() {
+  local seg
+  while IFS= read -r -d $'\036' seg; do
+    grep -qE "$STDIN_SHELL_RE" <<<"$seg" || continue
+    if grep -qE "$STDIN_TRIGGERS" <<<"$seg"; then return 0; fi
+    if [[ "$seg" == *'$'* ]] && grep -qE "$STDIN_TRIGGERS" <<<"$COMMAND"; then return 0; fi
+  done < <(segments <<<"$COMMAND")
+  return 1
+}
 add_target() { TARGETS+=("$1"); MATCHES+=("$2"); }
 
 # wrapper_opt_takes_arg <wrapper> <option>: does this wrapper option consume
@@ -283,17 +369,24 @@ command_and_files() {
 
 # body_files <token regex>: the paths command_and_files reads, one per line.
 # cat's arguments run until a separator or a heredoc (<<), whose body is text,
-# not file names. It runs twice: once splitting at every space, which also
-# reads inside a quoted script (bash -c 'gh pr comment N -F - < v.md'), and
-# once keeping a quoted word ('a b', or "a b" holding no $ or parentheses)
-# whole, so a path with a space is read too.
+# not file names, and only a cat in COMMAND POSITION starts them: "run cat
+# m.sh to see" in a reply is prose, not a read (#10334). It runs twice: once
+# splitting at every space, which also reads inside a quoted script
+# (bash -c 'gh pr comment N -F - < v.md'), and once keeping a quoted word
+# ('a b', or "a b" holding no $ or parentheses) whole, so a path with a space
+# is read too.
 WORD_RE="<<<|<<|<|[|;&()]|[^[:space:]\"'<>|;&()]+"
 QUOTED_RE="'[^']*'|\"[^\"\$()]*\""
 body_files() {
-  local tok prev="" incat=0
+  # cmdpos: the next word could be a command (start of a statement, after
+  # assignments, wrappers and their options, timeout's duration, or a script
+  # handed to bash -c / eval). Each line ends in a ; token, since grep -o
+  # never matches the newline itself.
+  local tok prev="" incat=0 cmdpos=1 dur=0 skip=0 wrap=""
   while IFS= read -r tok; do
     case "$tok" in
-      '|'|';'|'&'|'('|')'|'<<'|'<<<') incat=0; prev=$tok; continue ;;
+      ')') incat=0; cmdpos=0; prev=$tok; continue ;;
+      '|'|';'|'&'|'('|'<<'|'<<<') incat=0; cmdpos=1; dur=0; skip=0; wrap=""; prev=$tok; continue ;;
       \'*\'|\"*\") tok=${tok:1:${#tok}-2} ;;
     esac
     case "$prev" in -F|--body-file|--input|'<') printf '%s\n' "$tok" ;; esac
@@ -303,9 +396,22 @@ body_files() {
       -*) ;;
       *) [ "$incat" -eq 0 ] || printf '%s\n' "$tok" ;;
     esac
-    [ "${tok##*/}" != cat ] || incat=1
+    if [ "$cmdpos" -eq 1 ] && [ "$skip" -eq 1 ]; then
+      skip=0   # the value of a wrapper option (`nice -n 5`, `sudo -u x`)
+    elif [ "$cmdpos" -eq 1 ]; then
+      case "${tok##*/}" in
+        cat) incat=1; cmdpos=0 ;;
+        sudo|command|builtin|exec|env|nice|nohup|time|xargs|ionice|stdbuf) wrap=${tok##*/} ;;
+        timeout) wrap=timeout; dur=1 ;;
+        eval|if|elif|while|until|then|do|else|'{'|'!'|[A-Za-z_]*=*) ;;
+        -*) if wrapper_opt_skips_next "$wrap" "$tok"; then skip=1; fi ;;
+        *) if [ "$dur" -eq 1 ]; then dur=0; else cmdpos=0; fi ;;
+      esac
+    elif [ "$tok" = -c ] || [ "$tok" = eval ]; then
+      cmdpos=1
+    fi
     prev=$tok
-  done < <(grep -oE "$1" <<<"$COMMAND")
+  done < <(grep -oE "$1" <<<"${COMMAND//$'\n'/ ;$'\n'} ;")
 }
 
 # A number as written in a call: digits (optionally #), else "?".
@@ -387,8 +493,8 @@ scan() { # <shell text> <depth>
         if [ -n "$script" ]; then scan "$script" $((depth + 1)); continue; fi
         # No -c and no script file: the shell reads its script from stdin (a
         # heredoc or a pipe). The hook does not run that text, so if the
-        # command names a ready call anywhere, it blocks.
-        if [ "$j" -ge "${#w[@]}" ] && grep -qE "$STDIN_TRIGGERS" <<<"$COMMAND"; then
+        # segment feeding it names a ready call, it blocks.
+        if [ "$j" -ge "${#w[@]}" ] && stdin_names_ready; then
           add_target "$repo#stdin" "$stmt_text (a script on stdin)"
           continue
         fi
