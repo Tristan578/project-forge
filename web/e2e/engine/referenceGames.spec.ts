@@ -384,13 +384,19 @@ async function configureGame(page: Page, game: ReferenceGame, ids: Record<string
  * round starts — one component per entity per frame, the way the inspector's
  * Add button delivers them.
  *
- * Measured, not assumed: adding an entity's two components in the same frame
- * leaves the engine holding only the second (#10193). `apply_game_component_adds`
- * inserts a new `GameComponents` through deferred `Commands` for an entity that
- * has none, so the second request in that frame still sees none and its insert
- * replaces the first. Until that is fixed this spec must not batch, or it would
- * fail on the engine bug instead of proving the games load; the wait between
- * rounds is also what reports a dropped component as a count mismatch.
+ * The engine no longer requires this. When the spec was written, adding an
+ * entity's two components in the same frame left the engine holding only the
+ * second (#10193): `apply_game_component_adds` inserted a new `GameComponents`
+ * through deferred `Commands` for an entity that had none, so the second
+ * request in that frame still saw none and its insert replaced the first.
+ * #10211 fixed it — the bridge now stages every add for an entity in one
+ * `StagedGameComponents` (`engine/src/core/game_components.rs`) and inserts
+ * the accumulated set once at the end of the drain, pinned by that module's
+ * `two_adds_for_one_entity_share_one_insert` test. The rounds are kept for
+ * what they report: an export is read between rounds, so a component the
+ * engine accepted but could not build shows up as a count mismatch in the
+ * round that added it, beside the rejection lines, rather than as one
+ * undifferentiated diff after every component went in at once.
  *
  * Each round's polled value carries the engine-rejection lines collected so
  * far, beside the counts. Console events reach the test asynchronously, so a
