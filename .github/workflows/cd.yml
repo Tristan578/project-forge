@@ -1458,7 +1458,8 @@ jobs:
           ( cd web && node --input-type=module -e "
             import { neon } from '@neondatabase/serverless';
             const sql = neon(process.env.DATABASE_URL);
-            await sql('CREATE EXTENSION IF NOT EXISTS vector');
+            // sql.query(), not sql(): @neondatabase/serverless 1.x accepts only tagged-template calls on the bare function (#10352).
+            await sql.query('CREATE EXTENSION IF NOT EXISTS vector');
             console.log('pgvector extension ensured on dry-run branch');
           " )
           # NO --force here. Without it drizzle-kit prints its own data-loss
