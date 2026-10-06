@@ -284,9 +284,8 @@ describe('sceneSlice.loadTemplate', () => {
 
       const result = await harness.store.getState().loadTemplate('2d-platformer');
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('JsValue("serialize failed")');
-      expect(result.error).toContain('Reload the editor');
+      expect(result).toEqual({ success: false, error: expect.stringContaining('JsValue("serialize failed")') });
+      expect(result).toEqual({ success: false, error: expect.stringContaining('Reload the editor') });
       expect(harness.store.getState().sceneLoadError).toEqual({
         reason: expect.stringContaining('the engine failed while loading it'),
         at: expect.any(Number),
