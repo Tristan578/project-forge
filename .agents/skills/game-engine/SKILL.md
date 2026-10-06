@@ -1,6 +1,6 @@
 ---
 name: game-engine
-description: Web game engine patterns — game loops, physics, collision, sprites, tilemaps, audio, 2D/3D rendering, WebGL, Canvas. Use when implementing game mechanics, SpawnForge engine features, or game system architecture (platformers, physics, input, camera).
+description: SpawnForge engine command and ECS patterns — JSON commands through handle_command(), the pending-queue bridge, ECS components, and MCP command wiring. Use when implementing SpawnForge game mechanics or engine features (physics, input, camera, entities).
 ---
 
 # Game Engine Skill

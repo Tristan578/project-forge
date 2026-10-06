@@ -39,7 +39,7 @@ You are the infrastructure and DevOps specialist for SpawnForge — an AI-native
 | **Neon Postgres** | User data, projects, billing, cost logging | @web/src/lib/db/ (Drizzle ORM schema + client) |
 | **Upstash Redis** | Distributed rate limiting for API routes | @web/src/lib/rateLimit/distributed.ts |
 | **Clerk** | Authentication, session management | @web/src/lib/auth/, @web/src/proxy.ts (edge middleware) |
-| **Stripe** | 4-tier subscriptions, webhook processing | @web/src/app/api/webhooks/stripe/, @web/src/lib/billing/ |
+| **Stripe** | 4-tier subscriptions, webhook processing | @web/src/app/api/stripe/webhook/, @web/src/lib/billing/ |
 | **Sentry** | Error tracking, performance monitoring | @web/src/app/api/chat/route.ts, org: `tristan-nolan`, project: `spawnforge-ai` |
 | **PostHog** | Product analytics, feature flags, funnels | @web/src/lib/analytics/posthog.ts, @web/src/components/providers/PostHogProvider.tsx |
 | **GitHub Actions** | CI (lint, tsc, vitest, playwright, WASM build) | @.github/workflows/ci.yml, @.github/workflows/cd.yml |

@@ -740,7 +740,9 @@ Check CI first, and port a shared failure's fix before running any board.
 
 ### 24. A symlink checked out as a text file drops the skill behind it, silently
 **Applies:** .claude/skills|.agents/skills|.windsurf/skills|symlink|core.symlinks|120000|ln -s
-**What happens:** 17 skills and one rule reference were missing from every
+**What happens:** 16 skills and one rule reference (17 of the repo's 25
+tracked links; `git status` showed all 25 as type changes once
+`core.symlinks` was set true) were missing from every
 session on the main Windows checkout, and nothing said so. The agents that
 preload those skills (builder, test-writer, infra-devops, ux-reviewer) ran
 without them.

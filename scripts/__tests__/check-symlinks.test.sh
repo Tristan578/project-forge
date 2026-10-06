@@ -146,6 +146,28 @@ ln -s "../shared/file.md" "$R/links/with space.md"
 commit_all "$R"
 expect "9. a link path containing a space is checked, not split" "$(run_gate "$R")" 0 "1 symlinks OK"
 
+# ---- 10. a tracked link deleted from the working tree ---------------------
+# Not a stub: the core.symlinks remedy would be wrong advice for it.
+R="$(repo deleted)"
+ln -s ../shared/file.md "$R/links/ok.md"
+ln -s ../shared/dir "$R/links/gone"
+commit_all "$R"
+rm "$R/links/gone"
+expect "10. a tracked link missing from the working tree is reported as missing, not as a stub" \
+  "$(run_gate "$R")" 1 "links/gone" "missing from the working tree" "~plain text files"
+
+# ---- 11. the printed fix quotes each stub path ------------------------------
+# A path with a space must survive the printed remedy, so the remedy names
+# each stub as a quoted argument instead of re-deriving the list with awk.
+R="$(repo stubspace)"
+printf '../shared/file.md' > "$R/links/with space.md"
+commit_all "$R"
+blob="$(git -C "$R" hash-object -w "$R/links/with space.md")"
+git -C "$R" update-index --cacheinfo "120000,$blob,links/with space.md"
+git -C "$R" config core.symlinks false
+expect "11. the remedy for a stub with a space in its path quotes that path" \
+  "$(run_gate "$R")" 1 "git checkout -- 'links/with space.md'"
+
 echo ""
 echo "=== $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

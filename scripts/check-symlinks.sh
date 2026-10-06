@@ -31,6 +31,10 @@ while IFS= read -r -d '' rec; do
   path="${rec#*$'\t'}"
   total=$((total + 1))
 
+  if [ ! -L "$path" ] && [ ! -e "$path" ]; then
+    problems+=("$path: missing from the working tree (restore it: git checkout -- '$path')")
+    continue
+  fi
   if [ ! -L "$path" ]; then
     stubs+=("$path")
     continue
@@ -71,10 +75,14 @@ if [ "${#stubs[@]}" -gt 0 ]; then
   echo "check-symlinks: ${#stubs[@]} of $total symlinks are checked out as plain text files:"
   printf '  %s\n' "${stubs[@]}"
   echo ""
-  echo "Skills behind these links do not load. Fix this clone once:"
+  echo "Skills behind these links do not load. Fix this clone once (in Git Bash on Windows):"
   echo "  git config core.symlinks true"
   echo "  (Windows: Settings > System > For developers > Developer Mode must be on.)"
-  echo "  git ls-files -s | awk '\$1==\"120000\"{print \$4}' | while IFS= read -r p; do rm -f \"\$p\"; git checkout -- \"\$p\"; done"
+  echo "Then re-create each link:"
+  for p in "${stubs[@]}"; do
+    q="${p//\'/\'\\\'\'}"
+    echo "  rm -f -- '$q' && git checkout -- '$q'"
+  done
   echo ""
 fi
 
