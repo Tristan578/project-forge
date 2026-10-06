@@ -31,7 +31,8 @@ describe('readProjectTypeFromSceneData', () => {
 
   it('reads a legacy file with no key as 3d', () => {
     const legacy = sceneFixture('Legacy');
-    expect('projectType' in legacy.metadata).toBe(false);
+    // Non-vacuous: the fixture must really lack the key.
+    expect(Object.keys(legacy.metadata ?? {})).not.toContain(SCENE_PROJECT_TYPE_KEY);
     expect(readProjectTypeFromSceneData(legacy)).toBe('3d');
   });
 
