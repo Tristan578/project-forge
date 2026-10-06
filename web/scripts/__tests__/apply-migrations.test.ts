@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { MigrationMeta } from 'drizzle-orm/migrator';
 import type { MigrationRecord } from '../baseline-drizzle-journal';
 import {
+  causeMessages,
   createStatementRecorder,
   describeMigrationFailure,
+  rootCauseMessage,
   zipMigrationStatements,
   type MigrationStatements,
 } from '../apply-migrations';
@@ -85,6 +87,47 @@ describe('describeMigrationFailure', () => {
     const quoted = described.slice(described.indexOf(marker) + marker.length);
     expect(quoted).toBe(`${long.slice(0, 120)} [truncated]`);
     expect(described.length).toBeLessThan(long.length);
+  });
+});
+
+describe('rootCauseMessage / causeMessages', () => {
+  // drizzle wraps the driver's error: DrizzleQueryError("Failed query: <sql>\nparams: ")
+  // with `cause` = NeonDbError whose message is Postgres's own text. The first
+  // mutation run (PR #10370, job 112542684001) printed only the wrapper, and the
+  // Postgres message surfaced nowhere but the service container's log.
+  const postgres = new Error('relation "table_that_does_not_exist" does not exist');
+  const drizzle = new Error('Failed query: CREATE TABLE "probe" (...);\nparams: ', { cause: postgres });
+
+  it("ends with the ROOT cause — Postgres's message — not drizzle's wrapper", () => {
+    expect(rootCauseMessage(drizzle)).toBe('relation "table_that_does_not_exist" does not exist');
+  });
+
+  it('returns the message itself when there is no cause', () => {
+    expect(rootCauseMessage(new Error('plain'))).toBe('plain');
+  });
+
+  it('stringifies a non-Error throwable', () => {
+    expect(rootCauseMessage('a string was thrown')).toBe('a string was thrown');
+    expect(rootCauseMessage(new Error('outer', { cause: 42 }))).toBe('42');
+  });
+
+  it('lists every distinct message from the outside in, deduplicated', () => {
+    const wrapped = new Error('while applying migration x: relation "t" does not exist', { cause: drizzle });
+    expect(causeMessages(wrapped)).toEqual([
+      'while applying migration x: relation "t" does not exist',
+      'Failed query: CREATE TABLE "probe" (...);\nparams: ',
+      'relation "table_that_does_not_exist" does not exist',
+    ]);
+    const repeated = new Error('same', { cause: new Error('same', { cause: new Error('same') }) });
+    expect(causeMessages(repeated)).toEqual(['same']);
+  });
+
+  it('terminates on a cyclic cause chain', () => {
+    const a = new Error('a');
+    const b = new Error('b', { cause: a });
+    (a as Error & { cause: unknown }).cause = b;
+    expect(causeMessages(a)).toEqual(['a', 'b']);
+    expect(rootCauseMessage(a)).toBe('b');
   });
 });
 

@@ -113,6 +113,33 @@ export function zipMigrationStatements(
   });
 }
 
+/**
+ * Every distinct message along an error's `cause` chain, outermost first.
+ * drizzle wraps the driver's error (`Failed query: <sql>\nparams: `) around
+ * the one that carries Postgres's own text, and the first mutation run of
+ * #10161 printed only the wrapper — the Postgres message surfaced nowhere but
+ * the service container's log. Cycles terminate; non-Error links are
+ * stringified.
+ */
+export function causeMessages(error: unknown): string[] {
+  const messages: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current);
+    const message = current instanceof Error ? current.message : String(current);
+    if (message !== '' && !messages.includes(message)) messages.push(message);
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return messages;
+}
+
+/** The innermost message of the chain — for a failed statement, Postgres's own. */
+export function rootCauseMessage(error: unknown): string {
+  const messages = causeMessages(error);
+  return messages[messages.length - 1] ?? String(error);
+}
+
 const MAX_QUOTED_STATEMENT_CHARS = 120;
 
 /**
@@ -171,11 +198,10 @@ async function main(): Promise<void> {
   try {
     await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
   } catch (error) {
+    // The one-line annotation names the migration AND Postgres's own message;
+    // the wrapper with the full statement follows as a cause line.
     const where = describeMigrationFailure(recorder.lastStatement(), migrations);
-    throw new Error(
-      `${where}: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
+    throw new Error(`${where}: ${rootCauseMessage(error)}`, { cause: error });
   }
 
   // Report what the database now believes, so a CI log shows the outcome rather
@@ -194,12 +220,10 @@ async function main(): Promise<void> {
 // execute it (#10190).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error: unknown) => {
-    console.error(
-      '::error::Migration failed',
-      error instanceof Error ? error.message : String(error),
-    );
-    if (error instanceof Error && error.cause) {
-      console.error('Cause:', String(error.cause));
+    const [headline, ...causes] = causeMessages(error);
+    console.error('::error::Migration failed', headline ?? String(error));
+    for (const cause of causes) {
+      console.error('Cause:', cause);
     }
     process.exitCode = 1;
   });
