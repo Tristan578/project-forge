@@ -20,6 +20,25 @@ export { EXECUTOR_REGISTRY, registerExecutor } from './executors';
 // verb list is how the two stop agreeing.
 export { BEHAVIOR_VOCAB, BEHAVIOR_PLANS, zBehavior, isBehavior } from './behaviorVocabulary';
 export type { Behavior, BehaviorPlan } from './behaviorVocabulary';
+// The one versioned brief contract for manual and AI briefs (#10174). Same
+// reason as the vocabulary above: a brief read or written outside this
+// directory (persistence, the editor) validates with THIS function, not a
+// second one.
+export {
+  BRIEF_ISSUE_CODES,
+  BRIEF_LIMITS,
+  BRIEF_SCHEMA_VERSION,
+  validateBrief,
+  zBriefContent,
+  zGameBrief,
+} from './briefSchema';
+export type {
+  BriefIssue,
+  BriefIssueCode,
+  BriefValidation,
+  GameBrief,
+  OpenDecision,
+} from './briefSchema';
 export type {
   OrchestratorGDD,
   OrchestratorPlan,
