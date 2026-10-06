@@ -8,6 +8,7 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/compon
 import { TemplateGallery } from '../TemplateGallery';
 import { useEditorStore } from '@/stores/editorStore';
 import { AnalyticsEvent } from '@/lib/analytics/posthog';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
@@ -152,6 +153,64 @@ describe('TemplateGallery', () => {
     expect(screen.queryByRole('alert')).toBeNull();
     expect(mockTrackEvent).toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, { source: 'blank' });
     expect(mockOnClose).toHaveBeenCalled();
+  });
+
+  // #10202 review, M1: `newScene()` re-raises a dispatch the engine threw on,
+  // after locking saving (#10079, #10202). This path had no catch, so the
+  // throw became an unhandled rejection (the card's `onClick` drops the
+  // promise): the gallery stayed open with no explanation, `setError` never
+  // ran, and nothing said to reload.
+  describe('Blank Project when newScene throws (#10202)', () => {
+    /** A Node-level listener: with no catch, the dropped promise rejects and this fires. */
+    function watchUnhandledRejections() {
+      const unhandled = vi.fn();
+      process.on('unhandledRejection', unhandled);
+      return {
+        unhandled,
+        async settle() {
+          // Node reports an unhandled rejection once the microtask queue has
+          // drained, before the next check-phase callback runs.
+          await new Promise((resolve) => setImmediate(resolve));
+          process.off('unhandledRejection', unhandled);
+        },
+      };
+    }
+
+    it('stays open, tells the user to reload in the shared sentence, fires nothing and rejects nothing', async () => {
+      const watch = watchUnhandledRejections();
+      mockNewScene.mockImplementationOnce(() => { throw new EngineDispatchThrewError('new_scene', 'JsValue("serialize failed")'); });
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByText('Blank Project').closest('button')!);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(ENGINE_THREW_RELOAD_GUIDANCE);
+      expect(alert).toHaveTextContent('JsValue("serialize failed")');
+      expect(alert).not.toHaveTextContent('try again');
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(mockOnClose).not.toHaveBeenCalled();
+      expect(mockTrackEvent).not.toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, expect.anything());
+      await watch.settle();
+      expect(watch.unhandled).not.toHaveBeenCalled();
+    });
+
+    // #10202 review, M3: only the typed engine throw carries a lockout. A
+    // plain error out of the store set none, so the banner must not claim one.
+    it('reports a non-engine throw as a plain failure, never as an engine error with a lockout', async () => {
+      const watch = watchUnhandledRejections();
+      mockNewScene.mockImplementationOnce(() => { throw new Error('hydrate failed'); });
+      render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByText('Blank Project').closest('button')!);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('A new scene could not be created: hydrate failed');
+      expect(alert).not.toHaveTextContent('engine error');
+      expect(alert).not.toHaveTextContent(ENGINE_THREW_RELOAD_GUIDANCE);
+      expect(mockOnClose).not.toHaveBeenCalled();
+      await watch.settle();
+      expect(watch.unhandled).not.toHaveBeenCalled();
+    });
   });
 
   it('has role="dialog" on the modal', () => {

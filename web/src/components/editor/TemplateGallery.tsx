@@ -5,6 +5,7 @@ import { Gamepad2, Zap, Crosshair, Puzzle, Compass, X, AlertTriangle, Loader2 } 
 import { useEditorStore } from '@/stores/editorStore';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import { offerCustomizeWithAi } from '@/lib/chat/customizeWithAi';
+import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
 import type { TemplateRegistryEntry } from '@/data/templates';
 
 interface TemplateGalleryProps {
@@ -95,7 +96,21 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
       // disambiguator — read synchronously, immediately after the call, so
       // nothing can have changed in between. Deferral: nothing was cleared and
       // nothing needed to be, the editor is already blank, so proceed.
-      if (newScene() === false && isEngineAttached()) {
+      let accepted: boolean;
+      try {
+        accepted = newScene();
+      } catch (error) {
+        // A THROWN `new_scene` is re-raised after the store has locked saving
+        // (#10079, #10202): the outgoing scene may be half-despawned, so the
+        // gallery stays open and says to reload — in the one sentence every
+        // surface shows, narrowed to the engine throw by the helper; a plain
+        // error (a storage write refused) is reported as what it is. Without
+        // this catch the throw was an unhandled rejection (the card's
+        // `onClick` drops this promise) and the gallery sat open, mute.
+        setError(sceneDispatchFailureMessage('A new scene could not be created', error));
+        return;
+      }
+      if (accepted === false && isEngineAttached()) {
         setError('The engine did not accept a new scene. Please try again.');
         return;
       }
