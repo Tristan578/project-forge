@@ -268,7 +268,25 @@ describe('new_scene', () => {
   it('reports a rejected engine transition instead of success', async () => {
     const { result } = await invokeHandler(sceneManagementHandlers, 'new_scene', {}, { newScene: vi.fn(() => false) });
     expect(result.success).toBe(false);
-    expect(result.error).toContain('unchanged');
+    expect(result.error).toBe('The engine did not accept a new scene. The current scene is unchanged.');
+  });
+
+  // #10202 review, round 2: the store also answers `false` when IT refused —
+  // browser storage would not clear the prefab-instance registry before the
+  // dispatch, so the engine was never asked — and when no engine is attached.
+  // The tool result names the real cause instead of blaming the engine.
+  it.each([
+    ['registry_not_cleared', 'the browser refused to update its local storage (the prefab-instance registry), so the engine was never asked.'],
+    ['engine_not_attached', 'The engine is not ready yet — try again in a moment.'],
+  ] as const)('names the real cause when newScene() refuses for %s', async (refusal, cause) => {
+    const { result } = await invokeHandler(sceneManagementHandlers, 'new_scene', {}, {
+      newScene: vi.fn(() => false),
+      newSceneRefusal: vi.fn(() => refusal),
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(cause);
+    expect(result.error).toContain('The current scene is unchanged.');
+    expect(result.error).not.toContain('engine did not accept');
   });
 
   it('calls newScene on the store and returns success message', async () => {
@@ -742,6 +760,27 @@ describe('switch_scene', () => {
 
     expect(store.newScene).toHaveBeenCalled();
     expect(store.loadScene).not.toHaveBeenCalled();
+  });
+
+  // #10202 review, round 2: the `newScene()` fallback refuses for reasons that
+  // are not the engine's, and "The engine rejected the scene switch" blamed it
+  // for a storage refusal. The outgoing capture is still persisted.
+  it('names the real cause when the newScene() fallback refuses because the registry could not be cleared', async () => {
+    mockSwitchScene.mockReturnValue({ project: { ...baseProject, activeSceneId: 'scene_2' }, sceneToLoad: null });
+
+    const { result, store } = await invokeHandler(
+      sceneManagementHandlers,
+      'switch_scene',
+      { sceneId: 'scene_2' },
+      { newScene: vi.fn(() => false), newSceneRefusal: vi.fn(() => 'registry_not_cleared') },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('the browser refused to update its local storage (the prefab-instance registry), so the engine was never asked.');
+    expect(result.error).toContain('unchanged');
+    expect(result.error).not.toContain('engine rejected');
+    expect(store.newScene).toHaveBeenCalled();
+    expect(mockSaveProjectScenes).toHaveBeenCalledWith(baseProject, store.projectId);
   });
 
   // Sentry: `store.loadScene` rolls back its OWN state (audio, prefab

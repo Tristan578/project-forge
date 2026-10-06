@@ -19,6 +19,7 @@ import { ownEntry, parseArgs, sceneDispatchThrewResult, zSetupGameFromDescriptio
 import { getPresetById } from '@/lib/materialPresets';
 import { getCapabilityUnavailability } from '@/lib/config/providers';
 import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
+import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
 import { buildStoreComponent, buildStoreComponentWithReport } from '@/lib/engine/gameComponentWire';
 import { withCorrectionSummary, type GameComponentFieldCorrection } from '@/lib/engine/gameComponentCorrections';
@@ -469,9 +470,13 @@ export const compoundHandlers: Record<string, ToolHandler> = {
         return { ...threw, error: `${threw.error} Nothing was created.` };
       }
       if (cleared === false) {
+        // By cause (#10202 review): the store also answers `false` when no
+        // engine is attached yet, or when browser storage refused the
+        // registry write that precedes the dispatch — neither is the engine
+        // refusing, and the model should not be told it was.
         return {
           success: false,
-          error: 'The engine did not accept a new scene, so the existing scene was not cleared. Nothing was created.',
+          error: `${describeNewSceneRefusal(ctx.store.newSceneRefusal())} The existing scene was not cleared, so nothing was created.`,
         };
       }
     }

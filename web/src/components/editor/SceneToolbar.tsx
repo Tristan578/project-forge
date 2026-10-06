@@ -7,6 +7,7 @@ import { saveSceneToCloud } from '@/lib/projects/cloudSave';
 import { useMusicArrangementStore } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, stagePrefabInstancesForExport } from '@/lib/prefabs/prefabStore';
 import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
+import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
 import { showError } from '@/lib/toast';
 import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
@@ -42,7 +43,7 @@ export function SceneToolbar() {
   const saveScene = useEditorStore((s) => s.saveScene);
   const loadScene = useEditorStore((s) => s.loadScene);
   const newScene = useEditorStore((s) => s.newScene);
-  const isEngineAttached = useEditorStore((s) => s.isEngineAttached);
+  const newSceneRefusal = useEditorStore((s) => s.newSceneRefusal);
   const setSceneName = useEditorStore((s) => s.setSceneName);
   const engineMode = useEditorStore((s) => s.engineMode);
   const undo = useEditorStore((s) => s.undo);
@@ -169,22 +170,21 @@ export function SceneToolbar() {
   /**
    * Report a `newScene()` that returned false, naming the RIGHT cause.
    *
-   * The boolean is false for two unrelated facts, and this button is reachable
-   * during the window that produces the second: the toolbar renders as soon as
-   * the editor page does, while the dispatcher is only attached once the WASM
-   * engine has finished loading. Calling that "the engine did not accept a new
-   * scene" tells the user their engine refused them when it had simply not
-   * arrived yet — and the two want different reactions (retry in a moment vs.
-   * something is wrong). `isEngineAttached()` reads the fact the boolean drops.
+   * The boolean is false for three unrelated facts, and only one of them is
+   * the engine refusing. This button is reachable during the window that
+   * produces another: the toolbar renders as soon as the editor page does,
+   * while the dispatcher is only attached once the WASM engine has finished
+   * loading. And the store refuses on its own when browser storage will not
+   * clear the prefab-instance registry before the dispatch (#10202 review).
+   * Calling either "the engine did not accept a new scene" tells the user
+   * their engine refused them when it was never asked — and the three want
+   * different reactions (retry in a moment / free up storage / something is
+   * wrong with the engine). `newSceneRefusal()` reads the fact the boolean
+   * drops; the words are the same ones the AI/MCP `new_scene` handler uses.
    */
   const reportNewSceneFailure = useCallback(() => {
-    showError(
-      isEngineAttached()
-        // Parity with the AI/MCP `new_scene` handler.
-        ? 'The engine did not accept a new scene. The current scene is unchanged.'
-        : 'The engine is not ready yet — try again in a moment. The current scene is unchanged.',
-    );
-  }, [isEngineAttached]);
+    showError(`${describeNewSceneRefusal(newSceneRefusal())} The current scene is unchanged.`);
+  }, [newSceneRefusal]);
 
   /**
    * `newScene()` for the button and the shortcut. A `false` is reported by

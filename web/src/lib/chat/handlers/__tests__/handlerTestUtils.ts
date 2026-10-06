@@ -126,6 +126,11 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
     // an engine that always accepts.
     loadScene: vi.fn(() => true),
     newScene: vi.fn(),
+    // Read by the `new_scene`, `switch_scene` and `create_scene_from_description`
+    // handlers right after a `false` from `newScene` to name its cause
+    // (#10202 review). `null` reads as the engine refusing, which is what
+    // every pre-existing `newScene: vi.fn(() => false)` here means.
+    newSceneRefusal: vi.fn(() => null),
     setScenes: vi.fn(),
     startSceneTransition: vi.fn().mockResolvedValue(undefined),
     setDefaultTransition: vi.fn(),

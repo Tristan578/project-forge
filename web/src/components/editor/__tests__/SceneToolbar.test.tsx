@@ -68,6 +68,10 @@ function mockEditorStore(overrides: Record<string, unknown> = {}) {
     // Default to an attached engine: every pre-existing test here describes a
     // loaded editor. The deferral cases opt out explicitly.
     isEngineAttached: vi.fn(() => true),
+    // Why the last `newScene()` answered false (#10202 review). `null` reads
+    // as the engine refusing — what every pre-existing `newScene: () => false`
+    // here means; the deferral and storage cases override it.
+    newSceneRefusal: vi.fn(() => null),
     setSceneName: vi.fn(),
     engineMode: 'edit',
     undo: vi.fn(),
@@ -440,7 +444,7 @@ describe('SceneToolbar', () => {
     // not "refused". Reporting a refusal there accuses a healthy engine.
     it('says the engine is not ready yet, not that it refused, when no dispatcher is attached', async () => {
       const newScene = vi.fn(() => false);
-      mockEditorStore({ newScene, sceneModified: false, isEngineAttached: vi.fn(() => false) });
+      mockEditorStore({ newScene, sceneModified: false, newSceneRefusal: vi.fn(() => 'engine_not_attached') });
       render(<SceneToolbar />);
 
       await act(async () => {
@@ -454,7 +458,7 @@ describe('SceneToolbar', () => {
 
     it('says the engine is not ready yet for the Ctrl+Shift+N shortcut too', () => {
       const newScene = vi.fn(() => false);
-      mockEditorStore({ newScene, isEngineAttached: vi.fn(() => false) });
+      mockEditorStore({ newScene, newSceneRefusal: vi.fn(() => 'engine_not_attached') });
       render(<SceneToolbar />);
 
       act(() => {
@@ -464,6 +468,25 @@ describe('SceneToolbar', () => {
       expect(vi.mocked(showError)).toHaveBeenCalledWith(
         'The engine is not ready yet — try again in a moment. The current scene is unchanged.',
       );
+    });
+
+    // #10202 review, round 2: the store refuses a new scene on its own when
+    // browser storage will not clear the prefab-instance registry before the
+    // dispatch. The engine was never asked, so the toast must not say it
+    // refused — the user would go looking at the wrong thing.
+    it('names browser storage, not the engine, when the registry could not be cleared before the dispatch', async () => {
+      const newScene = vi.fn(() => false);
+      mockEditorStore({ newScene, sceneModified: false, newSceneRefusal: vi.fn(() => 'registry_not_cleared') });
+      render(<SceneToolbar />);
+
+      await act(async () => {
+        screen.getByRole('button', { name: /new scene/i }).click();
+      });
+
+      expect(vi.mocked(showError)).toHaveBeenCalledExactlyOnceWith(
+        'A new scene could not be started because the browser refused to update its local storage (the prefab-instance registry), so the engine was never asked. The current scene is unchanged.',
+      );
+      expect(vi.mocked(showError)).not.toHaveBeenCalledWith(expect.stringContaining('engine did not accept'));
     });
 
     it('does not show an error when newScene succeeds', async () => {

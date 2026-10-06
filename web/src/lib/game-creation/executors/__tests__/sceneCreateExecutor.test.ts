@@ -234,14 +234,36 @@ describe('sceneCreateExecutor', () => {
   // game on top of the starter Ground/Player/Sun.
   it('fails the step when the engine refuses to clear the starter scene', async () => {
     const ctx = makeCtx({ store: {
-      projectId: null, setScenes: vi.fn(), newScene: vi.fn(() => false), sceneGraph: { nodes: {} },
+      projectId: null, setScenes: vi.fn(), newScene: vi.fn(() => false), newSceneRefusal: vi.fn(() => 'engine_refused'), sceneGraph: { nodes: {} },
     } });
 
     const result = await sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx);
 
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('COMMAND_FAILED');
+    expect(result.error?.message).toBe('Engine refused new_scene while clearing the starter scene');
     expect(ctx.getStore().newScene).toHaveBeenCalled();
+  });
+
+  // #10202 review, round 2: `newScene()` is also `false` when the store
+  // refused on its own — browser storage would not clear the prefab-instance
+  // registry before the dispatch — and when no engine is attached. The step
+  // error names the real cause so the log does not send the reader to the
+  // engine for a storage refusal.
+  it.each([
+    ['registry_not_cleared', 'Browser storage refused to clear the prefab-instance registry, so new_scene was never dispatched'],
+    ['engine_not_attached', 'No engine was attached to clear the starter scene, so new_scene was never dispatched'],
+  ] as const)('names the real cause when newScene() refuses for %s', async (refusal, message) => {
+    const ctx = makeCtx({ store: {
+      projectId: null, setScenes: vi.fn(), newScene: vi.fn(() => false), newSceneRefusal: vi.fn(() => refusal), sceneGraph: { nodes: {} },
+    } });
+
+    const result = await sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('COMMAND_FAILED');
+    expect(result.error?.message).toBe(message);
+    expect(result.error?.message).not.toContain('Engine refused');
   });
 
   it('aborts before touching persisted scenes', async () => {

@@ -9,6 +9,7 @@ import { parseArgs, sceneDispatchThrewResult } from './types';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
 import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
+import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
 import { validateSceneFile, type SceneValidation } from '@/lib/scenes/sceneValidation';
 import { COMPLETION_MODE_INFO } from '@/lib/playMode/completionMode';
@@ -117,7 +118,13 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       return sceneDispatchThrewResult('A new scene could not be created', error);
     }
     if (accepted === false) {
-      return { success: false, error: 'The engine did not accept a new scene. The current scene is unchanged.' };
+      // By cause: a `false` is also "no engine attached yet" and "browser
+      // storage refused the registry write before the dispatch", neither of
+      // which the engine did (#10202 review). Same words as the toolbar.
+      return {
+        success: false,
+        error: `${describeNewSceneRefusal(ctx.store.newSceneRefusal())} The current scene is unchanged.`,
+      };
     }
     return { success: true, result: { message: 'New scene created' } };
   },
@@ -271,7 +278,15 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     }
     if (accepted === false) {
       saveProjectScenes(project, ctx.store.projectId);
-      return { success: false, error: 'The engine rejected the scene switch. The current scene is unchanged.' };
+      // The `newScene()` fallback refuses for reasons that are not the
+      // engine's (no engine attached, a storage write refused), so its `false`
+      // is reported by cause; a refused `loadScene` is the engine's answer.
+      return {
+        success: false,
+        error: result.sceneToLoad
+          ? 'The engine rejected the scene switch. The current scene is unchanged.'
+          : `${describeNewSceneRefusal(ctx.store.newSceneRefusal())} The scene switch was cancelled, and the current scene is unchanged.`,
+      };
     }
     saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(

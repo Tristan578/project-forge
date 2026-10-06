@@ -405,7 +405,29 @@ describe('create_scene_from_description', () => {
       });
 
       expect(result.success).toBe(false);
+      expect(result.error).toBe('The engine did not accept a new scene. The existing scene was not cleared, so nothing was created.');
       expect(store.newScene).toHaveBeenCalled();
+      expect(spawnEntity).not.toHaveBeenCalled();
+    });
+
+    // #10202 review, round 2: the store also answers `false` when IT refused
+    // — browser storage would not clear the prefab-instance registry before
+    // the dispatch — so the model must not be told the engine did.
+    it('names browser storage, not the engine, when the registry could not be cleared before the dispatch', async () => {
+      const spawnEntity = vi.fn(() => 'spawned-1');
+      const { result } = await invoke('create_scene_from_description', {
+        entities: [{ type: 'cube', name: 'Box' }],
+        clearExisting: true,
+      }, {
+        newScene: vi.fn(() => false),
+        newSceneRefusal: vi.fn(() => 'registry_not_cleared'),
+        spawnEntity,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('the browser refused to update its local storage (the prefab-instance registry), so the engine was never asked.');
+      expect(result.error).toContain('nothing was created.');
+      expect(result.error).not.toContain('engine did not accept');
       expect(spawnEntity).not.toHaveBeenCalled();
     });
 

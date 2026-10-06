@@ -6,6 +6,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import { offerCustomizeWithAi } from '@/lib/chat/customizeWithAi';
 import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
+import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
 import type { TemplateRegistryEntry } from '@/data/templates';
 
 interface TemplateGalleryProps {
@@ -27,7 +28,7 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
   const [error, setError] = useState<string | null>(null);
   const loadTemplate = useEditorStore((s) => s.loadTemplate);
   const newScene = useEditorStore((s) => s.newScene);
-  const isEngineAttached = useEditorStore((s) => s.isEngineAttached);
+  const newSceneRefusal = useEditorStore((s) => s.newSceneRefusal);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -92,10 +93,13 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
       // ALSO false when there is no dispatcher yet, which is the ordinary cold
       // open (the engine mounts after the editor page). Treating that as a
       // refusal put an error on the gallery and trapped the user in it on the
-      // one path that has nothing to go wrong. `isEngineAttached()` is the
+      // one path that has nothing to go wrong. `newSceneRefusal()` is the
       // disambiguator — read synchronously, immediately after the call, so
       // nothing can have changed in between. Deferral: nothing was cleared and
-      // nothing needed to be, the editor is already blank, so proceed.
+      // nothing needed to be, the editor is already blank, so proceed. The
+      // third reason — browser storage refused the registry write that
+      // precedes the dispatch — is named as such, not as the engine's refusal
+      // (#10202 review).
       let accepted: boolean;
       try {
         accepted = newScene();
@@ -110,9 +114,12 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
         setError(sceneDispatchFailureMessage('A new scene could not be created', error));
         return;
       }
-      if (accepted === false && isEngineAttached()) {
-        setError('The engine did not accept a new scene. Please try again.');
-        return;
+      if (accepted === false) {
+        const refusal = newSceneRefusal();
+        if (refusal !== 'engine_not_attached') {
+          setError(`${describeNewSceneRefusal(refusal)} Please try again.`);
+          return;
+        }
       }
       trackEvent(AnalyticsEvent.GAME_CREATED, { source: 'blank' });
       onClose();

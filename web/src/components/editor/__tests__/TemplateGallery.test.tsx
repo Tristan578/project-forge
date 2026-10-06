@@ -58,11 +58,12 @@ describe('TemplateGallery', () => {
     .fn()
     .mockResolvedValue({ success: true, entityCount: 5, skippedEntityIds: [] });
   const mockNewScene = vi.fn();
-  // `newScene()` returns false for two unrelated facts — the engine REFUSED, or
-  // there is no dispatcher yet and the call was DEFERRED — and this is what
-  // separates them. Defaults to an attached engine, the state every other test
-  // in this file describes.
-  const mockIsEngineAttached = vi.fn(() => true);
+  // `newScene()` returns false for three unrelated facts — the engine REFUSED,
+  // there is no dispatcher yet and the call was DEFERRED, or browser storage
+  // refused the registry write that precedes the dispatch — and this is what
+  // separates them (#10202 review). `null` reads as the engine refusing, the
+  // state the pre-existing rejection test describes.
+  const mockNewSceneRefusal = vi.fn<() => 'engine_not_attached' | 'engine_refused' | 'registry_not_cleared' | null>(() => null);
 
   function setupStore() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,7 +71,7 @@ describe('TemplateGallery', () => {
       const state = {
         loadTemplate: mockLoadTemplate,
         newScene: mockNewScene,
-        isEngineAttached: mockIsEngineAttached,
+        newSceneRefusal: mockNewSceneRefusal,
       };
       return typeof selector === 'function' ? selector(state) : state;
     });
@@ -79,7 +80,7 @@ describe('TemplateGallery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLoadTemplate.mockResolvedValue({ success: true, entityCount: 5, skippedEntityIds: [] });
-    mockIsEngineAttached.mockReturnValue(true);
+    mockNewSceneRefusal.mockReturnValue(null);
     setupStore();
   });
 
@@ -146,13 +147,29 @@ describe('TemplateGallery', () => {
   // nothing needed to be: the editor is already blank.
   it('Blank Project with no dispatcher starts the project (deferral is not an error)', () => {
     mockNewScene.mockReturnValueOnce(false);
-    mockIsEngineAttached.mockReturnValue(false);
+    mockNewSceneRefusal.mockReturnValue('engine_not_attached');
     render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
     fireEvent.click(screen.getByText('Blank Project').closest('button')!);
     expect(mockNewScene).toHaveBeenCalled();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(mockTrackEvent).toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, { source: 'blank' });
     expect(mockOnClose).toHaveBeenCalled();
+  });
+
+  // #10202 review, round 2: the third reason for a `false` is the store
+  // refusing on its own because browser storage would not clear the
+  // prefab-instance registry before the dispatch. The engine was never asked,
+  // so the banner must not say it refused.
+  it('Blank Project names browser storage, not the engine, when the registry could not be cleared', async () => {
+    mockNewScene.mockReturnValueOnce(false);
+    mockNewSceneRefusal.mockReturnValue('registry_not_cleared');
+    render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
+    fireEvent.click(screen.getByText('Blank Project').closest('button')!);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('the browser refused to update its local storage (the prefab-instance registry), so the engine was never asked. Please try again.');
+    expect(alert).not.toHaveTextContent('engine did not accept');
+    expect(mockOnClose).not.toHaveBeenCalled();
+    expect(mockTrackEvent).not.toHaveBeenCalledWith(AnalyticsEvent.GAME_CREATED, expect.anything());
   });
 
   // #10202 review, M1: `newScene()` re-raises a dispatch the engine threw on,
