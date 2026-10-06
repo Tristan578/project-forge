@@ -101,7 +101,7 @@
     ".agents/skills/pr-green-machine/scripts/fix-common-ci.sh": "82bb6706bcaf686bd917a90472b7a60e3cdf890f34a9a2c39adda89bc0eb7bac",
     ".agents/skills/pr-green-machine/scripts/pr-status.sh": "e1fe411b6d1d7896612c11258686f683baaaca0646edc64b613e3deb5b7c2c48",
     ".agents/skills/resolve-all-pr-comments/SKILL.md": "cb4527cc6e3a25a37323aec2b178e721e763d51a2732603203e27f4abee4938c",
-    ".agents/skills/resolve-pr-comments/SKILL.md": "18b9a5259fa54c9b6ff236ee1a6fd6797fa5250e21dba018f20d326a0dd2e009",
+    ".agents/skills/resolve-pr-comments/SKILL.md": "a22a2dd8cdfd4d3f2ea969468a47d3f57e5def87e814a715ecb4a8dbbd190c2d",
     ".agents/skills/review-protocol/SKILL.md": "e44434e44578cf78b41a3f13f197f9034695db402aa3e782952d5e8837620685",
     ".agents/skills/rust-engine/SKILL.md": "948717e13028fec32ec5d94a93e1733ee8b3cbddaea5dbd63e6f15e61492a01b",
     ".agents/skills/rust-engine/references/bevy-api.md": "b0e1f190975f91f5dfb9e026b1a6ba89cc36c7c55608d415197a41cc034ff564",

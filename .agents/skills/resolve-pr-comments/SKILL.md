@@ -39,9 +39,11 @@ if [ -z "$WT" ]; then
   (cd "$WT" && gh pr checkout "$PR")
 fi
 
-# 3. Work from that worktree for every later step
+# 3. Work from that worktree for every later step, and bring the branch up to
+#    date. `gh pr checkout` fast-forwards from whichever remote holds the PR
+#    head, so it also works for a fork (a plain `git pull origin` would not).
 cd "$WT"
-git pull --ff-only origin "$PR_BRANCH"
+gh pr checkout "$PR"
 
 # 4. VERIFY — print both and confirm they match
 echo "PR branch:      $PR_BRANCH"
