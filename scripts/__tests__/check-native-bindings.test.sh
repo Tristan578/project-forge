@@ -229,7 +229,7 @@ WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
 # was never evaluated (review board on #10296, lesson 18). A row that does not
 # parse, a workflow named twice, or an empty table fails below.
 readonly NATIVE_BINDING_FLOORS='
-ci.yml: build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-crossbrowser docs-e2e observatory-tests docs-internal-gate design-internal-gate
+ci.yml: build-nextjs test-e2e-ui test-e2e-api test-e2e-auth test-e2e-journey test-e2e-engine-smoke test-e2e-engine-journeys test-e2e-crossbrowser docs-e2e observatory-tests docs-internal-gate design-internal-gate
 quality-gates.yml: test-web test-mcp editor-boot lighthouse-delta
 cd.yml: test-web test-mcp e2e
 '
