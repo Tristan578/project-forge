@@ -1,28 +1,35 @@
 /**
- * Shared replay invocation surface (#9902).
+ * Shared replay invocation surface (#9902; AI parity and the pinned runtime: #10007).
  *
- * The manual Replay button uses this invocation function. It also accepts an
- * AI source label for future registration, but no chat command currently calls
- * it; that integration is tracked in #10007. Unit tests cover the shared runner
- * contract and do not establish an available AI product entry point.
+ * Every entry point — the manual Replay button, the E2E hooks and the in-app AI
+ * tool (`lib/chat/handlers/playtestHandlers.ts`) — reaches the runner through
+ * `invokeReplay` / `startReplayInvocation`, carrying only a SOURCE label. The
+ * label is evidence; it changes neither validation nor the runner, which is
+ * what `__tests__/replayParity.test.ts` proves command by command.
  *
  * `createDomKeyboardEnvironment` builds the REAL runtime boundary used in the
  * browser: named actions resolve to key codes through the scene's input
  * bindings, presses dispatch DOM `KeyboardEvent`s on the same channel a human's
  * keystrokes travel (which the engine's `capture_input` reads via winit /
- * Bevy `ButtonInput`), frames advance when the play-tick bus reports them, and state is
- * observed from the play-tick bus.
+ * Bevy `ButtonInput`), frames advance when the play-tick bus reports them,
+ * state is observed from the play-tick bus, and the clock and runtime mode are
+ * driven through the engine command dispatcher (`pin_frame_rate`,
+ * `unpin_frame_rate`, `pause`, `resume`).
  */
 
+import type { CommandResponse } from '@/hooks/useEngine';
 import type { InputBinding } from '@/stores/slices/types';
 import { getLatestPlayTick, subscribePlayTick } from './playTickBus';
 import type { InputTrace } from './inputTrace';
 import {
   replayInputTrace,
+  startReplay,
   REPLAY_INPUT_TRACE_COMMAND,
   type ReplayEnvironment,
+  type ReplayHandle,
   type ReplayObservation,
   type ReplayOutcome,
+  type ReplayRunOptions,
 } from './replayRunner';
 
 /** Who initiated a replay. Affects evidence only, never validation or runner. */
@@ -35,26 +42,57 @@ export interface ReplayInvocationResult {
   outcome: ReplayOutcome;
 }
 
+/** A controlled replay (pause / resume / cancel) started from either entry point. */
+export interface ReplaySession {
+  command: typeof REPLAY_INPUT_TRACE_COMMAND;
+  source: ReplaySource;
+  handle: ReplayHandle;
+}
+
 /**
  * Run a replay with a caller-provided source label. Throws
  * `InputTraceValidationError` on an invalid trace before touching the engine.
- * @param source Caller-provided origin label; does not imply AI registration.
+ * @param source Origin label recorded in the result.
  * @param trace Bounded recording to validate and replay.
  * @param env Input injection and observation boundary.
+ * @param options Pause boundary, pin rate, handle callback.
  * @returns The replay outcome with its source label and command identifier.
  */
 export async function invokeReplay(
   source: ReplaySource,
   trace: InputTrace,
   env: ReplayEnvironment,
+  options: ReplayRunOptions = {},
 ): Promise<ReplayInvocationResult> {
-  const outcome = await replayInputTrace(trace, env);
+  const outcome = await replayInputTrace(trace, env, options);
   return { command: REPLAY_INPUT_TRACE_COMMAND, source, outcome };
+}
+
+/**
+ * Start a CONTROLLED replay with a caller-provided source label. Same
+ * validation gate as `invokeReplay`; returns the handle instead of awaiting.
+ * @param source Origin label recorded in the session.
+ * @param trace Bounded recording to validate and replay.
+ * @param env Input injection and observation boundary.
+ * @param options Pause boundary, pin rate, handle callback.
+ * @returns The session, whose handle controls and reports the run.
+ */
+export function startReplayInvocation(
+  source: ReplaySource,
+  trace: InputTrace,
+  env: ReplayEnvironment,
+  options: ReplayRunOptions = {},
+): ReplaySession {
+  const handle = startReplay(trace, env, options);
+  return { command: REPLAY_INPUT_TRACE_COMMAND, source, handle };
 }
 
 // ---------------------------------------------------------------------------
 // Real browser runtime boundary
 // ---------------------------------------------------------------------------
+
+/** The engine command dispatcher, as `getCommandDispatcher()` returns it. */
+export type EngineDispatch = (command: string, payload: unknown) => CommandResponse | void;
 
 /**
  * Build an action-to-key resolver from the scene's bindings.
@@ -112,19 +150,33 @@ function dispatchKey(type: 'keydown' | 'keyup', code: string): void {
   canvas.dispatchEvent(event);
 }
 
+export interface DomKeyboardEnvironmentConfig {
+  bindings: InputBinding[];
+  playerEntityId: string;
+  collectibleEntityIds: string[];
+  /**
+   * The engine command dispatcher (`getCommandDispatcher()`), or null when no
+   * engine is attached. The clock pin and the runtime pause/resume travel
+   * through it, so the same `tracked` wrapper, analytics and rejection
+   * reporting every engine command gets apply to a replay's commands too.
+   */
+  dispatch: EngineDispatch | null;
+}
+
 /**
  * Build the real DOM-keyboard runtime environment for a browser replay.
  *
  * Observations report positions and entity disappearance. The replay fixture
  * must ensure disappearance represents collection, rather than another cause.
- * @param config Current bindings and the player/collectible ids to observe.
+ *
+ * The clock pin is answered from the engine's own response: only an explicit
+ * `success: true` counts. A dispatcher that answers nothing is a stand-in with
+ * no engine behind it, and a pin it cannot confirm is not a pin — the runner
+ * then refuses to replay rather than reporting a verdict from an unpinned run.
+ * @param config Current bindings, the player/collectible ids to observe, and the dispatcher.
  * @returns A canvas-keyboard environment that advances on observed play ticks.
  */
-export function createDomKeyboardEnvironment(config: {
-  bindings: InputBinding[];
-  playerEntityId: string;
-  collectibleEntityIds: string[];
-}): ReplayEnvironment {
+export function createDomKeyboardEnvironment(config: DomKeyboardEnvironmentConfig): ReplayEnvironment {
   const resolveKeys = buildActionKeyResolver(config.bindings);
   const observe = (): ReplayObservation | null => {
     const snapshot = getLatestPlayTick();
@@ -136,6 +188,10 @@ export function createDomKeyboardEnvironment(config: {
       }
     }
     return { entities };
+  };
+  const requireDispatch = (): EngineDispatch => {
+    if (!config.dispatch) throw new Error('Replay requires the engine command dispatcher.');
+    return config.dispatch;
   };
   return {
     resolveKeys,
@@ -149,5 +205,18 @@ export function createDomKeyboardEnvironment(config: {
     observe,
     playerEntityId: config.playerEntityId,
     collectibleEntityIds: config.collectibleEntityIds,
+    pinFrameRate: (hz) => {
+      const response = requireDispatch()('pin_frame_rate', { hz });
+      return response?.success === true;
+    },
+    unpinFrameRate: () => {
+      requireDispatch()('unpin_frame_rate', {});
+    },
+    pauseRuntime: () => {
+      requireDispatch()('pause', {});
+    },
+    resumeRuntime: () => {
+      requireDispatch()('resume', {});
+    },
   };
 }

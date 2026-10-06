@@ -1,6 +1,6 @@
 # Command Reference
 
-Reference for all 380 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
+Reference for all 383 registered MCP commands. Registration does not imply that a command is available through every entry point; compatibility commands may return an unavailable error.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -16,7 +16,7 @@ Reference for all 380 registered MCP commands. Registration does not imply that 
 - [Camera](#camera) (4 commands)
 - [History](#history) (2 commands)
 - [Query](#query) (18 commands)
-- [Runtime](#runtime) (12 commands)
+- [Runtime](#runtime) (15 commands)
 - [Asset](#asset) (5 commands)
 - [Scripting](#scripting) (15 commands)
 - [Audio](#audio) (38 commands)
@@ -1922,6 +1922,67 @@ Resume play mode from paused state
 ```json
 {
   "command": "resume",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `replay_input_trace`
+
+Replay a bounded input trace through the RUNNING engine and report what it observed: whether the player entity moved and whether exactly one collectible was collected. The engine clock is pinned for the whole run so the result is deterministic. Provide exactly one of trace (a recorded input trace from the Playtest panel, max 120 ticks / 30 s) or strategy (an AI gameplay-bot strategy, planned and converted into a trace). Requires Play mode. The verdict is a runtime outcome, never a heuristic rating.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `playerEntityId` | string | Yes | Entity whose displacement proves input reached the runtime |
+| `collectibleEntityIds` | string[] | No | Collectibles expected to be collected. Defaults to every entity carrying a collectible component. |
+| `trace` | object | No | A recorded input trace: { version: 1, fixtureId, actionNames, durationMs, frames: [{ tick, actions: { <name>: { pressed, axis? } } }] } |
+| `strategy` | `"explorer"` \| `"speedrunner"` \| `"completionist"` \| `"random"` \| `"cautious"` | No | AI gameplay-bot strategy to plan and replay instead of a recorded trace |
+
+**Example:**
+```json
+{
+  "command": "replay_input_trace",
+  "params": {
+    "playerEntityId": "my_playerEntityId"
+  }
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `pin_frame_rate`
+
+Pin the simulation clock so every rendered frame advances the simulation by exactly 1/hz seconds, regardless of wall-clock frame time. Used by replay_input_trace for deterministic replays; unpin_frame_rate restores the wall clock.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `hz` | number | No | Simulation ticks per rendered frame, integer 1-240 (default 60) |
+
+**Example:**
+```json
+{
+  "command": "pin_frame_rate",
+  "params": {}
+}
+```
+
+Scope: `scene:write` | Token cost: 0
+
+---
+
+### `unpin_frame_rate`
+
+Return the simulation clock to the wall clock after pin_frame_rate.
+
+**Example:**
+```json
+{
+  "command": "unpin_frame_rate",
   "params": {}
 }
 ```

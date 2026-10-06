@@ -53,6 +53,17 @@ export const E2E_TIMEOUT_ENGINE_FULL_MS = 90_000;
 export const E2E_TIMEOUT_PIPELINE_LIVE_MS = 180_000;
 
 /**
+ * Shared NFR-C1 targets (#9773, carried by #10007) that
+ * `e2e/engine/inputReplay.spec.ts` measures in the browser for the replay
+ * controls: a local control (pause / resume / cancel) is acknowledged within
+ * this many milliseconds (p95), and a long job shows its pending / progress
+ * state within `REPLAY_NFR_PENDING_DISPLAY_MS`. These are acceptance limits,
+ * not timeouts; the measured values are attached to the test's evidence.
+ */
+export const REPLAY_NFR_ACK_P95_MS = 100;
+export const REPLAY_NFR_PENDING_DISPLAY_MS = 250;
+
+/**
  * Slack added on top of a performance capture's warm-up + capture window
  * (`e2e/perf/fixtureCapture.spec.ts`, #10013): cold WASM fetch and compile,
  * scene load, the exporter's play settle and environment collection.

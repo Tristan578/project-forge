@@ -68,6 +68,7 @@ pub mod scene;
 pub mod scene_file;
 pub mod scene_graph;
 pub mod scripting;
+pub mod simulation_clock;
 pub mod selection;
 pub mod skeletal_animation2d;
 pub mod skeleton2d;

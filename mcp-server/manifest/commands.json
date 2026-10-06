@@ -1688,6 +1688,81 @@
       "visibility": "public"
     },
     {
+      "name": "replay_input_trace",
+      "description": "Replay a bounded input trace through the RUNNING engine and report what it observed: whether the player entity moved and whether exactly one collectible was collected. The engine clock is pinned for the whole run so the result is deterministic. Provide exactly one of trace (a recorded input trace from the Playtest panel, max 120 ticks / 30 s) or strategy (an AI gameplay-bot strategy, planned and converted into a trace). Requires Play mode. The verdict is a runtime outcome, never a heuristic rating.",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "playerEntityId": {
+            "type": "string",
+            "description": "Entity whose displacement proves input reached the runtime"
+          },
+          "collectibleEntityIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Collectibles expected to be collected. Defaults to every entity carrying a collectible component."
+          },
+          "trace": {
+            "type": "object",
+            "description": "A recorded input trace: { version: 1, fixtureId, actionNames, durationMs, frames: [{ tick, actions: { <name>: { pressed, axis? } } }] }"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "explorer",
+              "speedrunner",
+              "completionist",
+              "random",
+              "cautious"
+            ],
+            "description": "AI gameplay-bot strategy to plan and replay instead of a recorded trace"
+          }
+        },
+        "required": [
+          "playerEntityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "pin_frame_rate",
+      "description": "Pin the simulation clock so every rendered frame advances the simulation by exactly 1/hz seconds, regardless of wall-clock frame time. Used by replay_input_trace for deterministic replays; unpin_frame_rate restores the wall clock.",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "hz": {
+            "type": "number",
+            "description": "Simulation ticks per rendered frame, integer 1-240 (default 60)"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "unpin_frame_rate",
+      "description": "Return the simulation clock to the wall clock after pin_frame_rate.",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
       "name": "get_mode",
       "description": "Get current engine mode (edit, play, or paused)",
       "category": "runtime",

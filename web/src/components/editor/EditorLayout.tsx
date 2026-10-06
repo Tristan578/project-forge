@@ -545,28 +545,63 @@ export function EditorLayout() {
       ) => {
         setCommandDispatcher(dispatch);
       };
-      // Runtime input-trace replay (#9902). The engine-replay spec drives the
-      // REAL replay runner through this: it builds the same DOM-keyboard runtime
-      // boundary the manual Replay button uses, runs `invokeReplay('manual', …)`
-      // and returns the JSON-serializable observed-state outcome. Same build-time gate as the
-      // hooks above; never attached in a normal production build.
+      // Runtime input-trace replay (#9902; pinned runtime #10007). The engine
+      // replay spec drives the REAL replay runner through this: the same
+      // `replayEntryPoints` the manual Replay controls and the AI tool use,
+      // labelled 'manual', returning the JSON-serializable observed-state
+      // outcome. Same build-time gate as the hooks above; never attached in a
+      // normal production build.
       window.__FORGE_REPLAY = async (
         trace: unknown,
         config: { playerEntityId: string; collectibleEntityIds: string[] },
       ) => {
-        const [{ invokeReplay, createDomKeyboardEnvironment }, { parseInputTrace }] =
-          await Promise.all([
-            import('@/lib/playtest/replayInvocation'),
-            import('@/lib/playtest/inputTrace'),
-          ]);
-        const validated = parseInputTrace(trace);
-        const env = createDomKeyboardEnvironment({
-          bindings: useEditorStore.getState().inputBindings,
-          playerEntityId: config.playerEntityId,
-          collectibleEntityIds: config.collectibleEntityIds,
-        });
-        const result = await invokeReplay('manual', validated, env);
+        const { runReplay } = await import('@/lib/playtest/replayEntryPoints');
+        const result = await runReplay('manual', { trace, ...config });
         return result.outcome;
+      };
+      // Controlled replay sessions for the pause/cancel/restart scenario
+      // (#10007). Sessions live in this closure, addressed by id. `state` joins
+      // the runner's progress with the engine's OWN evaluated input and the
+      // observed player position from the play-tick bus, so the spec asserts
+      // "cancellation released input" on what the engine reports, not on the
+      // runner's bookkeeping. Same gate as `__FORGE_REPLAY`.
+      const replaySessions = new Map<
+        string,
+        { playerEntityId: string; handle: import('@/lib/playtest/replayRunner').ReplayHandle }
+      >();
+      let nextReplaySessionId = 0;
+      const replaySession = (id: string) => {
+        const entry = replaySessions.get(id);
+        if (!entry) throw new Error(`Unknown replay session: ${id}`);
+        return entry;
+      };
+      window.__FORGE_REPLAY_CONTROL = {
+        start: async (trace, config, options) => {
+          const { startReplaySession } = await import('@/lib/playtest/replayEntryPoints');
+          const session = startReplaySession('manual', { trace, ...config }, options ?? {});
+          const id = `replay-${nextReplaySessionId}`;
+          nextReplaySessionId += 1;
+          replaySessions.set(id, { playerEntityId: config.playerEntityId, handle: session.handle });
+          return id;
+        },
+        state: async (id) => {
+          const { playerEntityId, handle } = replaySession(id);
+          const { getLatestPlayTick } = await import('@/lib/playtest/playTickBus');
+          const tick = getLatestPlayTick();
+          return {
+            ...handle.getProgress(),
+            engineInput: tick ? { pressed: tick.inputState.pressed, axes: tick.inputState.axes } : null,
+            playerPosition: tick?.entities[playerEntityId]?.position ?? null,
+          };
+        },
+        control: (id, action) => replaySession(id).handle[action](),
+        result: async (id) => {
+          const result = await replaySession(id).handle.result;
+          if (result.status === 'failed') {
+            return { status: 'failed', error: result.error.message, ticksReplayed: result.ticksReplayed };
+          }
+          return result;
+        },
       };
       // Feeds a `get_entity_details` answer into the confirmed spawn/transform
       // observation cache (#9899). Same gate and rationale as

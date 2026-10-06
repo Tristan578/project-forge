@@ -1,10 +1,20 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildActionKeyResolver, createDomKeyboardEnvironment } from '../replayInvocation';
+import type { CommandResponse } from '@/hooks/useEngine';
+import {
+  buildActionKeyResolver,
+  createDomKeyboardEnvironment,
+  type EngineDispatch,
+} from '../replayInvocation';
 import { publishPlayTick, resetPlayTickBus } from '../playTickBus';
 
-function environment() {
-  return createDomKeyboardEnvironment({ bindings: [], playerEntityId: 'player', collectibleEntityIds: [] });
+function environment(dispatch: EngineDispatch | null = null) {
+  return createDomKeyboardEnvironment({
+    bindings: [],
+    playerEntityId: 'player',
+    collectibleEntityIds: [],
+    dispatch,
+  });
 }
 
 afterEach(() => {
@@ -70,5 +80,50 @@ describe('browser replay boundary', () => {
     await vi.advanceTimersByTimeAsync(2_000);
     await rejection;
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('browser replay boundary — clock and runtime mode through the engine dispatcher (#10007)', () => {
+  function recordingDispatch(answer: CommandResponse | void) {
+    const log: Array<[string, unknown]> = [];
+    const dispatch: EngineDispatch = (command, payload) => {
+      log.push([command, payload]);
+      return answer;
+    };
+    return { dispatch, log };
+  }
+
+  it('pins through pin_frame_rate and reports the engine\'s acceptance', async () => {
+    const { dispatch, log } = recordingDispatch({ success: true });
+    const env = environment(dispatch);
+    expect(await env.pinFrameRate?.(60)).toBe(true);
+    expect(log).toEqual([['pin_frame_rate', { hz: 60 }]]);
+  });
+
+  it('reports a refused pin so the runner can stop before injecting input', async () => {
+    const { dispatch } = recordingDispatch({ success: false, error: 'Unknown command: pin_frame_rate' });
+    expect(await environment(dispatch).pinFrameRate?.(60)).toBe(false);
+  });
+
+  it('treats a dispatcher that answers nothing as NOT pinned (a stand-in cannot confirm a pin)', async () => {
+    const { dispatch } = recordingDispatch(undefined);
+    expect(await environment(dispatch).pinFrameRate?.(60)).toBe(false);
+  });
+
+  it('unpins, pauses and resumes through the engine\'s own commands', async () => {
+    const { dispatch, log } = recordingDispatch({ success: true });
+    const env = environment(dispatch);
+    await env.unpinFrameRate?.();
+    await env.pauseRuntime?.();
+    await env.resumeRuntime?.();
+    expect(log.map(([command]) => command)).toEqual(['unpin_frame_rate', 'pause', 'resume']);
+  });
+
+  it('fails explicitly when no engine dispatcher is attached', () => {
+    const env = environment(null);
+    expect(() => env.pinFrameRate?.(60)).toThrow('engine command dispatcher');
+    expect(() => env.unpinFrameRate?.()).toThrow('engine command dispatcher');
+    expect(() => env.pauseRuntime?.()).toThrow('engine command dispatcher');
+    expect(() => env.resumeRuntime?.()).toThrow('engine command dispatcher');
   });
 });

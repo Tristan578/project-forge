@@ -73,7 +73,18 @@ export default defineConfig({
   //
   // journey-evidence-canary.spec.ts (#10157) is the third @engine-smoke spec:
   // a /dev release journey that exists to prove the evidence pipeline on every
-  // PR. @release-journey is deliberately NOT in this grep — the account
+  // PR.
+  // engine/inputReplay.spec.ts (#9902 → #10007) is the fourth: it replays a
+  // bounded 120-tick input trace through the real runtime input path with the
+  // engine's simulation clock PINNED (`pin_frame_rate`, one tick per rendered
+  // frame), which is what makes its moved-entity / one-collectible assertions
+  // deterministic under SwiftShader's variable frame rate, then exercises
+  // pause / cancel / restart and checks the restarted run lands within 0.01
+  // world units of the first. It raises its describe block to
+  // E2E_TIMEOUT_PIPELINE_LIVE_MS for the same reason pipeline-live-engine does:
+  // one cold boot, then three replays and two Play/Stop round-trips on top.
+  // Justification for the added minutes: docs/testing-principles.md §9.
+  // @release-journey is deliberately NOT in this grep — the account
   // journeys planned under #9723 need a database and must not wander into this
   // job; a journey lands here only by also carrying @engine-smoke. (Those
   // account journeys are also refused by describeJourney() until #10266 adds

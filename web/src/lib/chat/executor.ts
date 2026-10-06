@@ -27,6 +27,7 @@ import { scriptLibraryHandlers } from './handlers/scriptLibraryHandlers';
 import { physicsJointHandlers } from './handlers/physicsJointHandlers';
 import { animationParticleHandlers } from './handlers/animationParticleHandlers';
 import { gameplayHandlers } from './handlers/gameplayHandlers';
+import { playtestHandlers } from './handlers/playtestHandlers';
 import { assetHandlers } from './handlers/assetHandlers';
 import { audioEntityHandlers } from './handlers/audioEntityHandlers';
 import { pixelArtHandlers } from './handlers/pixelArtHandlers';
@@ -68,6 +69,7 @@ export const HANDLER_DOMAIN_SOURCES: ReadonlyArray<{
   { name: 'physicsJointHandlers', handlers: physicsJointHandlers },
   { name: 'animationParticleHandlers', handlers: animationParticleHandlers },
   { name: 'gameplayHandlers', handlers: gameplayHandlers },
+  { name: 'playtestHandlers', handlers: playtestHandlers },
   { name: 'assetHandlers', handlers: assetHandlers },
   { name: 'audioEntityHandlers', handlers: audioEntityHandlers },
   { name: 'pixelArtHandlers', handlers: pixelArtHandlers },
@@ -104,6 +106,7 @@ export const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx
   ...physicsJointHandlers,
   ...animationParticleHandlers,
   ...gameplayHandlers,
+  ...playtestHandlers,
   ...assetHandlers,
   ...audioEntityHandlers,
   ...pixelArtHandlers,
