@@ -752,4 +752,4 @@ because git considers the stub correct for that setting.
 dangling or absolute target, a target outside the repository, or an untracked
 target, and it prints the fix. It runs in CI and at session start. When you add
 a symlink, point it at a tracked file inside the repository.
-**Ticket:** (prompt audit, 2026-10-05)
+**Ticket:** #10343
