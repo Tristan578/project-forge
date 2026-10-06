@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, resolve } from 'node:path';
 import type { MigrationMeta } from 'drizzle-orm/migrator';
 import type { MigrationRecord } from '../baseline-drizzle-journal';
 import {
@@ -156,4 +160,65 @@ describe('zipMigrationStatements', () => {
     const shifted: MigrationRecord[] = [records[0]!, { ...records[1]!, when: 999 }];
     expect(() => zipMigrationStatements(metas, shifted)).toThrow(/0001_next.*999.*200/);
   });
+});
+
+// ---------------------------------------------------------------------------
+// The script has to RUN as a CLI, not just import (#10161)
+// ---------------------------------------------------------------------------
+//
+// `main()` sits behind `import.meta.url === pathToFileURL(process.argv[1]).href`
+// so that importing this module from a test never executes it (#10190). The
+// other side of that guard is a silent fail-open: if the comparison ever stops
+// matching (a path-casing difference, a symlinked checkout, tsx changing what
+// it reports as `import.meta.url`), `npm run db:migrate` exits 0 having applied
+// NOTHING — a green step on the production deploy path in front of an
+// unmigrated database, the failure shape #9979 replaced `drizzle-kit migrate`
+// to end. Every helper above is imported through vitest and cannot see it. Only
+// spawning the script the way npm does can.
+
+const web = resolve(__dirname, '..', '..');
+const require = createRequire(import.meta.url);
+const tsxCli = resolve(dirname(require.resolve('tsx/package.json')), 'dist', 'cli.mjs');
+
+describe('apply-migrations as npm runs it (#10161)', () => {
+  it('is the script `npm run db:migrate` runs, through tsx, from the web directory', () => {
+    const pkg = JSON.parse(readFileSync(resolve(web, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    // Fails closed: if the npm script stops running this file, the spawn below
+    // would be testing something the deploy no longer runs.
+    expect(pkg.scripts['db:migrate']).toMatch(/&&\s*tsx scripts\/apply-migrations\.ts\s*$/);
+  });
+
+  it('does not exit 0 having done nothing: with DATABASE_URL unset it exits 1 and names DATABASE_URL', () => {
+    const env = { ...process.env };
+    delete env.DATABASE_URL;
+    let status = 0;
+    let stdout = '';
+    let stderr = '';
+    try {
+      stdout = execFileSync(process.execPath, [tsxCli, 'scripts/apply-migrations.ts'], {
+        cwd: web,
+        env,
+        encoding: 'utf8',
+        timeout: 60_000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      const failure = error as { status?: number | null; stdout?: string; stderr?: string };
+      status = failure.status ?? -1;
+      stdout = failure.stdout ?? '';
+      stderr = failure.stderr ?? '';
+    }
+    // A guard that stopped matching exits 0 with empty output, so the exit code
+    // and the message are asserted together: neither alone distinguishes "main()
+    // ran and refused" from "main() never ran".
+    expect({ status, stdout, stderr }).toEqual({
+      status: 1,
+      stdout: '',
+      stderr: expect.stringContaining('DATABASE_URL is required'),
+    });
+    expect(stderr).toContain('::error::Migration failed');
+    expect(stderr).not.toContain('Transform failed');
+  }, 90_000);
 });
