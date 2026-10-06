@@ -5,7 +5,7 @@
 
 import { z } from 'zod';
 import type { ToolHandler, ExecutionResult, InputBinding } from './types';
-import { parseArgs } from './types';
+import { parseArgs, sceneDispatchThrewResult } from './types';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
@@ -85,14 +85,32 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     // The scene currently on screen is untouched when the load is rejected, so
     // this must not strand the editor: the failure is reported back to the
     // assistant below and saving of the current scene stays enabled (#10056).
-    if (ctx.store.loadScene(p.data.json, { rejectionStrandsEditor: false }) === false) {
+    let accepted: boolean;
+    try {
+      accepted = ctx.store.loadScene(p.data.json, { rejectionStrandsEditor: false });
+    } catch (error) {
+      // A rejection returns `false`; a THROWN dispatch is re-raised after the
+      // store has locked saving (#10079, #10202). "Try again" is the wrong
+      // advice for a viewport that may be half-applied, so this says reload —
+      // parity with `switch_scene` below.
+      return sceneDispatchThrewResult('The scene could not be opened', error);
+    }
+    if (accepted === false) {
       return { success: false, error: 'The scene was not loaded. Check its prefab metadata and engine readiness, then try again.' };
     }
     return { success: true, result: { message: 'Scene load triggered' } };
   },
 
   new_scene: async (_args, ctx): Promise<ExecutionResult> => {
-    if (ctx.store.newScene() === false) {
+    let accepted: boolean;
+    try {
+      accepted = ctx.store.newScene();
+    } catch (error) {
+      // Same as `load_scene`: a thrown `new_scene` can have despawned the
+      // outgoing scene mid-apply, so "unchanged" below would be a lie (#10202).
+      return sceneDispatchThrewResult('A new scene could not be created', error);
+    }
+    if (accepted === false) {
       return { success: false, error: 'The engine did not accept a new scene. The current scene is unchanged.' };
     }
     return { success: true, result: { message: 'New scene created' } };
@@ -239,10 +257,7 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       // export of the wrecked engine scene, so it is safe under the lockout
       // both `loadScene` and `newScene` have by now set.
       saveProjectScenes(project, ctx.store.projectId);
-      return {
-        success: false,
-        error: `The scene could not be opened due to an engine error (${error instanceof Error ? error.message : String(error)}). Reload the editor before continuing — the viewport can no longer be trusted and saving is locked to protect your stored scene.`,
-      };
+      return sceneDispatchThrewResult('The scene could not be opened', error);
     }
     if (accepted === false) {
       saveProjectScenes(project, ctx.store.projectId);

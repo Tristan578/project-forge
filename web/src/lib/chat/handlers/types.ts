@@ -121,3 +121,24 @@ export function parseArgs<T>(
 export function ownEntry<T>(record: Record<string, T>, key: string): T | undefined {
   return Object.hasOwn(record, key) ? record[key] : undefined;
 }
+
+/**
+ * The failure a scene tool returns when the store re-raised a dispatch the
+ * engine THREW on (`loadScene` / `newScene`, #10079, #10202).
+ *
+ * By the time this runs the store has set `sceneLoadError(ENGINE_LOAD_THREW)`
+ * and locked every save path, so the message says so and tells the user to
+ * reload — never that the scene is unchanged, and never to try again: the
+ * throw can have arrived after the engine queued the replacement
+ * (`handle_command` dispatches before it serializes its answer), so the
+ * viewport may be half-applied. Shared so the manual and AI paths say the
+ * same thing (`sceneSlice.switchScene` shows the same sentence as a toast).
+ * @param lead What failed, as a clause: `'The scene could not be opened'`.
+ * @param error The error the store re-raised; its message is relayed.
+ */
+export function sceneDispatchThrewResult(lead: string, error: unknown): ExecutionResult {
+  return {
+    success: false,
+    error: `${lead} due to an engine error (${error instanceof Error ? error.message : String(error)}). Reload the editor before continuing — the viewport can no longer be trusted and saving is locked to protect your stored scene.`,
+  };
+}

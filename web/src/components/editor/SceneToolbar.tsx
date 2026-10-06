@@ -28,6 +28,17 @@ import {
 // instead, so the upstream fold reflects what was active when the save was
 // asked for rather than whatever is active when the answer happens to land.
 
+/**
+ * The toast for a scene command the engine THREW on. `loadScene`/`newScene`
+ * re-raise such a dispatch after locking every save path (#10079, #10202), so
+ * the toast says so and tells the user to reload — not that the scene is
+ * unchanged, which it may not be. Same sentence `sceneSlice.switchScene` shows
+ * for the Scene Browser, with the lead varied by what was attempted.
+ * @param lead What failed, as a clause: `'The scene could not be opened'`.
+ */
+const ENGINE_THREW_TOAST = (lead: string): string =>
+  `${lead} due to an engine error. Reload the editor before continuing — the viewport can no longer be trusted, and saving is locked to protect your stored scene.`;
+
 export function SceneToolbar() {
   const sceneName = useEditorStore((s) => s.sceneName);
   const sceneModified = useEditorStore((s) => s.sceneModified);
@@ -134,10 +145,24 @@ export function SceneToolbar() {
 
   const handleLoad = useCallback(async () => {
     const json = await openSceneFilePicker();
+    if (!json) return;
     // The scene currently on screen stays on screen if the import is rejected,
     // so this must not strand the editor: the toast below is the whole report
     // and saving of the current scene stays enabled (#10056).
-    if (json && loadScene(json, { rejectionStrandsEditor: false }) === false) {
+    let accepted: boolean;
+    try {
+      accepted = loadScene(json, { rejectionStrandsEditor: false });
+    } catch {
+      // A THROWN dispatch is re-raised after `loadScene` has locked saving
+      // (#10079, #10202): the import may have half-applied over the current
+      // scene, so "try again" would be the wrong advice and an uncaught throw
+      // here would be an unhandled rejection. Same sentence the Scene
+      // Browser's `switchScene` shows; the dispatcher has already logged the
+      // error itself.
+      showError(ENGINE_THREW_TOAST('The scene could not be opened'));
+      return;
+    }
+    if (accepted === false) {
       // Parity with the AI/MCP `load_scene` handler, which surfaces the same
       // rejection: without this the scene silently vanishes into a no-op when
       // its embedded prefab graph is rejected or the engine is not ready.
@@ -165,12 +190,30 @@ export function SceneToolbar() {
     );
   }, [isEngineAttached]);
 
+  /**
+   * `newScene()` for the button and the shortcut. A `false` is reported by
+   * cause (`reportNewSceneFailure`). A THROW is the engine failing mid-apply,
+   * and `newScene` has already locked saving before re-raising it (#10079,
+   * #10202) — so the user is told to reload, not that the scene is unchanged,
+   * and the throw does not escape the event handler.
+   */
+  const runNewScene = useCallback(() => {
+    let accepted: boolean;
+    try {
+      accepted = newScene();
+    } catch {
+      showError(ENGINE_THREW_TOAST('A new scene could not be created'));
+      return;
+    }
+    if (accepted === false) reportNewSceneFailure();
+  }, [newScene, reportNewSceneFailure]);
+
   const handleNew = useCallback(async () => {
     if (sceneModified) {
       if (!await confirm('Discard unsaved changes and create a new scene?')) return;
     }
-    if (newScene() === false) reportNewSceneFailure();
-  }, [newScene, sceneModified, confirm, reportNewSceneFailure]);
+    runNewScene();
+  }, [runNewScene, sceneModified, confirm]);
 
   // Ctrl+S shortcut
   useEffect(() => {
@@ -188,12 +231,12 @@ export function SceneToolbar() {
       }
       if (e.ctrlKey && e.shiftKey && e.key === 'N') {
         e.preventDefault();
-        if (newScene() === false) reportNewSceneFailure();
+        runNewScene();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleSave, newScene, projectId, handleCloudSave, reportNewSceneFailure]);
+  }, [handleSave, runNewScene, projectId, handleCloudSave]);
 
   const handleExport = useCallback(() => {
     setShowExportDialog(true);

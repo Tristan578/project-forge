@@ -15,7 +15,7 @@
 
 import type { ToolHandler, ExecutionResult, ToolCallContext } from './types';
 import type { EntityType, InputBinding, SceneNode } from './types';
-import { ownEntry, parseArgs, zSetupGameFromDescription } from './types';
+import { ownEntry, parseArgs, sceneDispatchThrewResult, zSetupGameFromDescription } from './types';
 import { getPresetById } from '@/lib/materialPresets';
 import { getCapabilityUnavailability } from '@/lib/config/providers';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
@@ -452,11 +452,23 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     // Discarding it would spawn every entity below on top of the scene the user
     // asked to replace, then report success — the same false-success class
     // `newScene` was made boolean to close (#10056). Stop before spawning.
-    if (clearExisting && ctx.store.newScene() === false) {
-      return {
-        success: false,
-        error: 'The engine did not accept a new scene, so the existing scene was not cleared. Nothing was created.',
-      };
+    if (clearExisting) {
+      let cleared: boolean;
+      try {
+        cleared = ctx.store.newScene();
+      } catch (error) {
+        // A THROWN `new_scene` is re-raised after the store has locked saving
+        // (#10079, #10202): the viewport may be half-cleared, so nothing may
+        // be spawned onto it and the user is told to reload.
+        const threw = sceneDispatchThrewResult('The existing scene could not be cleared', error);
+        return { ...threw, error: `${threw.error} Nothing was created.` };
+      }
+      if (cleared === false) {
+        return {
+          success: false,
+          error: 'The engine did not accept a new scene, so the existing scene was not cleared. Nothing was created.',
+        };
+      }
     }
 
     if (envSettings) {
