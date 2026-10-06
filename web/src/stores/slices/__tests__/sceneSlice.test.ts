@@ -9,8 +9,10 @@ import { stageSceneCompletionMode, takeStagedSceneCompletionMode } from '@/lib/s
 import { useMusicArrangementStore, readArrangementFromSceneData } from '@/lib/music/arrangementStore';
 import { loadPrefabInstances, savePrefabInstancesToStorage, savePrefab, getPrefab } from '@/lib/prefabs/prefabStore';
 import * as prefabStoreModule from '@/lib/prefabs/prefabStore';
+import * as sceneAudioManifestModule from '@/lib/audio/sceneAudioManifest';
 import * as toastModule from '@/lib/toast';
 import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
+import type { SceneLoadError } from '../sceneSlice';
 
 // `switchScene` surfaces a thrown-dispatch failure through `showError`. Mock the
 // toast module so the message can be asserted without sonner's DOM host (#10079).
@@ -260,6 +262,142 @@ describe('sceneSlice', () => {
       } finally {
         write.mockRestore();
         errorLog.mockRestore();
+      }
+    });
+
+    // #10202 review, round 2: three unrelated facts share `newScene()`'s
+    // `false`, and every surface reported all three as the engine refusing.
+    // The slice now records WHICH, for `newSceneRefusal()` to read right after.
+    describe('newSceneRefusal() names why the last newScene() answered false', () => {
+      it('is registry_not_cleared when the pre-dispatch registry write fails, and the engine was never asked', () => {
+        const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage')
+          .mockImplementationOnce(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); });
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          expect(store.getState().newScene()).toBe(false);
+          expect(store.getState().newSceneRefusal()).toBe('registry_not_cleared');
+          expect(mockDispatch).not.toHaveBeenCalledWith('new_scene', expect.anything());
+        } finally {
+          write.mockRestore();
+          errorLog.mockRestore();
+        }
+      });
+
+      it('is engine_refused after a clean { success: false }', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+
+        expect(store.getState().newScene()).toBe(false);
+        expect(store.getState().newSceneRefusal()).toBe('engine_refused');
+      });
+
+      it('is engine_not_attached when there is no dispatcher', () => {
+        setSceneDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+        expect(store.getState().newScene()).toBe(false);
+        expect(store.getState().newSceneRefusal()).toBe('engine_not_attached');
+      });
+
+      it('is null after an accepted new scene, and after a throw — a throw is not a refusal', () => {
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+        expect(store.getState().newScene()).toBe(false);
+        expect(store.getState().newSceneRefusal()).toBe('engine_refused');
+
+        setSceneDispatcher(mockDispatch);
+        expect(store.getState().newScene()).toBe(true);
+        expect(store.getState().newSceneRefusal()).toBeNull();
+
+        setSceneDispatcher(vi.fn(() => ({ success: false, error: 'busy' })));
+        expect(store.getState().newScene()).toBe(false);
+        setSceneDispatcher(vi.fn(() => { throw new Error('engine trapped'); }));
+        expect(() => store.getState().newScene()).toThrow(EngineDispatchThrewError);
+        expect(store.getState().newSceneRefusal()).toBeNull();
+      });
+    });
+
+    // #10202 review, round 2: `dispatchSceneLoad`'s catch ran the audio and
+    // mode rollbacks bare before rethrowing. A rollback that threw would have
+    // left the catch with ITS error instead of the typed one — a plain error
+    // every caller reports as a storage failure, with no lockout, for an
+    // engine throw that did happen.
+    it('a rollback that throws cannot replace the typed engine error, skip the lockout or skip the other rollback', () => {
+      const stage = sceneAudioManifestModule.stageSceneAudio;
+      const staging = vi.spyOn(sceneAudioManifestModule, 'stageSceneAudio').mockImplementationOnce((json) => {
+        stage(json);
+        return () => { throw new Error('audio rollback exploded'); };
+      });
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      stageSceneCompletionMode('narrative');
+      setSceneDispatcher((command) => (command === 'load_scene'
+        ? { success: false, error: 'Engine failed', threw: true as const }
+        : { success: true }));
+      try {
+        const thrown = catchThrow(() => store.getState().loadScene(JSON.stringify({ ...sceneFixture('S'), completionMode: 'sandbox' })));
+
+        expect(thrown).toBeInstanceOf(EngineDispatchThrewError);
+        expect((thrown as Error).message).toBe('Engine failed');
+        expect(store.getState().sceneLoadError?.reason).toContain('the engine failed while loading it');
+        // The mode rollback still ran after the audio rollback threw.
+        expect(takeStagedSceneCompletionMode()).toBe('narrative');
+        expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('staged scene audio'), expect.any(Error));
+      } finally {
+        staging.mockRestore();
+        errorLog.mockRestore();
+      }
+    });
+
+    // #10202 review, round 2: `loadScene`'s catch rolled the prefab registry
+    // back BEFORE setting the lockout. The rollback is guarded inside, but
+    // the lockout is the one thing that branch must not skip, so it goes
+    // first — as `loadTemplate` already did. Observed from inside the
+    // rollback write itself.
+    it('sets the throw lockout before rolling the prefab registry back', () => {
+      const saveInstances = prefabStoreModule.savePrefabInstancesToStorage;
+      const lockoutAtWrite: Array<SceneLoadError | null> = [];
+      const write = vi.spyOn(prefabStoreModule, 'savePrefabInstancesToStorage').mockImplementation((instances) => {
+        lockoutAtWrite.push(store.getState().sceneLoadError);
+        return saveInstances(instances);
+      });
+      setSceneDispatcher((command) => (command === 'load_scene'
+        ? { success: false, error: 'Engine failed', threw: true as const }
+        : { success: true }));
+      try {
+        expect(() => store.getState().loadScene(JSON.stringify(sceneFixture('S')))).toThrow(EngineDispatchThrewError);
+
+        // Two writes: the install before the dispatch, the rollback after the throw.
+        expect(lockoutAtWrite).toHaveLength(2);
+        expect(lockoutAtWrite[0]).toBeNull();
+        expect(lockoutAtWrite[1]?.reason).toContain('the engine failed while loading it');
+      } finally {
+        write.mockRestore();
+      }
+    });
+
+    // #10202 review, round 2: `newScene`'s catch was broad, so a JS failure
+    // AFTER the engine had accepted `new_scene` rolled the registry back to
+    // the OUTGOING scene's instances — describing a scene that was gone, and
+    // attaching them to the empty one on the next save (BUG-1 again) — and
+    // put the dropped audio stash and the outgoing mode back with it.
+    it('does not roll back the registry or the staged mode when a JS step fails after the engine accepted new_scene', () => {
+      savePrefabInstancesToStorage([{ instanceId: 'pfi_prev', prefabId: 'prev', overrides: {} }]);
+      stageSceneCompletionMode('narrative');
+      const unsubscribe = store.subscribe((state, previous) => {
+        if (state.sceneOperationRevision !== previous.sceneOperationRevision) throw new Error('subscriber exploded');
+      });
+      try {
+        const thrown = catchThrow(() => store.getState().newScene({ completionMode: 'endless' }));
+
+        // A plain error, not the engine's: the callers report it as such.
+        expect(thrown).toBeInstanceOf(Error);
+        expect(thrown).not.toBeInstanceOf(EngineDispatchThrewError);
+        expect((thrown as Error).message).toBe('subscriber exploded');
+        expect(mockDispatch).toHaveBeenCalledWith('new_scene', {});
+        // The engine holds the empty scene, so the state describing it stands.
+        expect(loadPrefabInstances()).toEqual([]);
+        expect(takeStagedSceneCompletionMode()).toBe('endless');
+        expect(store.getState().sceneLoadError).toBeNull();
+        expect(store.getState().newSceneRefusal()).toBeNull();
+      } finally {
+        unsubscribe();
       }
     });
 
