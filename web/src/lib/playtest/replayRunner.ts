@@ -18,7 +18,14 @@
  * unpinned on EVERY exit path: completion, cancellation and failure. An engine
  * that refuses the pin fails the replay before any input is injected, so a
  * verdict is never produced on an unpinned clock without saying so
- * (`ReplayOutcome.pinned`).
+ * (`ReplayOutcome.pinned`). An unpin that FAILS after a completed run does not
+ * taint the verdict — the run was pinned — and is reported beside it
+ * (`ReplayRunResult.unpinError`); the engine also releases any pin on Stop.
+ *
+ * The pin is engine-global, so only ONE replay may run at a time. That guard
+ * is not here: `replayEntryPoints.ts` holds the module-level single-flight
+ * guard every entry point (manual panel, E2E hooks, AI tool) goes through,
+ * and this runner stays a pure function of its environment.
  *
  * PAUSE / RESUME / CANCEL are first-class (`startReplay` returns a handle):
  * pausing releases every synthetic key and pauses the runtime at a tick
@@ -28,6 +35,11 @@
  * never read as a pass or a fail. A cancel does NOT wait for the frame in
  * flight: a stopped engine never ticks again, so the keys are released and the
  * clock unpinned the moment the cancel lands, not after a stalled-tick timeout.
+ * A cancel can land at ANY await — including from inside the 'paused'
+ * notification itself — and `result` still settles exactly once, as
+ * `cancelled`; 'cancelling' is never overwritten by a state the cancel
+ * interrupted (`__tests__/replayController.test.ts`, "a cancel that races the
+ * pause").
  *
  * WHY THIS IS NOT `gameplayBot.ts`. `simulatePlaytest` in `lib/ai/gameplayBot.ts`
  * is a HEURISTIC: it inspects the scene graph statically and produces an
@@ -103,19 +115,20 @@ export interface ReplayEnvironment {
   /** Collectible entity ids expected to be collected (despawned) on replay. */
   collectibleEntityIds: string[];
   /**
-   * Pin the simulation clock to `hz` ticks per rendered frame
-   * (`pin_frame_rate`). Returns whether the engine ACCEPTED the pin; a refusal
-   * fails the replay before any input is injected. Absent on a boundary with
-   * no clock (unit fakes), in which case the outcome records `pinned: false`.
+   * Pin the simulation clock to `hz` ticks per second of game time
+   * (`pin_frame_rate`; the engine advances exactly one tick per rendered
+   * frame). Returns whether the engine ACCEPTED the pin; a refusal fails the
+   * replay before any input is injected. Absent on a boundary with no clock
+   * (unit fakes), in which case the outcome records `pinned: false`.
    * @param hz Simulation rate to pin.
    * @returns Whether the engine accepted the pin.
    */
   pinFrameRate?(hz: number): boolean | Promise<boolean>;
-  /** Return the simulation to the wall clock (`unpin_frame_rate`). */
+  /** Return the simulation to the wall clock (`unpin_frame_rate`). May throw on a refusal. */
   unpinFrameRate?(): void | Promise<void>;
-  /** Pause the runtime while the replay is paused (engine `pause`). */
+  /** Pause the runtime while the replay is paused (engine `pause`). May throw on a refusal. */
   pauseRuntime?(): void | Promise<void>;
-  /** Resume a runtime this runner paused (engine `resume`). */
+  /** Resume a runtime this runner paused (engine `resume`). May throw on a refusal. */
   resumeRuntime?(): void | Promise<void>;
 }
 
@@ -162,6 +175,7 @@ export interface ReplayOutcome {
  * Runner states. `pausing` / `cancelling` are the SYNCHRONOUS acknowledgements
  * of a control request; the matching settled state follows at the next tick
  * boundary (within one frame), once every synthetic key has been released.
+ * `cancelling` is sticky: only `cancelled` (or a boundary failure) follows it.
  */
 export type ReplayRunState =
   | 'pinning'
@@ -189,7 +203,8 @@ export interface ReplayRunOptions {
   /**
    * Pause automatically BEFORE injecting this tick's input, i.e. after exactly
    * `pauseAtTick` ticks have been replayed. Exact by construction: the boundary
-   * is a tick count, not a wall-clock moment.
+   * is a tick count, not a wall-clock moment. `totalTicks` is a valid boundary:
+   * the run pauses after its last tick, before the settle frames.
    */
   pauseAtTick?: number;
   /** Simulation rate to pin; `DEFAULT_REPLAY_PIN_HZ` when omitted. */
@@ -198,9 +213,13 @@ export interface ReplayRunOptions {
   onHandle?: (handle: ReplayHandle) => void;
 }
 
-/** How a controlled run ended. A cancelled run carries no outcome, by design. */
+/**
+ * How a controlled run ended. A cancelled run carries no outcome, by design.
+ * A completed run whose unpin FAILED still carries its outcome — the run was
+ * pinned — with the unpin failure reported beside it, never as a failed run.
+ */
 export type ReplayRunResult =
-  | { status: 'completed'; outcome: ReplayOutcome }
+  | { status: 'completed'; outcome: ReplayOutcome; unpinError?: string }
   | { status: 'cancelled'; ticksReplayed: number }
   | { status: 'failed'; error: Error; ticksReplayed: number };
 
@@ -208,11 +227,15 @@ export type ReplayRunResult =
 export interface ReplayHandle {
   /** Settles exactly once; never rejects — failures are `status: 'failed'`. */
   readonly result: Promise<ReplayRunResult>;
-  /** Request a pause at the next tick boundary. Applies while pinning or running. */
+  /**
+   * Request a pause at the next tick boundary. Applies while pinning or
+   * running, up to and including the final boundary (after the last tick);
+   * refused once the run is in its settle frames, where no boundary is left.
+   */
   pause(): boolean;
   /** Resume a paused run, or withdraw a pause that has not settled yet. */
   resume(): boolean;
-  /** Stop the run, release input, unpin. Applies in any non-terminal state. */
+  /** Stop the run, release input, unpin. Applies once, in any non-terminal state. */
   cancel(): boolean;
   getProgress(): ReplayProgress;
   /** Progress notifications are delivered synchronously on every state change and tick. */
@@ -260,6 +283,10 @@ function keysForFrame(frame: InputTraceFrame, env: ReplayEnvironment): Set<strin
     for (const code of env.resolveKeys(actionName, state)) codes.add(code);
   }
   return codes;
+}
+
+function toError(caught: unknown): Error {
+  return caught instanceof Error ? caught : new Error(String(caught));
 }
 
 const TERMINAL_STATES: ReadonlySet<ReplayRunState> = new Set(['completed', 'cancelled', 'failed']);
@@ -312,6 +339,8 @@ export function startReplay(
   let pauseRequested = false;
   let cancelRequested = false;
   let pauseArmed = options.pauseAtTick !== undefined;
+  /** Set once the final tick boundary is behind us: no pause can settle any more. */
+  let pastFinalBoundary = false;
   /** Set while paused: resume or cancel resolves it. */
   let wakeUp: (() => void) | null = null;
   /** Set while a frame is awaited: cancel resolves it so the wait ends at once. */
@@ -329,7 +358,15 @@ export function startReplay(
       }
     }
   };
+  /**
+   * 'cancelling' is sticky. A cancel can land in the middle of any await, and
+   * the code after that await was written for the state it interrupted
+   * (announcing 'paused', 'running'); none of those may paint over a cancel
+   * the creator has already been shown. Only the cancel's own settlement — or
+   * a boundary failure while settling it — replaces it.
+   */
   const setState = (state: ReplayRunState) => {
+    if (progress.state === 'cancelling' && state !== 'cancelled' && state !== 'failed') return;
     progress.state = state;
     notify();
   };
@@ -344,6 +381,7 @@ export function startReplay(
   const handle: ReplayHandle = {
     result: Promise.resolve({ status: 'cancelled', ticksReplayed: 0 }), // replaced below
     pause: () => {
+      if (pastFinalBoundary) return false;
       if (progress.state !== 'running' && progress.state !== 'pinning') return false;
       pauseRequested = true;
       setState('pausing');
@@ -361,7 +399,7 @@ export function startReplay(
       return true;
     },
     cancel: () => {
-      if (TERMINAL_STATES.has(progress.state)) return false;
+      if (TERMINAL_STATES.has(progress.state) || cancelRequested) return false;
       cancelRequested = true;
       pauseRequested = false;
       setState('cancelling');
@@ -383,10 +421,28 @@ export function startReplay(
     let runtimePausedByRunner = false;
     let pinnedByRunner = false;
 
-    const unpin = async () => {
-      if (!pinnedByRunner) return;
+    /**
+     * Unpin if this runner pinned. Returns the failure instead of throwing:
+     * the exit path decides what it taints, and on completion it taints
+     * nothing — the run WAS pinned; only the release failed.
+     */
+    const unpin = async (): Promise<Error | null> => {
+      if (!pinnedByRunner) return null;
       pinnedByRunner = false;
-      await env.unpinFrameRate?.();
+      try {
+        await env.unpinFrameRate?.();
+        return null;
+      } catch (caught) {
+        const error = toError(caught);
+        console.error('[replayRunner] could not unpin the clock', error);
+        return error;
+      }
+    };
+
+    const resumeRuntimeIfPaused = async (): Promise<void> => {
+      if (!runtimePausedByRunner) return;
+      runtimePausedByRunner = false;
+      await env.resumeRuntime?.();
     };
 
     /**
@@ -413,17 +469,57 @@ export function startReplay(
     /**
      * A cancelled run releases input, restores a runtime this runner paused,
      * unpins, and reports NO outcome — whichever point of the run the cancel
-     * landed at.
+     * landed at. Every step is best-effort: a boundary that fails while the
+     * creator's cancel is being honoured is logged, and the result is still
+     * the cancellation they asked for, settled exactly once.
      */
     const finishCancelled = async (ticks: number): Promise<ReplayRunResult> => {
-      await releaseHeld();
-      if (runtimePausedByRunner) {
-        runtimePausedByRunner = false;
-        await env.resumeRuntime?.();
+      try {
+        await releaseHeld();
+      } catch (releaseError) {
+        console.error('[replayRunner] could not release held keys while cancelling', releaseError);
+      }
+      try {
+        await resumeRuntimeIfPaused();
+      } catch (resumeError) {
+        console.error('[replayRunner] could not resume the runtime while cancelling', resumeError);
       }
       await unpin();
       setState('cancelled');
       return { status: 'cancelled', ticksReplayed: ticks };
+    };
+
+    /**
+     * Settle a requested pause at the tick boundary `tick` and wait to be
+     * woken. Returns false when a cancel landed anywhere in the process, so
+     * the caller stops. A cancel can arrive during every await here AND from
+     * inside the 'paused' notification itself (a UI that cancels on seeing
+     * 'paused' — the case the review-board reproduced), so `cancelRequested`
+     * is re-checked after each await, and the wake-up promise exists BEFORE
+     * 'paused' is announced so that a cancel always has something to resolve.
+     */
+    const pauseAtBoundary = async (tick: number): Promise<boolean> => {
+      // No synthetic key stays down while the creator reads the frozen scene.
+      await releaseHeld();
+      if (cancelRequested) return false;
+      if (env.pauseRuntime) {
+        await env.pauseRuntime();
+        runtimePausedByRunner = true;
+        if (cancelRequested) return false;
+      }
+      progress.tick = tick;
+      const woken = new Promise<void>((resolve) => {
+        wakeUp = resolve;
+      });
+      setState('paused');
+      await woken;
+      wakeUp = null;
+      if (cancelRequested) return false;
+      pauseRequested = false;
+      await resumeRuntimeIfPaused();
+      if (cancelRequested) return false;
+      setState('running');
+      return true;
     };
 
     try {
@@ -456,28 +552,7 @@ export function startReplay(
           pauseArmed = false;
           pauseRequested = true;
         }
-        if (pauseRequested) {
-          // Settle the pause at the tick boundary: no synthetic key stays down
-          // while the creator reads the frozen scene.
-          await releaseHeld();
-          if (env.pauseRuntime) {
-            await env.pauseRuntime();
-            runtimePausedByRunner = true;
-          }
-          progress.tick = tick;
-          setState('paused');
-          await new Promise<void>((resolve) => {
-            wakeUp = resolve;
-          });
-          wakeUp = null;
-          if (cancelRequested) break;
-          pauseRequested = false;
-          if (runtimePausedByRunner) {
-            runtimePausedByRunner = false;
-            await env.resumeRuntime?.();
-          }
-          setState('running');
-        }
+        if (pauseRequested && !(await pauseAtBoundary(tick))) break;
 
         const frame = framesByTick.get(tick);
         const active = frame ? keysForFrame(frame, env) : new Set<string>();
@@ -497,6 +572,20 @@ export function startReplay(
         progress.tick = ticksReplayed;
         notify();
       }
+
+      // --- The final boundary ----------------------------------------------
+      // A pause accepted during the last tick's frame (or armed for
+      // `pauseAtTick === totalTicks`) settles here, after every tick and
+      // before the settle frames; the earlier runner accepted it and then
+      // ran on to completion with the pause never settling.
+      if (!cancelRequested) {
+        if (pauseArmed && options.pauseAtTick === totalTicks) {
+          pauseArmed = false;
+          pauseRequested = true;
+        }
+        if (pauseRequested) await pauseAtBoundary(ticksReplayed);
+      }
+      pastFinalBoundary = true;
 
       if (cancelRequested) return finishCancelled(ticksReplayed);
 
@@ -550,7 +639,9 @@ export function startReplay(
         },
       ];
 
-      await unpin();
+      // The verdict is already decided; a failed unpin is reported, not a
+      // failed run (the engine releases any leftover pin on Stop regardless).
+      const unpinError = await unpin();
       const outcome: ReplayOutcome = {
         command: REPLAY_INPUT_TRACE_COMMAND,
         verdict: assertions.every((a) => a.passed) ? 'passed' : 'failed',
@@ -565,9 +656,17 @@ export function startReplay(
         pinHz: pinned ? pinHz : null,
       };
       setState('completed');
-      return { status: 'completed', outcome };
+      return unpinError
+        ? { status: 'completed', outcome, unpinError: unpinError.message }
+        : { status: 'completed', outcome };
     } catch (caught) {
-      const error = caught instanceof Error ? caught : new Error(String(caught));
+      const error = toError(caught);
+      // A boundary that fails while a cancel is being honoured does not turn
+      // the creator's cancel into a failure they did not cause.
+      if (cancelRequested) {
+        console.error('[replayRunner] boundary failed while cancelling; reporting the cancellation', error);
+        return finishCancelled(ticksReplayed);
+      }
       // A failed frame/input operation must not leave synthetic keys held, a
       // runtime paused, or a clock pinned. Each step is best-effort: the
       // original error is what the caller needs to see.
@@ -576,19 +675,12 @@ export function startReplay(
       } catch (releaseError) {
         console.error('[replayRunner] could not release held keys after a failure', releaseError);
       }
-      if (runtimePausedByRunner) {
-        runtimePausedByRunner = false;
-        try {
-          await env.resumeRuntime?.();
-        } catch (resumeError) {
-          console.error('[replayRunner] could not resume the runtime after a failure', resumeError);
-        }
-      }
       try {
-        await unpin();
-      } catch (unpinError) {
-        console.error('[replayRunner] could not unpin the clock after a failure', unpinError);
+        await resumeRuntimeIfPaused();
+      } catch (resumeError) {
+        console.error('[replayRunner] could not resume the runtime after a failure', resumeError);
       }
+      await unpin();
       setState('failed');
       return { status: 'failed', error, ticksReplayed };
     }
@@ -603,7 +695,10 @@ export function startReplay(
  * Replay a bounded input trace through the real runtime and return an
  * observed-state verdict. The uncontrolled form of `startReplay`: it resolves
  * with the outcome, and throws for an invalid trace, a refused pin, a boundary
- * failure, or a cancellation issued through `options.onHandle`.
+ * failure, or a cancellation issued through `options.onHandle`. A completed
+ * run whose unpin failed still resolves with its outcome; the failure is
+ * logged, since this form has nowhere else to put it (use `startReplay` to
+ * read `unpinError`).
  * @param trace Recording to validate before injecting any input.
  * @param env Input injection, tick advancement, observation and clock boundary.
  * @param options Pause boundary, pin rate, handle callback.
@@ -617,7 +712,18 @@ export async function replayInputTrace(
   env: ReplayEnvironment,
   options: ReplayRunOptions = {},
 ): Promise<ReplayOutcome> {
-  const result = await startReplay(trace, env, options).result;
+  return outcomeOf(await startReplay(trace, env, options).result);
+}
+
+/**
+ * Map a settled controlled run to the uncontrolled contract: the outcome, or
+ * the matching throw. Shared by `replayInputTrace` and the entry points'
+ * `runReplay`, so there is one place that decides what each status means.
+ * @param result A settled `ReplayRunResult`.
+ * @returns The outcome of a completed run.
+ * @throws ReplayCancelledError for a cancelled run; the run's error for a failed one.
+ */
+export function outcomeOf(result: ReplayRunResult): ReplayOutcome {
   if (result.status === 'completed') return result.outcome;
   if (result.status === 'cancelled') throw new ReplayCancelledError(result.ticksReplayed);
   throw result.error;

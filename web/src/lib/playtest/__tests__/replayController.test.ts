@@ -27,6 +27,7 @@ import {
   type ReplayHandle,
   type ReplayObservation,
   type ReplayProgress,
+  type ReplayRunResult,
   type ReplayRunState,
 } from '../replayRunner';
 import { INPUT_TRACE_VERSION, type InputTrace } from '../inputTrace';
@@ -62,8 +63,8 @@ function makeFakeEngine(
   const bound = options.bound ?? true;
   const acceptPin = options.acceptPin ?? true;
   const manualFrames = options.manualFrames ?? false;
-  /** With `manualFrames`, each `advanceFrame` waits here until `step()` lets it through. */
-  const pendingFrames: Array<() => void> = [];
+  /** With `manualFrames`, each `advanceFrame` waits here until `step()` lets it through (or `fail()` rejects it). */
+  const pendingFrames: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
   const held = new Set<string>();
   let playerX = 0;
   let collectiblePresent = true;
@@ -98,8 +99,8 @@ function makeFakeEngine(
       // resolves in a microtask finishes a whole trace before a test can act
       // on it, so a test that must act mid-trace drives frames by hand.
       if (manualFrames) {
-        await new Promise<void>((resolve) => {
-          pendingFrames.push(resolve);
+        await new Promise<void>((resolve, reject) => {
+          pendingFrames.push({ resolve, reject });
         });
       }
       if (runtimePaused) return;
@@ -131,10 +132,18 @@ function makeFakeEngine(
 
   /** Let exactly one pending frame through and flush the runner's continuation. */
   const step = async () => {
-    const release = pendingFrames.shift();
-    if (!release) throw new Error('no frame is pending');
-    release();
+    const pending = pendingFrames.shift();
+    if (!pending) throw new Error('no frame is pending');
+    pending.resolve();
     // Several microtask turns: the runner awaits the frame, then its own bookkeeping.
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+  };
+
+  /** Reject the pending frame — what the boundary's stalled-tick timeout does. */
+  const fail = async (error: Error) => {
+    const pending = pendingFrames.shift();
+    if (!pending) throw new Error('no frame is pending');
+    pending.reject(error);
     for (let i = 0; i < 8; i += 1) await Promise.resolve();
   };
 
@@ -144,6 +153,7 @@ function makeFakeEngine(
     pressLog,
     releaseLog,
     step,
+    fail,
     getPlayerX: () => playerX,
     getCollected: () => collectedCount,
     isHeld: (code: string) => held.has(code),
@@ -172,6 +182,33 @@ function waitForState(handle: ReplayHandle, state: ReplayRunState): Promise<Repl
         reject(new Error(`run ended in ${progress.state} before reaching ${state}`));
       }
     });
+  });
+}
+
+/**
+ * Resolve with the run's result, or FAIL within `ms` if it never settles. A
+ * plain `await handle.result` on a stuck run only fails at the test timeout,
+ * with no message; this names the defect (an unsettled result is exactly the
+ * stuck-pause bug the review-board reproduced).
+ */
+async function settlesWithin(handle: ReplayHandle, ms = 1500): Promise<ReplayRunResult> {
+  const holder: { value: ReplayRunResult | null } = { value: null };
+  void handle.result.then((result) => {
+    holder.value = result;
+  });
+  await vi.waitFor(
+    () => {
+      if (!holder.value) throw new Error(`result still unsettled after ${ms} ms (state ${handle.getProgress().state})`);
+    },
+    { timeout: ms, interval: 10 },
+  );
+  return holder.value as ReplayRunResult;
+}
+
+/** One macrotask, so a hook that resolves "later" really resolves after the current microtask run. */
+function nextMacrotask(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setImmediate(resolve);
   });
 }
 
@@ -409,6 +446,236 @@ describe('startReplay — cancellation releases input', () => {
       },
     });
     await expect(promise).rejects.toBeInstanceOf(ReplayCancelledError);
+  });
+});
+
+describe('startReplay — a cancel that races the pause (review-board MAJOR 1)', () => {
+  it('cancel issued from inside the "paused" notification settles as cancelled, not as a pause that never ends', async () => {
+    const engine = makeFakeEngine();
+    const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
+    const states: ReplayRunState[] = [];
+    let secondCancel: boolean | null = null;
+    handle.subscribe((p) => {
+      states.push(p.state);
+      // A UI that cancels the moment it sees 'paused' — the review's reproduction.
+      if (p.state === 'paused') {
+        expect(handle.cancel()).toBe(true);
+        secondCancel = handle.cancel();
+      }
+    });
+
+    const result = await settlesWithin(handle);
+    expect(result).toEqual({ status: 'cancelled', ticksReplayed: 3 });
+    expect(secondCancel, 'a repeat cancel while cancelling does not apply').toBe(false);
+    // 'paused' was announced (the cancel came from inside it), then the cancel
+    // took over: nothing overwrote 'cancelling' with 'paused' afterwards.
+    expect(states.slice(states.indexOf('paused'))).toEqual(['paused', 'cancelling', 'cancelled']);
+    expect(handle.getProgress().state).toBe('cancelled');
+    expect(handle.getProgress().heldKeys).toEqual([]);
+    expect(engine.isHeld('KeyD')).toBe(false);
+    expect(engine.isRuntimePaused(), 'the runtime the runner paused is running again').toBe(false);
+    expect(engine.log.filter((l) => l === 'unpin')).toHaveLength(1);
+    expect(engine.log[engine.log.length - 1]).toBe('unpin');
+  });
+
+  it('cancel landing while pauseRuntime is still in flight settles as cancelled and never announces "paused"', async () => {
+    const engine = makeFakeEngine();
+    const pauseNow = engine.env.pauseRuntime!;
+    let releasePause: (() => void) | null = null;
+    // The real boundary's pause is a command round-trip; model it resolving
+    // on a LATER macrotask so a cancel can land in the gap.
+    engine.env.pauseRuntime = () =>
+      new Promise<void>((resolve) => {
+        releasePause = () => {
+          void pauseNow();
+          resolve();
+        };
+      });
+    const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
+    const states: ReplayRunState[] = [];
+    handle.subscribe((p) => states.push(p.state));
+
+    await vi.waitFor(() => expect(releasePause).not.toBeNull());
+    expect(handle.getProgress().tick).toBe(3);
+    expect(engine.isHeld('KeyD'), 'keys are released before the runtime is asked to pause').toBe(false);
+
+    expect(handle.cancel()).toBe(true);
+    expect(handle.getProgress().state).toBe('cancelling');
+    await nextMacrotask();
+    releasePause!();
+
+    const result = await settlesWithin(handle);
+    expect(result).toEqual({ status: 'cancelled', ticksReplayed: 3 });
+    expect(states).not.toContain('paused');
+    expect(states[states.length - 1]).toBe('cancelled');
+    expect(engine.isRuntimePaused(), 'the pause that landed after the cancel was undone').toBe(false);
+    expect(engine.log.filter((l) => l === 'runtime pause')).toHaveLength(1);
+    expect(engine.log.filter((l) => l === 'runtime resume')).toHaveLength(1);
+    expect(engine.log.filter((l) => l === 'unpin')).toHaveLength(1);
+    expect(engine.isHeld('KeyD')).toBe(false);
+  });
+
+  it('cancel landing while the pause is releasing keys settles as cancelled without pausing the runtime at all', async () => {
+    const engine = makeFakeEngine();
+    const releaseNow = engine.env.releaseKeys;
+    let releaseKeysLater: (() => void) | null = null;
+    engine.env.releaseKeys = (codes) =>
+      new Promise<void>((resolve) => {
+        releaseKeysLater = () => {
+          void releaseNow(codes);
+          resolve();
+        };
+      });
+    const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
+    await vi.waitFor(() => expect(releaseKeysLater).not.toBeNull());
+
+    expect(handle.cancel()).toBe(true);
+    await nextMacrotask();
+    releaseKeysLater!();
+
+    const result = await settlesWithin(handle);
+    expect(result).toEqual({ status: 'cancelled', ticksReplayed: 3 });
+    expect(engine.log.filter((l) => l === 'runtime pause'), 'no pause after the cancel').toHaveLength(0);
+    expect(engine.isHeld('KeyD')).toBe(false);
+    expect(engine.log[engine.log.length - 1]).toBe('unpin');
+  });
+});
+
+describe('startReplay — exit paths (review-board m5)', () => {
+  it('a boundary failure mid-run, after the pin was accepted, releases keys and unpins before reporting failed', async () => {
+    const engine = makeFakeEngine({ manualFrames: true });
+    const handle = startReplay(moveRightTrace(), engine.env);
+    await vi.waitFor(() => expect(engine.log).toContain('pin 60'));
+    await engine.step(); // warm-up
+    await waitForState(handle, 'running');
+    for (let i = 0; i < 3; i += 1) await engine.step();
+    expect(engine.isHeld('KeyD')).toBe(true);
+
+    // What the browser boundary does when the engine stops ticking.
+    await engine.fail(new Error('Replay stopped: no engine play tick received.'));
+
+    const result = await settlesWithin(handle);
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') return;
+    expect(result.error.message).toBe('Replay stopped: no engine play tick received.');
+    expect(result.ticksReplayed).toBe(3);
+    expect(engine.isHeld('KeyD')).toBe(false);
+    expect(engine.releaseLog).toEqual([['KeyD']]);
+    expect(engine.log.filter((l) => l === 'unpin')).toHaveLength(1);
+    expect(engine.log[engine.log.length - 1]).toBe('unpin');
+    expect(handle.getProgress().state).toBe('failed');
+    expect(handle.getProgress().heldKeys).toEqual([]);
+    expect(handle.cancel(), 'nothing left to cancel').toBe(false);
+  });
+
+  it('a refused resume fails the run and still releases the clock', async () => {
+    const engine = makeFakeEngine();
+    engine.env.resumeRuntime = () => {
+      throw new Error('Replay: the engine did not confirm resume: PendingCommands resource not initialized');
+    };
+    const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 5 });
+    await waitForState(handle, 'paused');
+    expect(handle.resume()).toBe(true);
+
+    const result = await settlesWithin(handle);
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') return;
+    expect(result.error.message).toContain('did not confirm resume');
+    expect(result.ticksReplayed).toBe(5);
+    expect(engine.isHeld('KeyD')).toBe(false);
+    expect(engine.log.filter((l) => l === 'unpin')).toHaveLength(1);
+    expect(handle.getProgress().state).toBe('failed');
+  });
+
+  it('a failed unpin after a completed run keeps the outcome and reports the unpin failure separately', async () => {
+    const engine = makeFakeEngine();
+    engine.env.unpinFrameRate = () => {
+      engine.log.push('unpin refused');
+      throw new Error('Replay: the engine did not confirm unpin_frame_rate: PendingCommands resource not initialized');
+    };
+    const handle = startReplay(moveRightTrace(), engine.env);
+    const result = await settlesWithin(handle);
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    expect(result.outcome.verdict).toBe('passed');
+    expect(result.outcome.ticksReplayed).toBe(TICKS);
+    expect(result.outcome.pinned).toBe(true);
+    expect(result.unpinError).toContain('unpin_frame_rate');
+    expect(handle.getProgress().state).toBe('completed');
+    expect(engine.log[engine.log.length - 1]).toBe('unpin refused');
+  });
+
+  it('a clean completion carries no unpin error', async () => {
+    const engine = makeFakeEngine();
+    const result = await startReplay(moveRightTrace(), engine.env).result;
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    expect(result.unpinError).toBeUndefined();
+  });
+
+  it('a pause accepted during the last tick settles at the final boundary, and resume then completes the run', async () => {
+    const engine = makeFakeEngine({ manualFrames: true });
+    const handle = startReplay(moveRightTrace(4), engine.env);
+    await vi.waitFor(() => expect(engine.log).toContain('pin 60'));
+    await engine.step(); // warm-up
+    for (let i = 0; i < 3; i += 1) await engine.step(); // ticks 0..2 seen through
+    // Tick 3 — the last — is injected and its frame is in flight.
+    expect(handle.getProgress().tick).toBe(3);
+    expect(engine.isHeld('KeyD')).toBe(true);
+    expect(handle.pause()).toBe(true);
+    expect(handle.getProgress().state).toBe('pausing');
+
+    await engine.step(); // the last tick's frame
+    const paused = await waitForState(handle, 'paused');
+    expect(paused.tick).toBe(4);
+    expect(paused.heldKeys).toEqual([]);
+    expect(engine.isHeld('KeyD')).toBe(false);
+    expect(engine.isRuntimePaused()).toBe(true);
+
+    expect(handle.resume()).toBe(true);
+    await waitForState(handle, 'running');
+    expect(engine.isRuntimePaused()).toBe(false);
+    // 'running' is announced before the runner reaches its first settle
+    // frame; let that continuation run so a frame is pending to step.
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    await engine.step();
+    await engine.step(); // the two settle frames
+    const result = await settlesWithin(handle);
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    expect(result.outcome.ticksReplayed).toBe(4);
+    // No tick follows the final boundary, so nothing is re-pressed on resume.
+    expect(engine.pressLog).toEqual([['KeyD']]);
+    expect(engine.releaseLog).toEqual([['KeyD']]);
+    expect(engine.log[engine.log.length - 1]).toBe('unpin');
+  });
+
+  it('pause() is refused once the final boundary has passed (the settle frames), instead of accepted and never settled', async () => {
+    const engine = makeFakeEngine({ manualFrames: true });
+    const handle = startReplay(moveRightTrace(4), engine.env);
+    await vi.waitFor(() => expect(engine.log).toContain('pin 60'));
+    await engine.step(); // warm-up
+    for (let i = 0; i < 4; i += 1) await engine.step(); // every tick seen through
+    expect(handle.getProgress().tick).toBe(4);
+    expect(handle.getProgress().state).toBe('running');
+    expect(handle.pause()).toBe(false);
+    expect(handle.getProgress().state).toBe('running');
+    await engine.step();
+    await engine.step();
+    const result = await settlesWithin(handle);
+    expect(result.status).toBe('completed');
+  });
+
+  it('pauseAtTick equal to the trace length pauses after the last tick, before the settle frames', async () => {
+    const engine = makeFakeEngine();
+    const handle = startReplay(moveRightTrace(4), engine.env, { pauseAtTick: 4 });
+    const paused = await waitForState(handle, 'paused');
+    expect(paused.tick).toBe(4);
+    expect(engine.isRuntimePaused()).toBe(true);
+    expect(handle.resume()).toBe(true);
+    const result = await settlesWithin(handle);
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') expect(result.outcome.ticksReplayed).toBe(4);
   });
 });
 
