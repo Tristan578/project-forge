@@ -18,6 +18,7 @@ import type {
   TokenEstimate,
 } from '@/lib/game-creation/types';
 import { runPipeline } from '@/lib/game-creation/pipelineRunner';
+import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
 import { buildPlan } from '@/lib/game-creation/planBuilder';
 import { entitySetupExecutor } from '@/lib/game-creation/executors/entitySetupExecutor';
 import { worldBuildExecutor } from '@/lib/game-creation/executors/worldBuildExecutor';
@@ -1091,6 +1092,65 @@ describe('runPipeline', () => {
     expect(attempts).toBe(2);
     expect(result.steps[0].status).toBe('failed');
     expect(result.status).toBe('failed');
+  });
+
+  // #10202 review (Sentry): the runner's generic catch turns ANY throw into
+  // `retryable: true`. That is right for a transient provider fault and wrong
+  // for `EngineDispatchThrewError` — the engine already threw mid-apply and the
+  // store locked saves, so a second dispatch of the same scene-replacing
+  // command lands on a viewport that cannot be trusted. `planBuilder` gives
+  // `scene_create` `maxRetries: 1`, which is what made the second call real.
+  describe('an executor that throws', () => {
+    function throwingRegistry(thrown: unknown, onCall: () => void): Map<ExecutorName, ExecutorDefinition> {
+      return makeRegistry({
+        name: 'scene_create',
+        inputSchema: z.object({}),
+        execute: async (): Promise<ExecutorResult> => {
+          onCall();
+          throw thrown;
+        },
+        userFacingErrorMessage: 'Scene creation failed.',
+      });
+    }
+
+    it('is NOT retried when it threw EngineDispatchThrewError, even with maxRetries: 1', async () => {
+      let attempts = 0;
+      const plan = makePlan({
+        steps: [
+          makeStep('step_0', 'scene_create', { maxRetries: 1 }),
+          makeStep('step_1', 'verify_all_scenes'),
+        ],
+      });
+      const result = await runPipeline(
+        plan,
+        throwingRegistry(new EngineDispatchThrewError('new_scene', 'RuntimeError: unreachable'), () => { attempts += 1; }),
+        makeContext(controller.signal),
+      );
+
+      expect(attempts).toBe(1);
+      expect(result.steps[0].status).toBe('failed');
+      expect(result.steps[0].error?.retryable).toBe(false);
+      expect(result.steps[0].error?.message).toBe('RuntimeError: unreachable');
+      expect(result.steps[0].error?.userFacingMessage).toBe('Scene creation failed.');
+      expect(result.steps[1].status).toBe('skipped');
+      expect(result.status).toBe('failed');
+    });
+
+    it('IS retried when it threw anything else — the existing contract', async () => {
+      let attempts = 0;
+      const plan = makePlan({ steps: [makeStep('step_0', 'scene_create', { maxRetries: 1 })] });
+      const result = await runPipeline(
+        plan,
+        throwingRegistry(new Error('provider hiccup'), () => { attempts += 1; }),
+        makeContext(controller.signal),
+      );
+
+      expect(attempts).toBe(2);
+      expect(result.steps[0].status).toBe('failed');
+      expect(result.steps[0].error?.code).toBe('EXCEPTION');
+      expect(result.steps[0].error?.retryable).toBe(true);
+      expect(result.status).toBe('failed');
+    });
   });
 
   it('fires onPlanStatusChange when plan status transitions', async () => {

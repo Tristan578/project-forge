@@ -4,6 +4,7 @@ import { makeStepError, successResult, failResult } from './shared';
 import { waitForEngineFrame } from './engineDispatch';
 import { createScene, loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
 import type { NewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
+import { EngineDispatchThrewError, engineThrewMessage } from '@/lib/scenes/engineDispatchThrew';
 
 /**
  * World configuration used to live here and no longer does — it moved to the
@@ -133,8 +134,34 @@ export const sceneCreateExecutor: ExecutorDefinition = {
     // synchronously right after the call); the step error carries that cause
     // rather than blaming the engine for a storage refusal or an engine that
     // has not attached yet (#10202 review).
+    //
+    // `newScene()` THROWS `EngineDispatchThrewError` when the engine call
+    // threw — after the store has locked every save path, because the throw can
+    // arrive once the engine has already begun despawning (#10202). That is not
+    // a refusal and it is not retryable: `planBuilder` gives this step
+    // `maxRetries: 1`, so letting it escape to the pipeline runner's generic
+    // catch (`retryable: true`) dispatched `new_scene` a second time against an
+    // engine that had already thrown mid-apply, with saves locked. Fail the step
+    // typed and non-retryable instead — the chat tools' `new_scene` narrows the
+    // same way. Anything else `newScene()` throws (a storage write refused, a
+    // subscriber that threw) set no lockout and is no engine report, so it is
+    // rethrown to the runner's catch unchanged.
     const store = ctx.getStore();
-    if (store.newScene({ completionMode: ctx.gdd?.completionMode }) === false) {
+    let cleared: boolean;
+    try {
+      cleared = store.newScene({ completionMode: ctx.gdd?.completionMode });
+    } catch (error) {
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
+      return failResult(
+        makeStepError(
+          'ENGINE_DISPATCH_THREW',
+          engineThrewMessage('A new scene could not be created', error),
+          this.userFacingErrorMessage,
+          false,
+        ),
+      );
+    }
+    if (cleared === false) {
       return failResult(
         makeStepError(
           'COMMAND_FAILED',
