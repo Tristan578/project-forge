@@ -29,8 +29,30 @@ import {
  * DOCUMENTED GAP: SwiftShader is software WebGL2 — this validates ECS / picking
  * / play / export journeys but NOT WebGPU or real-GPU rendering correctness.
  */
+/**
+ * What the Step 2c script logs on each frame it is given. Asserted on in Step
+ * 3b; a value no other code writes, so a match can only come from that script.
+ */
+const PLAY_TICK_MARKER = 'engine-smoke: onUpdate ran';
+
 test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
-  test.beforeEach(async ({ editor }) => {
+  /**
+   * Every console warning the page writes, captured from before the first
+   * navigation. Step 4b asserts on the slice written during the Play session
+   * (#10375): the engine's per-frame Play event is `PLAY_TICK_DELTA`, and while
+   * the editor's event hub did not know it, every frame surfaced here as
+   * `Unknown engine event: PLAY_TICK_DELTA` (40+ per run in CI run 37546070304)
+   * and scripts received no ticks at all. Nothing else in this spec could see
+   * that: Play still "entered", Stop still "stopped", and the store never
+   * learns that a frame was dropped.
+   */
+  let consoleWarnings: string[] = [];
+
+  test.beforeEach(async ({ page, editor }) => {
+    consoleWarnings = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'warning') consoleWarnings.push(msg.text());
+    });
     // `editor.load()` seeds 'forge:preferred-backend' = 'webgl2' for every spec
     // that uses it, so SwiftShader is never asked for WebGPU here.
     await editor.load();
@@ -73,7 +95,7 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
     // allGameComponents, which is exactly what the gate's reader inspects). This
     // makes the gate pass on real state, so Step 3 exercises the genuine
     // Edit -> Play engine transition rather than being silently short-circuited.
-    await page.evaluate(() => {
+    const targetId = await page.evaluate((): string => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;
       const state = store.getState();
@@ -90,7 +112,39 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
           targetEntityId: null,
         },
       });
+      return targetId;
     });
+
+    // Step 2c: attach a script that reports the frames it is given. This is the
+    // tick-driven observation Step 3b asserts on (#10375): a script's
+    // `onUpdate` runs ONLY when the engine's per-frame `PLAY_TICK_DELTA`
+    // reaches the script runner through the event hub, so a Play session that
+    // produced no such log entry is a Play session in which scripts received
+    // no ticks — which the console-warning assertion in Step 4b alone could
+    // not tell from an idle page. `setScript` is the same store action the
+    // script inspector uses: it records the script locally (what the runner
+    // gathers at Play start) and dispatches `set_script` to the engine. The
+    // script stops logging after five frames so it cannot flood the log.
+    await page.evaluate(
+      ({ entityId, marker }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__EDITOR_STORE;
+        store.getState().setScript(
+          entityId,
+          [
+            'let ticks = 0;',
+            'function onUpdate(dt) {',
+            '  if (ticks < 5) {',
+            '    ticks += 1;',
+            `    forge.log(${JSON.stringify(marker)});`,
+            '  }',
+            '}',
+          ].join('\n'),
+          true
+        );
+      },
+      { entityId: targetId, marker: PLAY_TICK_MARKER }
+    );
 
     // Step 3: enter Play mode — the engine snapshots state and inserts the
     // GameComponentRuntime. The Stop button is ALWAYS rendered (PlayControls.tsx
@@ -113,6 +167,9 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
       .locator('button[title*="Play"], button[title*="play"]')
       .first();
     await expect(playBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
+    // Everything the page warns from here until the return to edit mode is the
+    // Play session's output; Step 4b reads that slice.
+    const playSessionStart = consoleWarnings.length;
     await playBtn.click();
 
     // The 'Playing' indicator span becoming visible is true ONLY in play mode.
@@ -127,6 +184,21 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
         return store?.getState().engineMode === 'play';
       },
       undefined,
+      { timeout: E2E_TIMEOUT_INTERACTION_MS }
+    );
+
+    // Step 3b: the Play session must actually drive scripts (see Step 2c).
+    // TWO entries, not one: the first frame of a run is a full keyframe, so a
+    // hub that handled only that frame and dropped the deltas behind it would
+    // still produce a single entry and read as healthy.
+    await page.waitForFunction(
+      (marker: string) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__EDITOR_STORE;
+        const logs: Array<{ message: string }> = store?.getState().scriptLogs ?? [];
+        return logs.filter((entry) => entry.message === marker).length >= 2;
+      },
+      PLAY_TICK_MARKER,
       { timeout: E2E_TIMEOUT_INTERACTION_MS }
     );
 
@@ -150,6 +222,17 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
       { timeout: E2E_TIMEOUT_INTERACTION_MS }
     );
     await expect(page.locator('canvas').first()).toBeVisible();
+
+    // Step 4b: the hub dropped no engine event during the Play session. Scoped
+    // to the session (Play click through the return to edit mode) because that
+    // is where the per-frame event lives; `toEqual([])` so a failure names the
+    // event(s) that fell through. Step 3b is what keeps this from passing on a
+    // page that produced no frames at all.
+    expect(
+      consoleWarnings
+        .slice(playSessionStart)
+        .filter((line) => line.startsWith('Unknown engine event:'))
+    ).toEqual([]);
 
     // Step 5: open the export dialog and confirm it renders export options.
     // The toolbar Export button (SceneToolbar.tsx) is icon-only (Download icon,
