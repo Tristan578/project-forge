@@ -8,7 +8,9 @@ import type { MigrationRecord } from '../baseline-drizzle-journal';
 import {
   causeMessages,
   createStatementRecorder,
+  currentMigrationIndex,
   describeMigrationFailure,
+  findApplyingMigration,
   rootCauseMessage,
   zipMigrationStatements,
   type MigrationStatements,
@@ -51,7 +53,38 @@ describe('createStatementRecorder', () => {
     recorder.logger.logQuery('ALTER TABLE a ADD COLUMN b text;', []);
     expect(recorder.lastStatement()).toBe('ALTER TABLE a ADD COLUMN b text;');
   });
+
+  it('keeps every statement in the order it was logged, for locating the migration being applied', () => {
+    const recorder = createStatementRecorder();
+    expect(recorder.statements()).toEqual([]);
+    recorder.logger.logQuery('CREATE TABLE a (id int);', []);
+    recorder.logger.logQuery('ALTER TABLE a ADD COLUMN b text;', []);
+    recorder.logger.logQuery('CREATE TABLE a (id int);', []);
+    expect(recorder.statements()).toEqual([
+      'CREATE TABLE a (id int);',
+      'ALTER TABLE a ADD COLUMN b text;',
+      'CREATE TABLE a (id int);',
+    ]);
+  });
 });
+
+// Two migrations that carry the same statement text — `CREATE EXTENSION IF NOT
+// EXISTS vector;` is the realistic one: it is idempotent, so a later migration
+// has every reason to repeat it. Matching on text alone cannot tell them apart.
+const DUPLICATE = 'CREATE EXTENSION IF NOT EXISTS vector;';
+const WITH_DUPLICATE: MigrationStatements[] = [
+  { tag: '0000_base', statements: [DUPLICATE, 'CREATE TABLE a (id int);'] },
+  { tag: '0001_next', statements: ['CREATE TABLE b (id int);', DUPLICATE] },
+];
+
+// What drizzle's neon-http migrator logs BEFORE the first migration statement
+// (node_modules/drizzle-orm/neon-http/migrator.js): the schema, the journal
+// table, and the read of the newest journal row.
+const BOOKKEEPING = [
+  'CREATE SCHEMA IF NOT EXISTS "drizzle"',
+  '\n\t\tCREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (\n\t\t\tid SERIAL PRIMARY KEY\n\t\t)\n\t',
+  'select id, hash, created_at from "drizzle"."__drizzle_migrations" order by created_at desc limit 1',
+];
 
 describe('describeMigrationFailure', () => {
   it('names the migration and the statement position for a statement the migrator ran', () => {
@@ -68,6 +101,36 @@ describe('describeMigrationFailure', () => {
     );
     expect(describeMigrationFailure('\nCREATE INDEX a_idx ON a (id);\n', MIGRATIONS)).toBe(
       'while applying migration 0000_base (statement 2 of 2)',
+    );
+  });
+
+  it('names the migration BEING APPLIED when the same statement text sits in an earlier one too', () => {
+    // Without the index the first match wins, which is the earlier migration —
+    // the wrong one when the later migration is the one that failed.
+    expect(describeMigrationFailure(DUPLICATE, WITH_DUPLICATE, 1)).toBe(
+      'while applying migration 0001_next (statement 2 of 2)',
+    );
+    expect(describeMigrationFailure(DUPLICATE, WITH_DUPLICATE, 0)).toBe(
+      'while applying migration 0000_base (statement 1 of 2)',
+    );
+  });
+
+  it('falls back to the first match when it was not told which migration is being applied', () => {
+    expect(describeMigrationFailure(DUPLICATE, WITH_DUPLICATE)).toBe(
+      'while applying migration 0000_base (statement 1 of 2)',
+    );
+    expect(describeMigrationFailure(DUPLICATE, WITH_DUPLICATE, null)).toBe(
+      'while applying migration 0000_base (statement 1 of 2)',
+    );
+  });
+
+  it('does not trust an index whose migration lacks the statement, or one out of range', () => {
+    // 0001_next has no `CREATE TABLE a`; naming it would invent a location.
+    expect(describeMigrationFailure('CREATE TABLE a (id int);', WITH_DUPLICATE, 1)).toBe(
+      'while applying migration 0000_base (statement 2 of 2)',
+    );
+    expect(describeMigrationFailure(DUPLICATE, WITH_DUPLICATE, 7)).toBe(
+      'while applying migration 0000_base (statement 1 of 2)',
     );
   });
 
@@ -91,6 +154,95 @@ describe('describeMigrationFailure', () => {
     const quoted = described.slice(described.indexOf(marker) + marker.length);
     expect(quoted).toBe(`${long.slice(0, 120)} [truncated]`);
     expect(described.length).toBeLessThan(long.length);
+  });
+});
+
+describe('currentMigrationIndex', () => {
+  // After its own bookkeeping, the migrator logs the PENDING migrations'
+  // statements in order, so the log is a prefix of their concatenation. Aligning
+  // it against that concatenation names the migration of the last statement
+  // exactly — which text matching alone cannot when a statement repeats.
+  it('names the migration of the last logged statement on a from-zero run, skipping the bookkeeping', () => {
+    const logged = [
+      ...BOOKKEEPING,
+      'CREATE TABLE a (id int);',
+      '\nCREATE INDEX a_idx ON a (id);\n',
+      'ALTER TABLE a ADD COLUMN b text;',
+    ];
+    expect(currentMigrationIndex(logged, MIGRATIONS, [0, 1])).toBe(1);
+    expect(currentMigrationIndex(logged.slice(0, -1), MIGRATIONS, [0, 1])).toBe(0);
+  });
+
+  it('is not fooled by a duplicate in a migration that was already applied', () => {
+    // 0000 is in the journal, so only 0001 runs. The failing DUPLICATE is 0001's.
+    const logged = [...BOOKKEEPING, 'CREATE TABLE b (id int);', DUPLICATE];
+    expect(currentMigrationIndex(logged, WITH_DUPLICATE, [1])).toBe(1);
+    // The same log read as if everything were pending lands on 0000 — which is
+    // why the pending set has to come from the journal, not be assumed.
+    expect(currentMigrationIndex(logged, WITH_DUPLICATE, [0, 1])).toBe(0);
+  });
+
+  it('is null before any migration statement ran', () => {
+    expect(currentMigrationIndex([], MIGRATIONS, [0, 1])).toBeNull();
+    expect(currentMigrationIndex(BOOKKEEPING, MIGRATIONS, [0, 1])).toBeNull();
+  });
+
+  it('is null when the LAST logged statement is not the one the alignment expected', () => {
+    // A statement drizzle logged that no pending migration contains must not
+    // let an earlier statement's migration stand in for it.
+    expect(
+      currentMigrationIndex([...BOOKKEEPING, 'CREATE TABLE a (id int);', 'SELECT 1'], MIGRATIONS, [0, 1]),
+    ).toBeNull();
+  });
+
+  it('is null when nothing is pending', () => {
+    expect(currentMigrationIndex([...BOOKKEEPING, 'CREATE TABLE a (id int);'], MIGRATIONS, [])).toBeNull();
+  });
+});
+
+describe('findApplyingMigration', () => {
+  // The migrator inserts journal rows only after EVERY statement applied, so a
+  // failure leaves the journal as the migrator read it; reading it again names
+  // the migrations that were pending.
+  const folderMillis = [100, 200];
+  const logged = [...BOOKKEEPING, 'CREATE TABLE b (id int);', DUPLICATE];
+
+  function queryReturning(rows: unknown): { query: (text: string) => Promise<unknown>; texts: string[] } {
+    const texts: string[] = [];
+    return {
+      texts,
+      query: (text: string) => {
+        texts.push(text);
+        return Promise.resolve(rows);
+      },
+    };
+  }
+
+  it("reads the journal's newest row and treats only newer migrations as pending", async () => {
+    // bigint arrives as a string over the neon HTTP driver.
+    const { query, texts } = queryReturning([{ created_at: '100' }]);
+    await expect(findApplyingMigration(query, logged, WITH_DUPLICATE, folderMillis)).resolves.toBe(1);
+    expect(texts).toEqual([
+      'select created_at from drizzle.__drizzle_migrations order by created_at desc limit 1',
+    ]);
+  });
+
+  it('treats every migration as pending when the journal is empty', async () => {
+    const fromZero = [...BOOKKEEPING, DUPLICATE];
+    await expect(
+      findApplyingMigration(queryReturning([]).query, fromZero, WITH_DUPLICATE, folderMillis),
+    ).resolves.toBe(0);
+  });
+
+  it('is null, not a throw, when the journal cannot be read: the real failure must still be the one reported', async () => {
+    const failing = () => Promise.reject(new Error('connection reset'));
+    await expect(findApplyingMigration(failing, logged, WITH_DUPLICATE, folderMillis)).resolves.toBeNull();
+  });
+
+  it('is null for a journal timestamp that is not a number, rather than reading it as an empty journal', async () => {
+    await expect(
+      findApplyingMigration(queryReturning([{ created_at: 'not-a-number' }]).query, logged, WITH_DUPLICATE, folderMillis),
+    ).resolves.toBeNull();
   });
 });
 

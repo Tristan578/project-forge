@@ -41,8 +41,10 @@
  * but not the statement. What it does offer is the `logger` hook, called with
  * each statement's text immediately before it executes. The last statement
  * logged is the one that failed, and the migration file it was split from is
- * the migration to name — `describeMigrationFailure` below. Pure helpers,
- * tested in `scripts/__tests__/apply-migrations.test.ts`.
+ * the migration to name — `describeMigrationFailure` below. A statement that
+ * repeats across migrations is placed by which migration was being applied
+ * (`findApplyingMigration`), not by its text, which would blame the earlier
+ * file. Pure helpers, tested in `scripts/__tests__/apply-migrations.test.ts`.
  */
 import { pathToFileURL } from 'node:url';
 import { neon } from '@neondatabase/serverless';
@@ -61,11 +63,13 @@ export interface MigrationStatements {
   statements: readonly string[];
 }
 
-/** A drizzle `Logger` that remembers only the most recent statement. */
+/** A drizzle `Logger` that remembers every statement, in the order it was logged. */
 export interface StatementRecorder {
   logger: Logger;
   /** The last statement the migrator handed the driver, or null before the first. */
   lastStatement(): string | null;
+  /** Every statement the migrator handed the driver, in order. */
+  statements(): readonly string[];
 }
 
 /**
@@ -74,14 +78,15 @@ export interface StatementRecorder {
  * throws is the statement that failed.
  */
 export function createStatementRecorder(): StatementRecorder {
-  let last: string | null = null;
+  const logged: string[] = [];
   return {
     logger: {
       logQuery(query: string): void {
-        last = query;
+        logged.push(query);
       },
     },
-    lastStatement: () => last,
+    lastStatement: () => logged[logged.length - 1] ?? null,
+    statements: () => logged,
   };
 }
 
@@ -143,15 +148,110 @@ export function rootCauseMessage(error: unknown): string {
 const MAX_QUOTED_STATEMENT_CHARS = 120;
 
 /**
+ * Which migration the migrator was applying when the last statement was
+ * logged, as an index into `migrations`, or null when that cannot be told.
+ *
+ * Matching the failed statement's TEXT cannot say, because a statement can
+ * repeat across migrations (`CREATE EXTENSION IF NOT EXISTS vector;` is
+ * idempotent, so a later migration has every reason to repeat it) and the
+ * first match would blame the earlier file. What the migrator does is
+ * deterministic: after its own bookkeeping it runs the PENDING migrations'
+ * statements in order. The log is therefore a prefix of their concatenation,
+ * and walking the log against that concatenation names the migration of the
+ * last statement exactly.
+ *
+ * @param logged Every statement the recorder saw, in order.
+ * @param migrations Every migration file, paired with its tag.
+ * @param pending Indices into `migrations` the migrator was going to apply.
+ * @returns null before any migration statement ran, or when the LAST logged
+ *   statement is not the one the walk expected — an earlier statement's
+ *   migration must not stand in for a statement the walk could not place.
+ */
+export function currentMigrationIndex(
+  logged: readonly string[],
+  migrations: readonly MigrationStatements[],
+  pending: readonly number[],
+): number | null {
+  const expected = pending.flatMap((index) =>
+    (migrations[index]?.statements ?? []).map((statement) => ({ index, text: statement.trim() })),
+  );
+  let cursor = 0;
+  let current: number | null = null;
+  let lastAligned = false;
+  for (const statement of logged) {
+    const next = expected[cursor];
+    if (next !== undefined && next.text === statement.trim()) {
+      current = next.index;
+      cursor += 1;
+      lastAligned = true;
+    } else {
+      lastAligned = false;
+    }
+  }
+  return lastAligned ? current : null;
+}
+
+/** The read drizzle's migrator makes to decide what is pending (neon-http/migrator.js). */
+const NEWEST_JOURNAL_ROW_SQL =
+  'select created_at from drizzle.__drizzle_migrations order by created_at desc limit 1';
+
+/**
+ * After a failed `migrate`, find the migration it was applying.
+ *
+ * The migrator applies a migration only when the journal's newest row is older
+ * than that migration's timestamp, and it inserts journal rows only after EVERY
+ * statement applied, so a failure leaves the journal exactly as the migrator
+ * read it: reading it again names the migrations that were pending. The read
+ * is made AFTER the failure, not before, so the success path — the production
+ * deploy — issues no query it did not issue before.
+ *
+ * Never throws: this refines an error message, and losing the refinement (the
+ * database may be unreachable, which can be why `migrate` failed) must not
+ * replace the real failure. Null falls back to the first matching statement.
+ *
+ * @param query Runs one SQL text against the database.
+ * @param logged Every statement the recorder saw, in order.
+ * @param migrations Every migration file, paired with its tag.
+ * @param folderMillis Each migration's timestamp, in the same order.
+ */
+export async function findApplyingMigration(
+  query: (text: string) => Promise<unknown>,
+  logged: readonly string[],
+  migrations: readonly MigrationStatements[],
+  folderMillis: readonly number[],
+): Promise<number | null> {
+  try {
+    const rows = (await query(NEWEST_JOURNAL_ROW_SQL)) as Array<{ created_at: string | number | null }>;
+    const raw = rows[0]?.created_at;
+    const newest = raw === undefined || raw === null ? null : Number(raw);
+    // A timestamp that is not a number is not an empty journal: reading it as
+    // one would call every migration pending.
+    if (newest !== null && !Number.isFinite(newest)) return null;
+    const pending = folderMillis.flatMap((millis, index) =>
+      newest === null || newest < millis ? [index] : [],
+    );
+    return currentMigrationIndex(logged, migrations, pending);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Say where a failed `migrate` call was when it threw.
  *
  * @param lastStatement What the recorder holds: the statement being executed.
  * @param migrations Every migration file, paired with its tag.
+ * @param applyingIndex The migration the migrator was applying (see
+ *   `findApplyingMigration`). Preferred when that migration holds the
+ *   statement, so a statement repeated in an earlier migration is not blamed
+ *   on it. Null, or an index whose migration lacks the statement, falls back to
+ *   the first migration that holds it.
  * @returns A phrase that completes "Migration failed ...".
  */
 export function describeMigrationFailure(
   lastStatement: string | null,
   migrations: readonly MigrationStatements[],
+  applyingIndex: number | null = null,
 ): string {
   if (lastStatement === null) {
     return 'before any migration statement ran (preparing the drizzle journal table)';
@@ -160,7 +260,9 @@ export function describeMigrationFailure(
   // surrounding newlines; drizzle logs the statement exactly as split, so the
   // comparison tolerates whitespace on either side and nothing else.
   const wanted = lastStatement.trim();
-  for (const migration of migrations) {
+  const applying = applyingIndex === null ? undefined : migrations[applyingIndex];
+  const candidates = applying === undefined ? migrations : [applying, ...migrations];
+  for (const migration of candidates) {
     const position = migration.statements.findIndex((statement) => statement.trim() === wanted);
     if (position !== -1) {
       return `while applying migration ${migration.tag} (statement ${position + 1} of ${migration.statements.length})`;
@@ -190,17 +292,23 @@ async function main(): Promise<void> {
   // The same files the migrator is about to read, under the journal's tags,
   // so a failure can be named. Read BEFORE migrating: a journal that does not
   // pair with its files is a reason not to start.
-  const migrations = zipMigrationStatements(
-    readMigrationFiles({ migrationsFolder: MIGRATIONS_FOLDER }),
-    await loadMigrationRecords(),
-  );
+  const metas = readMigrationFiles({ migrationsFolder: MIGRATIONS_FOLDER });
+  const migrations = zipMigrationStatements(metas, await loadMigrationRecords());
 
   try {
     await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
   } catch (error) {
     // The one-line annotation names the migration AND Postgres's own message;
-    // the wrapper with the full statement follows as a cause line.
-    const where = describeMigrationFailure(recorder.lastStatement(), migrations);
+    // the wrapper with the full statement follows as a cause line. Which
+    // migration was being applied decides where a statement repeated across
+    // migrations is blamed, so it is looked up rather than guessed from text.
+    const applying = await findApplyingMigration(
+      (text) => sql.query(text),
+      recorder.statements(),
+      migrations,
+      metas.map((meta) => meta.folderMillis),
+    );
+    const where = describeMigrationFailure(recorder.lastStatement(), migrations, applying);
     throw new Error(`${where}: ${rootCauseMessage(error)}`, { cause: error });
   }
 
