@@ -216,9 +216,21 @@ const REJECTED_ACTION_LABELS: Readonly<Record<string, string>> = {
   delete_entity: 'delete the entity',
 };
 
-function rejectedActionMessage(command: string): string {
+/**
+ * The user-facing sentence for a command that did not go through.
+ *
+ * `threw` is the dispatcher reporting a CAUGHT throw from the engine call,
+ * not a refusal: the engine may already have acted, and for a scene command
+ * the store then shows "due to an engine error … reload" (#10202). Saying
+ * "rejected the change" right before that toast would contradict it, so the
+ * wording branches here while the console line and the Sentry report below
+ * carry the raw engine text unchanged either way (#10202 review, m4).
+ */
+function rejectedActionMessage(command: string, threw: boolean): string {
   const action = REJECTED_ACTION_LABELS[command] ?? 'complete that action';
-  return `Couldn't ${action}. The engine rejected the change.`;
+  return threw
+    ? `Couldn't ${action}. The engine ran into an error.`
+    : `Couldn't ${action}. The engine rejected the change.`;
 }
 
 /**
@@ -232,20 +244,32 @@ function rejectedActionMessage(command: string): string {
  * without touching a single caller.
  *
  * Monitoring must never break dispatch, so every step is guarded.
+ * @param threw Whether the answer was a caught throw (`CommandResponse.threw`)
+ *   rather than a refusal; only the notification wording reads it.
+ * @param notify Whether to show the generic toast at all. `false` when a
+ *   caller that CAN observe the answer is about to report it itself — see
+ *   {@link reportsItsOwnThrow}; the console line and the Sentry report are
+ *   unconditional.
  */
-function reportCommandRejected(command: string, error: string | undefined): void {
+function reportCommandRejected(
+  command: string,
+  error: string | undefined,
+  { threw = false, notify = true }: { threw?: boolean; notify?: boolean } = {},
+): void {
   const engineError = error ?? 'no error message';
   console.error(`Engine rejected command '${command}': ${engineError}`);
 
   const firstRejection = !_reportedRejections.has(command);
   if (firstRejection) {
     _reportedRejections.add(command);
-    try {
-      // Product wording only: neither the internal command vocabulary nor the
-      // raw engine error belongs in a user-visible notification.
-      showError(rejectedActionMessage(command));
-    } catch {
-      /* notifications are best-effort — never let them break dispatch */
+    if (notify) {
+      try {
+        // Product wording only: neither the internal command vocabulary nor
+        // the raw engine error belongs in a user-visible notification.
+        showError(rejectedActionMessage(command, threw));
+      } catch {
+        /* notifications are best-effort — never let them break dispatch */
+      }
     }
   }
 
@@ -273,6 +297,30 @@ function reportCommandRejected(command: string, error: string | undefined): void
  * `engine/src/bridge/scene_io.rs`). Nothing else queues a scene replacement.
  */
 const SCENE_REPLACING_COMMANDS: ReadonlySet<string> = new Set(['load_scene', 'new_scene']);
+
+/**
+ * Does the caller of this answer report it to the user itself, so the generic
+ * toast would be a second notice for one event?
+ *
+ * Only for a scene-replacing command whose engine call THREW. Those two
+ * commands are dispatched from exactly one place, `sceneSlice`'s
+ * `dispatchSceneCommand`, which re-raises a `threw` answer as
+ * `EngineDispatchThrewError` — so the slice sets the `ENGINE_LOAD_THREW` save
+ * lockout (`SceneLoadErrorNotice` shows it) and the caller's `catch` shows the
+ * one reload sentence (`ENGINE_THREW_RELOAD_GUIDANCE`). Toasting "Couldn't
+ * load the scene. The engine ran into an error." here as well put two
+ * notices on screen for one failure (#10202 review, round 2); the console
+ * line and the Sentry report still fire from here, because they are the
+ * record and the slice keeps none.
+ *
+ * A clean REFUSAL of the same commands keeps the generic toast: the slice
+ * returns `false` for it, and most of its callers (a cold open, a deferred
+ * replay) surface nothing of their own. Any other command keeps it for every
+ * answer, since nothing downstream can observe the response.
+ */
+function reportsItsOwnThrow(command: string, threw: boolean): boolean {
+  return threw && SCENE_REPLACING_COMMANDS.has(command);
+}
 
 /**
  * Drop every game-component adjustment marker (PF-1148) once the engine has
@@ -357,7 +405,8 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
     // returns nothing (every test double, and any pre-PF-1098 caller) is not
     // reporting failure, and must not be treated as if it were.
     if (response && response.success === false) {
-      reportCommandRejected(command, response.error);
+      const threw = response.threw === true;
+      reportCommandRejected(command, response.error, { threw, notify: !reportsItsOwnThrow(command, threw) });
     } else {
       observeCaptureCommand(command);
     }
