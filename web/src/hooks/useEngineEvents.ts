@@ -19,6 +19,7 @@ import {
   handlePerformanceEvent,
   handleEditModeEvent,
   handleRenderErrorEvent,
+  resetPlayTickSnapshot,
 } from './events';
 import { THROTTLED_EVENTS } from './events/throttledEvents';
 import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
@@ -150,6 +151,16 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       // reflects the current engine state after switching back to edit mode.
       if (type === 'ENGINE_MODE_CHANGED') {
         playThrottle.reset();
+        // The reconstituted PLAY_TICK_DELTA frame (#10375, gameEvents.ts) is
+        // valid only inside one continuous Play run. The engine clears its own
+        // delta cache on every frame it is not in Play (`emit_play_tick_system`),
+        // so the first frame after a fresh Play or a resume is a full one; drop
+        // the snapshot on every transition OUT of Play (edit or paused) so the
+        // two caches stay aligned. Otherwise an entity from the previous run
+        // would ride into the next until the engine happened to mention it.
+        if (payload.mode !== 'play') {
+          resetPlayTickSnapshot();
+        }
       }
 
       const set = useEditorStore.setState;

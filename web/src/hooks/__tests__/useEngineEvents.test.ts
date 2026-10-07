@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useEngineEvents } from '../useEngineEvents';
-import { useEditorStore, setCommandDispatcher, setCommandBatchDispatcher } from '@/stores/editorStore';
+import { useEditorStore, setCommandDispatcher, setCommandBatchDispatcher, firePlayTick } from '@/stores/editorStore';
 import * as events from '../events';
 
 vi.mock('@/stores/editorStore', () => ({
@@ -11,21 +11,44 @@ vi.mock('@/stores/editorStore', () => ({
   },
   setCommandDispatcher: vi.fn(),
   setCommandBatchDispatcher: vi.fn(),
+  firePlayTick: vi.fn(),
 }));
 
-vi.mock('../events', () => ({
-  handleTransformEvent: vi.fn().mockReturnValue(false),
-  handleMaterialEvent: vi.fn().mockReturnValue(false),
-  handlePhysicsEvent: vi.fn().mockReturnValue(false),
-  handleAudioEvent: vi.fn().mockReturnValue(false),
-  handleAnimationEvent: vi.fn().mockReturnValue(false),
-  handleGameEvent: vi.fn().mockReturnValue(false),
-  handleSpriteEvent: vi.fn().mockReturnValue(false),
-  handleParticleEvent: vi.fn().mockReturnValue(false),
-  handlePerformanceEvent: vi.fn().mockReturnValue(false),
-  handleEditModeEvent: vi.fn().mockReturnValue(false),
-  handleRenderErrorEvent: vi.fn().mockReturnValue(false),
+// The real `gameEvents` module reaches these on import; both are stubbed the
+// same way `events/__tests__/gameEvents.test.ts` stubs them, so this file does
+// not drag the React script-runner hook or sonner into a hub test.
+vi.mock('@/lib/scripting/useScriptRunner', () => ({
+  getScriptGameEventCallback: vi.fn(() => null),
 }));
+vi.mock('@/lib/toast', () => ({
+  showError: vi.fn(),
+  showPersistentError: vi.fn(),
+  showSuccess: vi.fn(),
+  showInfo: vi.fn(),
+}));
+
+// Every domain handler is a mock EXCEPT the game handler, which is the real
+// module. The PLAY_TICK_DELTA tests below (#10375) assert that a frame REACHES
+// `firePlayTick`; a routing assertion against a mock that answers `true` would
+// prove only that the mock was called, which is how a dropped frame stayed
+// invisible to this suite in the first place.
+vi.mock('../events', async () => {
+  const game = await vi.importActual<typeof import('../events/gameEvents')>('../events/gameEvents');
+  return {
+    handleTransformEvent: vi.fn().mockReturnValue(false),
+    handleMaterialEvent: vi.fn().mockReturnValue(false),
+    handlePhysicsEvent: vi.fn().mockReturnValue(false),
+    handleAudioEvent: vi.fn().mockReturnValue(false),
+    handleAnimationEvent: vi.fn().mockReturnValue(false),
+    handleGameEvent: game.handleGameEvent,
+    resetPlayTickSnapshot: game.resetPlayTickSnapshot,
+    handleSpriteEvent: vi.fn().mockReturnValue(false),
+    handleParticleEvent: vi.fn().mockReturnValue(false),
+    handlePerformanceEvent: vi.fn().mockReturnValue(false),
+    handleEditModeEvent: vi.fn().mockReturnValue(false),
+    handleRenderErrorEvent: vi.fn().mockReturnValue(false),
+  };
+});
 
 describe('useEngineEvents', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -155,6 +178,81 @@ describe('useEngineEvents', () => {
       useEditorStore.getState,
     );
     expect(console.warn).not.toHaveBeenCalledWith('Unknown engine event:', 'RENDER_ERROR');
+  });
+
+  /**
+   * #10375. The engine's Play loop emits ONLY `PLAY_TICK_DELTA`
+   * (`emit_play_tick_system`, engine/src/bridge/scripts.rs); the full-frame
+   * `PLAY_TICK` emitter has no caller. Before `gameEvents` grew its arm, every
+   * Play frame fell through to the "Unknown engine event" warning below — CI
+   * run 37546070304's trace shows 40+ of them after "Entered Play mode" — and
+   * a script's `onUpdate` never ran in the editor. `handleGameEvent` is the
+   * REAL module in this file (see the `../events` mock) so these assert that
+   * the frame reaches `firePlayTick`, not that a mock was called.
+   */
+  describe('PLAY_TICK_DELTA', () => {
+    const inputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+    const cube = { position: [0, 1, 0], rotation: [0, 0, 0], scale: [1, 1, 1] };
+    const frame = (changedEntities: Record<string, unknown>) => ({
+      type: 'PLAY_TICK_DELTA',
+      payload: { changedEntities, changedEntityInfos: {}, removedEntityIds: [], inputState },
+    });
+    const lastTick = () =>
+      vi.mocked(firePlayTick).mock.calls.at(-1)?.[0] as { entities: Record<string, unknown> } | undefined;
+
+    beforeEach(() => {
+      events.resetPlayTickSnapshot();
+      // The hub reads engineMode only for THROTTLED_EVENTS. Answering 'play'
+      // arms the throttle, so a future entry for this event would drop frames
+      // in the every-frame test below instead of passing by accident.
+      vi.mocked(useEditorStore.getState).mockReturnValue({ engineMode: 'play' } as never);
+    });
+
+    afterEach(() => {
+      vi.mocked(useEditorStore.getState).mockReset();
+    });
+
+    it('reaches firePlayTick as a full frame and is not reported as an unknown event', () => {
+      renderHook(() => useEngineEvents({ wasmModule }));
+      const callback = wasmModule.set_event_callback.mock.calls[0][0];
+
+      callback(frame({ cube }));
+
+      expect(firePlayTick).toHaveBeenCalledWith({ entities: { cube }, entityInfos: {}, inputState });
+      expect(console.warn).not.toHaveBeenCalledWith('Unknown engine event:', 'PLAY_TICK_DELTA');
+    });
+
+    it('delivers every frame, because the script runner needs each one', () => {
+      // THROTTLED_EVENTS drops past the 10fps budget rather than delaying, so
+      // three back-to-back frames must all arrive.
+      renderHook(() => useEngineEvents({ wasmModule }));
+      const callback = wasmModule.set_event_callback.mock.calls[0][0];
+
+      callback(frame({ cube }));
+      callback(frame({}));
+      callback(frame({}));
+
+      expect(firePlayTick).toHaveBeenCalledTimes(3);
+    });
+
+    it.each(['edit', 'paused'])(
+      'forgets the snapshot when the engine leaves Play for %s, so a stale entity cannot ride into the next run',
+      (mode) => {
+        // The engine clears its own delta cache on every frame it is not in
+        // Play, so the first frame after the next Play (or resume) is a full
+        // one. The hub's snapshot has to go at the same moment, or an entity
+        // from the previous run survives until the engine happens to mention
+        // it again.
+        renderHook(() => useEngineEvents({ wasmModule }));
+        const callback = wasmModule.set_event_callback.mock.calls[0][0];
+
+        callback(frame({ cube }));
+        callback({ type: 'ENGINE_MODE_CHANGED', payload: { mode } });
+        callback(frame({ other: cube }));
+
+        expect(lastTick()?.entities).toEqual({ other: cube });
+      },
+    );
   });
 
   it('warns on unknown engine event', () => {
