@@ -45,6 +45,48 @@ function reportUnrepresentableComponent(entry: unknown): void {
   );
 }
 
+type PlayTickVec3 = [number, number, number];
+interface PlayTickEntityState { position: PlayTickVec3; rotation: PlayTickVec3; scale: PlayTickVec3 }
+interface PlayTickEntityInfo { name: string; type: string; colliderRadius: number }
+interface PlayTickInputState {
+  pressed: Record<string, boolean>;
+  justPressed: Record<string, boolean>;
+  justReleased: Record<string, boolean>;
+  axes: Record<string, number>;
+}
+
+/**
+ * The last full Play frame, reconstituted from the engine's deltas (#10375).
+ *
+ * The engine's per-frame Play system emits ONLY `PLAY_TICK_DELTA`
+ * (`emit_play_tick_system`, engine/src/bridge/scripts.rs): the entities whose
+ * transform or info changed since its previous frame, the ids that vanished,
+ * and the input state. The full-frame `PLAY_TICK` emitter has no caller. Every
+ * consumer downstream of `firePlayTick` — the script runner's worker tick and
+ * the record/replay bus — reads a FULL frame, so the delta is merged here and
+ * the full shape is what goes on; nothing downstream has to know about deltas.
+ *
+ * The merge mirrors the engine's own cache, which is cleared on every frame it
+ * is not in Play: the first frame after entering (or resuming) Play lists every
+ * entity, so it is a keyframe for an empty snapshot; later frames list only
+ * what changed plus what was removed. `useEngineEvents` calls
+ * `resetPlayTickSnapshot` on every transition out of Play so the two caches
+ * stay aligned and an entity from a previous run cannot ride into the next.
+ *
+ * Each frame gets a FRESH `entities`/`entityInfos` object rather than an
+ * in-place merge: `publishPlayTick` caches the latest frame by reference and
+ * the input-trace recorder reads frames after the fact, so mutating in place
+ * would silently rewrite every frame a subscriber kept into the newest one.
+ */
+let playTickEntities: Record<string, PlayTickEntityState> = {};
+let playTickEntityInfos: Record<string, PlayTickEntityInfo> = {};
+
+/** Forget the reconstituted Play frame. Called when the engine leaves Play, and by tests. */
+export function resetPlayTickSnapshot(): void {
+  playTickEntities = {};
+  playTickEntityInfos = {};
+}
+
 export function handleGameEvent(
   type: string,
   data: Record<string, unknown>,
@@ -115,11 +157,50 @@ export function handleGameEvent(
 
     case 'PLAY_TICK': {
       const payload = castPayload<{
-        entities: Record<string, { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] }>;
-        entityInfos: Record<string, { name: string; type: string; colliderRadius: number }>;
-        inputState: { pressed: Record<string, boolean>; justPressed: Record<string, boolean>; justReleased: Record<string, boolean>; axes: Record<string, number> };
+        entities: Record<string, PlayTickEntityState>;
+        entityInfos: Record<string, PlayTickEntityInfo>;
+        inputState: PlayTickInputState;
       }>(data);
+      // A full frame is a keyframe: whatever it does not list no longer
+      // exists, so it REPLACES the delta snapshot rather than merging into it.
+      // The engine has no caller for this emitter today (#10375), but the
+      // wire shape is still declared and the arm is kept so a build that
+      // sends full frames keeps working.
+      playTickEntities = { ...(payload.entities ?? {}) };
+      playTickEntityInfos = { ...(payload.entityInfos ?? {}) };
       firePlayTick(payload);
+      return true;
+    }
+
+    case 'PLAY_TICK_DELTA': {
+      const delta = castPayload<{
+        changedEntities?: Record<string, PlayTickEntityState>;
+        changedEntityInfos?: Record<string, PlayTickEntityInfo>;
+        removedEntityIds?: string[];
+        inputState: PlayTickInputState;
+      }>(data);
+      // Remove, then apply — the same order `DeltaSerializer.applyDelta`
+      // uses. The engine never lists one id in both (removed = in its cache
+      // but gone; changed = present), so the order is a convention, not a
+      // tie-break. Fresh objects per frame: see `playTickEntities`.
+      const entities: Record<string, PlayTickEntityState> = { ...playTickEntities };
+      const entityInfos: Record<string, PlayTickEntityInfo> = { ...playTickEntityInfos };
+      for (const id of delta.removedEntityIds ?? []) {
+        delete entities[id];
+        delete entityInfos[id];
+      }
+      for (const [id, state] of Object.entries(delta.changedEntities ?? {})) {
+        entities[id] = state;
+      }
+      for (const [id, info] of Object.entries(delta.changedEntityInfos ?? {})) {
+        entityInfos[id] = info;
+      }
+      playTickEntities = entities;
+      playTickEntityInfos = entityInfos;
+      // Always fire, even for an empty delta: the engine emits every frame
+      // because the script runtime needs input state each frame, and a
+      // static scene is all empty deltas after the first.
+      firePlayTick({ entities, entityInfos, inputState: delta.inputState });
       return true;
     }
 
