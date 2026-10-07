@@ -1957,11 +1957,11 @@ Scope: `scene:write` | Token cost: 0
 
 ### `pin_frame_rate`
 
-Pin the simulation clock so every rendered frame advances the simulation by exactly 1/hz seconds, regardless of wall-clock frame time. Used by replay_input_trace for deterministic replays; unpin_frame_rate restores the wall clock.
+Pin the simulation clock so every rendered frame advances the simulation by exactly 1/hz seconds, regardless of wall-clock frame time. Used by replay_input_trace for deterministic replays; unpin_frame_rate restores the wall clock. A pin never outlives Play mode: leaving Play (Stop) releases it. Physics tracks the pin only at hz >= 60 (Rapier caps its step at 1/60 s); below that, gameplay systems step 1/hz per frame while physics steps 1/60.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `hz` | number | No | Simulation ticks per rendered frame, integer 1-240 (default 60) |
+| `hz` | number | No | Simulation rate in Hz (ticks per second of game time), integer 4-240 (default 60). The engine always advances exactly one tick per rendered frame; hz sets how long that tick is. 4 Hz (a 250 ms tick) is the floor because Bevy clamps any longer step to 250 ms. |
 
 **Example:**
 ```json
@@ -1977,7 +1977,7 @@ Scope: `scene:write` | Token cost: 0
 
 ### `unpin_frame_rate`
 
-Return the simulation clock to the wall clock after pin_frame_rate.
+Return the simulation clock to the wall clock after pin_frame_rate; the next frame is measured from now. Leaving Play mode (Stop) does this automatically.
 
 **Example:**
 ```json
