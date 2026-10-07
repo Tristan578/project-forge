@@ -52,17 +52,24 @@
 //! measures its delta from the last SYNTHETIC instant, and the two clocks have
 //! drifted apart in one of two directions:
 //!
-//! * frames rendered FASTER than the pinned rate (a 144 Hz display pinned at
-//!   60): the synthetic clock is AHEAD of the wall clock, and because
-//!   `Time<Real>::update_with_instant` uses `saturating_duration_since`, every
-//!   delta is ZERO until the wall clock catches up — about a second of frozen
-//!   simulation after a 120-tick replay;
-//! * frames rendered SLOWER (SwiftShader at 15 fps): the synthetic clock is
-//!   BEHIND, and the first automatic frame jumps by the whole lag, clamped to
-//!   `max_delta`.
+//! * frames rendered SLOWER than the pinned rate (SwiftShader at 15 fps pinned
+//!   at 60): the synthetic clock is BEHIND the wall clock, and the unpin frame
+//!   jumps by the whole lag (clamped to `max_delta`) — ~150 ms of simulation in
+//!   one frame, measured by `unpinning_re_anchors_the_wall_clock_when_the_pinned_clock_lagged`,
+//!   which is the test that goes red without the re-anchor;
+//! * frames rendered FASTER (a 144 Hz display pinned at 60): the synthetic
+//!   clock is AHEAD, `Time<Real>::update_with_instant` uses
+//!   `saturating_duration_since`, and the unpin frame's delta is ZERO. In
+//!   bevy_time 0.19.1 that is ONE dropped frame, not a freeze: `update_with_instant`
+//!   moves `last_update` to the new instant unconditionally, so the following
+//!   frame is already measured from the wall clock. (An earlier reading of this
+//!   code expected every delta to stay zero until the wall clock caught up;
+//!   `unpinning_re_anchors_the_wall_clock_when_the_pinned_clock_led` pins the
+//!   one-frame bound, and stays green with or without the re-anchor.)
 //!
-//! Re-anchoring makes the next frame's delta the time since the unpin, in
-//! both directions (`unpinning_re_anchors_*`).
+//! Re-anchoring makes the unpin frame's delta near zero in BOTH directions and
+//! the frame after it the time since the unpin, so the slow-rasteriser case no
+//! longer replays its lag as one long step.
 //!
 //! A pin never outlives Play mode. The web runner unpins on every exit path,
 //! but a pin made directly through the `pin_frame_rate` tool (the in-app AI, an
@@ -454,10 +461,14 @@ mod tests {
 
     /// Frames rendered FASTER than the pinned rate: 60 back-to-back updates
     /// pinned at 60 Hz push the synthetic clock a full second ahead of the
-    /// wall clock. Without the re-anchor, `saturating_duration_since` makes
-    /// every automatic delta ZERO until the wall clock catches up — the
-    /// simulation freezes for ~1 s after the replay. With it, the frame after
-    /// the unpin measures from the unpin.
+    /// wall clock. The unpin frame's delta is zero either way
+    /// (`saturating_duration_since`), and this test pins that the freeze is
+    /// bounded to THAT ONE FRAME: the frame after the unpin must already read
+    /// the wall clock. In bevy_time 0.19.1 `update_with_instant` moves
+    /// `last_update` to the new instant unconditionally, so this holds with or
+    /// without this module's re-anchor — it is the lagging test below that the
+    /// re-anchor changes. Should a future bevy_time stop moving `last_update`
+    /// on a saturated delta, this is the test that reports it.
     #[test]
     fn unpinning_re_anchors_the_wall_clock_when_the_pinned_clock_led() {
         let mut app = app();
@@ -471,14 +482,19 @@ mod tests {
         queue(&mut app, FrameRatePinRequest::Unpin);
         app.update();
         assert!(is_automatic(&app));
+        let unpin_frame = virtual_delta(&app);
+        assert!(
+            unpin_frame < pin_duration(60),
+            "the unpin frame itself is (near) zero, never a step: {unpin_frame:?}"
+        );
 
         std::thread::sleep(Duration::from_millis(15));
         app.update();
         let delta = virtual_delta(&app);
         assert!(
             delta >= Duration::from_millis(15),
-            "the frame after the unpin must measure from the unpin, not from a synthetic instant \
-             a second ahead of the wall clock (delta was {delta:?})"
+            "the frame after the unpin must measure from the wall clock, not stay at zero while \
+             the wall clock catches up a synthetic second (delta was {delta:?})"
         );
         assert!(delta < Duration::from_millis(250), "not a clamped jump either: {delta:?}");
     }
