@@ -1282,6 +1282,7 @@ jobs:
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
+            scripts/assert-e2e-db-host.sh scripts/__tests__/assert-e2e-db-host.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
             scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
@@ -1376,6 +1377,11 @@ jobs:
 
       - name: Run preview-database branch-policy test suite
         run: bash scripts/__tests__/preview-db-branch.test.sh
+      # The guard that keeps test-e2e-engine-journeys on the database it
+      # provisioned (#10161): drives scripts/assert-e2e-db-host.sh with foreign
+      # hosts and pins that the guard step precedes db:migrate in that job.
+      - name: Run E2E database host-guard test suite
+        run: bash scripts/__tests__/assert-e2e-db-host.test.sh
 
       # Executes the ci-gate `Detect changed paths` step body extracted from this
       # very file. Rides needs-ci, which every ci.yml edit sets, so the filters
@@ -2289,6 +2295,20 @@ jobs:
             exit 1
           fi
 
+      # Hand the engine this job just proved present to test-e2e-engine-journeys
+      # (#10161), which `needs:` this job and downloads it instead of restoring
+      # the cache (a miss there would mean a SECOND cargo build of the same
+      # tree) or rebuilding. Same run, same tree, same bytes: the journeys gate
+      # tests exactly the binary the smoke gate did. One day is plenty — the
+      # consumer runs in this workflow run.
+      - name: Upload the WebGL2 engine for the journeys gate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: engine-webgl2-pkg
+          path: engine/pkg-webgl2/
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Copy WASM into web/public (same-origin)
         run: |
           mkdir -p web/public/engine-pkg-webgl2
@@ -2407,6 +2427,265 @@ jobs:
         env:
           JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npx tsx scripts/check-journey-evidence.ts journey-evidence --min-journeys 1 --expect-github-sha "$GITHUB_SHA" --expect-pr-head-sha "$JOURNEY_PR_HEAD_SHA"
+
+  # DB-backed engine journeys gate (#10161). Journeys 3 and 4 of #9723 — save a
+  # game and reopen it in a fresh session; publish it and play it signed out —
+  # need a database, and test-e2e-engine-smoke drives /dev, which bypasses the
+  # database by design. This job serves the same hooks-flag production build
+  # against a Postgres CREATED FOR THIS RUN, migrated with the real
+  # `db:migrate`, drift-checked with the real `db:drift`, and reached by the
+  # real neon HTTP driver through Neon's documented local proxy. No secret and
+  # no Neon branch, so it runs identically on same-repo, fork and Dependabot
+  # PRs. The decision and the two rejected options:
+  # docs/decisions/2026-10-05-engine-journeys-database.md.
+  #
+  # SELECTOR for the journeys that will land here (#10152, #10153, #10154):
+  # tag the test `@engine-journey`. playwright.journeys.config.ts greps for
+  # that tag and nothing else; the @ui jobs never select it (uiSuiteReporter
+  # requires @ui) and the smoke config greps @engine-smoke|@engine-ui. Today
+  # the only member is engine-journeys-health.spec.ts, which asserts
+  # /api/health reports the per-run database `connected` through the proxy.
+  #
+  # ENGINE: downloaded from the artifact test-e2e-engine-smoke uploads after
+  # proving it present, so this job never compiles the engine and tests
+  # exactly the bytes the smoke gate did. The `needs:` on that job is the
+  # price: measured on run 37406582728 the chain (583 s smoke, then this job)
+  # stays under the 1087 s WASM Build that bounds the run anyway.
+  #
+  # Anti-tamper: mapped to needs-web AND needs-engine in
+  # scripts/check-ci-success.sh (both arms of the if: below), exactly as
+  # test-e2e-engine-smoke is.
+  test-e2e-engine-journeys:
+    name: E2E Engine Journeys Gate
+    needs: [ci-gate, test-e2e-engine-smoke]
+    if: ${{ needs.ci-gate.outputs.needs-web == 'true' || needs.ci-gate.outputs.needs-engine == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      # Build-time flag, job-level for the same two reasons as engine-smoke:
+      # the Next.js build-cache key reads it through `env`, and it is what
+      # opens e2eHooksEnabled() so the driver honours E2E_NEON_HTTP_ENDPOINT
+      # (web/src/lib/db/e2eNeonEndpoint.ts). A production build without it
+      # ignores that variable — pinned by e2eNeonEndpoint.test.ts.
+      NEXT_PUBLIC_E2E_HOOKS: 'true'
+      # The per-run database. `postgres`/`postgres` are the service
+      # container's throwaway credentials: nothing outside this runner can
+      # reach them, and the guard step below refuses any host but localhost.
+      # The neon HTTP driver never connects to this URL's host — it POSTs each
+      # query to E2E_NEON_HTTP_ENDPOINT with the URL in a header, and the proxy
+      # connects to Postgres through its own PG_CONNECTION_STRING.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/spawnforge_journeys
+      E2E_NEON_HTTP_ENDPOINT: http://localhost:4444/sql
+    services:
+      # Postgres 17 with pgvector: migration 0010
+      # (web/drizzle/0010_graph_retrieval_nodes_edges.sql) runs CREATE EXTENSION
+      # vector, which the stock postgres image does not ship. Pinned by digest like
+      # every action in this file (scripts/check-actions-pinned.sh does not
+      # read `image:`, so this pin is held by review).
+      postgres:
+        image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: spawnforge_journeys
+        ports:
+          - 5432:5432
+        # The runner waits for a healthy service before the first step runs,
+        # which is what lets the proxy step below connect on its first try.
+        options: >-
+          --health-cmd "pg_isready -U postgres -d spawnforge_journeys"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      # Same silent-drop guard as test-e2e-ui (npm/cli#4828 class, PF-947).
+      - name: Assert native swc binding survived npm ci
+        run: bash scripts/check-native-bindings.sh
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      # --- Database: guard, provision, migrate, drift ------------------------
+      # Before anything touches the database: the host in DATABASE_URL and the
+      # proxy endpoint must be the loopback this run provisioned. A foreign
+      # host would otherwise be migrated and served with every check green.
+      # scripts/__tests__/assert-e2e-db-host.test.sh drives the guard with a
+      # foreign host and pins that this step precedes db:migrate.
+      - name: Guard DATABASE_URL against any host but this run's
+        run: bash scripts/assert-e2e-db-host.sh
+
+      # Neon's documented local proxy for the serverless driver
+      # (neon.com/guides/local-development-with-neon, which the driver docs'
+      # "Developing locally" section points at): Neon's own `proxy` binary,
+      # built from neondatabase/neon at release-proxy-8853 with its postgres
+      # auth backend, behind a Caddy listener on :4444. Started as a STEP, not
+      # a second service: its start.sh runs psql once at boot to create the
+      # control-plane table the proxy reads on every connection, and services
+      # start concurrently, so as a service it could race the database. Host
+      # networking so `localhost:5432` inside the container is the service's
+      # published port and :4444 lands on the runner. Pinned by digest — the
+      # image's only tag is `main`.
+      - name: Start the Neon HTTP proxy for the per-run database
+        run: |
+          docker run -d --name neon-http-proxy --network host \
+            -e PG_CONNECTION_STRING="$DATABASE_URL" \
+            ghcr.io/timowilhelm/local-neon-http-proxy:main@sha256:cd2ae14edf2feafbc3330492de5c80506f77274c3bd013154cdef697bdeb768a
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null -X POST "$E2E_NEON_HTTP_ENDPOINT" \
+                 -H "Neon-Connection-String: $DATABASE_URL" \
+                 -H 'Content-Type: application/json' \
+                 -d '{"query":"SELECT 1","params":[]}' 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+      # The probe sends the request shape the driver itself sends — the
+      # connection string in `Neon-Connection-String`, raw text output, array
+      # mode — and asserts the ROW, not a status code (lessons-learned #1 and
+      # #14: a 200 with the wrong body is how a contract break reads as
+      # health). On failure the proxy's log is the diagnosis, so it is
+      # printed here rather than discovered later. The body carries no
+      # credential: command, rowCount, rows, fields.
+      - name: Probe the proxy with the driver's own request shape
+        run: |
+          body="$(curl -sS -X POST "$E2E_NEON_HTTP_ENDPOINT" \
+            -H "Neon-Connection-String: $DATABASE_URL" \
+            -H 'Neon-Raw-Text-Output: true' \
+            -H 'Neon-Array-Mode: true' \
+            -H 'Content-Type: application/json' \
+            -d '{"query":"SELECT 1 AS one","params":[]}')" || body="(curl failed)"
+          if grep -q '"rows":\[\["1"\]\]' <<<"$body"; then
+            echo "Neon HTTP proxy answered SELECT 1 through $E2E_NEON_HTTP_ENDPOINT: $body"
+          else
+            echo "::error::the Neon HTTP proxy did not return the expected row for SELECT 1 — body: $body" >&2
+            docker logs neon-http-proxy 2>&1 | tail -50 || true
+            exit 1
+          fi
+
+      # Real migrate, real drift, no substitution. A migration that cannot
+      # apply fails HERE, naming the migration, before Playwright starts
+      # (apply-migrations.ts prints the cause and exits non-zero). The tsx
+      # scripts reach the proxy through the same E2E_NEON_HTTP_ENDPOINT
+      # override: a tsx process is not a production build, so the gate is
+      # open there even without the hooks flag.
+      - name: Migrate the per-run database
+        working-directory: web
+        run: npm run db:migrate
+
+      - name: Assert the migrated schema matches schema.ts (db:drift)
+        working-directory: web
+        run: npm run db:drift
+
+      # --- Engine: the smoke gate's artifact, never a rebuild -----------------
+      - name: Download the WebGL2 engine built for the smoke gate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: engine-webgl2-pkg
+          path: engine/pkg-webgl2
+
+      # The same assertion the smoke gate makes before trusting its own copy.
+      - name: Assert the WebGL2 engine is present
+        run: |
+          if [ ! -s engine/pkg-webgl2/forge_engine_bg.wasm ]; then
+            echo "::error::engine/pkg-webgl2/forge_engine_bg.wasm is missing or empty after downloading engine-webgl2-pkg" >&2
+            ls -la engine/pkg-webgl2 2>&1 || true
+            exit 1
+          fi
+
+      - name: Copy WASM into web/public (same-origin)
+        run: |
+          mkdir -p web/public/engine-pkg-webgl2
+          cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
+
+      # --- Playwright ---------------------------------------------------------
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          # Same single-root-lockfile key as test-e2e-ui (#8589).
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh browsers
+
+      - name: Install Playwright OS deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 12
+        working-directory: web
+        run: bash ../scripts/install-playwright-ci.sh deps
+
+      # Same key as the smoke gate: both build with NEXT_PUBLIC_E2E_HOOKS=true,
+      # so the two jobs share one build cache rather than each warming its own.
+      - name: Cache Next.js build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: web/.next/cache
+          key: nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/src/**/*.ts', 'web/src/**/*.tsx', 'web/src/**/*.css', 'web/next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-hooks${{ env.NEXT_PUBLIC_E2E_HOOKS }}-${{ hashFiles('package-lock.json') }}-
+
+      - name: Build for engine-journeys E2E
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+        run: npx next build
+
+      # Runs the @engine-journey selection under the same SwiftShader flags as
+      # the smoke gate (playwright.journeys.config.ts). SKIP_ENV_VALIDATION on
+      # THIS step: the `next start` webServer inherits the invoking step's env,
+      # not the build's (scripts/__tests__/e2e-tag-routing.test.sh pins it).
+      # VERCEL_GIT_COMMIT_SHA makes /api/health report this run's commit, as
+      # in the smoke gate, for the journeys that will attach evidence here
+      # (#10157). The journey-evidence reporter and its post-run check are NOT
+      # wired yet: check-journey-evidence.ts refuses --min-journeys below 1 by
+      # design, and no journey lives here until #10153 — that PR registers
+      # the reporter in playwright.journeys.config.ts and adds the upload and
+      # check steps exactly as test-e2e-engine-smoke has them.
+      - name: Run engine journeys gate
+        working-directory: web
+        env:
+          SKIP_ENV_VALIDATION: 'true'
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          JOURNEY_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npx playwright test --config playwright.journeys.config.ts
+
+      - name: Upload engine-journeys report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: e2e-engine-journeys-report
+          path: web/playwright-report/
+          retention-days: 14
+
+      # --- Teardown -----------------------------------------------------------
+      # The service container is destroyed by the runner when the job ends;
+      # the proxy was started by a step, so a step stops it. Its log is
+      # printed first on a failed job: it is the only record of a refused
+      # connection or a failed control-plane query.
+      - name: Print the proxy log (failure only)
+        if: ${{ failure() }}
+        run: docker logs neon-http-proxy 2>&1 | tail -200 || true
+
+      - name: Tear down the Neon HTTP proxy
+        if: ${{ always() }}
+        run: docker rm -f neon-http-proxy >/dev/null 2>&1 || true
 
   # Cross-browser E2E (#9610). firefox, webkit and the two mobile projects had
   # been declared in playwright.config.ts for months and executed by nothing:
@@ -2697,6 +2976,7 @@ jobs:
       - test-e2e-auth
       - test-e2e-journey
       - test-e2e-engine-smoke
+      - test-e2e-engine-journeys
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
