@@ -243,6 +243,9 @@ describe('sceneCreateExecutor', () => {
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('COMMAND_FAILED');
     expect(result.error?.message).toBe('Engine refused new_scene while clearing the starter scene');
+    // A refusal is not a throw: nothing was locked, so "try again" stays right
+    // and the reload advice must not leak onto this path.
+    expect(result.error?.userFacingMessage).toBe('Could not create the scene. Please try again.');
     expect(ctx.getStore().newScene).toHaveBeenCalled();
   });
 
@@ -265,6 +268,7 @@ describe('sceneCreateExecutor', () => {
     expect(result.error?.code).toBe('COMMAND_FAILED');
     expect(result.error?.message).toBe(message);
     expect(result.error?.message).not.toContain('Engine refused');
+    expect(result.error?.userFacingMessage).toBe('Could not create the scene. Please try again.');
   });
 
   // #10202 review (Sentry): `newScene()` now THROWS `EngineDispatchThrewError`
@@ -300,7 +304,16 @@ describe('sceneCreateExecutor', () => {
       expect(result.error?.message).toContain('due to an engine error (RuntimeError: unreachable executed)');
       expect(result.error?.message).toContain(ENGINE_THREW_RELOAD_GUIDANCE);
       expect(result.error?.message).not.toContain('Engine refused');
-      expect(result.error?.userFacingMessage).toBe(sceneCreateExecutor.userFacingErrorMessage);
+      // The line the user reads gives the right advice too. "Please try again"
+      // — the step's generic message — is wrong after an engine throw: the
+      // viewport can be half-applied and saving is locked, so the answer is to
+      // reload, in the same words `sceneDispatchThrewResult` uses.
+      expect(result.error?.userFacingMessage).toBe(
+        `The engine failed while creating the scene. ${ENGINE_THREW_RELOAD_GUIDANCE}`,
+      );
+      expect(result.error?.userFacingMessage).toContain('Reload the editor');
+      expect(result.error?.userFacingMessage).not.toContain('try again');
+      expect(result.error?.userFacingMessage).not.toBe(sceneCreateExecutor.userFacingErrorMessage);
     });
 
     it('lets a throw that is not the engine\'s propagate to the runner as the plain failure it is', async () => {

@@ -4,7 +4,11 @@ import { makeStepError, successResult, failResult } from './shared';
 import { waitForEngineFrame } from './engineDispatch';
 import { createScene, loadProjectScenes, saveProjectScenes } from '@/lib/scenes/sceneManager';
 import type { NewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
-import { EngineDispatchThrewError, engineThrewMessage } from '@/lib/scenes/engineDispatchThrew';
+import {
+  ENGINE_THREW_RELOAD_GUIDANCE,
+  EngineDispatchThrewError,
+  engineThrewMessage,
+} from '@/lib/scenes/engineDispatchThrew';
 
 /**
  * World configuration used to live here and no longer does — it moved to the
@@ -50,6 +54,18 @@ function newSceneRefusalDiagnostic(refusal: NewSceneRefusal | null): string {
       return 'Engine refused new_scene while clearing the starter scene';
   }
 }
+
+/**
+ * What the user reads when `newScene()` threw inside the engine. The step's
+ * generic `userFacingErrorMessage` ends "Please try again", which is the wrong
+ * advice here: the throw can have arrived after the engine began despawning, the
+ * viewport may be half-applied, and the store has locked saving. So this says
+ * the engine failed and then the shared reload guidance — the sentence every
+ * other scene surface shows (`sceneDispatchThrewResult`) — so the wording cannot
+ * drift from them. The engine's own text stays in the step's diagnostic
+ * `message`, not on this line (#10202).
+ */
+const ENGINE_THREW_USER_MESSAGE = `The engine failed while creating the scene. ${ENGINE_THREW_RELOAD_GUIDANCE}`;
 
 export const sceneCreateExecutor: ExecutorDefinition = {
   name: 'scene_create',
@@ -156,7 +172,7 @@ export const sceneCreateExecutor: ExecutorDefinition = {
         makeStepError(
           'ENGINE_DISPATCH_THREW',
           engineThrewMessage('A new scene could not be created', error),
-          this.userFacingErrorMessage,
+          ENGINE_THREW_USER_MESSAGE,
           false,
         ),
       );
