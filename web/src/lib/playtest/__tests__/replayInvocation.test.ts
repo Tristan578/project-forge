@@ -119,6 +119,32 @@ describe('browser replay boundary — clock and runtime mode through the engine 
     expect(log.map(([command]) => command)).toEqual(['unpin_frame_rate', 'pause', 'resume']);
   });
 
+  // The engine answers every command; a boundary that ignores the answer
+  // reports a clock as released, or a runtime as paused, when it is not.
+  it.each([
+    ['unpinFrameRate', 'unpin_frame_rate'],
+    ['pauseRuntime', 'pause'],
+    ['resumeRuntime', 'resume'],
+  ] as const)('%s throws when the engine refuses %s, naming the command and the reason', async (method, command) => {
+    const { dispatch } = recordingDispatch({ success: false, error: 'PendingCommands resource not initialized' });
+    const env = environment(dispatch);
+    await expect(async () => {
+      await env[method]?.();
+    }).rejects.toThrow(new RegExp(`${command}.*PendingCommands resource not initialized`));
+  });
+
+  it.each([
+    ['unpinFrameRate', 'unpin_frame_rate'],
+    ['pauseRuntime', 'pause'],
+    ['resumeRuntime', 'resume'],
+  ] as const)('%s throws when a stand-in dispatcher answers nothing (no engine confirmed %s)', async (method, command) => {
+    const { dispatch } = recordingDispatch(undefined);
+    const env = environment(dispatch);
+    await expect(async () => {
+      await env[method]?.();
+    }).rejects.toThrow(new RegExp(`${command}`));
+  });
+
   it('fails explicitly when no engine dispatcher is attached', () => {
     const env = environment(null);
     expect(() => env.pinFrameRate?.(60)).toThrow('engine command dispatcher');

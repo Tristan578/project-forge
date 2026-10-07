@@ -187,27 +187,61 @@ describe('replay_input_trace', () => {
 });
 
 describe('pin_frame_rate / unpin_frame_rate', () => {
+  /** The engine accepted the command — the answer a live engine gives. */
+  const accepted = { dispatchResponse: { success: true } };
+
   it('pins at the default rate when none is given', async () => {
-    const { result, dispatchCommand } = await invokeHandler(playtestHandlers, 'pin_frame_rate', {});
+    const { result, dispatchCommand } = await invokeHandler(playtestHandlers, 'pin_frame_rate', {}, {}, accepted);
     expect(result.success).toBe(true);
     expect(dispatchCommand).toHaveBeenCalledWith('pin_frame_rate', { hz: 60 });
   });
 
   it('pins at an explicit rate inside the engine\'s bounds', async () => {
-    const { result, dispatchCommand } = await invokeHandler(playtestHandlers, 'pin_frame_rate', { hz: 30 });
+    const { result, dispatchCommand } = await invokeHandler(playtestHandlers, 'pin_frame_rate', { hz: 30 }, {}, accepted);
     expect(result.success).toBe(true);
     expect(dispatchCommand).toHaveBeenCalledWith('pin_frame_rate', { hz: 30 });
   });
 
-  it.each([0, 241, 59.5, '60'])('refuses hz=%s before dispatching', async (hz) => {
+  // 1-3 Hz are refused with the engine: Bevy clamps a step longer than 250 ms,
+  // so a pin below 4 Hz could not advance the `1 / hz` it claims.
+  it.each([0, 1, 3, 241, 59.5, '60'])('refuses hz=%s before dispatching', async (hz) => {
     const { result, dispatchCommand } = await invokeHandler(playtestHandlers, 'pin_frame_rate', { hz });
     expect(result.success).toBe(false);
     expect(dispatchCommand).not.toHaveBeenCalled();
   });
 
   it('unpins', async () => {
-    const { result, dispatchCommand } = await invokeHandler(playtestHandlers, 'unpin_frame_rate', {});
+    const { result, dispatchCommand } = await invokeHandler(playtestHandlers, 'unpin_frame_rate', {}, {}, accepted);
     expect(result.success).toBe(true);
     expect(dispatchCommand).toHaveBeenCalledWith('unpin_frame_rate', {});
+  });
+
+  // The handlers used to answer `success: true` whatever the engine said, so
+  // an agent was told its clock was pinned by an engine that had refused.
+  describe('report the engine\'s own answer', () => {
+    const refused = { success: false, error: 'PendingCommands resource not initialized' };
+
+    it('pin_frame_rate fails when the engine refuses the pin, carrying the engine\'s reason', async () => {
+      const { result } = await invokeHandler(playtestHandlers, 'pin_frame_rate', { hz: 60 }, {}, { dispatchResponse: refused });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('pin_frame_rate');
+      expect(result.error).toContain('PendingCommands resource not initialized');
+    });
+
+    it('unpin_frame_rate fails when the engine refuses the unpin', async () => {
+      const { result } = await invokeHandler(playtestHandlers, 'unpin_frame_rate', {}, {}, { dispatchResponse: refused });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('unpin_frame_rate');
+      expect(result.error).toContain('PendingCommands resource not initialized');
+    });
+
+    it.each(['pin_frame_rate', 'unpin_frame_rate'])(
+      '%s fails when the dispatcher answers nothing: a stand-in cannot confirm a clock change',
+      async (tool) => {
+        const { result } = await invokeHandler(playtestHandlers, tool, {}, {}, { dispatchResponse: undefined });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(tool);
+      },
+    );
   });
 });

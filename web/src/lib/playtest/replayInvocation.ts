@@ -193,6 +193,21 @@ export function createDomKeyboardEnvironment(config: DomKeyboardEnvironmentConfi
     if (!config.dispatch) throw new Error('Replay requires the engine command dispatcher.');
     return config.dispatch;
   };
+  /**
+   * Dispatch a clock or mode command and insist on the engine's explicit
+   * acceptance. The pin has always been answered this way (a stand-in that
+   * answers nothing is not a pin); the unpin, pause and resume used to be
+   * fire-and-forget, so a refused `unpin_frame_rate` left the clock pinned
+   * while the run reported it released, and a refused `pause` left the game
+   * running behind a "paused" replay. A refusal throws, carrying the engine's
+   * own reason, and the runner's exit paths decide what it taints.
+   */
+  const confirmed = (command: string, payload: unknown): void => {
+    const response = requireDispatch()(command, payload);
+    if (response?.success === true) return;
+    const reason = response?.error ?? 'no engine confirmed the command';
+    throw new Error(`Replay: the engine did not confirm ${command}: ${reason}`);
+  };
   return {
     resolveKeys,
     pressKeys: (codes) => {
@@ -210,13 +225,13 @@ export function createDomKeyboardEnvironment(config: DomKeyboardEnvironmentConfi
       return response?.success === true;
     },
     unpinFrameRate: () => {
-      requireDispatch()('unpin_frame_rate', {});
+      confirmed('unpin_frame_rate', {});
     },
     pauseRuntime: () => {
-      requireDispatch()('pause', {});
+      confirmed('pause', {});
     },
     resumeRuntime: () => {
-      requireDispatch()('resume', {});
+      confirmed('resume', {});
     },
   };
 }

@@ -27,8 +27,12 @@ import { simulatePlaytest, type BotStrategy, type SceneContext } from '@/lib/ai/
 const BOT_STRATEGY_NAMES = ['explorer', 'speedrunner', 'completionist', 'random', 'cautious'] as const;
 const zStrategy = z.enum(BOT_STRATEGY_NAMES);
 
-/** Mirrors the engine's `pin_frame_rate` bounds (`core::simulation_clock`). */
-const zPinHz = z.number().int().min(1).max(240);
+/**
+ * Mirrors the engine's `pin_frame_rate` bounds (`core::simulation_clock`
+ * `MIN_PIN_HZ..=MAX_PIN_HZ`). The floor is 4 Hz because Bevy clamps any step
+ * longer than 250 ms, so a slower pin could not advance the `1 / hz` it claims.
+ */
+const zPinHz = z.number().int().min(4).max(240);
 
 /** The error the manual controls express by disabling Replay outside Play mode. */
 export const REPLAY_REQUIRES_PLAY_MODE =
@@ -116,18 +120,47 @@ export const playtestHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({ hz: zPinHz.optional() }), args);
     if (p.error) return p.error;
     const hz = p.data.hz ?? 60;
-    ctx.dispatchCommand('pin_frame_rate', { hz });
+    const refusal = engineRefusal(
+      'pin_frame_rate',
+      ctx.dispatchCommand('pin_frame_rate', { hz }) as CommandResponse | void,
+    );
+    if (refusal) return { success: false, error: refusal };
     return {
       success: true,
-      result: { message: `Simulation clock pinned to ${hz} Hz (one tick per rendered frame)`, hz },
+      result: {
+        message:
+          `Simulation clock pinned to ${hz} Hz: every rendered frame advances the game by ` +
+          `exactly 1/${hz} s. Released by unpin_frame_rate or by leaving Play mode.`,
+        hz,
+      },
     };
   },
 
   unpin_frame_rate: async (_args, ctx): Promise<ExecutionResult> => {
-    ctx.dispatchCommand('unpin_frame_rate', {});
+    const refusal = engineRefusal(
+      'unpin_frame_rate',
+      ctx.dispatchCommand('unpin_frame_rate', {}) as CommandResponse | void,
+    );
+    if (refusal) return { success: false, error: refusal };
     return {
       success: true,
       result: { message: 'Simulation clock returned to the wall clock' },
     };
   },
 };
+
+/**
+ * The engine's answer to a clock command, as a tool error when it is not an
+ * explicit acceptance. The context's dispatcher is typed `=> void` because
+ * most handlers ignore the answer; these two cannot — reporting "pinned" for
+ * a pin the engine refused (or that no engine confirmed) is exactly the kind
+ * of claim an agent then builds a deterministic session on.
+ * @param command The clock command that was dispatched.
+ * @param response What the dispatcher answered, if anything.
+ * @returns The error text to return, or null when the engine accepted.
+ */
+function engineRefusal(command: string, response: CommandResponse | void): string | null {
+  if (response?.success === true) return null;
+  const reason = response?.error ?? 'no engine confirmed the command';
+  return `${command} was not applied: ${reason}`;
+}
