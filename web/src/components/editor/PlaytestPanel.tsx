@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect, useSyncExternalStore } from 'react';
 import {
   Play,
   PlayCircle,
@@ -28,11 +28,22 @@ import { useEditorStore } from '@/stores/editorStore';
 import { InputTraceRecorder, InputTraceValidationError, type InputTrace } from '@/lib/playtest/inputTrace';
 import {
   collectibleEntityIdsFrom,
-  runReplay,
+  getActiveReplaySession,
   startReplaySession,
+  subscribeActiveReplaySession,
 } from '@/lib/playtest/replayEntryPoints';
 import { botSessionToInputTrace } from '@/lib/playtest/botTrace';
 import type { ReplayHandle, ReplayOutcome, ReplayProgress } from '@/lib/playtest/replayRunner';
+import { ReplayLiveRegion, replayStatusText } from './ReplayLiveRegion';
+
+/**
+ * Whether ANY replay — manual, the bot's engine run, or the chat tool's — is
+ * in flight. The pin is engine-global and `replayEntryPoints` admits one run
+ * at a time, so every control that would start one is disabled on this.
+ */
+function useReplayActive(): boolean {
+  return useSyncExternalStore(subscribeActiveReplaySession, getActiveReplaySession, () => null) !== null;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -206,6 +217,9 @@ function RuntimeReplaySection() {
   const [error, setError] = useState<string | null>(null);
 
   const isPlaying = engineMode === 'play';
+  // A replay started anywhere (the bot's Run Playtest, the chat tool) occupies
+  // the engine clock; Record and Replay wait for it, not only for their own.
+  const replayActive = useReplayActive();
   const bindings = useMemo(() => inputBindings ?? [], [inputBindings]);
   const actionNames = useMemo(() => bindings.map((b) => b.actionName), [bindings]);
 
@@ -273,16 +287,13 @@ function RuntimeReplaySection() {
     };
   }, [isPlaying]);
 
-  // Stop ends a replay in flight: the engine never ticks again, so the runner
-  // must release its synthetic keys and unpin NOW rather than wait for a frame.
-  // Keyed on 'edit' deliberately, not on leaving 'play': the runner's own Pause
-  // puts the engine in 'paused' (ENGINE_MODE_CHANGED), and a replay has to
-  // survive its own pause.
-  useEffect(() => {
-    if (engineMode === 'edit') handleRef.current?.cancel();
-  }, [engineMode]);
-
-  // Unmounting the panel mid-replay must not leave a synthetic key held either.
+  // Stop ends a replay in flight: `replayEntryPoints` watches the store's
+  // engineMode and cancels the active session on the transition to 'edit'
+  // (keyed on 'edit', not on leaving 'play', so the runner's own Pause —
+  // which puts the engine in 'paused' — does not cancel it). That one watch
+  // covers this section, the bot's run below and the chat tool alike, so the
+  // panel keeps no Stop effect of its own. Unmounting the panel mid-replay
+  // must not leave a synthetic key held either, and that IS the panel's job.
   useEffect(
     () => () => {
       handleRef.current?.cancel();
@@ -314,9 +325,16 @@ function RuntimeReplaySection() {
       setProgress(session.handle.getProgress());
       unsubscribe = session.handle.subscribe(setProgress);
       const result = await session.handle.result;
-      if (result.status === 'completed') setOutcome(result.outcome);
-      else if (result.status === 'cancelled') setCancelledAfter(result.ticksReplayed);
-      else setError(result.error.message);
+      if (result.status === 'completed') {
+        setOutcome(result.outcome);
+        // The run was pinned, so the verdict stands; the release failing is
+        // reported beside it (the engine releases any pin on Stop regardless).
+        if (result.unpinError) setError(`Replay finished, but the engine clock could not be released: ${result.unpinError}`);
+      } else if (result.status === 'cancelled') {
+        setCancelledAfter(result.ticksReplayed);
+      } else {
+        setError(result.error.message);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -364,7 +382,7 @@ function RuntimeReplaySection() {
       <div className="flex gap-2">
         <button
           onClick={toggleRecord}
-          disabled={!isPlaying || isReplaying}
+          disabled={!isPlaying || isReplaying || replayActive}
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
           aria-label={isRecording ? 'Stop recording input' : 'Record input'}
           aria-pressed={isRecording}
@@ -374,7 +392,7 @@ function RuntimeReplaySection() {
         </button>
         <button
           onClick={startReplay}
-          disabled={!isPlaying || !primaryId || !hasTrace || isRecording || isReplaying}
+          disabled={!isPlaying || !primaryId || !hasTrace || isRecording || isReplaying || replayActive}
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
           aria-label="Replay recorded input"
         >
@@ -384,19 +402,20 @@ function RuntimeReplaySection() {
       </div>
 
       {isReplaying && progress && (
+        // The visible line changes on every tick and is deliberately NOT a
+        // live region; `ReplayLiveRegion` announces it at a readable rate.
         <div
-          role="status"
-          aria-live="polite"
           data-testid="replay-progress"
           className="mt-2 flex items-center gap-2 px-2.5 py-1.5 bg-zinc-800 rounded text-xs"
         >
           <Loader2 size={14} className="animate-spin text-blue-400 shrink-0" />
           <span className="flex-1 text-zinc-300">{replayStatusText(progress)}</span>
+          <ReplayLiveRegion progress={progress} />
           {showResume ? (
             <button
               onClick={resumeReplay}
               disabled={progress.state === 'pausing'}
-              className="p-1 rounded hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className={REPLAY_CONTROL_BUTTON}
               aria-label="Resume replay"
             >
               <Play size={14} />
@@ -405,7 +424,7 @@ function RuntimeReplaySection() {
             <button
               onClick={pauseReplay}
               disabled={!canPause}
-              className="p-1 rounded hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className={REPLAY_CONTROL_BUTTON}
               aria-label="Pause replay"
             >
               <Pause size={14} />
@@ -414,7 +433,7 @@ function RuntimeReplaySection() {
           <button
             onClick={cancelReplay}
             disabled={progress.state === 'cancelling'}
-            className="p-1 rounded hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className={REPLAY_CONTROL_BUTTON}
             aria-label="Cancel replay"
           >
             <Square size={14} />
@@ -439,24 +458,13 @@ function RuntimeReplaySection() {
   );
 }
 
-/** The progress line a replay shows while it runs: state, tick position, clock. */
-function replayStatusText(progress: ReplayProgress): string {
-  const clock = progress.pinned === true ? ' on the pinned clock' : '';
-  switch (progress.state) {
-    case 'pinning':
-      return 'Pinning the engine clock…';
-    case 'running':
-      return `Replaying tick ${progress.tick} of ${progress.totalTicks}${clock}`;
-    case 'pausing':
-      return `Pausing at tick ${progress.tick}…`;
-    case 'paused':
-      return `Paused at tick ${progress.tick} of ${progress.totalTicks}; input released`;
-    case 'cancelling':
-      return 'Cancelling and releasing input…';
-    default:
-      return progress.state;
-  }
-}
+/**
+ * Pause / Resume / Cancel are icon buttons: a 14 px icon with `p-1` is a
+ * 22 px target, under the WCAG 2.5.8 minimum of 24 × 24. `min-h-6 min-w-6`
+ * (24 px) is the floor; the icon stays centred inside it.
+ */
+const REPLAY_CONTROL_BUTTON =
+  'inline-flex min-h-6 min-w-6 items-center justify-center p-1 rounded hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed';
 
 /**
  * Observed-state verdict of a runtime replay, used for both the manual Replay
@@ -523,10 +531,24 @@ export function PlaytestPanel() {
   const [sessions, setSessions] = useState<PlaytestSession[]>([]);
   const [report, setReport] = useState<PlaytestReport | null>(null);
   // The bot's plan driven through the REAL engine (#10007): the same
-  // `replay_input_trace` command the manual Replay button runs, labelled 'ai'.
+  // `replay_input_trace` command the manual Replay button runs, labelled 'ai',
+  // through the same controlled session — so it occupies the one replay
+  // guard, is cancelled by Stop like the manual run, and can be cancelled by
+  // this panel unmounting (the handle below).
   const [botOutcome, setBotOutcome] = useState<ReplayOutcome | null>(null);
   const [botRuntimeError, setBotRuntimeError] = useState<string | null>(null);
+  const [botCancelledAfter, setBotCancelledAfter] = useState<number | null>(null);
+  const botHandleRef = useRef<ReplayHandle | null>(null);
+  const replayActive = useReplayActive();
   const canRunInEngine = engineMode === 'play' && !!primaryId;
+
+  // Unmounting mid-run must not leave the bot's synthetic keys held.
+  useEffect(
+    () => () => {
+      botHandleRef.current?.cancel();
+    },
+    [],
+  );
 
   const runBotInEngine = useCallback(
     async (session: PlaytestSession) => {
@@ -536,8 +558,23 @@ export function PlaytestPanel() {
         fixtureId: sceneName || 'current-scene',
         actionNames,
       });
-      const result = await runReplay('ai', { trace, playerEntityId: primaryId });
-      setBotOutcome(result.outcome);
+      const replay = startReplaySession('ai', { trace, playerEntityId: primaryId });
+      botHandleRef.current = replay.handle;
+      try {
+        const result = await replay.handle.result;
+        if (result.status === 'completed') {
+          setBotOutcome(result.outcome);
+          if (result.unpinError) {
+            setBotRuntimeError(`finished, but the engine clock could not be released: ${result.unpinError}`);
+          }
+        } else if (result.status === 'cancelled') {
+          setBotCancelledAfter(result.ticksReplayed);
+        } else {
+          setBotRuntimeError(result.error.message);
+        }
+      } finally {
+        botHandleRef.current = null;
+      }
     },
     [primaryId, inputBindings, sceneName],
   );
@@ -564,6 +601,7 @@ export function PlaytestPanel() {
     setIsRunning(true);
     setBotOutcome(null);
     setBotRuntimeError(null);
+    setBotCancelledAfter(null);
     try {
       const ctx = buildContext();
       const session = await simulatePlaytest(ctx, selectedStrategy);
@@ -627,7 +665,9 @@ export function PlaytestPanel() {
         <div className="flex gap-2">
           <button
             onClick={runSingle}
-            disabled={isLoading}
+            // Also waits for a replay started elsewhere: Run Playtest drives
+            // the engine, and only one pinned run exists at a time.
+            disabled={isLoading || replayActive}
             className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
             aria-label={`Run playtest with ${selectedStrategy} strategy`}
           >
@@ -649,6 +689,11 @@ export function PlaytestPanel() {
         <RuntimeReplaySection />
 
         {/* The bot's plan run through the real engine — a runtime verdict, never a rating */}
+        {botCancelledAfter !== null && (
+          <div role="status" className="px-2.5 py-1.5 bg-zinc-800 rounded text-xs text-zinc-400">
+            AI bot runtime replay cancelled after {botCancelledAfter} ticks. Input was released; no verdict was recorded.
+          </div>
+        )}
         {botRuntimeError && (
           <div role="alert" className="px-2.5 py-2 rounded border text-xs bg-red-500/20 text-red-400 border-red-500/30">
             AI bot runtime replay: {botRuntimeError}

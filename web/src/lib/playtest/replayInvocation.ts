@@ -22,7 +22,7 @@ import type { InputBinding } from '@/stores/slices/types';
 import { getLatestPlayTick, subscribePlayTick } from './playTickBus';
 import type { InputTrace } from './inputTrace';
 import {
-  replayInputTrace,
+  outcomeOf,
   startReplay,
   REPLAY_INPUT_TRACE_COMMAND,
   type ReplayEnvironment,
@@ -64,7 +64,8 @@ export async function invokeReplay(
   env: ReplayEnvironment,
   options: ReplayRunOptions = {},
 ): Promise<ReplayInvocationResult> {
-  const outcome = await replayInputTrace(trace, env, options);
+  const session = startReplayInvocation(source, trace, env, options);
+  const outcome = outcomeOf(await session.handle.result);
   return { command: REPLAY_INPUT_TRACE_COMMAND, source, outcome };
 }
 

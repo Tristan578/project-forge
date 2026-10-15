@@ -359,11 +359,14 @@ export function startReplay(
     }
   };
   /**
-   * 'cancelling' is sticky. A cancel can land in the middle of any await, and
-   * the code after that await was written for the state it interrupted
-   * (announcing 'paused', 'running'); none of those may paint over a cancel
-   * the creator has already been shown. Only the cancel's own settlement — or
-   * a boundary failure while settling it — replaces it.
+   * 'cancelling' is sticky: only the cancel's own settlement — or a boundary
+   * failure while settling it — replaces it. A cancel can land in the middle
+   * of any await, and the code after that await was written for the state it
+   * interrupted (announcing 'paused', 'running'). Every such site re-checks
+   * `cancelRequested` first, and the controller tests pin that no state
+   * follows 'cancelling' but 'cancelled'; with those checks in place this
+   * guard is unreachable (mutating it out keeps the suite green). It stays as
+   * defence in depth for the `setState` someone adds after an unchecked await.
    */
   const setState = (state: ReplayRunState) => {
     if (progress.state === 'cancelling' && state !== 'cancelled' && state !== 'failed') return;

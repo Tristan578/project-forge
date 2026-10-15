@@ -38,7 +38,11 @@ const storeState = vi.hoisted(() => ({
 const dispatcherSlot = vi.hoisted(() => ({ current: null as EngineDispatch | null }));
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: Object.assign(() => storeState, { getState: () => storeState }),
+  useEditorStore: Object.assign(() => storeState, {
+    getState: () => storeState,
+    // The entry points watch engineMode to cancel on Stop; nothing stops here.
+    subscribe: () => () => {},
+  }),
   getCommandDispatcher: () => dispatcherSlot.current,
 }));
 
