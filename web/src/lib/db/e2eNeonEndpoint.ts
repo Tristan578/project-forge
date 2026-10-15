@@ -56,6 +56,10 @@ const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '
  * @returns The endpoint to install, or `null` when the override must not apply.
  * @throws When the gate is open and the value is set but is not a loopback
  *   `http(s)://…/sql` URL — a misconfiguration must fail, never fall back.
+ *   The messages name the variable and the reason and never quote the raw
+ *   value or `url.href`, because a malformed value can carry `user:password@`
+ *   and these errors reach service and CI logs. Only the parsed scheme,
+ *   hostname and pathname are quoted; none of them holds userinfo.
  */
 export function resolveE2eNeonEndpoint(
   rawValue: string | undefined,
@@ -68,7 +72,9 @@ export function resolveE2eNeonEndpoint(
   try {
     url = new URL(rawValue);
   } catch {
-    throw new Error(`${E2E_NEON_HTTP_ENDPOINT_ENV} is not a URL: ${JSON.stringify(rawValue)}`);
+    // The value is deliberately NOT quoted: a malformed URL can still carry
+    // `user:password@`, and this message reaches service and CI logs.
+    throw new Error(`${E2E_NEON_HTTP_ENDPOINT_ENV} is not a URL (the value is not echoed)`);
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(

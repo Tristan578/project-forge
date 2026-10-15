@@ -90,6 +90,45 @@ describe('resolveE2eNeonEndpoint (pure)', () => {
   });
 });
 
+describe('resolveE2eNeonEndpoint never echoes the raw value or its credentials (#10161)', () => {
+  // A malformed value can still carry userinfo (`user:secret@`) or a token in the
+  // query, and these messages reach service and CI logs. The errors name the
+  // variable and the reason; the only parts of the value they may quote are the
+  // parsed scheme, hostname and pathname, none of which carry credentials.
+  const USER = 'svc-account-7';
+  const PASSWORD = 'hunter2-s3cret';
+
+  function messageOf(value: string): string {
+    try {
+      resolveE2eNeonEndpoint(value, true);
+    } catch (error) {
+      return (error as Error).message;
+    }
+    throw new Error(`expected ${JSON.stringify(value.replace(PASSWORD, '***'))} to be refused`);
+  }
+
+  it.each([
+    ['is not a URL (empty host)', `http://${USER}:${PASSWORD}@`, /not a URL/],
+    ['is not a URL (no scheme)', `//${USER}:${PASSWORD}@localhost:4444/sql`, /not a URL/],
+    ['has the wrong scheme', `postgres://${USER}:${PASSWORD}@localhost:5432/db`, /http\(s\)/],
+    ['names a non-loopback host', `https://${USER}:${PASSWORD}@ep-x.neon.tech/sql`, /loopback/],
+    [
+      'has the wrong path',
+      `http://${USER}:${PASSWORD}@localhost:4444/other?token=${PASSWORD}`,
+      /\/sql/,
+    ],
+  ])('a value that %s is refused without quoting its credentials', (_label, value, reason) => {
+    const message = messageOf(value);
+    // Still says what is wrong and which variable to fix...
+    expect(message).toContain(E2E_NEON_HTTP_ENDPOINT_ENV);
+    expect(message).toMatch(reason);
+    // ...and nothing of the secret-bearing parts of the value.
+    expect(message).not.toContain(PASSWORD);
+    expect(message).not.toContain(USER);
+    expect(message).not.toContain(value);
+  });
+});
+
 describe('applyE2eNeonEndpointOverride (through the real driver config)', () => {
   const defaultEndpoint = neonConfig.fetchEndpoint;
 
