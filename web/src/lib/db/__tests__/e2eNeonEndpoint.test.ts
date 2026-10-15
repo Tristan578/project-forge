@@ -160,6 +160,154 @@ describe('applyE2eNeonEndpointOverride (through the real driver config)', () => 
   });
 });
 
+describe('applyE2eNeonEndpointOverride gives the driver back when the override stops applying (#10161)', () => {
+  // `neonConfig.fetchEndpoint` is read at QUERY time, and the helper is called
+  // again later in the same process: `checkDatabase` re-runs it on every
+  // uncached health probe, and `next dev` reloads env files. A variable that is
+  // unset by then must not leave the previous proxy endpoint on the driver.
+  //
+  // The helper remembers what it displaced in module state, so every case loads
+  // a fresh copy of it (and of the driver it writes to) instead of inheriting
+  // the previous case's memory.
+  type Driver = typeof import('@neondatabase/serverless');
+  type Helper = typeof import('../e2eNeonEndpoint');
+  const OTHER_PROXY = 'http://127.0.0.1:5555/sql';
+  let driver: Driver['neonConfig'];
+  let apply: Helper['applyE2eNeonEndpointOverride'];
+  let original: Driver['neonConfig']['fetchEndpoint'];
+
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ neonConfig: driver } = await import('@neondatabase/serverless'));
+    ({ applyE2eNeonEndpointOverride: apply } = await import('../e2eNeonEndpoint'));
+    original = driver.fetchEndpoint;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    driver.fetchEndpoint = original;
+  });
+
+  /** Count every assignment to `fetchEndpoint`, still forwarding it to the driver. */
+  function trackWrites(): { writes: unknown[]; stop: () => void } {
+    const descriptor = Object.getOwnPropertyDescriptor(driver, 'fetchEndpoint');
+    // Fail closed: if the driver stops exposing an accessor, the tracking below
+    // would silently count nothing and every "never writes" case would pass.
+    expect(descriptor?.set, 'the driver must expose fetchEndpoint as an accessor').toBeTypeOf(
+      'function',
+    );
+    const writes: unknown[] = [];
+    Object.defineProperty(driver, 'fetchEndpoint', {
+      ...descriptor,
+      set(value: unknown) {
+        writes.push(value);
+        descriptor!.set!.call(driver, value);
+      },
+    });
+    return { writes, stop: () => Object.defineProperty(driver, 'fetchEndpoint', descriptor!) };
+  }
+
+  it.each([
+    ['set to the empty string', ''],
+    ['unset', undefined],
+  ])('puts the driver back on the endpoint it displaced when the variable is %s', (_label, later) => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, PROXY);
+    expect(apply()).toBe(PROXY);
+    expect(driver.fetchEndpoint).toBe(PROXY);
+
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, later);
+    expect(apply()).toBeNull();
+    expect(driver.fetchEndpoint).toBe(original);
+  });
+
+  it('puts the driver back when the hooks gate closes after an install', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, PROXY);
+    expect(apply()).toBe(PROXY);
+
+    // Same variable, but the process now reads as a production build without the flag.
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_E2E_HOOKS', '');
+    expect(apply()).toBeNull();
+    expect(driver.fetchEndpoint).toBe(original);
+  });
+
+  it('installs again after a restore, and restores again afterwards', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, PROXY);
+    apply();
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, '');
+    apply();
+    expect(driver.fetchEndpoint).toBe(original);
+
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, PROXY);
+    expect(apply()).toBe(PROXY);
+    expect(driver.fetchEndpoint).toBe(PROXY);
+
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, '');
+    expect(apply()).toBeNull();
+    expect(driver.fetchEndpoint).toBe(original);
+  });
+
+  it("restores the driver's own endpoint, not the previous proxy, after the proxy changed in between", () => {
+    // The original is captured before the FIRST write only; capturing on every
+    // install would restore to the first proxy and leave it on the driver.
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, PROXY);
+    apply();
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, OTHER_PROXY);
+    expect(apply()).toBe(OTHER_PROXY);
+    expect(driver.fetchEndpoint).toBe(OTHER_PROXY);
+
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, '');
+    apply();
+    expect(driver.fetchEndpoint).toBe(original);
+  });
+
+  it('never writes to the driver while the hooks gate is closed and nothing was installed', () => {
+    // A restore that fired unconditionally would overwrite an endpoint somebody
+    // else set with a value this module never displaced.
+    const elsewhere = 'http://elsewhere.invalid/sql';
+    driver.fetchEndpoint = elsewhere;
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_E2E_HOOKS', '');
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, PROXY);
+
+    const { writes, stop } = trackWrites();
+    try {
+      expect(apply()).toBeNull();
+      expect(apply()).toBeNull();
+    } finally {
+      stop();
+    }
+    expect(writes).toEqual([]);
+    expect(driver.fetchEndpoint).toBe(elsewhere);
+  });
+
+  it('never writes for an unset variable when nothing was installed, and restores only once after an install', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, '');
+    const { writes, stop } = trackWrites();
+    try {
+      apply();
+      expect(writes).toEqual([]);
+
+      vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, PROXY);
+      apply();
+      expect(writes).toEqual([PROXY]);
+
+      vi.stubEnv(E2E_NEON_HTTP_ENDPOINT_ENV, '');
+      apply();
+      apply();
+      // One write to install, one to restore; the second no-op call adds nothing.
+      expect(writes).toEqual([PROXY, original]);
+    } finally {
+      stop();
+    }
+  });
+});
+
 describe('source shape (Next.js inlines only literal process.env reads; every neon() site is gated)', () => {
   const moduleCode = executableCode(readFileSync(MODULE_FILE, 'utf8'));
   const hooksCode = executableCode(readFileSync(HOOKS_FILE, 'utf8'));

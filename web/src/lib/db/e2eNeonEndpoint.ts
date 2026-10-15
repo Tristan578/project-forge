@@ -89,16 +89,43 @@ export function resolveE2eNeonEndpoint(
 }
 
 /**
- * Install the override on the driver when the gate is open and the variable
- * is set. Call it before constructing a `neon()` client.
+ * What `neonConfig.fetchEndpoint` held before this module first wrote to it,
+ * for as long as the override is installed, or `null` when nothing is
+ * displaced. The value sits inside an object so that "nothing displaced" stays
+ * distinguishable from a driver whose own `fetchEndpoint` is `undefined`.
+ */
+let displaced: { original: typeof neonConfig.fetchEndpoint } | null = null;
+
+/**
+ * Make the driver's endpoint match the environment, then report what it is.
+ * Call it before constructing a `neon()` client.
  *
- * @returns The endpoint installed, or `null` when the driver was left on its
+ * It is not a one-shot. `checkDatabase` calls it again on every uncached
+ * health probe and `next dev` reloads env files, and the driver reads
+ * `fetchEndpoint` at query time — so a variable that was set when the proxy
+ * was installed and is unset or empty now (or a gate that has since closed)
+ * must take the proxy back off, or queries keep going to a proxy the
+ * environment no longer names. The driver's own value is remembered before the
+ * FIRST write only and put back when the override stops applying; installing a
+ * different proxy in between does not change what is restored.
+ *
+ * A value the gate refuses throws before the driver is touched, so a
+ * previously installed endpoint stays exactly as it was: a misconfiguration is
+ * loud, and never a silent move toward Neon cloud.
+ *
+ * @returns The endpoint installed, or `null` when the driver is on its
  *   default (Neon cloud) endpoint.
  */
 export function applyE2eNeonEndpointOverride(): string | null {
   const endpoint = resolveE2eNeonEndpoint(process.env.E2E_NEON_HTTP_ENDPOINT, e2eHooksEnabled());
   if (endpoint !== null) {
+    displaced ??= { original: neonConfig.fetchEndpoint };
     neonConfig.fetchEndpoint = endpoint;
+    return endpoint;
   }
-  return endpoint;
+  if (displaced !== null) {
+    neonConfig.fetchEndpoint = displaced.original;
+    displaced = null;
+  }
+  return null;
 }
