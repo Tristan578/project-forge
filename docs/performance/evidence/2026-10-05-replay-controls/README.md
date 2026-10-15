@@ -21,19 +21,20 @@ is what the NFR names, at two frame cadences: 60 fps (a desktop refresh) and
 
 The same two timings are also measured in the real browser against the live
 engine by `web/e2e/engine/inputReplay.spec.ts` on every PR (attachment
-`replay-nfr-timing.json` on the test), asserted against
+`replay-nfr-timing.json` on the test): five samples of each — Scenario 3's own
+plus four short controlled sessions — with the MEDIAN asserted against
 `REPLAY_NFR_ACK_P95_MS` / `REPLAY_NFR_PENDING_DISPLAY_MS` from
-`web/e2e/constants.ts`. That spec could not be run on this machine (no local
-WASM build; the Engine Smoke Gate builds it in CI), so the browser numbers are
-not reproduced here.
+`web/e2e/constants.ts`, and every sample attached. That spec could not be run
+on this machine (no local WASM build; the Engine Smoke Gate builds it in CI),
+so the browser numbers are not reproduced here.
 
 | | |
 |---|---|
 | Fixture | `minimal-2d-replay` — the trace a "hold `move_right` for 120 ticks" recording produces (the same trace `inputReplay.spec.ts` replays); fixture definition `web/e2e/fixtures/minimal-2d-replay-fixture.ts` |
 | Runs | 20 per cadence; each run pauses at a tick between 5 and 14, resumes, then cancels three ticks later — 120 acknowledgement samples in all (pause + resume + cancel, both cadences) |
 | Machine | AMD Ryzen 7 3800X (8 cores, 16 threads), 63.9 GB RAM, Windows 11 Home 10.0.26200 (build 26200) |
-| Runtime | Node v24.5.0 (`npx tsx`), Git Bash; no other test run in progress |
-| Git | branch `claude/10007-pinned-replay-gate`; re-measured on 2026-10-06 (`measuredAt` in the JSON) against the runner as committed in `f97c8ebfa` and its predecessors — the script and the runner are unchanged after the measurement |
+| Runtime | Node v24.22.0 (`npx tsx`), Git Bash; no other test run or type-check in progress (an earlier run of the same day overlapped a `tsc` and showed one 24.7 ms acknowledgement outlier; it was discarded and re-measured alone) |
+| Git | branch `claude/10007-pinned-replay-gate`; measured on 2026-10-15 (`measuredAt` in the JSON) at commit `86e38fd41`, which is on this branch. The runner the script drives (`startReplay` and its pause / resume / cancel) was last changed in `27ce139aa` — the review-board round-2 fixes: a cancel racing the pause, the final-boundary pause, a failed unpin kept beside the verdict — and that commit is an ancestor of `86e38fd41`; the one later change, the single-flight guard in `replayEntryPoints`, sits above `startReplay` and is not on the script's path. The previous version of this file cited `f97c8ebfa`, a commit that is not on this branch |
 | Reproduce | `cd web && npx tsx scripts/measure-replay-nfr.ts` — rewrites `replay-nfr.json` and prints the summary and a PASS / FAIL verdict |
 
 ## Results
@@ -51,11 +52,11 @@ not by the frame.
 
 | Metric | 60 fps (16.7 ms frames) | 15 fps (66.7 ms frames) | Limit |
 |---|---|---|---|
-| Acknowledgement, all controls, n=120 | p50 0.004 ms · **p95 0.030 ms** · max 0.117 ms | (pooled across both cadences) | p95 <= 100 ms |
-| Pending display (`pinning` visible after `startReplay` returns), n=20 each | p95 1.16 ms | p95 1.11 ms | <= 250 ms |
-| Progress (`running`, after the pin round-trip and one frame), n=20 each | p95 31.5 ms | p95 79.3 ms | — (context) |
-| Pause settle (`paused`), n=20 each | p95 31.5 ms | p95 77.6 ms | — (one frame) |
-| Cancel settle (`cancelled`), n=20 each | p95 0.073 ms | p95 0.064 ms | — (microtasks) |
+| Acknowledgement, all controls, n=120 | p50 0.004 ms · **p95 0.013 ms** · max 0.233 ms | (pooled across both cadences) | p95 <= 100 ms |
+| Pending display (`pinning` visible after `startReplay` returns), n=20 each | p95 3.65 ms | p95 1.21 ms | <= 250 ms |
+| Progress (`running`, after the pin round-trip and one frame), n=20 each | p95 35.8 ms | p95 79.0 ms | — (context) |
+| Pause settle (`paused`), n=20 each | p95 34.5 ms | p95 78.8 ms | — (one frame) |
+| Cancel settle (`cancelled`), n=20 each | p95 0.133 ms | p95 0.029 ms | — (microtasks) |
 
 Verdict: **PASS** — acknowledgement p95 is three orders of magnitude inside the
 100 ms limit, and the pending state is visible within a few milliseconds at
