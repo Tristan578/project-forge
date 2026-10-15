@@ -2,11 +2,50 @@
  * Reference game `qa-score3-v1/platformer-2d` — the 2D member of #9878's
  * `qa-score3-v1` set (#10159).
  *
- * A single-screen side-scroller: the player starts on the left ledge, crosses a
- * spike pit by way of a floating platform (a coin sits above it), and wins by
- * touching the goal flag on the right ledge. Seven entities, all spawned by
- * `spawn_entity` and configured through the same store actions the editor
- * uses, so the engine spec applies it exactly the way a creator would.
+ * A single-screen side-scroller built to be WON BY HOLDING RIGHT: the player
+ * starts on the start ledge, walks along one level floor past a coin, and wins
+ * by touching the goal flag on the end ledge. Behind the player, to the left,
+ * is a spike pit that loses the game when walked into. Seven entities, all
+ * spawned by `spawn_entity` and configured through the same store actions the
+ * editor uses, so the engine spec applies it exactly the way a creator would.
+ *
+ * ROUTE — WHY IT IS FLAT. The engine's 2D character controller cannot jump,
+ * and that decides every coordinate below (details under JUMP). All it can do
+ * is walk sideways at `speed` and let the 2D simulation's gravity pull the body
+ * down, so a route has to be completable with horizontal input alone:
+ *
+ *   - win: hold right. Walk from x=-5 over the start ledge (top y=0, x -8..-1)
+ *     and straight on over the end ledge (top y=0, x -1..8). The two ledges
+ *     meet flush at x=-1 with coplanar tops, so the 0.8-wide box straddles the
+ *     seam and never drops or rises. The coin (x=2.5, y 0.15..0.65) and the
+ *     goal flag (x=7, y 0..1.5) both overlap the box's own height band
+ *     (y 0..0.8) at floor level, so walking collects the one and touches the
+ *     other. No floor on the route is higher than the one before it, because
+ *     the controller cannot climb even a hundredth of a unit, and there is no
+ *     drop or gap either: how far the body drifts sideways while it falls
+ *     depends on the frame rate (the controller moves by the frame's `dt`, the
+ *     simulation's step is capped), so a route that needed a landing spot could
+ *     not be reproduced.
+ *   - lose: hold left. The spike pit is a sensor filling the cavity between the
+ *     left bank and the start ledge (x -10..-8, y -3..0.5). Its tips stand 0.5
+ *     above the floor, inside the box's height band, so the box touches it
+ *     while still standing on the start ledge: the lose path needs no fall
+ *     either. The bank on the far side makes the pit a recess in the floor
+ *     rather than a void.
+ *   - the hazard sits BESIDE the winning route, behind the spawn, so winning
+ *     never has to avoid it by jumping.
+ *
+ * `e2e/lib/__tests__/referenceGames.test.ts` pins this against the fixture's own
+ * data (`walkRoute.ts` sweeps the player's box along it): the winning walk reaches
+ * the goal over floors that only ever step down, collects the coin and touches no
+ * damage zone, and the left walk reaches the pit without leaving the floor. It
+ * cannot see the engine; no live-engine journey has yet played this route.
+ *
+ * VERSIONS. v1 routed the player across a spike pit by way of a floating
+ * platform (jump needed). No walk could win it under the controller described
+ * below, so it described a game that could not be won; v2 is this layout. A
+ * platform-and-jump route returns as a new version once the 2D controller has a
+ * real jump (#10378).
  *
  * WIN — `winCondition { conditionType: 'reachGoal', targetEntityId: 'goal' }`
  * on the goal flag itself. The engine's `system_win_condition`
@@ -19,7 +58,7 @@
  * LOSE — there is no first-class lost state. Lose is the player's HP reaching 0
  * in the spike pit: `damageZone { oneShot: true }` zeroes the player's
  * `health`, and `system_health` then moves the player back to `respawnPoint`
- * (the start ledge) and refills HP, because `respawnOnDeath` is true and
+ * (above the start ledge) and refills HP, because `respawnOnDeath` is true and
  * `despawnOnDeath` is false. An engine query of the player's transform and
  * health observes it.
  *
@@ -43,15 +82,15 @@
  * direct-translation branch of `system_character_controller`
  * (`engine/src/core/game_components.rs`), which writes the transform itself:
  * walking moves `speed * dt` per frame, and a jump is a single-frame nudge of
- * `jump_height * 0.5 * dt` with no vertical velocity and no gravity integrator
- * of its own — pinned by `in_2d_a_jump_adds_to_the_vertical_walk_on_the_same_axis`
- * and recorded as an unresolved divergence on `CharacterControllerData`. The
- * only gravity acting on the player is the 2D simulation's, through its
- * dynamic body's `gravityScale: 1` (`physics_2d_sim.rs` inserts Rapier's
- * `GravityScale`). So the layout above describes the intended game, not a
- * traversal these numbers establish: whether the player can reach the floating
- * platform and cross the pit is #10152's job (the journey that plays this
- * game), and #10159 does not assert it.
+ * `jump_height * 0.5 * dt` (about 0.05 units a press at 60 Hz) with no vertical
+ * velocity, no grounded state and no gravity integrator of its own — pinned by
+ * `in_2d_a_jump_adds_to_the_vertical_walk_on_the_same_axis` and recorded as an
+ * unresolved divergence on `CharacterControllerData`. The only gravity acting
+ * on the player is the 2D simulation's, through its dynamic body's
+ * `gravityScale: 1` (`physics_2d_sim.rs` inserts Rapier's `GravityScale`). The
+ * value and the `jump` binding stay so the player is authored like a platformer
+ * and the binding is ready for the day the jump works; nothing on the route
+ * uses it.
  *
  * Coordinates are world units in the XY plane (a 2D project's camera looks down
  * -Z); each entity's 2D collider size equals its X/Y scale.
@@ -87,10 +126,10 @@ export const platformer2d = {
   set: REFERENCE_GAME_SET,
   member: '2d',
   fixtureId: `${REFERENCE_GAME_SET}/platformer-2d`,
-  version: 1,
+  version: 2,
   description:
-    '2D platformer reference game: cross the spike pit via the floating platform and touch the goal flag. ' +
-    'Win = reachGoal on the goal; lose = HP to 0 in the spike pit, then respawn at the start ledge.',
+    '2D platformer reference game: hold right to walk the level floor, take the coin and touch the goal flag. ' +
+    'Win = reachGoal on the goal; lose = hold left into the spike pit (HP to 0), then respawn at the start ledge.',
   projectType: '2d',
   completionMode: 'win',
   inputBindings: [
@@ -113,7 +152,7 @@ export const platformer2d = {
       id: 'player',
       name: 'Player',
       entityType: 'cube',
-      position: [-6, 0.5, 0],
+      position: [-5, 0.5, 0],
       scale: [0.8, 0.8, 0.8],
       physics: {
         dimension: '2d',
@@ -146,7 +185,7 @@ export const platformer2d = {
             currentHp: 3,
             invincibilitySecs: 0.5,
             respawnOnDeath: true,
-            respawnPoint: [-6, 1, 0],
+            respawnPoint: [-5, 1, 0],
             despawnOnDeath: false,
           },
         },
@@ -156,34 +195,34 @@ export const platformer2d = {
       id: 'ledge_start',
       name: 'Start Ledge',
       entityType: 'cube',
-      position: [-4, -0.5, 0],
-      scale: [6, 1, 1],
-      physics: { dimension: '2d', data: staticBody([6, 1], false) },
+      position: [-4.5, -0.5, 0],
+      scale: [7, 1, 1],
+      physics: { dimension: '2d', data: staticBody([7, 1], false) },
       gameComponents: [],
     },
     {
       id: 'spike_pit',
       name: 'Spike Pit',
       entityType: 'cube',
-      position: [0.5, -1.5, 0],
-      scale: [3, 1, 1],
-      physics: { dimension: '2d', data: staticBody([3, 1], true) },
+      position: [-9, -1.25, 0],
+      scale: [2, 3.5, 1],
+      physics: { dimension: '2d', data: staticBody([2, 3.5], true) },
       gameComponents: [{ type: 'damageZone', damageZone: { damagePerSecond: 100, oneShot: true } }],
     },
     {
-      id: 'floating_platform',
-      name: 'Floating Platform',
+      id: 'left_bank',
+      name: 'Left Bank',
       entityType: 'cube',
-      position: [0.5, 1.5, 0],
-      scale: [2, 0.4, 1],
-      physics: { dimension: '2d', data: staticBody([2, 0.4], false) },
+      position: [-12, -0.5, 0],
+      scale: [4, 1, 1],
+      physics: { dimension: '2d', data: staticBody([4, 1], false) },
       gameComponents: [],
     },
     {
       id: 'coin',
       name: 'Coin',
       entityType: 'cylinder',
-      position: [0.5, 2.5, 0],
+      position: [2.5, 0.4, 0],
       scale: [0.5, 0.5, 0.5],
       physics: { dimension: '2d', data: staticBody([0.5, 0.5], true) },
       gameComponents: [
@@ -197,9 +236,9 @@ export const platformer2d = {
       id: 'ledge_end',
       name: 'End Ledge',
       entityType: 'cube',
-      position: [5, -0.5, 0],
-      scale: [6, 1, 1],
-      physics: { dimension: '2d', data: staticBody([6, 1], false) },
+      position: [3.5, -0.5, 0],
+      scale: [9, 1, 1],
+      physics: { dimension: '2d', data: staticBody([9, 1], false) },
       gameComponents: [],
     },
     {
@@ -221,20 +260,20 @@ export const platformer2d = {
 } satisfies ReferenceGame;
 
 /**
- * Independent expected state for `platformer-2d@1`. Hand-written: the engine
+ * Independent expected state for `platformer-2d@2`. Hand-written: the engine
  * spec asserts against THIS, and `verify.ts` re-derives it from the fixture.
  * Changing the fixture means bumping `version` above and rewriting this record,
  * including `contentDigest`.
  */
 export const platformer2dExpected = {
   fixtureId: 'qa-score3-v1/platformer-2d',
-  version: 1,
-  contentDigest: 'sha256:81718c4675de86da0813b8e88ac38a3123a4929a387f5b7abffd95f8401a5e06',
+  version: 2,
+  contentDigest: 'sha256:f2cd181597baa5ebaa6db472c51f8da7a315450244c434d3a93a6c65a48fca05',
   entities: {
     player: { name: 'Player', entityType: 'cube', physics: '2d', gameComponents: ['characterController', 'health'] },
     ledge_start: { name: 'Start Ledge', entityType: 'cube', physics: '2d', gameComponents: [] },
     spike_pit: { name: 'Spike Pit', entityType: 'cube', physics: '2d', gameComponents: ['damageZone'] },
-    floating_platform: { name: 'Floating Platform', entityType: 'cube', physics: '2d', gameComponents: [] },
+    left_bank: { name: 'Left Bank', entityType: 'cube', physics: '2d', gameComponents: [] },
     coin: { name: 'Coin', entityType: 'cylinder', physics: '2d', gameComponents: ['collectible'] },
     ledge_end: { name: 'End Ledge', entityType: 'cube', physics: '2d', gameComponents: [] },
     goal: { name: 'Goal Flag', entityType: 'cone', physics: '2d', gameComponents: ['winCondition'] },
@@ -255,7 +294,7 @@ export const platformer2dExpected = {
     maxHp: 3,
     respawnOnDeath: true,
     despawnOnDeath: false,
-    respawnPoint: [-6, 1, 0],
+    respawnPoint: [-5, 1, 0],
     damageZoneEntityIds: ['spike_pit'],
     oneShot: true,
   },

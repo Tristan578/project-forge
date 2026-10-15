@@ -28,6 +28,7 @@ import {
   deriveExpectedState,
   expectedStateProblems,
 } from '../../fixtures/reference-games/verify';
+import { walkRightRoute, walkRoute } from '../../fixtures/reference-games/walkRoute';
 import { SPAWNABLE_ENTITY_TYPES } from '@/stores/slices/sceneGraphSlice';
 import { normalizeGameComponent, toWireComponent } from '@/lib/engine/gameComponentWire';
 
@@ -150,5 +151,154 @@ describe('the expected-state checker fails for the reasons it exists', () => {
   it('derives the same record the fixture ships with, minus the digest', () => {
     const { contentDigest: _digest, ...rest } = expected;
     expect(deriveExpectedState(game)).toEqual(rest);
+  });
+});
+
+/**
+ * #10378 — what the 2D reference game's route may ask of the player.
+ *
+ * A 2D project takes the legacy direct-translation branch of the character
+ * controller: walking moves the transform, a jump is a one-frame nudge, and the
+ * body can only fall. So a route that climbs, or that needs a jump to cross a
+ * gap, describes a game nobody can win. `walkRightRoute` sweeps the player's
+ * box from its spawn to the goal over the fixture's own geometry; the cases
+ * below hold the shipped game to a route it can walk, and hold the checker to
+ * going red for each way a future edit could break that.
+ */
+describe('the 2D reference game can be won by walking right (#10159, #10378)', () => {
+  function the2dGame(): ReferenceGame {
+    const entry = REFERENCE_GAMES.find(({ game }) => game.member === '2d');
+    if (!entry) throw new Error('the registry holds no 2D reference game');
+    return entry.game;
+  }
+
+  /** A clone of the 2D game with `change` applied to the entity `id`. */
+  function edited(id: string, change: (entity: ReferenceGame['entities'][number]) => void): ReferenceGame {
+    const game = clone(the2dGame());
+    const entity = game.entities.find((e) => e.id === id);
+    if (!entity) throw new Error(`the 2D game has no entity "${id}"`);
+    change(entity);
+    return game;
+  }
+
+  it('gives every 2D collider the size of its mesh, which is what the route geometry reads', () => {
+    const game = the2dGame();
+    let checked = 0;
+    for (const entity of game.entities) {
+      if (entity.physics?.dimension !== '2d') continue;
+      expect(entity.physics.data.size, entity.id).toEqual([entity.scale[0], entity.scale[1]]);
+      checked += 1;
+    }
+    expect(checked).toBe(game.entities.length);
+  });
+
+  it('walks from the spawn to the goal over a floor that never rises, collecting the coin and touching no damage zone', () => {
+    const game = the2dGame();
+
+    const report = walkRightRoute(game);
+
+    expect(report.problems).toEqual([]);
+    expect(report.surfaces).toEqual(['ledge_start', 'ledge_end']);
+    expect(report.collected).toEqual(['coin']);
+    // The same property stated straight off the data, so a bug in the sweep
+    // cannot hide a climb from this test: each floor the player reaches is no
+    // higher than the one before it.
+    const tops = report.surfaces.map((id) => {
+      const entity = game.entities.find((e) => e.id === id);
+      return entity ? entity.position[1] + entity.scale[1] / 2 : Number.NaN;
+    });
+    expect(tops.length).toBeGreaterThan(1);
+    tops.forEach((top, i) => {
+      expect(Number.isFinite(top)).toBe(true);
+      if (i > 0) expect(top).toBeLessThanOrEqual(tops[i - 1] + 1e-9);
+    });
+  });
+
+  it.each([0.3, 0.1, 0.01])('refuses an end ledge that rises %s above the start ledge', (rise) => {
+    const risen = edited('ledge_end', (e) => {
+      e.position = [e.position[0], e.position[1] + rise, e.position[2]];
+    });
+
+    const { problems } = walkRightRoute(risen);
+
+    expect(problems.some((p) => p.startsWith('climb:'))).toBe(true);
+  });
+
+  it('refuses a gap the box cannot straddle', () => {
+    const split = edited('ledge_end', (e) => {
+      e.position = [e.position[0] + 1, e.position[1], e.position[2]];
+    });
+
+    const { problems } = walkRightRoute(split);
+
+    expect(problems.some((p) => p.startsWith('gap:'))).toBe(true);
+  });
+
+  it('refuses an opening lower than the box, and accepts one it fits under', () => {
+    const withOverhang = (bottom: number) => {
+      const game = clone(the2dGame());
+      const overhang = structuredClone(game.entities.filter((e) => e.id === 'ledge_end')[0]);
+      overhang.id = 'overhang';
+      overhang.name = 'Overhang';
+      overhang.scale = [2, 1, 1];
+      overhang.position = [3, bottom + 0.5, 0];
+      if (overhang.physics?.dimension === '2d') overhang.physics.data.size = [2, 1];
+      game.entities.push(overhang);
+      return game;
+    };
+
+    expect(walkRightRoute(withOverhang(0.5)).problems.some((p) => p.startsWith('climb:'))).toBe(true);
+    expect(walkRightRoute(withOverhang(0.9)).problems).toEqual([]);
+  });
+
+  it('loses by holding left: the box touches the spike pit without ever leaving the start ledge', () => {
+    const game = the2dGame();
+
+    const report = walkRoute(game, 'left', 'spike_pit');
+
+    // No fall is needed, so the lose path does not depend on how far the body
+    // drifts while it drops (which varies with the frame rate).
+    expect(report.problems).toEqual([]);
+    expect(report.surfaces).toEqual(['ledge_start']);
+  });
+
+  it('refuses a lose route whose damage zone the walk cannot reach', () => {
+    const buried = edited('spike_pit', (e) => {
+      e.position = [e.position[0], -3, e.position[2]];
+    });
+
+    const { problems } = walkRoute(buried, 'left', 'spike_pit');
+
+    expect(problems).not.toEqual([]);
+  });
+
+  it('refuses a damage zone on the walk to the goal', () => {
+    const onTheRoute = edited('spike_pit', (e) => {
+      e.position = [2, 0.3, 0];
+    });
+
+    const { problems } = walkRightRoute(onTheRoute);
+
+    expect(problems.some((p) => p.startsWith('hazard:'))).toBe(true);
+  });
+
+  it('refuses a coin the walk never touches', () => {
+    const overhead = edited('coin', (e) => {
+      e.position = [e.position[0], e.position[1] + 3, e.position[2]];
+    });
+
+    const { problems } = walkRightRoute(overhead);
+
+    expect(problems.some((p) => p.startsWith('collectible:'))).toBe(true);
+  });
+
+  it('refuses a goal the walk passes without touching', () => {
+    const overhead = edited('goal', (e) => {
+      e.position = [e.position[0], e.position[1] + 3, e.position[2]];
+    });
+
+    const { problems } = walkRightRoute(overhead);
+
+    expect(problems.some((p) => p.startsWith('target:'))).toBe(true);
   });
 });
