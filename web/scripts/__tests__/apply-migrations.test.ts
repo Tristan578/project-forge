@@ -9,8 +9,11 @@ import {
   causeMessages,
   createStatementRecorder,
   currentMigrationIndex,
+  describeApplyFailure,
   describeMigrationFailure,
   findApplyingMigration,
+  findApplyingStatement,
+  locateLastStatement,
   rootCauseMessage,
   zipMigrationStatements,
   type MigrationStatements,
@@ -77,6 +80,17 @@ const WITH_DUPLICATE: MigrationStatements[] = [
   { tag: '0001_next', statements: ['CREATE TABLE b (id int);', DUPLICATE] },
 ];
 
+// The same statement TWICE inside one migration — two identical seed INSERTs,
+// the second of which violates the unique key the first one satisfied. A text
+// search finds the FIRST copy whichever one failed, so the position of the
+// failing statement has to come from the log, not from the statement's text.
+const SEED = "INSERT INTO flags (name) VALUES ('beta');";
+const CREATE_FLAGS = 'CREATE TABLE flags (name text UNIQUE);';
+const WITH_REPEATED_STATEMENT: MigrationStatements[] = [
+  { tag: '0000_base', statements: [CREATE_FLAGS] },
+  { tag: '0001_seed', statements: [SEED, SEED] },
+];
+
 // What drizzle's neon-http migrator logs BEFORE the first migration statement
 // (node_modules/drizzle-orm/neon-http/migrator.js): the schema, the journal
 // table, and the read of the newest journal row.
@@ -131,6 +145,35 @@ describe('describeMigrationFailure', () => {
     );
     expect(describeMigrationFailure(DUPLICATE, WITH_DUPLICATE, 7)).toBe(
       'while applying migration 0000_base (statement 1 of 2)',
+    );
+  });
+
+  it('names the position of the statement that FAILED when the same statement sits twice in one migration', () => {
+    // The second INSERT violated the unique key. findIndex on the text says 1.
+    expect(describeMigrationFailure(SEED, WITH_REPEATED_STATEMENT, 1, 1)).toBe(
+      'while applying migration 0001_seed (statement 2 of 2)',
+    );
+    expect(describeMigrationFailure(SEED, WITH_REPEATED_STATEMENT, 1, 0)).toBe(
+      'while applying migration 0001_seed (statement 1 of 2)',
+    );
+  });
+
+  it('searches the statement text only when the position is unknown, or does not hold that statement', () => {
+    const first = 'while applying migration 0001_seed (statement 1 of 2)';
+    expect(describeMigrationFailure(SEED, WITH_REPEATED_STATEMENT, 1)).toBe(first);
+    expect(describeMigrationFailure(SEED, WITH_REPEATED_STATEMENT, 1, null)).toBe(first);
+    // Out of range: no statement sits there, so the position says nothing.
+    expect(describeMigrationFailure(SEED, WITH_REPEATED_STATEMENT, 1, 9)).toBe(first);
+    // In range but a different statement: a position that does not hold the
+    // failed statement must not invent a location, so the search decides.
+    expect(describeMigrationFailure(CREATE_FLAGS, WITH_REPEATED_STATEMENT, 1, 0)).toBe(
+      'while applying migration 0000_base (statement 1 of 1)',
+    );
+  });
+
+  it('ignores a position when it is given without the migration it belongs to', () => {
+    expect(describeMigrationFailure(SEED, WITH_REPEATED_STATEMENT, null, 1)).toBe(
+      'while applying migration 0001_seed (statement 1 of 2)',
     );
   });
 
@@ -200,6 +243,48 @@ describe('currentMigrationIndex', () => {
   });
 });
 
+describe('locateLastStatement', () => {
+  // The same alignment as currentMigrationIndex, but it also says WHICH of the
+  // migration's statements the last logged one was. Position comes from how far
+  // the walk had got, so two identical statements are told apart by order.
+  it('places each of two identical statements in one migration at its own position', () => {
+    const first = [...BOOKKEEPING, SEED];
+    const second = [...first, SEED];
+    // Only 0001 is pending: 0000 is already in the journal.
+    expect(locateLastStatement(first, WITH_REPEATED_STATEMENT, [1])).toEqual({
+      migrationIndex: 1,
+      statementIndex: 0,
+    });
+    expect(locateLastStatement(second, WITH_REPEATED_STATEMENT, [1])).toEqual({
+      migrationIndex: 1,
+      statementIndex: 1,
+    });
+  });
+
+  it('places a statement that repeats across migrations AND within one, from a from-zero run', () => {
+    const migrations: MigrationStatements[] = [
+      { tag: '0000_base', statements: [SEED] },
+      { tag: '0001_seed', statements: [SEED, SEED] },
+    ];
+    const at = (copies: number) =>
+      locateLastStatement([...BOOKKEEPING, ...Array<string>(copies).fill(SEED)], migrations, [0, 1]);
+    expect(at(1)).toEqual({ migrationIndex: 0, statementIndex: 0 });
+    expect(at(2)).toEqual({ migrationIndex: 1, statementIndex: 0 });
+    expect(at(3)).toEqual({ migrationIndex: 1, statementIndex: 1 });
+  });
+
+  it('reports the migration currentMigrationIndex reports, and null where it is null', () => {
+    const log = [...BOOKKEEPING, CREATE_FLAGS, SEED, SEED];
+    expect(locateLastStatement(log, WITH_REPEATED_STATEMENT, [0, 1])?.migrationIndex).toBe(
+      currentMigrationIndex(log, WITH_REPEATED_STATEMENT, [0, 1]),
+    );
+    expect(locateLastStatement([], WITH_REPEATED_STATEMENT, [0, 1])).toBeNull();
+    expect(locateLastStatement(BOOKKEEPING, WITH_REPEATED_STATEMENT, [0, 1])).toBeNull();
+    expect(locateLastStatement([...BOOKKEEPING, CREATE_FLAGS, 'SELECT 1'], WITH_REPEATED_STATEMENT, [0, 1])).toBeNull();
+    expect(locateLastStatement([...BOOKKEEPING, CREATE_FLAGS], WITH_REPEATED_STATEMENT, [])).toBeNull();
+  });
+});
+
 describe('findApplyingMigration', () => {
   // The migrator inserts journal rows only after EVERY statement applied, so a
   // failure leaves the journal as the migrator read it; reading it again names
@@ -243,6 +328,74 @@ describe('findApplyingMigration', () => {
     await expect(
       findApplyingMigration(queryReturning([{ created_at: 'not-a-number' }]).query, logged, WITH_DUPLICATE, folderMillis),
     ).resolves.toBeNull();
+  });
+});
+
+describe('findApplyingStatement / describeApplyFailure (what main() does when migrate throws)', () => {
+  const folderMillis = [100, 200];
+
+  function journalNewest(createdAt: string | null): (text: string) => Promise<unknown> {
+    return () => Promise.resolve(createdAt === null ? [] : [{ created_at: createdAt }]);
+  }
+
+  function recorderThatSaw(statements: readonly string[]): ReturnType<typeof createStatementRecorder> {
+    const recorder = createStatementRecorder();
+    for (const statement of statements) recorder.logger.logQuery(statement, []);
+    return recorder;
+  }
+
+  it('findApplyingStatement returns the migration AND the position of the statement that was executing', async () => {
+    // 0000 is already in the journal (created_at 100), so only 0001's two
+    // identical INSERTs ran: the second is the one that threw.
+    const logged = [...BOOKKEEPING, SEED, SEED];
+    await expect(
+      findApplyingStatement(journalNewest('100'), logged, WITH_REPEATED_STATEMENT, folderMillis),
+    ).resolves.toEqual({ migrationIndex: 1, statementIndex: 1 });
+    await expect(
+      findApplyingStatement(journalNewest('100'), logged.slice(0, -1), WITH_REPEATED_STATEMENT, folderMillis),
+    ).resolves.toEqual({ migrationIndex: 1, statementIndex: 0 });
+  });
+
+  it('findApplyingStatement is null, not a throw, when the journal cannot be read', async () => {
+    const failing = () => Promise.reject(new Error('connection reset'));
+    await expect(
+      findApplyingStatement(failing, [...BOOKKEEPING, SEED], WITH_REPEATED_STATEMENT, folderMillis),
+    ).resolves.toBeNull();
+  });
+
+  it('says "statement 2 of 2" when the SECOND of two identical statements in a migration failed', async () => {
+    const recorder = recorderThatSaw([...BOOKKEEPING, SEED, SEED]);
+    await expect(
+      describeApplyFailure(journalNewest('100'), recorder, WITH_REPEATED_STATEMENT, folderMillis),
+    ).resolves.toBe('while applying migration 0001_seed (statement 2 of 2)');
+  });
+
+  it('says "statement 1 of 2" when the FIRST of them failed', async () => {
+    const recorder = recorderThatSaw([...BOOKKEEPING, SEED]);
+    await expect(
+      describeApplyFailure(journalNewest('100'), recorder, WITH_REPEATED_STATEMENT, folderMillis),
+    ).resolves.toBe('while applying migration 0001_seed (statement 1 of 2)');
+  });
+
+  it('places the statement from a from-zero run too, where 0000 ran first', async () => {
+    const recorder = recorderThatSaw([...BOOKKEEPING, CREATE_FLAGS, SEED, SEED]);
+    await expect(
+      describeApplyFailure(journalNewest(null), recorder, WITH_REPEATED_STATEMENT, folderMillis),
+    ).resolves.toBe('while applying migration 0001_seed (statement 2 of 2)');
+  });
+
+  it('falls back to the first text match, never a throw, when the journal cannot be read', async () => {
+    const recorder = recorderThatSaw([...BOOKKEEPING, SEED, SEED]);
+    const failing = () => Promise.reject(new Error('connection reset'));
+    await expect(
+      describeApplyFailure(failing, recorder, WITH_REPEATED_STATEMENT, folderMillis),
+    ).resolves.toBe('while applying migration 0001_seed (statement 1 of 2)');
+  });
+
+  it('says no migration statement ran when the migrator logged nothing', async () => {
+    await expect(
+      describeApplyFailure(journalNewest(null), recorderThatSaw([]), WITH_REPEATED_STATEMENT, folderMillis),
+    ).resolves.toBe('before any migration statement ran (preparing the drizzle journal table)');
   });
 });
 
