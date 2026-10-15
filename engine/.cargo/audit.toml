@@ -1,0 +1,36 @@
+# cargo-audit configuration for the engine. `cargo audit` reads this file from
+# its working directory, and the Quality Gates job runs it with
+# `working-directory: engine` (.github/workflows/quality-gates.yml, "cargo audit
+# (engine)"), so an entry here is what keeps a known, un-relockable advisory from
+# failing every CI run. It is NOT a place to park a fixable one.
+#
+# Every ignore carries, in the comment block directly above its id:
+#   unfixable: why no relock can move the crate to a patched release today
+#   exposure:  what input reaches the vulnerable code and the worst case
+#   lift when: the condition under which the entry must be removed, with the
+#              tracking issue
+# scripts/__tests__/cargo-audit-ignores.test.sh pins that shape AND the exact
+# list below, so adding an id means editing the test in the same change.
+
+[advisories]
+ignore = [
+  # RUSTSEC-2026-0344: ruzstd 0.8.2, decompression bomb (a tiny input can
+  # exhaust memory), severity 7.5 high, fixed in ruzstd >= 0.9.1.
+  # unfixable: ruzstd is reached only through bevy_image 0.19.1's `zstd_rust`
+  #   feature, which declares `ruzstd = "0.8"`; cargo cannot resolve 0.9.x for
+  #   that requirement and a [patch] cannot change it either. 0.19.1 is the
+  #   newest bevy_image in the 0.19 line (checked 2026-10-15), and the feature
+  #   cannot be dropped: `tonemapping_luts` = ktx2 + bevy_image/zstd, and
+  #   without the LUTs every material renders pink (CLAUDE.md, Rendering
+  #   Strategy). `zstd_c` is the C decoder and does not build for wasm32.
+  # exposure: the only zstd-supercompressed KTX2 the engine decodes is Bevy's
+  #   own embedded tonemapping LUT. Nothing in engine/src or web/src produces or
+  #   accepts a .ktx2 asset (grep ktx2|zstd finds no source reference), so an
+  #   attacker would need a scene that points a texture at a hosted .ktx2 file;
+  #   the worst case is that one viewer's WASM heap runs out and the tab
+  #   crashes. No server-side code runs ruzstd.
+  # lift when: the engine moves to Bevy >= 0.20 (bevy_image there is free to
+  #   admit ruzstd 0.9), or a bevy_image 0.19.x release raises the requirement.
+  #   Tracking: #10393.
+  "RUSTSEC-2026-0344",
+]
