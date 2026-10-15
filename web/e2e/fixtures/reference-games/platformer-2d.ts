@@ -21,11 +21,16 @@
  *     goal flag (x=7, y 0..1.5) both overlap the box's own height band
  *     (y 0..0.8) at floor level, so walking collects the one and touches the
  *     other. No floor on the route is higher than the one before it, because
- *     the controller cannot climb even a hundredth of a unit, and there is no
- *     drop or gap either: how far the body drifts sideways while it falls
- *     depends on the frame rate (the controller moves by the frame's `dt`, the
- *     simulation's step is capped), so a route that needed a landing spot could
- *     not be reproduced.
+ *     the controller cannot climb even a hundredth of a unit. The layout has
+ *     no drop and no gap either: how far the body drifts sideways while it
+ *     falls depends on the frame rate (the controller moves by the frame's
+ *     `dt`, the simulation's step is capped), so a route that needed a landing
+ *     spot could not be reproduced. The checker (`walkRoute.ts`) is not as
+ *     strict on that last point: it refuses a gap the box cannot straddle and
+ *     any climb, but it ACCEPTS a step down onto an adjoining lower floor,
+ *     because it does not model the fall. That drop is avoided by THIS layout
+ *     (both ledges are coplanar), not forbidden by the checker; a test pins
+ *     that the checker allows it.
  *   - lose: hold left. The spike pit is a sensor filling the cavity between the
  *     left bank and the start ledge (x -10..-8, y -3..0.5). Its tips stand 0.5
  *     above the floor, inside the box's height band, so the box touches it
@@ -37,9 +42,9 @@
  *
  * `e2e/lib/__tests__/referenceGames.test.ts` pins this against the fixture's own
  * data (`walkRoute.ts` sweeps the player's box along it): the winning walk reaches
- * the goal over floors that only ever step down, collects the coin and touches no
- * damage zone, and the left walk reaches the pit without leaving the floor. It
- * cannot see the engine; no live-engine journey has yet played this route.
+ * the goal over floors that never rise, collects the coin and touches no damage
+ * zone, and the left walk reaches the pit without leaving the floor. It cannot
+ * see the engine; no live-engine journey has yet played this route.
  *
  * VERSIONS. v1 routed the player across a spike pit by way of a floating
  * platform (jump needed). No walk could win it under the controller described
@@ -62,8 +67,10 @@
  * `despawnOnDeath` is false. An engine query of the player's transform and
  * health observes it.
  *
- * 2D CONTACTS — the three game-component systems above read their contacts
- * from `GameComponentRuntime.active_collisions`, which `system_track_collisions`
+ * 2D CONTACTS — the win-condition, collectible and damage-zone systems
+ * (`system_win_condition`, `system_collectible` and `system_damage_zone` in
+ * `engine/src/core/game_components.rs`) read their contacts from
+ * `GameComponentRuntime.active_collisions`, which `system_track_collisions`
  * fills from BOTH simulations: `bevy_rapier3d`'s `CollisionEvent` stream and,
  * since #10212 (closing #10194), `bevy_rapier2d`'s as well. Before that fix
  * the set was fed by the 3D reader only, so in a 2D project the goal, the coin

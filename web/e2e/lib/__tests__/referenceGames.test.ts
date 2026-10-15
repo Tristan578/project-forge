@@ -234,6 +234,20 @@ describe('the 2D reference game can be won by walking right (#10159, #10378)', (
     expect(problems.some((p) => p.startsWith('gap:'))).toBe(true);
   });
 
+  it('accepts a step down onto an adjoining lower floor, which the shipped layout does not use', () => {
+    // The checker lowers the floor once the box has cleared the higher ledge, so a
+    // descent is not refused. The fixture header says the same: the layout avoids
+    // a drop, the checker does not forbid one.
+    const stepDown = edited('ledge_end', (e) => {
+      e.position = [e.position[0], e.position[1] - 0.5, e.position[2]];
+    });
+
+    const report = walkRightRoute(stepDown);
+
+    expect(report.problems).toEqual([]);
+    expect(report.surfaces).toEqual(['ledge_start', 'ledge_end']);
+  });
+
   it('refuses an opening lower than the box, and accepts one it fits under', () => {
     const withOverhang = (bottom: number) => {
       const game = clone(the2dGame());
@@ -263,13 +277,25 @@ describe('the 2D reference game can be won by walking right (#10159, #10378)', (
   });
 
   it('refuses a lose route whose damage zone the walk cannot reach', () => {
+    // Sink the pit below the floor AND close the cavity it sat in, by widening the
+    // left bank to meet the start ledge. The floor is then continuous all the way
+    // past the pit, so the only thing wrong with the route is that the walk never
+    // touches its target. (Sinking the pit alone leaves the 2-unit cavity between
+    // the ledge and the bank, and the walk fails on that gap, not on the target.)
     const buried = edited('spike_pit', (e) => {
       e.position = [e.position[0], -3, e.position[2]];
     });
+    const bank = buried.entities.find((e) => e.id === 'left_bank');
+    if (bank?.physics?.dimension !== '2d') throw new Error('the 2D game has no left_bank with a 2D collider');
+    bank.scale = [6, 1, 1];
+    bank.position = [-11, bank.position[1], bank.position[2]];
+    bank.physics.data.size = [6, 1];
 
     const { problems } = walkRoute(buried, 'left', 'spike_pit');
 
-    expect(problems).not.toEqual([]);
+    // A gap ends the walk before the target check runs, so `target:` appearing at
+    // all means the sweep got past the pit on a continuous floor.
+    expect(problems.some((p) => p.startsWith('target:'))).toBe(true);
   });
 
   it('refuses a damage zone on the walk to the goal', () => {
@@ -300,5 +326,28 @@ describe('the 2D reference game can be won by walking right (#10159, #10378)', (
     const { problems } = walkRightRoute(overhead);
 
     expect(problems.some((p) => p.startsWith('target:'))).toBe(true);
+  });
+
+  // Both spawn refusals start with `spawn:`, and a player sunk into its only
+  // support also has no floor under it, so a prefix check would stay green with
+  // the embedded rule disabled. These pin the whole line instead.
+  it('refuses a player spawned inside a support', () => {
+    const sunk = edited('player', (e) => {
+      e.position = [e.position[0], 0.2, e.position[2]];
+    });
+
+    const { problems } = walkRightRoute(sunk);
+
+    expect(problems).toEqual(['spawn: the player starts inside ledge_start']);
+  });
+
+  it('refuses a player spawned with nothing solid under it', () => {
+    const overTheCavity = edited('player', (e) => {
+      e.position = [-9, e.position[1], e.position[2]];
+    });
+
+    const { problems } = walkRightRoute(overTheCavity);
+
+    expect(problems).toEqual(['spawn: nothing solid is under the player at x=-9']);
   });
 });

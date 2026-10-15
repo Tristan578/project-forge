@@ -16,6 +16,11 @@
  *   (the controller moves by the frame's `dt`, the simulation's step is capped),
  *   so a route that needs a particular landing spot is not reproducible. The
  *   check below therefore accepts no gap at all that the box cannot straddle.
+ *   It does accept a step DOWN onto a lower floor the box is already over once
+ *   it has cleared the higher one (the floor it stands on stays or lowers, it
+ *   never rises). The sweep does not model the fall, so a layout that wants to
+ *   stay independent of where a fall lands has to avoid descents itself, as
+ *   `platformer-2d.ts` does.
  *
  * The model is deliberately small. The player's box sweeps sideways from its
  * spawn in fixed steps. At every step it needs a solid under it, and nothing
