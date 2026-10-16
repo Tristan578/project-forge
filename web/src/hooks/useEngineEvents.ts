@@ -193,6 +193,13 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       console.warn('Unknown engine event:', type);
     };
 
+    // A callback registered against a (re)initialised engine starts from no
+    // frame: the engine's delta cache is empty after `init_engine` and a
+    // re-initialisation emits no mode event, so nothing else would drop a
+    // snapshot left from before (#10375). `resetEngine` does the same on the
+    // recovery path, which keeps the module identity and so does not re-run
+    // this effect; this is the hub's own guard for when it does re-run.
+    resetPlayTickSnapshot();
     wasmModule.set_event_callback(handleEvent);
   }, [wasmModule]);
 }
