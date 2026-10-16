@@ -28,7 +28,7 @@ import {
   deriveExpectedState,
   expectedStateProblems,
 } from '../../fixtures/reference-games/verify';
-import { walkRightRoute, walkRoute } from '../../fixtures/reference-games/walkRoute';
+import { boxOf, walkRightRoute, walkRoute } from '../../fixtures/reference-games/walkRoute';
 import { SPAWNABLE_ENTITY_TYPES } from '@/stores/slices/sceneGraphSlice';
 import { normalizeGameComponent, toWireComponent } from '@/lib/engine/gameComponentWire';
 
@@ -181,15 +181,103 @@ describe('the 2D reference game can be won by walking right (#10159, #10378)', (
     return game;
   }
 
-  it('gives every 2D collider the size of its mesh, which is what the route geometry reads', () => {
+  // bevy_rapier2d multiplies every collider by the entity's transform scale, and the
+  // engine inserts no `ColliderScale` (`make_collider_2d` in
+  // `engine/src/core/physics_2d_sim.rs` builds `Collider::cuboid(size / 2)` and
+  // `Collider::ball(radius)`), so a collider's `size` is in LOCAL units and the scale
+  // gives the world extent. The web's own default is `size: [1, 1]`.
+  it('expresses every 2D collider in local units: the unit shape, with the transform scale carrying the world extent', () => {
     const game = the2dGame();
     let checked = 0;
     for (const entity of game.entities) {
       if (entity.physics?.dimension !== '2d') continue;
-      expect(entity.physics.data.size, entity.id).toEqual([entity.scale[0], entity.scale[1]]);
+      const { colliderShape, size, radius } = entity.physics.data;
+      if (colliderShape === 'box') {
+        // Setting `size` to the scale as well would be applied twice: a 7-wide scale
+        // with a 7-wide size is a 49-wide collider.
+        expect(size, `${entity.id} box size`).toEqual([1, 1]);
+      } else if (colliderShape === 'circle') {
+        // The unit circle spans the same 1-unit diameter as a unit box, so a uniform
+        // scale is its world diameter.
+        expect(radius, `${entity.id} circle radius`).toBe(0.5);
+        expect(entity.scale[0], `${entity.id} circle scale`).toBe(entity.scale[1]);
+      } else {
+        throw new Error(`${entity.id}: ${colliderShape} is not a shape the walk-route model measures`);
+      }
       checked += 1;
     }
     expect(checked).toBe(game.entities.length);
+  });
+
+  it('places every collider where the layout puts it, whatever the transform scale does to its local size', () => {
+    // Written out by hand from the header's layout, not derived from the fixture's own
+    // scales, so a double-scaled collider cannot satisfy it by agreeing with itself.
+    const worldExtents: Record<string, { x: [number, number]; y: [number, number] }> = {
+      player: { x: [-5.4, -4.6], y: [0.1, 0.9] },
+      ledge_start: { x: [-8, -1], y: [-1, 0] },
+      spike_pit: { x: [-10, -8], y: [-3, 0.5] },
+      left_bank: { x: [-14, -10], y: [-1, 0] },
+      coin: { x: [2.25, 2.75], y: [0.15, 0.65] },
+      ledge_end: { x: [-1, 8], y: [-1, 0] },
+      goal: { x: [6.75, 7.25], y: [0, 1.5] },
+    };
+    const game = the2dGame();
+    expect(game.entities.map((e) => e.id).sort()).toEqual(Object.keys(worldExtents).sort());
+    for (const entity of game.entities) {
+      const box = boxOf(entity);
+      const want = worldExtents[entity.id];
+      expect(box.minX, `${entity.id} minX`).toBeCloseTo(want.x[0], 9);
+      expect(box.maxX, `${entity.id} maxX`).toBeCloseTo(want.x[1], 9);
+      expect(box.minY, `${entity.id} minY`).toBeCloseTo(want.y[0], 9);
+      expect(box.maxY, `${entity.id} maxY`).toBeCloseTo(want.y[1], 9);
+    }
+  });
+
+  it('measures a collider the way the engine builds it: local size times the transform scale', () => {
+    // The shape the fixture had before v3: `size` equal to `scale`. The engine
+    // simulates 7 x 7 = a 49-wide start ledge, so the checker has to report 49 and
+    // not the 7 the author meant.
+    const doubled = edited('ledge_start', (e) => {
+      if (e.physics?.dimension === '2d') e.physics.data.size = [e.scale[0], e.scale[1]];
+    });
+    const ledge = doubled.entities.find((e) => e.id === 'ledge_start');
+    if (!ledge) throw new Error('the 2D game has no ledge_start');
+
+    const box = boxOf(ledge);
+
+    expect(box.maxX - box.minX).toBe(49);
+    expect(box.maxY - box.minY).toBe(1);
+  });
+
+  it.each([
+    { radius: 0.5, scale: 2, diameter: 2 },
+    { radius: 0.25, scale: 2, diameter: 1 },
+    { radius: 0.5, scale: 0.5, diameter: 0.5 },
+  ])('measures a circle collider as its radius times the transform scale ($radius x $scale)', ({ radius, scale, diameter }) => {
+    const round = edited('coin', (e) => {
+      if (e.physics?.dimension === '2d') {
+        e.physics.data.colliderShape = 'circle';
+        e.physics.data.radius = radius;
+      }
+      e.scale = [scale, scale, scale];
+    });
+    const coin = round.entities.find((e) => e.id === 'coin');
+    if (!coin) throw new Error('the 2D game has no coin');
+
+    const box = boxOf(coin);
+
+    expect(box.maxX - box.minX).toBeCloseTo(diameter, 9);
+    expect(box.maxY - box.minY).toBeCloseTo(diameter, 9);
+  });
+
+  it('refuses to measure a collider shape it does not model, rather than guess its extent', () => {
+    const capsule = edited('player', (e) => {
+      if (e.physics?.dimension === '2d') e.physics.data.colliderShape = 'capsule';
+    });
+    const player = capsule.entities.find((e) => e.id === 'player');
+    if (!player) throw new Error('the 2D game has no player');
+
+    expect(() => boxOf(player)).toThrow(/capsule/);
   });
 
   it('walks from the spawn to the goal over a floor that never rises, collecting the coin and touching no damage zone', () => {
@@ -256,7 +344,6 @@ describe('the 2D reference game can be won by walking right (#10159, #10378)', (
       overhang.name = 'Overhang';
       overhang.scale = [2, 1, 1];
       overhang.position = [3, bottom + 0.5, 0];
-      if (overhang.physics?.dimension === '2d') overhang.physics.data.size = [2, 1];
       game.entities.push(overhang);
       return game;
     };
@@ -286,10 +373,10 @@ describe('the 2D reference game can be won by walking right (#10159, #10378)', (
       e.position = [e.position[0], -3, e.position[2]];
     });
     const bank = buried.entities.find((e) => e.id === 'left_bank');
-    if (bank?.physics?.dimension !== '2d') throw new Error('the 2D game has no left_bank with a 2D collider');
+    if (!bank) throw new Error('the 2D game has no left_bank');
+    // Only the scale changes: the collider's local size stays the unit box.
     bank.scale = [6, 1, 1];
     bank.position = [-11, bank.position[1], bank.position[2]];
-    bank.physics.data.size = [6, 1];
 
     const { problems } = walkRoute(buried, 'left', 'spike_pit');
 

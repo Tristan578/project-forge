@@ -27,9 +27,10 @@
  * solid may stand in the band it occupies above the floor it is on. The sweep
  * stops when the box first touches its target: the goal for the winning walk
  * (right), a damage zone for the losing one (left). Everything read here is
- * fixture data (a 2D collider's centre is the entity's position, its size the
- * collider's size), so the check fails the moment a fixture edit re-adds a climb
- * or a gap, long before a slow engine journey would.
+ * fixture data (a 2D collider's centre is the entity's position, its extent the
+ * collider's local size times the entity's transform scale, as the engine
+ * simulates it: see `boxOf`), so the check fails the moment a fixture edit
+ * re-adds a climb or a gap, long before a slow engine journey would.
  *
  * Plain data and pure helpers only, like `referenceGame.ts`.
  */
@@ -67,14 +68,49 @@ export interface WalkRouteReport {
   problems: string[];
 }
 
-/** The collider of a 2D entity as a world box. Throws for an entity with no 2D collider. */
+/**
+ * The collider of a 2D entity as a world box, measured the way the engine
+ * simulates it. Throws for an entity with no 2D collider, and for a collider
+ * shape this model does not measure.
+ *
+ * The collider's `size` and `radius` are in the entity's LOCAL space. The engine
+ * builds `Collider::cuboid(size / 2)` and `Collider::ball(radius)`
+ * (`make_collider_2d`, `engine/src/core/physics_2d_sim.rs`) and inserts no
+ * `ColliderScale`, so bevy_rapier2d's `apply_scale` multiplies the shape by the
+ * entity's transform scale on X and Y. The world extent is therefore
+ * `size * |scale|` for a box and `radius * |scale|` per axis for a circle (swept
+ * here as its bounding box). Reading `size` alone, as this function once did, is
+ * only right while the scale is 1: a fixture that also set `size` to its scale
+ * was double-scaled by the engine (a 7-wide ledge simulated as 49 wide) and
+ * nothing here could see it.
+ */
 export function boxOf(entity: ReferenceEntity): WorldBox {
   if (entity.physics?.dimension !== '2d') {
     throw new Error(`entity "${entity.id}" has no 2D collider`);
   }
-  const [width, height] = entity.physics.data.size;
+  const { colliderShape, size, radius } = entity.physics.data;
+  const scaleX = Math.abs(entity.scale[0]);
+  const scaleY = Math.abs(entity.scale[1]);
+  let halfWidth: number;
+  let halfHeight: number;
+  switch (colliderShape) {
+    // `make_collider_2d` builds the same cuboid for `box` and `auto`.
+    case 'box':
+    case 'auto':
+      halfWidth = (Math.abs(size[0]) * scaleX) / 2;
+      halfHeight = (Math.abs(size[1]) * scaleY) / 2;
+      break;
+    case 'circle':
+      halfWidth = Math.abs(radius) * scaleX;
+      halfHeight = Math.abs(radius) * scaleY;
+      break;
+    default:
+      // A capsule, hull or edge would need its own scaled extent; guessing one from
+      // `size` is the silent-wrong-answer this model exists to prevent.
+      throw new Error(`entity "${entity.id}" has a ${colliderShape} collider, which the walk-route model does not measure`);
+  }
   const [x, y] = entity.position;
-  return { id: entity.id, minX: x - width / 2, maxX: x + width / 2, minY: y - height / 2, maxY: y + height / 2 };
+  return { id: entity.id, minX: x - halfWidth, maxX: x + halfWidth, minY: y - halfHeight, maxY: y + halfHeight };
 }
 
 /** A static, non-sensor 2D body: what the player stands on and bumps into. */

@@ -48,9 +48,12 @@
  *
  * VERSIONS. v1 routed the player across a spike pit by way of a floating
  * platform (jump needed). No walk could win it under the controller described
- * below, so it described a game that could not be won; v2 is this layout. A
- * platform-and-jump route returns as a new version once the 2D controller has a
- * real jump (#10378).
+ * below, so it described a game that could not be won; v2 was this layout. v3
+ * keeps v2's layout and world extents and changes only how the colliders express
+ * them: v2 set each box's `size` to its scale, which the engine multiplies by the
+ * scale again (see COORDINATES), so the game it simulated was not the one drawn
+ * here. A platform-and-jump route returns as a new version once the 2D
+ * controller has a real jump (#10378).
  *
  * WIN — `winCondition { conditionType: 'reachGoal', targetEntityId: 'goal' }`
  * on the goal flag itself. The engine's `system_win_condition`
@@ -99,8 +102,21 @@
  * and the binding is ready for the day the jump works; nothing on the route
  * uses it.
  *
- * Coordinates are world units in the XY plane (a 2D project's camera looks down
- * -Z); each entity's 2D collider size equals its X/Y scale.
+ * COORDINATES. Positions and scales are world units in the XY plane (a 2D
+ * project's camera looks down -Z). Every 2D collider is the UNIT shape in the
+ * entity's local space (a box of `size: [1, 1]`) and the entity's X/Y scale gives
+ * it its world extent: bevy_rapier2d multiplies each collider by the entity's
+ * transform scale, and the engine inserts no `ColliderScale`
+ * (`make_collider_2d` in `engine/src/core/physics_2d_sim.rs` builds
+ * `Collider::cuboid(size / 2)` and `Collider::ball(radius)`). The web's own
+ * default is the same `size: [1, 1]` (`defaultPhysics2dData`). A collider whose
+ * `size` also equalled its scale would be simulated at size x scale: the 7-wide
+ * start ledge as 49 wide, the 0.8 player as 0.64. `walkRoute.ts` measures
+ * colliders that way, and the suite pins both the unit size and the world
+ * extents the layout above needs.
+ *
+ * Every collider is a box; `radius` is read only by a circle, so it sits at the
+ * default 0.5 and does nothing here.
  */
 import type { Physics2dData } from '@/stores/slices/types';
 import {
@@ -109,12 +125,20 @@ import {
   type ReferenceGameExpectedState,
 } from './referenceGame';
 
-/** Static 2D body; `isSensor` for triggers the player passes through. */
-function staticBody(size: [number, number], isSensor: boolean): Physics2dData {
+/**
+ * Static 2D body; `isSensor` for triggers the player passes through.
+ *
+ * The collider is the UNIT box, `size: [1, 1]`, on purpose: `size` is in the
+ * entity's local space and the engine multiplies it by the transform scale, so
+ * the entity's `scale` is what gives the collider its world extent (see the
+ * header's COORDINATES note). There is deliberately no `size` parameter. Passing
+ * the scale in here as well would have the engine apply it twice.
+ */
+function staticBody(isSensor: boolean): Physics2dData {
   return {
     bodyType: 'static',
     colliderShape: 'box',
-    size,
+    size: [1, 1],
     radius: 0.5,
     vertices: [],
     mass: 1,
@@ -133,7 +157,7 @@ export const platformer2d = {
   set: REFERENCE_GAME_SET,
   member: '2d',
   fixtureId: `${REFERENCE_GAME_SET}/platformer-2d`,
-  version: 2,
+  version: 3,
   description:
     '2D platformer reference game: hold right to walk the level floor, take the coin and touch the goal flag. ' +
     'Win = reachGoal on the goal; lose = hold left into the spike pit (HP to 0), then respawn at the start ledge.',
@@ -166,8 +190,8 @@ export const platformer2d = {
         data: {
           bodyType: 'dynamic',
           colliderShape: 'box',
-          size: [0.8, 0.8],
-          radius: 0.4,
+          size: [1, 1],
+          radius: 0.5,
           vertices: [],
           mass: 1,
           friction: 0.2,
@@ -204,7 +228,7 @@ export const platformer2d = {
       entityType: 'cube',
       position: [-4.5, -0.5, 0],
       scale: [7, 1, 1],
-      physics: { dimension: '2d', data: staticBody([7, 1], false) },
+      physics: { dimension: '2d', data: staticBody(false) },
       gameComponents: [],
     },
     {
@@ -213,7 +237,7 @@ export const platformer2d = {
       entityType: 'cube',
       position: [-9, -1.25, 0],
       scale: [2, 3.5, 1],
-      physics: { dimension: '2d', data: staticBody([2, 3.5], true) },
+      physics: { dimension: '2d', data: staticBody(true) },
       gameComponents: [{ type: 'damageZone', damageZone: { damagePerSecond: 100, oneShot: true } }],
     },
     {
@@ -222,7 +246,7 @@ export const platformer2d = {
       entityType: 'cube',
       position: [-12, -0.5, 0],
       scale: [4, 1, 1],
-      physics: { dimension: '2d', data: staticBody([4, 1], false) },
+      physics: { dimension: '2d', data: staticBody(false) },
       gameComponents: [],
     },
     {
@@ -231,7 +255,7 @@ export const platformer2d = {
       entityType: 'cylinder',
       position: [2.5, 0.4, 0],
       scale: [0.5, 0.5, 0.5],
-      physics: { dimension: '2d', data: staticBody([0.5, 0.5], true) },
+      physics: { dimension: '2d', data: staticBody(true) },
       gameComponents: [
         {
           type: 'collectible',
@@ -245,7 +269,7 @@ export const platformer2d = {
       entityType: 'cube',
       position: [3.5, -0.5, 0],
       scale: [9, 1, 1],
-      physics: { dimension: '2d', data: staticBody([9, 1], false) },
+      physics: { dimension: '2d', data: staticBody(false) },
       gameComponents: [],
     },
     {
@@ -254,7 +278,7 @@ export const platformer2d = {
       entityType: 'cone',
       position: [7, 0.75, 0],
       scale: [0.5, 1.5, 0.5],
-      physics: { dimension: '2d', data: staticBody([0.5, 1.5], true) },
+      physics: { dimension: '2d', data: staticBody(true) },
       gameComponents: [
         {
           type: 'winCondition',
@@ -267,15 +291,15 @@ export const platformer2d = {
 } satisfies ReferenceGame;
 
 /**
- * Independent expected state for `platformer-2d@2`. Hand-written: the engine
+ * Independent expected state for `platformer-2d@3`. Hand-written: the engine
  * spec asserts against THIS, and `verify.ts` re-derives it from the fixture.
  * Changing the fixture means bumping `version` above and rewriting this record,
  * including `contentDigest`.
  */
 export const platformer2dExpected = {
   fixtureId: 'qa-score3-v1/platformer-2d',
-  version: 2,
-  contentDigest: 'sha256:f2cd181597baa5ebaa6db472c51f8da7a315450244c434d3a93a6c65a48fca05',
+  version: 3,
+  contentDigest: 'sha256:c512abb4f1e7fb24e064cc06827db006d48abdbc39a1521c7aed3d0ffd8995f1',
   entities: {
     player: { name: 'Player', entityType: 'cube', physics: '2d', gameComponents: ['characterController', 'health'] },
     ledge_start: { name: 'Start Ledge', entityType: 'cube', physics: '2d', gameComponents: [] },
