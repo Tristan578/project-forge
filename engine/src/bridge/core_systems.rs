@@ -107,6 +107,13 @@ pub(super) fn apply_mode_change_requests(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut selection_events: MessageWriter<SelectionChangedEvent>,
+    // Cleared on every accepted transition OUT of Play below. The emit system
+    // clears it too, but only on a frame it runs outside Play — a pause and a
+    // resume (or a stop and a play) applied in this one drain never give it
+    // such a frame, and the editor's hub has already forgotten its snapshot on
+    // the mode events, so the next delta would omit every unmoved entity
+    // (#10375; `core/play_tick_delta.rs`).
+    mut play_tick_cache: ResMut<super::scripts::PlayTickCache>,
 ) {
     let requests: Vec<ModeChangeRequest> = pending.mode_change_requests.drain(..).collect();
     for request in requests {
@@ -195,12 +202,14 @@ pub(super) fn apply_mode_change_requests(
                     }
                 }
                 *mode = EngineMode::Edit;
+                play_tick_cache.on_leaving_play();
                 events::emit_engine_mode_changed(&mode);
                 log("Exited Play mode (scene restored)");
             }
             ModeChangeRequest::Pause => {
                 if current != EngineMode::Play { continue; }
                 *mode = EngineMode::Paused;
+                play_tick_cache.on_leaving_play();
                 events::emit_engine_mode_changed(&mode);
                 log("Paused Play mode");
             }
