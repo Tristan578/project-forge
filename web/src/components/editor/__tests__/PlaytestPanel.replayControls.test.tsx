@@ -300,9 +300,9 @@ describe('runtime replay controls', () => {
 
     // A replay must survive its own pause: leaving 'play' for 'paused' is the
     // runner's doing, not the creator pausing from the toolbar. This is the
-    // panel-level pin of the runner's ordering — `runtimePausedByRunner` is
-    // set BEFORE the pause is dispatched — since the store here delivers the
-    // mode synchronously inside that dispatch (the worst case).
+    // panel-level pin of the runner's ordering — its pending own-pause count
+    // is incremented BEFORE the pause is dispatched — since the store here
+    // delivers the mode synchronously inside that dispatch (the worst case).
     expect(screen.getByTestId('replay-progress')).toHaveTextContent('Paused at tick 2 of 120; input released');
     expect(screen.getByRole('button', { name: 'Resume replay' })).toBeEnabled();
     expect(screen.queryByText(/Replay cancelled/)).toBeNull();

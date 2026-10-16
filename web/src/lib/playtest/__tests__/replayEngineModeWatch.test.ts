@@ -24,7 +24,8 @@
  * made a flag ("paused by the runner right now") the wrong attribution: a
  * replay Resume within one frame of its Pause cleared the flag before the
  * pause's own 'paused' arrived, and the runner cancelled itself as a toolbar
- * Pause. The runner counts its pending own pauses and resumes instead.
+ * Pause. The runner counts its pending own pauses instead; a 'play' is still
+ * attributed by the flag, which an own resume clears before dispatching.
  */
 import { describe, expect, it, vi } from 'vitest';
 import {

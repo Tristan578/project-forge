@@ -622,8 +622,10 @@ export function startReplay(
     /**
      * True from just BEFORE the runner dispatches the engine's pause to just
      * BEFORE it dispatches the resume: whether the cancel and failure paths
-     * owe the runtime a resume. NOT what tells the runner's own mode changes
-     * from the toolbar's — see the two counts below.
+     * owe the runtime a resume, and what attributes a 'play' (an own resume
+     * clears it before `resume` is dispatched, so a 'play' that finds it set
+     * is the toolbar's). NOT what tells an own 'paused' from the toolbar's —
+     * see the count below.
      */
     let runtimePausedByRunner = false;
     /**
@@ -1055,7 +1057,14 @@ export function startReplay(
     } finally {
       // After the terminal state, whichever exit path announced it (the
       // cancel paths are awaited above so this follows 'cancelled' too).
-      stopWatchingEngineMode?.();
+      // Guarded: `result` never rejects, and an unsubscribe that threw here
+      // would reject it after the state was announced and leave the entry
+      // point's single-flight guard held until a reload.
+      try {
+        stopWatchingEngineMode?.();
+      } catch (unsubscribeError) {
+        console.error('[replayRunner] could not stop watching the engine mode', unsubscribeError);
+      }
     }
   };
 
