@@ -701,8 +701,17 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, sprite::handle_sprite_and_camera2d_queries)
             .add_systems(Update, sprite::handle_sprite_sheet_state_queries)
             .add_systems(Update, sprite::handle_sprite_animator_state_queries)
-            // 2D camera systems (always-active): project type + Camera2d management
-            .add_systems(Update, sprite::apply_project_type_changes)
+            // 2D camera systems (always-active): project type + Camera2d management.
+            // `.after(apply_scene_load)` is load-bearing (#10227): the loader
+            // queues the scene file's `metadata.projectType` into the queue
+            // this system drains, and without the edge Bevy may run the drain
+            // first, leaving the loaded scene's dimension unapplied for a
+            // frame — long enough for the SCENE_LOADED handler's follow-up
+            // export (`checkpointRecovery.matchesExpected`) to read the OLD
+            // type. `apply_scene_export` is ordered after this system below
+            // for the same reason. Pinned by `scene_file.rs`'s
+            // `project_type_persistence_tests`.
+            .add_systems(Update, sprite::apply_project_type_changes.after(scene_io::apply_scene_load))
             .add_systems(Update, sprite::apply_camera_2d_updates)
             .add_systems(Update, sprite::sync_camera_2d_rendering)
             // 2D play-mode systems: camera bounds clamping + pixel-perfect snapping
@@ -941,7 +950,12 @@ impl Plugin for SelectionPlugin {
                     core::terrain::collect_terrain_changes,
                     procedural::emit_terrain_changes,
                 ).chain().in_set(EditorSystemSet))
-                .add_systems(Update, scene_io::apply_scene_export)
+                // `.after(apply_project_type_changes)` is load-bearing (#10227):
+                // the export writes `Res<ProjectType>` into `metadata.projectType`,
+                // and a load queued in the same frame must have been applied by
+                // the drain before the export reads the resource, or the
+                // exported scene carries the type of the scene it REPLACED.
+                .add_systems(Update, scene_io::apply_scene_export.after(sprite::apply_project_type_changes))
                 .add_systems(Update, (
                     scene_io::apply_new_scene,
                     scene_io::apply_gltf_import,

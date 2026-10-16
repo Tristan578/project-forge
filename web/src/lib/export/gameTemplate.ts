@@ -26,9 +26,15 @@ export interface GameTemplateOptions {
   creatorTier?: string | undefined;    // User subscription tier — branding non-removable on starter/hobbyist
   hideBranding?: boolean | undefined;  // Only honored on creator/pro tiers
   /**
-   * Project dimension. A scene file does not carry it, and sprites render only
-   * through the engine's 2D camera, which `set_project_type` creates — so a 2D
-   * game exported without it showed an empty viewport (#10013).
+   * Project dimension. Sprites render only through the engine's 2D camera,
+   * which exists only in 2D mode — so a 2D game exported without this showed
+   * an empty viewport (#10013). Since #10227 the scene file ALSO carries the
+   * type as `metadata.projectType`, which the engine applies on `load_scene`,
+   * so the explicit `set_project_type` this template (and `zipExporter.ts`)
+   * emits after the load is redundant for a scene saved by a current editor.
+   * It is kept as a belt for scene data WITHOUT the key — saved before #10227,
+   * or written by a producer that stated none — which the engine leaves at its
+   * default 3D in a fresh runtime.
    */
   projectType?: '2d' | '3d' | undefined;
 }

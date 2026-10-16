@@ -1184,6 +1184,23 @@ describe('sceneSlice', () => {
       expect(store.getState().scenes.some((s) => s.name === 'New Scene')).toBe(true);
     });
 
+    it('createNewScene states the live project type in the new scene (#10227)', () => {
+      // A scene created in a 2D project is a 2D scene: `metadata.projectType`
+      // comes from the store's mirror of the engine's type, so the scene is
+      // self-describing even when opened cold in a fresh engine. Without the
+      // key a switch would still keep the session's dimension (the engine
+      // leaves its type alone for a key-less scene), but a cold open would
+      // come up 3D.
+      store.setState({ projectType: '2d' });
+      store.getState().createNewScene('Cave');
+      const entry = persisted().scenes.find((s) => s.name === 'Cave');
+      expect(entry?.data?.metadata?.projectType).toBe('2d');
+
+      store.setState({ projectType: '3d' });
+      store.getState().createNewScene('Hall');
+      expect(persisted().scenes.find((s) => s.name === 'Hall')?.data?.metadata?.projectType).toBe('3d');
+    });
+
     it('switchScene makes the target active and loads its data', async () => {
       store.getState().createNewScene('Second');
       const target = store.getState().scenes.find((s) => s.name === 'Second');
