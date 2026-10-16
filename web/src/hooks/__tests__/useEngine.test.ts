@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 import { renderHook, waitFor } from '@testing-library/react';
 import {
   useEngine,
@@ -12,6 +13,7 @@ import {
   type WasmModule,
 } from '../useEngine';
 import * as initLog from '@/lib/initLog';
+import { mergePlayTickDelta } from '@/hooks/events/playTickSnapshot';
 
 vi.mock('@/lib/initLog', () => ({
   logInitEvent: vi.fn(),
@@ -37,7 +39,7 @@ describe('useEngine', () => {
 
     // Setup a mock canvas in the document
     const canvas = document.createElement('canvas');
-    canvas.id = 'forge-canvas';
+    canvas.id = EDITOR_CANVAS_ID;
     document.body.appendChild(canvas);
   });
 
@@ -63,7 +65,7 @@ describe('useEngine', () => {
     (window as Window & { __SKIP_ENGINE?: boolean }).__SKIP_ENGINE = true;
 
     const onError = vi.fn();
-    const { result } = renderHook(() => useEngine('forge-canvas', { onError }));
+    const { result } = renderHook(() => useEngine(EDITOR_CANVAS_ID, { onError }));
 
     await waitFor(() => {
       expect(onError).toHaveBeenCalled();
@@ -74,7 +76,7 @@ describe('useEngine', () => {
   });
 
   it('sendCommand returns undefined when engine not initialized', () => {
-    const { result } = renderHook(() => useEngine('forge-canvas'));
+    const { result } = renderHook(() => useEngine(EDITOR_CANVAS_ID));
     const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     expect(result.current.sendCommand('cmd', {})).toBeUndefined();
@@ -84,7 +86,7 @@ describe('useEngine', () => {
   });
 
   it('sendCommandBatch returns failure result when engine not initialized', () => {
-    const { result } = renderHook(() => useEngine('forge-canvas'));
+    const { result } = renderHook(() => useEngine(EDITOR_CANVAS_ID));
     const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const batchResult = result.current.sendCommandBatch([{ command: 'test', payload: {} }]);
@@ -106,12 +108,12 @@ describe('useEngine', () => {
   });
 
   it('returns wasmModule as null in hook return', () => {
-    const { result } = renderHook(() => useEngine('forge-canvas'));
+    const { result } = renderHook(() => useEngine(EDITOR_CANVAS_ID));
     expect(result.current.wasmModule).toBeNull();
   });
 
   it('does not re-initialize on re-render', () => {
-    const { rerender } = renderHook(() => useEngine('forge-canvas'));
+    const { rerender } = renderHook(() => useEngine(EDITOR_CANVAS_ID));
     const firstCallCount = (initLog.logInitEvent as ReturnType<typeof vi.fn>).mock.calls.length;
 
     rerender();
@@ -121,7 +123,7 @@ describe('useEngine', () => {
   });
 
   it('starts with isReady=false and error=null', () => {
-    const { result } = renderHook(() => useEngine('forge-canvas'));
+    const { result } = renderHook(() => useEngine(EDITOR_CANVAS_ID));
     expect(result.current.isReady).toBe(false);
     expect(result.current.error).toBeNull();
   });
@@ -135,7 +137,7 @@ describe('useEngine', () => {
   it('does not report a backend after loading fails', async () => {
     window.__SKIP_ENGINE = true;
     try {
-      const { result } = renderHook(() => useEngine('forge-canvas'));
+      const { result } = renderHook(() => useEngine(EDITOR_CANVAS_ID));
       await waitFor(() => expect(result.current.error).not.toBeNull());
       expect(getActiveEngineBackend()).toBe('unknown');
     } finally {
@@ -144,7 +146,7 @@ describe('useEngine', () => {
   });
 
   it('returns a cleanup function from the loading useEffect', () => {
-    const { unmount } = renderHook(() => useEngine('forge-canvas'));
+    const { unmount } = renderHook(() => useEngine(EDITOR_CANVAS_ID));
     // Unmounting should not throw — the cleanup sets cancelled=true
     // so any in-flight WASM load is ignored on resolve/reject
     expect(() => unmount()).not.toThrow();
@@ -154,7 +156,7 @@ describe('useEngine', () => {
     (window as Window & { __SKIP_ENGINE?: boolean }).__SKIP_ENGINE = true;
 
     const onError = vi.fn();
-    const { unmount } = renderHook(() => useEngine('forge-canvas', { onError }));
+    const { unmount } = renderHook(() => useEngine(EDITOR_CANVAS_ID, { onError }));
 
     // Unmount immediately before the async load can settle
     unmount();
@@ -176,7 +178,7 @@ describe('recoverEngine', () => {
     resetEngine();
 
     const canvas = document.createElement('canvas');
-    canvas.id = 'forge-canvas';
+    canvas.id = EDITOR_CANVAS_ID;
     document.body.appendChild(canvas);
   });
 
@@ -193,26 +195,26 @@ describe('recoverEngine', () => {
     while (document.body.firstChild) {
       document.body.removeChild(document.body.firstChild);
     }
-    const result = await recoverEngine('forge-canvas');
+    const result = await recoverEngine(EDITOR_CANVAS_ID);
     // loadWasm will reject in jsdom (no WASM binary), so recovery fails
     expect(result).toBe(false);
   });
 
   it('returns false when loadWasm throws', async () => {
-    const result = await recoverEngine('forge-canvas');
+    const result = await recoverEngine(EDITOR_CANVAS_ID);
     // loadWasm uses a dynamic import that will fail in jsdom (no WASM binary)
     expect(result).toBe(false);
   });
 
   it('captures exception on failure', async () => {
     const sentry = await import('@/lib/monitoring/sentry-client');
-    await recoverEngine('forge-canvas');
+    await recoverEngine(EDITOR_CANVAS_ID);
     expect(sentry.captureException).toHaveBeenCalled();
   });
 
   it('adds breadcrumb before attempting recovery', async () => {
     const sentry = await import('@/lib/monitoring/sentry-client');
-    await recoverEngine('forge-canvas');
+    await recoverEngine(EDITOR_CANVAS_ID);
     expect(sentry.addBreadcrumb).toHaveBeenCalledWith(
       expect.objectContaining({
         category: 'engine',
@@ -220,6 +222,37 @@ describe('recoverEngine', () => {
         level: 'info',
       }),
     );
+  });
+
+  // #10375 (Sentry review on #10390). A recovered engine starts from an empty
+  // delta cache and emits no mode event, so the hub's reconstituted Play frame
+  // (hooks/events/playTickSnapshot.ts) has to be forgotten on this path —
+  // otherwise the new run's full first frame merges ONTO the old snapshot and
+  // an entity that no longer exists is never removed. Recovery fails in jsdom
+  // (no WASM binary), but the reset is step 1 and runs before the load.
+  describe('play-tick snapshot', () => {
+    const cube = {
+      position: [0, 1, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: [1, 1, 1] as [number, number, number],
+    };
+    const inputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+    const seed = () =>
+      mergePlayTickDelta({ changedEntities: { cube }, changedEntityInfos: {}, removedEntityIds: [], inputState });
+    const nextFrame = () =>
+      mergePlayTickDelta({ changedEntities: { other: cube }, changedEntityInfos: {}, removedEntityIds: [], inputState });
+
+    it('is forgotten by recoverEngine before the engine is reloaded', async () => {
+      seed();
+      await recoverEngine('forge-canvas');
+      expect(nextFrame().entities).toEqual({ other: cube });
+    });
+
+    it('is forgotten by resetEngine, so every retry path starts from no frame', () => {
+      seed();
+      resetEngine();
+      expect(nextFrame().entities).toEqual({ other: cube });
+    });
   });
 });
 

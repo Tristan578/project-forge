@@ -19,6 +19,7 @@ import {
   handlePerformanceEvent,
   handleEditModeEvent,
   handleRenderErrorEvent,
+  resetPlayTickSnapshot,
 } from './events';
 import { THROTTLED_EVENTS } from './events/throttledEvents';
 import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
@@ -150,6 +151,19 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       // reflects the current engine state after switching back to edit mode.
       if (type === 'ENGINE_MODE_CHANGED') {
         playThrottle.reset();
+        // The reconstituted PLAY_TICK_DELTA frame (#10375, gameEvents.ts) is
+        // valid only inside one continuous Play run. The engine empties its
+        // own delta cache at two sites: `emit_play_tick_system` clears it on
+        // every frame it runs outside Play, and `apply_mode_change_requests`
+        // clears it in its Stop and Pause arms, on the transition itself, so a
+        // leave-and-return applied in one update still yields a full first
+        // frame (`core/play_tick_delta.rs`). Drop the snapshot on every
+        // transition OUT of Play (edit or paused) so the two caches stay
+        // aligned; otherwise an entity from the previous run would ride into
+        // the next until the engine happened to mention it again.
+        if (payload.mode !== 'play') {
+          resetPlayTickSnapshot();
+        }
       }
 
       const set = useEditorStore.setState;
@@ -182,6 +196,13 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       console.warn('Unknown engine event:', type);
     };
 
+    // A callback registered against a (re)initialised engine starts from no
+    // frame: the engine's delta cache is empty after `init_engine` and a
+    // re-initialisation emits no mode event, so nothing else would drop a
+    // snapshot left from before (#10375). `resetEngine` does the same on the
+    // recovery path, which keeps the module identity and so does not re-run
+    // this effect; this is the hub's own guard for when it does re-run.
+    resetPlayTickSnapshot();
     wasmModule.set_event_callback(handleEvent);
   }, [wasmModule]);
 }

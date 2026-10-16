@@ -2,10 +2,10 @@
 
 > Hand-written against `web/src/data/commands.json` — no generator emits this
 > file, so the "Generated from" claim it used to carry was itself a rotted
-> number's cover story. The manifest holds 380 commands across 41 categories,
-> measured 2026-09-22 and pinned by
+> number's cover story. The manifest holds 383 commands across 41 categories,
+> measured 2026-10-05 and pinned by
 > `web/src/lib/config/__tests__/capabilityMatrix.test.ts`.
-> Last updated: 2026-09-22
+> Last updated: 2026-10-05
 
 ## System Boundaries
 
@@ -435,6 +435,8 @@ tool above takes a rectangle, while the engine arm takes a `tiles` array of
 | `play` | Enter play mode (runs scripts, physics, animations). | No |
 | `stop` | Exit play mode, restore to pre-play snapshot. | No |
 | `pause` / `resume` | Pause/resume simulation. | No |
+| `pin_frame_rate` / `unpin_frame_rate` | Pin the simulation clock to `1/hz` s per rendered frame (`TimeUpdateStrategy::ManualDuration`, #10007) / return to the wall clock. Internal; the replay runner pins before its first tick and unpins on every exit. | No |
+| `replay_input_trace` | **JS-side** (`web/src/lib/playtest/`): replays a bounded input trace through the real input path on the pinned clock and reports an observed-state verdict. Not an engine arm. | No |
 | `get_mode` | Query current engine mode (edit/play/paused). | No |
 | `set_input_binding` | Map action name to a key. | No |
 | `set_input_preset` | Apply input preset (FPS, Platformer, TopDown, Racing). | No |
