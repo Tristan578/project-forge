@@ -65,6 +65,7 @@ pub(super) mod scan {
         ("core/entity_factory.rs", include_str!("../entity_factory.rs")),
         ("core/game_camera.rs", include_str!("../game_camera.rs")),
         ("core/reparent.rs", include_str!("../reparent.rs")),
+        ("core/simulation_clock.rs", include_str!("../simulation_clock.rs")),
     ];
 
     /// Where systems are registered. `bridge/mod.rs` carries almost all of
@@ -77,6 +78,9 @@ pub(super) mod scan {
         ("core/snap.rs", include_str!("../snap.rs")),
         ("core/physics.rs", include_str!("../physics.rs")),
         ("core/physics_2d_sim.rs", include_str!("../physics_2d_sim.rs")),
+        // `SimulationClockPlugin` (#10007) registers its own drain in `First`;
+        // `bridge/mod.rs` adds the plugin unconditionally, in both builds.
+        ("core/simulation_clock.rs", include_str!("../simulation_clock.rs")),
     ];
 
     pub const BRIDGE_MOD: &str = include_str!("../../bridge/mod.rs");

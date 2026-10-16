@@ -139,6 +139,17 @@ pub(super) fn apply_mode_change_requests(
             }
             ModeChangeRequest::Stop => {
                 if current == EngineMode::Edit { continue; }
+                // Record the stop for the clock pin's release, which compares
+                // the mode across frames and cannot see a Stop and a Play
+                // drained in this one update (#10007; `core/simulation_clock.rs`).
+                // Only here: Pause keeps the pin. Queued rather than taken as
+                // a parameter because this system is at Bevy's sixteen-parameter
+                // limit; the queue is applied before the next frame's `First`.
+                commands.queue(|world: &mut bevy::prelude::World| {
+                    world
+                        .resource_mut::<crate::core::simulation_clock::SimulationClockPin>()
+                        .on_play_stopped();
+                });
                 // Restore scene from snapshot (uses mutable query p1)
                 {
                     let mut restore_query = queries.p1();

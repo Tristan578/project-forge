@@ -28,11 +28,39 @@ pub struct InputBindingRemoval {
     pub player: u8,
 }
 
+/// How many frames an `add_game_component` whose entity is not in the world
+/// yet is carried before it is dropped (with a log line).
+///
+/// `spawn_entity` is a deferred `Commands::spawn`, so an add issued in the
+/// SAME frame — a `dispatch_batch`, an agent issuing the two back to back, a
+/// test building a scene in one synchronous block — finds no entity in the
+/// drain's query. The drain used to `continue` on that, silently: the scene
+/// looked complete to the caller and the engine had no component. The spawn
+/// lands on the next frame; one deferral is enough for the same-frame case,
+/// and the budget is small so a genuinely unknown id is reported, not
+/// carried forever. (#10007)
+pub const GAME_COMPONENT_ADD_DEFER_FRAMES: u8 = 3;
+
 #[derive(Debug, Clone)]
 pub struct GameComponentAddRequest {
     pub entity_id: String,
     pub component_type: String,
     pub properties_json: String,
+    /// Frames this request has already waited for its entity (see
+    /// [`GAME_COMPONENT_ADD_DEFER_FRAMES`]). Starts at 0.
+    pub deferred_frames: u8,
+}
+
+impl GameComponentAddRequest {
+    /// A fresh request that has not waited for its entity yet.
+    pub fn new(entity_id: String, component_type: String, properties_json: String) -> Self {
+        Self { entity_id, component_type, properties_json, deferred_frames: 0 }
+    }
+
+    /// Whether this request may wait one more frame for its entity.
+    pub fn can_defer(&self) -> bool {
+        self.deferred_frames < GAME_COMPONENT_ADD_DEFER_FRAMES
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +122,30 @@ impl PendingCommands {
 
     pub fn queue_game_component_add(&mut self, request: GameComponentAddRequest) {
         self.game_component_adds.push(request);
+    }
+
+    /// Put back the adds whose entity the drain could not find this frame,
+    /// AHEAD of anything queued since (they were queued first), each one
+    /// frame older; return the ones that have used up their budget so the
+    /// drain can report them. Order is preserved in both lists.
+    pub fn defer_game_component_adds(
+        &mut self,
+        unmatched: Vec<GameComponentAddRequest>,
+    ) -> Vec<GameComponentAddRequest> {
+        let mut dropped = Vec::new();
+        let mut deferred = Vec::new();
+        for mut request in unmatched {
+            if request.can_defer() {
+                request.deferred_frames += 1;
+                deferred.push(request);
+            } else {
+                dropped.push(request);
+            }
+        }
+        if !deferred.is_empty() {
+            self.game_component_adds.splice(0..0, deferred);
+        }
+        dropped
     }
 
     pub fn queue_game_component_update(&mut self, request: GameComponentUpdateRequest) {
@@ -169,4 +221,66 @@ pub fn queue_camera_shake_from_bridge(request: CameraShakeRequest) -> bool {
 
 pub fn queue_mouse_delta_from_bridge(dx: f32, dy: f32) -> bool {
     super::with_pending(|pc| pc.queue_mouse_delta(dx, dy)).is_some()
+}
+
+#[cfg(test)]
+mod game_component_add_deferral {
+    //! A same-frame `add_game_component` is carried until its entity exists
+    //! and dropped — reported — only after its budget (#10007). The drain in
+    //! `bridge/game.rs` is wasm32-only, so the policy lives here where it
+    //! runs natively.
+    use super::*;
+
+    fn add(entity: &str) -> GameComponentAddRequest {
+        GameComponentAddRequest::new(entity.into(), "character_controller".into(), "{}".into())
+    }
+
+    #[test]
+    fn a_fresh_request_has_not_waited_and_may_defer() {
+        let request = add("player");
+        assert_eq!(request.deferred_frames, 0);
+        assert!(request.can_defer());
+    }
+
+    #[test]
+    fn an_unmatched_add_is_requeued_one_frame_older_ahead_of_newer_requests() {
+        let mut pending = PendingCommands::default();
+        pending.queue_game_component_add(add("newer"));
+        let dropped = pending.defer_game_component_adds(vec![add("player")]);
+        assert!(dropped.is_empty());
+        let ids: Vec<&str> = pending.game_component_adds.iter().map(|r| r.entity_id.as_str()).collect();
+        assert_eq!(ids, vec!["player", "newer"], "the deferred add keeps its place ahead of later ones");
+        assert_eq!(pending.game_component_adds[0].deferred_frames, 1);
+        assert_eq!(pending.game_component_adds[1].deferred_frames, 0);
+    }
+
+    #[test]
+    fn an_add_is_carried_for_the_budget_then_dropped_and_reported() {
+        let mut pending = PendingCommands::default();
+        let mut carried = vec![add("ghost")];
+        for frame in 1..=GAME_COMPONENT_ADD_DEFER_FRAMES {
+            let dropped = pending.defer_game_component_adds(carried);
+            assert!(dropped.is_empty(), "frame {frame}: still within the budget");
+            carried = pending.game_component_adds.drain(..).collect();
+            assert_eq!(carried.len(), 1);
+            assert_eq!(carried[0].deferred_frames, frame);
+        }
+        // The budget is spent: the next unmatched frame reports it instead.
+        let dropped = pending.defer_game_component_adds(carried);
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].entity_id, "ghost");
+        assert_eq!(dropped[0].deferred_frames, GAME_COMPONENT_ADD_DEFER_FRAMES);
+        assert!(pending.game_component_adds.is_empty(), "a dropped add is not requeued");
+    }
+
+    #[test]
+    fn order_is_preserved_across_deferred_and_dropped() {
+        let mut pending = PendingCommands::default();
+        let mut spent = add("spent");
+        spent.deferred_frames = GAME_COMPONENT_ADD_DEFER_FRAMES;
+        let dropped = pending.defer_game_component_adds(vec![add("a"), spent, add("b")]);
+        assert_eq!(dropped.iter().map(|r| r.entity_id.as_str()).collect::<Vec<_>>(), vec!["spent"]);
+        let ids: Vec<&str> = pending.game_component_adds.iter().map(|r| r.entity_id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b"]);
+    }
 }
