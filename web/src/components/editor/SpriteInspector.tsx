@@ -4,6 +4,7 @@ import { useCallback, useRef, useState, useId } from 'react';
 import { X, Image as ImageIcon, Pencil } from 'lucide-react';
 import { useEditorStore, type SpriteData, type SpriteAnchor } from '@/stores/editorStore';
 import { PixelArtEditor } from './PixelArtEditor';
+import { readTextureFile } from '@/lib/engine/textureFormatGuard';
 
 /** Anchor point grid positions */
 const ANCHOR_GRID: SpriteAnchor[][] = [
@@ -39,13 +40,15 @@ export function SpriteInspector() {
   const handleTextureUpload = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0 || !primaryId) return;
     const file = files[0];
-    const reader = new FileReader();
-    reader.onload = () => {
-      // The data URL is sent whole: its header is how the engine learns the
+    try {
+      // The data URL is sent whole, its type filled in from the extension
+      // when the OS declared none: the header is how the engine learns the
       // format, and it refuses anything but PNG/JPEG by name (#10396).
-      loadTexture(reader.result as string, file.name, primaryId, 'sprite');
-    };
-    reader.readAsDataURL(file);
+      const dataUrl = await readTextureFile(file);
+      loadTexture(dataUrl, file.name, primaryId, 'sprite');
+    } catch (err) {
+      console.error(`Could not read "${file.name}":`, err);
+    }
   }, [primaryId, loadTexture]);
 
   const handleSelectTexture = useCallback((assetId: string) => {
@@ -147,7 +150,7 @@ export function SpriteInspector() {
           <input
             ref={fileRef}
             type="file"
-            accept=".png,.jpg,.jpeg,.webp"
+            accept=".png,.jpg,.jpeg"
             className="hidden"
             onChange={(e) => handleTextureUpload(e.target.files)}
           />

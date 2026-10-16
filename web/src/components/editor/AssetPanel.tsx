@@ -16,15 +16,14 @@ import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { GenerateSoundDialog } from './GenerateSoundDialog';
 import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
+import { readTextureFile } from '@/lib/engine/textureFormatGuard';
 
 /**
  * Read a file as a data URL: `data:<file.type>;base64,<body>`.
  *
- * Textures are sent whole, header included, because the header is how the
- * engine learns the format: it accepts PNG and JPEG and refuses everything
- * else by name (`load_texture`, #10396). Stripping it - as `fileToBase64`
- * below still does for models and audio, whose importers read bytes, not a
- * type - would make every upload a PNG whatever the file was.
+ * Models and audio take the body alone (`fileToBase64`): their importers read
+ * bytes, not a type. Textures go through `readTextureFile` instead, whole,
+ * because the header is how the engine learns the format (#10396).
  */
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -145,9 +144,10 @@ export const AssetPanel = memo(function AssetPanel() {
     if (!files || !primaryId) return;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      // Header kept: the engine reads the format from it and refuses anything
+      // Header kept (and filled in from the extension when the OS declared
+      // no type): the engine reads the format from it and refuses anything
       // but PNG/JPEG by name; the slice shows that refusal.
-      const dataUrl = await fileToDataUrl(file);
+      const dataUrl = await readTextureFile(file);
       loadTexture(dataUrl, file.name, primaryId, 'base_color');
     }
   }, [loadTexture, primaryId]);
@@ -174,7 +174,9 @@ export const AssetPanel = memo(function AssetPanel() {
     const validFiles: File[] = [];
     for (let i = 0; i < files.length; i++) {
       const ext = files[i].name.split('.').pop()?.toLowerCase();
-      if (ext === 'glb' || ext === 'gltf' || ['png', 'jpg', 'jpeg', 'webp'].includes(ext ?? '') || ['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
+      // Only the texture formats the engine decodes (PNG, JPEG) are taken
+      // from a drop; a .webp would be refused by name downstream.
+      if (ext === 'glb' || ext === 'gltf' || ['png', 'jpg', 'jpeg'].includes(ext ?? '') || ['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
         validFiles.push(files[i]);
       }
     }
@@ -189,9 +191,9 @@ export const AssetPanel = memo(function AssetPanel() {
       if (ext === 'glb' || ext === 'gltf') {
         const base64 = await fileToBase64(file);
         importGltf(base64, file.name);
-      } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext ?? '')) {
+      } else if (['png', 'jpg', 'jpeg'].includes(ext ?? '')) {
         if (primaryId) {
-          const dataUrl = await fileToDataUrl(file);
+          const dataUrl = await readTextureFile(file);
           loadTexture(dataUrl, file.name, primaryId, 'base_color');
         }
       } else if (['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
@@ -452,7 +454,7 @@ export const AssetPanel = memo(function AssetPanel() {
       <input
         ref={textureInputRef}
         type="file"
-        accept=".png,.jpg,.jpeg,.webp"
+        accept=".png,.jpg,.jpeg"
         multiple
         className="hidden"
         onChange={(e) => handleTextureImport(e.target.files)}

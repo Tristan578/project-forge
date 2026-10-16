@@ -9,6 +9,7 @@ import { MATERIAL_PRESETS, ALL_CATEGORIES, getPresetById, saveCustomMaterial, ty
 import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { linearToHex, hexToLinear } from '@/lib/colorUtils';
+import { readTextureFile } from '@/lib/engine/textureFormatGuard';
 import { CustomWgslEditor } from './CustomWgslEditor';
 
 interface SliderRowProps {
@@ -79,13 +80,15 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
   const handleFileSelect = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const file = files[0];
-    const reader = new FileReader();
-    reader.onload = () => {
-      // The data URL is sent whole: its header is how the engine learns the
+    try {
+      // The data URL is sent whole, its type filled in from the extension
+      // when the OS declared none: the header is how the engine learns the
       // format, and it refuses anything but PNG/JPEG by name (#10396).
-      loadTexture(reader.result as string, file.name, entityId, slot);
-    };
-    reader.readAsDataURL(file);
+      const dataUrl = await readTextureFile(file);
+      loadTexture(dataUrl, file.name, entityId, slot);
+    } catch (err) {
+      console.error(`Could not read "${file.name}":`, err);
+    }
   }, [loadTexture, entityId, slot]);
 
   const handleSelectChange = useCallback((value: string) => {
@@ -93,14 +96,12 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
       fileRef.current?.click();
     } else if (value === '__none__') {
       removeTexture(entityId, slot);
-    } else {
-      // value is an asset ID — load it into this slot
-      // For existing assets, we fire loadTexture with the asset's data
-      // But the asset is already loaded; we need to assign it to this slot
-      // The texture is referenced by asset ID
-      loadTexture('', value, entityId, slot);
     }
-  }, [loadTexture, removeTexture, entityId, slot]);
+    // Any other value is an existing asset's id. Assigning one to a slot
+    // needs a command the engine does not have yet (#10398); the option is
+    // disabled, and a programmatic change lands here and does nothing. It
+    // used to send an empty body as a texture, which the engine refused.
+  }, [removeTexture, entityId, slot]);
 
   const hasAssets = textureAssets.length > 0;
 
@@ -118,11 +119,15 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
             id={selectId}
             value={textureRef ?? '__none__'}
             onChange={(e) => handleSelectChange(e.target.value)}
+            title="Assigning an existing texture asset to a slot is not available yet (#10398); upload the file to this slot instead."
             className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
           >
             <option value="__none__">None</option>
+            {/* Listed so the slot's current asset still reads by name, but not
+                offered: assigning by id needs an engine command that does not
+                exist yet (#10398). */}
             {textureAssets.map((asset) => (
-              <option key={asset.id} value={asset.id}>{asset.name}</option>
+              <option key={asset.id} value={asset.id} disabled>{asset.name} (assign not available yet)</option>
             ))}
             <option value="__upload__">Upload new...</option>
           </select>
@@ -164,7 +169,7 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
       <input
         ref={fileRef}
         type="file"
-        accept=".png,.jpg,.jpeg,.webp"
+        accept=".png,.jpg,.jpeg"
         aria-label={`Upload ${label.toLowerCase()} texture file`}
         className="hidden"
         onChange={(e) => handleFileSelect(e.target.files)}
