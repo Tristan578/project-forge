@@ -127,6 +127,21 @@ describe('resolveE2eNeonEndpoint never echoes the raw value or its credentials (
     expect(message).not.toContain(USER);
     expect(message).not.toContain(value);
   });
+
+  it('a scheme-less user:password@host value does not leak its username through the parsed scheme', () => {
+    // `user:pass@host/sql` has no `//`, so the parser reads everything before
+    // the first colon as the SCHEME: protocol is `svc-account-7:` (the username
+    // itself) and the password lands in the opaque path. Quoting the parsed
+    // scheme therefore quotes the username, so the scheme is not quoted at all.
+    const value = 'svc-account-7:hunter2@localhost:4444/sql';
+    expect(new URL(value).protocol, 'the shape this case exists for').toBe('svc-account-7:');
+
+    const message = messageOf(value);
+    expect(message).toContain(E2E_NEON_HTTP_ENDPOINT_ENV);
+    expect(message).toMatch(/http\(s\)/);
+    expect(message).not.toContain('svc-account-7');
+    expect(message).not.toContain('hunter2');
+  });
 });
 
 describe('applyE2eNeonEndpointOverride (through the real driver config)', () => {
@@ -206,8 +221,12 @@ describe('applyE2eNeonEndpointOverride gives the driver back when the override s
   // unset by then must not leave the previous proxy endpoint on the driver.
   //
   // The helper remembers what it displaced in module state, so every case loads
-  // a fresh copy of it (and of the driver it writes to) instead of inheriting
-  // the previous case's memory.
+  // a fresh copy of the HELPER instead of inheriting the previous case's memory.
+  // The driver is not reloaded: `@neondatabase/serverless` is externalized, so
+  // `vi.resetModules()` leaves the one `neonConfig` object in place (measured:
+  // identical before and after the reset, while the helper module is not). What
+  // isolates the cases on the driver side is the `afterEach` below, which puts
+  // `fetchEndpoint` back.
   type Driver = typeof import('@neondatabase/serverless');
   type Helper = typeof import('../e2eNeonEndpoint');
   const OTHER_PROXY = 'http://127.0.0.1:5555/sql';

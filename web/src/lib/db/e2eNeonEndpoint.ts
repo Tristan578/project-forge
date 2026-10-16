@@ -58,8 +58,11 @@ const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '
  *   `http(s)://…/sql` URL — a misconfiguration must fail, never fall back.
  *   The messages name the variable and the reason and never quote the raw
  *   value or `url.href`, because a malformed value can carry `user:password@`
- *   and these errors reach service and CI logs. Only the parsed scheme,
- *   hostname and pathname are quoted; none of them holds userinfo.
+ *   and these errors reach service and CI logs. The parsed scheme is not
+ *   quoted either: a scheme-less `user:password@host/sql` parses with the
+ *   USERNAME as its scheme. Only the hostname and pathname are quoted, and they
+ *   are reached only for an http(s) URL, whose userinfo the parser strips out
+ *   of both.
  */
 export function resolveE2eNeonEndpoint(
   rawValue: string | undefined,
@@ -77,9 +80,10 @@ export function resolveE2eNeonEndpoint(
     throw new Error(`${E2E_NEON_HTTP_ENDPOINT_ENV} is not a URL (the value is not echoed)`);
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error(
-      `${E2E_NEON_HTTP_ENDPOINT_ENV} must be an http(s) URL; got scheme '${url.protocol}'`,
-    );
+    // The parsed scheme is NOT quoted either: without `//` the parser reads
+    // everything before the first colon as the scheme, so for
+    // `user:password@host/sql` it is the username.
+    throw new Error(`${E2E_NEON_HTTP_ENDPOINT_ENV} must be an http(s) URL`);
   }
   if (!LOOPBACK_HOSTS.has(url.hostname)) {
     throw new Error(
