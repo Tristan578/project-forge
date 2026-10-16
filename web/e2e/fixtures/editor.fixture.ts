@@ -80,6 +80,7 @@ export class EditorPage {
     await this.page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__FORGE_ENGINE_READY === true,
+      undefined,
       { timeout: E2E_HYDRATION_TIMEOUT_MS }
     );
     // Wait for the editor layout to have mounted.
@@ -148,10 +149,20 @@ export class EditorPage {
     // runners typically take 60-90s for this cold compile. We give it 90s on first
     // attempt; if that times out, reload once (chunks are now compiled) and wait
     // a further 40s.
+    //
+    // Options go THIRD — waitForFunction(fn, arg, options). These calls used to
+    // pass `{ timeout }` second, as the page function's arg, so both waits were
+    // really actionTimeout (10s). The waits are now real, but the TEST timeout
+    // still bounds them: 30s under playwright.ci.config.ts, 45s journey, 60s
+    // default, 90s engine. Under every config the test ends before 90s, so the
+    // reload fallback below is only reachable by a spec that raises its own
+    // timeout (test.setTimeout / test.slow) past ~95s. CI serves `next start`,
+    // where there is no cold compile to wait out.
     try {
       await this.page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_FULL_MS }
       );
     } catch {
@@ -160,6 +171,7 @@ export class EditorPage {
       await this.page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_ENGINE_INIT_MS }
       );
     }
@@ -242,6 +254,7 @@ export class EditorPage {
     await this.page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => !!(window as any).__EDITOR_STORE,
+      undefined,
       { timeout }
     );
   }

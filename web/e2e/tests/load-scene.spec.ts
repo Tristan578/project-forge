@@ -45,6 +45,7 @@ test.describe('load_scene store action @ui @dev', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
+      undefined,
       { timeout: E2E_TIMEOUT_NAV_MS },
     );
 
@@ -64,6 +65,7 @@ test.describe('load_scene store action @ui @dev', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
+      undefined,
       { timeout: E2E_TIMEOUT_NAV_MS },
     );
 
@@ -89,6 +91,7 @@ test.describe('load_scene store action @ui @dev', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
+      undefined,
       { timeout: E2E_TIMEOUT_NAV_MS },
     );
 
@@ -123,6 +126,7 @@ test.describe('load_scene store action @ui @dev', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
+      undefined,
       { timeout: E2E_TIMEOUT_NAV_MS },
     );
 
@@ -224,6 +228,7 @@ test.describe('load_scene engine round-trip @engine', () => {
         }
         return false;
       },
+      undefined,
       { timeout: E2E_TIMEOUT_ELEMENT_MS },
     ).catch(() => undefined); // panel visibility is checked below
 
