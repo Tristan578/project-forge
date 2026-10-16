@@ -22,6 +22,7 @@ import { safeParseInputTrace } from '@/lib/playtest/inputTrace';
 import { botSessionToInputTrace } from '@/lib/playtest/botTrace';
 import { getActiveReplaySession, runReplay } from '@/lib/playtest/replayEntryPoints';
 import type { EngineDispatch } from '@/lib/playtest/replayInvocation';
+import type { ReplayRunOptions } from '@/lib/playtest/replayRunner';
 import { simulatePlaytest, type BotStrategy, type SceneContext } from '@/lib/ai/gameplayBot';
 
 const BOT_STRATEGY_NAMES = ['explorer', 'speedrunner', 'completionist', 'random', 'cautious'] as const;
@@ -77,13 +78,20 @@ export const playtestHandlers: Record<string, ToolHandler> = {
     const strategy: BotStrategy | undefined = p.data.strategy;
     if (strategy) {
       const session = await simulatePlaytest(sceneContextOf(ctx.store), strategy);
+      const bindings = ctx.store.inputBindings ?? [];
       trace = botSessionToInputTrace(session, {
         fixtureId: ctx.store.sceneName || 'current-scene',
-        actionNames: (ctx.store.inputBindings ?? []).map((b) => b.actionName),
+        actionNames: bindings.map((b) => b.actionName),
+        // Only a signed-axis binding may answer a negative direction (a
+        // digital one would press its positive key for it — the wrong way).
+        axisActionNames: bindings.filter((b) => b.actionType === 'axis').map((b) => b.actionName),
       });
     }
     const parsed = safeParseInputTrace(trace);
     if (!parsed.success) return { success: false, error: parsed.error };
+    // A planned strategy never aims for a collectible, so its verdict is the
+    // movement assertion alone; a recorded trace keeps the full verdict.
+    const runOptions: ReplayRunOptions = strategy ? { assertCollectible: false } : {};
 
     // The context's dispatcher IS the engine dispatcher (`executeToolCall`
     // passes `getCommandDispatcher()`), typed `=> void` because most handlers
@@ -95,7 +103,7 @@ export const playtestHandlers: Record<string, ToolHandler> = {
       const result = await runReplay(
         'ai',
         { trace: parsed.trace, playerEntityId, collectibleEntityIds },
-        {},
+        runOptions,
         {
           bindings: ctx.store.inputBindings ?? [],
           allGameComponents: ctx.store.allGameComponents ?? {},

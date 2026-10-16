@@ -275,6 +275,18 @@ export interface ReplayRunOptions {
   pauseAtTick?: number;
   /** Simulation rate to pin; `DEFAULT_REPLAY_PIN_HZ` when omitted. */
   pinHz?: number;
+  /**
+   * Whether the verdict includes qa.FR-1.OP-03 ("exactly one collectible
+   * collected during replay"). Defaults to TRUE: the manual Replay button, the
+   * chat tool's recorded-trace branch and the curated E2E gate keep that
+   * assertion. The bot's Run Playtest passes `false`, because its heuristic
+   * plan never aims for a collectible — in a scene without one, or one the
+   * plan does not happen to reach, OP-03 would fail every bot run on a rule
+   * the bot was never asked to satisfy; the curated fixture the gate replays
+   * DOES aim for one. When false, OP-03 is omitted and the verdict is decided
+   * by the remaining assertions; `collectiblesCollected` is still reported.
+   */
+  assertCollectible?: boolean;
   /** Receives the handle as soon as it exists (for callers using `replayInputTrace`). */
   onHandle?: (handle: ReplayHandle) => void;
 }
@@ -468,11 +480,20 @@ export function startReplay(
     notify();
   };
 
+  /**
+   * Release every synthetic key. `held` is updated AFTER the boundary
+   * confirms the release, exactly as the tick loop's diff does: a release the
+   * boundary refuses (the DOM boundary throws when the engine canvas is gone)
+   * leaves the codes in `held`, so the cleanup that follows a failure or a
+   * cancel tries them again instead of finding an empty set and leaving the
+   * keys pressed in the engine. Deleted by snapshot, not cleared, so a key
+   * pressed meanwhile is never forgotten either.
+   */
   const releaseHeld = async () => {
     if (held.size === 0) return;
     const codes = [...held];
-    held.clear();
     await env.releaseKeys(codes);
+    for (const code of codes) held.delete(code);
   };
 
   const handle: ReplayHandle = {
@@ -606,7 +627,11 @@ export function startReplay(
       try {
         await releaseHeld();
       } catch (releaseError) {
-        console.error('[replayRunner] could not release held keys while cancelling', releaseError);
+        // The codes are still in `held`: the release did not reach the engine.
+        console.error(
+          `[replayRunner] could not release held keys while cancelling; still held: ${[...held].join(', ')}`,
+          releaseError,
+        );
       }
       try {
         await resumeRuntimeIfPaused();
@@ -783,7 +808,13 @@ export function startReplay(
             positionSamples: [...positionSamples],
           },
         },
-        {
+      ];
+      // OP-03 is the run policy's call (`assertCollectible`, default on): the
+      // bot's plan never aims for a collectible, so its run omits the
+      // assertion rather than failing on it; `collectiblesCollected` is
+      // reported on the outcome either way.
+      if (options.assertCollectible ?? true) {
+        assertions.push({
           operationId: 'qa.FR-1.OP-03',
           description: 'exactly one collectible collected during replay',
           passed: collectiblesCollected === 1,
@@ -792,8 +823,8 @@ export function startReplay(
             collectedEntityIds: collected,
             collectiblesCollected,
           },
-        },
-      ];
+        });
+      }
 
       // The verdict is already decided; a failed unpin is reported, not a
       // failed run (a pin in force during Play is released by Stop anyway).
@@ -835,7 +866,10 @@ export function startReplay(
       try {
         await releaseHeld();
       } catch (releaseError) {
-        console.error('[replayRunner] could not release held keys after a failure', releaseError);
+        console.error(
+          `[replayRunner] could not release held keys after a failure; still held: ${[...held].join(', ')}`,
+          releaseError,
+        );
       }
       try {
         await resumeRuntimeIfPaused();

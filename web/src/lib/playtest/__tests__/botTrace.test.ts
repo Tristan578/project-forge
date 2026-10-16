@@ -7,7 +7,10 @@ import { simulatePlaytest, type BotAction } from '@/lib/ai/gameplayBot';
 import { botSessionToInputTrace, namedActionsForBotAction, BOT_TRACE_TICK_HZ } from '../botTrace';
 import { MAX_TRACE_TICKS, MAX_TRACE_DURATION_MS, parseInputTrace } from '../inputTrace';
 
+/** A scene with no dedicated negative actions: a leftward move has nowhere to go but a signed axis. */
 const AXIS_SCENE = ['move_right', 'move_forward', 'jump'];
+/** The names of AXIS_SCENE bound as signed axes (`InputBinding.actionType === 'axis'`). */
+const AXIS_BOUND = ['move_right', 'move_forward'];
 const DIGITAL_SCENE = ['move_right', 'move_left', 'move_forward', 'move_backward', 'jump'];
 
 function move(timestamp: number, x: number, y: number): BotAction {
@@ -21,13 +24,24 @@ describe('namedActionsForBotAction', () => {
     });
   });
 
-  it('maps a leftward move to move_left when the scene binds it, else to a negative move_right axis', () => {
+  it('maps a leftward move to move_left when the scene binds it', () => {
     expect(namedActionsForBotAction(move(0, -0.5, 0), DIGITAL_SCENE)).toEqual({
       move_left: { pressed: true, axis: 0.5 },
     });
-    expect(namedActionsForBotAction(move(0, -0.5, 0), AXIS_SCENE)).toEqual({
+  });
+
+  it('maps a leftward move to a negative move_right axis when move_left is absent and move_right is bound as an axis', () => {
+    expect(namedActionsForBotAction(move(0, -0.5, 0), AXIS_SCENE, AXIS_BOUND)).toEqual({
       move_right: { pressed: true, axis: -0.5 },
     });
+  });
+
+  // The replay resolver reads the sign for an AXIS binding only; a digital
+  // move_right answers KeyD whatever the sign, so a negative move_right here
+  // would press RIGHT. Not moving is the safe answer.
+  it('leaves a leftward move unbound when move_left is absent and move_right is NOT an axis', () => {
+    expect(namedActionsForBotAction(move(0, -0.5, 0), AXIS_SCENE)).toEqual({});
+    expect(namedActionsForBotAction(move(0, -0.5, 0), AXIS_SCENE, ['move_forward'])).toEqual({});
   });
 
   it('maps the y component to move_forward / move_backward the same way', () => {
@@ -37,6 +51,10 @@ describe('namedActionsForBotAction', () => {
     expect(namedActionsForBotAction(move(0, 0, -1), DIGITAL_SCENE)).toEqual({
       move_backward: { pressed: true, axis: 1 },
     });
+    expect(namedActionsForBotAction(move(0, 0, -1), AXIS_SCENE, AXIS_BOUND)).toEqual({
+      move_forward: { pressed: true, axis: -1 },
+    });
+    expect(namedActionsForBotAction(move(0, 0, -1), AXIS_SCENE)).toEqual({});
   });
 
   it('drops names the scene does not bind, and ignores dead-zone components', () => {
@@ -107,6 +125,19 @@ describe('botSessionToInputTrace', () => {
     expect(() => parseInputTrace(trace)).not.toThrow();
     expect(trace.fixtureId).toBe(fixtureId);
     expect(trace.actionNames).toEqual(DIGITAL_SCENE);
+  });
+
+  it('carries axisActionNames through: a leftward plan is a negative axis on an axis-bound move_right and unbound on a digital-only one', () => {
+    const plan = { actions: [move(0, -1, 0)] };
+    const axis = botSessionToInputTrace(plan, {
+      fixtureId,
+      actionNames: AXIS_SCENE,
+      axisActionNames: AXIS_BOUND,
+      msPerTick: 50,
+    });
+    expect(axis.frames.map((f) => f.actions)).toEqual([{ move_right: { pressed: true, axis: -1 } }]);
+    const digital = botSessionToInputTrace(plan, { fixtureId, actionNames: AXIS_SCENE, msPerTick: 50 });
+    expect(digital.frames.map((f) => f.actions)).toEqual([{}]);
   });
 
   it('an empty plan converts to an empty, valid trace', () => {

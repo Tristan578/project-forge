@@ -9,12 +9,14 @@
  *   - the dead-input negative case FAILS the outcome assertion and is NOT a
  *     heuristic `gameplayBot` rating.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   replayInputTrace,
+  startReplay,
   REPLAY_INPUT_TRACE_COMMAND,
   MOVE_EPSILON,
   type ReplayEnvironment,
+  type ReplayHandle,
   type ReplayObservation,
 } from '../replayRunner';
 import { invokeReplay } from '../replayInvocation';
@@ -52,7 +54,9 @@ function moveRightTrace(ticks: number): InputTrace {
  *
  * `pressLog` / `releaseLog` record every `pressKeys` / `releaseKeys` call in
  * order, so a test can assert a held key is pressed once (not re-pressed each
- * tick it stays down) and released exactly when its action ends.
+ * tick it stays down) and released exactly when its action ends. `getHeldKeys`
+ * is the engine's view of what is still pressed — what a refused release
+ * leaves behind.
  */
 function makeFakeEngine(options: { bound: boolean }) {
   const held = new Set<string>();
@@ -94,7 +98,7 @@ function makeFakeEngine(options: { bound: boolean }) {
     collectibleEntityIds: [COLLECTIBLE],
   };
 
-  return { env, pressLog, releaseLog, getPlayerX: () => playerX };
+  return { env, pressLog, releaseLog, getPlayerX: () => playerX, getHeldKeys: () => [...held] };
 }
 
 describe('replayInputTrace — simulated success path', () => {
@@ -313,5 +317,130 @@ describe('replayInputTrace — frame-to-frame key diffing', () => {
     // KeyD released at the switch (tick 2, before KeyA is pressed); KeyA
     // released by the finally-block cleanup after the last frame.
     expect(releaseLog).toEqual([['KeyD'], ['KeyA']]);
+  });
+});
+
+/**
+ * #10007 (review finding) — a release the boundary refuses must not lose
+ * track of the held keys. The DOM boundary's `releaseKeys` throws when the
+ * engine canvas is gone (`replayInvocation.ts`, `dispatchKey`). `releaseHeld`
+ * used to clear `held` BEFORE awaiting the release, so the cleanup that follows
+ * a failure (or honours a cancel) found an empty set, returned at once, and
+ * the synthetic keys stayed pressed in the engine. The tick loop's own diff
+ * already released first and forgot after; `releaseHeld` now does the same.
+ * Every `releaseHeld` caller is covered: the pause boundary inside the loop
+ * (a), the completion path after the last tick (b), and the cancel path (c).
+ */
+describe('startReplay — a refused key release keeps the keys in `held` for the cleanup', () => {
+  /**
+   * Make the boundary refuse the FIRST release and honour every later one,
+   * without the refused one reaching the fake engine (the keys stay pressed
+   * there exactly as they would behind a thrown `dispatchKey`). Returns every
+   * release call, refused or not, in order.
+   */
+  function refuseFirstRelease(env: ReplayEnvironment): string[][] {
+    const release = env.releaseKeys;
+    const releaseCalls: string[][] = [];
+    env.releaseKeys = async (codes) => {
+      releaseCalls.push([...codes]);
+      if (releaseCalls.length === 1) throw new Error('canvas gone');
+      await release(codes);
+    };
+    return releaseCalls;
+  }
+
+  it('(a) refused at a pause boundary inside the loop: fails with that error, the cleanup releases the same keys, nothing stays pressed', async () => {
+    const { env, getHeldKeys } = makeFakeEngine({ bound: true });
+    const releaseCalls = refuseFirstRelease(env);
+    // KeyD is held from tick 0; the pause armed for tick 2 releases it at that
+    // boundary through `releaseHeld` — the first release, which is refused.
+    const result = await startReplay(moveRightTrace(4), env, { pauseAtTick: 2 }).result;
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unreachable: asserted above');
+    expect(result.error.message).toBe('canvas gone');
+    expect(result.ticksReplayed).toBe(2);
+    // The failure path's cleanup tried the SAME keys again and was honoured.
+    expect(releaseCalls).toEqual([['KeyD'], ['KeyD']]);
+    expect(getHeldKeys()).toEqual([]);
+  });
+
+  it('(b) refused on the completion path, after the last tick: fails with that error, the cleanup releases the same keys, nothing stays pressed', async () => {
+    const { env, getHeldKeys } = makeFakeEngine({ bound: true });
+    const releaseCalls = refuseFirstRelease(env);
+    // Two ticks of KeyD, then the trace ends: the first release is the
+    // completion path's "release everything and settle".
+    const result = await startReplay(moveRightTrace(2), env).result;
+
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') throw new Error('unreachable: asserted above');
+    expect(result.error.message).toBe('canvas gone');
+    expect(result.ticksReplayed).toBe(2);
+    expect(releaseCalls).toEqual([['KeyD'], ['KeyD']]);
+    expect(getHeldKeys()).toEqual([]);
+  });
+
+  it('(c) a cancel that lands while the release is being refused: reports the cancellation, and the error names the keys still held', async () => {
+    const { env, getHeldKeys } = makeFakeEngine({ bound: true });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      let handle: ReplayHandle | null = null;
+      const releaseCalls: string[][] = [];
+      // A boundary that refuses EVERY release, with the creator's Cancel
+      // landing in the middle of the first refusal.
+      env.releaseKeys = async (codes) => {
+        releaseCalls.push([...codes]);
+        handle?.cancel();
+        throw new Error('canvas gone');
+      };
+      handle = startReplay(moveRightTrace(2), env);
+      const result = await handle.result;
+
+      expect(result).toEqual({ status: 'cancelled', ticksReplayed: 2 });
+      // The cancel's own cleanup tried the keys again — they were still in
+      // `held` — was refused again, and said exactly what is still down.
+      expect(releaseCalls).toEqual([['KeyD'], ['KeyD']]);
+      expect(getHeldKeys()).toEqual(['KeyD']);
+      const stillHeld = consoleError.mock.calls.find(
+        ([message]) => typeof message === 'string' && message.includes('could not release held keys while cancelling'),
+      );
+      expect(stillHeld?.[0]).toContain('still held: KeyD');
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});
+
+/**
+ * #10007 (review finding) — the collectible assertion is the run policy's
+ * call. The bot's Run Playtest replays a heuristic plan that never aims for a
+ * collectible, so with OP-03 always on its verdict failed in every scene
+ * without one. `assertCollectible: false` omits OP-03; the default keeps it
+ * for the manual Replay, the recorded-trace tool and the curated E2E gate.
+ */
+describe('replayInputTrace — the collectible assertion is opt-out', () => {
+  // Five ticks of KeyD move the player 0.5: past MOVE_EPSILON, short of the
+  // coin at x = 1, so the run moved and collected nothing.
+  it('assertCollectible: false omits OP-03 — a run that moved and collected nothing passes, and still reports collectiblesCollected', async () => {
+    const { env, getPlayerX } = makeFakeEngine({ bound: true });
+    const outcome = await replayInputTrace(moveRightTrace(5), env, { assertCollectible: false });
+
+    expect(getPlayerX()).toBeCloseTo(0.5, 5);
+    expect(outcome.verdict).toBe('passed');
+    expect(outcome.assertions.map((a) => [a.operationId, a.passed])).toEqual([['qa.FR-1.OP-01', true]]);
+    expect(outcome.collectiblesCollected).toBe(0);
+  });
+
+  it('the default keeps OP-03: the same run fails on it when nothing was collected', async () => {
+    const { env, getPlayerX } = makeFakeEngine({ bound: true });
+    const outcome = await replayInputTrace(moveRightTrace(5), env);
+
+    expect(getPlayerX()).toBeCloseTo(0.5, 5);
+    expect(outcome.verdict).toBe('failed');
+    expect(outcome.assertions.map((a) => [a.operationId, a.passed])).toEqual([
+      ['qa.FR-1.OP-01', true],
+      ['qa.FR-1.OP-03', false],
+    ]);
+    expect(outcome.collectiblesCollected).toBe(0);
   });
 });

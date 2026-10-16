@@ -27,16 +27,36 @@ import { INPUT_TRACE_VERSION, MAX_TRACE_TICKS } from '@/lib/playtest/inputTrace'
 import { getActiveReplaySession, startReplaySession } from '@/lib/playtest/replayEntryPoints';
 import { REPLAY_NFR_PENDING_DISPLAY_MS } from '../../../../e2e/constants';
 
+/** The scene's one binding: a signed-axis `move_right` (KeyD / KeyA). */
+const AXIS_MOVE_RIGHT = {
+  actionName: 'move_right',
+  actionType: 'axis',
+  sources: [] as string[],
+  positiveKeys: ['KeyD'],
+  negativeKeys: ['KeyA'],
+};
+
 const state = vi.hoisted(() => ({
   engineMode: 'play',
   primaryId: 'player',
   sceneName: 'Fixture',
   inputBindings: [
-    { actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'] },
-  ],
+    { actionName: 'move_right', actionType: 'axis', sources: [] as string[], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'] },
+  ] as Array<Record<string, unknown>>,
   allGameComponents: { coin: [{ type: 'collectible' }] },
   sceneGraph: { nodes: { player: { name: 'Player' } }, rootIds: ['player'] },
 }));
+
+/**
+ * The REAL entry point, wrapped so a test can read what the panel asked for
+ * (source, request, run options). Every other export is the real one, so the
+ * single-flight guard, the Stop watch and `useActiveReplay` behave exactly as
+ * in the app.
+ */
+vi.mock('@/lib/playtest/replayEntryPoints', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/playtest/replayEntryPoints')>();
+  return { ...actual, startReplaySession: vi.fn(actual.startReplaySession) };
+});
 
 /**
  * The store's change subscription, as `replayEntryPoints` uses it to cancel
@@ -538,5 +558,111 @@ describe('the bot run and the manual run share one replay guard (review-board MA
     expect(getActiveReplaySession()).toBeNull();
     expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeDisabled(); // no trace recorded
     expect(screen.getByRole('button', { name: 'Record input' })).toBeEnabled();
+  });
+});
+
+/**
+ * #10007 (review findings) — what the panel asks the shared entry point for.
+ * The bot's run opts out of the collectible assertion (its plan never aims
+ * for one) while the manual Replay keeps the full verdict; and the bot's
+ * trace is built from the scene's bindings, so a leftward move on a digital-
+ * only `move_right` is left unbound rather than pressing right.
+ */
+describe("the bot's run policy and vocabulary come from the scene", () => {
+  const startSession = vi.mocked(startReplaySession);
+  const rightward = { type: 'move', timestamp: 0, direction: { x: 1, y: 0 } };
+
+  beforeEach(() => {
+    state.engineMode = 'play';
+    state.inputBindings = [{ ...AXIS_MOVE_RIGHT }];
+    botSession.actions[0] = { ...rightward };
+    storeSubscribers.clear();
+    engine.commands.length = 0;
+    engine.paused = false;
+    engine.refuseUnpin = false;
+    keyEvents.length = 0;
+    startSession.mockClear();
+    resetPlayTickBus();
+    const canvas = document.createElement('canvas');
+    canvas.id = EDITOR_CANVAS_ID;
+    canvas.addEventListener('keydown', (e) => keyEvents.push(`down ${e.code}`));
+    canvas.addEventListener('keyup', (e) => keyEvents.push(`up ${e.code}`));
+    document.body.append(canvas);
+  });
+
+  afterEach(async () => {
+    const active = getActiveReplaySession();
+    if (active) {
+      active.handle.cancel();
+      await active.handle.result;
+    }
+    cleanup();
+    document.body.replaceChildren();
+    state.inputBindings = [{ ...AXIS_MOVE_RIGHT }];
+    botSession.actions[0] = { ...rightward };
+  });
+
+  /** Cancel whatever run is active and let its result settle. */
+  async function cancelActive() {
+    await act(async () => {
+      const active = getActiveReplaySession();
+      active?.handle.cancel();
+      await active?.handle.result;
+    });
+  }
+
+  it("Run Playtest starts the 'ai' session with assertCollectible: false; the manual Replay passes no such option", async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    expect(aiCall).toBeDefined();
+    expect(aiCall?.[2]).toEqual({ assertCollectible: false });
+    await cancelActive();
+    await screen.findByText(/AI bot runtime replay cancelled/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    const manualCall = startSession.mock.calls.find(([source]) => source === 'manual');
+    expect(manualCall).toBeDefined();
+    expect(manualCall?.[2]?.assertCollectible).toBeUndefined();
+    await cancelActive();
+    await screen.findByText(/Replay cancelled after 0 ticks/);
+  });
+
+  it('a leftward bot move on a scene binding only a DIGITAL move_right is left unbound (never pressed right)', async () => {
+    state.inputBindings = [{ actionName: 'move_right', actionType: 'digital', sources: ['KeyD'] }];
+    botSession.actions[0] = { type: 'move', timestamp: 0, direction: { x: -1, y: 0 } };
+    render(<PlaytestPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    const trace = aiCall?.[1].trace as { frames: Array<{ actions: Record<string, unknown> }> };
+    expect(trace.frames.length).toBeGreaterThan(0);
+    expect(trace.frames[0].actions).toEqual({});
+
+    // Through the warm-up and the first tick, nothing is pressed: not KeyD.
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    expect(keyEvents).toEqual([]);
+  });
+
+  it('a leftward bot move on a signed-axis move_right is its negative half (KeyA), as before', async () => {
+    botSession.actions[0] = { type: 'move', timestamp: 0, direction: { x: -1, y: 0 } };
+    render(<PlaytestPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    const trace = aiCall?.[1].trace as { frames: Array<{ actions: Record<string, unknown> }> };
+    expect(trace.frames[0].actions).toEqual({ move_right: { pressed: true, axis: -1 } });
+
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    expect(keyEvents).toEqual(['down KeyA']);
   });
 });

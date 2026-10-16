@@ -24,10 +24,15 @@
  * Direction → named action follows the engine's own vocabulary
  * (`core::game_components::system_character_controller` reads `move_right`,
  * `move_left`, `move_forward`, `move_backward`, `jump`): a positive x is
- * `move_right`, a negative x is `move_left` when the scene binds it and a
- * negative `move_right` axis otherwise (the signed-axis form the recorder
- * produces for an axis binding), and likewise for y against `move_forward` /
- * `move_backward`.
+ * `move_right`; a negative x is `move_left` when the scene binds it, and
+ * otherwise a negative `move_right` axis — the signed-axis form the recorder
+ * produces — but ONLY when `move_right` is bound as a signed axis
+ * (`BotTraceOptions.axisActionNames`). The replay resolver uses the sign for
+ * an axis binding alone; a digital binding answers its one key whatever the
+ * sign, so a negative `move_right` on a digital-only scene would press RIGHT.
+ * A digital-only scene without `move_left` therefore leaves leftward moves
+ * unbound (not moving is better than moving the wrong way). Likewise for y
+ * against `move_forward` / `move_backward`.
  */
 
 import type { BotAction, PlaytestSession } from '@/lib/ai/gameplayBot';
@@ -52,6 +57,13 @@ export interface BotTraceOptions {
   /** The scene's action vocabulary; names outside it are dropped. */
   actionNames: string[];
   /**
+   * Names bound as signed axes (`InputBinding.actionType === 'axis'`). Only
+   * these may carry a negative direction when the scene has no dedicated
+   * negative action; a digital binding would press its positive key for it.
+   * Defaults to none, so a caller that does not say leaves such moves unbound.
+   */
+  axisActionNames?: readonly string[];
+  /**
    * Bot-timeline milliseconds represented by one engine tick. Defaults to
    * spanning the whole plan across `MAX_TRACE_TICKS`, never finer than one
    * real frame at `BOT_TRACE_TICK_HZ`.
@@ -61,6 +73,7 @@ export interface BotTraceOptions {
 
 function pickAxis(
   vocabulary: ReadonlySet<string>,
+  axisNames: ReadonlySet<string>,
   value: number,
   positiveName: string,
   negativeName: string,
@@ -72,8 +85,14 @@ function pickAxis(
   }
   if (vocabulary.has(negativeName)) return [negativeName, { pressed: true, axis: magnitude }];
   // No dedicated negative action: express it as the negative half of the
-  // positive axis, which an axis binding's `negativeKeys` answers.
-  if (vocabulary.has(positiveName)) return [positiveName, { pressed: true, axis: -magnitude }];
+  // positive axis, which an axis binding's `negativeKeys` answers. Only for a
+  // binding that IS an axis: `buildActionKeyResolver` reads the sign for an
+  // axis binding alone and returns a digital binding's key regardless, so a
+  // negative `move_right` on a digital-only scene would press RIGHT. Pressing
+  // the wrong direction is worse than not moving, so it stays unbound.
+  if (vocabulary.has(positiveName) && axisNames.has(positiveName)) {
+    return [positiveName, { pressed: true, axis: -magnitude }];
+  }
   return null;
 }
 
@@ -81,17 +100,21 @@ function pickAxis(
  * The named actions one bot action holds while it is current.
  * @param action A planned bot action.
  * @param actionNames The scene's action vocabulary.
+ * @param axisActionNames Names bound as signed axes; only these may carry a
+ *   negative direction in place of a missing negative action.
  * @returns Named-action states for a trace frame; empty for actions with no engine input.
  */
 export function namedActionsForBotAction(
   action: BotAction,
   actionNames: readonly string[],
+  axisActionNames: readonly string[] = [],
 ): Record<string, InputActionState> {
   const vocabulary = new Set(actionNames);
+  const axisNames = new Set(axisActionNames);
   const actions: Record<string, InputActionState> = {};
   if (action.type === 'move' && action.direction) {
-    const horizontal = pickAxis(vocabulary, action.direction.x, 'move_right', 'move_left');
-    const vertical = pickAxis(vocabulary, action.direction.y, 'move_forward', 'move_backward');
+    const horizontal = pickAxis(vocabulary, axisNames, action.direction.x, 'move_right', 'move_left');
+    const vertical = pickAxis(vocabulary, axisNames, action.direction.y, 'move_forward', 'move_backward');
     if (horizontal) actions[horizontal[0]] = horizontal[1];
     if (vertical) actions[vertical[0]] = vertical[1];
   } else if (action.type === 'jump' && vocabulary.has('jump')) {
@@ -130,6 +153,7 @@ export function botSessionToInputTrace(
   const tickCount = Math.min(MAX_TRACE_TICKS, Math.ceil(endMs / msPerTick));
 
   const frames: InputTraceFrame[] = [];
+  const axisActionNames = options.axisActionNames ?? [];
   let actionIndex = -1;
   let jumpTapped = false;
   for (let tick = 0; tick < tickCount; tick += 1) {
@@ -144,11 +168,11 @@ export function botSessionToInputTrace(
       if (current.type === 'jump') {
         // A jump is a tap: pressed on the first tick it is current, then idle.
         if (!jumpTapped) {
-          actions = namedActionsForBotAction(current, options.actionNames);
+          actions = namedActionsForBotAction(current, options.actionNames, axisActionNames);
           jumpTapped = true;
         }
       } else {
-        actions = namedActionsForBotAction(current, options.actionNames);
+        actions = namedActionsForBotAction(current, options.actionNames, axisActionNames);
       }
     }
     frames.push({ tick, actions });

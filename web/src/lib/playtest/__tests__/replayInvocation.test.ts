@@ -2,11 +2,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResponse } from '@/hooks/useEngine';
 import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
+import type { InputBinding } from '@/stores/slices/types';
 import {
   buildActionKeyResolver,
   createDomKeyboardEnvironment,
   type EngineDispatch,
 } from '../replayInvocation';
+import { botSessionToInputTrace } from '../botTrace';
+import { replayInputTrace, type ReplayEnvironment } from '../replayRunner';
 import { publishPlayTick, resetPlayTickBus } from '../playTickBus';
 
 function environment(dispatch: EngineDispatch | null = null) {
@@ -123,6 +126,63 @@ describe('browser replay boundary', () => {
     await vi.advanceTimersByTimeAsync(2_000);
     await rejection;
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+/**
+ * #10007 (review finding) — end to end from the bot's plan to the resolver.
+ * `buildActionKeyResolver` reads the sign for an AXIS binding only and
+ * answers a DIGITAL binding's key whatever the sign, so a leftward plan on a
+ * scene that binds only a digital `move_right` used to press KeyD — the wrong
+ * direction. The trace conversion now emits the negative-axis fallback only
+ * for a name the bindings mark as an axis; replayed through the real
+ * resolver, KeyD is never pressed for a leftward move on that scene.
+ */
+describe('a leftward bot move never presses a digital move_right key', () => {
+  /** The bot's plan on a scene's bindings, replayed through the real resolver into a key log. */
+  async function keysPressedFor(direction: { x: number; y: number }, bindings: InputBinding[]): Promise<string[]> {
+    const trace = botSessionToInputTrace(
+      { actions: [{ type: 'move', timestamp: 0, direction }, { type: 'wait', timestamp: 100 }] },
+      {
+        fixtureId: 'resolver-fixture',
+        actionNames: bindings.map((b) => b.actionName),
+        axisActionNames: bindings.filter((b) => b.actionType === 'axis').map((b) => b.actionName),
+        msPerTick: 50,
+      },
+    );
+    const pressed: string[] = [];
+    const env: ReplayEnvironment = {
+      resolveKeys: buildActionKeyResolver(bindings),
+      pressKeys: (codes) => {
+        pressed.push(...codes);
+      },
+      releaseKeys: () => {},
+      advanceFrame: async () => {},
+      observe: () => null,
+      playerEntityId: 'player',
+      collectibleEntityIds: [],
+    };
+    await replayInputTrace(trace, env);
+    return pressed;
+  }
+
+  const digitalRightOnly: InputBinding[] = [
+    { actionName: 'move_right', actionType: 'digital', sources: ['KeyD'] },
+  ];
+  const axisRight: InputBinding[] = [
+    { actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'] },
+  ];
+
+  it('presses KeyD for a rightward move on the digital-only scene (the pipeline is live)', async () => {
+    expect(await keysPressedFor({ x: 1, y: 0 }, digitalRightOnly)).toEqual(['KeyD']);
+  });
+
+  it('presses nothing for a leftward move on the digital-only scene — never KeyD', async () => {
+    expect(await keysPressedFor({ x: -1, y: 0 }, digitalRightOnly)).toEqual([]);
+  });
+
+  it('presses KeyA for a leftward move when move_right is a signed axis', async () => {
+    expect(await keysPressedFor({ x: -1, y: 0 }, axisRight)).toEqual(['KeyA']);
   });
 });
 

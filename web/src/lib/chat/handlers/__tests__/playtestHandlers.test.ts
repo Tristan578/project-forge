@@ -87,7 +87,10 @@ describe('replay_input_trace', () => {
     const [source, request, options, deps] = runReplay.mock.calls[0];
     expect(source).toBe('ai');
     expect(request).toEqual({ trace: parseInputTrace(trace), playerEntityId: PLAYER, collectibleEntityIds: ['coin'] });
+    // A recorded trace keeps the FULL verdict, the collectible assertion
+    // included: only a planned strategy opts out of it (below).
     expect(options).toEqual({});
+    expect(options).not.toHaveProperty('assertCollectible');
     expect(deps.bindings).toEqual(playing.inputBindings);
     expect(deps.allGameComponents).toEqual(playing.allGameComponents);
     // The dispatcher the replay pins the clock through is the context's.
@@ -95,18 +98,23 @@ describe('replay_input_trace', () => {
     expect(dispatchCommand).toHaveBeenCalledWith('pin_frame_rate', { hz: 60 });
   });
 
-  it('plans a bot strategy and replays the resulting trace', async () => {
-    simulatePlaytest.mockResolvedValue({
+  /** A planned session: one move, then a wait. */
+  function plannedSession(direction: { x: number; y: number }) {
+    return {
       strategy: 'explorer',
       actions: [
-        { type: 'move', timestamp: 0, direction: { x: 1, y: 0 } },
+        { type: 'move', timestamp: 0, direction },
         { type: 'wait', timestamp: 500 },
       ],
       duration: 1000,
       outcome: 'completed',
       discoveries: [],
       metrics: { timeToComplete: 1000, deathCount: 0, itemsCollected: 0, areasExplored: 0, backtrackCount: 0 },
-    });
+    };
+  }
+
+  it('plans a bot strategy and replays the resulting trace without the collectible assertion', async () => {
+    simulatePlaytest.mockResolvedValue(plannedSession({ x: 1, y: 0 }));
     const { result } = await invokeHandler(
       playtestHandlers,
       'replay_input_trace',
@@ -119,13 +127,44 @@ describe('replay_input_trace', () => {
       expect.objectContaining({ gameComponents: { coin: [{ type: 'collectible' }] } }),
       'explorer',
     );
-    const request = runReplay.mock.calls[0][1];
+    const [, request, options] = runReplay.mock.calls[0];
     expect(request.playerEntityId).toBe(PLAYER);
     expect(request.collectibleEntityIds).toBeUndefined();
     // The plan became a trace in the scene's own vocabulary.
     expect(request.trace.actionNames).toEqual(['move_right']);
     expect(request.trace.frames[0].actions).toEqual({ move_right: { pressed: true, axis: 1 } });
     expect(request.trace.frames.length).toBeGreaterThan(0);
+    // The plan never aims for a collectible, so its verdict is the movement
+    // assertion alone (the recorded-trace branch above keeps OP-03).
+    expect(options).toEqual({ assertCollectible: false });
+  });
+
+  // `buildActionKeyResolver` answers a digital binding's key whatever the
+  // sign, so the negative-axis fallback is allowed only for names the
+  // bindings mark as an axis — derived here from the store's bindings.
+  it('derives the axis names from the bindings: a leftward plan is a negative move_right axis only when move_right is an axis', async () => {
+    simulatePlaytest.mockResolvedValue(plannedSession({ x: -1, y: 0 }));
+    const onAxis = await invokeHandler(
+      playtestHandlers,
+      'replay_input_trace',
+      { strategy: 'explorer', playerEntityId: PLAYER },
+      playing,
+    );
+    expect(onAxis.result.success).toBe(true);
+    expect(runReplay.mock.calls[0][1].trace.frames[0].actions).toEqual({ move_right: { pressed: true, axis: -1 } });
+
+    simulatePlaytest.mockResolvedValue(plannedSession({ x: -1, y: 0 }));
+    const onDigital = await invokeHandler(
+      playtestHandlers,
+      'replay_input_trace',
+      { strategy: 'explorer', playerEntityId: PLAYER },
+      { ...playing, inputBindings: [{ actionName: 'move_right', actionType: 'digital', sources: ['KeyD'] }] },
+    );
+    expect(onDigital.result.success).toBe(true);
+    const digitalTrace = runReplay.mock.calls[1][1].trace;
+    expect(digitalTrace.frames.length).toBeGreaterThan(0);
+    // Unbound, not reversed: pressing right for a leftward move is worse than not moving.
+    expect(digitalTrace.frames[0].actions).toEqual({});
   });
 
   it('refuses a request with both or neither input source', async () => {

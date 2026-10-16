@@ -609,12 +609,19 @@ export function PlaytestPanel() {
   const runBotInEngine = useCallback(
     async (session: PlaytestSession) => {
       if (!primaryId) return;
-      const actionNames = (inputBindings ?? []).map((b) => b.actionName);
+      const bindings = inputBindings ?? [];
+      const actionNames = bindings.map((b) => b.actionName);
+      // Only a signed-axis binding may answer a negative direction (a digital
+      // one would press its positive key for it — the wrong way).
+      const axisActionNames = bindings.filter((b) => b.actionType === 'axis').map((b) => b.actionName);
       const trace = botSessionToInputTrace(session, {
         fixtureId: sceneName || 'current-scene',
         actionNames,
+        axisActionNames,
       });
-      const replay = startReplaySession('ai', { trace, playerEntityId: primaryId });
+      // The bot's plan never aims for a collectible, so its verdict is the
+      // movement assertion alone; `collectiblesCollected` is still reported.
+      const replay = startReplaySession('ai', { trace, playerEntityId: primaryId }, { assertCollectible: false });
       botHandleRef.current = replay.handle;
       setBotProgress(replay.handle.getProgress());
       const unsubscribe = replay.handle.subscribe(setBotProgress);
