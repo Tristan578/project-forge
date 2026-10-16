@@ -20,7 +20,7 @@ import type { ExecutionResult, ToolHandler } from './types';
 import { parseArgs, zEntityId } from './types';
 import { safeParseInputTrace } from '@/lib/playtest/inputTrace';
 import { botSessionToInputTrace } from '@/lib/playtest/botTrace';
-import { runReplay } from '@/lib/playtest/replayEntryPoints';
+import { getActiveReplaySession, runReplay } from '@/lib/playtest/replayEntryPoints';
 import type { EngineDispatch } from '@/lib/playtest/replayInvocation';
 import { simulatePlaytest, type BotStrategy, type SceneContext } from '@/lib/ai/gameplayBot';
 
@@ -119,6 +119,8 @@ export const playtestHandlers: Record<string, ToolHandler> = {
   pin_frame_rate: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ hz: zPinHz.optional() }), args);
     if (p.error) return p.error;
+    const busy = replayGuardRefusal('pin_frame_rate');
+    if (busy) return { success: false, error: busy };
     const hz = p.data.hz ?? 60;
     const refusal = engineRefusal(
       'pin_frame_rate',
@@ -130,13 +132,16 @@ export const playtestHandlers: Record<string, ToolHandler> = {
       result: {
         message:
           `Simulation clock pinned to ${hz} Hz: every rendered frame advances the game by ` +
-          `exactly 1/${hz} s. Released by unpin_frame_rate or by leaving Play mode.`,
+          `exactly 1/${hz} s. Stop releases it while Play is running; a pin made in Edit mode ` +
+          'stays until unpin_frame_rate.',
         hz,
       },
     };
   },
 
   unpin_frame_rate: async (_args, ctx): Promise<ExecutionResult> => {
+    const busy = replayGuardRefusal('unpin_frame_rate');
+    if (busy) return { success: false, error: busy };
     const refusal = engineRefusal(
       'unpin_frame_rate',
       ctx.dispatchCommand('unpin_frame_rate', {}) as CommandResponse | void,
@@ -148,6 +153,23 @@ export const playtestHandlers: Record<string, ToolHandler> = {
     };
   },
 };
+
+/**
+ * The raw clock tools are a fourth door past the replay single-flight guard
+ * (`replayEntryPoints`): a pin or unpin issued while a replay is running
+ * would land in the middle of a run that owns the clock and pins its own
+ * rate. Refused while a session is active, naming the origin that holds it.
+ * @param tool The clock tool that was called.
+ * @returns The error text to return, or null when no replay is running.
+ */
+function replayGuardRefusal(tool: string): string | null {
+  const active = getActiveReplaySession();
+  if (!active) return null;
+  return (
+    `${tool} refused: a replay is already running (started by the ${active.source} controls) ` +
+    'and owns the engine clock. Wait for it to finish or cancel it first.'
+  );
+}
 
 /**
  * The engine's answer to a clock command, as a tool error when it is not an

@@ -71,12 +71,16 @@
 //! the frame after it the time since the unpin, so the slow-rasteriser case no
 //! longer replays its lag as one long step.
 //!
-//! A pin never outlives Play mode. The web runner unpins on every exit path,
-//! but a pin made directly through the `pin_frame_rate` tool (the in-app AI, an
-//! MCP client) has no owner, so the engine releases whatever pin is in force on
-//! the Play → Edit transition (Stop), with the same re-anchor
+//! Stop releases a pin that is in force during Play. The web runner unpins on
+//! every exit path, but a pin made directly through the `pin_frame_rate` tool
+//! (the in-app AI, an MCP client) has no owner, so the engine releases the pin
+//! in force on the Play → Edit transition (Stop), with the same re-anchor
 //! (`stopping_play_releases_a_pin_that_outlived_its_replay`). The runner's own
 //! Pause moves the engine to `Paused`, not `Edit`, and does not release it.
+//! The release runs ONLY on that transition and before the drain, so a pin
+//! queued in the frame Play stops, or made while already in Edit, stays until
+//! `unpin_frame_rate` (`a_pin_queued_in_the_frame_play_stops_still_wins` pins
+//! that deliberately: an explicit request is never silently discarded).
 //! Documented in `docs/decisions/2026-10-05-pinned-simulation-clock-for-replay.md`.
 
 use bevy::platform::time::Instant;
@@ -223,14 +227,15 @@ pub fn apply_frame_rate_pin_requests(
     }
 }
 
-/// Release a pin that outlived Play mode.
+/// Release the pin in force when Play stops.
 ///
 /// Fires on the transition INTO `Edit` from any other mode (that is Stop; the
 /// runner's own Pause goes to `Paused` and must keep the pin). Runs before
 /// [`apply_frame_rate_pin_requests`] in the same frame, so an explicit request
-/// queued in the frame Play stops still wins. `EngineMode` is read as an
-/// `Option` so an app without the mode machine (a focused test) is simply
-/// never released by this path.
+/// queued in the frame Play stops still wins, and a pin made while already in
+/// Edit is not touched: both stay until `unpin_frame_rate`. `EngineMode` is
+/// read as an `Option` so an app without the mode machine (a focused test) is
+/// simply never released by this path.
 pub fn release_pin_when_play_stops(
     mode: Option<Res<EngineMode>>,
     mut previous_mode: Local<Option<EngineMode>>,
@@ -558,7 +563,7 @@ mod tests {
         assert_eq!(pin(&app).hz, Some(60));
     }
 
-    // === A pin never outlives Play mode ===
+    // === Stop releases a pin in force during Play ===
 
     /// A pin made through the `pin_frame_rate` tool has no runner to unpin it.
     /// Stop (Play → Edit) releases it, with the same re-anchor an explicit

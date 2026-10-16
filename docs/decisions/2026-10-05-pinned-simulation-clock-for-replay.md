@@ -114,13 +114,16 @@ Rapier reads `Time` in `PostUpdate`.
   green with or without the re-anchor). With the re-anchor the unpin frame is
   near zero in both directions and the frame after it is measured from the
   unpin.
-- **A pin never outlives Play mode.** The web runner unpins on every exit
-  path, but a pin made directly through the `pin_frame_rate` tool (the in-app
-  AI, an MCP client) has no owner. The engine therefore releases whatever pin
-  is in force on the Play → Edit transition (Stop), with the same re-anchor,
-  in `First` before the drain — so an explicit request queued in the frame
-  Play stops still wins. The runner's own Pause moves the engine to `Paused`,
-  not `Edit`, and keeps the pin (`stopping_play_releases_a_pin_that_outlived_its_replay`,
+- **Stop releases a pin that is in force during Play.** The web runner unpins
+  on every exit path, but a pin made directly through the `pin_frame_rate`
+  tool (the in-app AI, an MCP client) has no owner. The engine therefore
+  releases the pin in force on the Play → Edit transition (Stop), with the
+  same re-anchor, in `First` before the drain. That is the whole rule: the
+  release runs only on that transition, so a pin queued in the frame Play
+  stops, or made while already in Edit, stays until `unpin_frame_rate` — an
+  explicit request is never silently discarded. The runner's own Pause moves
+  the engine to `Paused`, not `Edit`, and keeps the pin
+  (`stopping_play_releases_a_pin_that_outlived_its_replay`,
   `pausing_play_keeps_the_pin`, `a_pin_queued_in_the_frame_play_stops_still_wins`).
 - **One replay at a time.** The pin is engine-global, and each run unpins on
   its own exit, so two overlapping runs would have the first's unpin land in

@@ -14,7 +14,9 @@ import { playtestHandlers, REPLAY_NEEDS_ONE_SOURCE, REPLAY_REQUIRES_PLAY_MODE } 
 import { INPUT_TRACE_VERSION, parseInputTrace } from '@/lib/playtest/inputTrace';
 
 const runReplay = vi.hoisted(() => vi.fn());
-vi.mock('@/lib/playtest/replayEntryPoints', () => ({ runReplay }));
+/** The single-flight guard's view: null when idle, the active session otherwise. */
+const getActiveReplaySession = vi.hoisted(() => vi.fn<() => { source: string } | null>(() => null));
+vi.mock('@/lib/playtest/replayEntryPoints', () => ({ runReplay, getActiveReplaySession }));
 
 const simulatePlaytest = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/ai/gameplayBot', () => ({ simulatePlaytest }));
@@ -60,6 +62,8 @@ const playing = {
 beforeEach(() => {
   runReplay.mockReset();
   simulatePlaytest.mockReset();
+  getActiveReplaySession.mockReset();
+  getActiveReplaySession.mockReturnValue(null);
   runReplay.mockResolvedValue({ command: 'replay_input_trace', source: 'ai', outcome });
 });
 
@@ -214,6 +218,41 @@ describe('pin_frame_rate / unpin_frame_rate', () => {
     const { result, dispatchCommand } = await invokeHandler(playtestHandlers, 'unpin_frame_rate', {}, {}, accepted);
     expect(result.success).toBe(true);
     expect(dispatchCommand).toHaveBeenCalledWith('unpin_frame_rate', {});
+  });
+
+  // The raw clock tools are a fourth door past the single-flight guard: a pin
+  // or unpin issued while a replay runs would land in the middle of a run
+  // that owns the clock. They are refused while a session is active, naming
+  // the origin that holds it, and dispatch nothing.
+  describe('respect the replay guard', () => {
+    it.each(['pin_frame_rate', 'unpin_frame_rate'])(
+      '%s is refused while a replay is running, naming the active origin, without dispatching',
+      async (tool) => {
+        getActiveReplaySession.mockReturnValue({ source: 'manual' });
+        const { result, dispatchCommand } = await invokeHandler(playtestHandlers, tool, {}, {}, accepted);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(tool);
+        expect(result.error).toMatch(/already running/);
+        expect(result.error).toContain('manual');
+        expect(dispatchCommand).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['pin_frame_rate', 'unpin_frame_rate'])('%s is accepted when no replay is running', async (tool) => {
+      getActiveReplaySession.mockReturnValue(null);
+      const { result, dispatchCommand } = await invokeHandler(playtestHandlers, tool, {}, {}, accepted);
+      expect(result.success).toBe(true);
+      expect(dispatchCommand).toHaveBeenCalledTimes(1);
+    });
+
+    it('the pin tool tells the agent what releases the pin, exactly', async () => {
+      const { result } = await invokeHandler(playtestHandlers, 'pin_frame_rate', { hz: 30 }, {}, accepted);
+      expect(result.success).toBe(true);
+      const message = (result.result as { message: string }).message;
+      expect(message).toContain('Stop releases it while Play is running');
+      expect(message).toContain('a pin made in Edit mode stays until unpin_frame_rate');
+      expect(message).not.toMatch(/never outlives/);
+    });
   });
 
   // The handlers used to answer `success: true` whatever the engine said, so

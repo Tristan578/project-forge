@@ -328,7 +328,7 @@ function RuntimeReplaySection() {
       if (result.status === 'completed') {
         setOutcome(result.outcome);
         // The run was pinned, so the verdict stands; the release failing is
-        // reported beside it (the engine releases any pin on Stop regardless).
+        // reported beside it (Stop releases a pin in force during Play anyway).
         if (result.unpinError) setError(`Replay finished, but the engine clock could not be released: ${result.unpinError}`);
       } else if (result.status === 'cancelled') {
         setCancelledAfter(result.ticksReplayed);

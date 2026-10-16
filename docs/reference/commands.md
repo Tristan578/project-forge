@@ -1957,7 +1957,7 @@ Scope: `scene:write` | Token cost: 0
 
 ### `pin_frame_rate`
 
-Pin the simulation clock so every rendered frame advances the simulation by exactly 1/hz seconds, regardless of wall-clock frame time. Used by replay_input_trace for deterministic replays; unpin_frame_rate restores the wall clock. A pin never outlives Play mode: leaving Play (Stop) releases it. Physics tracks the pin only at hz >= 60 (Rapier caps its step at 1/60 s); below that, gameplay systems step 1/hz per frame while physics steps 1/60.
+Pin the simulation clock so every rendered frame advances the simulation by exactly 1/hz seconds, regardless of wall-clock frame time. Used by replay_input_trace for deterministic replays; unpin_frame_rate restores the wall clock. Stop releases a pin that is in force during Play; a pin made in Edit, or queued in the frame Play stops, stays until unpin_frame_rate. Physics tracks the pin only at hz >= 60 (Rapier caps its step at 1/60 s); below that, gameplay systems step 1/hz per frame while physics steps 1/60.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1977,7 +1977,7 @@ Scope: `scene:write` | Token cost: 0
 
 ### `unpin_frame_rate`
 
-Return the simulation clock to the wall clock after pin_frame_rate; the next frame is measured from now. Leaving Play mode (Stop) does this automatically.
+Return the simulation clock to the wall clock after pin_frame_rate; the next frame is measured from now. Stop does this for a pin in force during Play; a pin made in Edit stays until this command.
 
 **Example:**
 ```json
