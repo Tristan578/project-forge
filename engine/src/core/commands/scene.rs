@@ -188,10 +188,18 @@ fn handle_import_gltf(payload: serde_json::Value) -> super::CommandResult {
 }
 
 /// Payload for load_texture command.
+///
+/// `dataBase64` is what every web producer and all three MCP manifests send,
+/// the same name `import_gltf` and `import_audio` use. From the 2026-02 module
+/// split until #10397 this field was named `data`, so no `load_texture` sent
+/// from the editor ever deserialized; `data` stays accepted for a direct caller
+/// that used the old name. `web/src/lib/engine/__tests__/textureFormatGuard.test.ts`
+/// pins the names on both sides.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoadTexturePayload {
-    data: String,
+    #[serde(alias = "data")]
+    data_base64: String,
     name: String,
     entity_id: String,
     slot: String,
@@ -203,7 +211,7 @@ fn handle_load_texture(payload: serde_json::Value) -> super::CommandResult {
         .map_err(|e| format!("Invalid load_texture payload: {}", e))?;
 
     let request = TextureLoadRequest {
-        data_base64: data.data,
+        data_base64: data.data_base64,
         name: data.name.clone(),
         entity_id: data.entity_id.clone(),
         slot: data.slot,
@@ -603,6 +611,56 @@ mod tests {
             "Expected parse error for missing dataBase64, got: {}",
             err
         );
+    }
+
+    // === load_texture ===
+
+    /// A 1x1 PNG as a data URL. The handler never decodes it; the drain does.
+    const PNG_DATA_URL: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+    #[test]
+    fn load_texture_accepts_the_payload_every_web_producer_sends() {
+        // `dataBase64`, as assetSlice.loadTexture, the chat handler and the MCP
+        // manifests send it. Until #10397 the field was named `data`, so this
+        // payload failed to parse and nothing was ever queued.
+        let pending = run_with_queue("load_texture", json!({
+            "dataBase64": PNG_DATA_URL,
+            "name": "stone.png",
+            "entityId": "entity-1",
+            "slot": "base_color"
+        }));
+
+        assert_eq!(pending.texture_load_requests.len(), 1);
+        let request = &pending.texture_load_requests[0];
+        assert_eq!(request.data_base64, PNG_DATA_URL);
+        assert_eq!(request.name, "stone.png");
+        assert_eq!(request.entity_id, "entity-1");
+        assert_eq!(request.slot, "base_color");
+    }
+
+    #[test]
+    fn load_texture_still_accepts_the_old_data_field() {
+        let pending = run_with_queue("load_texture", json!({
+            "data": PNG_DATA_URL,
+            "name": "stone.png",
+            "entityId": "entity-1",
+            "slot": "base_color"
+        }));
+
+        assert_eq!(pending.texture_load_requests.len(), 1);
+        assert_eq!(pending.texture_load_requests[0].data_base64, PNG_DATA_URL);
+    }
+
+    #[test]
+    fn load_texture_rejects_a_payload_with_no_body_field() {
+        let err = run("load_texture", json!({
+            "name": "stone.png",
+            "entityId": "entity-1",
+            "slot": "base_color"
+        }))
+        .unwrap_err();
+        assert!(err.contains("Invalid load_texture payload"), "{err}");
+        assert!(err.contains("dataBase64"), "serde must name the field the web sends: {err}");
     }
 
     /// Initialize a real `PendingCommands`, register it for bridge access, run
