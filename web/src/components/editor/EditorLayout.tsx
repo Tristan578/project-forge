@@ -63,6 +63,7 @@ import { useGenerationStore } from '@/stores/generationStore';
 import { useUserStore } from '@/stores/userStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
+import { createReplaySessionRegistry } from '@/lib/playtest/replaySessionRegistry';
 import { startAutoSave } from '@/lib/storage/autoSave';
 import { safeGetItem, safeSetItem } from '@/lib/storage/safeLocalStorage';
 import { UserButton } from '@clerk/nextjs';
@@ -560,29 +561,21 @@ export function EditorLayout() {
         return result.outcome;
       };
       // Controlled replay sessions for the pause/cancel/restart scenario
-      // (#10007). Sessions live in this closure, addressed by id. `state` joins
-      // the runner's progress with the engine's OWN evaluated input and the
-      // observed player position from the play-tick bus, so the spec asserts
-      // "cancellation released input" on what the engine reports, not on the
-      // runner's bookkeeping. Same gate as `__FORGE_REPLAY`.
-      const replaySessions = new Map<
-        string,
-        { playerEntityId: string; handle: import('@/lib/playtest/replayRunner').ReplayHandle }
-      >();
-      let nextReplaySessionId = 0;
-      const replaySession = (id: string) => {
-        const entry = replaySessions.get(id);
-        if (!entry) throw new Error(`Unknown replay session: ${id}`);
-        return entry;
-      };
+      // (#10007). Sessions live in a registry in this closure, addressed by
+      // id; settled sessions are dropped when the next one starts (the spec
+      // reads `state(id)` after `result(id)`, so the last finished one stays
+      // addressable until then — `lib/playtest/replaySessionRegistry`).
+      // `state` joins the runner's progress with the engine's OWN evaluated
+      // input and the observed player position from the play-tick bus, so the
+      // spec asserts "cancellation released input" on what the engine
+      // reports, not on the runner's bookkeeping. Same gate as `__FORGE_REPLAY`.
+      const replaySessions = createReplaySessionRegistry();
+      const replaySession = (id: string) => replaySessions.get(id);
       window.__FORGE_REPLAY_CONTROL = {
         start: async (trace, config, options) => {
           const { startReplaySession } = await import('@/lib/playtest/replayEntryPoints');
           const session = startReplaySession('manual', { trace, ...config }, options ?? {});
-          const id = `replay-${nextReplaySessionId}`;
-          nextReplaySessionId += 1;
-          replaySessions.set(id, { playerEntityId: config.playerEntityId, handle: session.handle });
-          return id;
+          return replaySessions.register({ playerEntityId: config.playerEntityId, handle: session.handle });
         },
         state: async (id) => {
           const { playerEntityId, handle } = replaySession(id);

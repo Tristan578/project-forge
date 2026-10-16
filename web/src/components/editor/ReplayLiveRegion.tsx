@@ -35,7 +35,7 @@ export function replayStatusText(progress: ReplayProgress): string {
 }
 
 /**
- * The screen-reader announcement for a running replay (#10007, review-board m6).
+ * The screen-reader announcement for a replay (#10007, review-board m6).
  *
  * The visible progress line updates on every tick — up to 60 times a second.
  * Making THAT line the live region turned a replay into a continuous stream of
@@ -45,11 +45,24 @@ export function replayStatusText(progress: ReplayProgress): string {
  * progress at most once per `REPLAY_ANNOUNCE_INTERVAL_MS`, trailing-edge, so
  * the most recent position is always the one read out; the visible line
  * stays live on its own, without a live role.
- * @param props.progress The runner's latest progress snapshot.
+ *
+ * Render it PERSISTENTLY, with `progress: null` while no run is in flight:
+ * several screen readers do not announce the initial content of a live
+ * region that was only just inserted, so the region has to exist, empty,
+ * before the first state it announces.
+ * @param props.progress The runner's latest progress snapshot, or null while idle.
+ * @param props.testId Test id, so two announcers on one page can be told apart.
  * @returns A polite, visually hidden status region.
  */
-export function ReplayLiveRegion({ progress }: { progress: ReplayProgress }) {
-  const text = replayStatusText(progress);
+export function ReplayLiveRegion({
+  progress,
+  testId = 'replay-announcer',
+}: {
+  progress: ReplayProgress | null;
+  testId?: string;
+}) {
+  const text = progress ? replayStatusText(progress) : '';
+  const state: ReplayRunState | null = progress?.state ?? null;
   const [announced, setAnnounced] = useState(text);
   /**
    * The state and time of the last announcement; read and written in effects
@@ -64,8 +77,8 @@ export function ReplayLiveRegion({ progress }: { progress: ReplayProgress }) {
     latest.current = text;
     const now = Date.now();
     const sinceLast = now - last.current.at;
-    if (progress.state !== last.current.state || sinceLast >= REPLAY_ANNOUNCE_INTERVAL_MS) {
-      last.current = { state: progress.state, at: now };
+    if (state !== last.current.state || sinceLast >= REPLAY_ANNOUNCE_INTERVAL_MS) {
+      last.current = { state, at: now };
       setAnnounced(text);
       return undefined;
     }
@@ -73,14 +86,14 @@ export function ReplayLiveRegion({ progress }: { progress: ReplayProgress }) {
     // since the last announcement. Re-running this effect on every tick
     // re-arms the same deadline, so a burst is announced exactly once.
     const timer = setTimeout(() => {
-      last.current = { state: progress.state, at: Date.now() };
+      last.current = { state, at: Date.now() };
       setAnnounced(latest.current);
     }, REPLAY_ANNOUNCE_INTERVAL_MS - sinceLast);
     return () => clearTimeout(timer);
-  }, [text, progress.state]);
+  }, [text, state]);
 
   return (
-    <span role="status" aria-live="polite" className="sr-only">
+    <span role="status" aria-live="polite" className="sr-only" data-testid={testId}>
       {announced}
     </span>
   );

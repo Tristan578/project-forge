@@ -102,6 +102,25 @@ describe('ReplayLiveRegion', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Replaying tick 20 of 120');
   });
 
+  it('is rendered while idle, empty, so the first state of a run is announced from an existing region', () => {
+    // Several screen readers do not announce the initial content of a live
+    // region that was just inserted; the region therefore exists before any
+    // run and starts empty (review-board round 2, minor 6).
+    const view = render(<ReplayLiveRegion progress={null} />);
+    const region = screen.getByRole('status');
+    expect(region).toHaveAttribute('aria-live', 'polite');
+    expect(region.textContent).toBe('');
+    view.rerender(<ReplayLiveRegion progress={progress({ state: 'pinning' })} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Pinning the engine clock');
+    view.rerender(<ReplayLiveRegion progress={null} />);
+    expect(screen.getByRole('status').textContent).toBe('');
+  });
+
+  it('carries the test id it is given, so two announcers on one page can be told apart', () => {
+    render(<ReplayLiveRegion progress={null} testId="bot-replay-announcer" />);
+    expect(screen.getByTestId('bot-replay-announcer')).toHaveAttribute('role', 'status');
+  });
+
   it('replayStatusText names every state a creator can see', () => {
     expect(replayStatusText(progress({ state: 'pinning' }))).toBe('Pinning the engine clock…');
     expect(replayStatusText(progress({ state: 'running', tick: 3, pinned: false }))).toBe('Replaying tick 3 of 120');
