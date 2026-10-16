@@ -418,6 +418,7 @@ test.describe('Pipeline through the live engine @engine @engine-smoke', () => {
       () =>
         (window as unknown as StoreHandle).__EDITOR_STORE.getState()
           .engineMode === 'play',
+      undefined,
       { timeout: E2E_TIMEOUT_INTERACTION_MS }
     );
     await expect(playStatus).toBeVisible({
