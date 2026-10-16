@@ -146,6 +146,7 @@ test.describe('Runtime input replay on the pinned clock @engine @engine-smoke', 
 
   test('replays 120 ticks deterministically (OP-01, OP-03), survives pause / cancel / restart within 0.01 units, and acknowledges controls within the NFR', async ({
     page,
+    editor,
   }, testInfo) => {
     await expect(page.locator('canvas').first()).toBeVisible({
       timeout: E2E_TIMEOUT_ELEMENT_MS,
@@ -162,6 +163,17 @@ test.describe('Runtime input replay on the pinned clock @engine @engine-smoke', 
     await expect(page.locator('canvas#game-canvas')).toHaveCount(1);
 
     // --- Build the fixture scene through REAL engine commands ---------------
+    // In TWO steps, with the spawns confirmed in between. `spawn_entity` is a
+    // deferred `Commands::spawn`: an `add_game_component` / `set_physics2d` /
+    // `update_transform` issued in the SAME engine frame finds no entity to
+    // attach to. The first two live runs of this spec (80a9e0850) built the
+    // whole scene in one synchronous block, so every component and collider
+    // was dropped — the engine then evaluated `move_right` on all 120 ticks
+    // and moved nothing, because no character controller existed. The engine
+    // now defers a same-frame component add until its entity exists
+    // (`apply_game_component_adds`), but the physics and transform drains do
+    // not, and the product's own pipeline confirms a spawn before configuring
+    // it (`entitySetupExecutor`), so this spec does the same.
     const ids = await page.evaluate((fx: Fixture) => {
       const store = window.__EDITOR_STORE as typeof useEditorStore;
       const state = store.getState();
@@ -171,21 +183,36 @@ test.describe('Runtime input replay on the pinned clock @engine @engine-smoke', 
         const id = state.spawnEntity(entity.entityType, entity.name, entity.position);
         if (!id) throw new Error(`spawnEntity failed for ${entity.name}`);
         spawned[entity.id] = id;
-        state.updateTransform(id, 'scale', entity.scale);
-        state.setPhysics2d(id, entity.physics2d, true);
-        for (const component of entity.gameComponents) {
-          state.addGameComponent(id, component);
-        }
       }
-      for (const binding of fx.inputBindings) state.setInputBinding(binding);
-      // A collectAll win condition on the one collectible makes the scene
-      // winnable so the pre-play gate (#8542) admits Play.
-      state.addGameComponent(spawned[fx.entities[1].id], {
-        type: 'winCondition',
-        winCondition: { conditionType: 'collectAll', targetScore: null, targetEntityId: null },
-      });
       return spawned;
     }, FX);
+    await editor.waitForEntityCount(FX.entities.length);
+    await page.evaluate(
+      ({ fx, ids }: { fx: Fixture; ids: Record<string, string> }) => {
+        const state = (window.__EDITOR_STORE as typeof useEditorStore).getState();
+        for (const entity of fx.entities) {
+          const id = ids[entity.id];
+          state.updateTransform(id, 'scale', entity.scale);
+          state.setPhysics2d(id, entity.physics2d, true);
+          for (const component of entity.gameComponents) {
+            state.addGameComponent(id, component);
+          }
+        }
+        for (const binding of fx.inputBindings) state.setInputBinding(binding);
+        // A collectAll win condition on the one collectible makes the scene
+        // winnable so the pre-play gate (#8542) admits Play.
+        state.addGameComponent(ids[fx.entities[1].id], {
+          type: 'winCondition',
+          winCondition: { conditionType: 'collectAll', targetScore: null, targetEntityId: null },
+        });
+      },
+      { fx: FX, ids },
+    );
+    // Two engine frames, so every drain above has landed before Play
+    // (the same wait the pipeline's `waitForEngineFrame` performs).
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+    );
     const config = { playerEntityId: ids['player'], collectibleEntityIds: [ids['coin']] };
 
     // --- Run A: the uninterrupted reference replay on the pinned clock -----
@@ -250,11 +277,16 @@ test.describe('Runtime input replay on the pinned clock @engine @engine-smoke', 
     );
     expect(['pinning', 'running', 'pausing', 'paused']).toContain(started.firstState);
 
-    await page.waitForFunction(
-      async (id) => (await window.__FORGE_REPLAY_CONTROL!.state(id)).state === 'paused',
-      started.id,
-      { timeout: E2E_TIMEOUT_TEST_MS },
-    );
+    // `expect.poll`, not `page.waitForFunction` with an async predicate: the
+    // hook's `state()` is async, and waitForFunction resolves on the truthy
+    // Promise it returns, not on the awaited value — the first live run of
+    // this scenario "found" the pause at tick 2 while the run was running.
+    await expect
+      .poll(
+        () => page.evaluate(async (id) => (await window.__FORGE_REPLAY_CONTROL!.state(id)).state, started.id),
+        { timeout: E2E_TIMEOUT_TEST_MS },
+      )
+      .toBe('paused');
     const paused = await page.evaluate((id) => window.__FORGE_REPLAY_CONTROL!.state(id), started.id);
     expect(paused.tick, `paused at the wrong tick: ${JSON.stringify(paused)}`).toBe(PAUSE_AT_TICK);
     expect(paused.heldKeys, 'synthetic keys still held while paused').toEqual([]);
@@ -281,21 +313,23 @@ test.describe('Runtime input replay on the pinned clock @engine @engine-smoke', 
     // found it) and ITS evaluated input — not the runner's list — says the
     // move action is released.
     await waitForEngineMode(page, 'play');
-    await page.waitForFunction(
-      async (id) => {
-        const state = await window.__FORGE_REPLAY_CONTROL!.state(id);
-        const input = state.engineInput;
-        return (
-          state.state === 'cancelled' &&
-          state.heldKeys.length === 0 &&
-          input !== null &&
-          !input.pressed['move_right'] &&
-          (input.axes['move_right'] ?? 0) === 0
-        );
-      },
-      started.id,
-      { timeout: E2E_TIMEOUT_INTERACTION_MS },
-    );
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async (id) => {
+            const state = await window.__FORGE_REPLAY_CONTROL!.state(id);
+            const input = state.engineInput;
+            return (
+              state.state === 'cancelled' &&
+              state.heldKeys.length === 0 &&
+              input !== null &&
+              !input.pressed['move_right'] &&
+              (input.axes['move_right'] ?? 0) === 0
+            );
+          }, started.id),
+        { timeout: E2E_TIMEOUT_INTERACTION_MS },
+      )
+      .toBe(true);
     expect(await engineMode(page)).toBe('play');
 
     // --- NFR-C1: four more samples in the same Play session -----------------
