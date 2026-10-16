@@ -13,6 +13,7 @@ import {
   type WasmModule,
 } from '../useEngine';
 import * as initLog from '@/lib/initLog';
+import { mergePlayTickDelta } from '@/hooks/events/playTickSnapshot';
 
 vi.mock('@/lib/initLog', () => ({
   logInitEvent: vi.fn(),
@@ -221,6 +222,37 @@ describe('recoverEngine', () => {
         level: 'info',
       }),
     );
+  });
+
+  // #10375 (Sentry review on #10390). A recovered engine starts from an empty
+  // delta cache and emits no mode event, so the hub's reconstituted Play frame
+  // (hooks/events/playTickSnapshot.ts) has to be forgotten on this path —
+  // otherwise the new run's full first frame merges ONTO the old snapshot and
+  // an entity that no longer exists is never removed. Recovery fails in jsdom
+  // (no WASM binary), but the reset is step 1 and runs before the load.
+  describe('play-tick snapshot', () => {
+    const cube = {
+      position: [0, 1, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: [1, 1, 1] as [number, number, number],
+    };
+    const inputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+    const seed = () =>
+      mergePlayTickDelta({ changedEntities: { cube }, changedEntityInfos: {}, removedEntityIds: [], inputState });
+    const nextFrame = () =>
+      mergePlayTickDelta({ changedEntities: { other: cube }, changedEntityInfos: {}, removedEntityIds: [], inputState });
+
+    it('is forgotten by recoverEngine before the engine is reloaded', async () => {
+      seed();
+      await recoverEngine('forge-canvas');
+      expect(nextFrame().entities).toEqual({ other: cube });
+    });
+
+    it('is forgotten by resetEngine, so every retry path starts from no frame', () => {
+      seed();
+      resetEngine();
+      expect(nextFrame().entities).toEqual({ other: cube });
+    });
   });
 });
 

@@ -253,6 +253,28 @@ describe('useEngineEvents', () => {
         expect(lastTick()?.entities).toEqual({ other: cube });
       },
     );
+
+    it('starts a callback registered against a fresh engine from no frame', () => {
+      // The engine's delta cache is fresh after `init_engine`, and a recovery
+      // (`recoverEngine`) re-initialises WITHOUT a mode event, so a snapshot
+      // left from before the crash would have the new run's full first frame
+      // merged onto it and never lose an entity that no longer exists (Sentry
+      // review on #10390). `resetEngine` forgets it too (useEngine.test.ts);
+      // this is the hub's own guard for the moment it registers a callback.
+      const { rerender } = renderHook(
+        ({ module }: { module: typeof wasmModule }) => useEngineEvents({ wasmModule: module }),
+        { initialProps: { module: wasmModule } },
+      );
+      const first = wasmModule.set_event_callback.mock.calls[0][0];
+      first(frame({ cube }));
+
+      const fresh = { set_event_callback: vi.fn(), handle_command: vi.fn(), handle_command_batch: vi.fn() };
+      rerender({ module: fresh });
+      const second = fresh.set_event_callback.mock.calls[0][0];
+      second(frame({ other: cube }));
+
+      expect(lastTick()?.entities).toEqual({ other: cube });
+    });
   });
 
   it('warns on unknown engine event', () => {
