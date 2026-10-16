@@ -4,16 +4,14 @@
 //! scene to the runtime engine through `load_scene` and nothing else (#10195).
 //! The rest of the import/export surface is editor-only.
 
-// Payload ceilings for the editor-only import paths. Each is read from exactly
-// one `#[cfg(not(feature = "runtime"))]` system below, so the constants carry
-// the same gate — a `runtime` build never parses a glTF blob or a texture blob
+// Payload ceilings and format gates for the editor-only import paths. They
+// live in `core::asset_import_guard` (always compiled: the command handlers
+// enforce them first, #10396) and are read here from exactly one
+// `#[cfg(not(feature = "runtime"))]` system each, so this `use` carries the
+// same gate — a `runtime` build never parses a glTF blob or a texture blob
 // handed in from the shell. (A scene it does parse; see `apply_scene_load`.)
-/// Maximum byte length of a glTF base64 payload (~50 MB decoded, 1.33× overhead).
 #[cfg(not(feature = "runtime"))]
-pub const MAX_GLTF_BASE64_LEN: usize = 67_500_000;
-/// Maximum byte length of a texture base64 payload (~50 MB decoded, 1.33× overhead).
-#[cfg(not(feature = "runtime"))]
-pub const MAX_TEXTURE_BASE64_LEN: usize = 67_500_000;
+use crate::core::asset_import_guard::{self, MAX_GLTF_BASE64_LEN, MAX_TEXTURE_BASE64_LEN};
 
 use bevy::prelude::*;
 
@@ -645,6 +643,14 @@ pub(super) fn apply_gltf_import(
             }
         };
 
+        // The handler refused anything KTX2 or Basis Universal before it was
+        // queued; repeated on the decoded bytes so no other producer that
+        // reaches this queue gets past it (#10396).
+        if let Err(refusal) = asset_import_guard::inspect_gltf_bytes(&bytes) {
+            tracing::error!("glTF import rejected: {}", refusal);
+            continue;
+        }
+
         // Determine the in-memory asset path using a unique name
         let ext = if request.name.ends_with(".gltf") { "gltf" } else { "glb" };
         let memory_path = format!("{}.{}", asset_id, ext);
@@ -848,21 +854,21 @@ pub(super) fn apply_texture_load(
         let asset_id = uuid::Uuid::new_v4().to_string();
         let file_size = request.data_base64.len() as u64;
 
-        // Parse data URL: "data:image/png;base64,AAAA..."
-        let (mime_type, raw_base64) = if let Some(comma_pos) = request.data_base64.find(',') {
-            let header = &request.data_base64[..comma_pos];
-            let mime = header
-                .strip_prefix("data:")
-                .and_then(|s| s.strip_suffix(";base64"))
-                .unwrap_or("image/png");
-            (mime.to_string(), &request.data_base64[comma_pos + 1..])
-        } else {
-            // Raw base64 without data URL prefix
-            ("image/png".to_string(), request.data_base64.as_str())
+        // The allowlist the handler already applied, repeated on the payload
+        // this drain decodes: the type handed to `ImageType::MimeType` below is
+        // always one of ALLOWED_TEXTURE_MIME_TYPES, never the caller's string
+        // (#10396). A raw base64 body (no data URL header) is PNG.
+        let source = match asset_import_guard::check_texture_payload(&request.data_base64) {
+            Ok(source) => source,
+            Err(refusal) => {
+                tracing::error!("Texture load rejected: {}", refusal);
+                continue;
+            }
         };
+        let mime_type = source.mime_type;
 
         // Decode base64 to raw bytes
-        let bytes = match base64::engine::general_purpose::STANDARD.decode(raw_base64) {
+        let bytes = match base64::engine::general_purpose::STANDARD.decode(source.base64) {
             Ok(b) => b,
             Err(e) => {
                 tracing::warn!("Failed to decode base64 texture data: {}", e);
@@ -876,7 +882,7 @@ pub(super) fn apply_texture_load(
         // Create Bevy Image from raw bytes
         let image_result = Image::from_buffer(
             &bytes,
-            ImageType::MimeType(&mime_type),
+            ImageType::MimeType(mime_type),
             CompressedImageFormats::NONE,
             is_srgb,
             ImageSampler::Default,
