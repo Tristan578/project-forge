@@ -14,6 +14,8 @@ import {
   ACCEPTED_TEXTURE_DECLARATIONS,
   ALLOWED_TEXTURE_MIME_TYPES,
   checkTexturePayload,
+  declareTextureType,
+  textureMimeTypeForFile,
 } from '../textureFormatGuard';
 
 // The wire-shape pin dispatches through the real slice; only the audio queue
@@ -94,12 +96,65 @@ describe('checkTexturePayload', () => {
   });
 
   it('refuses dds, webp and anything else outside the allowlist', () => {
-    for (const declared of ['image/x-dds', 'image/vnd-ms.dds', 'image/webp', 'application/octet-stream']) {
+    for (const declared of ['image/x-dds', 'image/vnd-ms.dds', 'image/webp', 'text/plain']) {
       expect(checkTexturePayload(`data:${declared};base64,AAAA`)).toEqual({
         ok: false,
         error: `unsupported texture format '${declared}'; accepted formats are image/png, image/jpeg`,
       });
     }
+  });
+
+  it('refuses an empty or generic declared type as unrecognised, naming the accepted formats', () => {
+    // A browser gives a file it cannot classify no type at all; the data URL
+    // then reads `data:;base64,` or `data:application/octet-stream;base64,`.
+    for (const data of [
+      'data:;base64,AAAA',
+      'data:application/octet-stream;base64,AAAA',
+      'DATA:Application/Octet-Stream;charset=binary;base64,AAAA',
+      'data: ;base64,AAAA',
+    ]) {
+      expect(checkTexturePayload(data), data).toEqual({
+        ok: false,
+        error: 'unrecognised file type; accepted formats are image/png, image/jpeg',
+      });
+    }
+  });
+});
+
+describe('textureMimeTypeForFile', () => {
+  it('keeps the type the browser declared', () => {
+    expect(textureMimeTypeForFile('image/png', 'anything.bin')).toBe('image/png');
+    expect(textureMimeTypeForFile('image/webp', 'photo.png')).toBe('image/webp');
+  });
+
+  it('derives png/jpeg from the extension when the OS declared none', () => {
+    expect(textureMimeTypeForFile('', 'stone.PNG')).toBe('image/png');
+    expect(textureMimeTypeForFile('', 'photo.jpg')).toBe('image/jpeg');
+    expect(textureMimeTypeForFile('', 'photo.jpeg')).toBe('image/jpeg');
+    expect(textureMimeTypeForFile('application/octet-stream', 'stone.png')).toBe('image/png');
+  });
+
+  it('leaves an unknown extension undeclared, so the guard refuses it as unrecognised', () => {
+    expect(textureMimeTypeForFile('', 'lut.ktx2')).toBe('');
+    expect(textureMimeTypeForFile('', 'noextension')).toBe('');
+    expect(checkTexturePayload(declareTextureType('data:;base64,AAAA', textureMimeTypeForFile('', 'lut.ktx2')))).toEqual({
+      ok: false,
+      error: 'unrecognised file type; accepted formats are image/png, image/jpeg',
+    });
+  });
+});
+
+describe('declareTextureType', () => {
+  it('rewrites an empty or generic data URL header to the derived type', () => {
+    expect(declareTextureType('data:;base64,AAAA', 'image/png')).toBe('data:image/png;base64,AAAA');
+    expect(declareTextureType('data:application/octet-stream;base64,AAAA', 'image/jpeg')).toBe('data:image/jpeg;base64,AAAA');
+  });
+
+  it('leaves a declared header and a raw body alone', () => {
+    expect(declareTextureType('data:image/png;base64,AAAA', 'image/jpeg')).toBe('data:image/png;base64,AAAA');
+    expect(declareTextureType('data:image/webp;base64,AAAA', 'image/png')).toBe('data:image/webp;base64,AAAA');
+    expect(declareTextureType('AAAA', 'image/png')).toBe('AAAA');
+    expect(declareTextureType('data:;base64,AAAA', '')).toBe('data:;base64,AAAA');
   });
 
   it('refuses a data URL that is not base64', () => {
@@ -184,27 +239,70 @@ describe('the allowlist matches engine/src/core/asset_import_guard.rs', () => {
   });
 });
 
-describe('the load_texture wire shape matches engine/src/core/commands/scene.rs', () => {
+const camel = (snake: string) => snake.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+
+/**
+ * The wire names a payload struct in `core/commands/scene.rs` reads: its
+ * fields camelCased (as `#[serde(rename_all = "camelCase")]` reads them) and
+ * its `#[serde(alias)]`es.
+ */
+function rustPayloadShape(struct: string): { fields: string[]; aliases: string[] } {
   const source = rustSource(join('core', 'commands', 'scene.rs'));
+  const block = source.match(new RegExp(`struct ${struct} \\{([\\s\\S]*?)\\n\\}`));
+  expect(block, `${struct} must be declared in scene.rs`).not.toBeNull();
+  const fields: string[] = [];
+  const aliases: string[] = [];
+  for (const line of block![1].split('\n')) {
+    const alias = line.match(/#\[serde\(alias = "([^"]+)"\)\]/);
+    if (alias) aliases.push(alias[1]);
+    const field = line.match(/^\s*([a-z_0-9]+):\s*[A-Za-z<>\[\]; 0-9]+,\s*$/);
+    if (field) fields.push(camel(field[1]));
+  }
+  expect(fields.length).toBeGreaterThan(0);
+  return { fields, aliases };
+}
 
-  const camel = (snake: string) => snake.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+describe('the MCP manifest names exactly the fields the engine reads', () => {
+  const ROOT = join(__dirname, '..', '..', '..', '..', '..');
+  const COPIES = [
+    'mcp-server/manifest/commands.json',
+    'web/src/data/commands.json',
+    'apps/docs/data/commands.json',
+  ];
 
-  /** Field names (camelCased, as `#[serde(rename_all = "camelCase")]` reads them) and aliases. */
-  function rustPayloadShape(struct: string): { fields: string[]; aliases: string[] } {
-    const block = source.match(new RegExp(`struct ${struct} \\{([\\s\\S]*?)\\n\\}`));
-    expect(block, `${struct} must be declared in scene.rs`).not.toBeNull();
-    const fields: string[] = [];
-    const aliases: string[] = [];
-    for (const line of block![1].split('\n')) {
-      const alias = line.match(/#\[serde\(alias = "([^"]+)"\)\]/);
-      if (alias) aliases.push(alias[1]);
-      const field = line.match(/^\s*([a-z_0-9]+):\s*[A-Za-z<>\[\]; 0-9]+,\s*$/);
-      if (field) fields.push(camel(field[1]));
-    }
-    expect(fields.length).toBeGreaterThan(0);
-    return { fields, aliases };
+  interface ManifestCommand {
+    name: string;
+    parameters: { properties: Record<string, unknown>; required?: string[] };
   }
 
+  function manifestCommand(name: string): ManifestCommand {
+    const manifest = JSON.parse(readFileSync(join(ROOT, COPIES[0]), 'utf8')) as { commands: ManifestCommand[] };
+    const entry = manifest.commands.find((c) => c.name === name);
+    expect(entry, `${name} must be in the manifest`).toBeDefined();
+    return entry!;
+  }
+
+  it('the three manifest copies are byte-identical', () => {
+    const [canonical, ...others] = COPIES.map((p) => readFileSync(join(ROOT, p), 'utf8'));
+    expect(canonical.length).toBeGreaterThan(0);
+    for (const other of others) expect(other).toBe(canonical);
+  });
+
+  it.each([
+    ['load_texture', 'LoadTexturePayload'],
+    ['import_gltf', 'ImportGltfPayload'],
+  ])('every %s parameter is a field %s reads, and the body is dataBase64', (command, struct) => {
+    const { properties, required } = manifestCommand(command).parameters;
+    const names = Object.keys(properties);
+    expect(names.length).toBeGreaterThan(0);
+    const { fields } = rustPayloadShape(struct);
+    for (const name of names) expect(fields, `${command}.${name}`).toContain(name);
+    for (const name of required ?? []) expect(names, `required ${name}`).toContain(name);
+    expect(names).toContain('dataBase64');
+  });
+});
+
+describe('the load_texture wire shape matches engine/src/core/commands/scene.rs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

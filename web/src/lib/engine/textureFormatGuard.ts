@@ -72,6 +72,11 @@ export function checkTexturePayload(data: string): TextureCheck {
 
   const [declaredRaw = '', ...params] = header.split(';');
   const declared = declaredRaw.trim();
+  if (isUndeclaredType(declared)) {
+    // "unsupported texture format ''" would read as a bug; this names the
+    // situation - a file nobody could identify - and what is accepted.
+    return refusal(`unrecognised file type; accepted formats are ${ALLOWED_TEXTURE_MIME_TYPES.join(', ')}`);
+  }
   const accepted = ACCEPTED_TEXTURE_DECLARATIONS.find(([d]) => d === declared.toLowerCase());
   if (!accepted) {
     return refusal(
@@ -97,4 +102,66 @@ function boundedEcho(declared: string): string {
     .map((c) => (/^[\x20-\x7e]$/.test(c) ? c : '?'))
     .join('');
   return chars.length > ECHO_LIMIT ? `${printable}...` : printable;
+}
+
+/**
+ * No usable type: an empty declaration, or the generic
+ * `application/octet-stream` a browser gives a file it cannot classify.
+ * Mirrors the engine's `UnrecognisedType`.
+ */
+function isUndeclaredType(declared: string): boolean {
+  const lowered = declared.trim().toLowerCase();
+  return lowered === '' || lowered === 'application/octet-stream';
+}
+
+/**
+ * The types a picker may derive from a file's extension when the OS gave it
+ * none - `File.type` is empty on a machine with no MIME mapping for `.png`.
+ * Only the accepted formats are listed: an unknown extension stays undeclared
+ * and the guard refuses it as unrecognised rather than guessing.
+ */
+const EXTENSION_MIME_TYPES: ReadonlyMap<string, AllowedTextureMimeType> = new Map([
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+]);
+
+/** The type a picked file should declare: `File.type`, or one derived from its extension when that is empty. */
+export function textureMimeTypeForFile(type: string, name: string): string {
+  const declared = type.trim().toLowerCase();
+  if (!isUndeclaredType(declared)) return declared;
+  const dot = name.lastIndexOf('.');
+  if (dot === -1) return '';
+  return EXTENSION_MIME_TYPES.get(name.slice(dot + 1).toLowerCase()) ?? '';
+}
+
+/**
+ * A data URL whose header declares `mimeType` when it declared nothing
+ * usable. A header that already names a type - right or wrong - is kept, so
+ * the browser's own classification is never second-guessed; a raw body is
+ * returned as is.
+ */
+export function declareTextureType(dataUrl: string, mimeType: string): string {
+  if (mimeType === '' || dataUrl.slice(0, 5).toLowerCase() !== 'data:') return dataUrl;
+  const comma = dataUrl.indexOf(',');
+  if (comma === -1) return dataUrl;
+  const [declaredRaw = '', ...params] = dataUrl.slice(5, comma).split(';');
+  if (!isUndeclaredType(declaredRaw)) return dataUrl;
+  const rest = params.length > 0 ? `;${params.join(';')}` : '';
+  return `data:${mimeType}${rest}${dataUrl.slice(comma)}`;
+}
+
+/**
+ * Read a picked texture file as a data URL, header included - the header is
+ * how the engine learns the format - with the type filled in from the
+ * extension when the OS declared none.
+ */
+export function readTextureFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      resolve(declareTextureType(reader.result as string, textureMimeTypeForFile(file.type, file.name)));
+    reader.onerror = () => reject(new Error(`FileReader error for "${file.name}"`));
+    reader.readAsDataURL(file);
+  });
 }
