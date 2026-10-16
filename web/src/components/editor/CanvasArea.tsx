@@ -14,8 +14,10 @@ import { RenderErrorNotice } from './RenderErrorNotice';
 import { ViewPresetButtons } from './ViewPresetButtons';
 import { UICanvasOverlay } from './ui-builder/UICanvasOverlay';
 import { UIRuntimeRenderer } from './ui-builder/UIRuntimeRenderer';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 
-const CANVAS_ID = 'game-canvas';
+// Shared with engine recovery and the replay runner: see `lib/engine/canvasId`.
+const CANVAS_ID = EDITOR_CANVAS_ID;
 
 // Keyboard orbit step sizes — kept small enough that held-key repeat feels
 // smooth, large enough that a single tap is perceptible.

@@ -51,6 +51,7 @@ pub mod pending_commands {
 pub mod physics;
 pub mod physics_2d;
 pub mod physics_2d_sim;
+pub mod play_tick_delta;
 pub mod post_processing;
 pub mod procedural_mesh;
 pub mod project_type;
@@ -68,6 +69,7 @@ pub mod scene;
 pub mod scene_file;
 pub mod scene_graph;
 pub mod scripting;
+pub mod simulation_clock;
 pub mod selection;
 pub mod skeletal_animation2d;
 pub mod skeleton2d;

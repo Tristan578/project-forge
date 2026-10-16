@@ -72,6 +72,7 @@ use crate::core::{
     pending_commands::PendingCommands,
     physics::PhysicsPlugin,
     physics_2d_sim::Physics2dPlugin,
+    simulation_clock::SimulationClockPlugin,
     animation_clip::AnimationClipPlugin,
     post_processing::PostProcessingPlugin,
     quality::QualitySettings,
@@ -238,6 +239,9 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
         .add_plugins(InputPlugin)
         .add_plugins(PhysicsPlugin)
         .add_plugins(Physics2dPlugin)
+        // Pinned simulation clock for deterministic replay (#10007). Registered
+        // in both builds: an exported game is replayed the way Play mode is.
+        .add_plugins(SimulationClockPlugin)
         .add_plugins(AnimationClipPlugin)
         .add_plugins(ShaderEffectsPlugin)
         .add_plugins(CustomWgslPlugin)

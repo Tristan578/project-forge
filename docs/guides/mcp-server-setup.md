@@ -68,8 +68,8 @@ use a project URL, `/editor/<id>?mcp=<token>`, and that one does go through
 sign-in whenever Clerk is configured and you are signed out: sign in first, then
 open it.
 Once attached, a persistent indicator names each command that ran or was
-refused, with a one-click **Detach**. The bridge runs an **allowlist**: 322 of
-the 380 commands are permitted by name, and anything not enumerated — including
+refused, with a one-click **Detach**. The bridge runs an **allowlist**: 325 of
+the 383 commands are permitted by name, and anything not enumerated — including
 any command added to the manifest later — is refused. Scripting is denied
 outright: `create_script` source reaches `Function(...)` in the editor (see SEC-2
 in the root `CLAUDE.md`), as are commands that spend generation tokens, export,
@@ -254,7 +254,7 @@ Nine high-level tools that chain multiple commands in sequence:
 | `create_level_layout` | Generate a level layout with ground, walls, obstacles and spawn points |
 | `setup_game_from_description` | Scaffold a complete, playable game from a plain-text description |
 
-Use `list_doc_topics` or `search_docs` to discover the full set of 380 commands by category.
+Use `list_doc_topics` or `search_docs` to discover the full set of 383 commands by category.
 
 ## Available Resources
 
@@ -365,7 +365,7 @@ If a command times out, the error message will name the specific command. Retry 
 
 ## Command Reference
 
-For a complete list of all 380 commands with full parameter schemas, see:
+For a complete list of all 383 commands with full parameter schemas, see:
 
 - [Command Reference](../reference/commands.md)
 - Use the `search_docs` tool to find commands by keyword

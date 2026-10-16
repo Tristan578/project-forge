@@ -1,0 +1,926 @@
+/** @vitest-environment jsdom */
+/**
+ * #10007 — the manual Replay controls: pending display, Pause / Resume / Cancel.
+ *
+ * Drives the real panel against the real browser boundary (DOM key events on
+ * the editor canvas `#game-canvas`, the play-tick bus, a recording engine dispatcher) so what is
+ * asserted is the control surface a creator actually uses:
+ *   - the pending/progress line is on screen within the NFR-C1 limit of the
+ *     Replay click (measured and printed, asserted against
+ *     `REPLAY_NFR_PENDING_DISPLAY_MS`);
+ *   - Pause is acknowledged in the same commit, settles at the next tick with
+ *     input released and the runtime paused, and offers Resume;
+ *   - Cancel while paused resumes the runtime, unpins the clock, and reports
+ *     "cancelled after N ticks" with no verdict;
+ *   - the bot's "Run Playtest" engine run goes through the same single-flight
+ *     guard, disables Replay / Record while it runs, and is cancelled by Stop
+ *     exactly as a manual replay is (review-board MAJOR 3 / m1);
+ *   - Pause / Resume / Cancel meet the 24 px minimum target (m7), and a
+ *     refused unpin is reported beside the verdict rather than replacing it (m5).
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@/test/utils/componentTestUtils';
+import { PlaytestPanel } from '../PlaytestPanel';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
+import { publishPlayTick, resetPlayTickBus } from '@/lib/playtest/playTickBus';
+import { INPUT_TRACE_VERSION, MAX_TRACE_TICKS } from '@/lib/playtest/inputTrace';
+import { getActiveReplaySession, startReplaySession } from '@/lib/playtest/replayEntryPoints';
+import type { ReplayCancelReason } from '@/lib/playtest/replayRunner';
+import { REPLAY_NFR_PENDING_DISPLAY_MS } from '../../../../e2e/constants';
+
+/** The scene's one binding: a signed-axis `move_right` (KeyD / KeyA). */
+const AXIS_MOVE_RIGHT = {
+  actionName: 'move_right',
+  actionType: 'axis',
+  sources: [] as string[],
+  positiveKeys: ['KeyD'],
+  negativeKeys: ['KeyA'],
+};
+
+const state = vi.hoisted(() => ({
+  engineMode: 'play',
+  primaryId: 'player',
+  sceneName: 'Fixture',
+  inputBindings: [
+    { actionName: 'move_right', actionType: 'axis', sources: [] as string[], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'] },
+  ] as Array<Record<string, unknown>>,
+  allGameComponents: { coin: [{ type: 'collectible' }] },
+  sceneGraph: { nodes: { player: { name: 'Player' } }, rootIds: ['player'] },
+}));
+
+/**
+ * The REAL entry point, wrapped so a test can read what the panel asked for
+ * (source, request, run options). Every other export is the real one, so the
+ * single-flight guard, the Stop watch and `useActiveReplay` behave exactly as
+ * in the app.
+ */
+vi.mock('@/lib/playtest/replayEntryPoints', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/playtest/replayEntryPoints')>();
+  return { ...actual, startReplaySession: vi.fn(actual.startReplaySession) };
+});
+
+/**
+ * The store's change subscription, which `replayEntryPoints` hands the runner
+ * so it can cancel the active replay on Stop and on a toolbar Pause / Resume
+ * it did not make. `setEngineMode` is what the real store does when the
+ * engine reports ENGINE_MODE_CHANGED: update the state, then notify.
+ */
+const storeSubscribers = vi.hoisted(
+  () => new Set<(next: typeof state, prev: typeof state) => void>(),
+);
+
+const engine = vi.hoisted(() => ({
+  commands: [] as string[],
+  paused: false,
+  /** When set, the engine refuses `unpin_frame_rate` (m5). */
+  refuseUnpin: false,
+  dispatch: (command: string) => {
+    engine.commands.push(command);
+    // The real engine answers `pause` / `resume` with ENGINE_MODE_CHANGED and
+    // the store mirrors it as `engineMode` and notifies its subscribers — so
+    // the runner's watch SEES the 'paused' its own pause produced, delivered
+    // from INSIDE the dispatch, and must know it as its own. (The panel only
+    // sees the new mode on its next render, as it would after the store's
+    // subscription fired — tests rerender to deliver it.)
+    if (command === 'pause') {
+      engine.paused = true;
+      setEngineMode('paused');
+    }
+    if (command === 'resume') {
+      engine.paused = false;
+      setEngineMode('play');
+    }
+    if (command === 'unpin_frame_rate' && engine.refuseUnpin) {
+      return { success: false, error: 'PendingCommands resource not initialized' };
+    }
+    return { success: true };
+  },
+}));
+
+vi.mock('@/stores/editorStore', () => ({
+  useEditorStore: Object.assign(
+    (selector: (value: typeof state) => unknown) => selector(state),
+    {
+      getState: () => state,
+      subscribe: (listener: (next: typeof state, prev: typeof state) => void) => {
+        storeSubscribers.add(listener);
+        return () => {
+          storeSubscribers.delete(listener);
+        };
+      },
+    },
+  ),
+  getCommandDispatcher: () => engine.dispatch,
+}));
+
+/** A deterministic bot plan: hold right for half a second. */
+const botSession = vi.hoisted(() => ({
+  strategy: 'explorer',
+  actions: [
+    { type: 'move', timestamp: 0, direction: { x: 1, y: 0 } },
+    { type: 'wait', timestamp: 500 },
+  ],
+  duration: 1000,
+  outcome: 'completed',
+  discoveries: [],
+  metrics: { timeToComplete: 1000, deathCount: 0, itemsCollected: 0, areasExplored: 0, backtrackCount: 0 },
+}));
+
+vi.mock('@/lib/ai/gameplayBot', () => ({
+  BOT_STRATEGIES: { explorer: { name: 'Explorer', description: 'Visits every room.' } },
+  simulatePlaytest: vi.fn(async () => botSession),
+  generatePlaytestReport: vi.fn(() => ({
+    sessions: [botSession],
+    totalDiscoveries: 0,
+    criticalCount: 0,
+    majorCount: 0,
+    minorCount: 0,
+    uniqueDiscoveries: [],
+    strategyComparison: {},
+    overallRating: 'good',
+  })),
+}));
+
+function setEngineMode(mode: string) {
+  const prev = { ...state };
+  state.engineMode = mode;
+  for (const listener of storeSubscribers) listener(state, prev);
+}
+
+const keyEvents: string[] = [];
+
+function tick(elapsedMs: number, holding: boolean) {
+  publishPlayTick({
+    entities: { player: { position: [0, 0, 0] }, coin: { position: [1, 0, 0] } },
+    inputState: {
+      pressed: { move_right: holding },
+      axes: { move_right: holding ? 1 : 0 },
+    },
+    elapsedMs,
+  });
+}
+
+/**
+ * One engine frame: let the runner reach its `advanceFrame` (it subscribes to
+ * the bus a microtask after the control that started it), publish a play tick,
+ * then let the runner's continuation run.
+ */
+async function frame(elapsedMs: number) {
+  await act(async () => {
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    tick(elapsedMs, false);
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  });
+}
+
+async function flush() {
+  await act(async () => {
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+  });
+}
+
+function recordHoldRightTrace() {
+  fireEvent.click(screen.getByRole('button', { name: 'Record input' }));
+  act(() => {
+    for (let t = 1; t <= MAX_TRACE_TICKS; t += 1) tick(t * 16, true);
+  });
+  expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeEnabled();
+}
+
+describe('runtime replay controls', () => {
+  beforeEach(() => {
+    state.engineMode = 'play';
+    storeSubscribers.clear();
+    engine.commands.length = 0;
+    engine.paused = false;
+    engine.refuseUnpin = false;
+    keyEvents.length = 0;
+    resetPlayTickBus();
+    const canvas = document.createElement('canvas');
+    canvas.id = EDITOR_CANVAS_ID;
+    canvas.addEventListener('keydown', (e) => keyEvents.push(`down ${e.code}`));
+    canvas.addEventListener('keyup', (e) => keyEvents.push(`up ${e.code}`));
+    document.body.append(canvas);
+  });
+
+  afterEach(async () => {
+    // The guard is module state: never leave a run active across tests.
+    const active = getActiveReplaySession();
+    if (active) {
+      active.handle.cancel();
+      await active.handle.result;
+    }
+    cleanup();
+    document.body.replaceChildren();
+  });
+
+  it('shows the pending line within the NFR limit, pauses with input released, and cancels without a verdict', async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+
+    // --- Replay: the pending line is in the same commit as the click ---------
+    const clickedAt = performance.now();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    const progress = screen.getByTestId('replay-progress');
+    const pendingMs = performance.now() - clickedAt;
+    console.log(`[nfr] replay pending display: ${pendingMs.toFixed(2)} ms (limit ${REPLAY_NFR_PENDING_DISPLAY_MS} ms)`);
+    expect(pendingMs).toBeLessThanOrEqual(REPLAY_NFR_PENDING_DISPLAY_MS);
+    expect(progress).toHaveTextContent('Pinning the engine clock');
+    expect(engine.commands[0]).toBe('pin_frame_rate');
+
+    // The pin's warm-up frame, then three replayed ticks: KeyD is held.
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    expect(screen.getByTestId('replay-progress')).toHaveTextContent('Replaying tick 0 of 120 on the pinned clock');
+    for (let i = 0; i < 3; i += 1) await frame((elapsed += 16));
+    expect(screen.getByTestId('replay-progress')).toHaveTextContent('Replaying tick 3 of 120');
+    expect(keyEvents).toEqual(['down KeyD']);
+
+    // --- Pause: acknowledged now, settled at the next tick boundary --------
+    fireEvent.click(screen.getByRole('button', { name: 'Pause replay' }));
+    expect(screen.getByTestId('replay-progress')).toHaveTextContent('Pausing at tick 3');
+    await frame((elapsed += 16));
+    expect(screen.getByTestId('replay-progress')).toHaveTextContent('Paused at tick 4 of 120; input released');
+    expect(keyEvents).toEqual(['down KeyD', 'up KeyD']);
+    expect(engine.paused).toBe(true);
+    expect(screen.getByRole('button', { name: 'Resume replay' })).toBeEnabled();
+
+    // --- Cancel while paused: runtime resumed, clock unpinned, no verdict ----
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel replay' }));
+    expect(await screen.findByText(/Replay cancelled after 4 ticks/)).toBeInTheDocument();
+    expect(screen.queryByTestId('replay-progress')).toBeNull();
+    expect(screen.queryByText(/^Replay (passed|failed)$/)).toBeNull();
+    expect(engine.paused).toBe(false);
+    expect(engine.commands).toEqual(['pin_frame_rate', 'pause', 'resume', 'unpin_frame_rate']);
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeEnabled();
+  });
+
+  it('resume re-presses the held key and the replay runs to a verdict', async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    fireEvent.click(screen.getByRole('button', { name: 'Pause replay' }));
+    await frame((elapsed += 16));
+    expect(screen.getByRole('button', { name: 'Resume replay' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume replay' }));
+    await flush();
+    expect(screen.getByTestId('replay-progress')).toHaveTextContent('Replaying tick 2 of 120');
+    // Every remaining tick plus the two settle frames.
+    for (let i = 0; i < MAX_TRACE_TICKS + 2; i += 1) await frame((elapsed += 16));
+
+    expect(await screen.findByText(/^Replay (passed|failed)$/)).toBeInTheDocument();
+    expect(screen.getByText(/120 ticks · pinned 60 Hz/)).toBeInTheDocument();
+    expect(keyEvents).toEqual(['down KeyD', 'up KeyD', 'down KeyD', 'up KeyD']);
+    expect(engine.commands).toEqual(['pin_frame_rate', 'pause', 'resume', 'unpin_frame_rate']);
+    expect(screen.queryByTestId('replay-progress')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it("the runner's own pause moves the engine to 'paused' WITHOUT cancelling the replay", async () => {
+    const view = render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    fireEvent.click(screen.getByRole('button', { name: 'Pause replay' }));
+    await frame((elapsed += 16));
+    expect(screen.getByTestId('replay-progress')).toHaveTextContent('Paused at tick 2 of 120; input released');
+    // The engine confirmed the pause: the store now says 'paused', its
+    // subscribers (the runner's watch included — notified from INSIDE the
+    // `pause` dispatch, before it returned) were told, and the panel
+    // re-renders on it exactly as it would after ENGINE_MODE_CHANGED.
+    expect(state.engineMode).toBe('paused');
+    view.rerender(<PlaytestPanel />);
+    await flush();
+
+    // A replay must survive its own pause: leaving 'play' for 'paused' is the
+    // runner's doing, not the creator pausing from the toolbar. This is the
+    // panel-level pin of the runner's ordering — its pending own-pause count
+    // is incremented BEFORE the pause is dispatched — since the store here
+    // delivers the mode synchronously inside that dispatch (the worst case).
+    expect(screen.getByTestId('replay-progress')).toHaveTextContent('Paused at tick 2 of 120; input released');
+    expect(screen.getByRole('button', { name: 'Resume replay' })).toBeEnabled();
+    expect(screen.queryByText(/Replay cancelled/)).toBeNull();
+    expect(engine.commands).toEqual(['pin_frame_rate', 'pause']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume replay' }));
+    await flush();
+    expect(state.engineMode).toBe('play');
+    view.rerender(<PlaytestPanel />);
+    for (let i = 0; i < MAX_TRACE_TICKS + 2; i += 1) await frame((elapsed += 16));
+    expect(await screen.findByText(/^Replay (passed|failed)$/)).toBeInTheDocument();
+    expect(engine.commands).toEqual(['pin_frame_rate', 'pause', 'resume', 'unpin_frame_rate']);
+  });
+
+  it('stopping Play mid-replay cancels it at once: input released, clock unpinned, no verdict', async () => {
+    const view = render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    for (let i = 0; i < 3; i += 1) await frame((elapsed += 16));
+    expect(keyEvents).toEqual(['down KeyD']);
+
+    // Stop: the store leaves Play (and notifies), and the engine never
+    // publishes another tick.
+    act(() => setEngineMode('edit'));
+    view.rerender(<PlaytestPanel />);
+
+    // findBy's default 1 s window is the assertion: the boundary's own
+    // stalled-tick timeout is 2 s, so a cancel that merely waited for the next
+    // frame would arrive late, as a failure, and miss this.
+    const cancelledLine = await screen.findByText(/Replay cancelled after 3 ticks/);
+    expect(cancelledLine).toBeInTheDocument();
+    // And the line says WHICH control cancelled it.
+    expect(cancelledLine).toHaveTextContent(
+      'Replay cancelled after 3 ticks because Play was stopped. Input was released; no verdict was recorded.',
+    );
+    expect(keyEvents).toEqual(['down KeyD', 'up KeyD']);
+    expect(engine.commands).toEqual(['pin_frame_rate', 'unpin_frame_rate']);
+    expect(screen.queryByTestId('replay-progress')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/^Replay (passed|failed)$/)).toBeNull();
+  });
+
+  it('a refused unpin after a completed replay keeps the verdict and reports that the clock could not be released', async () => {
+    engine.refuseUnpin = true;
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    let elapsed = 0;
+    for (let i = 0; i < MAX_TRACE_TICKS + 3; i += 1) await frame((elapsed += 16));
+
+    expect(await screen.findByText(/^Replay (passed|failed)$/)).toBeInTheDocument();
+    expect(screen.getByText(/120 ticks · pinned 60 Hz/)).toBeInTheDocument();
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(/clock could not be released/);
+    expect(alert).toHaveTextContent(/unpin_frame_rate/);
+    expect(alert).toHaveTextContent(/PendingCommands resource not initialized/);
+    expect(engine.commands[engine.commands.length - 1]).toBe('unpin_frame_rate');
+  });
+
+  it('Pause, Resume and Cancel meet the 24 px minimum target size (WCAG 2.5.8)', async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    for (const name of ['Pause replay', 'Cancel replay']) {
+      const button = screen.getByRole('button', { name });
+      expect(button.className, `${name} is under the 24 px minimum`).toContain('min-h-6');
+      expect(button.className, `${name} is under the 24 px minimum`).toContain('min-w-6');
+    }
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    fireEvent.click(screen.getByRole('button', { name: 'Pause replay' }));
+    await frame((elapsed += 16));
+    const resume = screen.getByRole('button', { name: 'Resume replay' });
+    expect(resume.className).toContain('min-h-6');
+    expect(resume.className).toContain('min-w-6');
+  });
+
+  it('the visible progress line is not a live region; a persistent, throttled announcer beside it is', async () => {
+    render(<PlaytestPanel />);
+    // Present before any run, empty: a freshly inserted live region's first
+    // content is not announced by several screen readers.
+    const idle = screen.getByTestId('replay-announcer');
+    expect(idle).toHaveAttribute('aria-live', 'polite');
+    expect(idle.className).toContain('sr-only');
+    expect(idle.textContent).toBe('');
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    const visible = screen.getByTestId('replay-progress');
+    expect(visible).not.toHaveAttribute('aria-live');
+    expect(visible).not.toHaveAttribute('role');
+    expect(screen.getByTestId('replay-announcer')).toHaveTextContent('Pinning the engine clock');
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    // A state change (pinning -> running) is announced at once...
+    expect(screen.getByTestId('replay-announcer')).toHaveTextContent('Replaying tick 0 of 120');
+    for (let i = 0; i < 5; i += 1) await frame((elapsed += 16));
+    // ...while tick progress inside the same state is held back; the visible
+    // line is live regardless.
+    expect(screen.getByTestId('replay-progress')).toHaveTextContent('Replaying tick 5 of 120');
+    expect(screen.getByTestId('replay-announcer')).toHaveTextContent('Replaying tick 0 of 120');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel replay' }));
+    await screen.findByText(/Replay cancelled after 5 ticks/);
+    // Still present once the run is over, and the terminal state was
+    // announced (the panel keeps the terminal progress rather than clearing
+    // the announcer in the same render it arrives in).
+    expect(screen.getByTestId('replay-announcer')).toHaveTextContent('Replay cancelled after 5 ticks; input released');
+  });
+});
+
+describe('the bot run and the manual run share one replay guard (review-board MAJOR 3 / m1)', () => {
+  beforeEach(() => {
+    state.engineMode = 'play';
+    storeSubscribers.clear();
+    engine.commands.length = 0;
+    engine.paused = false;
+    engine.refuseUnpin = false;
+    keyEvents.length = 0;
+    resetPlayTickBus();
+    const canvas = document.createElement('canvas');
+    canvas.id = EDITOR_CANVAS_ID;
+    canvas.addEventListener('keydown', (e) => keyEvents.push(`down ${e.code}`));
+    canvas.addEventListener('keyup', (e) => keyEvents.push(`up ${e.code}`));
+    document.body.append(canvas);
+  });
+
+  afterEach(async () => {
+    const active = getActiveReplaySession();
+    if (active) {
+      active.handle.cancel();
+      await active.handle.result;
+    }
+    cleanup();
+    document.body.replaceChildren();
+  });
+
+  it("Run Playtest's engine run takes the guard: Replay and Record are disabled meanwhile, and Stop cancels it cleanly", async () => {
+    const view = render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    // The bot's plan became a trace and the engine clock was pinned for it.
+    expect(engine.commands).toEqual(['pin_frame_rate']);
+    expect(getActiveReplaySession()?.source).toBe('ai');
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Record input' })).toBeDisabled();
+
+    let elapsed = 0;
+    await frame((elapsed += 16)); // warm-up
+    await frame((elapsed += 16)); // tick 0: the bot holds right
+    expect(keyEvents).toEqual(['down KeyD']);
+
+    // Stop. Before the fix this surfaced ~2 s later as "Replay stopped: no
+    // engine play tick received."; now the run is cancelled at once.
+    act(() => setEngineMode('edit'));
+    view.rerender(<PlaytestPanel />);
+    expect(await screen.findByText(/AI bot runtime replay cancelled after 1 tick/)).toBeInTheDocument();
+    expect(keyEvents).toEqual(['down KeyD', 'up KeyD']);
+    expect(engine.commands).toEqual(['pin_frame_rate', 'unpin_frame_rate']);
+    expect(getActiveReplaySession()).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/no engine play tick received/)).toBeNull();
+  });
+
+  it('a manual replay in flight disables Run Playtest, and the guard is released when it ends', async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    expect(screen.getByRole('button', { name: 'Run playtest with explorer strategy' })).toBeDisabled();
+    expect(getActiveReplaySession()?.source).toBe('manual');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel replay' }));
+    expect(await screen.findByText(/Replay cancelled after 0 ticks/)).toBeInTheDocument();
+    expect(getActiveReplaySession()).toBeNull();
+    expect(screen.getByRole('button', { name: 'Run playtest with explorer strategy' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeEnabled();
+  });
+
+  it("the bot's engine run shows its own progress line with Cancel, and the Runtime Replay section says why Replay waits", async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    expect(screen.getByTestId('bot-replay-progress')).toHaveTextContent('AI bot: Pinning the engine clock');
+    expect(screen.getByTestId('bot-replay-announcer')).toHaveTextContent('Pinning the engine clock');
+    const hint = screen.getByTestId('replay-busy-hint');
+    expect(hint).toHaveTextContent('A replay is running (the AI bot). Cancel it or press Stop.');
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeDisabled();
+
+    let elapsed = 0;
+    await frame((elapsed += 16)); // warm-up
+    await frame((elapsed += 16)); // tick 0
+    expect(screen.getByTestId('bot-replay-progress')).toHaveTextContent('AI bot: Replaying tick 1 of');
+    const cancel = screen.getByRole('button', { name: 'Cancel AI bot replay' });
+    expect(cancel.className).toContain('min-h-6');
+    fireEvent.click(cancel);
+    expect(await screen.findByText(/AI bot runtime replay cancelled after 1 tick/)).toBeInTheDocument();
+    expect(screen.queryByTestId('bot-replay-progress')).toBeNull();
+    expect(screen.queryByTestId('replay-busy-hint')).toBeNull();
+    expect(screen.getByTestId('bot-replay-announcer')).toHaveTextContent('Replay cancelled after 1 ticks; input released');
+    expect(engine.commands).toEqual(['pin_frame_rate', 'unpin_frame_rate']);
+    expect(keyEvents).toEqual(['down KeyD', 'up KeyD']);
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeEnabled();
+  });
+
+  it('a manual replay in flight says why Run Playtest waits', async () => {
+    render(<PlaytestPanel />);
+    expect(screen.queryByTestId('bot-busy-hint')).toBeNull();
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    expect(screen.getByTestId('bot-busy-hint')).toHaveTextContent('A replay is running (your recording). Cancel it or press Stop.');
+    expect(screen.getByRole('button', { name: 'Run playtest with explorer strategy' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel replay' }));
+    await screen.findByText(/Replay cancelled after 0 ticks/);
+    expect(screen.queryByTestId('bot-busy-hint')).toBeNull();
+  });
+
+  it("a replay the assistant started says so in both sections, with nothing to cancel in the panel", async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    const trace = {
+      version: INPUT_TRACE_VERSION,
+      fixtureId: 'assistant',
+      actionNames: ['move_right'],
+      durationMs: 160,
+      frames: Array.from({ length: 10 }, (_, tick) => ({ tick, actions: { move_right: { pressed: true, axis: 1 } } })),
+    };
+    let session!: ReturnType<typeof startReplaySession>;
+    act(() => {
+      session = startReplaySession('ai', { trace, playerEntityId: 'player', collectibleEntityIds: ['coin'] });
+    });
+    expect(screen.getByTestId('replay-busy-hint')).toHaveTextContent(
+      'A replay is running (the assistant). Wait for it to finish or press Stop.',
+    );
+    expect(screen.getByTestId('bot-busy-hint')).toHaveTextContent(
+      'A replay is running (the assistant). Wait for it to finish or press Stop.',
+    );
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Record input' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Run playtest with explorer strategy' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Cancel/ })).toBeNull();
+
+    await act(async () => {
+      session.handle.cancel();
+      await session.handle.result;
+    });
+    expect(screen.queryByTestId('replay-busy-hint')).toBeNull();
+    expect(screen.queryByTestId('bot-busy-hint')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeEnabled();
+  });
+
+  it("the bot's engine run reports its verdict when it completes", async () => {
+    render(<PlaytestPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    expect(engine.commands).toEqual(['pin_frame_rate']);
+    let elapsed = 0;
+    // Warm-up, every tick of the bot's trace, two settle frames; a generous
+    // bound, the run finishes when it finishes.
+    for (let i = 0; i < 200 && getActiveReplaySession(); i += 1) await frame((elapsed += 16));
+    expect(await screen.findByText(/^AI bot runtime replay (passed|failed)$/)).toBeInTheDocument();
+    expect(engine.commands[engine.commands.length - 1]).toBe('unpin_frame_rate');
+    expect(getActiveReplaySession()).toBeNull();
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeDisabled(); // no trace recorded
+    expect(screen.getByRole('button', { name: 'Record input' })).toBeEnabled();
+  });
+});
+
+/**
+ * #10007 (review findings) — what the panel asks the shared entry point for.
+ * The bot's run opts out of the collectible assertion (its plan never aims
+ * for one) while the manual Replay keeps the full verdict; and the bot's
+ * trace is built from the scene's bindings, so a leftward move on a digital-
+ * only `move_right` is left unbound rather than pressing right.
+ */
+describe("the bot's run policy and vocabulary come from the scene", () => {
+  const startSession = vi.mocked(startReplaySession);
+  const rightward = { type: 'move', timestamp: 0, direction: { x: 1, y: 0 } };
+
+  beforeEach(() => {
+    state.engineMode = 'play';
+    state.inputBindings = [{ ...AXIS_MOVE_RIGHT }];
+    botSession.actions[0] = { ...rightward };
+    storeSubscribers.clear();
+    engine.commands.length = 0;
+    engine.paused = false;
+    engine.refuseUnpin = false;
+    keyEvents.length = 0;
+    startSession.mockClear();
+    resetPlayTickBus();
+    const canvas = document.createElement('canvas');
+    canvas.id = EDITOR_CANVAS_ID;
+    canvas.addEventListener('keydown', (e) => keyEvents.push(`down ${e.code}`));
+    canvas.addEventListener('keyup', (e) => keyEvents.push(`up ${e.code}`));
+    document.body.append(canvas);
+  });
+
+  afterEach(async () => {
+    const active = getActiveReplaySession();
+    if (active) {
+      active.handle.cancel();
+      await active.handle.result;
+    }
+    cleanup();
+    document.body.replaceChildren();
+    state.inputBindings = [{ ...AXIS_MOVE_RIGHT }];
+    botSession.actions[0] = { ...rightward };
+  });
+
+  /** Cancel whatever run is active and let its result settle. */
+  async function cancelActive() {
+    await act(async () => {
+      const active = getActiveReplaySession();
+      active?.handle.cancel();
+      await active?.handle.result;
+    });
+  }
+
+  it("Run Playtest starts the 'ai' session with assertCollectible: false; the manual Replay passes no such option", async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    expect(aiCall).toBeDefined();
+    expect(aiCall?.[2]).toEqual({ assertCollectible: false });
+    await cancelActive();
+    await screen.findByText(/AI bot runtime replay cancelled/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    const manualCall = startSession.mock.calls.find(([source]) => source === 'manual');
+    expect(manualCall).toBeDefined();
+    expect(manualCall?.[2]?.assertCollectible).toBeUndefined();
+    await cancelActive();
+    await screen.findByText(/Replay cancelled after 0 ticks/);
+  });
+
+  it('a leftward bot move on a scene binding only a DIGITAL move_right is left unbound (never pressed right)', async () => {
+    state.inputBindings = [{ actionName: 'move_right', actionType: 'digital', sources: ['KeyD'] }];
+    botSession.actions[0] = { type: 'move', timestamp: 0, direction: { x: -1, y: 0 } };
+    render(<PlaytestPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    const trace = aiCall?.[1].trace as { frames: Array<{ actions: Record<string, unknown> }> };
+    expect(trace.frames.length).toBeGreaterThan(0);
+    expect(trace.frames[0].actions).toEqual({});
+
+    // Through the warm-up and the first tick, nothing is pressed: not KeyD.
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    expect(keyEvents).toEqual([]);
+  });
+
+  it('a leftward bot move on a signed-axis move_right is its negative half (KeyA), as before', async () => {
+    botSession.actions[0] = { type: 'move', timestamp: 0, direction: { x: -1, y: 0 } };
+    render(<PlaytestPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    const trace = aiCall?.[1].trace as { frames: Array<{ actions: Record<string, unknown> }> };
+    expect(trace.frames[0].actions).toEqual({ move_right: { pressed: true, axis: -1 } });
+
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    expect(keyEvents).toEqual(['down KeyA']);
+  });
+
+  /**
+   * Round-2 finding: a two-player scene keeps a row per slot for one action
+   * name, each with its own actionType. The axis names used to be derived by
+   * any-match over the flat list while the resolver answered the last row by
+   * name, so player 1's digital `move_right` answered a leftward bot move with
+   * a RIGHT key. Both now read the primary player's row.
+   */
+  it("a two-player scene: a leftward bot move answers the PRIMARY player's signed axis (KeyA), never player 1's digital key", async () => {
+    state.inputBindings = [
+      { ...AXIS_MOVE_RIGHT },
+      { actionName: 'move_right', actionType: 'digital', sources: ['ArrowRight'], player: 1 },
+    ];
+    botSession.actions[0] = { type: 'move', timestamp: 0, direction: { x: -1, y: 0 } };
+    render(<PlaytestPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    const trace = aiCall?.[1].trace as { frames: Array<{ actions: Record<string, unknown> }> };
+    expect(trace.frames[0].actions).toEqual({ move_right: { pressed: true, axis: -1 } });
+
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    expect(keyEvents).toEqual(['down KeyA']);
+  });
+
+  it("a two-player scene whose PRIMARY move_right is digital leaves a leftward move unbound, although player 1's is an axis", async () => {
+    state.inputBindings = [
+      { actionName: 'move_right', actionType: 'digital', sources: ['KeyD'] },
+      { actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['ArrowRight'], negativeKeys: ['ArrowLeft'], player: 1 },
+    ];
+    botSession.actions[0] = { type: 'move', timestamp: 0, direction: { x: -1, y: 0 } };
+    render(<PlaytestPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    const trace = aiCall?.[1].trace as { frames: Array<{ actions: Record<string, unknown> }> };
+    expect(trace.frames.length).toBeGreaterThan(0);
+    expect(trace.frames[0].actions).toEqual({});
+
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    expect(keyEvents).toEqual([]);
+  });
+
+  it("a two-player scene: player 1's move_left does not divert a leftward bot move from the PRIMARY player's signed axis (KeyA)", async () => {
+    state.inputBindings = [
+      { ...AXIS_MOVE_RIGHT },
+      { actionName: 'move_left', actionType: 'digital', sources: ['ArrowLeft'], player: 1 },
+    ];
+    botSession.actions[0] = { type: 'move', timestamp: 0, direction: { x: -1, y: 0 } };
+    render(<PlaytestPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    const trace = aiCall?.[1].trace as { frames: Array<{ actions: Record<string, unknown> }> };
+    expect(trace.frames[0].actions).toEqual({ move_right: { pressed: true, axis: -1 } });
+
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    expect(keyEvents).toEqual(['down KeyA']);
+  });
+});
+
+/**
+ * #10007 (Sentry finding on PR #10369) — the cancelled line says WHICH editor
+ * control cancelled the replay. The runner cancels on a mode change it did
+ * not make — Stop, a Pause from the toolbar, a Resume from the toolbar of a
+ * game the replay had paused — and the result carries the reason; the
+ * creator's own Cancel carries none and keeps today's sentence exactly. Both
+ * cancelled lines (the manual Replay's and the bot run's) read the one shared
+ * clause (`lib/playtest/replayCancelReason.ts`).
+ */
+describe('the cancelled line says which editor control cancelled the replay', () => {
+  beforeEach(() => {
+    state.engineMode = 'play';
+    state.inputBindings = [{ ...AXIS_MOVE_RIGHT }];
+    storeSubscribers.clear();
+    engine.commands.length = 0;
+    engine.paused = false;
+    engine.refuseUnpin = false;
+    keyEvents.length = 0;
+    resetPlayTickBus();
+    const canvas = document.createElement('canvas');
+    canvas.id = EDITOR_CANVAS_ID;
+    canvas.addEventListener('keydown', (e) => keyEvents.push(`down ${e.code}`));
+    canvas.addEventListener('keyup', (e) => keyEvents.push(`up ${e.code}`));
+    document.body.append(canvas);
+  });
+
+  afterEach(async () => {
+    const active = getActiveReplaySession();
+    if (active) {
+      active.handle.cancel();
+      await active.handle.result;
+    }
+    cleanup();
+    document.body.replaceChildren();
+  });
+
+  /** The cancelled line itself (a DIV), never the announcer span that says a shorter sentence. */
+  const findCancelledLine = (prefix: string) =>
+    screen.findByText((content, element) => element?.tagName === 'DIV' && content.startsWith(prefix));
+
+  /**
+   * The toolbar's move for each reason, on the store the runner watches, and
+   * what the engine must have been told. `engine-resumed` first pauses the
+   * replay THROUGH the runner (its `pause` moves the store to 'paused'), then
+   * the toolbar resumes the game behind it; no `resume` may follow from the
+   * runner, because the game is already running.
+   */
+  const TOOLBAR: Array<{
+    reason: ReplayCancelReason;
+    clause: string;
+    commands: string[];
+    /** The game is left as the toolbar chose it: a paused game stays paused. */
+    leftPaused: boolean;
+    drive: (replay: { pause: () => void; nextFrame: () => Promise<void> }) => Promise<void>;
+  }> = [
+    {
+      reason: 'engine-stopped',
+      clause: 'because Play was stopped',
+      commands: ['pin_frame_rate', 'unpin_frame_rate'],
+      leftPaused: false,
+      drive: async () => {
+        act(() => setEngineMode('edit'));
+      },
+    },
+    {
+      reason: 'engine-paused',
+      clause: 'because the game was paused from the toolbar',
+      commands: ['pin_frame_rate', 'unpin_frame_rate'],
+      leftPaused: true,
+      drive: async () => {
+        act(() => {
+          engine.paused = true;
+          setEngineMode('paused');
+        });
+      },
+    },
+    {
+      reason: 'engine-resumed',
+      clause: 'because the game was resumed from the toolbar while the replay was paused',
+      commands: ['pin_frame_rate', 'pause', 'unpin_frame_rate'],
+      leftPaused: false,
+      drive: async ({ pause, nextFrame }) => {
+        pause();
+        await nextFrame(); // the replay's pause settles at the next tick boundary
+        expect(engine.paused).toBe(true);
+        expect(state.engineMode).toBe('paused');
+        act(() => {
+          engine.paused = false;
+          setEngineMode('play');
+        });
+      },
+    },
+  ];
+
+  it.each(TOOLBAR)('the manual Replay, $reason: "$clause"', async ({ clause, commands, leftPaused, drive }) => {
+    const view = render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    let elapsed = 0;
+    await frame((elapsed += 16)); // warm-up
+    await frame((elapsed += 16)); // tick 0
+    expect(keyEvents).toEqual(['down KeyD']);
+
+    await drive({
+      pause: () => fireEvent.click(screen.getByRole('button', { name: 'Pause replay' })),
+      nextFrame: () => frame((elapsed += 16)),
+    });
+    view.rerender(<PlaytestPanel />);
+
+    const line = await findCancelledLine('Replay cancelled after');
+    expect(line).toHaveTextContent(/^Replay cancelled after \d+ ticks because/);
+    expect(line).toHaveTextContent(`ticks ${clause}. Input was released; no verdict was recorded.`);
+    expect(engine.commands).toEqual(commands);
+    expect(keyEvents).toEqual(['down KeyD', 'up KeyD']);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/^Replay (passed|failed)$/)).toBeNull();
+    expect(engine.paused).toBe(leftPaused);
+  });
+
+  it("the creator's own Cancel keeps today's sentence exactly, with no reason", async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel replay' }));
+    const line = await findCancelledLine('Replay cancelled after');
+    expect(line).toHaveTextContent(/^Replay cancelled after 1 ticks\. Input was released; no verdict was recorded\.$/);
+  });
+
+  it.each(TOOLBAR)("the bot's engine run, $reason: \"$clause\"", async ({ clause, commands, leftPaused, drive }) => {
+    const view = render(<PlaytestPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    expect(engine.commands).toEqual(['pin_frame_rate']);
+    let elapsed = 0;
+    await frame((elapsed += 16)); // warm-up
+    await frame((elapsed += 16)); // tick 0: the bot holds right
+    expect(keyEvents).toEqual(['down KeyD']);
+
+    // The bot's progress line has Cancel only; its pause is the handle's.
+    await drive({
+      pause: () => {
+        act(() => {
+          expect(getActiveReplaySession()?.handle.pause()).toBe(true);
+        });
+      },
+      nextFrame: () => frame((elapsed += 16)),
+    });
+    view.rerender(<PlaytestPanel />);
+
+    const line = await findCancelledLine('AI bot runtime replay cancelled after');
+    expect(line).toHaveTextContent(/^AI bot runtime replay cancelled after \d+ ticks because/);
+    expect(line).toHaveTextContent(`ticks ${clause}. Input was released; no verdict was recorded.`);
+    expect(engine.commands).toEqual(commands);
+    expect(keyEvents).toEqual(['down KeyD', 'up KeyD']);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/no engine play tick received/)).toBeNull();
+    expect(getActiveReplaySession()).toBeNull();
+    expect(engine.paused).toBe(leftPaused);
+  });
+
+  it("the bot's own Cancel keeps today's sentence exactly, with no reason", async () => {
+    render(<PlaytestPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel AI bot replay' }));
+    const line = await findCancelledLine('AI bot runtime replay cancelled after');
+    expect(line).toHaveTextContent(
+      /^AI bot runtime replay cancelled after 1 ticks\. Input was released; no verdict was recorded\.$/,
+    );
+  });
+});
