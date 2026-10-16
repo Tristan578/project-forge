@@ -152,19 +152,32 @@ export function declareTextureType(dataUrl: string, mimeType: string): string {
 }
 
 /**
- * What a picker tells the person when `readTextureFile` rejects: the file
- * could not be read at all, before any question of format. One sentence,
- * shared so the three pickers say the same thing.
+ * What a picker or drop zone tells the person when the browser could not
+ * read a file at all, before any question of format. It applies to a model
+ * or an audio file as much as to a texture, so it is the ONE definition of
+ * the sentence: a caller reports it, it never shows a toast itself, and no
+ * reader copies the wording.
  */
-export function textureReadFailureMessage(name: string): string {
+export function fileReadFailureMessage(name: string): string {
   return `Failed to read file "${name}". The file may be corrupted or inaccessible.`;
+}
+
+/**
+ * What a picker tells the person when the store's `loadTexture` THREW - a
+ * failure after the file was read, distinct from an unreadable file. The
+ * action normally answers with a result rather than throwing, so this is the
+ * message for the case nothing else names.
+ */
+export function textureLoadFailureMessage(name: string, error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  return `Could not load texture "${name}": ${detail}`;
 }
 
 /**
  * Read a picked texture file as a data URL, header included - the header is
  * how the engine learns the format - with the type filled in from the
  * extension when the OS declared none. Rejects when the FileReader fails;
- * the caller shows `textureReadFailureMessage` for that.
+ * the caller shows `fileReadFailureMessage` for that.
  */
 export function readTextureFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

@@ -14,7 +14,7 @@ import { render, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestU
 import { SpriteInspector } from '../SpriteInspector';
 import { useEditorStore } from '@/stores/editorStore';
 import type { SpriteData } from '@/stores/slices/types';
-import { createAssetSlice, setAssetDispatcher } from '@/stores/slices/assetSlice';
+import { createAssetSlice, setAssetDispatcher, type AssetSlice } from '@/stores/slices/assetSlice';
 import { createSliceStore } from '@/stores/slices/__tests__/sliceTestTemplate';
 
 vi.mock('@/stores/editorStore', () => ({ useEditorStore: vi.fn(() => ({})) }));
@@ -72,7 +72,7 @@ const spriteData: SpriteData = {
 const mockDispatch = vi.fn();
 const slice = createSliceStore(createAssetSlice);
 
-function setupStore() {
+function setupStore(loadTexture: AssetSlice['loadTexture'] = slice.getState().loadTexture) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => {
     const state = {
@@ -81,7 +81,7 @@ function setupStore() {
       sortingLayers: [{ name: 'Default', order: 0, visible: true }],
       assetRegistry: {},
       setSpriteData: vi.fn(),
-      loadTexture: slice.getState().loadTexture,
+      loadTexture,
     };
     return typeof selector === 'function' ? selector(state) : state;
   });
@@ -115,6 +115,23 @@ describe('SpriteInspector texture upload (#10396)', () => {
     await waitFor(() => expect(showError).toHaveBeenCalledWith(
       'Failed to read file "broken.png". The file may be corrupted or inaccessible.',
     ));
+    expect(mockDispatch).not.toHaveBeenCalled();
+    expect(showPersistentError).not.toHaveBeenCalled();
+  });
+
+  it('a texture the store cannot load is reported as a load failure, not as an unreadable file', async () => {
+    // The file reads fine; the store action throws. Its catch is separate
+    // from the read's, so the person is told what actually failed.
+    const loadTexture = vi.fn(() => { throw new Error('engine not ready'); });
+    setupStore(loadTexture);
+    const { container } = render(<SpriteInspector />);
+
+    fireEvent.change(textureInput(container), { target: { files: [pickedFile(PNG_BYTES, 'hero.png', 'image/png')] } });
+
+    await waitFor(() => expect(showError).toHaveBeenCalledWith('Could not load texture "hero.png": engine not ready'));
+    expect(showError).toHaveBeenCalledTimes(1);
+    expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('Failed to read file'));
+    expect(loadTexture).toHaveBeenCalledTimes(1);
     expect(mockDispatch).not.toHaveBeenCalled();
     expect(showPersistentError).not.toHaveBeenCalled();
   });

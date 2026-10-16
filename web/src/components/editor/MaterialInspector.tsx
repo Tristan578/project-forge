@@ -9,7 +9,7 @@ import { MATERIAL_PRESETS, ALL_CATEGORIES, getPresetById, saveCustomMaterial, ty
 import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { linearToHex, hexToLinear } from '@/lib/colorUtils';
-import { readTextureFile, textureReadFailureMessage } from '@/lib/engine/textureFormatGuard';
+import { readTextureFile, fileReadFailureMessage, textureLoadFailureMessage } from '@/lib/engine/textureFormatGuard';
 import { showError } from '@/lib/toast';
 import { CustomWgslEditor } from './CustomWgslEditor';
 
@@ -82,14 +82,24 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
   const handleFileSelect = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const file = files[0];
+    // The data URL is sent whole, its type filled in from the extension
+    // when the OS declared none: the header is how the engine learns the
+    // format, and it refuses anything but PNG/JPEG by name (#10396).
+    let dataUrl: string;
     try {
-      // The data URL is sent whole, its type filled in from the extension
-      // when the OS declared none: the header is how the engine learns the
-      // format, and it refuses anything but PNG/JPEG by name (#10396).
-      const dataUrl = await readTextureFile(file);
-      loadTexture(dataUrl, file.name, entityId, slot);
+      dataUrl = await readTextureFile(file);
     } catch {
-      showError(textureReadFailureMessage(file.name));
+      showError(fileReadFailureMessage(file.name));
+      return;
+    }
+    // Outside the read's try: a throw from the store action is a load
+    // failure, not an unreadable file, and must not be reported as one. It
+    // is caught rather than left to propagate because this is an event
+    // handler, where a rejection reaches nobody.
+    try {
+      loadTexture(dataUrl, file.name, entityId, slot);
+    } catch (error) {
+      showError(textureLoadFailureMessage(file.name, error));
     }
   }, [loadTexture, entityId, slot]);
 

@@ -7,14 +7,16 @@
  * silently (#10396, #10397).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, readdirSync } from 'fs';
+import { join, sep } from 'path';
 
 import {
   ACCEPTED_TEXTURE_DECLARATIONS,
   ALLOWED_TEXTURE_MIME_TYPES,
   checkTexturePayload,
   declareTextureType,
+  fileReadFailureMessage,
+  textureLoadFailureMessage,
   textureMimeTypeForFile,
 } from '../textureFormatGuard';
 
@@ -155,6 +157,43 @@ describe('declareTextureType', () => {
     expect(declareTextureType('data:image/webp;base64,AAAA', 'image/png')).toBe('data:image/webp;base64,AAAA');
     expect(declareTextureType('AAAA', 'image/png')).toBe('AAAA');
     expect(declareTextureType('data:;base64,AAAA', '')).toBe('data:;base64,AAAA');
+  });
+});
+
+describe('the failure sentences a picker shows', () => {
+  it('the read failure names the file', () => {
+    expect(fileReadFailureMessage('broken.png')).toBe(
+      'Failed to read file "broken.png". The file may be corrupted or inaccessible.',
+    );
+  });
+
+  it("the load failure names the file and carries the Error's message", () => {
+    expect(textureLoadFailureMessage('stone.png', new Error('engine not ready'))).toBe(
+      'Could not load texture "stone.png": engine not ready',
+    );
+  });
+
+  it('a non-Error throw is stringified into the load failure', () => {
+    expect(textureLoadFailureMessage('stone.png', 'boom')).toBe('Could not load texture "stone.png": boom');
+    expect(textureLoadFailureMessage('stone.png', 42)).toBe('Could not load texture "stone.png": 42');
+  });
+
+  it('the read-failure sentence has one definition in web/src: no component or reader copies it', () => {
+    // `fileToDataUrl` in AssetPanel used to hand-write the same sentence and
+    // show it itself, so a caller reporting per file reported twice. This
+    // walks the production sources (tests may quote the sentence to pin it)
+    // and fails on any second copy - and on an empty walk, which would be a
+    // pass that inspected nothing.
+    const SENTENCE = 'The file may be corrupted or inaccessible.';
+    const SRC = join(__dirname, '..', '..', '..');
+    const sources = readdirSync(SRC, { recursive: true, encoding: 'utf8' })
+      .filter((p) => /\.(ts|tsx)$/.test(p) && !/\.test\.tsx?$/.test(p))
+      .filter((p) => !p.split(sep).includes('__tests__'));
+    expect(sources.length).toBeGreaterThan(100);
+    const holders = sources.filter((p) => readFileSync(join(SRC, p), 'utf8').includes(SENTENCE));
+    expect(holders).toEqual([join('lib', 'engine', 'textureFormatGuard.ts')]);
+    const occurrences = readFileSync(join(SRC, holders[0]!), 'utf8').split(SENTENCE).length - 1;
+    expect(occurrences).toBe(1);
   });
 });
 

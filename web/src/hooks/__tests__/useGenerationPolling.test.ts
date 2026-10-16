@@ -2302,39 +2302,43 @@ describe('useGenerationPolling', () => {
     it('sprite sheet: the sheet is still sliced, but a refused texture is recorded as not placed', async () => {
       const cleanup = setupImageCompletion('rss1', 'sprite_sheet', { metadata: { frameCount: 4, frameSize: '64' } });
       const OriginalImage = globalThis.Image;
-      globalThis.Image = class MockImage {
-        naturalWidth = 256;
-        naturalHeight = 64;
-        onload: (() => void) | null = null;
-        onerror: (() => void) | null = null;
-        set src(_url: string) {
-          queueMicrotask(() => this.onload?.());
-        }
-      } as unknown as typeof Image;
       const origCreateObjectURL = globalThis.URL.createObjectURL;
       const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
-      globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
-      globalThis.URL.revokeObjectURL = vi.fn();
-      mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
+      // Restored in a finally: a failing assertion must not leak these
+      // stubs into the tests that follow.
+      try {
+        globalThis.Image = class MockImage {
+          naturalWidth = 256;
+          naturalHeight = 64;
+          onload: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          set src(_url: string) {
+            queueMicrotask(() => this.onload?.());
+          }
+        } as unknown as typeof Image;
+        globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+        globalThis.URL.revokeObjectURL = vi.fn();
+        mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
 
-      await runToCompletion();
+        await runToCompletion();
 
-      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
-      expect(mockSetSpriteSheet).toHaveBeenCalledWith('ent-refused', expect.anything());
-      expect(mockUpdateJob).toHaveBeenCalledWith('rss1', expect.objectContaining({
-        status: 'completed',
-        metadata: expect.objectContaining({
-          autoPlaced: false,
-          placementError: REASON,
-          targetEntityId: 'ent-refused',
-          spriteSheet: expect.objectContaining({ frameCount: 4 }),
-        }),
-      }));
-
-      globalThis.Image = OriginalImage;
-      globalThis.URL.createObjectURL = origCreateObjectURL;
-      globalThis.URL.revokeObjectURL = origRevokeObjectURL;
-      cleanup();
+        expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+        expect(mockSetSpriteSheet).toHaveBeenCalledWith('ent-refused', expect.anything());
+        expect(mockUpdateJob).toHaveBeenCalledWith('rss1', expect.objectContaining({
+          status: 'completed',
+          metadata: expect.objectContaining({
+            autoPlaced: false,
+            placementError: REASON,
+            targetEntityId: 'ent-refused',
+            spriteSheet: expect.objectContaining({ frameCount: 4 }),
+          }),
+        }));
+      } finally {
+        globalThis.Image = OriginalImage;
+        globalThis.URL.createObjectURL = origCreateObjectURL;
+        globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+        cleanup();
+      }
     });
   });
 

@@ -16,23 +16,23 @@ import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { GenerateSoundDialog } from './GenerateSoundDialog';
 import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
-import { readTextureFile, textureReadFailureMessage } from '@/lib/engine/textureFormatGuard';
+import { readTextureFile, fileReadFailureMessage, textureLoadFailureMessage } from '@/lib/engine/textureFormatGuard';
+import { createBatchFailureReporter, type BatchFailureReporter } from '@/lib/assets/batchFailureReporter';
 
 /**
  * Read a file as a data URL: `data:<file.type>;base64,<body>`.
  *
- * Models and audio take the body alone (`fileToBase64`): their importers read
- * bytes, not a type. Textures go through `readTextureFile` instead, whole,
- * because the header is how the engine learns the format (#10396).
+ * A pure read: it rejects when the FileReader fails and shows nothing, so a
+ * caller that reports per file reports once. Models and audio take the body
+ * alone (`fileToBase64`): their importers read bytes, not a type. Textures
+ * go through `readTextureFile` instead, whole, because the header is how the
+ * engine learns the format (#10396).
  */
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => {
-      showError(`Failed to read file "${file.name}". The file may be corrupted or inaccessible.`);
-      reject(new Error(`FileReader error for "${file.name}"`));
-    };
+    reader.onerror = () => reject(new Error(`FileReader error for "${file.name}"`));
     reader.readAsDataURL(file);
   });
 }
@@ -40,6 +40,24 @@ function fileToDataUrl(file: File): Promise<string> {
 async function fileToBase64(file: File): Promise<string> {
   // Strip the data:...;base64, prefix
   return (await fileToDataUrl(file)).split(',')[1];
+}
+
+/**
+ * Read `file` with `read`, or report the failure to the batch's reporter and
+ * return null so the caller moves on to the next file. One unreadable file
+ * must not stop the rest of a batch.
+ */
+async function readOrReport(
+  file: File,
+  read: (file: File) => Promise<string>,
+  failures: BatchFailureReporter,
+): Promise<string | null> {
+  try {
+    return await read(file);
+  } catch {
+    failures.report(fileReadFailureMessage(file.name));
+    return null;
+  }
 }
 
 function formatFileSize(bytes: number): string {
@@ -132,42 +150,59 @@ export const AssetPanel = memo(function AssetPanel() {
 
   const handleGltfImport = useCallback(async (files: FileList | null) => {
     if (!files) return;
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (!file.name.endsWith('.glb') && !file.name.endsWith('.gltf')) continue;
-      const base64 = await fileToBase64(file);
-      importGltf(base64, file.name);
+    const failures = createBatchFailureReporter();
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (!file.name.endsWith('.glb') && !file.name.endsWith('.gltf')) continue;
+        const base64 = await readOrReport(file, fileToBase64, failures);
+        if (base64 === null) continue;
+        importGltf(base64, file.name);
+      }
+    } finally {
+      failures.finish();
     }
   }, [importGltf]);
 
   const handleTextureImport = useCallback(async (files: FileList | null) => {
     if (!files || !primaryId) return;
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      // Header kept (and filled in from the extension when the OS declared
-      // no type): the engine reads the format from it and refuses anything
-      // but PNG/JPEG by name; the slice shows that refusal. A file that
-      // cannot be read at all is reported here and the rest still load.
-      let dataUrl: string;
-      try {
-        dataUrl = await readTextureFile(file);
-      } catch {
-        showError(textureReadFailureMessage(file.name));
-        continue;
+    const failures = createBatchFailureReporter();
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        // Header kept (and filled in from the extension when the OS declared
+        // no type): the engine reads the format from it and refuses anything
+        // but PNG/JPEG by name; the slice shows that refusal. A file that
+        // cannot be read at all is reported here and the rest still load.
+        const dataUrl = await readOrReport(file, readTextureFile, failures);
+        if (dataUrl === null) continue;
+        // A throw from the store action is a load failure, not an unreadable
+        // file; caught so the rest of the batch still loads.
+        try {
+          loadTexture(dataUrl, file.name, primaryId, 'base_color');
+        } catch (error) {
+          showError(textureLoadFailureMessage(file.name, error));
+        }
       }
-      loadTexture(dataUrl, file.name, primaryId, 'base_color');
+    } finally {
+      failures.finish();
     }
   }, [loadTexture, primaryId]);
 
   const handleAudioImport = useCallback(async (files: FileList | null) => {
     if (!files) return;
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      if (['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
-        const base64 = await fileToBase64(file);
+    const failures = createBatchFailureReporter();
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        if (!['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) continue;
+        const base64 = await readOrReport(file, fileToBase64, failures);
+        if (base64 === null) continue;
         importAudio(base64, file.name);
       }
+    } finally {
+      failures.finish();
     }
   }, [importAudio]);
 
@@ -190,32 +225,41 @@ export const AssetPanel = memo(function AssetPanel() {
 
     if (validFiles.length === 0) return;
     setImportProgress({ current: 0, total: validFiles.length });
+    const failures = createBatchFailureReporter();
 
-    for (let i = 0; i < validFiles.length; i++) {
-      const file = validFiles[i];
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      setImportProgress({ current: i + 1, total: validFiles.length });
-      if (ext === 'glb' || ext === 'gltf') {
-        const base64 = await fileToBase64(file);
-        importGltf(base64, file.name);
-      } else if (['png', 'jpg', 'jpeg'].includes(ext ?? '')) {
-        if (primaryId) {
-          // Reported per file so one unreadable file does not stop the batch
-          // (or leave the progress indicator stuck).
+    // Every read is reported per file so one unreadable model, texture or
+    // audio file does not stop the batch; the finally clears the progress
+    // indicator on every exit path so it can never be left stuck.
+    try {
+      for (let i = 0; i < validFiles.length; i++) {
+        const file = validFiles[i];
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        setImportProgress({ current: i + 1, total: validFiles.length });
+        if (ext === 'glb' || ext === 'gltf') {
+          const base64 = await readOrReport(file, fileToBase64, failures);
+          if (base64 === null) continue;
+          importGltf(base64, file.name);
+        } else if (['png', 'jpg', 'jpeg'].includes(ext ?? '')) {
+          if (!primaryId) continue;
+          const dataUrl = await readOrReport(file, readTextureFile, failures);
+          if (dataUrl === null) continue;
+          // Outside the read: a throw from the store action is a load
+          // failure, not an unreadable file, and is reported as itself.
           try {
-            const dataUrl = await readTextureFile(file);
             loadTexture(dataUrl, file.name, primaryId, 'base_color');
-          } catch {
-            showError(textureReadFailureMessage(file.name));
+          } catch (error) {
+            showError(textureLoadFailureMessage(file.name, error));
           }
+        } else if (['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
+          const base64 = await readOrReport(file, fileToBase64, failures);
+          if (base64 === null) continue;
+          importAudio(base64, file.name);
         }
-      } else if (['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
-        const base64 = await fileToBase64(file);
-        importAudio(base64, file.name);
       }
+    } finally {
+      failures.finish();
+      setImportProgress(null);
     }
-
-    setImportProgress(null);
   }, [importGltf, loadTexture, importAudio, primaryId]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {

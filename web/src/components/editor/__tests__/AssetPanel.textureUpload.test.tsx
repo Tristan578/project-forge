@@ -11,10 +11,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, waitFor } from '@/test/utils/componentTestUtils';
 import { AssetPanel } from '../AssetPanel';
 import { useEditorStore } from '@/stores/editorStore';
-import { createAssetSlice, setAssetDispatcher } from '@/stores/slices/assetSlice';
+import { createAssetSlice, setAssetDispatcher, type AssetSlice } from '@/stores/slices/assetSlice';
 import { createSliceStore } from '@/stores/slices/__tests__/sliceTestTemplate';
 
 vi.mock('@/stores/editorStore', () => ({
@@ -99,24 +99,43 @@ function pickedFile(bytes: Uint8Array<ArrayBuffer>, name: string, type: string):
 const mockDispatch = vi.fn();
 const slice = createSliceStore(createAssetSlice);
 
-function setupStore() {
+/** The store actions the panel calls; the texture one is the real slice unless a test overrides it. */
+type ImportActions = Pick<AssetSlice, 'importGltf' | 'loadTexture' | 'importAudio'>;
+
+function setupStore(overrides: Partial<ImportActions> = {}): ImportActions {
+  const actions: ImportActions = {
+    importGltf: vi.fn(() => ({ success: true })),
+    loadTexture: slice.getState().loadTexture,
+    importAudio: vi.fn(),
+    ...overrides,
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => selector({
     assetRegistry: {},
-    importGltf: vi.fn(),
-    loadTexture: slice.getState().loadTexture,
-    importAudio: vi.fn(),
+    ...actions,
     placeAsset: vi.fn(),
     deleteAsset: vi.fn(),
     primaryId: 'ent-1',
   }));
+  return actions;
 }
 
-function textureInput(container: HTMLElement): HTMLInputElement {
-  const input = container.querySelector('input[type="file"][accept*=".png"]');
-  expect(input, 'the texture file input must render').not.toBeNull();
+function fileInput(container: HTMLElement, accepts: string, what: string): HTMLInputElement {
+  const input = container.querySelector(`input[type="file"][accept*="${accepts}"]`);
+  expect(input, `the ${what} file input must render`).not.toBeNull();
   return input as HTMLInputElement;
 }
+
+const textureInput = (container: HTMLElement) => fileInput(container, '.png', 'texture');
+const gltfInput = (container: HTMLElement) => fileInput(container, '.glb', 'model');
+const audioInput = (container: HTMLElement) => fileInput(container, '.mp3', 'audio');
+
+/** Drop `files` on the panel; firing on the hidden input bubbles there. */
+function dropFiles(container: HTMLElement, files: File[]): void {
+  fireEvent.drop(textureInput(container), { dataTransfer: { files, types: ['Files'] } });
+}
+
+const readFailure = (name: string) => `Failed to read file "${name}". The file may be corrupted or inaccessible.`;
 
 describe('AssetPanel texture upload (#10396)', () => {
   beforeEach(() => {
@@ -159,6 +178,125 @@ describe('AssetPanel texture upload (#10396)', () => {
     expect(mockDispatch).toHaveBeenCalledTimes(1);
     expect(showError).toHaveBeenCalledTimes(1);
     expect(showError).toHaveBeenCalledWith('Failed to read file "broken.png". The file may be corrupted or inaccessible.');
+  });
+
+  describe('a texture the store cannot load', () => {
+    const throwing = () => vi.fn(() => { throw new Error('engine not ready'); });
+
+    it('dropped: is reported as a load failure, not as an unreadable file, and the progress bar still clears', async () => {
+      const loadTexture = throwing();
+      setupStore({ loadTexture });
+      const { container } = render(<AssetPanel />);
+
+      dropFiles(container, [pickedFile(PNG_BYTES, 'floor.png', 'image/png')]);
+
+      await waitFor(() => expect(showError).toHaveBeenCalledWith('Could not load texture "floor.png": engine not ready'));
+      expect(showError).toHaveBeenCalledTimes(1);
+      expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('Failed to read file'));
+      expect(loadTexture).toHaveBeenCalledTimes(1);
+      expect(mockDispatch).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
+    });
+
+    it('picked: is reported as a load failure, and the file after it still loads', async () => {
+      // Throws for one file and is the real slice for the rest, so "the next
+      // file still loads" is observable at the dispatcher.
+      const real = slice.getState().loadTexture;
+      const loadTexture = vi.fn((dataUrl: string, name: string, entityId: string, slot: string) => {
+        if (name === 'bad.png') throw new Error('engine not ready');
+        return real(dataUrl, name, entityId, slot);
+      });
+      setupStore({ loadTexture });
+      const { container } = render(<AssetPanel />);
+
+      fireEvent.change(textureInput(container), {
+        target: { files: [pickedFile(PNG_BYTES, 'bad.png', 'image/png'), pickedFile(PNG_BYTES, 'stone.png', 'image/png')] },
+      });
+
+      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({ name: 'stone.png' })));
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+      expect(showError).toHaveBeenCalledTimes(1);
+      expect(showError).toHaveBeenCalledWith('Could not load texture "bad.png": engine not ready');
+    });
+  });
+
+  describe('an unreadable model or audio file (#10396 round 3)', () => {
+    it('in a drop batch: is reported once, the texture after it still loads, and the progress bar clears', async () => {
+      vi.stubGlobal('FileReader', SelectiveFileReader);
+      const { importGltf } = setupStore();
+      const { container } = render(<AssetPanel />);
+
+      dropFiles(container, [pickedFile(PNG_BYTES, 'broken.glb', ''), pickedFile(PNG_BYTES, 'floor.png', 'image/png')]);
+
+      // The bar is up while the batch runs, and gone once it is done.
+      expect(screen.getByText(/Importing 1\/2/)).toBeTruthy();
+      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({ name: 'floor.png' })));
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+      expect(importGltf).not.toHaveBeenCalled();
+      // ONE toast for the model: the reader no longer shows one of its own.
+      expect(showError).toHaveBeenCalledTimes(1);
+      expect(showError).toHaveBeenCalledWith(readFailure('broken.glb'));
+      await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
+    });
+
+    it('a picked model that cannot be read is reported and the next one still imports', async () => {
+      vi.stubGlobal('FileReader', SelectiveFileReader);
+      const { importGltf } = setupStore();
+      const { container } = render(<AssetPanel />);
+
+      fireEvent.change(gltfInput(container), {
+        target: { files: [pickedFile(PNG_BYTES, 'broken.glb', ''), pickedFile(PNG_BYTES, 'model.glb', '')] },
+      });
+
+      await waitFor(() => expect(importGltf).toHaveBeenCalledWith('iVBORw0KGgo=', 'model.glb'));
+      expect(importGltf).toHaveBeenCalledTimes(1);
+      expect(showError).toHaveBeenCalledTimes(1);
+      expect(showError).toHaveBeenCalledWith(readFailure('broken.glb'));
+    });
+
+    it('a picked audio file that cannot be read is reported and the next one still imports', async () => {
+      vi.stubGlobal('FileReader', SelectiveFileReader);
+      const { importAudio } = setupStore();
+      const { container } = render(<AssetPanel />);
+
+      fireEvent.change(audioInput(container), {
+        target: { files: [pickedFile(PNG_BYTES, 'broken.mp3', ''), pickedFile(PNG_BYTES, 'song.mp3', '')] },
+      });
+
+      await waitFor(() => expect(importAudio).toHaveBeenCalledWith('iVBORw0KGgo=', 'song.mp3'));
+      expect(importAudio).toHaveBeenCalledTimes(1);
+      expect(showError).toHaveBeenCalledTimes(1);
+      expect(showError).toHaveBeenCalledWith(readFailure('broken.mp3'));
+    });
+  });
+
+  it('a drop with many unreadable files names the first three, sends the rest to the console, and adds one summary', async () => {
+    vi.stubGlobal('FileReader', SelectiveFileReader);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { container } = render(<AssetPanel />);
+      const files = [1, 2, 3, 4, 5].map((n) => pickedFile(PNG_BYTES, `broken${n}.png`, 'image/png'));
+      files.push(pickedFile(PNG_BYTES, 'floor.png', 'image/png'));
+
+      dropFiles(container, files);
+
+      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({ name: 'floor.png' })));
+      await waitFor(() => expect(showError).toHaveBeenCalledTimes(4));
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(showError).mock.calls.map(([m]) => m)).toEqual([
+        readFailure('broken1.png'),
+        readFailure('broken2.png'),
+        readFailure('broken3.png'),
+        '2 more files could not be read; details are in the browser console.',
+      ]);
+      expect(warn.mock.calls).toEqual([
+        [`[assets] ${readFailure('broken4.png')}`],
+        [`[assets] ${readFailure('broken5.png')}`],
+      ]);
+      await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('a picked PNG reaches load_texture as the whole data URL, header included', async () => {
