@@ -43,6 +43,20 @@ describe('assetHandlers', () => {
 
       expect(result.success).toBe(false);
     });
+
+    it('relays the engine\'s refusal of a model instead of reporting "Importing"', async () => {
+      // What the store returns when the engine refuses a KTX2-textured model
+      // before queueing it (#10396).
+      const reason = 'image #0 is a KTX2 texture (declared by its mimeType); KTX2 textures are not supported, convert the model\'s textures to PNG or JPEG and import again';
+      const { result } = await invokeHandler(
+        assetHandlers,
+        'import_gltf',
+        { dataBase64: 'Z2xURg==', name: 'crafted.glb' },
+        { importGltf: () => ({ success: false, error: reason }) },
+      );
+
+      expect(result).toEqual({ success: false, error: reason });
+    });
   });
 
   describe('load_texture', () => {
@@ -76,6 +90,46 @@ describe('assetHandlers', () => {
       });
 
       expect(result.success).toBe(false);
+    });
+
+    it('refuses a KTX2 data URL before touching the store, naming the accepted formats', async () => {
+      // The engine would refuse this (#10396); the tool must not report
+      // "Loading texture" for it, and the model needs the reason to act on.
+      const { result, store } = await invokeHandler(assetHandlers, 'load_texture', {
+        dataBase64: 'data:image/ktx2;base64,q0tUWCAyMLsNChoK',
+        name: 'lut.ktx2',
+        entityId: 'ent_1',
+        slot: 'base_color',
+      });
+
+      expect(result).toEqual({
+        success: false,
+        error: "unsupported texture format 'image/ktx2'; accepted formats are image/png, image/jpeg",
+      });
+      expect(store.loadTexture).not.toHaveBeenCalled();
+    });
+
+    it('accepts a PNG data URL and forwards it whole', async () => {
+      const { result, store } = await invokeHandler(assetHandlers, 'load_texture', {
+        dataBase64: 'data:image/png;base64,iVBORw0KGgo=',
+        name: 'stone.png',
+        entityId: 'ent_1',
+        slot: 'base_color',
+      });
+
+      expect(result.success).toBe(true);
+      expect(store.loadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', 'stone.png', 'ent_1', 'base_color');
+    });
+
+    it('relays a refusal the store (the engine) answered with', async () => {
+      const { result } = await invokeHandler(
+        assetHandlers,
+        'load_texture',
+        { dataBase64: 'iVBORw0KGgo=', name: 'huge.png', entityId: 'ent_1', slot: 'base_color' },
+        { loadTexture: () => ({ success: false, error: 'payload is 67500001 bytes of base64, over the 50 MB limit' }) },
+      );
+
+      expect(result).toEqual({ success: false, error: 'payload is 67500001 bytes of base64, over the 50 MB limit' });
     });
   });
 

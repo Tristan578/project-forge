@@ -214,6 +214,10 @@ const REJECTED_ACTION_LABELS: Readonly<Record<string, string>> = {
   save_scene: 'save the scene',
   spawn_entity: 'add the entity',
   delete_entity: 'delete the entity',
+  // A format refusal (`<command> refused: …`) is shown with its reason by
+  // assetSlice as well; this generic line covers every other rejection.
+  import_gltf: 'import the model',
+  load_texture: 'load the texture',
 };
 
 function rejectedActionMessage(command: string): string {

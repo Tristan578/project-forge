@@ -41,9 +41,9 @@ export function SpriteInspector() {
     const file = files[0];
     const reader = new FileReader();
     reader.onload = () => {
-      const result = reader.result as string;
-      const base64 = result.split(',')[1];
-      loadTexture(base64, file.name, primaryId, 'sprite');
+      // The data URL is sent whole: its header is how the engine learns the
+      // format, and it refuses anything but PNG/JPEG by name (#10396).
+      loadTexture(reader.result as string, file.name, primaryId, 'sprite');
     };
     reader.readAsDataURL(file);
   }, [primaryId, loadTexture]);

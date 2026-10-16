@@ -13,7 +13,24 @@ vi.mock('@/lib/audio/entityAudioGraph', async (importOriginal) => ({
 
 import { queueAudioImport } from '@/lib/audio/entityAudioGraph';
 
+// A format refusal is shown to the person from the slice (persistent, with
+// the reason); mock the toast module so the message can be asserted without
+// sonner's DOM host.
+vi.mock('@/lib/toast', () => ({
+  showError: vi.fn(),
+  showPersistentError: vi.fn(),
+  showSuccess: vi.fn(),
+  showInfo: vi.fn(),
+}));
+
+import { showPersistentError } from '@/lib/toast';
+
 const defaultSource: AssetMetadata['source'] = { type: 'upload', filename: 'test.glb' };
+
+/** A 1x1 PNG as a data URL: the shape every picker now sends. */
+const PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+const KTX2_DATA_URL = 'data:image/ktx2;base64,q0tUWCAyMLsNChoK';
+const KTX2_REFUSAL = "unsupported texture format 'image/ktx2'; accepted formats are image/png, image/jpeg";
 
 let store: ReturnType<typeof createSliceStore<AssetSlice>>;
 let mockDispatch: ReturnType<typeof createMockDispatch>;
@@ -38,12 +55,62 @@ describe('assetSlice', () => {
 
   describe('importGltf', () => {
     it('should dispatch only', () => {
-      store.getState().importGltf('data:base64...', 'model.glb');
+      const outcome = store.getState().importGltf('data:base64...', 'model.glb');
 
       expect(mockDispatch).toHaveBeenCalledWith('import_gltf', {
         dataBase64: 'data:base64...',
         name: 'model.glb',
       });
+      // A dispatcher that answers nothing is not reporting failure.
+      expect(outcome).toEqual({ success: true });
+      expect(showPersistentError).not.toHaveBeenCalled();
+    });
+
+    it('shows the engine\'s format refusal with its reason, and returns it', () => {
+      // What the engine answers for a model whose image #0 is KTX2 (#10396).
+      mockDispatch.mockReturnValue({
+        success: false,
+        error: 'import_gltf refused: image #0 is a KTX2 texture (declared by its mimeType); KTX2 textures are not supported, convert the model\'s textures to PNG or JPEG and import again',
+      });
+
+      const outcome = store.getState().importGltf('Z2xURg==', 'crafted.glb');
+
+      const reason = 'image #0 is a KTX2 texture (declared by its mimeType); KTX2 textures are not supported, convert the model\'s textures to PNG or JPEG and import again';
+      expect(outcome).toEqual({ success: false, error: reason });
+      expect(showPersistentError).toHaveBeenCalledTimes(1);
+      expect(showPersistentError).toHaveBeenCalledWith(
+        `Couldn't import the model: ${reason}`,
+        { id: 'import_gltf-refused' },
+      );
+    });
+
+    it('leaves a rejection that is not a format refusal to the generic report', () => {
+      // editorStore's tracked dispatcher already reports every rejection once
+      // per command; only the `refused:` contract gets the per-file toast.
+      mockDispatch.mockReturnValue({ success: false, error: 'PendingCommands resource not initialized' });
+
+      const outcome = store.getState().importGltf('Z2xURg==', 'model.glb');
+
+      expect(outcome).toEqual({ success: false, error: 'PendingCommands resource not initialized' });
+      expect(showPersistentError).not.toHaveBeenCalled();
+    });
+
+    it('does not read a throw as a refusal', () => {
+      mockDispatch.mockReturnValue({ success: false, error: 'import_gltf refused: x', threw: true });
+
+      const outcome = store.getState().importGltf('Z2xURg==', 'model.glb');
+
+      expect(outcome.success).toBe(false);
+      expect(showPersistentError).not.toHaveBeenCalled();
+    });
+
+    it('cuts an over-long engine reason with a visible marker', () => {
+      mockDispatch.mockReturnValue({ success: false, error: `import_gltf refused: ${'r'.repeat(600)}` });
+
+      const outcome = store.getState().importGltf('Z2xURg==', 'model.glb');
+
+      expect(outcome.error).toBe(`${'r'.repeat(512)}… [truncated]`);
+      expect(vi.mocked(showPersistentError).mock.calls[0]![0]).toContain('… [truncated]');
     });
 
     it('forwards an optional stable asset id', () => {
@@ -62,14 +129,72 @@ describe('assetSlice', () => {
 
   describe('loadTexture', () => {
     it('should dispatch only', () => {
-      store.getState().loadTexture('data:base64...', 'texture.png', 'entity1', 'base_color_texture');
+      const outcome = store.getState().loadTexture(PNG_DATA_URL, 'texture.png', 'entity1', 'base_color_texture');
 
       expect(mockDispatch).toHaveBeenCalledWith('load_texture', {
-        dataBase64: 'data:base64...',
+        dataBase64: PNG_DATA_URL,
         name: 'texture.png',
         entityId: 'entity1',
         slot: 'base_color_texture',
       });
+      expect(outcome).toEqual({ success: true });
+      expect(showPersistentError).not.toHaveBeenCalled();
+    });
+
+    it('still sends a raw base64 body, which the engine decodes as PNG', () => {
+      store.getState().loadTexture('iVBORw0KGgo=', 'texture.png', 'entity1', 'base_color');
+
+      expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({
+        dataBase64: 'iVBORw0KGgo=',
+      }));
+    });
+
+    it('refuses a KTX2 data URL before the command is built, naming the accepted formats', () => {
+      const outcome = store.getState().loadTexture(KTX2_DATA_URL, 'lut.ktx2', 'entity1', 'base_color');
+
+      expect(mockDispatch).not.toHaveBeenCalled();
+      expect(outcome).toEqual({ success: false, error: KTX2_REFUSAL });
+      expect(showPersistentError).toHaveBeenCalledWith(
+        `Couldn't load the texture: ${KTX2_REFUSAL}`,
+        { id: 'load_texture-refused' },
+      );
+    });
+
+    it('refuses WebP by name - the pickers accept .webp files, the engine has no decoder for them', () => {
+      const outcome = store.getState().loadTexture('data:image/webp;base64,UklGRg==', 'photo.webp', 'entity1', 'base_color');
+
+      expect(mockDispatch).not.toHaveBeenCalled();
+      expect(outcome).toEqual({
+        success: false,
+        error: "unsupported texture format 'image/webp'; accepted formats are image/png, image/jpeg",
+      });
+    });
+
+    it('refuses even when no dispatcher is attached', () => {
+      setAssetDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      const outcome = store.getState().loadTexture(KTX2_DATA_URL, 'lut.ktx2', 'entity1', 'base_color');
+
+      expect(outcome).toEqual({ success: false, error: KTX2_REFUSAL });
+    });
+
+    it('shows the engine\'s own refusal of a texture, and returns it', () => {
+      // The engine enforces the cap the slice does not: its answer is relayed.
+      mockDispatch.mockReturnValue({
+        success: false,
+        error: 'load_texture refused: payload is 67500001 bytes of base64, over the 50 MB limit',
+      });
+
+      const outcome = store.getState().loadTexture(PNG_DATA_URL, 'huge.png', 'entity1', 'base_color');
+
+      expect(outcome).toEqual({
+        success: false,
+        error: 'payload is 67500001 bytes of base64, over the 50 MB limit',
+      });
+      expect(showPersistentError).toHaveBeenCalledWith(
+        "Couldn't load the texture: payload is 67500001 bytes of base64, over the 50 MB limit",
+        { id: 'load_texture-refused' },
+      );
     });
   });
 

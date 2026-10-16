@@ -81,9 +81,9 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
     const file = files[0];
     const reader = new FileReader();
     reader.onload = () => {
-      const result = reader.result as string;
-      const base64 = result.split(',')[1];
-      loadTexture(base64, file.name, entityId, slot);
+      // The data URL is sent whole: its header is how the engine learns the
+      // format, and it refuses anything but PNG/JPEG by name (#10396).
+      loadTexture(reader.result as string, file.name, entityId, slot);
     };
     reader.readAsDataURL(file);
   }, [loadTexture, entityId, slot]);

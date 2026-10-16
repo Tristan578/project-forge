@@ -610,9 +610,10 @@ export const PixelArtEditor = memo(function PixelArtEditor({
   // Apply to entity sprite (flattened composite).
   const handleApply = useCallback(() => {
     if (!entityId) return;
+    // Sent whole: the `data:image/png;base64,` header is how the engine learns
+    // the format (#10396).
     const dataUrl = gridToDataUrl(compositeLayers(layers, canvasSize));
-    const base64 = dataUrl.split(',')[1];
-    loadTexture(base64, `pixel-art-${canvasSize}x${canvasSize}.png`, entityId, 'base_color');
+    loadTexture(dataUrl, `pixel-art-${canvasSize}x${canvasSize}.png`, entityId, 'base_color');
     onClose();
   }, [entityId, layers, canvasSize, loadTexture, onClose]);
 

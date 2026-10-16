@@ -17,21 +17,30 @@ import { GenerateSoundDialog } from './GenerateSoundDialog';
 import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
 
-function fileToBase64(file: File): Promise<string> {
+/**
+ * Read a file as a data URL: `data:<file.type>;base64,<body>`.
+ *
+ * Textures are sent whole, header included, because the header is how the
+ * engine learns the format: it accepts PNG and JPEG and refuses everything
+ * else by name (`load_texture`, #10396). Stripping it - as `fileToBase64`
+ * below still does for models and audio, whose importers read bytes, not a
+ * type - would make every upload a PNG whatever the file was.
+ */
+function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      // Strip the data:...;base64, prefix
-      const base64 = result.split(',')[1];
-      resolve(base64);
-    };
+    reader.onload = () => resolve(reader.result as string);
     reader.onerror = () => {
       showError(`Failed to read file "${file.name}". The file may be corrupted or inaccessible.`);
       reject(new Error(`FileReader error for "${file.name}"`));
     };
     reader.readAsDataURL(file);
   });
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  // Strip the data:...;base64, prefix
+  return (await fileToDataUrl(file)).split(',')[1];
 }
 
 function formatFileSize(bytes: number): string {
@@ -136,8 +145,10 @@ export const AssetPanel = memo(function AssetPanel() {
     if (!files || !primaryId) return;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const base64 = await fileToBase64(file);
-      loadTexture(base64, file.name, primaryId, 'base_color');
+      // Header kept: the engine reads the format from it and refuses anything
+      // but PNG/JPEG by name; the slice shows that refusal.
+      const dataUrl = await fileToDataUrl(file);
+      loadTexture(dataUrl, file.name, primaryId, 'base_color');
     }
   }, [loadTexture, primaryId]);
 
@@ -180,8 +191,8 @@ export const AssetPanel = memo(function AssetPanel() {
         importGltf(base64, file.name);
       } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext ?? '')) {
         if (primaryId) {
-          const base64 = await fileToBase64(file);
-          loadTexture(base64, file.name, primaryId, 'base_color');
+          const dataUrl = await fileToDataUrl(file);
+          loadTexture(dataUrl, file.name, primaryId, 'base_color');
         }
       } else if (['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
         const base64 = await fileToBase64(file);
