@@ -82,6 +82,7 @@ test.describe('Help & Onboarding @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_AUTH_MS },
       );
 
@@ -105,6 +106,7 @@ test.describe('Help & Onboarding @ui @dev', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
+        undefined,
         { timeout: E2E_TIMEOUT_AUTH_MS },
       );
 
