@@ -34,11 +34,16 @@ import {
  * 3b; a value no other code writes, so a match can only come from that script.
  */
 const PLAY_TICK_MARKER = 'engine-smoke: onUpdate ran';
-/** Logged every tenth frame with the frame count appended; Step 3c reads it. */
-const PLAY_TICK_FRAME_PREFIX = 'engine-smoke: frame ';
-/** Logged when `forge.getTransform(entityId)` flips to non-null / null. */
-const ENTITY_SEEN = 'engine-smoke: entity seen';
-const ENTITY_LOST = 'engine-smoke: entity lost';
+/**
+ * Logged by the Step 2c script about once a second (on its own `dt` clock)
+ * with CUMULATIVE counts appended: `frame=<frames> seen=<n> lost=<m>`, where
+ * `seen`/`lost` count the times `forge.getTransform(entityId)` flipped to
+ * non-null / null. Step 3c reads the LAST such line. The store keeps only the
+ * last 200 `scriptLogs` entries (scriptSlice.ts), so a per-event line logged
+ * early in the run could be evicted by a long or fast session and read as
+ * "never seen"; a line that carries its own history cannot be.
+ */
+const ENTITY_STATE_PREFIX = 'engine-smoke: state ';
 
 test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
   /**
@@ -129,40 +134,44 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
     // not tell from an idle page. `setScript` is the same store action the
     // script inspector uses: it records the script locally (what the runner
     // gathers at Play start) and dispatches `set_script` to the engine. The
-    // marker stops after five frames and the frame counter logs every tenth
-    // frame, so the 200-entry script log cannot overflow during the session.
-    // The script also reports whether it can still see its OWN entity each
-    // frame — on change only — which is what Step 3c asserts on.
+    // marker stops after five frames. Every frame the script checks whether it
+    // can still see its OWN entity and counts the flips; about once a second
+    // (its `dt` clock, first report on the first frame) it logs one state line
+    // with the cumulative counts, which is what Step 3c asserts on. A few
+    // lines per session: the 200-entry script log cannot overflow, and the
+    // last state line always carries the whole history.
     await page.evaluate(
-      ({ entityId, marker, framePrefix, seenMsg, lostMsg }) => {
+      ({ entityId, marker, statePrefix }) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__EDITOR_STORE;
         store.getState().setScript(
           entityId,
           [
             'let frames = 0;',
-            'let seen = null;',
+            'let clock = 0;',
+            'let lastReport = -1;',
+            'let present = null;',
+            'let seenCount = 0;',
+            'let lostCount = 0;',
             'function onUpdate(dt) {',
             '  frames += 1;',
+            '  clock += dt;',
             `  if (frames <= 5) forge.log(${JSON.stringify(marker)});`,
-            `  if (frames % 10 === 0) forge.log(${JSON.stringify(framePrefix)} + frames);`,
-            '  const present = forge.getTransform(entityId) !== null;',
-            '  if (present !== seen) {',
-            '    seen = present;',
-            `    forge.log(present ? ${JSON.stringify(seenMsg)} : ${JSON.stringify(lostMsg)});`,
+            '  const now = forge.getTransform(entityId) !== null;',
+            '  if (now !== present) {',
+            '    present = now;',
+            '    if (now) seenCount += 1; else lostCount += 1;',
+            '  }',
+            '  if (clock - lastReport >= 1) {',
+            '    lastReport = clock;',
+            `    forge.log(${JSON.stringify(statePrefix)} + 'frame=' + frames + ' seen=' + seenCount + ' lost=' + lostCount);`,
             '  }',
             '}',
           ].join('\n'),
           true
         );
       },
-      {
-        entityId: targetId,
-        marker: PLAY_TICK_MARKER,
-        framePrefix: PLAY_TICK_FRAME_PREFIX,
-        seenMsg: ENTITY_SEEN,
-        lostMsg: ENTITY_LOST,
-      }
+      { entityId: targetId, marker: PLAY_TICK_MARKER, statePrefix: ENTITY_STATE_PREFIX }
     );
 
     // Step 3: enter Play mode — the engine snapshots state and inserts the
@@ -230,22 +239,27 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
     // had dropped its snapshot, so the next delta (nothing moved: empty)
     // arrived as a frame with no entities; the script runner diffed every
     // entity away, the worker forgot the Cube, `forge.getTransform(entityId)`
-    // went null and the script logged ENTITY_LOST. The engine now clears its
-    // cache on the transition itself (`core/play_tick_delta.rs`), so the next
-    // frame is full. This is the one executable test of that bridge wiring:
-    // `bridge/` is wasm32-only and never compiles into a native test.
+    // went null and the script's `lost` count went to 1. The engine now clears
+    // its cache on the transition itself (`core/play_tick_delta.rs`), so the
+    // next frame is full. This is the one executable test of that bridge
+    // wiring: `bridge/` is wasm32-only and never compiles into a native test
+    // (a source pin, `playTickCacheClearPin.test.ts`, holds the call sites in
+    // place between E2E runs).
     //
     // Raw commands through `__FORGE_DISPATCH`, not the Play controls, so both
     // are queued before the engine's next update.
-    const framesBeforeBlip = await page.evaluate((prefix: string) => {
+    const stateBeforeBlip = await page.evaluate((prefix: string) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;
       const logs: Array<{ message: string }> = store?.getState().scriptLogs ?? [];
-      const counts = logs
-        .filter((entry) => entry.message.startsWith(prefix))
-        .map((entry) => Number(entry.message.slice(prefix.length)));
-      return counts.length > 0 ? Math.max(...counts) : 0;
-    }, PLAY_TICK_FRAME_PREFIX);
+      const lines = logs.filter((entry) => entry.message.startsWith(prefix));
+      const last = lines.length > 0 ? lines[lines.length - 1].message : '';
+      const parsed = /frame=(\d+) seen=(\d+) lost=(\d+)/.exec(last);
+      return { lines: lines.length, frame: parsed ? Number(parsed[1]) : 0 };
+    }, ENTITY_STATE_PREFIX);
+    // Non-vacuous: Step 3b saw two frames, and the script reports on its
+    // first, so a state line exists before the blip.
+    expect(stateBeforeBlip.lines).toBeGreaterThanOrEqual(1);
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const dispatch = (window as any).__FORGE_DISPATCH;
@@ -253,42 +267,45 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
         throw new Error('engine-smoke: __FORGE_DISPATCH refused a mode command');
       }
     });
-    // Frames kept coming after the blip: at least two more frame-counter
-    // entries past the last one seen before it (the counter logs every tenth
-    // frame, so the one seen may have been up to nine frames stale). A runtime
-    // that stalled on the pause cannot pass this, and a Cube the script lost
-    // would have been logged by the time these frames ran.
+    // Frames kept coming after the blip: wait for TWO more state lines. The
+    // first may summarise frames that mostly ran before the blip; the second
+    // is a full second of frames after it. A runtime that stalled on the
+    // pause cannot pass this, and a Cube the script lost in that second shows
+    // up in the cumulative `lost` count the last line carries.
     await page.waitForFunction(
-      ({ prefix, atLeast }: { prefix: string; atLeast: number }) => {
+      ({ prefix, atLeastLines }: { prefix: string; atLeastLines: number }) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__EDITOR_STORE;
         const logs: Array<{ message: string }> = store?.getState().scriptLogs ?? [];
-        return logs.some(
-          (entry) =>
-            entry.message.startsWith(prefix) && Number(entry.message.slice(prefix.length)) >= atLeast
-        );
+        return logs.filter((entry) => entry.message.startsWith(prefix)).length >= atLeastLines;
       },
-      { prefix: PLAY_TICK_FRAME_PREFIX, atLeast: framesBeforeBlip + 20 },
+      { prefix: ENTITY_STATE_PREFIX, atLeastLines: stateBeforeBlip.lines + 2 },
       { timeout: E2E_TIMEOUT_INTERACTION_MS }
     );
-    const sightings = await page.evaluate(
-      ({ seenMsg, lostMsg }: { seenMsg: string; lostMsg: string }) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
-        const logs: Array<{ message: string }> = store?.getState().scriptLogs ?? [];
-        return {
-          seen: logs.filter((entry) => entry.message === seenMsg).length,
-          lost: logs.filter((entry) => entry.message === lostMsg).length,
-          engineMode: store?.getState().engineMode as string,
-        };
-      },
-      { seenMsg: ENTITY_SEEN, lostMsg: ENTITY_LOST }
-    );
-    // `seen` first: a script that never saw its entity at all would report one
-    // `lost` on its first frame, but say so in the assertion that names it.
-    expect(sightings.seen).toBeGreaterThanOrEqual(1);
-    expect(sightings.lost).toBe(0);
-    expect(sightings.engineMode).toBe('play');
+    const stateAfterBlip = await page.evaluate((prefix: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__EDITOR_STORE;
+      const logs: Array<{ message: string }> = store?.getState().scriptLogs ?? [];
+      const lines = logs.filter((entry) => entry.message.startsWith(prefix));
+      const last = lines.length > 0 ? lines[lines.length - 1].message : '';
+      const parsed = /frame=(\d+) seen=(\d+) lost=(\d+)/.exec(last);
+      return {
+        last,
+        frame: parsed ? Number(parsed[1]) : 0,
+        seen: parsed ? Number(parsed[2]) : -1,
+        lost: parsed ? Number(parsed[3]) : -1,
+        engineMode: store?.getState().engineMode as string,
+      };
+    }, ENTITY_STATE_PREFIX);
+    // The last line is one of the newest log entries, so the cap cannot have
+    // evicted it, and its counts cover the whole run. `seen` first: a script
+    // that never saw its entity at all would count one `lost` on its first
+    // frame, but say so in the assertion that names it. The raw line is in
+    // each message so a failure shows what the script actually reported.
+    expect(stateAfterBlip.frame, stateAfterBlip.last).toBeGreaterThan(stateBeforeBlip.frame);
+    expect(stateAfterBlip.seen, stateAfterBlip.last).toBeGreaterThanOrEqual(1);
+    expect(stateAfterBlip.lost, stateAfterBlip.last).toBe(0);
+    expect(stateAfterBlip.engineMode).toBe('play');
 
     // Step 4: stop — the engine restores the edit snapshot and PlayControls drops
     // the indicator span (back to edit mode). Editor stays live.

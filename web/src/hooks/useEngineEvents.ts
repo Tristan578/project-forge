@@ -152,12 +152,15 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       if (type === 'ENGINE_MODE_CHANGED') {
         playThrottle.reset();
         // The reconstituted PLAY_TICK_DELTA frame (#10375, gameEvents.ts) is
-        // valid only inside one continuous Play run. The engine clears its own
-        // delta cache on every frame it is not in Play (`emit_play_tick_system`),
-        // so the first frame after a fresh Play or a resume is a full one; drop
-        // the snapshot on every transition OUT of Play (edit or paused) so the
-        // two caches stay aligned. Otherwise an entity from the previous run
-        // would ride into the next until the engine happened to mention it.
+        // valid only inside one continuous Play run. The engine empties its
+        // own delta cache at two sites: `emit_play_tick_system` clears it on
+        // every frame it runs outside Play, and `apply_mode_change_requests`
+        // clears it in its Stop and Pause arms, on the transition itself, so a
+        // leave-and-return applied in one update still yields a full first
+        // frame (`core/play_tick_delta.rs`). Drop the snapshot on every
+        // transition OUT of Play (edit or paused) so the two caches stay
+        // aligned; otherwise an entity from the previous run would ride into
+        // the next until the engine happened to mention it again.
         if (payload.mode !== 'play') {
           resetPlayTickSnapshot();
         }
