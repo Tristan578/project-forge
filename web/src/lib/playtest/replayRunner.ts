@@ -546,6 +546,10 @@ export function startReplay(
         runtimePausedByRunner = true;
         if (cancelRequested) return false;
         if (!pauseRequested) {
+          // Past the final boundary from here on: a pause() landing in the
+          // resume await below would have nothing left to settle at, so it
+          // must already be refused.
+          if (final) pastFinalBoundary = true;
           await resumeRuntimeIfPaused();
           if (cancelRequested) return false;
           return proceed();

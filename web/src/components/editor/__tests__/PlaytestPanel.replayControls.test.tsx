@@ -23,8 +23,8 @@ import { act, cleanup, fireEvent, render, screen } from '@/test/utils/componentT
 import { PlaytestPanel } from '../PlaytestPanel';
 import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 import { publishPlayTick, resetPlayTickBus } from '@/lib/playtest/playTickBus';
-import { MAX_TRACE_TICKS } from '@/lib/playtest/inputTrace';
-import { getActiveReplaySession } from '@/lib/playtest/replayEntryPoints';
+import { INPUT_TRACE_VERSION, MAX_TRACE_TICKS } from '@/lib/playtest/inputTrace';
+import { getActiveReplaySession, startReplaySession } from '@/lib/playtest/replayEntryPoints';
 import { REPLAY_NFR_PENDING_DISPLAY_MS } from '../../../../e2e/constants';
 
 const state = vi.hoisted(() => ({
@@ -376,8 +376,10 @@ describe('runtime replay controls', () => {
     expect(screen.getByTestId('replay-announcer')).toHaveTextContent('Replaying tick 0 of 120');
     fireEvent.click(screen.getByRole('button', { name: 'Cancel replay' }));
     await screen.findByText(/Replay cancelled after 5 ticks/);
-    // Still present once the run is over, empty again.
-    expect(screen.getByTestId('replay-announcer').textContent).toBe('');
+    // Still present once the run is over, and the terminal state was
+    // announced (the panel keeps the terminal progress rather than clearing
+    // the announcer in the same render it arrives in).
+    expect(screen.getByTestId('replay-announcer')).toHaveTextContent('Replay cancelled after 5 ticks; input released');
   });
 });
 
@@ -457,7 +459,7 @@ describe('the bot run and the manual run share one replay guard (review-board MA
     expect(screen.getByTestId('bot-replay-progress')).toHaveTextContent('AI bot: Pinning the engine clock');
     expect(screen.getByTestId('bot-replay-announcer')).toHaveTextContent('Pinning the engine clock');
     const hint = screen.getByTestId('replay-busy-hint');
-    expect(hint).toHaveTextContent('A replay is running (ai). Wait for it to finish or press Stop.');
+    expect(hint).toHaveTextContent('A replay is running (the AI bot). Cancel it or press Stop.');
     expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeDisabled();
 
     let elapsed = 0;
@@ -470,6 +472,7 @@ describe('the bot run and the manual run share one replay guard (review-board MA
     expect(await screen.findByText(/AI bot runtime replay cancelled after 1 tick/)).toBeInTheDocument();
     expect(screen.queryByTestId('bot-replay-progress')).toBeNull();
     expect(screen.queryByTestId('replay-busy-hint')).toBeNull();
+    expect(screen.getByTestId('bot-replay-announcer')).toHaveTextContent('Replay cancelled after 1 ticks; input released');
     expect(engine.commands).toEqual(['pin_frame_rate', 'unpin_frame_rate']);
     expect(keyEvents).toEqual(['down KeyD', 'up KeyD']);
     expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeEnabled();
@@ -480,11 +483,45 @@ describe('the bot run and the manual run share one replay guard (review-board MA
     expect(screen.queryByTestId('bot-busy-hint')).toBeNull();
     recordHoldRightTrace();
     fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
-    expect(screen.getByTestId('bot-busy-hint')).toHaveTextContent('A replay is running (manual). Wait for it to finish or press Stop.');
+    expect(screen.getByTestId('bot-busy-hint')).toHaveTextContent('A replay is running (your recording). Cancel it or press Stop.');
     expect(screen.getByRole('button', { name: 'Run playtest with explorer strategy' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel replay' }));
     await screen.findByText(/Replay cancelled after 0 ticks/);
     expect(screen.queryByTestId('bot-busy-hint')).toBeNull();
+  });
+
+  it("a replay the assistant started says so in both sections, with nothing to cancel in the panel", async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    const trace = {
+      version: INPUT_TRACE_VERSION,
+      fixtureId: 'assistant',
+      actionNames: ['move_right'],
+      durationMs: 160,
+      frames: Array.from({ length: 10 }, (_, tick) => ({ tick, actions: { move_right: { pressed: true, axis: 1 } } })),
+    };
+    let session!: ReturnType<typeof startReplaySession>;
+    act(() => {
+      session = startReplaySession('ai', { trace, playerEntityId: 'player', collectibleEntityIds: ['coin'] });
+    });
+    expect(screen.getByTestId('replay-busy-hint')).toHaveTextContent(
+      'A replay is running (the assistant). Wait for it to finish or press Stop.',
+    );
+    expect(screen.getByTestId('bot-busy-hint')).toHaveTextContent(
+      'A replay is running (the assistant). Wait for it to finish or press Stop.',
+    );
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Record input' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Run playtest with explorer strategy' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Cancel/ })).toBeNull();
+
+    await act(async () => {
+      session.handle.cancel();
+      await session.handle.result;
+    });
+    expect(screen.queryByTestId('replay-busy-hint')).toBeNull();
+    expect(screen.queryByTestId('bot-busy-hint')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Replay recorded input' })).toBeEnabled();
   });
 
   it("the bot's engine run reports its verdict when it completes", async () => {

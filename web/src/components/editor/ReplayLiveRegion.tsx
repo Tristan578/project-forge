@@ -29,9 +29,25 @@ export function replayStatusText(progress: ReplayProgress): string {
       return `Paused at tick ${progress.tick} of ${progress.totalTicks}; input released`;
     case 'cancelling':
       return 'Cancelling and releasing input…';
+    case 'completed':
+      return 'Replay completed';
+    case 'cancelled':
+      return `Replay cancelled after ${progress.tick} ticks; input released`;
+    case 'failed':
+      return `Replay failed after ${progress.tick} ticks`;
     default:
       return progress.state;
   }
+}
+
+const TERMINAL_STATES: ReadonlySet<ReplayRunState> = new Set(['completed', 'cancelled', 'failed']);
+
+/**
+ * @param state A runner state.
+ * @returns Whether the run is over: nothing further will be announced for it.
+ */
+export function isTerminalReplayState(state: ReplayRunState): boolean {
+  return TERMINAL_STATES.has(state);
 }
 
 /**
@@ -49,7 +65,10 @@ export function replayStatusText(progress: ReplayProgress): string {
  * Render it PERSISTENTLY, with `progress: null` while no run is in flight:
  * several screen readers do not announce the initial content of a live
  * region that was only just inserted, so the region has to exist, empty,
- * before the first state it announces.
+ * before the first state it announces. The parent must NOT swap the terminal
+ * progress for null in the render it arrives in (React batches the two and
+ * nothing is announced); it keeps the terminal progress, this region says it
+ * once, and then empties itself so it is silent while idle.
  * @param props.progress The runner's latest progress snapshot, or null while idle.
  * @param props.testId Test id, so two announcers on one page can be told apart.
  * @returns A polite, visually hidden status region.
@@ -80,7 +99,12 @@ export function ReplayLiveRegion({
     if (state !== last.current.state || sinceLast >= REPLAY_ANNOUNCE_INTERVAL_MS) {
       last.current = { state, at: now };
       setAnnounced(text);
-      return undefined;
+      if (state === null || !isTerminalReplayState(state)) return undefined;
+      // A terminal state is said once; the region then empties. Re-renders
+      // with the same terminal progress leave this effect alone, so the
+      // clear is never cancelled by the parent merely re-rendering.
+      const clear = setTimeout(() => setAnnounced(''), REPLAY_ANNOUNCE_INTERVAL_MS);
+      return () => clearTimeout(clear);
     }
     // Held back: announce the latest position once the interval has elapsed
     // since the last announcement. Re-running this effect on every tick

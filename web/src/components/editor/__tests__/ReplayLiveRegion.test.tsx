@@ -121,6 +121,34 @@ describe('ReplayLiveRegion', () => {
     expect(screen.getByTestId('bot-replay-announcer')).toHaveAttribute('role', 'status');
   });
 
+  it('announces a terminal state once, then clears itself so it is empty while idle', () => {
+    // The panel keeps the terminal progress after a run (it must not clear
+    // the announcer in the same render the terminal state arrives in, or
+    // nothing is announced); the announcer says it once and then empties.
+    const view = render(<ReplayLiveRegion progress={progress({ tick: 7 })} />);
+    view.rerender(<ReplayLiveRegion progress={progress({ state: 'completed', tick: 120 })} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Replay completed');
+    act(() => {
+      vi.advanceTimersByTime(REPLAY_ANNOUNCE_INTERVAL_MS);
+    });
+    expect(screen.getByRole('status').textContent).toBe('');
+    // The same terminal progress kept around re-announces nothing…
+    view.rerender(<ReplayLiveRegion progress={progress({ state: 'completed', tick: 120 })} />);
+    expect(screen.getByRole('status').textContent).toBe('');
+    // …and the other two terminal states behave the same way.
+    view.rerender(<ReplayLiveRegion progress={progress({ state: 'cancelled', tick: 5 })} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Replay cancelled after 5 ticks; input released');
+    act(() => {
+      vi.advanceTimersByTime(REPLAY_ANNOUNCE_INTERVAL_MS);
+    });
+    expect(screen.getByRole('status').textContent).toBe('');
+    view.rerender(<ReplayLiveRegion progress={progress({ state: 'failed', tick: 9 })} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Replay failed after 9 ticks');
+    // A new run starting right after is announced as usual.
+    view.rerender(<ReplayLiveRegion progress={progress({ state: 'pinning', tick: 0 })} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Pinning the engine clock');
+  });
+
   it('replayStatusText names every state a creator can see', () => {
     expect(replayStatusText(progress({ state: 'pinning' }))).toBe('Pinning the engine clock…');
     expect(replayStatusText(progress({ state: 'running', tick: 3, pinned: false }))).toBe('Replaying tick 3 of 120');
@@ -128,6 +156,8 @@ describe('ReplayLiveRegion', () => {
     expect(replayStatusText(progress({ state: 'pausing', tick: 3 }))).toBe('Pausing at tick 3…');
     expect(replayStatusText(progress({ state: 'paused', tick: 4 }))).toBe('Paused at tick 4 of 120; input released');
     expect(replayStatusText(progress({ state: 'cancelling' }))).toBe('Cancelling and releasing input…');
-    expect(replayStatusText(progress({ state: 'completed' }))).toBe('completed');
+    expect(replayStatusText(progress({ state: 'completed', tick: 120 }))).toBe('Replay completed');
+    expect(replayStatusText(progress({ state: 'cancelled', tick: 5 }))).toBe('Replay cancelled after 5 ticks; input released');
+    expect(replayStatusText(progress({ state: 'failed', tick: 9 }))).toBe('Replay failed after 9 ticks');
   });
 });

@@ -34,7 +34,7 @@ import {
 } from '@/lib/playtest/replayEntryPoints';
 import { botSessionToInputTrace } from '@/lib/playtest/botTrace';
 import type { ReplayHandle, ReplayOutcome, ReplayProgress } from '@/lib/playtest/replayRunner';
-import { ReplayLiveRegion, replayStatusText } from './ReplayLiveRegion';
+import { ReplayLiveRegion, isTerminalReplayState, replayStatusText } from './ReplayLiveRegion';
 import type { ReplaySession } from '@/lib/playtest/replayInvocation';
 
 /**
@@ -47,11 +47,39 @@ function useActiveReplay(): ReplaySession | null {
   return useSyncExternalStore(subscribeActiveReplaySession, getActiveReplaySession, () => null);
 }
 
+/**
+ * Who owns the replay in flight, in the creator's words, and what they can
+ * do about it. The source label alone cannot tell the panel's own bot run
+ * from a replay the chat assistant started (both are `'ai'`), so the panel
+ * passes whether ITS bot run is the active one. The bot run and a manual run
+ * both have a Cancel in this panel; an assistant-started run does not.
+ * @param session The replay in flight.
+ * @param botRunning Whether the panel's own bot run is that replay.
+ * @returns The subject and the advice for the hint.
+ */
+function describeReplayOrigin(
+  session: ReplaySession,
+  botRunning: boolean,
+): { who: string; advice: string } {
+  if (session.source === 'manual') return { who: 'your recording', advice: 'Cancel it or press Stop.' };
+  if (botRunning) return { who: 'the AI bot', advice: 'Cancel it or press Stop.' };
+  return { who: 'the assistant', advice: 'Wait for it to finish or press Stop.' };
+}
+
 /** Why Record / Replay / Run Playtest are disabled while someone else's replay runs. */
-function ReplayBusyHint({ session, testId }: { session: ReplaySession; testId: string }) {
+function ReplayBusyHint({
+  session,
+  botRunning,
+  testId,
+}: {
+  session: ReplaySession;
+  botRunning: boolean;
+  testId: string;
+}) {
+  const { who, advice } = describeReplayOrigin(session, botRunning);
   return (
     <p data-testid={testId} className="text-xs text-zinc-400 mb-2">
-      A replay is running ({session.source}). Wait for it to finish or press Stop.
+      A replay is running ({who}). {advice}
     </p>
   );
 }
@@ -211,7 +239,7 @@ function MetricsTable({ report }: { report: PlaytestReport }) {
  * collected). This is deliberately kept separate from, and never conflated
  * with, the heuristic "AI Playtest" rating above.
  */
-function RuntimeReplaySection() {
+function RuntimeReplaySection({ botRunning }: { botRunning: boolean }) {
   const engineMode = useEditorStore((s) => s.engineMode);
   const primaryId = useEditorStore((s) => s.primaryId);
   const inputBindings = useEditorStore((s) => s.inputBindings);
@@ -352,7 +380,9 @@ function RuntimeReplaySection() {
     } finally {
       unsubscribe?.();
       handleRef.current = null;
-      setProgress(null);
+      // The terminal progress is kept: clearing it here lands in the same
+      // render as the terminal state and the announcer would say nothing.
+      // The next Replay click replaces it.
       setIsReplaying(false);
     }
   }, [primaryId, collectibleEntityIds]);
@@ -391,7 +421,9 @@ function RuntimeReplaySection() {
           ? `Replay will observe ${selectedEntityName || primaryId}.`
           : 'Select the player entity before replaying recorded input.'}
       </p>
-      {activeReplay && !isReplaying && <ReplayBusyHint session={activeReplay} testId="replay-busy-hint" />}
+      {activeReplay && !isReplaying && (
+        <ReplayBusyHint session={activeReplay} botRunning={botRunning} testId="replay-busy-hint" />
+      )}
       <div className="flex gap-2">
         <button
           onClick={toggleRecord}
@@ -453,8 +485,9 @@ function RuntimeReplaySection() {
         </div>
       )}
       {/* Persistent (empty while idle): a live region inserted mid-run would
-          not have its first content announced by several screen readers. */}
-      <ReplayLiveRegion progress={isReplaying ? progress : null} />
+          not have its first content announced by several screen readers. It
+          receives the terminal progress too, says it once, then empties. */}
+      <ReplayLiveRegion progress={progress} />
 
       {cancelledAfter !== null && (
         <div role="status" className="mt-2 px-2.5 py-1.5 bg-zinc-800 rounded text-xs text-zinc-400">
@@ -553,8 +586,13 @@ export function PlaytestPanel() {
   const [botOutcome, setBotOutcome] = useState<ReplayOutcome | null>(null);
   const [botRuntimeError, setBotRuntimeError] = useState<string | null>(null);
   const [botCancelledAfter, setBotCancelledAfter] = useState<number | null>(null);
-  /** The bot run's progress while it is in flight; what its progress line and announcer render. */
+  /**
+   * The bot run's progress: what its progress line and announcer render. The
+   * terminal progress is kept after the run (the announcer says it once), so
+   * "running" is the non-terminal case, not "non-null".
+   */
   const [botProgress, setBotProgress] = useState<ReplayProgress | null>(null);
+  const botRunning = botProgress !== null && !isTerminalReplayState(botProgress.state);
   const botHandleRef = useRef<ReplayHandle | null>(null);
   const activeReplay = useActiveReplay();
   const replayActive = activeReplay !== null;
@@ -595,7 +633,7 @@ export function PlaytestPanel() {
       } finally {
         unsubscribe();
         botHandleRef.current = null;
-        setBotProgress(null);
+        // The terminal progress stays (see `botRunning`); the next run replaces it.
       }
     },
     [primaryId, inputBindings, sceneName],
@@ -688,7 +726,9 @@ export function PlaytestPanel() {
         </div>
 
         {/* Action buttons */}
-        {activeReplay && !botProgress && <ReplayBusyHint session={activeReplay} testId="bot-busy-hint" />}
+        {activeReplay && !botRunning && (
+          <ReplayBusyHint session={activeReplay} botRunning={false} testId="bot-busy-hint" />
+        )}
         <div className="flex gap-2">
           <button
             onClick={runSingle}
@@ -713,10 +753,10 @@ export function PlaytestPanel() {
         </div>
 
         {/* Runtime replay (real engine) — separate from the heuristic bot above */}
-        <RuntimeReplaySection />
+        <RuntimeReplaySection botRunning={botRunning} />
 
         {/* The bot's plan run through the real engine — a runtime verdict, never a rating */}
-        {botProgress && (
+        {botProgress && botRunning && (
           <div
             data-testid="bot-replay-progress"
             className="flex items-center gap-2 px-2.5 py-1.5 bg-zinc-800 rounded text-xs"

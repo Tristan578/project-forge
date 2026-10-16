@@ -801,6 +801,58 @@ describe('startReplay — the last windows a control can land in (review-board r
     expect(engine.pressLog).toEqual([['KeyD'], ['KeyD']]);
   });
 
+  it('pause() issued while a withdrawn final-boundary pause is resuming the runtime is refused, not accepted and never settled', async () => {
+    const engine = makeFakeEngine({ manualFrames: true });
+    const pauseNow = engine.env.pauseRuntime!;
+    const resumeNow = engine.env.resumeRuntime!;
+    let releasePause: (() => void) | null = null;
+    let releaseResume: (() => void) | null = null;
+    engine.env.pauseRuntime = () =>
+      new Promise<void>((resolve) => {
+        releasePause = () => {
+          void pauseNow();
+          resolve();
+        };
+      });
+    engine.env.resumeRuntime = () =>
+      new Promise<void>((resolve) => {
+        releaseResume = () => {
+          void resumeNow();
+          resolve();
+        };
+      });
+    const handle = startReplay(moveRightTrace(4), engine.env);
+    const states: ReplayRunState[] = [];
+    handle.subscribe((p) => states.push(p.state));
+    await vi.waitFor(() => expect(engine.log).toContain('pin 60'));
+    await engine.step(); // warm-up
+    for (let i = 0; i < 3; i += 1) await engine.step();
+    expect(handle.getProgress().tick).toBe(3);
+    expect(handle.pause()).toBe(true);
+    await engine.step(); // the last tick's frame: this pause settles at the FINAL boundary
+    await vi.waitFor(() => expect(releasePause).not.toBeNull());
+
+    // Withdrawn while the runtime pause is in flight…
+    expect(handle.resume()).toBe(true);
+    await nextMacrotask();
+    releasePause!();
+    // …so the withdrawn path resumes the runtime. There is no boundary left
+    // once it does: a pause() landing in THIS await must be refused.
+    await vi.waitFor(() => expect(releaseResume).not.toBeNull());
+    const statesBefore = states.length;
+    expect(handle.pause(), 'no boundary is left to settle a pause at').toBe(false);
+    await nextMacrotask();
+    releaseResume!();
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+
+    await engine.step();
+    await engine.step(); // the two settle frames
+    const result = await settlesWithin(handle);
+    expect(result.status).toBe('completed');
+    expect(states.slice(statesBefore)).not.toContain('pausing');
+    expect(handle.getProgress().state).toBe('completed');
+  });
+
   it('a listener cancelling from inside "paused" never lets a later listener see "paused" after "cancelling"', async () => {
     const engine = makeFakeEngine();
     const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
