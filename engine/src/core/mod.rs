@@ -6,6 +6,11 @@
 pub mod animation;
 pub mod animation_clip;
 pub mod asset_import_guard;
+/// Decoder pins for the texture allowlist (#10397): every allowlisted format
+/// decodes on this build, through both `Image::from_buffer` dispatches the
+/// editor uses. Carries its own `#![cfg(test)]`; it needs `bevy::image`, which
+/// is why it is not inside the probe-runnable `asset_import_guard.rs`.
+mod asset_import_guard_decoder_tests;
 pub mod asset_manager;
 pub mod audio;
 pub mod blend_tree2d;
