@@ -16,9 +16,12 @@
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
     },
-    "github": {
+    "github-local": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"]
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
     },
     "sentry": {
       "command": "npx",
