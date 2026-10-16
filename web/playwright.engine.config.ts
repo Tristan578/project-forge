@@ -90,7 +90,7 @@ export default defineConfig({
   // account journeys are also refused by describeJourney() until #10266 adds
   // trace/video redaction.)
   //
-  // e2e/engine/referenceGames.spec.ts (#10159) is the fourth: it builds each
+  // e2e/engine/referenceGames.spec.ts (#10159) is the fifth: it builds each
   // versioned reference game through real engine commands and checks the
   // engine's own export and scene graph against the fixture's expected-state
   // record before pressing Play. It runs under the default cap.
