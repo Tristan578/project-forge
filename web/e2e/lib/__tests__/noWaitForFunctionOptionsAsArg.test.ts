@@ -82,9 +82,16 @@ ruleTester.run('no-wait-for-function-options-as-arg', rule as unknown as Rule.Ru
       errors,
     },
     {
-      // `polling` is the other WaitForFunctionOptions key.
+      // `polling` is another PageWaitForFunctionOptions key.
       code: 'page.waitForFunction(() => ready(), { polling: 100 });',
       output: 'page.waitForFunction(() => ready(), undefined, { polling: 100 });',
+      errors,
+    },
+    {
+      // `signal` is the third: an AbortSignal in the arg slot is silently
+      // discarded, so the wait cannot be aborted and still uses actionTimeout.
+      code: 'page.waitForFunction(() => ready(), { signal: controller.signal });',
+      output: 'page.waitForFunction(() => ready(), undefined, { signal: controller.signal });',
       errors,
     },
     {
