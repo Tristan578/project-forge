@@ -7,7 +7,7 @@ export { handleMaterialEvent } from './materialEvents';
 export { handlePhysicsEvent } from './physicsEvents';
 export { handleAudioEvent } from './audioEvents';
 export { handleAnimationEvent } from './animationEvents';
-export { handleGameEvent } from './gameEvents';
+export { handleGameEvent, resetPlayTickSnapshot } from './gameEvents';
 export { handleSpriteEvent } from './spriteEvents';
 export { handleParticleEvent } from './particleEvents';
 export { handlePerformanceEvent } from './performanceEvents';
