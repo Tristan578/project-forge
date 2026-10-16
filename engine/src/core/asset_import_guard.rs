@@ -93,6 +93,11 @@ pub enum TextureRefusal {
     MalformedDataUrl,
     /// A `data:` URL whose header does not say `;base64`.
     NotBase64,
+    /// No usable type at all: an empty declaration (`data:;base64,`) or the
+    /// generic `application/octet-stream` a browser gives a file it cannot
+    /// classify. Named separately because "unsupported texture format ''"
+    /// reads as a bug rather than as a file nobody could identify.
+    UnrecognisedType,
     /// A declared type outside the allowlist. Carries a bounded, printable
     /// copy of the declaration so the message can name it safely.
     UnsupportedFormat(String),
@@ -108,6 +113,11 @@ impl fmt::Display for TextureRefusal {
             TextureRefusal::NotBase64 => {
                 write!(f, "data URL must be base64-encoded (data:<type>;base64,...)")
             }
+            TextureRefusal::UnrecognisedType => write!(
+                f,
+                "unrecognised file type; accepted formats are {}",
+                ALLOWED_TEXTURE_MIME_TYPES.join(", ")
+            ),
             TextureRefusal::UnsupportedFormat(declared) => write!(
                 f,
                 "unsupported texture format '{}'; accepted formats are {}",
@@ -142,6 +152,9 @@ pub fn check_texture_payload(data: &str) -> Result<TextureSource<'_>, TextureRef
     let mut parts = header.split(';');
     let declared = parts.next().unwrap_or("").trim();
     let lowered = declared.to_ascii_lowercase();
+    if lowered.is_empty() || lowered == "application/octet-stream" {
+        return Err(TextureRefusal::UnrecognisedType);
+    }
     let Some((_, mime_type)) = ACCEPTED_DECLARATIONS.iter().find(|(d, _)| *d == lowered) else {
         return Err(TextureRefusal::UnsupportedFormat(bounded_echo(declared)));
     };
@@ -247,16 +260,26 @@ pub fn inspect_gltf_base64(data: &str) -> Result<(), GltfRefusal> {
     if preamble.len() < GLB_PREAMBLE_LEN {
         return Err(GltfRefusal::Malformed("GLB header is truncated"));
     }
-    let chunk_len =
-        u32::from_le_bytes([preamble[12], preamble[13], preamble[14], preamble[15]]) as usize;
-    let needed = GLB_PREAMBLE_LEN
-        .checked_add(chunk_len)
-        .ok_or(GltfRefusal::Malformed("GLB JSON chunk is longer than the file says it is"))?;
-    // Every 4 characters decode to 3 bytes, so this is the shortest prefix
-    // that holds the whole JSON chunk; the BIN chunk after it is never decoded.
-    let needed_chars = needed.div_ceil(3) * 4;
-    let bytes = engine.decode(prefix(body, needed_chars)).map_err(|_| UNDECODABLE)?;
+    let chunk_len = u32::from_le_bytes([preamble[12], preamble[13], preamble[14], preamble[15]]);
+    // The shortest prefix that holds the whole JSON chunk; the BIN chunk
+    // after it is never decoded. A claim longer than the body just means
+    // the whole body, and the byte-level checks then refuse it as truncated.
+    let needed_chars = glb_json_prefix_chars(chunk_len);
+    let take = if needed_chars >= body.len() as u64 { body.len() } else { needed_chars as usize };
+    let bytes = engine.decode(prefix(body, take)).map_err(|_| UNDECODABLE)?;
     inspect_gltf_bytes(&bytes)
+}
+
+/// How many base64 characters hold a GLB's preamble plus a JSON chunk of
+/// `chunk_len` bytes: every 4 characters decode to 3 bytes.
+///
+/// Computed in u64 on purpose. `chunk_len` is whatever the file claims, and
+/// for anything above ~1 GiB the answer exceeds u32::MAX, so on wasm32 the
+/// usize arithmetic this replaced overflowed - a panic in a debug build, a
+/// wrap in release - before the length could be compared with the body.
+fn glb_json_prefix_chars(chunk_len: u32) -> u64 {
+    let needed = GLB_PREAMBLE_LEN as u64 + u64::from(chunk_len);
+    needed.div_ceil(3) * 4
 }
 
 /// Inspect decoded glTF bytes: a GLB (preamble + JSON chunk, possibly
@@ -280,7 +303,11 @@ pub fn inspect_gltf_bytes(bytes: &[u8]) -> Result<(), GltfRefusal> {
     if chunk_len > declared_total.saturating_sub(GLB_PREAMBLE_LEN) {
         return Err(GltfRefusal::Malformed("GLB JSON chunk is longer than the file says it is"));
     }
-    let end = GLB_PREAMBLE_LEN + chunk_len;
+    // Cannot overflow after the check above (chunk_len <= u32::MAX - 20), but
+    // stated rather than relied on.
+    let end = GLB_PREAMBLE_LEN
+        .checked_add(chunk_len)
+        .ok_or(GltfRefusal::Malformed("GLB JSON chunk is longer than the file says it is"))?;
     if bytes.len() < end {
         return Err(GltfRefusal::Malformed("GLB JSON chunk is truncated"));
     }
@@ -497,13 +524,32 @@ mod tests {
 
     #[test]
     fn dds_and_webp_are_refused() {
-        for declared in ["image/x-dds", "image/vnd-ms.dds", "image/webp", "application/octet-stream"] {
+        for declared in ["image/x-dds", "image/vnd-ms.dds", "image/webp", "text/plain"] {
             let data = format!("data:{declared};base64,AAAA");
             assert_eq!(
                 check_texture_payload(&data),
                 Err(TextureRefusal::UnsupportedFormat(declared.to_string())),
             );
         }
+    }
+
+    #[test]
+    fn an_empty_or_generic_declared_type_is_refused_as_unrecognised() {
+        // A browser gives a file it cannot classify no type at all, which a
+        // data URL spells `data:;base64,` or `data:application/octet-stream;base64,`.
+        // "unsupported texture format ''" would read as a bug; this names the
+        // situation and the accepted formats.
+        for data in [
+            "data:;base64,AAAA",
+            "data:application/octet-stream;base64,AAAA",
+            "DATA:Application/Octet-Stream;charset=binary;base64,AAAA",
+            "data: ;base64,AAAA",
+        ] {
+            assert_eq!(check_texture_payload(data), Err(TextureRefusal::UnrecognisedType), "{data}");
+        }
+        let message = TextureRefusal::UnrecognisedType.to_string();
+        assert!(message.starts_with("unrecognised file type"), "{message}");
+        assert!(message.contains("image/png, image/jpeg"), "{message}");
     }
 
     #[test]
@@ -742,5 +788,87 @@ mod tests {
         assert_eq!(percent_decode("a%2"), "a%2");
         assert_eq!(percent_decode("a%zz"), "a%zz");
         assert_eq!(percent_decode("%FF"), "\u{FFFD}");
+    }
+
+    // --- prefix arithmetic that cannot overflow on wasm32 ----------------
+
+    /// A GLB preamble claiming `chunk_len` bytes of JSON in a file of
+    /// `declared_total` bytes, followed by `payload` - far fewer bytes.
+    fn glb_preamble(declared_total: u32, chunk_len: u32, payload: &[u8]) -> Vec<u8> {
+        let mut glb = Vec::new();
+        glb.extend_from_slice(GLB_MAGIC);
+        glb.extend_from_slice(&2u32.to_le_bytes());
+        glb.extend_from_slice(&declared_total.to_le_bytes());
+        glb.extend_from_slice(&chunk_len.to_le_bytes());
+        glb.extend_from_slice(GLB_CHUNK_JSON);
+        glb.extend_from_slice(payload);
+        glb
+    }
+
+    #[test]
+    fn a_chunk_length_near_u32_max_fails_closed_through_the_base64_path() {
+        // The number of base64 characters that hold a chunk is computed in
+        // u64: for chunk lengths above ~1 GiB it exceeds u32::MAX, and the
+        // usize arithmetic this replaced overflowed on wasm32 (a debug build
+        // panics, a release build wraps). A 64-bit host cannot show that
+        // overflow, so the helper's value is pinned as well as the outcome.
+        assert_eq!(glb_json_prefix_chars(u32::MAX - 8), 5_726_623_076);
+        assert!(glb_json_prefix_chars(u32::MAX - 8) > u64::from(u32::MAX));
+        assert_eq!(glb_json_prefix_chars(0), 28);
+
+        // Claims the whole file is JSON: the preamble arithmetic runs, the
+        // short payload is what gets decoded, and it is refused as truncated.
+        let truncated = B64.encode(glb_preamble(u32::MAX, u32::MAX - 20, b"{}  "));
+        assert_eq!(
+            inspect_gltf_base64(&truncated),
+            Err(GltfRefusal::Malformed("GLB JSON chunk is truncated"))
+        );
+        // Claims more JSON than the file says it holds.
+        let longer = B64.encode(glb_preamble(u32::MAX, u32::MAX - 8, b"{}  "));
+        assert_eq!(
+            inspect_gltf_base64(&longer),
+            Err(GltfRefusal::Malformed("GLB JSON chunk is longer than the file says it is"))
+        );
+        assert_eq!(
+            inspect_gltf_base64(&B64.encode(glb_preamble(u32::MAX, u32::MAX, b"{}  "))),
+            Err(GltfRefusal::Malformed("GLB JSON chunk is longer than the file says it is"))
+        );
+    }
+
+    // --- the bridge drains re-run both gates ------------------------------
+
+    /// `bridge/` is wasm32-only, so the drains' re-checks never run under
+    /// `cargo test`; this text is the only thing holding them in place.
+    const SCENE_IO: &str = include_str!("../bridge/scene_io.rs");
+
+    /// Executable lines of `scene_io.rs` that begin with `statement`:
+    /// anchored to the trimmed line start and comment-excluded, so a
+    /// commented-out call or a doc comment quoting it does not count.
+    fn executable_lines_starting_with(statement: &str) -> usize {
+        SCENE_IO
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| !line.starts_with("//") && line.starts_with(statement))
+            .count()
+    }
+
+    #[test]
+    fn both_bridge_drains_re_run_their_gate_exactly_once() {
+        assert_eq!(
+            executable_lines_starting_with(
+                "if let Err(refusal) = asset_import_guard::inspect_gltf_bytes(&bytes)"
+            ),
+            1,
+            "apply_gltf_import must re-inspect the decoded document"
+        );
+        assert_eq!(
+            executable_lines_starting_with(
+                "let source = match asset_import_guard::check_texture_payload(&request.data_base64)"
+            ),
+            1,
+            "apply_texture_load must take its MIME type from the allowlist"
+        );
+        // The scan reads the real file, not an empty string.
+        assert!(SCENE_IO.contains("pub(super) fn apply_texture_load("));
     }
 }
