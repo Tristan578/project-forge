@@ -411,6 +411,32 @@ fn percent_decode(uri: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Hand-built documents for this module's tests and for the command-handler
+/// tests in `core/commands/scene.rs`.
+#[cfg(test)]
+pub(crate) mod fixtures {
+    use super::{GLB_CHUNK_JSON, GLB_MAGIC, GLB_PREAMBLE_LEN};
+
+    /// A minimal GLB: 12-byte header, then one JSON chunk (space-padded to a
+    /// multiple of four, as the spec requires), then `extra` appended verbatim.
+    pub(crate) fn glb(json: &str, extra: &[u8]) -> Vec<u8> {
+        let mut chunk = json.as_bytes().to_vec();
+        while chunk.len() % 4 != 0 {
+            chunk.push(b' ');
+        }
+        let total = (GLB_PREAMBLE_LEN + chunk.len() + extra.len()) as u32;
+        let mut glb = Vec::new();
+        glb.extend_from_slice(GLB_MAGIC);
+        glb.extend_from_slice(&2u32.to_le_bytes());
+        glb.extend_from_slice(&total.to_le_bytes());
+        glb.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
+        glb.extend_from_slice(GLB_CHUNK_JSON);
+        glb.extend_from_slice(&chunk);
+        glb.extend_from_slice(extra);
+        glb
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -529,32 +555,15 @@ mod tests {
 
     // --- import_gltf -------------------------------------------------------
 
-    /// A minimal GLB: 12-byte header, then one JSON chunk (space-padded to a
-    /// multiple of four, as the spec requires), then `extra` appended verbatim.
-    fn build_glb(json: &str, extra: &[u8]) -> Vec<u8> {
-        let mut chunk = json.as_bytes().to_vec();
-        while chunk.len() % 4 != 0 {
-            chunk.push(b' ');
-        }
-        let total = (GLB_PREAMBLE_LEN + chunk.len() + extra.len()) as u32;
-        let mut glb = Vec::new();
-        glb.extend_from_slice(GLB_MAGIC);
-        glb.extend_from_slice(&2u32.to_le_bytes());
-        glb.extend_from_slice(&total.to_le_bytes());
-        glb.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
-        glb.extend_from_slice(GLB_CHUNK_JSON);
-        glb.extend_from_slice(&chunk);
-        glb.extend_from_slice(extra);
-        glb
-    }
+    use super::fixtures::glb;
 
     const PNG_IMAGE: &str =
         r#"{"asset":{"version":"2.0"},"images":[{"mimeType":"image/png","bufferView":0}]}"#;
 
     #[test]
     fn a_glb_with_a_png_image_is_accepted() {
-        assert_eq!(inspect_gltf_bytes(&build_glb(PNG_IMAGE, b"BIN!")), Ok(()));
-        let b64 = B64.encode(build_glb(PNG_IMAGE, b""));
+        assert_eq!(inspect_gltf_bytes(&glb(PNG_IMAGE, b"BIN!")), Ok(()));
+        let b64 = B64.encode(glb(PNG_IMAGE, b""));
         assert_eq!(inspect_gltf_base64(&b64), Ok(()));
         assert_eq!(inspect_gltf_base64(&format!("data:model/gltf-binary;base64,{b64}")), Ok(()));
     }
@@ -563,10 +572,10 @@ mod tests {
     fn a_glb_declaring_a_ktx2_image_is_refused_with_its_index() {
         let json = r#"{"asset":{"version":"2.0"},"images":[{"mimeType":"image/png","bufferView":0},{"mimeType":"image/ktx2","bufferView":1}]}"#;
         assert_eq!(
-            inspect_gltf_bytes(&build_glb(json, b"")),
+            inspect_gltf_bytes(&glb(json, b"")),
             Err(GltfRefusal::Ktx2Image { index: 1, declared_by: "mimeType" })
         );
-        let b64 = B64.encode(build_glb(json, b""));
+        let b64 = B64.encode(glb(json, b""));
         assert!(inspect_gltf_base64(&b64).is_err());
     }
 
@@ -628,27 +637,27 @@ mod tests {
             Err(GltfRefusal::Malformed("GLB header is truncated"))
         );
         // Version 1.
-        let mut glb = build_glb(PNG_IMAGE, b"");
-        glb[4] = 1;
-        assert_eq!(inspect_gltf_bytes(&glb), Err(GltfRefusal::Malformed("GLB version is not 2")));
+        let mut doc = glb(PNG_IMAGE, b"");
+        doc[4] = 1;
+        assert_eq!(inspect_gltf_bytes(&doc), Err(GltfRefusal::Malformed("GLB version is not 2")));
         // First chunk is BIN, not JSON.
-        let mut glb = build_glb(PNG_IMAGE, b"");
-        glb[16..20].copy_from_slice(b"BIN\0");
+        let mut doc = glb(PNG_IMAGE, b"");
+        doc[16..20].copy_from_slice(b"BIN\0");
         assert_eq!(
-            inspect_gltf_bytes(&glb),
+            inspect_gltf_bytes(&doc),
             Err(GltfRefusal::Malformed("first GLB chunk is not JSON"))
         );
         // Chunk longer than the file claims to be.
-        let mut glb = build_glb(PNG_IMAGE, b"");
-        glb[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+        let mut doc = glb(PNG_IMAGE, b"");
+        doc[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
         assert_eq!(
-            inspect_gltf_bytes(&glb),
+            inspect_gltf_bytes(&doc),
             Err(GltfRefusal::Malformed("GLB JSON chunk is longer than the file says it is"))
         );
         // Chunk cut short.
-        let glb = build_glb(PNG_IMAGE, b"");
+        let doc = glb(PNG_IMAGE, b"");
         assert_eq!(
-            inspect_gltf_bytes(&glb[..glb.len() - 8]),
+            inspect_gltf_bytes(&doc[..doc.len() - 8]),
             Err(GltfRefusal::Malformed("GLB JSON chunk is truncated"))
         );
     }
@@ -689,8 +698,8 @@ mod tests {
         // The base64 of a GLB with a large BIN chunk, with garbage appended
         // where the BIN chunk's base64 would be: a full decode fails, the
         // prefix decode never reaches it.
-        let glb = build_glb(PNG_IMAGE, &[0u8; 4096]);
-        let mut b64 = B64.encode(&glb[..GLB_PREAMBLE_LEN + 88]);
+        let doc = glb(PNG_IMAGE, &[0u8; 4096]);
+        let mut b64 = B64.encode(&doc[..GLB_PREAMBLE_LEN + 88]);
         assert_eq!(b64.len() % 4, 0, "fixture must end on a base64 group");
         b64.push_str("!!!!");
         assert!(B64.decode(&b64).is_err(), "the fixture's tail must not decode");
@@ -698,7 +707,7 @@ mod tests {
 
         // The same header claiming a JSON chunk the payload does not contain
         // is a truncation, not an acceptance.
-        let mut short = build_glb(PNG_IMAGE, b"");
+        let mut short = glb(PNG_IMAGE, b"");
         short[12..16].copy_from_slice(&(88u32 + 400).to_le_bytes());
         short[8..12].copy_from_slice(&(GLB_PREAMBLE_LEN as u32 + 88 + 400).to_le_bytes());
         assert_eq!(

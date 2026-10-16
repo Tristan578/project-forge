@@ -2,6 +2,7 @@
 
 use bevy::math::Vec3;
 use serde::Deserialize;
+use crate::core::asset_import_guard::{self, MAX_GLTF_BASE64_LEN, MAX_TEXTURE_BASE64_LEN};
 use crate::core::pending::scene::{
     queue_scene_export_from_bridge, queue_scene_load_from_bridge, queue_new_scene_from_bridge,
     queue_gltf_import_from_bridge, queue_texture_load_from_bridge, queue_place_asset_from_bridge,
@@ -171,6 +172,18 @@ fn handle_import_gltf(payload: serde_json::Value) -> super::CommandResult {
     let data: ImportGltfPayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid import_gltf payload: {}", e))?;
 
+    // Refused here, before anything is queued, so the caller gets the reason;
+    // the drain repeats both checks on the bytes it decodes (#10396).
+    if data.data_base64.len() > MAX_GLTF_BASE64_LEN {
+        return Err(format!(
+            "import_gltf refused: payload is {} bytes of base64, over the 50 MB limit",
+            data.data_base64.len()
+        ));
+    }
+    if let Err(refusal) = asset_import_guard::inspect_gltf_base64(&data.data_base64) {
+        return Err(format!("import_gltf refused: {refusal}"));
+    }
+
     let request = GltfImportRequest {
         asset_id: data.id,
         data_base64: data.data_base64,
@@ -209,6 +222,18 @@ struct LoadTexturePayload {
 fn handle_load_texture(payload: serde_json::Value) -> super::CommandResult {
     let data: LoadTexturePayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid load_texture payload: {}", e))?;
+
+    // Refused here, before anything is queued, so the caller gets the reason
+    // and the accepted formats; the drain repeats the check (#10396).
+    if data.data_base64.len() > MAX_TEXTURE_BASE64_LEN {
+        return Err(format!(
+            "load_texture refused: payload is {} bytes of base64, over the 50 MB limit",
+            data.data_base64.len()
+        ));
+    }
+    if let Err(refusal) = asset_import_guard::check_texture_payload(&data.data_base64) {
+        return Err(format!("load_texture refused: {refusal}"));
+    }
 
     let request = TextureLoadRequest {
         data_base64: data.data_base64,
@@ -580,7 +605,7 @@ mod tests {
     #[test]
     fn import_gltf_accepts_valid_payload() {
         let result = run("import_gltf", json!({
-            "dataBase64": "SGVsbG8=",
+            "dataBase64": GLTF_JSON_BASE64,
             "name": "my_model.glb"
         }));
         assert!(result.is_err());
@@ -590,7 +615,7 @@ mod tests {
     #[test]
     fn import_gltf_rejects_missing_name() {
         let result = run("import_gltf", json!({
-            "dataBase64": "SGVsbG8="
+            "dataBase64": GLTF_JSON_BASE64
         }));
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -663,6 +688,185 @@ mod tests {
         assert!(err.contains("dataBase64"), "serde must name the field the web sends: {err}");
     }
 
+    // === load_texture / import_gltf format gates (#10396) ===
+
+    /// `{"asset":{"version":"2.0"}}`: the smallest glTF JSON the gate reads.
+    const GLTF_JSON_BASE64: &str = "eyJhc3NldCI6eyJ2ZXJzaW9uIjoiMi4wIn19";
+
+    fn texture_payload(data_base64: &str) -> serde_json::Value {
+        json!({
+            "dataBase64": data_base64,
+            "name": "stone.png",
+            "entityId": "entity-1",
+            "slot": "base_color"
+        })
+    }
+
+    fn glb_base64(json: &str) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .encode(crate::core::asset_import_guard::fixtures::glb(json, b""))
+    }
+
+    /// Like `run_with_queue`, for a payload the handler is expected to refuse:
+    /// returns the answer alongside the queue so a test can assert both the
+    /// reason and that nothing was queued.
+    fn run_with_queue_result(
+        command: &str,
+        payload: serde_json::Value,
+    ) -> (Result<(), String>, crate::core::pending::PendingCommands) {
+        let mut pending = crate::core::pending::PendingCommands::default();
+        crate::core::pending::register_pending_commands(&mut pending as *mut _);
+        let _guard = PendingGuard;
+        let result = dispatch(command, &payload)
+            .expect("scene dispatch returned None for known command");
+        (result, pending)
+    }
+
+    #[test]
+    fn load_texture_refuses_ktx2_before_queueing() {
+        let (result, pending) = run_with_queue_result(
+            "load_texture",
+            texture_payload("data:image/ktx2;base64,q0tUWCAyMLsNChoK"),
+        );
+        let err = result.unwrap_err();
+        assert!(err.starts_with("load_texture refused: "), "{err}");
+        assert!(err.contains("image/ktx2"), "{err}");
+        assert!(err.contains("image/png") && err.contains("image/jpeg"), "must name the accepted formats: {err}");
+        assert!(pending.texture_load_requests.is_empty(), "a refused texture must not be queued");
+    }
+
+    #[test]
+    fn load_texture_refuses_dds_and_webp_by_name() {
+        for declared in ["image/x-dds", "image/vnd-ms.dds", "image/webp"] {
+            let (result, pending) = run_with_queue_result(
+                "load_texture",
+                texture_payload(&format!("data:{declared};base64,AAAA")),
+            );
+            let err = result.unwrap_err();
+            assert!(err.contains(declared), "{err}");
+            assert!(err.contains("image/png, image/jpeg"), "{err}");
+            assert!(pending.texture_load_requests.is_empty());
+        }
+    }
+
+    #[test]
+    fn load_texture_accepts_png_and_jpeg_in_any_case_with_parameters() {
+        for data in [
+            "DATA:Image/PNG;charset=utf-8;BASE64,iVBORw0KGgo=",
+            "data:image/jpeg;base64,/9j/4AAQ",
+            "data:image/jpg;base64,/9j/4AAQ",
+        ] {
+            let pending = run_with_queue("load_texture", texture_payload(data));
+            assert_eq!(pending.texture_load_requests.len(), 1, "{data}");
+            assert_eq!(pending.texture_load_requests[0].data_base64, data);
+        }
+    }
+
+    #[test]
+    fn load_texture_accepts_a_raw_base64_body() {
+        // No header means PNG, as before the gate; a fixed PNG dispatch can
+        // never reach the KTX2 decoder.
+        let pending = run_with_queue("load_texture", texture_payload("iVBORw0KGgo="));
+        assert_eq!(pending.texture_load_requests.len(), 1);
+    }
+
+    #[test]
+    fn load_texture_refuses_an_empty_body() {
+        let (result, pending) = run_with_queue_result("load_texture", texture_payload(""));
+        assert!(result.unwrap_err().contains("texture data is empty"));
+        assert!(pending.texture_load_requests.is_empty());
+    }
+
+    #[test]
+    fn load_texture_refuses_a_payload_over_the_size_cap() {
+        let body = "A".repeat(MAX_TEXTURE_BASE64_LEN + 1);
+        let (result, pending) = run_with_queue_result("load_texture", texture_payload(&body));
+        let err = result.unwrap_err();
+        assert!(err.contains("over the 50 MB limit"), "{err}");
+        assert!(pending.texture_load_requests.is_empty());
+    }
+
+    #[test]
+    fn import_gltf_refuses_a_glb_with_a_ktx2_image_before_queueing() {
+        let data = glb_base64(
+            r#"{"asset":{"version":"2.0"},"images":[{"mimeType":"image/ktx2","bufferView":0}]}"#,
+        );
+        let (result, pending) = run_with_queue_result("import_gltf", json!({
+            "dataBase64": data,
+            "name": "crafted.glb"
+        }));
+        let err = result.unwrap_err();
+        assert!(err.starts_with("import_gltf refused: "), "{err}");
+        assert!(err.contains("image #0") && err.contains("KTX2"), "{err}");
+        assert!(err.contains("PNG or JPEG"), "must say what to do instead: {err}");
+        assert!(pending.gltf_import_requests.is_empty(), "a refused model must not be queued");
+    }
+
+    #[test]
+    fn import_gltf_accepts_a_glb_with_a_png_image() {
+        let data = glb_base64(
+            r#"{"asset":{"version":"2.0"},"images":[{"mimeType":"image/png","bufferView":0}]}"#,
+        );
+        let pending = run_with_queue("import_gltf", json!({
+            "dataBase64": format!("data:model/gltf-binary;base64,{data}"),
+            "name": "textured.glb"
+        }));
+        assert_eq!(pending.gltf_import_requests.len(), 1);
+        assert_eq!(pending.gltf_import_requests[0].name, "textured.glb");
+    }
+
+    #[test]
+    fn import_gltf_refuses_a_malformed_glb_header() {
+        use base64::Engine as _;
+        // The magic and a version, then nothing: no total length, no chunk.
+        let data = base64::engine::general_purpose::STANDARD.encode(b"glTF\x02\x00\x00\x00");
+        let (result, pending) = run_with_queue_result("import_gltf", json!({
+            "dataBase64": data,
+            "name": "truncated.glb"
+        }));
+        let err = result.unwrap_err();
+        assert!(err.contains("not a readable glTF/GLB file"), "{err}");
+        assert!(err.contains("GLB header is truncated"), "{err}");
+        assert!(pending.gltf_import_requests.is_empty());
+    }
+
+    #[test]
+    fn import_gltf_refuses_basis_universal_textures() {
+        let data = glb_base64(r#"{"asset":{"version":"2.0"},"extensionsRequired":["KHR_texture_basisu"]}"#);
+        let (result, pending) = run_with_queue_result("import_gltf", json!({
+            "dataBase64": data,
+            "name": "basisu.glb"
+        }));
+        assert!(result.unwrap_err().contains("KHR_texture_basisu"));
+        assert!(pending.gltf_import_requests.is_empty());
+    }
+
+    #[test]
+    fn import_gltf_refuses_a_json_document_with_a_ktx2_uri() {
+        use base64::Engine as _;
+        let data = base64::engine::general_purpose::STANDARD
+            .encode(r#"{"asset":{"version":"2.0"},"images":[{"uri":"textures/albedo.ktx2"}]}"#);
+        let (result, pending) = run_with_queue_result("import_gltf", json!({
+            "dataBase64": data,
+            "name": "model.gltf"
+        }));
+        assert!(result.unwrap_err().contains("file extension"));
+        assert!(pending.gltf_import_requests.is_empty());
+    }
+
+    #[test]
+    fn import_gltf_refuses_a_payload_over_the_size_cap() {
+        let body = "A".repeat(MAX_GLTF_BASE64_LEN + 1);
+        let (result, pending) = run_with_queue_result("import_gltf", json!({
+            "dataBase64": body,
+            "name": "huge.glb"
+        }));
+        let err = result.unwrap_err();
+        assert!(err.contains("over the 50 MB limit"), "{err}");
+        assert!(pending.gltf_import_requests.is_empty());
+    }
+
     /// Initialize a real `PendingCommands`, register it for bridge access, run
     /// `command`, and return the populated queue so a test can inspect exactly
     /// what was enqueued. Unlike `run` (which deliberately leaves the queue
@@ -712,7 +916,7 @@ mod tests {
         // Pre-fix code dropped this field on the floor, so this assertion FAILS
         // pre-fix (target_entity_id would be None) and passes post-fix.
         let pending = run_with_queue("import_gltf", json!({
-            "dataBase64": "SGVsbG8=",
+            "dataBase64": GLTF_JSON_BASE64,
             "name": "my_model.glb",
             "targetEntityId": "entity-42"
         }));
@@ -730,14 +934,14 @@ mod tests {
         );
         // Sanity-check the rest of the payload survived too.
         assert_eq!(request.name, "my_model.glb");
-        assert_eq!(request.data_base64, "SGVsbG8=");
+        assert_eq!(request.data_base64, GLTF_JSON_BASE64);
     }
 
     #[test]
     fn data_base64_imports_carry_caller_supplied_asset_ids() {
         let gltf = run_with_queue("import_gltf", json!({
             "id": "4ec30cf9-d98f-4e67-86d9-470a6cdbbe09",
-            "dataBase64": "SGVsbG8=",
+            "dataBase64": GLTF_JSON_BASE64,
             "name": "my_model.glb"
         }));
         assert_eq!(
@@ -762,7 +966,7 @@ mod tests {
         // target_entity_id == None (engine-generated fallback — a new root entity
         // is spawned rather than replacing an existing one).
         let pending = run_with_queue("import_gltf", json!({
-            "dataBase64": "SGVsbG8=",
+            "dataBase64": GLTF_JSON_BASE64,
             "name": "my_model.glb"
         }));
 
@@ -793,7 +997,7 @@ mod tests {
         // rather than failing the parse, so the replace-in-place validation path
         // degrades to spawning a new root entity.
         let pending = run_with_queue("import_gltf", json!({
-            "dataBase64": "SGVsbG8=",
+            "dataBase64": GLTF_JSON_BASE64,
             "name": "my_model.glb",
             "targetEntityId": serde_json::Value::Null
         }));
