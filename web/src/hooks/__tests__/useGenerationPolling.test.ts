@@ -1907,6 +1907,30 @@ describe('useGenerationPolling', () => {
 
       cleanup();
     });
+
+    it('records a refused import as not placed, with the reason, rather than autoPlaced: true', async () => {
+      // The engine inspects a model before queueing it and refuses one whose
+      // textures are KTX2 (#10396); the generation itself succeeded, so the
+      // job completes, but it must not claim the model was added.
+      const cleanup = setupModelCompletion({ autoPlace: true, targetEntityId: 'ent-1' });
+      const reason = 'image #0 is a KTX2 texture (declared by its mimeType); KTX2 textures are not supported, convert the model\'s textures to PNG or JPEG and import again';
+      mockImportGltf.mockReturnValueOnce({ success: false, error: reason });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockImportGltf).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('ap1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: reason,
+          targetEntityId: 'ent-1',
+        }),
+      }));
+
+      cleanup();
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -2005,6 +2029,32 @@ describe('useGenerationPolling', () => {
           autoPlaced: true,
           targetEntityId: 'ent-tex-target',
           materialSlot: 'normal_map',
+        }),
+      }));
+
+      cleanup();
+    });
+
+    it('records a refused map as not placed, naming the map and the reason', async () => {
+      // A provider that returns a map in a format the engine has no decoder
+      // for is refused by the slice before the command is built (#10396).
+      // One refused map out of two means the material was NOT fully placed.
+      const cleanup = setupTextureCompletion({ autoPlace: true, targetEntityId: 'ent-tex-target' });
+      const reason = "unsupported texture format 'image/webp'; accepted formats are image/png, image/jpeg";
+      mockLoadTexture
+        .mockReturnValueOnce({ success: false, error: reason })
+        .mockReturnValueOnce({ success: true });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(2);
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: `albedo: ${reason}`,
+          targetEntityId: 'ent-tex-target',
         }),
       }));
 

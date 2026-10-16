@@ -489,13 +489,13 @@ export function useGenerationPolling() {
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Generated_${job.prompt.slice(0, 20)}`;
 
-        if (shouldPlace) {
-          // Pass the job's targetEntityId so a placeholder primitive (spawned by the
-          // orchestrator before generation) is replaced in place rather than leaving
-          // the model as a sibling root. Textures/audio already consume this id;
-          // models were the only generated type that dropped it.
-          useEditorStore.getState().importGltf(base64, assetName, job.targetEntityId);
-        }
+        // Pass the job's targetEntityId so a placeholder primitive (spawned by the
+        // orchestrator before generation) is replaced in place rather than leaving
+        // the model as a sibling root. Textures/audio already consume this id;
+        // models were the only generated type that dropped it.
+        const placement = shouldPlace
+          ? placementOf(useEditorStore.getState().importGltf(base64, assetName, job.targetEntityId))
+          : { autoPlaced: false };
 
         updateJob(id, {
           status: 'completed',
@@ -503,7 +503,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: shouldPlace,
+            ...placement,
             targetEntityId: job.targetEntityId,
             quality: {
               fileSize: qualityMetrics.fileSize,
@@ -542,6 +542,9 @@ export function useGenerationPolling() {
 
         // If a specific materialSlot was requested, only apply that map
         const targetSlot = job.materialSlot;
+        // One refused map means the material was not fully placed; every
+        // refusal is kept, named by its map, so the record says which.
+        const placementErrors: string[] = [];
         for (const [mapType, url] of Object.entries(data.maps)) {
           const slot = slotMap[mapType];
           if (!slot) continue;
@@ -550,7 +553,12 @@ export function useGenerationPolling() {
 
           const blob = await downloadBinary(url);
           const base64 = await blobToBase64(blob);
-          useEditorStore.getState().loadTexture(base64, `${mapType}_${entityId}`, entityId, slot);
+          const placement = placementOf(
+            useEditorStore.getState().loadTexture(base64, `${mapType}_${entityId}`, entityId, slot),
+          );
+          if (placement.placementError !== undefined) {
+            placementErrors.push(`${mapType}: ${placement.placementError}`);
+          }
         }
 
         updateJob(id, {
@@ -558,7 +566,8 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: true,
+            autoPlaced: placementErrors.length === 0,
+            ...(placementErrors.length > 0 ? { placementError: placementErrors.join('; ') } : {}),
             targetEntityId: entityId,
             materialSlot: targetSlot,
           },
@@ -646,9 +655,9 @@ export function useGenerationPolling() {
         const entityId = job.targetEntityId ?? job.entityId;
         const slot = job.materialSlot ?? 'base_color';
 
-        if (entityId && job.autoPlace !== false) {
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, slot);
-        }
+        const placement = entityId && job.autoPlace !== false
+          ? placementOf(useEditorStore.getState().loadTexture(base64, assetName, entityId, slot))
+          : { autoPlaced: false };
 
         updateJob(id, {
           status: 'completed',
@@ -656,7 +665,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: !!entityId && job.autoPlace !== false,
+            ...placement,
             targetEntityId: entityId,
             materialSlot: slot,
           },
@@ -672,9 +681,9 @@ export function useGenerationPolling() {
         const entityId = job.targetEntityId ?? job.entityId;
         const shouldPlace = !!entityId && job.autoPlace !== false;
 
-        if (shouldPlace) {
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color');
-        }
+        const placement = shouldPlace
+          ? placementOf(useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color'))
+          : { autoPlaced: false };
 
         // Slice the sprite sheet into individual frames
         const imgDims = await getImageDimensions(blob);
@@ -696,7 +705,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: shouldPlace,
+            ...placement,
             targetEntityId: entityId,
             spriteSheet: {
               columns: grid.columns,
@@ -718,10 +727,10 @@ export function useGenerationPolling() {
         const entityId = job.targetEntityId ?? job.entityId;
         const slot = job.materialSlot ?? 'base_color';
 
-        if (entityId && job.autoPlace !== false) {
-          // Apply as texture on the target entity
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, slot);
-        }
+        // Apply as texture on the target entity
+        const placement = entityId && job.autoPlace !== false
+          ? placementOf(useEditorStore.getState().loadTexture(base64, assetName, entityId, slot))
+          : { autoPlaced: false };
 
         updateJob(id, {
           status: 'completed',
@@ -729,7 +738,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: !!entityId && job.autoPlace !== false,
+            ...placement,
             targetEntityId: entityId,
             materialSlot: slot,
           },
@@ -890,6 +899,22 @@ export function useGenerationPolling() {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Download failed: ${response.status}`);
     return response.blob();
+  }
+
+  /**
+   * What handing a generated asset to the editor came to.
+   *
+   * A refusal - the engine, or the format gate in front of it, turning the
+   * file away, reachable since #10396 - is recorded against the job as NOT
+   * placed, with the reason, rather than reported as `autoPlaced: true`. The
+   * generation itself succeeded, so the job still completes and nothing is
+   * refunded; the slice has already shown the person the refusal.
+   */
+  function placementOf(
+    outcome: { success: boolean; error?: string } | void,
+  ): { autoPlaced: boolean; placementError?: string } {
+    if (!outcome || outcome.success !== false) return { autoPlaced: true };
+    return { autoPlaced: false, placementError: outcome.error ?? 'the engine rejected it' };
   }
 
   async function blobToBase64(blob: Blob): Promise<string> {
