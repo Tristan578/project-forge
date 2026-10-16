@@ -27,8 +27,14 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 AUDIT_TOML="$REPO_ROOT/engine/.cargo/audit.toml"
 
-# Every workflow with a `cargo audit (engine)` step. Each reads the toml above.
-AUDIT_WORKFLOWS=(".github/workflows/quality-gates.yml" ".github/workflows/cd.yml")
+# The workflows that carry a `cargo audit (engine)` step TODAY. The list the
+# cases below walk is DERIVED from .github/workflows (a step is a `name:` line,
+# not a comment), so a third workflow that adds the step is checked at once, and
+# this pin makes both a new file and the disappearance of either an explicit
+# failure that needs a reviewed edit here.
+EXPECTED_AUDIT_WORKFLOWS=("cd.yml" "quality-gates.yml")
+WORKFLOW_DIR="$REPO_ROOT/.github/workflows"
+AUDIT_STEP_NAME_RE=$'^[[:space:]]*(-[[:space:]]+)?name:[[:space:]]*["\']?cargo audit \\(engine\\)'
 
 # The ONLY advisories allowed in the ignore list. Add one here and in the toml
 # together, with the toml's comment block; remove both when the lift condition
@@ -39,6 +45,7 @@ command -v grep   >/dev/null 2>&1 || { echo "FATAL: grep not found on host";   e
 command -v mktemp >/dev/null 2>&1 || { echo "FATAL: mktemp not found on host"; exit 1; }
 command -v awk    >/dev/null 2>&1 || { echo "FATAL: awk not found on host";    exit 1; }
 command -v sed    >/dev/null 2>&1 || { echo "FATAL: sed not found on host";    exit 1; }
+command -v find   >/dev/null 2>&1 || { echo "FATAL: find not found on host";   exit 1; }
 
 PASS=0
 FAIL=0
@@ -136,23 +143,38 @@ readonly -f check_audit_toml
 
 # step_runs_cargo_audit_from_engine <workflow-yaml-text> → exit 0 iff the text
 # holds at least one `cargo audit (engine)` step and EVERY such step has
-# `working-directory: engine` and runs plain `cargo audit`. cargo-audit resolves
-# .cargo/audit.toml from its working directory, so a step run from the repo root
-# would ignore the file and the list would be decorative. A step ends at a blank
-# line, the next `- ` list item, or the end of the text, so a property of a
-# LATER step is never credited to this one.
+# `working-directory: engine`, runs plain `cargo audit`, and carries neither
+# `continue-on-error:` (any value) nor a step-level `if:`: either of those
+# leaves the step green without gating the job, so the ignore file would be
+# read and nothing would ever fail on what it leaves un-ignored.
+# cargo-audit resolves .cargo/audit.toml from its working directory, so a step
+# run from the repo root would ignore the file and the list would be decorative.
+#
+# A step is a `- ` list item and every line indented deeper than it, so its
+# keys count wherever they sit in it (`- if: false` BEFORE the name, or after a
+# blank line), and a property of a LATER step is never credited to this one. A
+# shallower non-item line ends it. Blank and comment lines neither end nor
+# belong to a step. POSIX awk only (no gensub, no \s): ubuntu runners ship mawk.
 step_runs_cargo_audit_from_engine() {
   local verdict
   verdict="$(awk '
     function flush() {
-      if (inside) { total++; if (wd && cmd) { good++ } }
-      inside = 0; wd = 0; cmd = 0
+      if (isaudit) { total++; if (wd && cmd && !ungated) { good++ } }
+      isaudit = 0; wd = 0; cmd = 0; ungated = 0
     }
-    /name: cargo audit \(engine\)/ { flush(); inside = 1; next }
-    inside && /^[[:space:]]*$/ { flush(); next }
-    inside && /^[[:space:]]*- / { flush(); next }
-    inside && /^[[:space:]]*working-directory: engine[[:space:]]*$/ { wd = 1; next }
-    inside && /^[[:space:]]*run: cargo audit[[:space:]]*$/ { cmd = 1; next }
+    /^[ \t]*$/ { next }
+    /^[ \t]*#/ { next }
+    {
+      match($0, /^[ \t]*/); ind = RLENGTH
+      isitem = ($0 ~ /^[ \t]*- /)
+      if (instep && ind <= stepind && !isitem) { flush(); instep = 0 }
+      if (isitem && (!instep || ind <= stepind)) { flush(); instep = 1; stepind = ind }
+    }
+    !instep { next }
+    /^[ \t]*(- )?name:[ \t]*["\047]?cargo audit \(engine\)/ { isaudit = 1 }
+    /^[ \t]*(- )?working-directory: engine[ \t]*$/ { wd = 1 }
+    /^[ \t]*(- )?run: cargo audit[ \t]*$/ { cmd = 1 }
+    /^[ \t]*(- )?(if|continue-on-error):/ { ungated = 1 }
     END { flush(); print total + 0, good + 0 }
   ' <<<"$1")"
   local total="${verdict% *}" good="${verdict#* }"
@@ -195,17 +217,24 @@ fi
 # must run from engine/ for the file to apply; a step that ran `cargo audit`
 # from the repo root would ignore the file and the list would be decorative.
 # Both workflows run it (quality-gates.yml on every PR, cd.yml on the deploy
-# path), so both are pinned.
+# path). The set is derived from the tree, so a workflow nobody listed here is
+# still walked by every case below, and the set itself is pinned.
+derived_wf="$(find "$WORKFLOW_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -exec grep -lE "$AUDIT_STEP_NAME_RE" {} + | sed 's|.*/||' | sort)"
+expected_wf="$(printf '%s\n' "${EXPECTED_AUDIT_WORKFLOWS[@]}" | sort)"
 echo "2. every workflow runs cargo audit (engine) from engine/"
-for wf in "${AUDIT_WORKFLOWS[@]}"; do
-  if [[ ! -f "$REPO_ROOT/$wf" ]]; then
-    bad "$wf is missing"
-  elif step_runs_cargo_audit_from_engine "$(cat "$REPO_ROOT/$wf")"; then
-    ok "$wf: every 'cargo audit (engine)' step has working-directory: engine and runs plain cargo audit"
+if [[ "$derived_wf" == "$expected_wf" ]]; then
+  ok "the workflows with a 'cargo audit (engine)' step are exactly [$(tr '\n' ' ' <<<"$derived_wf")]"
+else
+  bad "the workflows with a 'cargo audit (engine)' step changed: expected [$(tr '\n' ' ' <<<"$expected_wf")] derived [$(tr '\n' ' ' <<<"$derived_wf")]; a new one is checked below but needs EXPECTED_AUDIT_WORKFLOWS edited here, a missing one is a deleted gate"
+fi
+while IFS= read -r wf; do
+  [[ -z "$wf" ]] && continue
+  if step_runs_cargo_audit_from_engine "$(cat "$WORKFLOW_DIR/$wf")"; then
+    ok "$wf: every 'cargo audit (engine)' step has working-directory: engine, runs plain cargo audit, and is neither continue-on-error nor conditional"
   else
-    bad "$wf: no 'cargo audit (engine)' step, or one does not run from engine/ (or runs something other than 'cargo audit'); the ignore file would not be read"
+    bad "$wf: a 'cargo audit (engine)' step does not run from engine/, runs something other than 'cargo audit', or is continue-on-error / conditional; the ignore file would not gate the job"
   fi
-done
+done <<<"$derived_wf"
 
 # --- 3. the checker is falsifiable (mutations of a fixture) ------------------
 echo "3. checker refuses malformed ignore files"
@@ -314,16 +343,17 @@ if grep -q "more than one \[advisories\] table" <<<"$(check_audit_toml "$tmp/dup
 # Case 2 only proves the CURRENT workflows satisfy the predicate. Each mutation
 # below must change the text and make that same predicate fail, or the pin could
 # never fire.
-echo "4. step pin refuses a cargo audit that would not read the file"
-for wf in "${AUDIT_WORKFLOWS[@]}"; do
-  if [[ ! -f "$REPO_ROOT/$wf" ]]; then
-    bad "$wf is missing"
-    continue
-  fi
-  wf_text="$(cat "$REPO_ROOT/$wf")"
+echo "4. step pin refuses a cargo audit that would not read the file or not gate the job"
+while IFS= read -r wf; do
+  [[ -z "$wf" ]] && continue
+  wf_text="$(cat "$WORKFLOW_DIR/$wf")"
   refuses_mutation "$wf with working-directory: ." "$wf_text" 's/^\([[:space:]]*\)working-directory: engine$/\1working-directory: ./'
   refuses_mutation "$wf with run: cargo audit || true" "$wf_text" 's/^\([[:space:]]*\)run: cargo audit$/\1run: cargo audit || true/'
   refuses_mutation "$wf with the step renamed away" "$wf_text" 's/name: cargo audit (engine)/name: cargo audit (renamed)/'
+  # Either key leaves the step green without gating the job: the ignore file is
+  # still read, and nothing it leaves un-ignored can ever fail the run.
+  refuses_mutation "$wf with continue-on-error: true appended" "$wf_text" 's/^\([[:space:]]*\)run: cargo audit$/&\n\1continue-on-error: true/'
+  refuses_mutation "$wf with if: false appended" "$wf_text" 's/^\([[:space:]]*\)run: cargo audit$/&\n\1if: false/'
 
   # A SECOND step that runs from the repo root is not excused by the first.
   extra_step="$wf_text"$'\n\n'"      - name: cargo audit (engine)"$'\n'"        run: cargo audit"
@@ -332,7 +362,35 @@ for wf in "${AUDIT_WORKFLOWS[@]}"; do
   else
     ok "$wf plus a second root-directory step: the step pin refuses it"
   fi
-done
+done <<<"$derived_wf"
+
+# The parse itself, on small synthetic workflows, with a positive control so a
+# refusal below is the key's doing and not a shape the parser cannot read.
+synth_head=$'jobs:\n  audit:\n    steps:\n'
+synth_ok=$'      - name: cargo audit (engine)\n        working-directory: engine\n        run: cargo audit\n'
+if step_runs_cargo_audit_from_engine "$synth_head$synth_ok"; then
+  ok "synthetic control: a plain step run from engine/ is accepted"
+else
+  bad "synthetic control: a plain step run from engine/ is refused, so the refusals below prove nothing"
+fi
+synth_if_first=$'      - if: false\n        name: cargo audit (engine)\n        working-directory: engine\n        run: cargo audit\n'
+if step_runs_cargo_audit_from_engine "$synth_head$synth_if_first"; then
+  bad "synthetic: an if: written BEFORE the name is not seen"
+else
+  ok "synthetic: an if: written before the name is refused"
+fi
+synth_after_gap=$'      - name: cargo audit (engine)\n        working-directory: engine\n        run: cargo audit\n\n        continue-on-error: true\n'
+if step_runs_cargo_audit_from_engine "$synth_head$synth_after_gap"; then
+  bad "synthetic: a continue-on-error: after a blank line inside the step is not seen"
+else
+  ok "synthetic: a continue-on-error: after a blank line inside the step is refused"
+fi
+synth_next_step=$'      - name: cargo audit (engine)\n        working-directory: engine\n        run: cargo audit\n      - name: Upload\n        if: always()\n        continue-on-error: true\n'
+if step_runs_cargo_audit_from_engine "$synth_head$synth_next_step"; then
+  ok "synthetic: an if: / continue-on-error: on the NEXT step is not charged to the audit step"
+else
+  bad "synthetic: the next step's if: / continue-on-error: was charged to the audit step"
+fi
 
 echo
 echo "cargo-audit-ignores: $PASS passed, $FAIL failed"
