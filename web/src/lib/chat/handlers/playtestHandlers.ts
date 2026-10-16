@@ -21,7 +21,7 @@ import { parseArgs, zEntityId } from './types';
 import { safeParseInputTrace } from '@/lib/playtest/inputTrace';
 import { botSessionToInputTrace } from '@/lib/playtest/botTrace';
 import { getActiveReplaySession, runReplay } from '@/lib/playtest/replayEntryPoints';
-import { replayAxisActionNames, type EngineDispatch } from '@/lib/playtest/replayInvocation';
+import { replayActionNames, replayAxisActionNames, type EngineDispatch } from '@/lib/playtest/replayInvocation';
 import type { ReplayRunOptions } from '@/lib/playtest/replayRunner';
 import { simulatePlaytest, type BotStrategy, type SceneContext } from '@/lib/ai/gameplayBot';
 
@@ -81,10 +81,10 @@ export const playtestHandlers: Record<string, ToolHandler> = {
       const bindings = ctx.store.inputBindings ?? [];
       trace = botSessionToInputTrace(session, {
         fixtureId: ctx.store.sceneName || 'current-scene',
-        actionNames: bindings.map((b) => b.actionName),
-        // Only the primary player's signed-axis bindings may answer a negative
-        // direction (a digital one would press its positive key for it — the
-        // wrong way), read from the same map the key resolver reads.
+        // Vocabulary and axis names both come from the primary player's
+        // bindings, the map the key resolver reads (a digital binding would
+        // press its positive key for a negative direction — the wrong way).
+        actionNames: replayActionNames(bindings),
         axisActionNames: replayAxisActionNames(bindings),
       });
     }

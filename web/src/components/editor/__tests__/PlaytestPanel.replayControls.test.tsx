@@ -713,4 +713,24 @@ describe("the bot's run policy and vocabulary come from the scene", () => {
     await frame((elapsed += 16));
     expect(keyEvents).toEqual([]);
   });
+
+  it("a two-player scene: player 1's move_left does not divert a leftward bot move from the PRIMARY player's signed axis (KeyA)", async () => {
+    state.inputBindings = [
+      { ...AXIS_MOVE_RIGHT },
+      { actionName: 'move_left', actionType: 'digital', sources: ['ArrowLeft'], player: 1 },
+    ];
+    botSession.actions[0] = { type: 'move', timestamp: 0, direction: { x: -1, y: 0 } };
+    render(<PlaytestPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    const trace = aiCall?.[1].trace as { frames: Array<{ actions: Record<string, unknown> }> };
+    expect(trace.frames[0].actions).toEqual({ move_right: { pressed: true, axis: -1 } });
+
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    expect(keyEvents).toEqual(['down KeyA']);
+  });
 });

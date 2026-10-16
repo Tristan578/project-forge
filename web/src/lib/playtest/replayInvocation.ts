@@ -143,6 +143,20 @@ export function replayAxisActionNames(bindings: readonly InputBinding[]): string
 }
 
 /**
+ * The primary player's action names: the bot's vocabulary
+ * (`BotTraceOptions.actionNames`). Derived from the same map the key resolver
+ * reads, so the bot only plans actions the resolver can answer. From the flat
+ * list, a `move_left` bound only on a second player's slot would divert a
+ * leftward move onto a name slot 0 never binds, pressing nothing where the
+ * primary's signed `move_right` axis was there to answer it.
+ * @param bindings The scene's flat binding list, every slot included.
+ * @returns Action names the primary player's bindings answer.
+ */
+export function replayActionNames(bindings: readonly InputBinding[]): string[] {
+  return [...primaryPlayerBindings(bindings).keys()];
+}
+
+/**
  * Build an action-to-key resolver from the scene's bindings.
  * @param bindings Current digital and signed-axis bindings, every slot included.
  * @returns A resolver yielding the primary player's key codes for an action and direction, or none.

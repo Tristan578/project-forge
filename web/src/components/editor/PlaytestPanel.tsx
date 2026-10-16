@@ -35,7 +35,7 @@ import {
 import { botSessionToInputTrace } from '@/lib/playtest/botTrace';
 import type { ReplayHandle, ReplayOutcome, ReplayProgress } from '@/lib/playtest/replayRunner';
 import { ReplayLiveRegion, isTerminalReplayState, replayStatusText } from './ReplayLiveRegion';
-import { replayAxisActionNames, type ReplaySession } from '@/lib/playtest/replayInvocation';
+import { replayActionNames, replayAxisActionNames, type ReplaySession } from '@/lib/playtest/replayInvocation';
 
 /**
  * The replay in flight — manual, the bot's engine run, or the chat tool's —
@@ -610,14 +610,14 @@ export function PlaytestPanel() {
     async (session: PlaytestSession) => {
       if (!primaryId) return;
       const bindings = inputBindings ?? [];
-      const actionNames = bindings.map((b) => b.actionName);
-      // Only the primary player's signed-axis bindings may answer a negative
-      // direction (a digital one would press its positive key for it — the
-      // wrong way), read from the same map the key resolver reads so a name
-      // is an axis here exactly when the resolver reads its sign.
+      // The bot's vocabulary and its axis names both come from the primary
+      // player's bindings, the map the key resolver reads: a name is in the
+      // vocabulary exactly when the resolver can answer it, and is an axis
+      // exactly when the resolver reads its sign (a digital binding would
+      // press its positive key for a negative direction — the wrong way).
       const trace = botSessionToInputTrace(session, {
         fixtureId: sceneName || 'current-scene',
-        actionNames,
+        actionNames: replayActionNames(bindings),
         axisActionNames: replayAxisActionNames(bindings),
       });
       // The bot's plan never aims for a collectible, so its verdict is the

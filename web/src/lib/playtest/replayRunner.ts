@@ -835,7 +835,9 @@ export function startReplay(
       if (cancelRequested) return finishCancelled(ticksReplayed);
       const outcome: ReplayOutcome = {
         command: REPLAY_INPUT_TRACE_COMMAND,
-        verdict: assertions.every((a) => a.passed) ? 'passed' : 'failed',
+        // A verdict over no assertions is not a pass: `every` is vacuously
+        // true on an empty array, and the assertions are policy-gated now.
+        verdict: assertions.length > 0 && assertions.every((a) => a.passed) ? 'passed' : 'failed',
         ticksReplayed,
         assertions,
         playerEntityId: env.playerEntityId,

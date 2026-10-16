@@ -6,6 +6,7 @@ import type { InputBinding } from '@/stores/slices/types';
 import {
   buildActionKeyResolver,
   createDomKeyboardEnvironment,
+  replayActionNames,
   replayAxisActionNames,
   type EngineDispatch,
 } from '../replayInvocation';
@@ -171,6 +172,20 @@ describe('browser replay boundary', () => {
  * axis (round-2 finding: any-match over the flat list did, while the
  * resolver answered the last row by name).
  */
+describe('replayActionNames', () => {
+  it("lists the primary player's names only, one each, in binding order, whatever the slot order", () => {
+    const primaryAxis: InputBinding = {
+      actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'],
+    };
+    const secondLeft: InputBinding = { actionName: 'move_left', actionType: 'digital', sources: ['ArrowLeft'], player: 1 };
+    const primaryJump: InputBinding = { actionName: 'jump', actionType: 'digital', sources: ['Space'], player: 0 };
+    expect(replayActionNames([primaryAxis, secondLeft, primaryJump])).toEqual(['move_right', 'jump']);
+    expect(replayActionNames([secondLeft, primaryJump, primaryAxis])).toEqual(['jump', 'move_right']);
+    expect(replayActionNames([secondLeft])).toEqual([]);
+    expect(replayActionNames([])).toEqual([]);
+  });
+});
+
 describe('replayAxisActionNames', () => {
   const primaryAxis: InputBinding = {
     actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'],
@@ -210,15 +225,16 @@ describe('replayAxisActionNames', () => {
 describe('a leftward bot move never presses a digital move_right key', () => {
   /**
    * The bot's plan on a scene's bindings, replayed through the real resolver
-   * into a key log. The axis names are derived exactly as PlaytestPanel and
-   * the chat handler derive them (`replayAxisActionNames`).
+   * into a key log. The vocabulary and the axis names are derived exactly as
+   * PlaytestPanel and the chat handler derive them (`replayActionNames`,
+   * `replayAxisActionNames`).
    */
   async function keysPressedFor(direction: { x: number; y: number }, bindings: InputBinding[]): Promise<string[]> {
     const trace = botSessionToInputTrace(
       { actions: [{ type: 'move', timestamp: 0, direction }, { type: 'wait', timestamp: 100 }] },
       {
         fixtureId: 'resolver-fixture',
-        actionNames: bindings.map((b) => b.actionName),
+        actionNames: replayActionNames(bindings),
         axisActionNames: replayAxisActionNames(bindings),
         msPerTick: 50,
       },
@@ -256,6 +272,17 @@ describe('a leftward bot move never presses a digital move_right key', () => {
 
   it('presses KeyA for a leftward move when move_right is a signed axis', async () => {
     expect(await keysPressedFor({ x: -1, y: 0 }, axisRight)).toEqual(['KeyA']);
+  });
+
+  it("a move_left bound only on player 1's slot does not divert a leftward move from the primary's signed axis", async () => {
+    // With the vocabulary taken from every slot, the bot would plan
+    // `move_left` (which the primary-only resolver cannot answer) instead of
+    // the negative `move_right` axis, and press nothing where KeyA was there.
+    const primaryAxisSecondLeft: InputBinding[] = [
+      ...axisRight,
+      { actionName: 'move_left', actionType: 'digital', sources: ['ArrowLeft'], player: 1 },
+    ];
+    expect(await keysPressedFor({ x: -1, y: 0 }, primaryAxisSecondLeft)).toEqual(['KeyA']);
   });
 
   /**

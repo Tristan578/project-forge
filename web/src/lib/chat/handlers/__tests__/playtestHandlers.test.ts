@@ -227,6 +227,23 @@ describe('replay_input_trace', () => {
     expect(digitalTrace.frames[0].actions).toEqual({});
   });
 
+  it("builds the bot's vocabulary from the PRIMARY player's row, so player 1's move_left cannot divert a leftward move", async () => {
+    const primaryAxis = { actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'] };
+    const secondLeft = { actionName: 'move_left', actionType: 'digital', sources: ['ArrowLeft'], player: 1 };
+    simulatePlaytest.mockResolvedValue(plannedSession({ x: -1, y: 0 }));
+    const result = await invokeHandler(
+      playtestHandlers,
+      'replay_input_trace',
+      { strategy: 'explorer', playerEntityId: PLAYER },
+      { ...playing, inputBindings: [primaryAxis, secondLeft] },
+    );
+    expect(result.result.success).toBe(true);
+    const trace = runReplay.mock.calls[runReplay.mock.calls.length - 1][1].trace;
+    // The negative primary axis, which the resolver answers with KeyA — not a
+    // `move_left` only player 1 binds, which it answers with nothing.
+    expect(trace.frames[0].actions).toEqual({ move_right: { pressed: true, axis: -1 } });
+  });
+
   it('refuses a request with both or neither input source', async () => {
     const both = await invokeHandler(
       playtestHandlers,
