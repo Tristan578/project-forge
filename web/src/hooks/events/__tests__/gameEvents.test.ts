@@ -776,6 +776,73 @@ describe('handleGameEvent', () => {
         inputState: input(),
       });
     });
+
+    /**
+     * A scene file keeps its entity ids, so a crafted one can name an entity
+     * `__proto__`, `constructor` or `prototype`. On a `{}`-based map,
+     * `entities['__proto__'] = state` is the inherited setter: it swaps the
+     * map's prototype instead of adding an entry, and every later lookup
+     * resolves through the hostile state (Devin security review on #10390).
+     * The snapshot maps therefore have no prototype at all, and those three
+     * names are ordinary own keys.
+     */
+    describe('hostile entity ids', () => {
+      const hostile = ['__proto__', 'constructor', 'prototype'] as const;
+      const sortedHostile = [...hostile].sort();
+      // Computed keys, so the fixture itself carries them as OWN properties
+      // (a bare `__proto__:` in a literal would set the fixture's prototype).
+      const withHostileIds = <T>(make: (i: number) => T): Record<string, T> =>
+        Object.fromEntries(hostile.map((id, i) => [id, make(i + 1)]));
+      const ownValue = (map: Record<string, unknown>, key: string): unknown =>
+        Object.getOwnPropertyDescriptor(map, key)?.value;
+
+      it('keeps them as own keys of a prototype-less map across a delta merge', () => {
+        const objectPrototypeBefore = Object.getOwnPropertyNames(Object.prototype).sort();
+        send(delta({
+          changedEntities: withHostileIds(state),
+          changedEntityInfos: withHostileIds((i) => info(`E${i}`)),
+        }));
+        // A second, empty frame exercises the copy path as well.
+        send(delta({}));
+
+        const tick = tickAt(1);
+        expect(Object.keys(tick.entities).sort()).toEqual(sortedHostile);
+        expect(Object.keys(tick.entityInfos).sort()).toEqual(sortedHostile);
+        expect(ownValue(tick.entities, '__proto__')).toEqual(state(1));
+        expect(ownValue(tick.entityInfos, '__proto__')).toEqual(info('E1'));
+        expect(Object.getPrototypeOf(tick.entities)).toBeNull();
+        expect(Object.getPrototypeOf(tick.entityInfos)).toBeNull();
+        expect(Object.getOwnPropertyNames(Object.prototype).sort()).toEqual(objectPrototypeBefore);
+        expect(({} as { position?: unknown }).position).toBeUndefined();
+      });
+
+      it('removes a hostile id like any other', () => {
+        send(delta({
+          changedEntities: withHostileIds(state),
+          changedEntityInfos: withHostileIds((i) => info(`E${i}`)),
+        }));
+        send(delta({ removedEntityIds: ['__proto__'] }));
+
+        expect(Object.keys(tickAt(1).entities).sort()).toEqual(['constructor', 'prototype']);
+        expect(Object.keys(tickAt(1).entityInfos).sort()).toEqual(['constructor', 'prototype']);
+        expect(Object.getPrototypeOf(tickAt(1).entities)).toBeNull();
+      });
+
+      it('survives a PLAY_TICK keyframe that carries them', () => {
+        handleGameEvent(
+          'PLAY_TICK',
+          { entities: withHostileIds(state), entityInfos: withHostileIds((i) => info(`E${i}`)), inputState: input() },
+          mockSetGet.set,
+          mockSetGet.get
+        );
+        send(delta({ changedEntities: withHostileIds(() => state(9)) }));
+
+        const tick = tickAt(1);
+        expect(Object.keys(tick.entities).sort()).toEqual(sortedHostile);
+        expect(ownValue(tick.entities, '__proto__')).toEqual(state(9));
+        expect(Object.getPrototypeOf(tick.entities)).toBeNull();
+      });
+    });
   });
 
   describe('GAME_EVENT', () => {
