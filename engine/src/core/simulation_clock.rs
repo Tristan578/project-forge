@@ -139,10 +139,11 @@ impl SimulationClockPin {
     /// but the mode applier drains every queued request in ONE update: a Stop
     /// followed by a Play in the same drain leaves the mode at `Play` on both
     /// sides of the frame, and the pass through `Edit` is invisible to that
-    /// comparison. The applier calls this from its Stop arm, and only there
-    /// (Pause keeps the pin), so the release fires regardless. The record is
-    /// consumed before the pin drain, so a pin queued in the stopping frame
-    /// still wins, as before.
+    /// comparison. The applier calls this from its Stop arm (through its
+    /// command queue, applied before the next frame's `First`), and only
+    /// there: Pause keeps the pin. So the release fires regardless. The record
+    /// is consumed before the pin drain, so a pin queued in the stopping
+    /// frame still wins, as before.
     pub fn on_play_stopped(&mut self) {
         self.play_stopped = true;
     }
@@ -733,10 +734,11 @@ mod tests {
     }
 
     /// The applier's call site is bridge code (wasm32-only), so no native test
-    /// runs it. This pins the EXECUTABLE call inside the Stop arm and its
-    /// absence from the Pause and Resume arms; it does not prove the arm runs.
-    /// `SPAWNFORGE_ENGINE_SRC` redirects the source root for a probe crate
-    /// built outside `engine/`.
+    /// runs it. This pins the EXECUTABLE call inside the Stop arm (the
+    /// statement line ending in `.on_play_stopped();`, queued through the
+    /// applier's `Commands`) and its absence from the Pause and Resume arms;
+    /// it does not prove the arm runs. `SPAWNFORGE_ENGINE_SRC` redirects the
+    /// source root for a probe crate built outside `engine/`.
     #[test]
     fn the_mode_applier_records_the_stop_in_its_stop_arm_only() {
         let root = std::env::var("SPAWNFORGE_ENGINE_SRC")
@@ -754,7 +756,7 @@ mod tests {
             body.lines()
                 .map(str::trim)
                 .filter(|line| !line.starts_with("//"))
-                .filter(|line| *line == "clock_pin.on_play_stopped();")
+                .filter(|line| line.ends_with(".on_play_stopped();"))
                 .count()
         };
         assert_eq!(calls(&arm("ModeChangeRequest::Stop =>")), 1, "the Stop arm must record the stop exactly once");
