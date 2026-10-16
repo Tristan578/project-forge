@@ -15,7 +15,11 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: (selector: (value: typeof state) => unknown) => selector(state),
+  useEditorStore: Object.assign(
+    (selector: (value: typeof state) => unknown) => selector(state),
+    { getState: () => state },
+  ),
+  getCommandDispatcher: () => null,
 }));
 
 describe('runtime recording controls', () => {

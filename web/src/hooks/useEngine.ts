@@ -8,6 +8,7 @@ import { fetchWasmWithMetrics } from '@/lib/monitoring/cdnAnalytics';
 import { GPU_INIT_TIMEOUT_MS, WASM_FETCH_TIMEOUT_MS } from '@/lib/config/timeouts';
 import { withTimeout } from '@/lib/async/withTimeout';
 import { checkCommandBatch, checkCommandPayload } from '@/lib/engine/commandPayloadGuard';
+import { resetPlayTickSnapshot } from '@/hooks/events/playTickSnapshot';
 
 /** Loading progress state exported for UI components to display progress feedback. */
 export type LoadingPhase = 'idle' | 'detecting' | 'downloading' | 'initializing' | 'ready' | 'error';
@@ -614,6 +615,12 @@ export function resetEngine(): void {
   wasmModule = null;
   initPromise = null;
   engineWasmMemory = null;
+  // No engine, no frame. `recoverEngine` reaches here first: the engine it
+  // then re-initialises starts from an empty delta cache and emits NO mode
+  // event, so the hub's reconstituted Play frame would otherwise survive the
+  // crash and have the new run's full first frame merged onto it, keeping
+  // entities that no longer exist (#10375, Sentry review on #10390).
+  resetPlayTickSnapshot();
   setLoadingState({ phase: 'idle' });
   clearEngineCrash();
 }

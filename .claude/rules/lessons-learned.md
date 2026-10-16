@@ -738,7 +738,32 @@ severity and the round cap":
 Check CI first, and port a shared failure's fix before running any board.
 **Ticket:** #10325
 
-### 24. A symlink checked out as a text file drops the skill behind it, silently
+### 24. A verdict that ANDs several assertions hides a dead predicate behind the others
+**Applies:** verdict|assertions|.every(|passed|outcome|mutation|__tests__|.test.ts
+**What happens:** A negative test asserts the combined verdict ("the replay
+FAILED") and stays green while one of the predicates feeding that verdict has
+stopped doing anything. Measured on #10007: the replay runner's verdict is
+`assertions.every(a => a.passed)` over a moved-entity check and a
+one-collectible check. A mutation probe rewrote the move predicate to `const
+moved = true` and every #10007 suite — the controlled-runner tests, the
+manual/AI parity tests and the panel tests, 24 tests — passed, because on dead
+input the collectible check alone kept the verdict `failed`. Only a #9902 test
+that happened to read the individual flag caught it.
+**Why:** An AND-ed verdict is satisfied by ANY failing member, so a test that
+pins the verdict pins "at least one predicate still fails", not "each predicate
+fails for its own reason". That is lesson #11's family — the assertion is
+reachable but cannot fail for the thing it names — arriving through a
+composite result. Evidence fields (`movedDistance === 0`) do not help: they
+pin what was OBSERVED, not what the predicate CONCLUDED from it.
+**Prevention:** Where a result aggregates several assertions, pin each
+member's own pass/fail flag in both directions — all true on the passing
+fixture, each false on the negative that targets it — and then mutate one
+predicate at a time to confirm each pin goes red on its own. A verdict-level
+check may stay as the summary, but it is not the gate for any single
+predicate.
+**Ticket:** #10007
+
+### 25. A symlink checked out as a text file drops the skill behind it, silently
 **Applies:** .claude/skills|.agents/skills|.windsurf/skills|symlink|core.symlinks|120000|ln -s
 **What happens:** 16 skills and one rule reference (17 of the repo's 25
 tracked links; `git status` showed all 25 as type changes once
