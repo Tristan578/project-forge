@@ -28,7 +28,7 @@
       "functions": 81,
       "lines": 87
     },
-    "quickValidation": "cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run"
+    "quickValidation": "cd web && npm run test:changed"
   },
   "targets": [
     "AGENTS.md",

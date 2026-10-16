@@ -11,7 +11,7 @@ This is the full development cycle for SpawnForge. Every feature goes through Pl
 
 ## 1. Plan
 
-Invoke the `planner` skill to draft a spec for: {{input}}
+Invoke the `planner` skill to draft a spec for: $ARGUMENTS
 - The planner uses the `design` skill patterns for architectural decisions
 - The planner verifies claims against actual code (not just design docs)
 - **STOP and await user approval.**
@@ -53,7 +53,6 @@ If any check fails, fix immediately before proceeding.
 After verification passes, update project context files:
 - **New pitfalls/API quirks?** → Add to `.claude/rules/*.md`
 - **Milestone completed?** → Move its tickets on the taskboard; update the feature claims in `README.md` if a user-visible capability shipped. There is deliberately no phase list in `.claude/CLAUDE.md` — a hand-maintained status summary rots and the taskboard is the live source
-- **MCP commands changed?** → Update count in `MEMORY.md` and `CLAUDE.md`
 - **New ECS components or libraries?** → Update `rules/file-map.md`, `rules/bevy-api.md`, `rules/library-apis.md`
 - **New EntitySnapshot fields?** → Update `rules/entity-snapshot.md`
 - **Temporary learnings?** → Log in `MEMORY.md`, promote to rules after confirmation
@@ -62,5 +61,5 @@ After verification passes, update project context files:
 
 All implementations must use these exact versions:
 - Bevy 0.19, bevy_rapier 0.35, bevy_hanabi 0.19, bevy_panorbit_camera 0.35
-- Next.js 16, React 19, Zustand 5, TypeScript 5, Tailwind 4, Vitest 4
+- Next.js 16, React 19, Zustand 5, TypeScript 6, Tailwind 4, Vitest 5
 - Rust stable, wasm-bindgen 0.2.127, csgrs 0.20

@@ -165,7 +165,7 @@ Checked: logic errors, security, API contracts, performance, project conventions
 7. **Batch comments** — use a single review submission, not individual comments
 8. **No style nits** — unless REVIEW.md explicitly asks for style checks
 9. **Deferred findings need PF tickets** — if you identify work that should be done but is not blocking, create a taskboard ticket and reference it
-10. **Max 10 findings per review** — if more issues exist, prioritize by severity and note N additional lower-severity findings omitted
+10. **Report every finding** — batch them into the single review, ordered by severity
 
 ## Focus Modes
 

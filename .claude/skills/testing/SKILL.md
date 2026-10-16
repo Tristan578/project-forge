@@ -56,17 +56,21 @@ engine/src/core/mesh_simplify.rs  # Rust unit tests (cargo test)
 ### Store Slice Tests (most common)
 
 ```typescript
+// web/src/stores/slices/__tests__/sliceTestTemplate.ts:
+//   createSliceStore(sliceCreator) → zustand store; createMockDispatch() → vi.fn dispatcher
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 
 describe('mySlice', () => {
   it('updates data on set action', () => {
-    const store = createSliceStore();
+    const store = createSliceStore(createMySlice);
     store.getState().setMyData('entity-1', { value: 42 });
     expect(store.getState().myDataMap['entity-1']).toEqual({ value: 42 });
   });
 
   it('dispatches command correctly', () => {
-    const { store, dispatch } = createMockDispatch();
+    const dispatch = createMockDispatch();
+    setMyDispatcher(dispatch); // each slice exports set<Name>Dispatcher (see animationSlice.test.ts)
+    const store = createSliceStore(createMySlice);
     store.getState().someAction('entity-1', { value: 42 });
     expect(dispatch).toHaveBeenCalledWith('my_command', {
       entityId: 'entity-1',
@@ -81,7 +85,7 @@ describe('mySlice', () => {
 ```typescript
 describe('myDomainEvents', () => {
   it('handles MY_EVENT by updating store', () => {
-    const store = createSliceStore();
+    const store = createSliceStore(createMySlice);
     const handler = createEventHandler(store);
 
     handler({
@@ -124,7 +128,7 @@ describe('myHandler', () => {
 - **Always use `@/lib/...` alias in `vi.mock()`** — never relative paths from __tests__ dirs
 - **Use `vi.resetModules()` + dynamic import** for script worker tests
 - **Stub `self` with mock `postMessage`** for worker tests
-- **No mocking the database in integration tests** — use real test instances
+- **API route tests mock `@/lib/db/client`** (see `references/mock-patterns.md`); never mock the module under test
 
 ## What to Test (Priority Order)
 
@@ -190,7 +194,7 @@ bash .claude/skills/testing/scripts/check-regression-test.sh <PR_NUMBER>
 - Scans the diff for `.test.ts` / `.test.tsx` files
 - Exits 1 with an actionable error if no test files are found
 
-PRs that fail this check are **blocked** until a regression test is added.
+The validator agent runs this check; it is not a CI gate, so run it yourself before opening a bug-fix PR.
 
 ## Anti-Patterns (Never Do These)
 
@@ -292,7 +296,7 @@ Playwright E2E tests require:
    device emulations and need no extra download)
 3. Dev server starts automatically via Playwright's `webServer` config.
 
-## Vitest 4.x API Reference
+## Vitest API Reference
 
 Vitest is Vite-native with Jest-compatible API, native ESM, TypeScript, and JSX support. Note: Vitest 4 defaults to the forks pool; jest-dom matchers need explicit `expect.extend(matchers)` in vitest.setup.ts.
 
