@@ -4,6 +4,7 @@ import type { ExecutorContext, OrchestratorGDD } from '../../types';
 import { loadProjectScenes, saveProjectScenes, createInitialProject } from '@/lib/scenes/sceneManager';
 import { attachFixtureValidator } from '@/lib/scenes/__tests__/sceneFixture';
 import { setSceneValidator } from '@/lib/scenes/sceneValidation';
+import { ENGINE_THREW_RELOAD_GUIDANCE, EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
 
 /**
  * `store` is a TEST-ONLY override key: it seeds what `ctx.getStore()` returns.
@@ -234,14 +235,97 @@ describe('sceneCreateExecutor', () => {
   // game on top of the starter Ground/Player/Sun.
   it('fails the step when the engine refuses to clear the starter scene', async () => {
     const ctx = makeCtx({ store: {
-      projectId: null, setScenes: vi.fn(), newScene: vi.fn(() => false), sceneGraph: { nodes: {} },
+      projectId: null, setScenes: vi.fn(), newScene: vi.fn(() => false), newSceneRefusal: vi.fn(() => 'engine_refused'), sceneGraph: { nodes: {} },
     } });
 
     const result = await sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx);
 
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('COMMAND_FAILED');
+    expect(result.error?.message).toBe('Engine refused new_scene while clearing the starter scene');
+    // A refusal is not a throw: nothing was locked, so "try again" stays right
+    // and the reload advice must not leak onto this path.
+    expect(result.error?.userFacingMessage).toBe('Could not create the scene. Please try again.');
     expect(ctx.getStore().newScene).toHaveBeenCalled();
+  });
+
+  // #10202 review, round 2: `newScene()` is also `false` when the store
+  // refused on its own — browser storage would not clear the prefab-instance
+  // registry before the dispatch — and when no engine is attached. The step
+  // error names the real cause so the log does not send the reader to the
+  // engine for a storage refusal.
+  it.each([
+    ['registry_not_cleared', 'Browser storage refused to clear the prefab-instance registry, so new_scene was never dispatched'],
+    ['engine_not_attached', 'No engine was attached to clear the starter scene, so new_scene was never dispatched'],
+  ] as const)('names the real cause when newScene() refuses for %s', async (refusal, message) => {
+    const ctx = makeCtx({ store: {
+      projectId: null, setScenes: vi.fn(), newScene: vi.fn(() => false), newSceneRefusal: vi.fn(() => refusal), sceneGraph: { nodes: {} },
+    } });
+
+    const result = await sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('COMMAND_FAILED');
+    expect(result.error?.message).toBe(message);
+    expect(result.error?.message).not.toContain('Engine refused');
+    expect(result.error?.userFacingMessage).toBe('Could not create the scene. Please try again.');
+  });
+
+  // #10202 review (Sentry): `newScene()` now THROWS `EngineDispatchThrewError`
+  // when the engine call throws, after locking every save path. This executor
+  // had no catch, so the throw reached the pipeline runner's generic catch, was
+  // reported `retryable: true`, and `scene_create`'s `maxRetries: 1` dispatched
+  // `new_scene` a SECOND time — against an engine that had already thrown
+  // mid-apply, with saves locked. The step must fail typed and non-retryable,
+  // with exactly one dispatch.
+  describe('when newScene() throws', () => {
+    function makeThrowingCtx(thrown: unknown) {
+      const newScene = vi.fn(() => { throw thrown; });
+      const ctx = makeCtx({ store: {
+        projectId: null, setScenes: vi.fn(), newScene, newSceneRefusal: vi.fn(() => null), sceneGraph: { nodes: {} },
+      } });
+      return { ctx, newScene };
+    }
+
+    it('fails the step NON-retryably after a single dispatch when the engine threw', async () => {
+      const { ctx, newScene } = makeThrowingCtx(
+        new EngineDispatchThrewError('new_scene', 'RuntimeError: unreachable executed'),
+      );
+
+      const result = await sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('ENGINE_DISPATCH_THREW');
+      // The property the runner reads to decide whether to dispatch again.
+      expect(result.error?.retryable).toBe(false);
+      expect(newScene).toHaveBeenCalledTimes(1);
+      // Names the engine throw and carries its text, and — like the chat
+      // tools' `new_scene` — says to reload rather than blaming a refusal.
+      expect(result.error?.message).toContain('due to an engine error (RuntimeError: unreachable executed)');
+      expect(result.error?.message).toContain(ENGINE_THREW_RELOAD_GUIDANCE);
+      expect(result.error?.message).not.toContain('Engine refused');
+      // The line the user reads gives the right advice too. "Please try again"
+      // — the step's generic message — is wrong after an engine throw: the
+      // viewport can be half-applied and saving is locked, so the answer is to
+      // reload, in the same words `sceneDispatchThrewResult` uses.
+      expect(result.error?.userFacingMessage).toBe(
+        `The engine failed while creating the scene. ${ENGINE_THREW_RELOAD_GUIDANCE}`,
+      );
+      expect(result.error?.userFacingMessage).toContain('Reload the editor');
+      expect(result.error?.userFacingMessage).not.toContain('try again');
+      expect(result.error?.userFacingMessage).not.toBe(sceneCreateExecutor.userFacingErrorMessage);
+    });
+
+    it('lets a throw that is not the engine\'s propagate to the runner as the plain failure it is', async () => {
+      // A storage write refused under quota (or a subscriber that threw) set no
+      // lockout, so it must not be reported as one — it goes to the runner's
+      // generic catch exactly as before.
+      const quota = new Error('QuotaExceededError');
+      const { ctx, newScene } = makeThrowingCtx(quota);
+
+      await expect(sceneCreateExecutor.execute({ name: 'Cave Level' }, ctx)).rejects.toBe(quota);
+      expect(newScene).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('aborts before touching persisted scenes', async () => {

@@ -5,9 +5,11 @@
 
 import { z } from 'zod';
 import type { ToolHandler, ExecutionResult, InputBinding } from './types';
-import { parseArgs } from './types';
+import { parseArgs, sceneDispatchThrewResult } from './types';
 import { captureActiveScene, type SceneCapture } from '@/lib/scenes/captureScene';
 import { newSceneExportRequestId } from '@/lib/engine/sceneExportWire';
+import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
+import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
 import { requestSceneExport } from '@/stores/slices/sceneSlice';
 import { validateSceneFile, type SceneValidation } from '@/lib/scenes/sceneValidation';
 import { COMPLETION_MODE_INFO } from '@/lib/playMode/completionMode';
@@ -85,15 +87,44 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
     // The scene currently on screen is untouched when the load is rejected, so
     // this must not strand the editor: the failure is reported back to the
     // assistant below and saving of the current scene stays enabled (#10056).
-    if (ctx.store.loadScene(p.data.json, { rejectionStrandsEditor: false }) === false) {
+    let accepted: boolean;
+    try {
+      accepted = ctx.store.loadScene(p.data.json, { rejectionStrandsEditor: false });
+    } catch (error) {
+      // A rejection returns `false`; a THROWN dispatch is re-raised after the
+      // store has locked saving (#10079, #10202). "Try again" is the wrong
+      // advice for a viewport that may be half-applied, so this says reload —
+      // parity with `switch_scene` below. Only the typed engine throw carries
+      // that lockout: anything else set none, so it goes to the executor's
+      // generic catch as the plain failure it is (#10202 review).
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
+      return sceneDispatchThrewResult('The scene could not be opened', error);
+    }
+    if (accepted === false) {
       return { success: false, error: 'The scene was not loaded. Check its prefab metadata and engine readiness, then try again.' };
     }
     return { success: true, result: { message: 'Scene load triggered' } };
   },
 
   new_scene: async (_args, ctx): Promise<ExecutionResult> => {
-    if (ctx.store.newScene() === false) {
-      return { success: false, error: 'The engine did not accept a new scene. The current scene is unchanged.' };
+    let accepted: boolean;
+    try {
+      accepted = ctx.store.newScene();
+    } catch (error) {
+      // Same as `load_scene`: a thrown `new_scene` can have despawned the
+      // outgoing scene mid-apply, so "unchanged" below would be a lie (#10202)
+      // — and the same narrowing, for the same reason.
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
+      return sceneDispatchThrewResult('A new scene could not be created', error);
+    }
+    if (accepted === false) {
+      // By cause: a `false` is also "no engine attached yet" and "browser
+      // storage refused the registry write before the dispatch", neither of
+      // which the engine did (#10202 review). Same words as the toolbar.
+      return {
+        success: false,
+        error: `${describeNewSceneRefusal(ctx.store.newSceneRefusal())} The current scene is unchanged.`,
+      };
     }
     return { success: true, result: { message: 'New scene created' } };
   },
@@ -237,16 +268,25 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       // outgoing scene's unsaved work, parity with the store's `switchScene`.
       // The persist writes the already-captured outgoing data, not a fresh
       // export of the wrecked engine scene, so it is safe under the lockout
-      // both `loadScene` and `newScene` have by now set.
+      // both `loadScene` and `newScene` have by now set — or, for a throw
+      // that was NOT the engine's (no lockout), simply correct. That one is
+      // rethrown: only the typed engine throw may be reported as an engine
+      // error with saving locked (#10202 review).
       saveProjectScenes(project, ctx.store.projectId);
-      return {
-        success: false,
-        error: `The scene could not be opened due to an engine error (${error instanceof Error ? error.message : String(error)}). Reload the editor before continuing — the viewport can no longer be trusted and saving is locked to protect your stored scene.`,
-      };
+      if (!(error instanceof EngineDispatchThrewError)) throw error;
+      return sceneDispatchThrewResult('The scene could not be opened', error);
     }
     if (accepted === false) {
       saveProjectScenes(project, ctx.store.projectId);
-      return { success: false, error: 'The engine rejected the scene switch. The current scene is unchanged.' };
+      // The `newScene()` fallback refuses for reasons that are not the
+      // engine's (no engine attached, a storage write refused), so its `false`
+      // is reported by cause; a refused `loadScene` is the engine's answer.
+      return {
+        success: false,
+        error: result.sceneToLoad
+          ? 'The engine rejected the scene switch. The current scene is unchanged.'
+          : `${describeNewSceneRefusal(ctx.store.newSceneRefusal())} The scene switch was cancelled, and the current scene is unchanged.`,
+      };
     }
     saveProjectScenes(result.project, ctx.store.projectId);
     ctx.store.setScenes(

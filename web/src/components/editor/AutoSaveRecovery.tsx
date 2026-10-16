@@ -5,6 +5,7 @@ import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
 import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
+import { sceneDispatchFailureMessage } from '@/lib/scenes/engineDispatchThrew';
 import { showError } from '@/lib/toast';
 import {
   loadAutoSaveEntry,
@@ -97,7 +98,21 @@ export function AutoSaveRecovery() {
     // untouched when the restore is rejected, so this must not raise the
     // save-locking `sceneLoadError` banner over a working editor — the toast
     // below is the whole report and the current scene stays savable (#10056).
-    if (loadScene(entry.sceneJson, { rejectionStrandsEditor: false }) === false) {
+    let accepted: boolean;
+    try {
+      accepted = loadScene(entry.sceneJson, { rejectionStrandsEditor: false });
+    } catch (error) {
+      // A THROWN dispatch is re-raised after `loadScene` has locked saving
+      // (#10079, #10202): the restore may have half-applied over the current
+      // scene, so "try again" would be the wrong advice and the backup is now
+      // the only trustworthy copy — keep the entry AND the banner. The helper
+      // narrows the reload-and-locked sentence to the engine throw; a plain
+      // error is reported as what it is. Without this catch the throw escaped
+      // the click handler as an uncaught error.
+      showError(sceneDispatchFailureMessage('The saved scene could not be restored', error));
+      return;
+    }
+    if (accepted === false) {
       showError('The saved scene could not be restored. Its data may be invalid or the engine is not ready — try again.');
       return;
     }

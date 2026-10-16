@@ -101,6 +101,9 @@ describe('adjustment markers across a scene replacement', () => {
       primaryGameComponents: null,
       primaryId: null,
       gameComponentAdjustments: {},
+      // A thrown scene command now locks saving (#10202); do not let one
+      // test's lockout leak into the next.
+      sceneLoadError: null,
     });
     clearStagedSceneAudio();
   });
@@ -307,7 +310,10 @@ describe('adjustment markers across a scene replacement', () => {
     ] as const)('a %s whose engine call throws drops them', (command, replace) => {
       expect(platformThenAttach({ handle_command: throwsOn(command) })).toEqual({ speed: speedClamp });
 
-      replace();
+      // The store re-raises the caught throw after locking saving (#10202);
+      // the markers are dropped by the tracked dispatcher before that, on the
+      // way out of the dispatch, which is what this test is about.
+      expect(replace).toThrow('serialize failed');
 
       expect(useEditorStore.getState().gameComponentAdjustments).toEqual({});
     });
