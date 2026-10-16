@@ -108,11 +108,15 @@ check_audit_toml() {
 
   # Each id's comment block: the contiguous `  #` lines directly above it must
   # name the advisory, and carry unfixable:, exposure:, lift when: and a
-  # tracking issue (#NNNN).
+  # tracking issue (#NNNN) INSIDE the lift-when section. That section runs from
+  # the `  # lift when:` line to the next keyed line (`unfixable:`/`exposure:`)
+  # or the end of the block, so an issue cited only in exposure: does not stand
+  # in for the one the lift condition is tracked by. Issue references elsewhere
+  # in the block are fine in addition.
   local id
   while IFS= read -r id; do
     [[ -z "$id" ]] && continue
-    local block
+    local block lift_section
     block="$(awk -v id="\"$id\"" '
       index($0, id) == 3 { print buf; exit }
       /^  #/ { buf = buf "\n" $0; next }
@@ -126,8 +130,13 @@ check_audit_toml() {
         echo "$id: comment block lacks '$key'"
       fi
     done
-    if ! grep -qE '#[0-9]{3,6}' <<<"$block"; then
-      echo "$id: comment block names no tracking issue (#NNNN)"
+    lift_section="$(awk '
+      /^  # lift when:/ { p = 1; print; next }
+      p && /^  # (unfixable|exposure):/ { p = 0 }
+      p { print }
+    ' <<<"$block")"
+    if ! grep -qE '#[0-9]{3,6}' <<<"$lift_section"; then
+      echo "$id: comment block names no tracking issue (#NNNN) inside its 'lift when:' section"
     fi
   done <<<"$ids"
 
@@ -269,6 +278,20 @@ if grep -q "lacks 'lift when:'" <<<"$(check_audit_toml "$tmp/no-lift.toml")"; th
 
 write_fixture "$tmp/no-issue.toml" "${good_lines[0]}" "${good_lines[1]}" "${good_lines[2]}" "lift when: a bevy_image release requires ruzstd >= 0.9.1."
 if grep -q "names no tracking issue" <<<"$(check_audit_toml "$tmp/no-issue.toml")"; then ok "refuses an entry without a tracking issue"; else bad "accepted an entry without a tracking issue"; fi
+
+# An issue cited only in exposure: is not the lift condition's tracking issue.
+write_fixture "$tmp/issue-in-exposure-only.toml" "${good_lines[0]}" "${good_lines[1]}" "exposure: only editor-side imports; narrowed by #10396." "lift when: a bevy_image release requires ruzstd >= 0.9.1."
+if grep -q "names no tracking issue" <<<"$(check_audit_toml "$tmp/issue-in-exposure-only.toml")"; then ok "refuses an entry whose only issue is cited in exposure:, none in lift when:"; else bad "accepted an issue cited only in exposure: as the tracking issue"; fi
+
+# The same holds when lift when: comes FIRST and exposure: (with the issue)
+# follows: the lift-when section ends at the next keyed line.
+write_fixture "$tmp/lift-before-exposure.toml" "${good_lines[0]}" "${good_lines[1]}" "lift when: a bevy_image release requires ruzstd >= 0.9.1." "exposure: only editor-side imports; narrowed by #10396."
+if grep -q "names no tracking issue" <<<"$(check_audit_toml "$tmp/lift-before-exposure.toml")"; then ok "refuses an issue in an exposure: that follows a lift when: with none"; else bad "accepted an issue in a later exposure: as the lift condition's tracking issue"; fi
+
+# Issue references elsewhere are fine IN ADDITION, and a continuation line of
+# the lift-when section counts as inside it.
+write_fixture "$tmp/issue-in-both.toml" "${good_lines[0]}" "${good_lines[1]}" "exposure: only editor-side imports; narrowed by #10396." "lift when: a bevy_image release requires ruzstd >= 0.9.1." "  Tracking: #10393."
+if [[ -z "$(check_audit_toml "$tmp/issue-in-both.toml")" ]]; then ok "accepts extra issue references elsewhere and a tracking line continuing lift when:"; else bad "rejects an entry whose lift when: continuation carries the issue: $(check_audit_toml "$tmp/issue-in-both.toml")"; fi
 
 write_fixture "$tmp/no-name.toml" "unfixable: x." "exposure: y." "lift when: z. Tracking: #10393."
 if grep -q "does not name the advisory" <<<"$(check_audit_toml "$tmp/no-name.toml")"; then ok "refuses a comment block that does not name its advisory"; else bad "accepted a comment block that does not name its advisory"; fi
