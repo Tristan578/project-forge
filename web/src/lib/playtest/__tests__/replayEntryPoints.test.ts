@@ -82,24 +82,36 @@ function engineModeBecomes(mode: string) {
   for (const listener of storeSubscribers) listener(storeState, prev);
 }
 
+type ModeRequest = 'pause' | 'resume' | 'stop';
+
 /**
  * A simulated engine behind the real boundary, frames published by hand. Its
  * `pause` / `resume` move the store's engineMode exactly as the real engine's
- * ENGINE_MODE_CHANGED does — delivered to the runner's watch from INSIDE the
- * dispatch, the worst case for telling the runner's own pause from the
- * toolbar's. The toolbar is `engineModeBecomes` by hand (plus `paused` here).
+ * ENGINE_MODE_CHANGED does: by default from INSIDE the dispatch, the worst
+ * case for telling the runner's own pause from the toolbar's by ORDER; with
+ * `queuedModes`, the real engine's delivery — the command is queued, the
+ * response is success, and the next `frame()` drains every queued request in
+ * order, applying the valid ones (Pause from Play, Resume from Paused, Stop
+ * from either) and moving the store once per applied transition, before it
+ * publishes a tick (which only a frame spent in Play does). The toolbar's
+ * commands take the same route as the runner's.
  */
-function makeEngine(options: { acceptPin?: boolean } = {}) {
+function makeEngine(options: { acceptPin?: boolean; queuedModes?: boolean } = {}) {
   const acceptPin = options.acceptPin ?? true;
+  const queuedModes = options.queuedModes ?? false;
   const canvas = document.createElement('canvas');
   canvas.id = EDITOR_CANVAS_ID;
   document.body.append(canvas);
   const commandLog: string[] = [];
   const keyLog: string[] = [];
+  /** Every mode the store was moved to, in order. */
+  const modeLog: string[] = [];
+  const queue: ModeRequest[] = [];
   const held = new Set<string>();
   let x = 0;
   let coin = true;
   let frames = 0;
+  let mode: 'play' | 'paused' | 'edit' = 'play';
   let paused = false;
   canvas.addEventListener('keydown', (e) => {
     keyLog.push(`down ${e.code}`);
@@ -109,33 +121,31 @@ function makeEngine(options: { acceptPin?: boolean } = {}) {
     keyLog.push(`up ${e.code}`);
     held.delete(e.code);
   });
+  /** `apply_mode_change_requests` for one request: applied only from its source mode, reported once if so. */
+  const apply = (request: ModeRequest) => {
+    if (request === 'pause' && mode === 'play') mode = 'paused';
+    else if (request === 'resume' && mode === 'paused') mode = 'play';
+    else if (request === 'stop' && mode !== 'edit') mode = 'edit';
+    else return;
+    paused = mode === 'paused';
+    modeLog.push(mode);
+    engineModeBecomes(mode);
+  };
+  const submit = (request: ModeRequest) => {
+    if (queuedModes) queue.push(request);
+    else apply(request);
+  };
   const dispatch: EngineDispatch = (command): CommandResponse => {
     commandLog.push(command);
     if (command === 'pin_frame_rate') return { success: acceptPin, error: acceptPin ? undefined : 'refused' };
-    if (command === 'pause') {
-      paused = true;
-      engineModeBecomes('paused');
-    }
-    if (command === 'resume') {
-      paused = false;
-      engineModeBecomes('play');
-    }
+    if (command === 'pause' || command === 'resume') submit(command);
     return { success: true };
   };
   /** The editor toolbar: the engine's mode changes without the runner asking. */
   const toolbar = {
-    pause: () => {
-      paused = true;
-      engineModeBecomes('paused');
-    },
-    resume: () => {
-      paused = false;
-      engineModeBecomes('play');
-    },
-    stop: () => {
-      paused = false;
-      engineModeBecomes('edit');
-    },
+    pause: () => submit('pause'),
+    resume: () => submit('resume'),
+    stop: () => submit('stop'),
   };
   const snapshot = (): PlayTickSnapshot => {
     const entities: PlayTickSnapshot['entities'] = { [PLAYER]: { position: [x, 0, 0] } };
@@ -146,13 +156,16 @@ function makeEngine(options: { acceptPin?: boolean } = {}) {
       elapsedMs: frames * 16,
     };
   };
-  /** One engine frame: let the runner subscribe, publish, let it continue. */
+  /** One engine frame: let the runner subscribe, drain the queued mode requests, publish (in Play), let it continue. */
   const frame = async () => {
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
-    if (!paused && held.has('KeyD')) x += 0.05;
-    if (coin && x >= 0.3) coin = false;
-    frames += 1;
-    publishPlayTick(snapshot());
+    for (const request of queue.splice(0)) apply(request);
+    if (mode === 'play') {
+      if (held.has('KeyD')) x += 0.05;
+      if (coin && x >= 0.3) coin = false;
+      frames += 1;
+      publishPlayTick(snapshot());
+    }
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
   };
   /** Publish frames until `done` settles. */
@@ -175,6 +188,7 @@ function makeEngine(options: { acceptPin?: boolean } = {}) {
     dispatch,
     commandLog,
     keyLog,
+    modeLog,
     frame,
     drive,
     toolbar,
@@ -432,6 +446,65 @@ describe('leaving Play mode — or pausing or resuming it from the toolbar — c
     expect(engine.commandLog).toEqual(['pin_frame_rate', 'pause', 'unpin_frame_rate']);
     expect(engine.keyLog).toEqual(['down KeyD', 'up KeyD']);
     expect(engine.isPaused()).toBe(false);
+    expect(getActiveReplaySession()).toBeNull();
+    expect(storeSubscribers.size).toBe(0);
+  });
+
+  it("with the engine's real delivery (mode commands queued, applied in the next frame's drain), the runner's own Pause then Resume within one frame completes: the store hears 'paused' and 'play' in one drain, AFTER the resume", async () => {
+    // The real engine answers `pause` with success and applies it a frame
+    // later; a replay Resume clicked within that frame queues `resume`
+    // behind it, and the drain then moves the store to 'paused' and to
+    // 'play' in one go. Keyed on a "paused by the runner" flag, the runner
+    // read that 'paused' as the toolbar's and cancelled its own run.
+    const engine = makeEngine({ queuedModes: true });
+    const session = startReplaySession(
+      'manual',
+      { trace: holdRightTrace(), ...request },
+      { pauseAtTick: 1 },
+      { dispatch: engine.dispatch },
+    );
+    await engine.frame(); // warm-up
+    await engine.frame(); // tick 0 seen through: the armed pause settles at boundary 1
+    await flush();
+    expect(session.handle.getProgress().state).toBe('paused');
+    expect(engine.commandLog).toEqual(['pin_frame_rate', 'pause']);
+    expect(storeState.engineMode, 'queued, not applied: the store has not heard it').toBe('play');
+    expect(engine.isPaused()).toBe(false);
+
+    expect(session.handle.resume()).toBe(true);
+    await flush();
+    expect(session.handle.getProgress().state).toBe('running');
+    expect(engine.commandLog).toEqual(['pin_frame_rate', 'pause', 'resume']);
+    expect(engine.isHeld('KeyD'), 'tick 1 re-pressed the held action').toBe(true);
+
+    await engine.frame(); // the drain: 'paused' then 'play', then the tick
+    expect(engine.modeLog).toEqual(['paused', 'play']);
+    expect(storeState.engineMode).toBe('play');
+    expect(session.handle.getProgress().state, "both modes were the runner's own").toBe('running');
+    expect(getActiveReplaySession()).toBe(session);
+
+    const result = await engine.drive(session.handle.result);
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    expect(result.outcome.verdict).toBe('passed');
+    expect(engine.commandLog).toEqual(['pin_frame_rate', 'pause', 'resume', 'unpin_frame_rate']);
+    expect(storeSubscribers.size).toBe(0);
+  });
+
+  it("with the engine's real delivery, a toolbar Pause is heard a frame later and cancels with 'engine-paused'; no tick follows it", async () => {
+    const engine = makeEngine({ queuedModes: true });
+    const session = startReplaySession('manual', { trace: holdRightTrace(), ...request }, {}, { dispatch: engine.dispatch });
+    await engine.frame(); // warm-up
+    await engine.frame(); // tick 0 seen through; tick 1 in flight
+    engine.toolbar.pause();
+    expect(session.handle.getProgress().state, 'queued, nothing heard yet').toBe('running');
+    await engine.frame(); // the drain reports 'paused'; a paused engine publishes no tick
+    expect(engine.modeLog).toEqual(['paused']);
+    const result = await settlesWithin(session.handle.result);
+    expect(result).toEqual({ status: 'cancelled', ticksReplayed: 1, reason: 'engine-paused' });
+    expect(engine.commandLog).toEqual(['pin_frame_rate', 'unpin_frame_rate']);
+    expect(engine.isPaused()).toBe(true);
+    expect(engine.isHeld('KeyD')).toBe(false);
     expect(getActiveReplaySession()).toBeNull();
     expect(storeSubscribers.size).toBe(0);
   });

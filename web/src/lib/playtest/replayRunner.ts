@@ -56,12 +56,25 @@
  * 'engine-resumed', without dispatching a resume at a game that is already
  * running; the alternative was the trace continuing, on the replay's own
  * Resume, into a world that had moved on without it — a deterministic verdict
- * that was silently wrong. The runner's OWN pause and resume never cancel:
- * `runtimePausedByRunner` is set BEFORE the pause command is dispatched and
- * cleared BEFORE the resume is, so the mode the engine reports back is
- * attributed correctly whether it arrives inside the dispatch (unit fakes) or
- * a frame later (the real engine). The creator's own Cancel carries no
- * reason. The watch is removed on every exit path.
+ * that was silently wrong. The runner's OWN pause and resume never cancel.
+ * Its own pause is told from the toolbar's by COUNTING, not by the current
+ * state: the runner counts a pending own pause before it dispatches `pause`,
+ * and a 'paused' that arrives consumes one before it can mean anything
+ * else. A flag ("the runtime is paused by the runner right now") was not
+ * enough, because the real engine QUEUES mode commands and applies every
+ * queued one in the next frame's drain, emitting one mode per applied
+ * transition (`bridge/core_systems.rs`, `apply_mode_change_requests`): a
+ * replay Resume issued within one frame of its Pause had already cleared
+ * that flag when the engine finally reported the 'paused' the pause
+ * produced, and the runner cancelled its own run as a toolbar Pause. The
+ * count holds whether the mode arrives inside the dispatch (unit fakes, the
+ * panel test's store), a microtask later, or in one coalesced drain a frame
+ * on (the real engine; the queue-and-drain fake in
+ * `replayEngineModeWatch.test.ts`). Its own resume needs no count: the flag
+ * is cleared before `resume` is dispatched, and the runner cannot pause
+ * again before the frame that reports that resume's 'play' has run. The
+ * creator's own Cancel carries no reason. The watch is removed on every
+ * exit path.
  *
  * WHY THIS IS NOT `gameplayBot.ts`. `simulatePlaytest` in `lib/ai/gameplayBot.ts`
  * is a HEURISTIC: it inspects the scene graph statically and produces an
@@ -608,12 +621,28 @@ export function startReplay(
     let ticksReplayed = 0;
     /**
      * True from just BEFORE the runner dispatches the engine's pause to just
-     * BEFORE it dispatches the resume. Flipped on that side of each await so
-     * the mode the engine reports back is attributed correctly whether it is
-     * delivered inside the dispatch or a frame later: the engine-mode watch
-     * reads it to tell the runner's own pause from the toolbar's.
+     * BEFORE it dispatches the resume: whether the cancel and failure paths
+     * owe the runtime a resume. NOT what tells the runner's own mode changes
+     * from the toolbar's — see the two counts below.
      */
     let runtimePausedByRunner = false;
+    /**
+     * Own pauses the runner has dispatched and the engine has not yet
+     * reported; incremented just BEFORE each `pauseRuntime`, consumed by the
+     * next 'paused' the watch receives. A count, not the flag above: the
+     * real engine queues the commands and reports every applied transition
+     * in the next frame's drain, so a resume issued within one frame of the
+     * pause has cleared the flag before the pause's own 'paused' arrives
+     * (module header). A count the engine never answers — a pause it
+     * dropped because a Stop drained earlier in the same frame, or a
+     * dispatch that threw — is left at 1, harmlessly: in each of those
+     * cases the run is already over. The resume needs no count: the flag is
+     * cleared before `resume` is dispatched, and the runner cannot pause
+     * again until a tick has passed, which takes a frame, whose drain
+     * reports that resume's 'play' first — so an own 'play' always finds
+     * the flag clear, however the engine delivers it.
+     */
+    let ownPausesPending = 0;
     let pinnedByRunner = false;
     const engineInput: ReplayEngineInputEvidence = {
       available: false,
@@ -668,27 +697,42 @@ export function startReplay(
 
     const resumeRuntimeIfPaused = async (): Promise<void> => {
       if (!runtimePausedByRunner) return;
+      // Cleared BEFORE the dispatch, so the 'play' it produces — inside this
+      // call or a frame later — never reads as a toolbar Resume.
       runtimePausedByRunner = false;
       await env.resumeRuntime?.();
     };
 
     /**
-     * The engine-mode watch (module header). Reads the runner's own flags and
-     * cancels through `requestCancel`, so a run already cancelling, or over,
-     * ignores whatever the editor reports next; a mode it has no rule for
-     * (its own pause and resume, or 'play' while running) is ignored too.
+     * The engine-mode watch (module header). A 'paused' first settles
+     * against the runner's own pending pauses — one each — and only an
+     * UNACCOUNTED one is the toolbar's; a 'play' is the toolbar's only while
+     * the runtime is paused by the runner, which its own resume has already
+     * cleared. Cancels through `requestCancel`, so a run already cancelling,
+     * or over, ignores whatever the editor reports next; a 'play' while the
+     * runner is running (the engine running on as it was) is ignored too.
      */
     const onEngineMode = (mode: string): void => {
       if (TERMINAL_STATES.has(progress.state) || cancelRequested) return;
       if (mode === 'edit') {
         requestCancel('engine-stopped');
-      } else if (mode === 'paused' && !runtimePausedByRunner) {
+      } else if (mode === 'paused') {
+        if (ownPausesPending > 0) {
+          // The engine reporting the runner's own pause back — inside the
+          // dispatch, or in a later frame's drain, by which time the runner
+          // may already have resumed (the count outlives the flag).
+          ownPausesPending -= 1;
+          return;
+        }
         // The creator paused the game from the toolbar: its ticks have
         // stopped, and the runner must not wait two seconds to call that a
         // stalled engine. The runtime is LEFT paused — `resumeRuntimeIfPaused`
         // resumes only a runtime this runner paused, and it did not.
         requestCancel('engine-paused');
-      } else if (mode === 'play' && runtimePausedByRunner) {
+      } else if (mode === 'play') {
+        // The runner's own resume reported back, or the engine running on
+        // as it was: nothing to do.
+        if (!runtimePausedByRunner) return;
         // The creator resumed, from the toolbar, a game the runner had
         // paused: it is running with no replay input, so the trace cannot be
         // continued. It is already running — clear the flag FIRST so the
@@ -774,13 +818,17 @@ export function startReplay(
       if (cancelRequested) return false;
       if (!pauseRequested) return proceed();
       if (env.pauseRuntime) {
-        // Set BEFORE the dispatch: the engine's 'paused' may reach the mode
-        // watch from inside this very call, and must read as the runner's
-        // own. If the dispatch throws, the flag stays true and the failure
-        // path's resume is a best-effort guess at a runtime that may never
-        // have paused — acceptable: the engine refuses a stray resume
-        // harmlessly, and the refusal is logged, not reported.
+        // Both set BEFORE the dispatch: the engine's 'paused' may reach the
+        // mode watch from inside this very call (a store that mirrors the
+        // mode synchronously) or in the next frame's drain, after a resume
+        // has already cleared the flag — the count is what makes it read as
+        // the runner's own in both cases. If the dispatch throws, the flag
+        // stays true and the failure path's resume is a best-effort guess at
+        // a runtime that may never have paused — acceptable: the engine
+        // refuses a stray resume harmlessly, and the refusal is logged, not
+        // reported; the count it leaves behind dies with the run.
         runtimePausedByRunner = true;
+        ownPausesPending += 1;
         await env.pauseRuntime();
         if (cancelRequested) return false;
         if (!pauseRequested) {

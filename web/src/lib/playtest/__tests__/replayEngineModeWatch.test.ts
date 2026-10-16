@@ -18,7 +18,13 @@
  * and cancels, with a reason, on a change it did not make. These tests drive
  * a fake engine whose pause/resume report the mode back synchronously or a
  * microtask later, and a toolbar that changes the mode behind the runner's
- * back.
+ * back — and, in group (g), a fake with the REAL engine's delivery: mode
+ * commands queued by the dispatch and applied one frame later in a single
+ * drain that reports one mode per applied transition. That delivery is what
+ * made a flag ("paused by the runner right now") the wrong attribution: a
+ * replay Resume within one frame of its Pause cleared the flag before the
+ * pause's own 'paused' arrived, and the runner cancelled itself as a toolbar
+ * Pause. The runner counts its pending own pauses and resumes instead.
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -61,9 +67,9 @@ type Listener = (mode: string) => void;
  * resume the RUNNER dispatched, and a toolbar that pauses, resumes or stops
  * the game behind the runner's back. `modeDelivery` says how the engine
  * reports the mode its OWN pause/resume produce: not at all (the controller
- * test's fake), inside the dispatch (the panel test's store, the worst case
- * for the ordering), or a microtask later (closer to the real engine, which
- * answers one frame on).
+ * test's fake), inside the dispatch (the panel test's store), or a microtask
+ * later. Neither is the real engine's delivery — that is `makeQueuedEngine`
+ * below — but both must be attributed right too.
  */
 function makeFakeEngine(
   options: { acceptPin?: boolean; manualFrames?: boolean; modeDelivery?: 'none' | 'sync' | 'async' } = {},
@@ -202,6 +208,191 @@ function makeFakeEngine(
     isHeld: (code: string) => held.has(code),
     isRuntimePaused: () => runtimePaused,
   };
+}
+
+type QueuedModeRequest = 'pause' | 'resume' | 'stop';
+
+/**
+ * The REAL engine's delivery, which no `makeFakeEngine` mode models.
+ * `pause` / `resume` / `stop` are QUEUED by the dispatch — the response is
+ * success, so the boundary's `confirmed()` passes and the runner carries on —
+ * and the next frame's drain applies every queued request in order: Pause
+ * only from Play, Resume only from Paused, Stop from either, anything else
+ * dropped without a word; each APPLIED transition is reported at once, one
+ * mode per transition (`apply_mode_change_requests`, `engine/src/bridge/core_systems.rs`,
+ * delivered synchronously through `events::emit_engine_mode_changed`).
+ * Outside Play the engine publishes no play tick (`emit_play_tick_system`),
+ * so a frame that leaves it paused or stopped leaves the runner's awaited
+ * frame pending. Every frame is published by hand (`frame()`), or until a
+ * promise settles (`drive()`), so the order of dispatch, drain and tick is
+ * in the test, not in a timer.
+ */
+function makeQueuedEngine(options: { afterPauseDispatch?: () => void } = {}) {
+  const pendingFrames: Array<() => void> = [];
+  const queue: QueuedModeRequest[] = [];
+  const held = new Set<string>();
+  let mode: 'play' | 'paused' | 'edit' = 'play';
+  let playerX = 0;
+  let collectiblePresent = true;
+  let pauseCalls = 0;
+  let resumeCalls = 0;
+  const log: string[] = [];
+  const listeners = new Set<Listener>();
+  /** Modes that reached at least one listener. */
+  const delivered: string[] = [];
+  const emit = (next: string) => {
+    if (listeners.size > 0) delivered.push(next);
+    for (const listener of [...listeners]) listener(next);
+  };
+
+  /** One frame's `apply_mode_change_requests`: every queued request, in order, reported as applied. */
+  const drain = () => {
+    for (const request of queue.splice(0)) {
+      if (request === 'pause' && mode === 'play') mode = 'paused';
+      else if (request === 'resume' && mode === 'paused') mode = 'play';
+      else if (request === 'stop' && mode !== 'edit') mode = 'edit';
+      else {
+        log.push(`drop ${request}`);
+        continue;
+      }
+      log.push(`mode ${mode}`);
+      emit(mode);
+    }
+  };
+
+  const snapshot = (): ReplayObservation => {
+    const entities: ReplayObservation['entities'] = { [PLAYER]: { position: [playerX, 0, 0] } };
+    if (collectiblePresent) entities[COLLECTIBLE] = { position: [1, 0, 0] };
+    const moving = held.has('KeyD');
+    return { entities, input: { pressed: { move_right: moving }, axes: { move_right: moving ? 1 : 0 } } };
+  };
+
+  const env: ReplayEnvironment = {
+    resolveKeys: (actionName) => (actionName === 'move_right' ? ['KeyD'] : []),
+    pressKeys: (codes) => {
+      log.push(`press ${codes.join('+')}`);
+      for (const c of codes) held.add(c);
+    },
+    releaseKeys: (codes) => {
+      log.push(`release ${codes.join('+')}`);
+      for (const c of codes) held.delete(c);
+    },
+    // The next play tick — which only a frame spent in Play publishes.
+    advanceFrame: () =>
+      new Promise<void>((resolve) => {
+        pendingFrames.push(resolve);
+      }),
+    observe: snapshot,
+    playerEntityId: PLAYER,
+    collectibleEntityIds: [COLLECTIBLE],
+    pinFrameRate: (hz) => {
+      log.push(`pin ${hz}`);
+      return true;
+    },
+    unpinFrameRate: () => {
+      log.push('unpin');
+    },
+    pauseRuntime: () => {
+      pauseCalls += 1;
+      queue.push('pause');
+      log.push('dispatch pause');
+      // A control that lands after the dispatch and before the runner's
+      // continuation (an asynchronous boundary, or a control run from the
+      // dispatch's own task) — the withdraw path.
+      options.afterPauseDispatch?.();
+    },
+    resumeRuntime: () => {
+      resumeCalls += 1;
+      queue.push('resume');
+      log.push('dispatch resume');
+    },
+    subscribeEngineMode: (listener) => {
+      log.push('watch engine mode');
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+
+  /** One engine update: the drain first, then — in Play only — the simulation step and the play tick. */
+  const frame = async () => {
+    drain();
+    if (mode === 'play') {
+      if (held.has('KeyD')) playerX += 0.05;
+      if (collectiblePresent && playerX >= 1) collectiblePresent = false;
+      pendingFrames.shift()?.();
+    }
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+  };
+
+  /** Publish frames until `done` settles; a run that never does fails here, named, not at the test timeout. */
+  const drive = async <T,>(done: Promise<T>, maxFrames = 400): Promise<T> => {
+    let settled = false;
+    const tracked = done.then(
+      (value) => {
+        settled = true;
+        return value;
+      },
+      (error: unknown) => {
+        settled = true;
+        throw error;
+      },
+    );
+    for (let i = 0; i < maxFrames && !settled; i += 1) await frame();
+    if (!settled) throw new Error(`run still unsettled after ${maxFrames} frames (engine ${mode})`);
+    return tracked;
+  };
+
+  /** The editor toolbar: its commands are queued exactly like the runner's. */
+  const toolbar = {
+    pause: () => {
+      log.push('toolbar pause');
+      queue.push('pause');
+    },
+    resume: () => {
+      log.push('toolbar resume');
+      queue.push('resume');
+    },
+    stop: () => {
+      log.push('toolbar stop');
+      queue.push('stop');
+    },
+  };
+
+  return {
+    env,
+    log,
+    frame,
+    drive,
+    toolbar,
+    delivered,
+    listenerCount: () => listeners.size,
+    pendingFrameCount: () => pendingFrames.length,
+    queued: () => [...queue],
+    mode: () => mode,
+    pauseCalls: () => pauseCalls,
+    resumeCalls: () => resumeCalls,
+    isHeld: (code: string) => held.has(code),
+  };
+}
+
+/** Publish frames on the queued engine until the handle reports `state`; a run that ends first, or never gets there, fails here. */
+async function framesUntil(
+  engine: ReturnType<typeof makeQueuedEngine>,
+  handle: ReplayHandle,
+  state: ReplayRunState,
+  maxFrames = 50,
+): Promise<void> {
+  for (let i = 0; i < maxFrames; i += 1) {
+    const current = handle.getProgress().state;
+    if (current === state) return;
+    if (current === 'completed' || current === 'cancelled' || current === 'failed') {
+      throw new Error(`run ended in ${current} before reaching ${state}`);
+    }
+    await engine.frame();
+  }
+  throw new Error(`still ${handle.getProgress().state} after ${maxFrames} frames, not ${state}`);
 }
 
 /** Resolve once the handle reports `state`; reject if the run ends first. */
@@ -422,6 +613,233 @@ describe('the runner watches the editor engine mode (#10007)', () => {
       const result = await settlesWithin(handle);
       expect(result.status).toBe('completed');
       expect(engine.delivered).toEqual(['play']);
+    });
+  });
+
+  describe("(g) the real engine's delivery: queued by the dispatch, applied one frame later in a single drain, one mode per applied transition", () => {
+    it("the runner's own Pause then its own Resume within one engine frame: the drain reports 'paused' and 'play' together, AFTER the resume — the run completes", async () => {
+      // The regression a flag had: at the boundary the runner dispatched
+      // `pause` and announced 'paused'; the replay's Resume cleared the
+      // "paused by the runner" flag and dispatched `resume` before the
+      // engine had applied the pause; the next frame's drain then delivered
+      // 'paused' with the flag down, and the runner cancelled its own run
+      // as a toolbar Pause ('engine-paused') while the game ran on.
+      const engine = makeQueuedEngine();
+      const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
+      await framesUntil(engine, handle, 'paused');
+      expect(handle.getProgress().tick).toBe(3);
+      expect(engine.log.slice(-2)).toEqual(['release KeyD', 'dispatch pause']);
+      expect(engine.mode(), 'the pause is queued, not applied: the engine has not reported it').toBe('play');
+      expect(engine.delivered).toEqual([]);
+
+      // The replay's Resume lands within the same engine frame (the panel's
+      // button, `__FORGE_REPLAY_CONTROL.control(id, 'resume')`): the runner
+      // dispatches the resume behind the still-queued pause and presses
+      // tick 3's key.
+      expect(handle.resume()).toBe(true);
+      await vi.waitFor(() => expect(engine.pendingFrameCount()).toBe(1));
+      expect(handle.getProgress().state).toBe('running');
+      expect(engine.queued()).toEqual(['pause', 'resume']);
+      expect(engine.log.slice(-3)).toEqual(['dispatch pause', 'dispatch resume', 'press KeyD']);
+
+      // One drain applies both and reports both — the runner's own, in order.
+      await engine.frame();
+      expect(engine.delivered).toEqual(['paused', 'play']);
+      expect(engine.log.slice(-3)).toEqual(['press KeyD', 'mode paused', 'mode play']);
+      expect(handle.getProgress().state, 'not cancelled: both modes were the runner\'s own').toBe('running');
+      expect(engine.mode()).toBe('play');
+      expect(engine.isHeld('KeyD')).toBe(true);
+
+      const result = await engine.drive(handle.result);
+      expect(result.status).toBe('completed');
+      if (result.status !== 'completed') return;
+      expect(result.outcome.verdict).toBe('passed');
+      expect(result.outcome.ticksReplayed).toBe(TICKS);
+      expect(engine.pauseCalls()).toBe(1);
+      expect(engine.resumeCalls()).toBe(1);
+      expect(engine.log[engine.log.length - 1]).toBe('unpin');
+      expect(engine.listenerCount()).toBe(0);
+    });
+
+    it("a Pause withdrawn after its dispatch and before the engine reports it (resume during 'pausing'): the drain's 'paused' and 'play' are the runner's own — the run completes", async () => {
+      let handle: ReplayHandle | null = null;
+      let stateAtWithdraw: ReplayRunState | null = null;
+      let withdrew: boolean | null = null;
+      const engine = makeQueuedEngine({
+        afterPauseDispatch: () => {
+          stateAtWithdraw = handle?.getProgress().state ?? null;
+          withdrew = handle?.resume() ?? null;
+        },
+      });
+      handle = startReplay(moveRightTrace(), engine.env);
+      await framesUntil(engine, handle, 'running');
+      await engine.frame(); // tick 0 seen through
+      await engine.frame(); // tick 1 seen through; tick 2 in flight
+      expect(handle.getProgress().tick).toBe(2);
+      expect(handle.pause()).toBe(true);
+      expect(handle.getProgress().state).toBe('pausing');
+
+      // Tick 2 seen through; at boundary 3 the runner releases the key and
+      // dispatches `pause`, and the resume lands right after the dispatch.
+      await engine.frame();
+      expect(stateAtWithdraw).toBe('pausing');
+      expect(withdrew).toBe(true);
+      expect(handle.getProgress().state).toBe('running');
+      expect(engine.queued()).toEqual(['pause', 'resume']);
+      expect(engine.log.slice(-4)).toEqual(['release KeyD', 'dispatch pause', 'dispatch resume', 'press KeyD']);
+      expect(engine.delivered).toEqual([]);
+      await vi.waitFor(() => expect(engine.pendingFrameCount()).toBe(1)); // tick 3's frame in flight
+
+      await engine.frame(); // the drain reports both, then the tick for tick 3
+      expect(engine.delivered).toEqual(['paused', 'play']);
+      expect(handle.getProgress().state).toBe('running');
+      expect(handle.getProgress().tick).toBe(4);
+
+      const result = await engine.drive(handle.result);
+      expect(result.status).toBe('completed');
+      if (result.status !== 'completed') return;
+      expect(result.outcome.verdict).toBe('passed');
+      expect(engine.pauseCalls()).toBe(1);
+      expect(engine.resumeCalls()).toBe(1);
+      expect(engine.listenerCount()).toBe(0);
+    });
+
+    it("once the runner's own Pause and Resume have been reported, a toolbar Pause is still the toolbar's: cancelled with 'engine-paused'", async () => {
+      // The own pause was CONSUMED by its report, not merely matched: a
+      // count that never came back down would swallow this one.
+      const engine = makeQueuedEngine();
+      const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
+      await framesUntil(engine, handle, 'paused');
+      expect(handle.resume()).toBe(true);
+      await vi.waitFor(() => expect(engine.pendingFrameCount()).toBe(1));
+      await engine.frame(); // 'paused' and 'play' reported, both the runner's; tick 3
+      expect(engine.delivered).toEqual(['paused', 'play']);
+      await engine.frame(); // tick 4
+      await engine.frame(); // tick 5
+      expect(handle.getProgress()).toMatchObject({ state: 'running', tick: 6 });
+
+      engine.toolbar.pause();
+      await engine.frame();
+      expect(engine.delivered).toEqual(['paused', 'play', 'paused']);
+      const result = await settlesWithin(handle, 500);
+      expect(result).toEqual({ status: 'cancelled', ticksReplayed: 6, reason: 'engine-paused' });
+      expect(engine.pauseCalls()).toBe(1);
+      expect(engine.resumeCalls(), "the runner's one resume; none for the toolbar's pause").toBe(1);
+      expect(engine.mode()).toBe('paused');
+      expect(engine.listenerCount()).toBe(0);
+    });
+
+    it("a toolbar Pause, reported by the next frame's drain: cancelled with 'engine-paused', no tick follows, the game left paused", async () => {
+      const engine = makeQueuedEngine();
+      const handle = startReplay(moveRightTrace(), engine.env);
+      await framesUntil(engine, handle, 'running');
+      for (let i = 0; i < 3; i += 1) await engine.frame();
+      expect(handle.getProgress().tick).toBe(3);
+      expect(engine.pendingFrameCount(), "tick 3's frame is in flight").toBe(1);
+
+      engine.toolbar.pause();
+      expect(handle.getProgress().state, 'queued, not yet reported: nothing to act on yet').toBe('running');
+      await engine.frame(); // the drain applies it and reports 'paused'; a paused engine publishes no tick
+      expect(engine.delivered).toEqual(['paused']);
+      expect(engine.pendingFrameCount(), 'the awaited frame was abandoned, never completed').toBe(1);
+      const result = await settlesWithin(handle, 500);
+      expect(result).toEqual({ status: 'cancelled', ticksReplayed: 3, reason: 'engine-paused' });
+      expect(engine.pauseCalls()).toBe(0);
+      expect(engine.resumeCalls(), "the creator's pause stands: no resume is queued at it").toBe(0);
+      expect(engine.queued()).toEqual([]);
+      expect(engine.mode()).toBe('paused');
+      expect(engine.isHeld('KeyD')).toBe(false);
+      expect(engine.log[engine.log.length - 1]).toBe('unpin');
+      expect(engine.listenerCount()).toBe(0);
+    });
+
+    it("a toolbar Resume queued in the same frame as the runner's own Pause: the drain reports 'paused' (the runner's) then 'play' (the toolbar's) — cancelled with 'engine-resumed', no resume dispatched", async () => {
+      const engine = makeQueuedEngine();
+      const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
+      await framesUntil(engine, handle, 'paused');
+      expect(engine.mode(), "the runner's pause is still queued").toBe('play');
+
+      engine.toolbar.resume();
+      expect(engine.queued()).toEqual(['pause', 'resume']);
+      await engine.frame();
+      expect(engine.delivered).toEqual(['paused', 'play']);
+      const result = await settlesWithin(handle, 500);
+      expect(result).toEqual({ status: 'cancelled', ticksReplayed: 3, reason: 'engine-resumed' });
+      expect(engine.resumeCalls(), 'the game is already running: the runner must not resume it again').toBe(0);
+      expect(engine.queued()).toEqual([]);
+      expect(engine.mode()).toBe('play');
+      expect(engine.isHeld('KeyD')).toBe(false);
+      expect(engine.log[engine.log.length - 1]).toBe('unpin');
+      expect(engine.listenerCount()).toBe(0);
+    });
+
+    it("a toolbar Resume after the engine applied the runner's Pause: cancelled with 'engine-resumed', no resume dispatched", async () => {
+      const engine = makeQueuedEngine();
+      const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
+      await framesUntil(engine, handle, 'paused');
+      await engine.frame(); // the drain applies the runner's pause and reports it
+      expect(engine.delivered).toEqual(['paused']);
+      expect(engine.mode()).toBe('paused');
+      expect(handle.getProgress().state, "the runner's own pause, reported a frame later, does not cancel").toBe('paused');
+
+      engine.toolbar.resume();
+      await engine.frame();
+      expect(engine.delivered).toEqual(['paused', 'play']);
+      const result = await settlesWithin(handle, 500);
+      expect(result).toEqual({ status: 'cancelled', ticksReplayed: 3, reason: 'engine-resumed' });
+      expect(engine.resumeCalls()).toBe(0);
+      expect(engine.queued()).toEqual([]);
+      expect(engine.mode()).toBe('play');
+      expect(engine.log[engine.log.length - 1]).toBe('unpin');
+      expect(engine.listenerCount()).toBe(0);
+    });
+
+    it("Stop queued ahead of the runner's own Pause in one drain: cancelled with 'engine-stopped'; the pause the engine dropped leaves a count nothing reads again", async () => {
+      const engine = makeQueuedEngine();
+      const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
+      // Stop lands once tick 2 is seen through — BEFORE the runner reaches
+      // boundary 3 and dispatches its pause behind it.
+      let stopped = false;
+      handle.subscribe((progress) => {
+        if (!stopped && progress.state === 'running' && progress.tick === 3) {
+          stopped = true;
+          engine.toolbar.stop();
+        }
+      });
+      await framesUntil(engine, handle, 'paused');
+      expect(stopped).toBe(true);
+      expect(engine.queued()).toEqual(['stop', 'pause']);
+
+      await engine.frame(); // Stop applied and reported; the pause is dropped outside Play
+      expect(engine.delivered).toEqual(['edit']);
+      expect(engine.log).toContain('drop pause');
+      const result = await settlesWithin(handle, 500);
+      expect(result).toEqual({ status: 'cancelled', ticksReplayed: 3, reason: 'engine-stopped' });
+      // The cancel path still offers its best-effort resume for the runtime
+      // it believes it paused; the stopped engine drops that too.
+      expect(engine.queued()).toEqual(['resume']);
+      await engine.frame();
+      expect(engine.log[engine.log.length - 1]).toBe('drop resume');
+      expect(engine.delivered).toEqual(['edit']);
+      expect(handle.getProgress().state).toBe('cancelled');
+      expect(engine.listenerCount()).toBe(0);
+    });
+
+    it("the creator's own Cancel while the runner's Pause is still queued: the cancel's resume queues behind it, one drain applies both, the game ends running, no reason", async () => {
+      const engine = makeQueuedEngine();
+      const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
+      await framesUntil(engine, handle, 'paused');
+      expect(handle.cancel()).toBe(true);
+      const result = await settlesWithin(handle, 500);
+      expect(result).toEqual({ status: 'cancelled', ticksReplayed: 3 });
+      expect(result).not.toHaveProperty('reason');
+      expect(engine.queued()).toEqual(['pause', 'resume']);
+      expect(engine.listenerCount(), 'the watch is gone before the drain reports either').toBe(0);
+      await engine.frame();
+      expect(engine.log.slice(-2)).toEqual(['mode paused', 'mode play']);
+      expect(engine.delivered).toEqual([]);
+      expect(engine.mode()).toBe('play');
+      expect(handle.getProgress().state).toBe('cancelled');
     });
   });
 
