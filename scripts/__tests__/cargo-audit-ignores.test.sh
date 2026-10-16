@@ -2,25 +2,33 @@
 # Pin for engine/.cargo/audit.toml — the cargo-audit ignore list.
 #
 # WHY THIS SUITE EXISTS
-# `cargo audit` reads `.cargo/audit.toml` from its working directory, and the
-# Quality Gates job runs it with `working-directory: engine`, so an id in that
-# file silences the advisory on every CI run from then on. That is the right
-# tool for an advisory no relock can fix (RUSTSEC-2026-0344, ruzstd pinned by
-# bevy_image 0.19.1's `^0.8`, #10393) and the wrong tool for everything else.
-# A silenced advisory is invisible by construction, so the file has to be the
-# loud part: every id must carry, in the comment block directly above it, why
-# it is unfixable, what the exposure is, and when it must be lifted with a
-# tracking issue — and the list itself is pinned HERE, so adding an id means
-# editing this suite in the same change (review sees both).
+# `cargo audit` reads `.cargo/audit.toml` from its working directory, and both
+# workflows that run it (quality-gates.yml and cd.yml) do so with
+# `working-directory: engine`, so an id in that file silences the advisory on
+# every CI run from then on. That is the right tool for an advisory no relock
+# can fix (RUSTSEC-2026-0344, ruzstd pinned by bevy_image 0.19.1's `^0.8`,
+# #10393) and the wrong tool for everything else. A silenced advisory is
+# invisible by construction, so the file has to be the loud part: every id must
+# carry, in the comment block directly above it, why it is unfixable, what the
+# exposure is, and when it must be lifted with a tracking issue — and the list
+# itself is pinned HERE, so adding an id means editing this suite in the same
+# change (review sees both). The file may hold nothing else: one `[advisories]`
+# table whose only key is `ignore`, so a `deny`-style key or a second table
+# cannot slip in unreviewed.
 #
 # Exit codes: 0 when every case passes, 1 otherwise. Assertions use explicit
 # if/then/else (not `A && ok || bad`) so the suite is SC2015-clean, and grep is
 # fed from here-strings, never `echo "$big" | grep` (SIGPIPE under pipefail).
+# Every function is frozen with `readonly -f` on the line after it
+# (scripts/check-fn-freeze.sh): a helper rebound later would turn every FAIL
+# into silence.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 AUDIT_TOML="$REPO_ROOT/engine/.cargo/audit.toml"
-QUALITY_GATES="$REPO_ROOT/.github/workflows/quality-gates.yml"
+
+# Every workflow with a `cargo audit (engine)` step. Each reads the toml above.
+AUDIT_WORKFLOWS=(".github/workflows/quality-gates.yml" ".github/workflows/cd.yml")
 
 # The ONLY advisories allowed in the ignore list. Add one here and in the toml
 # together, with the toml's comment block; remove both when the lift condition
@@ -29,13 +37,17 @@ EXPECTED_IGNORES=("RUSTSEC-2026-0344")
 
 command -v grep   >/dev/null 2>&1 || { echo "FATAL: grep not found on host";   exit 1; }
 command -v mktemp >/dev/null 2>&1 || { echo "FATAL: mktemp not found on host"; exit 1; }
+command -v awk    >/dev/null 2>&1 || { echo "FATAL: awk not found on host";    exit 1; }
+command -v sed    >/dev/null 2>&1 || { echo "FATAL: sed not found on host";    exit 1; }
 
 PASS=0
 FAIL=0
 ok()  { echo "  ok: $1"; PASS=$((PASS + 1)); }
+readonly -f ok
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+readonly -f bad
 
-# --- the checker ---------------------------------------------------------------
+# --- the checkers --------------------------------------------------------------
 # check_audit_toml <file> → prints problems, one per line; prints nothing when
 # the file is well-formed. Pure text, no toml parser: the shape is narrow.
 check_audit_toml() {
@@ -48,6 +60,28 @@ check_audit_toml() {
   fi
   if ! grep -qE '^ignore = \[$' <<<"$content"; then
     echo "no 'ignore = [' list"
+  fi
+
+  # Exactly one table, one list, one closer: a repeated header or list is a
+  # second place for entries the comment-block check below never reads.
+  local count
+  count="$(grep -cE '^\[advisories\]$' <<<"$content" || true)"
+  if [[ "$count" -gt 1 ]]; then
+    echo "more than one [advisories] table"
+  fi
+  count="$(grep -cE '^ignore = \[$' <<<"$content" || true)"
+  if [[ "$count" -gt 1 ]]; then
+    echo "more than one 'ignore = [' list"
+  fi
+
+  # Nothing else may live in the file: every line is blank, a comment, the
+  # table header, the list opener, an advisory id, or the list closer. A second
+  # table (`[output]`), a second key (`unmaintained = "deny"`) or anything after
+  # the list lands here.
+  local unexpected
+  unexpected="$(grep -vE '^[[:space:]]*(#.*)?$|^\[advisories\]$|^ignore = \[$|^  "RUSTSEC-[0-9]{4}-[0-9]{4}",?$|^\]$' <<<"$content" || true)"
+  if [[ -n "$unexpected" ]]; then
+    echo "unexpected content: only the [advisories] table with its 'ignore' list may be here: $(tr '\n' '|' <<<"$unexpected")"
   fi
 
   # Every quoted id inside the list, in order.
@@ -98,6 +132,50 @@ check_audit_toml() {
     echo "ignore list differs from the pinned set: expected [$(tr '\n' ' ' <<<"$expected_sorted")] got [$(tr '\n' ' ' <<<"$actual_sorted")]"
   fi
 }
+readonly -f check_audit_toml
+
+# step_runs_cargo_audit_from_engine <workflow-yaml-text> → exit 0 iff the text
+# holds at least one `cargo audit (engine)` step and EVERY such step has
+# `working-directory: engine` and runs plain `cargo audit`. cargo-audit resolves
+# .cargo/audit.toml from its working directory, so a step run from the repo root
+# would ignore the file and the list would be decorative. A step ends at a blank
+# line, the next `- ` list item, or the end of the text, so a property of a
+# LATER step is never credited to this one.
+step_runs_cargo_audit_from_engine() {
+  local verdict
+  verdict="$(awk '
+    function flush() {
+      if (inside) { total++; if (wd && cmd) { good++ } }
+      inside = 0; wd = 0; cmd = 0
+    }
+    /name: cargo audit \(engine\)/ { flush(); inside = 1; next }
+    inside && /^[[:space:]]*$/ { flush(); next }
+    inside && /^[[:space:]]*- / { flush(); next }
+    inside && /^[[:space:]]*working-directory: engine[[:space:]]*$/ { wd = 1; next }
+    inside && /^[[:space:]]*run: cargo audit[[:space:]]*$/ { cmd = 1; next }
+    END { flush(); print total + 0, good + 0 }
+  ' <<<"$1")"
+  local total="${verdict% *}" good="${verdict#* }"
+  [[ "$total" -ge 1 && "$total" -eq "$good" ]]
+}
+readonly -f step_runs_cargo_audit_from_engine
+
+# refuses_mutation <label> <workflow-text> <sed-expression> → ok when the sed
+# expression CHANGES the text and the step predicate then FAILS on it. A
+# mutation that changes nothing proves nothing, and a predicate that still
+# passes on the mutated text is decorative.
+refuses_mutation() {
+  local label="$1" text="$2" expr="$3" mutated
+  mutated="$(sed -e "$expr" <<<"$text")"
+  if [[ "$mutated" == "$text" ]]; then
+    bad "$label: the mutation changed nothing, so it proves nothing"
+  elif step_runs_cargo_audit_from_engine "$mutated"; then
+    bad "$label: the step pin still passes on the mutated text"
+  else
+    ok "$label: the step pin refuses it"
+  fi
+}
+readonly -f refuses_mutation
 
 # --- 1. the committed file is well-formed ------------------------------------
 echo "1. committed engine/.cargo/audit.toml"
@@ -106,23 +184,28 @@ if [[ ! -f "$AUDIT_TOML" ]]; then
 else
   problems="$(check_audit_toml "$AUDIT_TOML")"
   if [[ -z "$problems" ]]; then
-    ok "well-formed: every id has unfixable/exposure/lift-when/tracking, list equals the pin"
+    ok "well-formed: every id has unfixable/exposure/lift-when/tracking, list equals the pin, nothing else in the file"
   else
     bad "committed file: $problems"
   fi
 fi
 
-# --- 2. the gate actually reads it --------------------------------------------
-# cargo-audit resolves .cargo/audit.toml from its working directory. The step
+# --- 2. the gates actually read it --------------------------------------------
+# cargo-audit resolves .cargo/audit.toml from its working directory. Each step
 # must run from engine/ for the file to apply; a step that ran `cargo audit`
 # from the repo root would ignore the file and the list would be decorative.
-echo "2. quality-gates.yml runs cargo audit from engine/"
-step="$(awk '/name: cargo audit \(engine\)/{p=1} p{print} p && /run:/{exit}' "$QUALITY_GATES")"
-if grep -qE '^\s*working-directory: engine$' <<<"$step" && grep -qE '^\s*run: cargo audit$' <<<"$step"; then
-  ok "the 'cargo audit (engine)' step has working-directory: engine and runs plain cargo audit"
-else
-  bad "the 'cargo audit (engine)' step does not run from engine/ (or runs something other than 'cargo audit'); the ignore file would not be read: $step"
-fi
+# Both workflows run it (quality-gates.yml on every PR, cd.yml on the deploy
+# path), so both are pinned.
+echo "2. every workflow runs cargo audit (engine) from engine/"
+for wf in "${AUDIT_WORKFLOWS[@]}"; do
+  if [[ ! -f "$REPO_ROOT/$wf" ]]; then
+    bad "$wf is missing"
+  elif step_runs_cargo_audit_from_engine "$(cat "$REPO_ROOT/$wf")"; then
+    ok "$wf: every 'cargo audit (engine)' step has working-directory: engine and runs plain cargo audit"
+  else
+    bad "$wf: no 'cargo audit (engine)' step, or one does not run from engine/ (or runs something other than 'cargo audit'); the ignore file would not be read"
+  fi
+done
 
 # --- 3. the checker is falsifiable (mutations of a fixture) ------------------
 echo "3. checker refuses malformed ignore files"
@@ -139,8 +222,9 @@ write_fixture() { # <file> <comment-lines...> ; writes a one-id list
     echo "]"
   } >"$f"
 }
+readonly -f write_fixture
 
-good_lines=("RUSTSEC-2026-0344: ruzstd 0.8.2 decompression bomb." "unfixable: bevy_image 0.19.1 pins ^0.8." "exposure: only Bevy's embedded LUT." "lift when: Bevy >= 0.20. Tracking: #10393.")
+good_lines=("RUSTSEC-2026-0344: ruzstd 0.8.2 decompression bomb." "unfixable: bevy_image 0.19.1 pins ^0.8." "exposure: only editor-side imports." "lift when: a bevy_image release requires ruzstd >= 0.9.1. Tracking: #10393.")
 
 write_fixture "$tmp/good.toml" "${good_lines[@]}"
 if [[ -z "$(check_audit_toml "$tmp/good.toml")" ]]; then ok "accepts a complete entry"; else bad "rejects a complete entry: $(check_audit_toml "$tmp/good.toml")"; fi
@@ -154,7 +238,7 @@ if grep -q "lacks 'exposure:'" <<<"$(check_audit_toml "$tmp/no-exposure.toml")";
 write_fixture "$tmp/no-lift.toml" "${good_lines[0]}" "${good_lines[1]}" "${good_lines[2]}" "Tracking: #10393."
 if grep -q "lacks 'lift when:'" <<<"$(check_audit_toml "$tmp/no-lift.toml")"; then ok "refuses an entry without lift when:"; else bad "accepted an entry without lift when:"; fi
 
-write_fixture "$tmp/no-issue.toml" "${good_lines[0]}" "${good_lines[1]}" "${good_lines[2]}" "lift when: Bevy >= 0.20."
+write_fixture "$tmp/no-issue.toml" "${good_lines[0]}" "${good_lines[1]}" "${good_lines[2]}" "lift when: a bevy_image release requires ruzstd >= 0.9.1."
 if grep -q "names no tracking issue" <<<"$(check_audit_toml "$tmp/no-issue.toml")"; then ok "refuses an entry without a tracking issue"; else bad "accepted an entry without a tracking issue"; fi
 
 write_fixture "$tmp/no-name.toml" "unfixable: x." "exposure: y." "lift when: z. Tracking: #10393."
@@ -191,15 +275,64 @@ if grep -q "malformed entry" <<<"$(check_audit_toml "$tmp/stray.toml")"; then ok
 printf '[advisories]\nignore = [\n]\n' >"$tmp/empty.toml"
 if grep -q "ignore list is empty" <<<"$(check_audit_toml "$tmp/empty.toml")"; then ok "refuses an empty ignore list"; else bad "accepted an empty ignore list"; fi
 
+# The file is the ignore list and nothing else. A second table, a second key
+# beside `ignore`, or a key after the list would change what `cargo audit`
+# fails on (`unmaintained = "deny"`, `[output] deny = [...]`) with the
+# per-advisory comment check still green.
+{
+  echo "[advisories]"; echo "ignore = ["
+  for line in "${good_lines[@]}"; do echo "  # $line"; done
+  echo "  \"RUSTSEC-2026-0344\","; echo "]"
+  echo ""; echo "[output]"; echo 'deny = ["warnings"]'
+} >"$tmp/extra-table.toml"
+if grep -q "unexpected content" <<<"$(check_audit_toml "$tmp/extra-table.toml")"; then ok "refuses a second table"; else bad "accepted a second table"; fi
+
+{
+  echo "[advisories]"; echo 'unmaintained = "deny"'; echo "ignore = ["
+  for line in "${good_lines[@]}"; do echo "  # $line"; done
+  echo "  \"RUSTSEC-2026-0344\","; echo "]"
+} >"$tmp/extra-key.toml"
+if grep -q "unexpected content" <<<"$(check_audit_toml "$tmp/extra-key.toml")"; then ok "refuses a second key before the list"; else bad "accepted a second key before the list"; fi
+
+{
+  echo "[advisories]"; echo "ignore = ["
+  for line in "${good_lines[@]}"; do echo "  # $line"; done
+  echo "  \"RUSTSEC-2026-0344\","; echo "]"
+  echo 'informational_warnings = ["unmaintained"]'
+} >"$tmp/key-after-list.toml"
+if grep -q "unexpected content" <<<"$(check_audit_toml "$tmp/key-after-list.toml")"; then ok "refuses a key after the list"; else bad "accepted a key after the list"; fi
+
+# A repeated header is a second place for entries.
+{
+  echo "[advisories]"; echo "[advisories]"; echo "ignore = ["
+  for line in "${good_lines[@]}"; do echo "  # $line"; done
+  echo "  \"RUSTSEC-2026-0344\","; echo "]"
+} >"$tmp/dup-table.toml"
+if grep -q "more than one \[advisories\] table" <<<"$(check_audit_toml "$tmp/dup-table.toml")"; then ok "refuses a repeated [advisories] header"; else bad "accepted a repeated [advisories] header"; fi
+
 # --- 4. the step pin is falsifiable --------------------------------------------
-echo "4. step pin refuses a root-directory cargo audit"
-mutated="$(sed 's/^\(\s*\)working-directory: engine$/\1working-directory: ./' "$QUALITY_GATES")"
-mstep="$(awk '/name: cargo audit \(engine\)/{p=1} p{print} p && /run:/{exit}' <<<"$mutated")"
-if grep -qE '^\s*working-directory: engine$' <<<"$mstep"; then
-  bad "the mutation did not apply (no working-directory: engine line to change?)"
-else
-  ok "a step moved to the repo root would be caught (mutation applied; case 2 would fail)"
-fi
+# Case 2 only proves the CURRENT workflows satisfy the predicate. Each mutation
+# below must change the text and make that same predicate fail, or the pin could
+# never fire.
+echo "4. step pin refuses a cargo audit that would not read the file"
+for wf in "${AUDIT_WORKFLOWS[@]}"; do
+  if [[ ! -f "$REPO_ROOT/$wf" ]]; then
+    bad "$wf is missing"
+    continue
+  fi
+  wf_text="$(cat "$REPO_ROOT/$wf")"
+  refuses_mutation "$wf with working-directory: ." "$wf_text" 's/^\([[:space:]]*\)working-directory: engine$/\1working-directory: ./'
+  refuses_mutation "$wf with run: cargo audit || true" "$wf_text" 's/^\([[:space:]]*\)run: cargo audit$/\1run: cargo audit || true/'
+  refuses_mutation "$wf with the step renamed away" "$wf_text" 's/name: cargo audit (engine)/name: cargo audit (renamed)/'
+
+  # A SECOND step that runs from the repo root is not excused by the first.
+  extra_step="$wf_text"$'\n\n'"      - name: cargo audit (engine)"$'\n'"        run: cargo audit"
+  if step_runs_cargo_audit_from_engine "$extra_step"; then
+    bad "$wf plus a second root-directory step: the step pin still passes"
+  else
+    ok "$wf plus a second root-directory step: the step pin refuses it"
+  fi
+done
 
 echo
 echo "cargo-audit-ignores: $PASS passed, $FAIL failed"
