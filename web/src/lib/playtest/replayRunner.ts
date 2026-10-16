@@ -20,7 +20,8 @@
  * verdict is never produced on an unpinned clock without saying so
  * (`ReplayOutcome.pinned`). An unpin that FAILS after a completed run does not
  * taint the verdict — the run was pinned — and is reported beside it
- * (`ReplayRunResult.unpinError`); the engine also releases any pin on Stop.
+ * (`ReplayRunResult.unpinError`); a pin in force during Play is also released
+ * by the engine when Play stops.
  *
  * The pin is engine-global, so only ONE replay may run at a time. That guard
  * is not here: `replayEntryPoints.ts` holds the module-level single-flight
@@ -36,10 +37,11 @@
  * flight: a stopped engine never ticks again, so the keys are released and the
  * clock unpinned the moment the cancel lands, not after a stalled-tick timeout.
  * A cancel can land at ANY await — including from inside the 'paused'
- * notification itself — and `result` still settles exactly once, as
- * `cancelled`; 'cancelling' is never overwritten by a state the cancel
- * interrupted (`__tests__/replayController.test.ts`, "a cancel that races the
- * pause").
+ * notification itself, during the completion-path unpin, or during the
+ * failure path's cleanup — and `result` still settles exactly once, as
+ * `cancelled`; no state follows 'cancelling' but 'cancelled'
+ * (`__tests__/replayController.test.ts`, "a cancel that races the pause" and
+ * "the last windows a control can land in").
  *
  * WHY THIS IS NOT `gameplayBot.ts`. `simulatePlaytest` in `lib/ai/gameplayBot.ts`
  * is a HEURISTIC: it inspects the scene graph statically and produces an
@@ -346,30 +348,50 @@ export function startReplay(
   /** Set while a frame is awaited: cancel resolves it so the wait ends at once. */
   let abandonFrame: (() => void) | null = null;
 
+  /**
+   * Deliver the current progress to every listener, in order. A listener may
+   * call a control from inside its notification — cancelling on seeing
+   * 'paused' is the common case — which announces a NEW state while this one
+   * is still being delivered. That announcement is queued until the current
+   * delivery completes, so every listener sees one sequence: never
+   * 'cancelling' and then a stale 'paused' left over from the outer delivery.
+   * `getProgress()` is always current, inside a notification included.
+   */
+  let delivering = false;
+  const queued: ReplayProgress[] = [];
   const notify = () => {
     progress.heldKeys = [...held];
-    const snapshot: ReplayProgress = { ...progress, heldKeys: [...progress.heldKeys] };
-    for (const listener of listeners) {
-      try {
-        listener(snapshot);
-      } catch (error) {
-        // A UI listener must never take the replay down with it.
-        console.error('[replayRunner] progress listener threw; continuing', error);
+    queued.push({ ...progress, heldKeys: [...progress.heldKeys] });
+    if (delivering) return;
+    delivering = true;
+    try {
+      while (queued.length > 0) {
+        const snapshot = queued.shift() as ReplayProgress;
+        for (const listener of listeners) {
+          try {
+            listener(snapshot);
+          } catch (error) {
+            // A UI listener must never take the replay down with it.
+            console.error('[replayRunner] progress listener threw; continuing', error);
+          }
+        }
       }
+    } finally {
+      delivering = false;
     }
   };
   /**
-   * 'cancelling' is sticky: only the cancel's own settlement — or a boundary
-   * failure while settling it — replaces it. A cancel can land in the middle
-   * of any await, and the code after that await was written for the state it
-   * interrupted (announcing 'paused', 'running'). Every such site re-checks
-   * `cancelRequested` first, and the controller tests pin that no state
-   * follows 'cancelling' but 'cancelled'; with those checks in place this
-   * guard is unreachable (mutating it out keeps the suite green). It stays as
-   * defence in depth for the `setState` someone adds after an unchecked await.
+   * A cancel can land in the middle of any await, and the code after that
+   * await was written for the state it interrupted. Every announcement that
+   * follows an await therefore re-checks `cancelRequested` first — in
+   * `pauseAtBoundary`, after the completion-path unpin, and after the
+   * failure-path cleanup — so no state follows 'cancelling' but 'cancelled'.
+   * The controller tests pin each of those windows. There is deliberately no
+   * catch-all guard here: an earlier "sticky 'cancelling'" guard swallowed a
+   * 'completed' announced after a late cancel and left the run with no
+   * terminal state at all, which is worse than a wrong one.
    */
   const setState = (state: ReplayRunState) => {
-    if (progress.state === 'cancelling' && state !== 'cancelled' && state !== 'failed') return;
     progress.state = state;
     notify();
   };
@@ -500,15 +522,34 @@ export function startReplay(
      * 'paused' — the case the review-board reproduced), so `cancelRequested`
      * is re-checked after each await, and the wake-up promise exists BEFORE
      * 'paused' is announced so that a cancel always has something to resolve.
+     *
+     * A resume() during 'pausing' WITHDRAWS the pause; `pauseRequested` is
+     * likewise re-checked after each await, and a withdrawn pause never
+     * announces 'paused' (nothing would wake it): the keys released for it are
+     * pressed again by the next tick's diff, a runtime already paused for it
+     * is resumed. `final` marks the boundary after the last tick: once the run
+     * continues past it there is no boundary left, so `pastFinalBoundary` is
+     * set BEFORE 'running' is announced — a pause() issued from inside that
+     * notification is refused rather than accepted and never settled.
      */
-    const pauseAtBoundary = async (tick: number): Promise<boolean> => {
+    const pauseAtBoundary = async (tick: number, final: boolean): Promise<boolean> => {
+      const proceed = () => {
+        if (final) pastFinalBoundary = true;
+        return true;
+      };
       // No synthetic key stays down while the creator reads the frozen scene.
       await releaseHeld();
       if (cancelRequested) return false;
+      if (!pauseRequested) return proceed();
       if (env.pauseRuntime) {
         await env.pauseRuntime();
         runtimePausedByRunner = true;
         if (cancelRequested) return false;
+        if (!pauseRequested) {
+          await resumeRuntimeIfPaused();
+          if (cancelRequested) return false;
+          return proceed();
+        }
       }
       progress.tick = tick;
       const woken = new Promise<void>((resolve) => {
@@ -521,6 +562,7 @@ export function startReplay(
       pauseRequested = false;
       await resumeRuntimeIfPaused();
       if (cancelRequested) return false;
+      proceed();
       setState('running');
       return true;
     };
@@ -555,7 +597,7 @@ export function startReplay(
           pauseArmed = false;
           pauseRequested = true;
         }
-        if (pauseRequested && !(await pauseAtBoundary(tick))) break;
+        if (pauseRequested && !(await pauseAtBoundary(tick, false))) break;
 
         const frame = framesByTick.get(tick);
         const active = frame ? keysForFrame(frame, env) : new Set<string>();
@@ -586,7 +628,7 @@ export function startReplay(
           pauseArmed = false;
           pauseRequested = true;
         }
-        if (pauseRequested) await pauseAtBoundary(ticksReplayed);
+        if (pauseRequested) await pauseAtBoundary(ticksReplayed, true);
       }
       pastFinalBoundary = true;
 
@@ -643,8 +685,12 @@ export function startReplay(
       ];
 
       // The verdict is already decided; a failed unpin is reported, not a
-      // failed run (the engine releases any leftover pin on Stop regardless).
+      // failed run (a pin in force during Play is released by Stop anyway).
       const unpinError = await unpin();
+      // The cancel's last window: it may have landed during that unpin. It
+      // said it applied, so the run is a cancellation — no verdict — and the
+      // clock is already released (the second unpin below is a no-op).
+      if (cancelRequested) return finishCancelled(ticksReplayed);
       const outcome: ReplayOutcome = {
         command: REPLAY_INPUT_TRACE_COMMAND,
         verdict: assertions.every((a) => a.passed) ? 'passed' : 'failed',
@@ -684,6 +730,13 @@ export function startReplay(
         console.error('[replayRunner] could not resume the runtime after a failure', resumeError);
       }
       await unpin();
+      // The cancel landed while the failure was being cleaned up: the creator
+      // asked for a cancellation, and the run is already released.
+      if (cancelRequested) {
+        console.error('[replayRunner] run failed, then cancelled during cleanup; reporting the cancellation', error);
+        setState('cancelled');
+        return { status: 'cancelled', ticksReplayed };
+      }
       setState('failed');
       return { status: 'failed', error, ticksReplayed };
     }

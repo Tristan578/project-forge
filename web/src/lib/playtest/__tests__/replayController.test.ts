@@ -679,6 +679,145 @@ describe('startReplay — exit paths (review-board m5)', () => {
   });
 });
 
+describe('startReplay — the last windows a control can land in (review-board round 3)', () => {
+  it('cancel issued while the completion-path unpin is in flight settles as cancelled: no verdict, a terminal state, unpinned once', async () => {
+    const engine = makeFakeEngine();
+    const states: ReplayRunState[] = [];
+    let handle: ReplayHandle | null = null;
+    let cancelAnswer: boolean | null = null;
+    engine.env.unpinFrameRate = () => {
+      engine.log.push('unpin');
+      // The board's probe: a cancel from inside the final unpin.
+      cancelAnswer = handle?.cancel() ?? null;
+    };
+    handle = startReplay(moveRightTrace(4), engine.env);
+    handle.subscribe((p) => states.push(p.state));
+
+    const result = await settlesWithin(handle);
+    expect(cancelAnswer, 'cancel() said it applied').toBe(true);
+    expect(result).toEqual({ status: 'cancelled', ticksReplayed: 4 });
+    expect(states[states.length - 1]).toBe('cancelled');
+    expect(handle.getProgress().state).toBe('cancelled');
+    expect(states.slice(states.indexOf('cancelling'))).toEqual(['cancelling', 'cancelled']);
+    expect(engine.log.filter((l) => l === 'unpin')).toHaveLength(1);
+  });
+
+  it('cancel issued while the failure path is releasing keys settles as cancelled, not failed', async () => {
+    const engine = makeFakeEngine({ manualFrames: true });
+    const releaseNow = engine.env.releaseKeys;
+    let releaseLater: (() => void) | null = null;
+    engine.env.releaseKeys = (codes) =>
+      new Promise<void>((resolve) => {
+        releaseLater = () => {
+          void releaseNow(codes);
+          resolve();
+        };
+      });
+    const handle = startReplay(moveRightTrace(), engine.env);
+    await vi.waitFor(() => expect(engine.log).toContain('pin 60'));
+    await engine.step();
+    await waitForState(handle, 'running');
+    await engine.step();
+    await engine.step();
+    expect(handle.getProgress().tick).toBe(2);
+
+    await engine.fail(new Error('Replay stopped: no engine play tick received.'));
+    await vi.waitFor(() => expect(releaseLater).not.toBeNull());
+    expect(handle.cancel()).toBe(true);
+    await nextMacrotask();
+    releaseLater!();
+
+    const result = await settlesWithin(handle);
+    expect(result).toEqual({ status: 'cancelled', ticksReplayed: 2 });
+    expect(handle.getProgress().state).toBe('cancelled');
+    expect(engine.isHeld('KeyD')).toBe(false);
+    expect(engine.log.filter((l) => l === 'unpin')).toHaveLength(1);
+  });
+
+  it('pause() is refused from inside the final "running" notification (the resume at the final boundary)', async () => {
+    const engine = makeFakeEngine();
+    const handle = startReplay(moveRightTrace(4), engine.env, { pauseAtTick: 4 });
+    const states: ReplayRunState[] = [];
+    let pauseAnswer: boolean | null = null;
+    let sawPaused = false;
+    handle.subscribe((p) => {
+      states.push(p.state);
+      if (p.state === 'paused') sawPaused = true;
+      // The 'running' that follows the final-boundary pause: the per-tick
+      // 'running' at tick 4 comes BEFORE that boundary and may still pause.
+      if (p.state === 'running' && sawPaused && pauseAnswer === null) pauseAnswer = handle.pause();
+    });
+    await waitForState(handle, 'paused');
+    expect(handle.resume()).toBe(true);
+
+    const result = await settlesWithin(handle);
+    expect(pauseAnswer, 'no boundary is left to settle a pause at').toBe(false);
+    expect(result.status).toBe('completed');
+    expect(states).not.toContain('pausing');
+    expect(states[states.length - 1]).toBe('completed');
+  });
+
+  it('resume() while the pause is still settling (pauseRuntime in flight) withdraws it: no "paused", the run continues', async () => {
+    const engine = makeFakeEngine({ manualFrames: true });
+    const pauseNow = engine.env.pauseRuntime!;
+    let releasePause: (() => void) | null = null;
+    engine.env.pauseRuntime = () =>
+      new Promise<void>((resolve) => {
+        releasePause = () => {
+          void pauseNow();
+          resolve();
+        };
+      });
+    const handle = startReplay(moveRightTrace(6), engine.env);
+    const states: ReplayRunState[] = [];
+    handle.subscribe((p) => states.push(p.state));
+    await vi.waitFor(() => expect(engine.log).toContain('pin 60'));
+    await engine.step(); // warm-up
+    for (let i = 0; i < 3; i += 1) await engine.step();
+    expect(handle.getProgress().tick).toBe(3);
+    expect(handle.pause()).toBe(true);
+    await engine.step(); // tick 3's frame: the pause settles at boundary 4
+    await vi.waitFor(() => expect(releasePause).not.toBeNull());
+    expect(engine.isHeld('KeyD'), 'keys are released before the runtime is asked to pause').toBe(false);
+
+    // Withdrawn while the runtime pause is in flight.
+    expect(handle.resume()).toBe(true);
+    expect(handle.getProgress().state).toBe('running');
+    await nextMacrotask();
+    releasePause!();
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    expect(handle.getProgress().state, 'a withdrawn pause must not settle as paused').toBe('running');
+
+    for (let i = 0; i < 4; i += 1) await engine.step(); // ticks 4, 5 and the two settle frames
+    const result = await settlesWithin(handle);
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    expect(result.outcome.ticksReplayed).toBe(6);
+    expect(states).not.toContain('paused');
+    expect(engine.isRuntimePaused()).toBe(false);
+    expect(engine.log.filter((l) => l === 'runtime pause')).toHaveLength(1);
+    expect(engine.log.filter((l) => l === 'runtime resume')).toHaveLength(1);
+    // Released for the pause, pressed again by the frame diff once withdrawn.
+    expect(engine.pressLog).toEqual([['KeyD'], ['KeyD']]);
+  });
+
+  it('a listener cancelling from inside "paused" never lets a later listener see "paused" after "cancelling"', async () => {
+    const engine = makeFakeEngine();
+    const handle = startReplay(moveRightTrace(), engine.env, { pauseAtTick: 3 });
+    const seenByB: ReplayRunState[] = [];
+    handle.subscribe((p) => {
+      if (p.state === 'paused') handle.cancel();
+    });
+    handle.subscribe((p) => seenByB.push(p.state));
+
+    const result = await settlesWithin(handle);
+    expect(result.status).toBe('cancelled');
+    const cancelling = seenByB.indexOf('cancelling');
+    expect(cancelling).toBeGreaterThan(seenByB.indexOf('paused'));
+    expect(seenByB.slice(cancelling)).toEqual(['cancelling', 'cancelled']);
+  });
+});
+
 describe('startReplay — restart from the initial snapshot (Scenario 3, fake runtime)', () => {
   it('pause at 60, cancel, restart: the collector fires once and the end position matches an uninterrupted run within 0.01', async () => {
     // Reference: an uninterrupted replay on a fresh snapshot.
