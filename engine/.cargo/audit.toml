@@ -42,22 +42,22 @@ ignore = [
   #   no allowlist, so `data:image/ktx2;base64,...` reaches the KTX2 loader;
   #   web/src/lib/chat/handlers/assetHandlers.ts forwards any dataBase64 to it,
   #   and the file pickers' accept=".png,..." is a hint, not a filter. (2) glTF
-  #   import: apply_gltf_import in the same file (up to ~50 MB of base64) loads
-  #   the model through bevy_gltf, which passes each embedded image's own
-  #   `mimeType` to Image::from_buffer (bevy_gltf 0.19.1 src/loader/mod.rs; the
-  #   gltf crate does not validate it), so an image declared `image/ktx2`
-  #   reaches the same loader. Both drain systems are editor-only
-  #   (#[cfg(not(feature = "runtime"))]; core/pending/runtime_drains.rs lists
-  #   both queues as editor-authoring) and a scene file stores asset metadata,
-  #   not the bytes (core/scene_file.rs `assets`), so neither a published game
-  #   nor a remix delivers them: the person whose tab decodes the file has to
-  #   import it themselves (a crafted .glb or image they were handed, or a
-  #   generation provider's model that web/src/hooks/useGenerationPolling.ts
-  #   imports for them). Worst case: that tab's WASM heap runs out and it
-  #   crashes. No server-side code runs ruzstd, and it is an allocation
-  #   denial of service, not code execution. This risk is ACCEPTED until
-  #   #10396 (refuse image/ktx2 on both paths) lands; narrow this paragraph
-  #   when it does.
+  #   import: apply_gltf_import in the same file (about 50 MB decoded, 67.5 M
+  #   base64 characters) loads the model through bevy_gltf, which passes each
+  #   embedded image's own `mimeType` to Image::from_buffer (bevy_gltf 0.19.1
+  #   src/loader/mod.rs; the gltf crate does not validate it), so an image
+  #   declared `image/ktx2` reaches the same loader. Both drain systems are
+  #   editor-only (#[cfg(not(feature = "runtime"))];
+  #   core/pending/runtime_drains.rs lists both queues as editor-authoring) and
+  #   a scene file stores asset metadata, not the bytes (core/scene_file.rs
+  #   `assets`), so neither a published game nor a remix delivers them: the
+  #   person whose tab decodes the file has to import it themselves (a crafted
+  #   .glb or image they were handed, or a generation provider's model that
+  #   web/src/hooks/useGenerationPolling.ts imports for them). Worst case: that
+  #   tab's WASM heap runs out and it crashes. No server-side code runs ruzstd,
+  #   and it is an allocation denial of service, not code execution. This risk
+  #   is ACCEPTED until #10396 (refuse image/ktx2 on both paths) lands; narrow
+  #   this paragraph when it does.
   # lift when: a bevy_image release raises its ruzstd requirement to >= 0.9.1,
   #   or the engine stops using the ruzstd (`zstd_rust`) backend. Bevy 0.20
   #   does not do it: bevy_image 0.20.0 still declares `ruzstd = "0.8.0"` (read
