@@ -76,9 +76,22 @@ export const DEFAULT_REPLAY_PIN_HZ = 60;
 // Observation
 // ---------------------------------------------------------------------------
 
-/** The observed runtime state the runner reads before and after a replay. */
+/** The engine's OWN evaluated named actions on a frame (`capture_input`). */
+export interface ReplayObservedInput {
+  pressed: Record<string, boolean>;
+  axes: Record<string, number>;
+}
+
+/** The observed runtime state the runner reads before, during and after a replay. */
 export interface ReplayObservation {
   entities: Record<string, { position: [number, number, number] }>;
+  /**
+   * What the engine reported its named actions as on this frame, when the
+   * boundary can see it (the browser boundary reads it off the play-tick
+   * bus). Absent or null on a boundary without it (unit fakes), in which case
+   * the outcome records `engineInput.available: false`.
+   */
+  input?: ReplayObservedInput | null;
 }
 
 /**
@@ -167,6 +180,57 @@ export interface ReplayOutcome {
   pinned: boolean;
   /** The pinned rate, or null when the boundary had no clock to pin. */
   pinHz: number | null;
+  /**
+   * The injection-path evidence: what the ENGINE reported its named actions
+   * as, frame by frame, while the trace was injected. A verdict of "did not
+   * move" is only diagnosable with this beside it — it separates "the keys
+   * never reached the engine" from "the engine saw them and still did not
+   * move the entity".
+   */
+  engineInput: ReplayEngineInputEvidence;
+  /**
+   * The observed player position after tick 0, after every 30th tick, and
+   * after the last tick (0-based tick indexes), so a failure message shows
+   * WHEN the entity stopped moving, not only that it did.
+   */
+  positionSamples: ReplayPositionSample[];
+}
+
+export interface ReplayEngineInputEvidence {
+  /** Whether the boundary exposed the engine's input at all. */
+  available: boolean;
+  /** Ticks whose trace frame held at least one action. */
+  heldTicks: number;
+  /**
+   * Of those, ticks on whose frame the engine reported at least one of the
+   * held actions as pressed or with a non-zero axis.
+   */
+  observedTicks: number;
+  /** The first (0-based) tick the engine reported a held action on, or null. */
+  firstObservedTick: number | null;
+}
+
+export interface ReplayPositionSample {
+  /** 0-based index of the tick whose frame had just been seen through. */
+  tick: number;
+  position: [number, number, number] | null;
+}
+
+/** Every `positionSamples` entry is taken after one of these ticks (plus the last). */
+export const POSITION_SAMPLE_EVERY_TICKS = 30;
+
+/**
+ * Whether the engine reported any of `heldActions` as active on this frame.
+ * @param input The engine's evaluated actions, or null when the boundary has none.
+ * @param heldActions Action names the trace frame holds.
+ * @returns True when at least one held action is pressed or has a non-zero axis.
+ */
+export function engineObservedHeldInput(
+  input: ReplayObservedInput | null | undefined,
+  heldActions: readonly string[],
+): boolean {
+  if (!input) return false;
+  return heldActions.some((name) => input.pressed[name] === true || (input.axes[name] ?? 0) !== 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +339,14 @@ function distance(
   const dy = a[1] - b[1];
   const dz = a[2] - b[2];
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+/** Action names a frame holds (pressed, or with a non-zero axis). */
+function heldActionsOf(frame: InputTraceFrame | undefined): string[] {
+  if (!frame) return [];
+  return Object.entries(frame.actions)
+    .filter(([, state]) => state.pressed || (state.axis ?? 0) !== 0)
+    .map(([name]) => name);
 }
 
 /** Key codes active on a given tick, unioned across every pressed action. */
@@ -445,6 +517,38 @@ export function startReplay(
     let ticksReplayed = 0;
     let runtimePausedByRunner = false;
     let pinnedByRunner = false;
+    const engineInput: ReplayEngineInputEvidence = {
+      available: false,
+      heldTicks: 0,
+      observedTicks: 0,
+      firstObservedTick: null,
+    };
+    const positionSamples: ReplayPositionSample[] = [];
+
+    /**
+     * Record what the engine reported on the frame tick `tick` was just seen
+     * through: whether it evaluated any action the frame held, and a position
+     * sample on the sampled ticks. Read-only; a boundary without `input` just
+     * leaves `available` false.
+     */
+    const recordTickEvidence = (tick: number, frame: InputTraceFrame | undefined) => {
+      const seen = env.observe();
+      if (seen?.input !== undefined && seen.input !== null) engineInput.available = true;
+      const heldActions = heldActionsOf(frame);
+      if (heldActions.length > 0) {
+        engineInput.heldTicks += 1;
+        if (engineObservedHeldInput(seen?.input, heldActions)) {
+          engineInput.observedTicks += 1;
+          engineInput.firstObservedTick ??= tick;
+        }
+      }
+      if (tick % POSITION_SAMPLE_EVERY_TICKS === 0 || tick === lastTick) {
+        positionSamples.push({
+          tick,
+          position: seen?.entities[env.playerEntityId]?.position ?? null,
+        });
+      }
+    };
 
     /**
      * Unpin if this runner pinned. Returns the failure instead of throwing:
@@ -618,6 +722,7 @@ export function startReplay(
         // cancel abandoned has not.
         if (cancelRequested) break;
         ticksReplayed += 1;
+        recordTickEvidence(tick, frame);
         progress.tick = ticksReplayed;
         notify();
       }
@@ -674,6 +779,8 @@ export function startReplay(
             ticksReplayed,
             pinned,
             pinHz: pinned ? pinHz : null,
+            engineInput: { ...engineInput },
+            positionSamples: [...positionSamples],
           },
         },
         {
@@ -707,6 +814,8 @@ export function startReplay(
         collectiblesCollected,
         pinned,
         pinHz: pinned ? pinHz : null,
+        engineInput,
+        positionSamples,
       };
       setState('completed');
       return unpinError

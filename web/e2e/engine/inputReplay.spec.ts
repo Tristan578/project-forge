@@ -84,6 +84,13 @@ function holdTrace(ticks: number = FX.replay.ticks) {
 const RESTART_TOLERANCE_WORLD_UNITS = 0.01;
 /** Where the second replay pauses — the tick the acceptance criteria name. */
 const PAUSE_AT_TICK = 60;
+/**
+ * Of the 120 injected ticks, the engine must report the held action on at
+ * least this many. One or two ticks of winit/bevy input latency at the start
+ * are expected; a count near zero means the synthetic keys never reached the
+ * engine, and a count well under this means they reach it intermittently.
+ */
+const REPLAY_MIN_OBSERVED_TICKS = 100;
 /** NFR-C1 samples per timing: Scenario 3's own plus this many short sessions. */
 const NFR_SAMPLE_COUNT = 5;
 /** The short sessions pause here, then are cancelled: enough to be a real control round-trip. */
@@ -196,9 +203,26 @@ test.describe('Runtime input replay on the pinned clock @engine @engine-smoke', 
     expect(outcomeA.pinned, `run A was not pinned: ${JSON.stringify(outcomeA)}`).toBe(true);
     expect(outcomeA.pinHz).toBe(60);
     expect(outcomeA.ticksReplayed).toBe(FX.replay.ticks);
+
+    // --- The injection path, on its own ------------------------------------
+    // The engine reports its evaluated named actions on every play tick; the
+    // runner counts the ticks on which it reported the held action. This is a
+    // separate, falsifiable gate from OP-01: "the keys reached the engine" is
+    // asserted here, "the engine moved the player" below, so a red run says
+    // which half failed. The first live run (80a9e0850) completed all 120
+    // ticks pinned with the player at [0,0,0]; this is what tells (a) events
+    // lost before the engine from (b) the engine seeing them and not moving.
+    const injection = `engineInput=${JSON.stringify(outcomeA.engineInput)} positionSamples=${JSON.stringify(outcomeA.positionSamples)}`;
+    expect(outcomeA.engineInput.available, `the boundary exposed no engine input: ${injection}`).toBe(true);
+    expect(outcomeA.engineInput.heldTicks).toBe(FX.replay.ticks);
+    expect(
+      outcomeA.engineInput.observedTicks,
+      `the engine reported move_right on too few of the ${FX.replay.ticks} injected ticks: ${injection}`,
+    ).toBeGreaterThanOrEqual(REPLAY_MIN_OBSERVED_TICKS);
+
     const moveA = outcomeA.assertions.find((a) => a.operationId === 'qa.FR-1.OP-01');
     const collectA = outcomeA.assertions.find((a) => a.operationId === 'qa.FR-1.OP-03');
-    expect(moveA?.passed, `player did not move: ${JSON.stringify(outcomeA)}`).toBe(true);
+    expect(moveA?.passed, `player did not move: ${JSON.stringify(outcomeA)}; ${injection}`).toBe(true);
     expect(
       collectA?.passed,
       `expected exactly one collectible collected: ${JSON.stringify(outcomeA)}`,

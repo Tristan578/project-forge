@@ -126,7 +126,10 @@ describe('replayInputTrace — simulated success path', () => {
     await expect(replayInputTrace(moveRightTrace(20), env)).rejects.toThrow('settlement timed out');
     expect(getPlayerX()).toBeGreaterThan(1);
     expect(releaseLog).toEqual([['KeyD']]);
-    expect(observations).toBe(1);
+    // One observation before the run and one per replayed tick (the engine
+    // input evidence, #10007) — and NOT the final one: a stalled settlement
+    // must never be followed by an observation that reads as a verdict.
+    expect(observations).toBe(1 + 20);
   });
 
   it('moves the entity and collects exactly one item (verdict passed)', async () => {

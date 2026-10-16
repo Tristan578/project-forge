@@ -97,6 +97,13 @@ declare global {
       collectiblesCollected: number;
       pinned: boolean;
       pinHz: number | null;
+      engineInput: {
+        available: boolean;
+        heldTicks: number;
+        observedTicks: number;
+        firstObservedTick: number | null;
+      };
+      positionSamples: Array<{ tick: number; position: [number, number, number] | null }>;
     }>;
 
     /**

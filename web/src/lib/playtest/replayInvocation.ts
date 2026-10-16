@@ -200,7 +200,12 @@ export function createDomKeyboardEnvironment(config: DomKeyboardEnvironmentConfi
         entities[id] = { position: entity.position };
       }
     }
-    return { entities };
+    // The engine's own evaluated actions on this frame (`capture_input`), so
+    // the outcome can say whether the injected keys reached the engine.
+    return {
+      entities,
+      input: { pressed: snapshot.inputState.pressed, axes: snapshot.inputState.axes },
+    };
   };
   const requireDispatch = (): EngineDispatch => {
     if (!config.dispatch) throw new Error('Replay requires the engine command dispatcher.');

@@ -79,7 +79,13 @@ function makeFakeEngine(
       [PLAYER]: { position: [playerX, 0, 0] },
     };
     if (collectiblePresent) entities[COLLECTIBLE] = { position: [1, 0, 0] };
-    return { entities };
+    // What the real engine reports on the play-tick bus: its evaluated
+    // actions. Here the fixture's one action follows the held key.
+    const moving = held.has('KeyD');
+    return {
+      entities,
+      input: { pressed: { move_right: moving }, axes: { move_right: moving ? 1 : 0 } },
+    };
   };
 
   const env: ReplayEnvironment = {
@@ -229,6 +235,41 @@ describe('startReplay — the clock is pinned before the first tick', () => {
     expect(result.outcome.ticksReplayed).toBe(TICKS);
     const byOp = Object.fromEntries(result.outcome.assertions.map((a) => [a.operationId, a.passed]));
     expect(byOp).toEqual({ 'qa.FR-1.OP-01': true, 'qa.FR-1.OP-03': true });
+    // The injection-path evidence: the engine reported the held action on
+    // every tick, from the first, and the position samples show the motion.
+    expect(result.outcome.engineInput).toEqual({
+      available: true,
+      heldTicks: TICKS,
+      observedTicks: TICKS,
+      firstObservedTick: 0,
+    });
+    expect(result.outcome.positionSamples.map((s) => s.tick)).toEqual([0, 30, 60, 90, 119]);
+    const xs = result.outcome.positionSamples.map((s) => s.position?.[0] ?? Number.NaN);
+    expect(xs[0]).toBeCloseTo(0.05, 10);
+    expect(xs[4]).toBeCloseTo(6.0, 10);
+    expect(xs.every((x, i) => i === 0 || x > xs[i - 1])).toBe(true);
+    // The OP-01 assertion carries the same evidence for a failure message.
+    const move = result.outcome.assertions.find((a) => a.operationId === 'qa.FR-1.OP-01');
+    expect(move?.evidence.engineInput).toEqual(result.outcome.engineInput);
+    expect(move?.evidence.positionSamples).toEqual(result.outcome.positionSamples);
+  });
+
+  it('a boundary that cannot see the engine input records the evidence as unavailable, not as unobserved', async () => {
+    const engine = makeFakeEngine();
+    const observe = engine.env.observe;
+    engine.env.observe = () => {
+      const seen = observe();
+      return seen ? { entities: seen.entities } : null;
+    };
+    const result = await startReplay(moveRightTrace(), engine.env).result;
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') return;
+    expect(result.outcome.engineInput).toEqual({
+      available: false,
+      heldTicks: TICKS,
+      observedTicks: 0,
+      firstObservedTick: null,
+    });
   });
 
   it('honours an explicit pin rate', async () => {
@@ -922,6 +963,17 @@ describe('startReplay — the issue\'s own negative (dead input)', () => {
     // probe found exactly that gap.
     const byOp = Object.fromEntries(result.outcome.assertions.map((a) => [a.operationId, a.passed]));
     expect(byOp).toEqual({ 'qa.FR-1.OP-01': false, 'qa.FR-1.OP-03': false });
+    // And the evidence says WHY: the engine never saw the action — the
+    // injection path, not the controller, is where this failure lives.
+    expect(result.outcome.engineInput).toEqual({
+      available: true,
+      heldTicks: TICKS,
+      observedTicks: 0,
+      firstObservedTick: null,
+    });
+    expect(result.outcome.positionSamples.map((s) => s.position)).toEqual(
+      Array.from({ length: 5 }, () => [0, 0, 0]),
+    );
   });
 
   it('the pause boundary is a tick count, so dead input still pauses at tick 60', async () => {
