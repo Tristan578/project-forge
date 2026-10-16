@@ -155,7 +155,8 @@ describe('flag source shape (Next.js inlines only literal process.env.NEXT_PUBLI
     const read = new RegExp(`(?:\\.|\\[\\s*['"\`])${FLAG}\\b`);
     const readers = files
       .filter((file) => read.test(executableCode(readFileSync(file, 'utf8'))))
-      .map((file) => relative(SRC, file));
+      // `relative` uses the platform separator; the expectation is a POSIX path.
+      .map((file) => relative(SRC, file).replace(/\\/g, '/'));
     expect(readers).toEqual(['lib/scripting/sandboxConfig.ts']);
   });
 
