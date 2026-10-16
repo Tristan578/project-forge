@@ -2207,6 +2207,138 @@ describe('useGenerationPolling', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // A refused placement is recorded at EVERY site that places an image (#10396)
+  // ---------------------------------------------------------------------------
+  describe('auto-place refusals', () => {
+    const REASON = "unsupported texture format 'image/webp'; accepted formats are image/png, image/jpeg";
+
+    /** A completed image job of `type`, whose download reads as a PNG data URL. */
+    function setupImageCompletion(id: string, type: string, jobOverrides: Record<string, unknown> = {}) {
+      mockJobs[id] = makeJob(id, {
+        type,
+        prompt: 'a thing',
+        autoPlace: true,
+        targetEntityId: 'ent-refused',
+        ...jobOverrides,
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = 'data:image/png;base64,AAAA';
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: `job-${id}`,
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/image.png',
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          blob: () => Promise.resolve(new Blob(['img'], { type: 'image/png' })),
+        } as Response;
+      });
+
+      return () => { globalThis.FileReader = origFileReader; };
+    }
+
+    async function runToCompletion() {
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    }
+
+    it('sprite / tileset: a refused texture is recorded as not placed, with the reason', async () => {
+      const cleanup = setupImageCompletion('rs1', 'sprite', { materialSlot: 'emissive' });
+      mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('rs1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: REASON,
+          targetEntityId: 'ent-refused',
+          materialSlot: 'emissive',
+        }),
+      }));
+      cleanup();
+    });
+
+    it('pixel-art: a refused texture is recorded as not placed, with the reason', async () => {
+      const cleanup = setupImageCompletion('rp1', 'pixel-art');
+      mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('rp1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: REASON,
+          targetEntityId: 'ent-refused',
+          materialSlot: 'base_color',
+        }),
+      }));
+      cleanup();
+    });
+
+    it('sprite sheet: the sheet is still sliced, but a refused texture is recorded as not placed', async () => {
+      const cleanup = setupImageCompletion('rss1', 'sprite_sheet', { metadata: { frameCount: 4, frameSize: '64' } });
+      const OriginalImage = globalThis.Image;
+      globalThis.Image = class MockImage {
+        naturalWidth = 256;
+        naturalHeight = 64;
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        set src(_url: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      } as unknown as typeof Image;
+      const origCreateObjectURL = globalThis.URL.createObjectURL;
+      const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
+      globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+      globalThis.URL.revokeObjectURL = vi.fn();
+      mockLoadTexture.mockReturnValueOnce({ success: false, error: REASON });
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(mockSetSpriteSheet).toHaveBeenCalledWith('ent-refused', expect.anything());
+      expect(mockUpdateJob).toHaveBeenCalledWith('rss1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: REASON,
+          targetEntityId: 'ent-refused',
+          spriteSheet: expect.objectContaining({ frameCount: 4 }),
+        }),
+      }));
+
+      globalThis.Image = OriginalImage;
+      globalThis.URL.createObjectURL = origCreateObjectURL;
+      globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+      cleanup();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Auto-place: music with targetEntityId
   // ---------------------------------------------------------------------------
   describe('auto-place music', () => {

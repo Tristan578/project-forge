@@ -38,7 +38,16 @@ vi.mock('@/lib/audio/entityAudioGraph', async (importOriginal) => ({
   queueAudioImport: vi.fn(),
 }));
 
-import { showPersistentError } from '@/lib/toast';
+import { showError, showPersistentError } from '@/lib/toast';
+
+/** A FileReader that fails every read, as a corrupted or locked file does. */
+class FailingFileReader {
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  readAsDataURL(): void {
+    queueMicrotask(() => this.onerror?.());
+  }
+}
 
 /** The 8-byte PNG signature: base64 `iVBORw0KGgo=`. */
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -93,7 +102,21 @@ describe('SpriteInspector texture upload (#10396)', () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     setAssetDispatcher(null as unknown as (command: string, payload: unknown) => void);
+  });
+
+  it('a file the browser cannot read is reported, and nothing is sent', async () => {
+    vi.stubGlobal('FileReader', FailingFileReader);
+    const { container } = render(<SpriteInspector />);
+
+    fireEvent.change(textureInput(container), { target: { files: [pickedFile(PNG_BYTES, 'broken.png', 'image/png')] } });
+
+    await waitFor(() => expect(showError).toHaveBeenCalledWith(
+      'Failed to read file "broken.png". The file may be corrupted or inaccessible.',
+    ));
+    expect(mockDispatch).not.toHaveBeenCalled();
+    expect(showPersistentError).not.toHaveBeenCalled();
   });
 
   it('a picked PNG reaches load_texture as the whole data URL, in the sprite slot', async () => {

@@ -807,11 +807,12 @@ mod tests {
 
     #[test]
     fn a_chunk_length_near_u32_max_fails_closed_through_the_base64_path() {
-        // The number of base64 characters that hold a chunk is computed in
-        // u64: for chunk lengths above ~1 GiB it exceeds u32::MAX, and the
-        // usize arithmetic this replaced overflowed on wasm32 (a debug build
-        // panics, a release build wraps). A 64-bit host cannot show that
-        // overflow, so the helper's value is pinned as well as the outcome.
+        // Pins two things: the helper's values at the u32 boundary (the
+        // result exceeds u32::MAX, which is why it is a u64), and that such a
+        // claim is refused rather than decoded. It is NOT a reproduction of
+        // the wasm32 overflow the u64 arithmetic replaced: on this 64-bit host
+        // the old usize arithmetic would have passed too, and no 32-bit target
+        // is available to run it on.
         assert_eq!(glb_json_prefix_chars(u32::MAX - 8), 5_726_623_076);
         assert!(glb_json_prefix_chars(u32::MAX - 8) > u64::from(u32::MAX));
         assert_eq!(glb_json_prefix_chars(0), 28);
@@ -836,39 +837,101 @@ mod tests {
     }
 
     // --- the bridge drains re-run both gates ------------------------------
+    //
+    // `bridge/` is wasm32-only, so the drains' re-checks never run under
+    // `cargo test`. What the pins below PROVE is textual: that the body of
+    // each drain function holds exactly one executable statement calling its
+    // gate. What they do not prove is that the statement runs or what it
+    // does; that is the decoder tests' and CI's wasm build's job.
 
-    /// `bridge/` is wasm32-only, so the drains' re-checks never run under
-    /// `cargo test`; this text is the only thing holding them in place.
     const SCENE_IO: &str = include_str!("../bridge/scene_io.rs");
 
-    /// Executable lines of `scene_io.rs` that begin with `statement`:
-    /// anchored to the trimmed line start and comment-excluded, so a
-    /// commented-out call or a doc comment quoting it does not count.
-    fn executable_lines_starting_with(statement: &str) -> usize {
-        SCENE_IO
-            .lines()
+    /// `source` with every `/* ... */` span removed (newlines inside a span
+    /// are kept, so line structure survives). A `//` line is handled by the
+    /// line scan, not here.
+    fn without_block_comments(source: &str) -> String {
+        let mut out = String::with_capacity(source.len());
+        let mut rest = source;
+        while let Some(open) = rest.find("/*") {
+            out.push_str(&rest[..open]);
+            let after = &rest[open + 2..];
+            match after.find("*/") {
+                Some(close) => {
+                    out.extend(after[..close].chars().filter(|c| *c == '\n'));
+                    rest = &after[close + 2..];
+                }
+                None => {
+                    rest = "";
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// The body of a top-level `pub(super) fn <name>(` in `scene_io.rs`: from
+    /// its signature line to the first `}` at column 0 after it, with block
+    /// comments removed. Panics, naming the function, if either edge is gone.
+    fn drain_body(name: &str) -> String {
+        let lines: Vec<&str> = SCENE_IO.lines().collect();
+        let signature = format!("pub(super) fn {name}(");
+        let start = lines
+            .iter()
+            .position(|line| line.trim_start().starts_with(&signature))
+            .unwrap_or_else(|| panic!("scene_io.rs no longer declares `{signature}`"));
+        let end = (start..lines.len())
+            .find(|&i| lines[i] == "}")
+            .unwrap_or_else(|| panic!("`{name}` has no closing brace at column 0"));
+        without_block_comments(&lines[start..=end].join("\n"))
+    }
+
+    /// Executable lines of `body` that begin with `statement`: anchored to
+    /// the trimmed line start, `//` lines excluded (block comments were
+    /// removed by `drain_body`).
+    fn executable_lines_starting_with(body: &str, statement: &str) -> usize {
+        body.lines()
             .map(str::trim_start)
             .filter(|line| !line.starts_with("//") && line.starts_with(statement))
             .count()
     }
 
     #[test]
-    fn both_bridge_drains_re_run_their_gate_exactly_once() {
-        assert_eq!(
-            executable_lines_starting_with(
-                "if let Err(refusal) = asset_import_guard::inspect_gltf_bytes(&bytes)"
-            ),
-            1,
-            "apply_gltf_import must re-inspect the decoded document"
+    fn the_scan_ignores_line_and_block_comments_and_other_functions() {
+        let body = without_block_comments(
+            "    gate(1);\n    // gate(2);\n    /* gate(3);\n    gate(4); */ other(5);\n    other(6);\n",
         );
+        assert_eq!(executable_lines_starting_with(&body, "gate("), 1, "only the live call counts");
+        // Code after a closing `*/` on the same line is still executable.
+        assert_eq!(executable_lines_starting_with(&body, "other("), 2);
+        assert_eq!(body.lines().count(), 5, "newlines inside a block comment are kept");
+        assert!(drain_body("apply_gltf_import").contains("pending.gltf_import_requests.drain("));
+        assert!(!drain_body("apply_gltf_import").contains("fn apply_texture_load("));
+    }
+
+    #[test]
+    fn apply_gltf_import_re_inspects_the_decoded_document_exactly_once() {
+        let statement = "if let Err(refusal) = asset_import_guard::inspect_gltf_bytes(&bytes)";
         assert_eq!(
-            executable_lines_starting_with(
-                "let source = match asset_import_guard::check_texture_payload(&request.data_base64)"
-            ),
+            executable_lines_starting_with(&drain_body("apply_gltf_import"), statement),
             1,
-            "apply_texture_load must take its MIME type from the allowlist"
+            "proven: the body of `apply_gltf_import` in bridge/scene_io.rs holds exactly one \
+             executable line beginning `{statement}` (trimmed line start; `//` lines and block \
+             comments excluded). Not proven: that it runs - bridge/ is wasm32-only. A rustfmt \
+             reflow of that statement onto several lines fails this loudly; keep it on one."
         );
-        // The scan reads the real file, not an empty string.
-        assert!(SCENE_IO.contains("pub(super) fn apply_texture_load("));
+    }
+
+    #[test]
+    fn apply_texture_load_takes_its_mime_type_from_the_allowlist_exactly_once() {
+        let statement =
+            "let source = match asset_import_guard::check_texture_payload(&request.data_base64)";
+        assert_eq!(
+            executable_lines_starting_with(&drain_body("apply_texture_load"), statement),
+            1,
+            "proven: the body of `apply_texture_load` in bridge/scene_io.rs holds exactly one \
+             executable line beginning `{statement}` (trimmed line start; `//` lines and block \
+             comments excluded). Not proven: that it runs - bridge/ is wasm32-only. A rustfmt \
+             reflow of that statement onto several lines fails this loudly; keep it on one."
+        );
     }
 }

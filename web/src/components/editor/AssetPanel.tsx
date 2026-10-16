@@ -16,7 +16,7 @@ import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { GenerateSoundDialog } from './GenerateSoundDialog';
 import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
-import { readTextureFile } from '@/lib/engine/textureFormatGuard';
+import { readTextureFile, textureReadFailureMessage } from '@/lib/engine/textureFormatGuard';
 
 /**
  * Read a file as a data URL: `data:<file.type>;base64,<body>`.
@@ -146,8 +146,15 @@ export const AssetPanel = memo(function AssetPanel() {
       const file = files[i];
       // Header kept (and filled in from the extension when the OS declared
       // no type): the engine reads the format from it and refuses anything
-      // but PNG/JPEG by name; the slice shows that refusal.
-      const dataUrl = await readTextureFile(file);
+      // but PNG/JPEG by name; the slice shows that refusal. A file that
+      // cannot be read at all is reported here and the rest still load.
+      let dataUrl: string;
+      try {
+        dataUrl = await readTextureFile(file);
+      } catch {
+        showError(textureReadFailureMessage(file.name));
+        continue;
+      }
       loadTexture(dataUrl, file.name, primaryId, 'base_color');
     }
   }, [loadTexture, primaryId]);
@@ -193,8 +200,14 @@ export const AssetPanel = memo(function AssetPanel() {
         importGltf(base64, file.name);
       } else if (['png', 'jpg', 'jpeg'].includes(ext ?? '')) {
         if (primaryId) {
-          const dataUrl = await readTextureFile(file);
-          loadTexture(dataUrl, file.name, primaryId, 'base_color');
+          // Reported per file so one unreadable file does not stop the batch
+          // (or leave the progress indicator stuck).
+          try {
+            const dataUrl = await readTextureFile(file);
+            loadTexture(dataUrl, file.name, primaryId, 'base_color');
+          } catch {
+            showError(textureReadFailureMessage(file.name));
+          }
         }
       } else if (['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
         const base64 = await fileToBase64(file);

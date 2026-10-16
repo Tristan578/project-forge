@@ -156,7 +156,9 @@ describe('declareTextureType', () => {
     expect(declareTextureType('AAAA', 'image/png')).toBe('AAAA');
     expect(declareTextureType('data:;base64,AAAA', '')).toBe('data:;base64,AAAA');
   });
+});
 
+describe('checkTexturePayload refuses what it cannot read, and echoes safely', () => {
   it('refuses a data URL that is not base64', () => {
     expect(checkTexturePayload('data:image/png,%89PNG')).toEqual({
       ok: false,

@@ -238,11 +238,15 @@ function rejectedActionMessage(command: string): string {
  * Monitoring must never break dispatch, so every step is guarded.
  */
 function reportCommandRejected(command: string, error: string | undefined): void {
-  // A format refusal is the person's input being turned away, not an engine
-  // fault: the engine answers `<command> refused: <reason>` and assetSlice
-  // shows that reason, with the file, on every refused file (#10396). The
-  // generic toast and the Sentry exception are for faults; a breadcrumb keeps
-  // the refusal in the session trail.
+  // A refusal is the person's input being turned away, not an engine fault.
+  // This applies to ANY command that answers with its own `<command> refused: `
+  // prefix, present and future; the generic toast and the Sentry exception
+  // are for faults, so neither fires here, only a breadcrumb for the session
+  // trail. The contract that comes with the prefix: the CALLER must surface
+  // the refusal itself, because nothing else will. Today assetSlice does so
+  // for `load_texture` and `import_gltf` (the file and the reason, on every
+  // refused file - #10396); a command that adopts the prefix without a caller
+  // showing it would be refused silently.
   if (error?.startsWith(`${command} refused: `)) {
     try {
       addBreadcrumb({ category: 'engine.command.refused', message: `${command}: ${error}`, level: 'info' });

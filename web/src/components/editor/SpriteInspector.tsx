@@ -4,7 +4,8 @@ import { useCallback, useRef, useState, useId } from 'react';
 import { X, Image as ImageIcon, Pencil } from 'lucide-react';
 import { useEditorStore, type SpriteData, type SpriteAnchor } from '@/stores/editorStore';
 import { PixelArtEditor } from './PixelArtEditor';
-import { readTextureFile } from '@/lib/engine/textureFormatGuard';
+import { readTextureFile, textureReadFailureMessage } from '@/lib/engine/textureFormatGuard';
+import { showError } from '@/lib/toast';
 
 /** Anchor point grid positions */
 const ANCHOR_GRID: SpriteAnchor[][] = [
@@ -46,8 +47,8 @@ export function SpriteInspector() {
       // format, and it refuses anything but PNG/JPEG by name (#10396).
       const dataUrl = await readTextureFile(file);
       loadTexture(dataUrl, file.name, primaryId, 'sprite');
-    } catch (err) {
-      console.error(`Could not read "${file.name}":`, err);
+    } catch {
+      showError(textureReadFailureMessage(file.name));
     }
   }, [primaryId, loadTexture]);
 

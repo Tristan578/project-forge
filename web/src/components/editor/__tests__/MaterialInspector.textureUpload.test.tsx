@@ -49,7 +49,16 @@ vi.mock('@/lib/audio/entityAudioGraph', async (importOriginal) => ({
   queueAudioImport: vi.fn(),
 }));
 
-import { showPersistentError } from '@/lib/toast';
+import { showError, showPersistentError } from '@/lib/toast';
+
+/** A FileReader that fails every read, as a corrupted or locked file does. */
+class FailingFileReader {
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  readAsDataURL(): void {
+    queueMicrotask(() => this.onerror?.());
+  }
+}
 
 /** The 8-byte PNG signature: base64 `iVBORw0KGgo=`. */
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -99,11 +108,11 @@ const mockDispatch = vi.fn();
 const mockRemoveTexture = vi.fn();
 const slice = createSliceStore(createAssetSlice);
 
-function setupStore(assetRegistry: Record<string, unknown> = {}) {
+function setupStore(assetRegistry: Record<string, unknown> = {}, materialOverrides: Partial<typeof material> = {}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => selector({
     primaryId: 'ent-1',
-    primaryMaterial: material,
+    primaryMaterial: { ...material, ...materialOverrides },
     updateMaterial: vi.fn(),
     primaryShaderEffect: null,
     updateShaderEffect: vi.fn(),
@@ -129,7 +138,21 @@ describe('MaterialInspector texture slots (#10396)', () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     setAssetDispatcher(null as unknown as (command: string, payload: unknown) => void);
+  });
+
+  it('a file the browser cannot read is reported, and nothing is sent', async () => {
+    vi.stubGlobal('FileReader', FailingFileReader);
+    render(<MaterialInspector />);
+
+    fireEvent.change(baseColorInput(), { target: { files: [pickedFile(PNG_BYTES, 'broken.png', 'image/png')] } });
+
+    await waitFor(() => expect(showError).toHaveBeenCalledWith(
+      'Failed to read file "broken.png". The file may be corrupted or inaccessible.',
+    ));
+    expect(mockDispatch).not.toHaveBeenCalled();
+    expect(showPersistentError).not.toHaveBeenCalled();
   });
 
   it('a picked PNG reaches load_texture as the whole data URL, for the slot it was picked in', async () => {
@@ -192,7 +215,7 @@ describe('MaterialInspector texture slots (#10396)', () => {
       tex1: { id: 'tex1', name: 'bricks.png', kind: 'texture', fileSize: 1024, source: { type: 'upload', filename: 'bricks.png' } },
     };
 
-    it('lists the asset but does not offer it, and says why', () => {
+    it('lists another asset but does not offer it, and a visible note the select points at says why', () => {
       setupStore(registry);
       render(<MaterialInspector />);
 
@@ -200,9 +223,44 @@ describe('MaterialInspector texture slots (#10396)', () => {
       const option = Array.from(select.options).find((o) => o.value === 'tex1');
       expect(option, 'the asset must still be listed').toBeDefined();
       expect(option!.disabled).toBe(true);
-      expect(option!.textContent).toContain('bricks.png');
-      expect(select.title).toContain('#10398');
-      expect(select.title).toMatch(/upload/i);
+      expect(option!.textContent).toBe('bricks.png (assign not available yet)');
+      // The explanation is visible text, and the select is described by it.
+      const noteId = select.getAttribute('aria-describedby');
+      expect(noteId).toBeTruthy();
+      const note = document.getElementById(noteId!);
+      expect(note).not.toBeNull();
+      expect(note!.textContent).toContain('#10398');
+      expect(note!.textContent).toMatch(/upload/i);
+      expect(select).not.toHaveAttribute('title');
+    });
+
+    it("the slot's current texture reads as itself, enabled, with nothing to explain", () => {
+      setupStore(registry, { baseColorTexture: 'tex1' });
+      render(<MaterialInspector />);
+
+      const select = screen.getByLabelText('Base Color') as HTMLSelectElement;
+      expect(select.value).toBe('tex1');
+      const option = Array.from(select.options).find((o) => o.value === 'tex1');
+      expect(option!.disabled).toBe(false);
+      expect(option!.textContent).toBe('bricks.png');
+      // The only asset is this slot's own: no other to assign, so no note.
+      expect(select.getAttribute('aria-describedby')).toBeNull();
+    });
+
+    it('with the current texture and another asset, only the other one is withheld', () => {
+      setupStore(
+        { ...registry, tex2: { id: 'tex2', name: 'stone.png', kind: 'texture', fileSize: 2048, source: { type: 'upload', filename: 'stone.png' } } },
+        { baseColorTexture: 'tex1' },
+      );
+      render(<MaterialInspector />);
+
+      const select = screen.getByLabelText('Base Color') as HTMLSelectElement;
+      const byValue = Object.fromEntries(Array.from(select.options).map((o) => [o.value, o]));
+      expect(byValue['tex1']!.disabled).toBe(false);
+      expect(byValue['tex1']!.textContent).toBe('bricks.png');
+      expect(byValue['tex2']!.disabled).toBe(true);
+      expect(byValue['tex2']!.textContent).toBe('stone.png (assign not available yet)');
+      expect(select.getAttribute('aria-describedby')).toBeTruthy();
     });
 
     it('choosing it anyway sends no empty-bodied load_texture and raises no refusal', () => {

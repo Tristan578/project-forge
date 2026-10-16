@@ -59,10 +59,36 @@ vi.mock('@/lib/audio/entityAudioGraph', async (importOriginal) => ({
   queueAudioImport: vi.fn(),
 }));
 
-import { showPersistentError } from '@/lib/toast';
+import { showError, showPersistentError } from '@/lib/toast';
 
 /** The 8-byte PNG signature: base64 `iVBORw0KGgo=`. */
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** A FileReader that fails every read, as a corrupted or locked file does. */
+class FailingFileReader {
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  readAsDataURL(): void {
+    queueMicrotask(() => this.onerror?.());
+  }
+}
+
+/** A FileReader that fails for files named `broken*` and reads the rest as the PNG signature. */
+class SelectiveFileReader {
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  result: string | null = null;
+  readAsDataURL(file: File): void {
+    queueMicrotask(() => {
+      if (file.name.startsWith('broken')) {
+        this.onerror?.();
+      } else {
+        this.result = 'data:image/png;base64,iVBORw0KGgo=';
+        this.onload?.();
+      }
+    });
+  }
+}
 /** A JPEG start-of-image + APP0 marker: base64 `/9j/4A==`. */
 const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
 
@@ -101,7 +127,38 @@ describe('AssetPanel texture upload (#10396)', () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     setAssetDispatcher(null as unknown as (command: string, payload: unknown) => void);
+  });
+
+  it('a file the browser cannot read is reported, and nothing is sent', async () => {
+    vi.stubGlobal('FileReader', FailingFileReader);
+    const { container } = render(<AssetPanel />);
+
+    fireEvent.change(textureInput(container), { target: { files: [pickedFile(PNG_BYTES, 'broken.png', 'image/png')] } });
+
+    await waitFor(() => expect(showError).toHaveBeenCalledWith(
+      'Failed to read file "broken.png". The file may be corrupted or inaccessible.',
+    ));
+    expect(mockDispatch).not.toHaveBeenCalled();
+    expect(showPersistentError).not.toHaveBeenCalled();
+  });
+
+  it('an unreadable file in a drop batch is reported and the rest still import', async () => {
+    vi.stubGlobal('FileReader', SelectiveFileReader);
+    const { container } = render(<AssetPanel />);
+
+    fireEvent.drop(textureInput(container), {
+      dataTransfer: {
+        files: [pickedFile(PNG_BYTES, 'broken.png', 'image/png'), pickedFile(PNG_BYTES, 'floor.png', 'image/png')],
+        types: ['Files'],
+      },
+    });
+
+    await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({ name: 'floor.png' })));
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
+    expect(showError).toHaveBeenCalledTimes(1);
+    expect(showError).toHaveBeenCalledWith('Failed to read file "broken.png". The file may be corrupted or inaccessible.');
   });
 
   it('a picked PNG reaches load_texture as the whole data URL, header included', async () => {

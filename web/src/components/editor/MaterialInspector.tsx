@@ -9,7 +9,8 @@ import { MATERIAL_PRESETS, ALL_CATEGORIES, getPresetById, saveCustomMaterial, ty
 import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { linearToHex, hexToLinear } from '@/lib/colorUtils';
-import { readTextureFile } from '@/lib/engine/textureFormatGuard';
+import { readTextureFile, textureReadFailureMessage } from '@/lib/engine/textureFormatGuard';
+import { showError } from '@/lib/toast';
 import { CustomWgslEditor } from './CustomWgslEditor';
 
 interface SliderRowProps {
@@ -68,6 +69,7 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const fileRef = useRef<HTMLInputElement>(null);
   const selectId = useId();
+  const noteId = useId();
 
   const assetName = textureRef ? assetRegistry[textureRef]?.name : null;
 
@@ -86,8 +88,8 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
       // format, and it refuses anything but PNG/JPEG by name (#10396).
       const dataUrl = await readTextureFile(file);
       loadTexture(dataUrl, file.name, entityId, slot);
-    } catch (err) {
-      console.error(`Could not read "${file.name}":`, err);
+    } catch {
+      showError(textureReadFailureMessage(file.name));
     }
   }, [loadTexture, entityId, slot]);
 
@@ -104,6 +106,10 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
   }, [removeTexture, entityId, slot]);
 
   const hasAssets = textureAssets.length > 0;
+  // Assets other than the slot's own: listed so a person can see them, but
+  // not offered, because assigning by id needs an engine command that does
+  // not exist yet (#10398). The slot's current texture reads as itself.
+  const hasOtherAssets = textureAssets.some((asset) => asset.id !== textureRef);
 
   return (
     <div className="flex items-center gap-2">
@@ -119,18 +125,22 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
             id={selectId}
             value={textureRef ?? '__none__'}
             onChange={(e) => handleSelectChange(e.target.value)}
-            title="Assigning an existing texture asset to a slot is not available yet (#10398); upload the file to this slot instead."
+            aria-describedby={hasOtherAssets ? noteId : undefined}
             className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
           >
             <option value="__none__">None</option>
-            {/* Listed so the slot's current asset still reads by name, but not
-                offered: assigning by id needs an engine command that does not
-                exist yet (#10398). */}
             {textureAssets.map((asset) => (
-              <option key={asset.id} value={asset.id} disabled>{asset.name} (assign not available yet)</option>
+              asset.id === textureRef
+                ? <option key={asset.id} value={asset.id}>{asset.name}</option>
+                : <option key={asset.id} value={asset.id} disabled>{asset.name} (assign not available yet)</option>
             ))}
             <option value="__upload__">Upload new...</option>
           </select>
+          {hasOtherAssets && (
+            <span id={noteId} className="shrink-0 text-[10px] text-zinc-500">
+              Assign not available yet (#10398); upload instead
+            </span>
+          )}
           {textureRef && (
             <button
               className="shrink-0 rounded p-0.5 text-zinc-400 hover:text-red-400"
