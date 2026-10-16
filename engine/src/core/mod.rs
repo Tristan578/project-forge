@@ -5,6 +5,7 @@
 
 pub mod animation;
 pub mod animation_clip;
+pub mod asset_import_guard;
 pub mod asset_manager;
 pub mod audio;
 pub mod blend_tree2d;
