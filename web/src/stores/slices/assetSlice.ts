@@ -66,7 +66,7 @@ const MAX_RELAYED_REASON = 512;
 function surfaceRefusal(
   command: 'import_gltf' | 'load_texture',
   response: DispatchResult,
-  lead: string,
+  name: string,
 ): AssetCommandResult {
   if (!response || response.success !== false) return { success: true };
   const prefix = `${command} refused: `;
@@ -74,8 +74,29 @@ function surfaceRefusal(
     return { success: false, error: response.error ?? 'The engine rejected the change.' };
   }
   const reason = truncateReason(response.error.slice(prefix.length));
-  showPersistentError(`${lead}: ${reason}`, { id: `${command}-refused` });
+  showRefusal(command, name, reason);
   return { success: false, error: reason };
+}
+
+/**
+ * The refusal toast: names the file, carries the reason, and is keyed by
+ * command AND file so dropping several files shows one toast each (the same
+ * file refused twice collapses) instead of the last reason overwriting the
+ * rest under one id.
+ */
+function showRefusal(command: 'import_gltf' | 'load_texture', name: string, reason: string): void {
+  const lead = command === 'load_texture'
+    ? `Couldn't load "${displayName(name)}" as a texture`
+    : `Couldn't import "${displayName(name)}"`;
+  showPersistentError(`${lead}: ${reason}`, { id: `${command}-refused:${name}` });
+}
+
+/** The longest file name shown in a refusal toast before it is cut. */
+const MAX_DISPLAY_NAME = 60;
+
+function displayName(name: string): string {
+  const chars = [...name];
+  return chars.length > MAX_DISPLAY_NAME ? `${chars.slice(0, MAX_DISPLAY_NAME).join('')}…` : name;
 }
 
 function truncateReason(reason: string): string {
@@ -101,7 +122,7 @@ export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (s
     });
     // The engine inspects the document before queueing it (a KTX2 or Basis
     // Universal texture, or an unreadable file, is refused by name - #10396).
-    return surfaceRefusal('import_gltf', response, "Couldn't import the model");
+    return surfaceRefusal('import_gltf', response, name);
   },
   loadTexture: (dataBase64, name, entityId, slot) => {
     // The same allowlist the engine applies, run before the command is built
@@ -109,12 +130,12 @@ export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (s
     // formats without a round trip (#10396). The engine's gate is the real one.
     const check = checkTexturePayload(dataBase64);
     if (!check.ok) {
-      showPersistentError(`Couldn't load the texture: ${check.error}`, { id: 'load_texture-refused' });
+      showRefusal('load_texture', name, check.error);
       return { success: false, error: check.error };
     }
     if (!dispatchCommand) return { success: true };
     const response = dispatchCommand('load_texture', { dataBase64, name, entityId, slot });
-    return surfaceRefusal('load_texture', response, "Couldn't load the texture");
+    return surfaceRefusal('load_texture', response, name);
   },
   removeTexture: (entityId, slot) => {
     if (dispatchCommand) dispatchCommand('remove_texture', { entityId, slot });

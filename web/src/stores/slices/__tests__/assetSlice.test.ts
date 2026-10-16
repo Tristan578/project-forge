@@ -78,9 +78,11 @@ describe('assetSlice', () => {
       const reason = 'image #0 is a KTX2 texture (declared by its mimeType); KTX2 textures are not supported, convert the model\'s textures to PNG or JPEG and import again';
       expect(outcome).toEqual({ success: false, error: reason });
       expect(showPersistentError).toHaveBeenCalledTimes(1);
+      // The file is named, and the id is per file, so dropping several models
+      // shows one toast each rather than the last reason overwriting the rest.
       expect(showPersistentError).toHaveBeenCalledWith(
-        `Couldn't import the model: ${reason}`,
-        { id: 'import_gltf-refused' },
+        `Couldn't import "crafted.glb": ${reason}`,
+        { id: 'import_gltf-refused:crafted.glb' },
       );
     });
 
@@ -155,9 +157,33 @@ describe('assetSlice', () => {
       expect(mockDispatch).not.toHaveBeenCalled();
       expect(outcome).toEqual({ success: false, error: KTX2_REFUSAL });
       expect(showPersistentError).toHaveBeenCalledWith(
-        `Couldn't load the texture: ${KTX2_REFUSAL}`,
-        { id: 'load_texture-refused' },
+        `Couldn't load "lut.ktx2" as a texture: ${KTX2_REFUSAL}`,
+        { id: 'load_texture-refused:lut.ktx2' },
       );
+    });
+
+    it('shows one toast per refused file, each naming its file and its own reason', () => {
+      store.getState().loadTexture(KTX2_DATA_URL, 'lut.ktx2', 'entity1', 'base_color');
+      store.getState().loadTexture('data:image/webp;base64,UklGRg==', 'photo.webp', 'entity1', 'base_color');
+
+      expect(showPersistentError).toHaveBeenCalledTimes(2);
+      const [first, second] = vi.mocked(showPersistentError).mock.calls;
+      expect(first![0]).toContain('"lut.ktx2"');
+      expect(first![0]).toContain("'image/ktx2'");
+      expect(second![0]).toContain('"photo.webp"');
+      expect(second![0]).toContain("'image/webp'");
+      // Distinct ids: sonner would collapse two toasts with one id into the
+      // last one shown.
+      expect(first![1]).toEqual({ id: 'load_texture-refused:lut.ktx2' });
+      expect(second![1]).toEqual({ id: 'load_texture-refused:photo.webp' });
+    });
+
+    it('keeps a long file name from swamping the toast', () => {
+      const name = `${'n'.repeat(120)}.ktx2`;
+      store.getState().loadTexture(KTX2_DATA_URL, name, 'entity1', 'base_color');
+
+      const [lead] = vi.mocked(showPersistentError).mock.calls[0]!;
+      expect(lead).toMatch(/^Couldn't load "n{60}…" as a texture: /);
     });
 
     it('refuses WebP by name - the pickers accept .webp files, the engine has no decoder for them', () => {
@@ -192,8 +218,8 @@ describe('assetSlice', () => {
         error: 'payload is 67500001 bytes of base64, over the 50 MB limit',
       });
       expect(showPersistentError).toHaveBeenCalledWith(
-        "Couldn't load the texture: payload is 67500001 bytes of base64, over the 50 MB limit",
-        { id: 'load_texture-refused' },
+        "Couldn't load \"huge.png\" as a texture: payload is 67500001 bytes of base64, over the 50 MB limit",
+        { id: 'load_texture-refused:huge.png' },
       );
     });
   });

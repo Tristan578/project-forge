@@ -238,6 +238,19 @@ function rejectedActionMessage(command: string): string {
  * Monitoring must never break dispatch, so every step is guarded.
  */
 function reportCommandRejected(command: string, error: string | undefined): void {
+  // A format refusal is the person's input being turned away, not an engine
+  // fault: the engine answers `<command> refused: <reason>` and assetSlice
+  // shows that reason, with the file, on every refused file (#10396). The
+  // generic toast and the Sentry exception are for faults; a breadcrumb keeps
+  // the refusal in the session trail.
+  if (error?.startsWith(`${command} refused: `)) {
+    try {
+      addBreadcrumb({ category: 'engine.command.refused', message: `${command}: ${error}`, level: 'info' });
+    } catch {
+      /* monitoring is best-effort */
+    }
+    return;
+  }
   const engineError = error ?? 'no error message';
   console.error(`Engine rejected command '${command}': ${engineError}`);
 
