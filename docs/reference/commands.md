@@ -2147,7 +2147,7 @@ Import a glTF/GLB 3D model file (base64-encoded data) into the asset registry an
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `dataBase64` | string | Yes | Base64-encoded glTF/GLB file data |
+| `dataBase64` | string | Yes | Base64-encoded glTF/GLB file data (a data:model/gltf-binary;base64, header is accepted). A model whose images are KTX2 or Basis Universal (KHR_texture_basisu), or that is not a readable glTF/GLB, is refused with the reason; use PNG or JPEG textures. |
 | `name` | string | Yes | Display name for the imported model |
 
 **Example:**
@@ -2171,7 +2171,7 @@ Load a texture image and assign it to a material slot on an entity
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `dataBase64` | string | Yes | Base64-encoded image data (PNG/JPG) |
+| `dataBase64` | string | Yes | Image data as a data URL (data:image/png;base64,... or data:image/jpeg;base64,...) or raw base64 (decoded as PNG). Only PNG and JPEG are accepted; any other format, including KTX2, is refused with the accepted formats named. |
 | `name` | string | Yes | Display name for the texture |
 | `entityId` | string | Yes | Entity to apply texture to |
 | `slot` | `"base_color"` \| `"normal_map"` \| `"metallic_roughness"` \| `"emissive"` \| `"occlusion"` | Yes | Material texture slot |

@@ -1,0 +1,15 @@
+---
+"web": patch
+---
+
+Texture upload from the editor and the chat assistant, and custom PNG skyboxes, work again; unsupported image formats are refused with a message that names the accepted ones.
+
+Texture loading had been broken in two places at once. The engine read the texture body from a field named `data` while everything in the editor sent `dataBase64`, so every upload failed before it was looked at; and no PNG or JPEG decoder was compiled into the engine, so even a correctly named upload - and every AI-generated skybox, which arrives as PNG - would have failed with "invalid image mime type" in the engine log. Both are fixed: the engine accepts `dataBase64` (and still `data`), and the PNG and JPEG decoders are built in. A test in the engine now fails if the list of accepted formats ever names a format the build cannot decode.
+
+Only PNG and JPEG textures are accepted. A `load_texture` whose data URL declares anything else - `image/ktx2`, DDS, WebP - is refused with "unsupported texture format '<type>'; accepted formats are image/png, image/jpeg", by the editor before the command is sent and by the engine if it is sent anyway; a raw base64 body with no data URL header is decoded as PNG, as before. The asset panel, material inspector, sprite inspector and pixel-art editor now send the file's data URL whole, so a JPEG upload reaches the JPEG decoder and a `.webp` file is refused by name instead of being decoded as PNG and failing silently. The chat assistant's `load_texture` tool checks the format before it touches the editor, so it no longer reports "Loading texture" for a file the engine will refuse, and it hands the model the reason.
+
+A glTF or GLB model whose images are KTX2 (declared by `mimeType`, by a data URI's own type, or by a `.ktx2` file name) or that uses `KHR_texture_basisu` is refused before it is queued, as is a file that is not a readable glTF/GLB document; the message names the image and says to convert the model's textures to PNG or JPEG. The existing 50 MB limit on models and textures is unchanged but is now answered to the caller as an error rather than only logged.
+
+Why: the engine's KTX2 path decompresses with a library that has a known unbounded-allocation flaw (RUSTSEC-2026-0344) and cannot be upgraded while the renderer depends on it, so a crafted import could exhaust the importing tab's memory. Neither path crosses a user boundary - a scene stores asset metadata, not the bytes, and the import drains are editor-only - so this closes a problem for the person doing the importing, not a remote one.
+
+The engine's refusal reason is shown in the editor as a persistent notification on every refused file (identical refusals collapse into one), and the AI tools relay it as the tool's error. The MCP manifest and the command reference describe the accepted formats for `load_texture` and the refusal for `import_gltf`.

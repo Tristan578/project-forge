@@ -2144,7 +2144,7 @@
         "properties": {
           "dataBase64": {
             "type": "string",
-            "description": "Base64-encoded glTF/GLB file data"
+            "description": "Base64-encoded glTF/GLB file data (a data:model/gltf-binary;base64, header is accepted). A model whose images are KTX2 or Basis Universal (KHR_texture_basisu), or that is not a readable glTF/GLB, is refused with the reason; use PNG or JPEG textures."
           },
           "name": {
             "type": "string",
@@ -2170,7 +2170,7 @@
         "properties": {
           "dataBase64": {
             "type": "string",
-            "description": "Base64-encoded image data (PNG/JPG)"
+            "description": "Image data as a data URL (data:image/png;base64,... or data:image/jpeg;base64,...) or raw base64 (decoded as PNG). Only PNG and JPEG are accepted; any other format, including KTX2, is refused with the accepted formats named."
           },
           "name": {
             "type": "string",
