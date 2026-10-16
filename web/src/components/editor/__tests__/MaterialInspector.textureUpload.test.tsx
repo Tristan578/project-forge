@@ -232,6 +232,9 @@ describe('MaterialInspector texture slots (#10396)', () => {
       expect(note!.textContent).toContain('#10398');
       expect(note!.textContent).toMatch(/upload/i);
       expect(select).not.toHaveAttribute('title');
+      // The note sits under the row, not in it: as a flex sibling of the
+      // select it kept its own width and squeezed the select to nothing.
+      expect(select.parentElement!.contains(note!)).toBe(false);
     });
 
     it("the slot's current texture reads as itself, enabled, with nothing to explain", () => {
@@ -260,7 +263,13 @@ describe('MaterialInspector texture slots (#10396)', () => {
       expect(byValue['tex1']!.textContent).toBe('bricks.png');
       expect(byValue['tex2']!.disabled).toBe(true);
       expect(byValue['tex2']!.textContent).toBe('stone.png (assign not available yet)');
-      expect(select.getAttribute('aria-describedby')).toBeTruthy();
+      const noteId = select.getAttribute('aria-describedby');
+      expect(noteId).toBeTruthy();
+      const note = document.getElementById(noteId!);
+      expect(note).not.toBeNull();
+      // With the remove button in the row as well, the note still lives
+      // outside it.
+      expect(select.parentElement!.contains(note!)).toBe(false);
     });
 
     it('choosing it anyway sends no empty-bodied load_texture and raises no refusal', () => {

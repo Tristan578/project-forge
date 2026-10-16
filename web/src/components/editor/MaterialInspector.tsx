@@ -112,78 +112,83 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
   const hasOtherAssets = textureAssets.some((asset) => asset.id !== textureRef);
 
   return (
-    <div className="flex items-center gap-2">
-      {/* `for` must name an element that is there: with no texture asset
-          the select is replaced by an Upload button that names itself. */}
-      <label htmlFor={hasAssets ? selectId : undefined} className="w-20 shrink-0 text-xs text-zinc-400">
-        {label}
-        {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
-      </label>
-      {hasAssets ? (
-        <>
-          <select
-            id={selectId}
-            value={textureRef ?? '__none__'}
-            onChange={(e) => handleSelectChange(e.target.value)}
-            aria-describedby={hasOtherAssets ? noteId : undefined}
-            className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
-          >
-            <option value="__none__">None</option>
-            {textureAssets.map((asset) => (
-              asset.id === textureRef
-                ? <option key={asset.id} value={asset.id}>{asset.name}</option>
-                : <option key={asset.id} value={asset.id} disabled>{asset.name} (assign not available yet)</option>
-            ))}
-            <option value="__upload__">Upload new...</option>
-          </select>
-          {hasOtherAssets && (
-            <span id={noteId} className="shrink-0 text-[10px] text-zinc-500">
-              Assign not available yet (#10398); upload instead
+    <div>
+      <div className="flex items-center gap-2">
+        {/* `for` must name an element that is there: with no texture asset
+            the select is replaced by an Upload button that names itself. */}
+        <label htmlFor={hasAssets ? selectId : undefined} className="w-20 shrink-0 text-xs text-zinc-400">
+          {label}
+          {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
+        </label>
+        {hasAssets ? (
+          <>
+            <select
+              id={selectId}
+              value={textureRef ?? '__none__'}
+              onChange={(e) => handleSelectChange(e.target.value)}
+              aria-describedby={hasOtherAssets ? noteId : undefined}
+              className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
+            >
+              <option value="__none__">None</option>
+              {textureAssets.map((asset) => (
+                asset.id === textureRef
+                  ? <option key={asset.id} value={asset.id}>{asset.name}</option>
+                  : <option key={asset.id} value={asset.id} disabled>{asset.name} (assign not available yet)</option>
+              ))}
+              <option value="__upload__">Upload new...</option>
+            </select>
+            {textureRef && (
+              <button
+                className="shrink-0 rounded p-0.5 text-zinc-400 hover:text-red-400"
+                onClick={() => removeTexture(entityId, slot)}
+                title="Remove texture"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <button
+              className="flex items-center gap-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-400 hover:border-[var(--sf-border-strong)] hover:text-zinc-200"
+              onClick={() => fileRef.current?.click()}
+              aria-label={`Upload ${label.toLowerCase()} texture`}
+              title={`Upload ${label.toLowerCase()} texture`}
+            >
+              <ImageIcon size={12} />
+              <span>Upload</span>
+            </button>
+            {textureRef && (
+              <button
+                className="rounded p-0.5 text-zinc-400 hover:text-red-400"
+                onClick={() => removeTexture(entityId, slot)}
+                title="Remove texture"
+              >
+                <X size={12} />
+              </button>
+            )}
+            <span className="truncate text-[10px] text-zinc-400">
+              {assetName ?? (textureRef ? textureRef.slice(0, 8) + '...' : 'none')}
             </span>
-          )}
-          {textureRef && (
-            <button
-              className="shrink-0 rounded p-0.5 text-zinc-400 hover:text-red-400"
-              onClick={() => removeTexture(entityId, slot)}
-              title="Remove texture"
-            >
-              <X size={12} />
-            </button>
-          )}
-        </>
-      ) : (
-        <>
-          <button
-            className="flex items-center gap-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-400 hover:border-[var(--sf-border-strong)] hover:text-zinc-200"
-            onClick={() => fileRef.current?.click()}
-            aria-label={`Upload ${label.toLowerCase()} texture`}
-            title={`Upload ${label.toLowerCase()} texture`}
-          >
-            <ImageIcon size={12} />
-            <span>Upload</span>
-          </button>
-          {textureRef && (
-            <button
-              className="rounded p-0.5 text-zinc-400 hover:text-red-400"
-              onClick={() => removeTexture(entityId, slot)}
-              title="Remove texture"
-            >
-              <X size={12} />
-            </button>
-          )}
-          <span className="truncate text-[10px] text-zinc-400">
-            {assetName ?? (textureRef ? textureRef.slice(0, 8) + '...' : 'none')}
-          </span>
-        </>
+          </>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".png,.jpg,.jpeg"
+          aria-label={`Upload ${label.toLowerCase()} texture file`}
+          className="hidden"
+          onChange={(e) => handleFileSelect(e.target.files)}
+        />
+      </div>
+      {/* The note is a block under the row, never a flex sibling of the
+          select: as one it kept its width and squeezed the select to
+          nothing whenever another texture asset existed. */}
+      {hasAssets && hasOtherAssets && (
+        <p id={noteId} className="mt-0.5 pl-[5.5rem] text-[10px] text-zinc-500">
+          Assign not available yet (#10398); upload instead
+        </p>
       )}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".png,.jpg,.jpeg"
-        aria-label={`Upload ${label.toLowerCase()} texture file`}
-        className="hidden"
-        onChange={(e) => handleFileSelect(e.target.files)}
-      />
     </div>
   );
 }
