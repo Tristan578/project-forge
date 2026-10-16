@@ -1,0 +1,68 @@
+# cargo-audit configuration for the engine. `cargo audit` reads this file from
+# its working directory, and both workflows that run it do so with
+# `working-directory: engine` (.github/workflows/quality-gates.yml and cd.yml,
+# "cargo audit (engine)"), so an entry here is what keeps a known, un-relockable
+# advisory from failing every CI run. It is NOT a place to park a fixable one.
+#
+# Every ignore carries, in the comment block directly above its id:
+#   unfixable: why no relock can move the crate to a patched release today
+#   exposure:  what input reaches the vulnerable code and the worst case
+#   lift when: the condition under which the entry must be removed, with the
+#              tracking issue
+# scripts/__tests__/cargo-audit-ignores.test.sh pins that shape, the exact list
+# below, that nothing else lives in this file (one `[advisories]` table whose
+# only key is `ignore`), and that both workflow steps run from engine/. Adding
+# an id, a table or a key means editing the test in the same change.
+
+[advisories]
+ignore = [
+  # RUSTSEC-2026-0344: ruzstd 0.8.2, decompression bomb (a tiny input can
+  # exhaust memory), severity 7.5 high, fixed in ruzstd >= 0.9.1.
+  # unfixable: not fixable by any relock or upstream release within Bevy 0.19.
+  #   ruzstd is reached only through bevy_image 0.19.1's `zstd_rust` feature
+  #   (enabled in engine/Cargo.toml), which declares `ruzstd = "0.8.0"`; cargo
+  #   cannot satisfy ^0.8 with 0.9.x, so no `cargo update` resolves it, and
+  #   0.19.1 is the last bevy_image 0.19.x (`cargo info bevy_image@0.19`,
+  #   checked 2026-10-15). A zstd decoder cannot be dropped: the three
+  #   tonemapping LUTs Bevy embeds are zstd-supercompressed KTX2
+  #   (supercompressionScheme 2 in each file header), and without the LUTs
+  #   every material renders pink (CLAUDE.md, Rendering Strategy). The other
+  #   backend, `zstd_c`, is the unsafe C-bindings decoder (bevy
+  #   docs/cargo_features.md); it is not used for the wasm32 build and this
+  #   change does not evaluate it. A vendored fork (a [patch.crates-io] ruzstd
+  #   0.8.x with the fix backported, or a bevy_image with a ^0.9 requirement,
+  #   as .transform-gizmo-fork does for another crate) would resolve it and was
+  #   judged not worth carrying for a client-side out-of-memory crash.
+  # exposure: two editor-side paths hand caller-chosen bytes to Bevy's KTX2
+  #   loader, which feeds ruzstd's StreamingDecoder into an unbounded Vec
+  #   (bevy_image 0.19.1 src/ktx2.rs, ktx2_buffer_to_image) before it checks
+  #   the format. (1) `load_texture`: apply_texture_load in
+  #   engine/src/bridge/scene_io.rs takes the MIME type from the caller's
+  #   data-URL header and calls Image::from_buffer with ImageType::MimeType and
+  #   no allowlist, so `data:image/ktx2;base64,...` reaches the KTX2 loader;
+  #   web/src/lib/chat/handlers/assetHandlers.ts forwards any dataBase64 to it,
+  #   and the file pickers' accept=".png,..." is a hint, not a filter. (2) glTF
+  #   import: apply_gltf_import in the same file (about 50 MB decoded, 67.5 M
+  #   base64 characters) loads the model through bevy_gltf, which passes each
+  #   embedded image's own `mimeType` to Image::from_buffer (bevy_gltf 0.19.1
+  #   src/loader/mod.rs; the gltf crate does not validate it), so an image
+  #   declared `image/ktx2` reaches the same loader. Both drain systems are
+  #   editor-only (#[cfg(not(feature = "runtime"))];
+  #   core/pending/runtime_drains.rs lists both queues as editor-authoring) and
+  #   a scene file stores asset metadata, not the bytes (core/scene_file.rs
+  #   `assets`), so neither a published game nor a remix delivers them: the
+  #   person whose tab decodes the file has to import it themselves (a crafted
+  #   .glb or image they were handed, or a generation provider's model that
+  #   web/src/hooks/useGenerationPolling.ts imports for them). Worst case: that
+  #   tab's WASM heap runs out and it crashes. No server-side code runs ruzstd,
+  #   and it is an allocation denial of service, not code execution. This risk
+  #   is ACCEPTED until #10396 (refuse image/ktx2 on both paths) lands; narrow
+  #   this paragraph when it does.
+  # lift when: a bevy_image release raises its ruzstd requirement to >= 0.9.1,
+  #   or the engine stops using the ruzstd (`zstd_rust`) backend. Bevy 0.20
+  #   does not do it: bevy_image 0.20.0 still declares `ruzstd = "0.8.0"` (read
+  #   from its Cargo.toml, 2026-10-15) while `cargo info ruzstd` lists 0.9.1 as
+  #   the latest release. Re-check on each bevy_image release.
+  #   Tracking: #10393 (this ignore), #10396 (narrowing the exposure).
+  "RUSTSEC-2026-0344",
+]
