@@ -81,6 +81,12 @@
 //! queued in the frame Play stops, or made while already in Edit, stays until
 //! `unpin_frame_rate` (`a_pin_queued_in_the_frame_play_stops_still_wins` pins
 //! that deliberately: an explicit request is never silently discarded).
+//! The mode applier drains every queued request in ONE update, so a Stop and
+//! a Play in the same drain leave `EngineMode` at `Play` on both sides of the
+//! frame and the transition is invisible to a frame-to-frame comparison; the
+//! applier therefore also records the stop on the pin resource
+//! ([`SimulationClockPin::on_play_stopped`]), and the release honours either
+//! signal (`a_stop_and_a_play_drained_in_one_update_still_release_the_pin`).
 //! Documented in `docs/decisions/2026-10-05-pinned-simulation-clock-for-replay.md`.
 
 use bevy::platform::time::Instant;
@@ -115,12 +121,30 @@ pub enum FrameRatePinRequest {
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct SimulationClockPin {
     pub hz: Option<u32>,
+    /// Play stopped since [`release_pin_when_play_stops`] last ran; see
+    /// [`SimulationClockPin::on_play_stopped`].
+    play_stopped: bool,
 }
 
 impl SimulationClockPin {
     /// Whether a pinned rate is currently driving `Time`.
     pub fn is_pinned(&self) -> bool {
         self.hz.is_some()
+    }
+
+    /// Record that Play just stopped, so the next `First` releases the pin
+    /// even when the mode no longer shows the transition.
+    ///
+    /// [`release_pin_when_play_stops`] compares `EngineMode` across frames,
+    /// but the mode applier drains every queued request in ONE update: a Stop
+    /// followed by a Play in the same drain leaves the mode at `Play` on both
+    /// sides of the frame, and the pass through `Edit` is invisible to that
+    /// comparison. The applier calls this from its Stop arm, and only there
+    /// (Pause keeps the pin), so the release fires regardless. The record is
+    /// consumed before the pin drain, so a pin queued in the stopping frame
+    /// still wins, as before.
+    pub fn on_play_stopped(&mut self) {
+        self.play_stopped = true;
     }
 }
 
@@ -250,7 +274,14 @@ pub fn release_pin_when_play_stops(
     let previous = previous_mode.replace(current);
     let entering_edit =
         current == EngineMode::Edit && previous.is_some_and(|p| p != EngineMode::Edit);
-    if !entering_edit || !pin.is_pinned() {
+    // A stop the comparison cannot see (a Stop and a Play drained in one
+    // update) is recorded on the resource by the applier. Consumed whether or
+    // not a pin is in force, so it never lingers into a later session.
+    let play_stopped = pin.play_stopped;
+    if play_stopped {
+        pin.play_stopped = false;
+    }
+    if !(entering_edit || play_stopped) || !pin.is_pinned() {
         return;
     }
     let hz = pin.hz;
@@ -646,5 +677,88 @@ mod tests {
         app.update();
         assert_eq!(pin(&app).hz, Some(30));
         assert_eq!(virtual_delta(&app), pin_duration(30));
+    }
+
+    /// The mode applier drains every queued request in one update: a Stop and
+    /// a Play in the same drain leave `EngineMode` at `Play` on both sides of
+    /// the frame, so the transition is invisible to the mode comparison. The
+    /// applier records the stop on the pin resource instead, and the release
+    /// honours it (Sentry finding on #10369).
+    #[test]
+    fn a_stop_and_a_play_drained_in_one_update_still_release_the_pin() {
+        let mut app = app();
+        app.update();
+        set_mode(&mut app, EngineMode::Play);
+        app.update();
+        queue(&mut app, FrameRatePinRequest::Pin { hz: 60 });
+        app.update();
+        assert_eq!(pin(&app).hz, Some(60));
+
+        // What the applier does within one Update for a queued [Stop, Play].
+        set_mode(&mut app, EngineMode::Edit);
+        app.world_mut().resource_mut::<SimulationClockPin>().on_play_stopped();
+        set_mode(&mut app, EngineMode::Play);
+        app.update();
+        assert!(!pin(&app).is_pinned(), "the stop recorded by the applier must release the pin");
+        assert!(is_automatic(&app));
+
+        // The record is consumed: a pin made in the new session is not
+        // released by a stale stop on a later frame.
+        queue(&mut app, FrameRatePinRequest::Pin { hz: 30 });
+        app.update();
+        assert_eq!(pin(&app).hz, Some(30));
+        app.update();
+        assert_eq!(pin(&app).hz, Some(30), "a consumed stop must not release a later pin");
+        assert_eq!(virtual_delta(&app), pin_duration(30));
+    }
+
+    /// A recorded stop with nothing pinned is consumed all the same, so it
+    /// cannot release a pin made afterwards.
+    #[test]
+    fn a_recorded_stop_with_no_pin_in_force_is_consumed_quietly() {
+        let mut app = app();
+        app.update();
+        set_mode(&mut app, EngineMode::Play);
+        app.update();
+        app.world_mut().resource_mut::<SimulationClockPin>().on_play_stopped();
+        app.update();
+        assert!(is_automatic(&app));
+        assert!(!pin(&app).is_pinned());
+
+        queue(&mut app, FrameRatePinRequest::Pin { hz: 60 });
+        app.update();
+        app.update();
+        assert_eq!(pin(&app).hz, Some(60), "the stale stop must have been consumed");
+        assert_eq!(virtual_delta(&app), pin_duration(60));
+    }
+
+    /// The applier's call site is bridge code (wasm32-only), so no native test
+    /// runs it. This pins the EXECUTABLE call inside the Stop arm and its
+    /// absence from the Pause and Resume arms; it does not prove the arm runs.
+    /// `SPAWNFORGE_ENGINE_SRC` redirects the source root for a probe crate
+    /// built outside `engine/`.
+    #[test]
+    fn the_mode_applier_records_the_stop_in_its_stop_arm_only() {
+        let root = std::env::var("SPAWNFORGE_ENGINE_SRC")
+            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/src").to_string());
+        let path = format!("{root}/bridge/core_systems.rs");
+        let source = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let arm = |name: &str| -> String {
+            assert_eq!(source.matches(name).count(), 1, "{name} must appear exactly once");
+            let start = source.find(name).unwrap() + name.len();
+            let rest = &source[start..];
+            let end = rest.find("ModeChangeRequest::").unwrap_or(rest.len());
+            rest[..end].to_string()
+        };
+        let calls = |body: &str| {
+            body.lines()
+                .map(str::trim)
+                .filter(|line| !line.starts_with("//"))
+                .filter(|line| *line == "clock_pin.on_play_stopped();")
+                .count()
+        };
+        assert_eq!(calls(&arm("ModeChangeRequest::Stop =>")), 1, "the Stop arm must record the stop exactly once");
+        assert_eq!(calls(&arm("ModeChangeRequest::Pause =>")), 0, "Pause keeps the pin and must not record a stop");
+        assert_eq!(calls(&arm("ModeChangeRequest::Resume =>")), 0, "Resume must not record a stop");
     }
 }
