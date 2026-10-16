@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invokeHandler } from './handlerTestUtils';
 import { playtestHandlers, REPLAY_NEEDS_ONE_SOURCE, REPLAY_REQUIRES_PLAY_MODE } from '../playtestHandlers';
 import { INPUT_TRACE_VERSION, parseInputTrace } from '@/lib/playtest/inputTrace';
+import { ReplayCancelledError } from '@/lib/playtest/replayRunner';
 // The tool definition the in-app AI reads (`chat/tools.ts` and `ai/spawnforgeAgent.ts` import this copy).
 import manifestJson from '@/data/commands.json';
 
@@ -291,6 +292,24 @@ describe('replay_input_trace', () => {
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain('pin_frame_rate');
+  });
+
+  // #10007 (Sentry finding on PR #10369): the runner cancels a replay the
+  // editor took over — Stop, a toolbar Pause, a toolbar Resume — and the
+  // `ReplayCancelledError` the entry point throws says which, in the same
+  // words the panel shows. The tool reports that message as its error.
+  it("reports why the editor cancelled the replay, in the runner's own words", async () => {
+    runReplay.mockRejectedValue(new ReplayCancelledError(3, 'engine-paused'));
+    const { result } = await invokeHandler(
+      playtestHandlers,
+      'replay_input_trace',
+      { trace: validTrace(), playerEntityId: PLAYER },
+      playing,
+    );
+    expect(result).toEqual({
+      success: false,
+      error: 'Replay cancelled after 3 ticks because the game was paused from the toolbar; no outcome was produced.',
+    });
   });
 
   it('rejects an unknown strategy and a missing player id', async () => {

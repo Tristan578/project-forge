@@ -234,6 +234,14 @@ export interface DomKeyboardEnvironmentConfig {
    * reporting every engine command gets apply to a replay's commands too.
    */
   dispatch: EngineDispatch | null;
+  /**
+   * The editor's engine mode, delivered on every change (the store's
+   * `engineMode`); the runner watches it to cancel itself on Stop and on a
+   * toolbar Pause or Resume it did not make (`replayRunner.ts`). Omitted by
+   * a caller with no editor; `replayEntryPoints.prepareReplay` always
+   * supplies it, so every entry point's run carries the watch.
+   */
+  subscribeEngineMode?: ReplayEnvironment['subscribeEngineMode'];
 }
 
 /**
@@ -311,5 +319,6 @@ export function createDomKeyboardEnvironment(config: DomKeyboardEnvironmentConfi
     resumeRuntime: () => {
       confirmed('resume', {});
     },
+    ...(config.subscribeEngineMode ? { subscribeEngineMode: config.subscribeEngineMode } : {}),
   };
 }

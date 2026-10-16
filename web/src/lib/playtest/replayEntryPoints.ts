@@ -19,16 +19,24 @@
  * and the active run is left alone. The guard is released when the active
  * run's `result` settles — completed, cancelled or failed.
  *
- * LEAVING PLAY CANCELS THE ACTIVE RUN. Stop makes the engine restore its edit
- * snapshot and never tick again, so a run left in flight would hold its
- * synthetic keys and its pin until the boundary's stalled-tick timeout turned
- * the creator's Stop into a failure. Every session started here therefore
- * watches the store's `engineMode` and cancels itself on the transition to
- * `'edit'` — whichever entry point started it, so a bot or chat replay is
- * cancelled by Stop exactly as a manual one is. Keyed on `'edit'`, not on
- * leaving `'play'`: the runner's own Pause moves the engine to `'paused'`, and
- * a replay has to survive its own pause. `__tests__/replayEntryPoints.test.ts`
- * pins both rules.
+ * LEAVING PLAY — OR PAUSING OR RESUMING IT FROM THE TOOLBAR — CANCELS THE
+ * ACTIVE RUN. The runner owns the runtime during a replay and cannot follow a
+ * mode change it did not make (`replayRunner.ts`, the engine-mode watch): Stop
+ * cancels with reason 'engine-stopped' (the engine restores its edit snapshot
+ * and never ticks again, so a run left in flight would hold its keys and its
+ * pin until the stalled-tick timeout turned the creator's Stop into a
+ * failure); a toolbar Pause cancels with 'engine-paused' and the game is left
+ * paused; a toolbar Resume of a game the replay had paused cancels with
+ * 'engine-resumed'. The runner's own Pause and Resume never cancel. This
+ * module's part is the wiring: `prepareReplay` hands the store's `engineMode`
+ * subscription to the boundary (`DomKeyboardEnvironmentConfig.subscribeEngineMode`),
+ * so every session started here — manual panel, E2E hook, the bot's run, the
+ * chat tool — carries the watch, and `__tests__/replayEntryPoints.test.ts`
+ * pins that it does. The watch used to live HERE, keyed on 'edit' alone, and
+ * its test drove a 'paused' by hand while the run was running and asserted no
+ * cancel as "the runner's own pause" — but a 'paused' the runner did not
+ * dispatch IS the toolbar's pause, the case that now cancels. Only the runner
+ * knows whether it paused the runtime, which is why the watch moved.
  *
  * Store reads are injectable (`deps`) so the parity test can run both paths
  * against one recorded dispatcher and one simulated play-tick bus.
@@ -57,7 +65,8 @@ export interface ReplayRequest {
 
 /**
  * Delivers the store's `engineMode` whenever it changes; returns the
- * unsubscribe. The default reads the live editor store.
+ * unsubscribe. The default reads the live editor store; the runner receives
+ * it through the boundary (`ReplayEnvironment.subscribeEngineMode`).
  */
 export type EngineModeSubscription = (listener: (mode: string) => void) => () => void;
 
@@ -169,7 +178,9 @@ function resolveDeps(deps: ReplayEntryDeps): Required<ReplayEntryDeps> {
 }
 
 /**
- * Validate a request's trace and build the real browser runtime boundary for it.
+ * Validate a request's trace and build the real browser runtime boundary for
+ * it — the store's `engineMode` subscription included, so the runner can
+ * cancel itself on Stop and on a toolbar Pause or Resume (module header).
  * @param request Trace and the entities to observe.
  * @param deps Store overrides.
  * @returns The validated trace and the environment to replay it in.
@@ -187,6 +198,7 @@ export function prepareReplay(
     collectibleEntityIds:
       request.collectibleEntityIds ?? collectibleEntityIdsFrom(resolved.allGameComponents),
     dispatch: resolved.dispatch,
+    subscribeEngineMode: resolved.subscribeEngineMode,
   });
   return { trace, env };
 }
@@ -198,10 +210,11 @@ export function prepareReplay(
 /**
  * Start a controlled replay (pause / resume / cancel) from any entry point.
  *
- * Takes the single-flight guard (or refuses), builds the boundary, starts
- * the run, and arms the Stop watch. The guard is taken AFTER validation so
- * an invalid trace never occupies it, and the run is started only once the
- * guard is held so a refused start has dispatched nothing.
+ * Takes the single-flight guard (or refuses), builds the boundary — which
+ * carries the engine-mode watch — and starts the run. The guard is taken
+ * AFTER validation so an invalid trace never occupies it, and the run is
+ * started only once the guard is held so a refused start has dispatched
+ * nothing.
  * @param source Who asked: the manual controls or the in-app AI.
  * @param request Trace and the entities to observe.
  * @param options Pause boundary, pin rate, handle callback.
@@ -218,17 +231,12 @@ export function startReplaySession(
 ): ReplaySession {
   if (activeSession) throw new ReplayBusyError(activeSession.source);
   const { trace, env } = prepareReplay(request, deps);
-  const subscribeEngineMode = deps.subscribeEngineMode ?? subscribeEngineModeFromStore;
 
   const session = startReplayInvocation(source, trace, env, options);
   setActiveSession(session);
-  const stopWatching = subscribeEngineMode((mode) => {
-    if (mode === 'edit') session.handle.cancel();
-  });
   // `result` never rejects. Registered before any caller can await it, so
   // the guard is released before a caller's own continuation runs.
   void session.handle.result.then(() => {
-    stopWatching();
     if (activeSession === session) setActiveSession(null);
   });
   return session;
@@ -236,9 +244,10 @@ export function startReplaySession(
 
 /**
  * Run a replay to completion from any entry point. The uncontrolled form of
- * `startReplaySession`: same guard, same Stop watch; resolves with the outcome
- * and throws for a busy guard, an invalid trace, a refused pin, a boundary
- * failure, or a cancellation (including the one Stop issues).
+ * `startReplaySession`: same guard, same engine-mode watch; resolves with the
+ * outcome and throws for a busy guard, an invalid trace, a refused pin, a
+ * boundary failure, or a cancellation (including the ones Stop and a toolbar
+ * Pause or Resume issue — `ReplayCancelledError.reason` says which).
  * @param source Who asked: the manual controls or the in-app AI.
  * @param request Trace and the entities to observe.
  * @param options Pause boundary, pin rate, handle callback.

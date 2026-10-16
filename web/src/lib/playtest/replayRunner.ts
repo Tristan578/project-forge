@@ -43,6 +43,26 @@
  * (`__tests__/replayController.test.ts`, "a cancel that races the pause" and
  * "the last windows a control can land in").
  *
+ * THE RUNNER WATCHES THE EDITOR'S ENGINE MODE (`ReplayEnvironment.subscribeEngineMode`,
+ * `__tests__/replayEngineModeWatch.test.ts`). The runner owns the runtime for
+ * the whole replay — it pins the clock, injects keys per engine tick, and
+ * pauses and resumes the engine for its own Pause — so a mode change it did
+ * not make is one it cannot follow. Stop ('edit') cancels the run with reason
+ * 'engine-stopped'. A toolbar Pause ('paused' while the runner had not paused
+ * the runtime) cancels it with 'engine-paused' and LEAVES the game paused; the
+ * alternative was the boundary's stalled-tick timeout turning a deliberate
+ * pause into "no engine play tick received" two seconds later. A toolbar
+ * Resume ('play' while the runtime was paused BY the runner) cancels it with
+ * 'engine-resumed', without dispatching a resume at a game that is already
+ * running; the alternative was the trace continuing, on the replay's own
+ * Resume, into a world that had moved on without it — a deterministic verdict
+ * that was silently wrong. The runner's OWN pause and resume never cancel:
+ * `runtimePausedByRunner` is set BEFORE the pause command is dispatched and
+ * cleared BEFORE the resume is, so the mode the engine reports back is
+ * attributed correctly whether it arrives inside the dispatch (unit fakes) or
+ * a frame later (the real engine). The creator's own Cancel carries no
+ * reason. The watch is removed on every exit path.
+ *
  * WHY THIS IS NOT `gameplayBot.ts`. `simulatePlaytest` in `lib/ai/gameplayBot.ts`
  * is a HEURISTIC: it inspects the scene graph statically and produces an
  * `overallRating` ('excellent' | 'good' | 'needs_work' | 'critical_issues')
@@ -61,6 +81,7 @@ import {
   type InputTrace,
   type InputTraceFrame,
 } from './inputTrace';
+import { replayCancelReasonClause } from './replayCancelReason';
 
 /** Command identifier of the shared replay runner (manual button, E2E hook, AI tool). */
 export const REPLAY_INPUT_TRACE_COMMAND = 'replay_input_trace' as const;
@@ -145,6 +166,14 @@ export interface ReplayEnvironment {
   pauseRuntime?(): void | Promise<void>;
   /** Resume a runtime this runner paused (engine `resume`). May throw on a refusal. */
   resumeRuntime?(): void | Promise<void>;
+  /**
+   * Deliver the editor's engine mode ('edit' | 'play' | 'paused') on every
+   * change; returns the unsubscribe. The runner subscribes before the pin,
+   * unsubscribes on every exit path, and cancels itself on a change it did
+   * not make (module header). Absent on a boundary with no editor (unit
+   * fakes), in which case nothing outside the handle can end the run.
+   */
+  subscribeEngineMode?: (listener: (mode: string) => void) => () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -292,13 +321,23 @@ export interface ReplayRunOptions {
 }
 
 /**
- * How a controlled run ended. A cancelled run carries no outcome, by design.
- * A completed run whose unpin FAILED still carries its outcome — the run was
- * pinned — with the unpin failure reported beside it, never as a failed run.
+ * Why the RUNNER cancelled a run on the editor's behalf (the engine-mode
+ * watch): Stop, a toolbar Pause the runner did not make, or a toolbar Resume
+ * of a runtime the runner had paused. A creator's own Cancel carries none.
+ * `replayCancelReason.ts` turns one into the creator's words.
+ */
+export type ReplayCancelReason = 'engine-stopped' | 'engine-paused' | 'engine-resumed';
+
+/**
+ * How a controlled run ended. A cancelled run carries no outcome, by design;
+ * it carries a `reason` only when the runner cancelled it on the editor's
+ * behalf. A completed run whose unpin FAILED still carries its outcome — the
+ * run was pinned — with the unpin failure reported beside it, never as a
+ * failed run.
  */
 export type ReplayRunResult =
   | { status: 'completed'; outcome: ReplayOutcome; unpinError?: string }
-  | { status: 'cancelled'; ticksReplayed: number }
+  | { status: 'cancelled'; ticksReplayed: number; reason?: ReplayCancelReason }
   | { status: 'failed'; error: Error; ticksReplayed: number };
 
 /** Control surface of a running replay. Every control returns whether it applied. */
@@ -320,14 +359,27 @@ export interface ReplayHandle {
   subscribe(listener: (progress: ReplayProgress) => void): () => void;
 }
 
-/** Thrown by `replayInputTrace` when the run was cancelled through its handle. */
+/**
+ * Thrown by `replayInputTrace` (and the entry points' `runReplay`) when the
+ * run was cancelled — through its handle, or by the runner on the editor's
+ * behalf, in which case `reason` says why and the message says it in the
+ * creator's words. This message is what the chat tool reports.
+ */
 export class ReplayCancelledError extends Error {
   readonly ticksReplayed: number;
-  /** @param ticksReplayed Ticks injected before the cancellation took effect. */
-  constructor(ticksReplayed: number) {
-    super(`Replay cancelled after ${ticksReplayed} ticks; no outcome was produced.`);
+  /** Why the runner cancelled on the editor's behalf; undefined for a creator's own Cancel. */
+  readonly reason: ReplayCancelReason | undefined;
+  /**
+   * @param ticksReplayed Ticks injected before the cancellation took effect.
+   * @param reason The runner's reason, when it cancelled on the editor's behalf.
+   */
+  constructor(ticksReplayed: number, reason?: ReplayCancelReason) {
+    super(
+      `Replay cancelled after ${ticksReplayed} ticks${replayCancelReasonClause(reason)}; no outcome was produced.`,
+    );
     this.name = 'ReplayCancelledError';
     this.ticksReplayed = ticksReplayed;
+    this.reason = reason;
   }
 }
 
@@ -424,6 +476,8 @@ export function startReplay(
 
   let pauseRequested = false;
   let cancelRequested = false;
+  /** Set with `cancelRequested` when the RUNNER cancelled on the editor's behalf; a creator's own Cancel leaves it undefined. */
+  let cancelReason: ReplayCancelReason | undefined;
   let pauseArmed = options.pauseAtTick !== undefined;
   /** Set once the final tick boundary is behind us: no pause can settle any more. */
   let pastFinalBoundary = false;
@@ -496,6 +550,30 @@ export function startReplay(
     for (const code of codes) held.delete(code);
   };
 
+  /**
+   * The ONE cancel path. The public `handle.cancel()` — the creator's Cancel,
+   * a panel unmount, `cancelActiveReplay`, the chat tool — gives no reason;
+   * the engine-mode watch gives the one it cancelled for. The state machine
+   * is the same for both: 'cancelling' now, 'cancelled' once the keys are
+   * released and the clock unpinned, and the reason rides on the result.
+   */
+  const requestCancel = (reason?: ReplayCancelReason): boolean => {
+    if (TERMINAL_STATES.has(progress.state) || cancelRequested) return false;
+    cancelRequested = true;
+    cancelReason = reason;
+    pauseRequested = false;
+    setState('cancelling');
+    wakeUp?.();
+    abandonFrame?.();
+    return true;
+  };
+
+  /** The cancelled result, carrying the reason only when the runner had one. */
+  const cancelledResult = (ticks: number): ReplayRunResult =>
+    cancelReason === undefined
+      ? { status: 'cancelled', ticksReplayed: ticks }
+      : { status: 'cancelled', ticksReplayed: ticks, reason: cancelReason };
+
   const handle: ReplayHandle = {
     result: Promise.resolve({ status: 'cancelled', ticksReplayed: 0 }), // replaced below
     pause: () => {
@@ -516,15 +594,7 @@ export function startReplay(
       wakeUp?.();
       return true;
     },
-    cancel: () => {
-      if (TERMINAL_STATES.has(progress.state) || cancelRequested) return false;
-      cancelRequested = true;
-      pauseRequested = false;
-      setState('cancelling');
-      wakeUp?.();
-      abandonFrame?.();
-      return true;
-    },
+    cancel: () => requestCancel(),
     getProgress: () => ({ ...progress, heldKeys: [...held] }),
     subscribe: (listener) => {
       listeners.add(listener);
@@ -536,6 +606,13 @@ export function startReplay(
 
   const run = async (): Promise<ReplayRunResult> => {
     let ticksReplayed = 0;
+    /**
+     * True from just BEFORE the runner dispatches the engine's pause to just
+     * BEFORE it dispatches the resume. Flipped on that side of each await so
+     * the mode the engine reports back is attributed correctly whether it is
+     * delivered inside the dispatch or a frame later: the engine-mode watch
+     * reads it to tell the runner's own pause from the toolbar's.
+     */
     let runtimePausedByRunner = false;
     let pinnedByRunner = false;
     const engineInput: ReplayEngineInputEvidence = {
@@ -596,6 +673,32 @@ export function startReplay(
     };
 
     /**
+     * The engine-mode watch (module header). Reads the runner's own flags and
+     * cancels through `requestCancel`, so a run already cancelling, or over,
+     * ignores whatever the editor reports next; a mode it has no rule for
+     * (its own pause and resume, or 'play' while running) is ignored too.
+     */
+    const onEngineMode = (mode: string): void => {
+      if (TERMINAL_STATES.has(progress.state) || cancelRequested) return;
+      if (mode === 'edit') {
+        requestCancel('engine-stopped');
+      } else if (mode === 'paused' && !runtimePausedByRunner) {
+        // The creator paused the game from the toolbar: its ticks have
+        // stopped, and the runner must not wait two seconds to call that a
+        // stalled engine. The runtime is LEFT paused — `resumeRuntimeIfPaused`
+        // resumes only a runtime this runner paused, and it did not.
+        requestCancel('engine-paused');
+      } else if (mode === 'play' && runtimePausedByRunner) {
+        // The creator resumed, from the toolbar, a game the runner had
+        // paused: it is running with no replay input, so the trace cannot be
+        // continued. It is already running — clear the flag FIRST so the
+        // cancel path does not dispatch a resume at it.
+        runtimePausedByRunner = false;
+        requestCancel('engine-resumed');
+      }
+    };
+
+    /**
      * Wait for the next engine frame — or stop waiting the moment the run is
      * cancelled. A stopped engine never ticks again, so a cancel that waited
      * for the frame would leave synthetic keys held until the boundary's own
@@ -640,7 +743,7 @@ export function startReplay(
       }
       await unpin();
       setState('cancelled');
-      return { status: 'cancelled', ticksReplayed: ticks };
+      return cancelledResult(ticks);
     };
 
     /**
@@ -671,8 +774,14 @@ export function startReplay(
       if (cancelRequested) return false;
       if (!pauseRequested) return proceed();
       if (env.pauseRuntime) {
-        await env.pauseRuntime();
+        // Set BEFORE the dispatch: the engine's 'paused' may reach the mode
+        // watch from inside this very call, and must read as the runner's
+        // own. If the dispatch throws, the flag stays true and the failure
+        // path's resume is a best-effort guess at a runtime that may never
+        // have paused — acceptable: the engine refuses a stray resume
+        // harmlessly, and the refusal is logged, not reported.
         runtimePausedByRunner = true;
+        await env.pauseRuntime();
         if (cancelRequested) return false;
         if (!pauseRequested) {
           // Past the final boundary from here on: a pause() landing in the
@@ -700,7 +809,14 @@ export function startReplay(
       return true;
     };
 
+    let stopWatchingEngineMode: (() => void) | null = null;
     try {
+      // --- Watch the editor's engine mode for the whole run -----------------
+      // Before the pin, so a Stop or a toolbar Pause during the warm-up frame
+      // is seen too; removed in the `finally` below on EVERY exit path —
+      // completed, cancelled, failed, a refused pin included.
+      stopWatchingEngineMode = env.subscribeEngineMode?.(onEngineMode) ?? null;
+
       // --- Pin the clock BEFORE the first tick ------------------------------
       if (env.pinFrameRate) {
         const accepted = await env.pinFrameRate(pinHz);
@@ -766,7 +882,7 @@ export function startReplay(
       }
       pastFinalBoundary = true;
 
-      if (cancelRequested) return finishCancelled(ticksReplayed);
+      if (cancelRequested) return await finishCancelled(ticksReplayed);
 
       // Release everything and let the runtime settle so the final observation
       // reflects a resting state, not a mid-input frame.
@@ -775,7 +891,7 @@ export function startReplay(
       await awaitFrame();
       // Every tick was injected, but cancel() said it applied: a cancelled run
       // never carries a verdict, even one reached behind its back.
-      if (cancelRequested) return finishCancelled(ticksReplayed);
+      if (cancelRequested) return await finishCancelled(ticksReplayed);
 
       const after = env.observe();
       const endPosition = after?.entities[env.playerEntityId]?.position ?? null;
@@ -832,7 +948,7 @@ export function startReplay(
       // The cancel's last window: it may have landed during that unpin. It
       // said it applied, so the run is a cancellation — no verdict — and the
       // clock is already released (the second unpin below is a no-op).
-      if (cancelRequested) return finishCancelled(ticksReplayed);
+      if (cancelRequested) return await finishCancelled(ticksReplayed);
       const outcome: ReplayOutcome = {
         command: REPLAY_INPUT_TRACE_COMMAND,
         // A verdict over no assertions is not a pass: `every` is vacuously
@@ -860,7 +976,7 @@ export function startReplay(
       // the creator's cancel into a failure they did not cause.
       if (cancelRequested) {
         console.error('[replayRunner] boundary failed while cancelling; reporting the cancellation', error);
-        return finishCancelled(ticksReplayed);
+        return await finishCancelled(ticksReplayed);
       }
       // A failed frame/input operation must not leave synthetic keys held, a
       // runtime paused, or a clock pinned. Each step is best-effort: the
@@ -884,10 +1000,14 @@ export function startReplay(
       if (cancelRequested) {
         console.error('[replayRunner] run failed, then cancelled during cleanup; reporting the cancellation', error);
         setState('cancelled');
-        return { status: 'cancelled', ticksReplayed };
+        return cancelledResult(ticksReplayed);
       }
       setState('failed');
       return { status: 'failed', error, ticksReplayed };
+    } finally {
+      // After the terminal state, whichever exit path announced it (the
+      // cancel paths are awaited above so this follows 'cancelled' too).
+      stopWatchingEngineMode?.();
     }
   };
 
@@ -930,6 +1050,6 @@ export async function replayInputTrace(
  */
 export function outcomeOf(result: ReplayRunResult): ReplayOutcome {
   if (result.status === 'completed') return result.outcome;
-  if (result.status === 'cancelled') throw new ReplayCancelledError(result.ticksReplayed);
+  if (result.status === 'cancelled') throw new ReplayCancelledError(result.ticksReplayed, result.reason);
   throw result.error;
 }

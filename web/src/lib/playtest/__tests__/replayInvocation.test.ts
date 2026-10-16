@@ -432,4 +432,21 @@ describe('browser replay boundary — clock and runtime mode through the engine 
     expect(() => env.pauseRuntime?.()).toThrow('engine command dispatcher');
     expect(() => env.resumeRuntime?.()).toThrow('engine command dispatcher');
   });
+
+  // #10007 (Sentry finding on PR #10369): the runner watches the editor's
+  // engine mode through the boundary, so the entry points' store subscription
+  // has to travel through this config to reach it — and a caller with no
+  // editor gets an environment without the hook, not one that is `undefined`.
+  it('carries the engine-mode subscription into the environment when configured, and omits it otherwise', () => {
+    const subscribe = vi.fn(() => () => {});
+    const env = createDomKeyboardEnvironment({
+      bindings: [],
+      playerEntityId: 'player',
+      collectibleEntityIds: [],
+      dispatch: null,
+      subscribeEngineMode: subscribe,
+    });
+    expect(env.subscribeEngineMode).toBe(subscribe);
+    expect(environment()).not.toHaveProperty('subscribeEngineMode');
+  });
 });

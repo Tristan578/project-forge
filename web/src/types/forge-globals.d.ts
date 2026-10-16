@@ -143,7 +143,12 @@ declare global {
               assertions: Array<{ operationId: string; passed: boolean }>;
             };
           }
-        | { status: 'cancelled'; ticksReplayed: number }
+        | {
+            status: 'cancelled';
+            ticksReplayed: number;
+            /** Present when the runner cancelled on the editor's behalf (Stop, toolbar Pause / Resume). */
+            reason?: 'engine-stopped' | 'engine-paused' | 'engine-resumed';
+          }
         | { status: 'failed'; error: string; ticksReplayed: number }
       >;
     };

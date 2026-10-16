@@ -33,7 +33,8 @@ import {
   subscribeActiveReplaySession,
 } from '@/lib/playtest/replayEntryPoints';
 import { botSessionToInputTrace } from '@/lib/playtest/botTrace';
-import type { ReplayHandle, ReplayOutcome, ReplayProgress } from '@/lib/playtest/replayRunner';
+import type { ReplayCancelReason, ReplayHandle, ReplayOutcome, ReplayProgress } from '@/lib/playtest/replayRunner';
+import { replayCancelReasonClause } from '@/lib/playtest/replayCancelReason';
 import { ReplayLiveRegion, isTerminalReplayState, replayStatusText } from './ReplayLiveRegion';
 import { replayActionNames, replayAxisActionNames, type ReplaySession } from '@/lib/playtest/replayInvocation';
 
@@ -45,6 +46,16 @@ import { replayActionNames, replayAxisActionNames, type ReplaySession } from '@/
  */
 function useActiveReplay(): ReplaySession | null {
   return useSyncExternalStore(subscribeActiveReplaySession, getActiveReplaySession, () => null);
+}
+
+/**
+ * A cancelled run, as the panel reports it: how far it got and — when the
+ * runner cancelled on the editor's behalf (Stop, a toolbar Pause or Resume)
+ * — why. The creator's own Cancel carries no reason.
+ */
+interface CancelledRun {
+  ticksReplayed: number;
+  reason?: ReplayCancelReason;
 }
 
 /**
@@ -317,7 +328,7 @@ function RuntimeReplaySection({ botRunning }: { botRunning: boolean }) {
   // Cancel act on, and `progress` is what the pending/progress line renders.
   const handleRef = useRef<ReplayHandle | null>(null);
   const [progress, setProgress] = useState<ReplayProgress | null>(null);
-  const [cancelledAfter, setCancelledAfter] = useState<number | null>(null);
+  const [cancelled, setCancelled] = useState<CancelledRun | null>(null);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -327,13 +338,15 @@ function RuntimeReplaySection({ botRunning }: { botRunning: boolean }) {
     };
   }, [isPlaying]);
 
-  // Stop ends a replay in flight: `replayEntryPoints` watches the store's
-  // engineMode and cancels the active session on the transition to 'edit'
-  // (keyed on 'edit', not on leaving 'play', so the runner's own Pause —
-  // which puts the engine in 'paused' — does not cancel it). That one watch
-  // covers this section, the bot's run below and the chat tool alike, so the
-  // panel keeps no Stop effect of its own. Unmounting the panel mid-replay
-  // must not leave a synthetic key held either, and that IS the panel's job.
+  // Stop — and a Pause or Resume from the editor toolbar — ends a replay in
+  // flight: the runner watches the store's engineMode through the boundary
+  // `replayEntryPoints` builds and cancels itself on a mode change it did not
+  // make (its own Pause and Resume move the mode too, and it knows them as
+  // its own). That one watch covers this section, the bot's run below and
+  // the chat tool alike, so the panel keeps no Stop effect of its own; the
+  // cancelled line below says which control it was. Unmounting the panel
+  // mid-replay must not leave a synthetic key held either, and that IS the
+  // panel's job.
   useEffect(
     () => () => {
       handleRef.current?.cancel();
@@ -352,7 +365,7 @@ function RuntimeReplaySection({ botRunning }: { botRunning: boolean }) {
     if (!trace || !primaryId) return;
     setError(null);
     setOutcome(null);
-    setCancelledAfter(null);
+    setCancelled(null);
     setIsReplaying(true);
     let unsubscribe: (() => void) | null = null;
     try {
@@ -371,7 +384,7 @@ function RuntimeReplaySection({ botRunning }: { botRunning: boolean }) {
         // reported beside it (Stop releases a pin in force during Play anyway).
         if (result.unpinError) setError(`Replay finished, but the engine clock could not be released: ${result.unpinError}`);
       } else if (result.status === 'cancelled') {
-        setCancelledAfter(result.ticksReplayed);
+        setCancelled(result);
       } else {
         setError(result.error.message);
       }
@@ -489,9 +502,10 @@ function RuntimeReplaySection({ botRunning }: { botRunning: boolean }) {
           receives the terminal progress too, says it once, then empties. */}
       <ReplayLiveRegion progress={progress} />
 
-      {cancelledAfter !== null && (
+      {cancelled !== null && (
         <div role="status" className="mt-2 px-2.5 py-1.5 bg-zinc-800 rounded text-xs text-zinc-400">
-          Replay cancelled after {cancelledAfter} ticks. Input was released; no verdict was recorded.
+          Replay cancelled after {cancelled.ticksReplayed} ticks{replayCancelReasonClause(cancelled.reason)}. Input was
+          released; no verdict was recorded.
         </div>
       )}
 
@@ -585,7 +599,7 @@ export function PlaytestPanel() {
   // this panel unmounting (the handle below).
   const [botOutcome, setBotOutcome] = useState<ReplayOutcome | null>(null);
   const [botRuntimeError, setBotRuntimeError] = useState<string | null>(null);
-  const [botCancelledAfter, setBotCancelledAfter] = useState<number | null>(null);
+  const [botCancelled, setBotCancelled] = useState<CancelledRun | null>(null);
   /**
    * The bot run's progress: what its progress line and announcer render. The
    * terminal progress is kept after the run (the announcer says it once), so
@@ -634,7 +648,7 @@ export function PlaytestPanel() {
             setBotRuntimeError(`finished, but the engine clock could not be released: ${result.unpinError}`);
           }
         } else if (result.status === 'cancelled') {
-          setBotCancelledAfter(result.ticksReplayed);
+          setBotCancelled(result);
         } else {
           setBotRuntimeError(result.error.message);
         }
@@ -673,7 +687,7 @@ export function PlaytestPanel() {
     setIsRunning(true);
     setBotOutcome(null);
     setBotRuntimeError(null);
-    setBotCancelledAfter(null);
+    setBotCancelled(null);
     try {
       const ctx = buildContext();
       const session = await simulatePlaytest(ctx, selectedStrategy);
@@ -782,9 +796,10 @@ export function PlaytestPanel() {
           </div>
         )}
         <ReplayLiveRegion progress={botProgress} testId="bot-replay-announcer" />
-        {botCancelledAfter !== null && (
+        {botCancelled !== null && (
           <div role="status" className="px-2.5 py-1.5 bg-zinc-800 rounded text-xs text-zinc-400">
-            AI bot runtime replay cancelled after {botCancelledAfter} ticks. Input was released; no verdict was recorded.
+            AI bot runtime replay cancelled after {botCancelled.ticksReplayed} ticks{replayCancelReasonClause(botCancelled.reason)}.
+            Input was released; no verdict was recorded.
           </div>
         )}
         {botRuntimeError && (

@@ -25,6 +25,7 @@ import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 import { publishPlayTick, resetPlayTickBus } from '@/lib/playtest/playTickBus';
 import { INPUT_TRACE_VERSION, MAX_TRACE_TICKS } from '@/lib/playtest/inputTrace';
 import { getActiveReplaySession, startReplaySession } from '@/lib/playtest/replayEntryPoints';
+import type { ReplayCancelReason } from '@/lib/playtest/replayRunner';
 import { REPLAY_NFR_PENDING_DISPLAY_MS } from '../../../../e2e/constants';
 
 /** The scene's one binding: a signed-axis `move_right` (KeyD / KeyA). */
@@ -59,9 +60,10 @@ vi.mock('@/lib/playtest/replayEntryPoints', async (importOriginal) => {
 });
 
 /**
- * The store's change subscription, as `replayEntryPoints` uses it to cancel
- * the active replay on Stop. `setEngineMode` is what the real store does when
- * the engine reports ENGINE_MODE_CHANGED: update the state, then notify.
+ * The store's change subscription, which `replayEntryPoints` hands the runner
+ * so it can cancel the active replay on Stop and on a toolbar Pause / Resume
+ * it did not make. `setEngineMode` is what the real store does when the
+ * engine reports ENGINE_MODE_CHANGED: update the state, then notify.
  */
 const storeSubscribers = vi.hoisted(
   () => new Set<(next: typeof state, prev: typeof state) => void>(),
@@ -76,9 +78,10 @@ const engine = vi.hoisted(() => ({
     engine.commands.push(command);
     // The real engine answers `pause` / `resume` with ENGINE_MODE_CHANGED and
     // the store mirrors it as `engineMode` and notifies its subscribers — so
-    // the entry points' Stop watch SEES 'paused' and must ignore it. (The
-    // panel only sees the new mode on its next render, as it would after the
-    // store's subscription fired — tests rerender to deliver it.)
+    // the runner's watch SEES the 'paused' its own pause produced, delivered
+    // from INSIDE the dispatch, and must know it as its own. (The panel only
+    // sees the new mode on its next render, as it would after the store's
+    // subscription fired — tests rerender to deliver it.)
     if (command === 'pause') {
       engine.paused = true;
       setEngineMode('paused');
@@ -288,14 +291,18 @@ describe('runtime replay controls', () => {
     await frame((elapsed += 16));
     expect(screen.getByTestId('replay-progress')).toHaveTextContent('Paused at tick 2 of 120; input released');
     // The engine confirmed the pause: the store now says 'paused', its
-    // subscribers (the entry points' Stop watch included) were notified, and
-    // the panel re-renders on it exactly as it would after ENGINE_MODE_CHANGED.
+    // subscribers (the runner's watch included — notified from INSIDE the
+    // `pause` dispatch, before it returned) were told, and the panel
+    // re-renders on it exactly as it would after ENGINE_MODE_CHANGED.
     expect(state.engineMode).toBe('paused');
     view.rerender(<PlaytestPanel />);
     await flush();
 
     // A replay must survive its own pause: leaving 'play' for 'paused' is the
-    // runner's doing, not the creator stopping the game.
+    // runner's doing, not the creator pausing from the toolbar. This is the
+    // panel-level pin of the runner's ordering — `runtimePausedByRunner` is
+    // set BEFORE the pause is dispatched — since the store here delivers the
+    // mode synchronously inside that dispatch (the worst case).
     expect(screen.getByTestId('replay-progress')).toHaveTextContent('Paused at tick 2 of 120; input released');
     expect(screen.getByRole('button', { name: 'Resume replay' })).toBeEnabled();
     expect(screen.queryByText(/Replay cancelled/)).toBeNull();
@@ -327,7 +334,12 @@ describe('runtime replay controls', () => {
     // findBy's default 1 s window is the assertion: the boundary's own
     // stalled-tick timeout is 2 s, so a cancel that merely waited for the next
     // frame would arrive late, as a failure, and miss this.
-    expect(await screen.findByText(/Replay cancelled after 3 ticks/)).toBeInTheDocument();
+    const cancelledLine = await screen.findByText(/Replay cancelled after 3 ticks/);
+    expect(cancelledLine).toBeInTheDocument();
+    // And the line says WHICH control cancelled it.
+    expect(cancelledLine).toHaveTextContent(
+      'Replay cancelled after 3 ticks because Play was stopped. Input was released; no verdict was recorded.',
+    );
     expect(keyEvents).toEqual(['down KeyD', 'up KeyD']);
     expect(engine.commands).toEqual(['pin_frame_rate', 'unpin_frame_rate']);
     expect(screen.queryByTestId('replay-progress')).toBeNull();
@@ -732,5 +744,183 @@ describe("the bot's run policy and vocabulary come from the scene", () => {
     await frame((elapsed += 16));
     await frame((elapsed += 16));
     expect(keyEvents).toEqual(['down KeyA']);
+  });
+});
+
+/**
+ * #10007 (Sentry finding on PR #10369) — the cancelled line says WHICH editor
+ * control cancelled the replay. The runner cancels on a mode change it did
+ * not make — Stop, a Pause from the toolbar, a Resume from the toolbar of a
+ * game the replay had paused — and the result carries the reason; the
+ * creator's own Cancel carries none and keeps today's sentence exactly. Both
+ * cancelled lines (the manual Replay's and the bot run's) read the one shared
+ * clause (`lib/playtest/replayCancelReason.ts`).
+ */
+describe('the cancelled line says which editor control cancelled the replay', () => {
+  beforeEach(() => {
+    state.engineMode = 'play';
+    state.inputBindings = [{ ...AXIS_MOVE_RIGHT }];
+    storeSubscribers.clear();
+    engine.commands.length = 0;
+    engine.paused = false;
+    engine.refuseUnpin = false;
+    keyEvents.length = 0;
+    resetPlayTickBus();
+    const canvas = document.createElement('canvas');
+    canvas.id = EDITOR_CANVAS_ID;
+    canvas.addEventListener('keydown', (e) => keyEvents.push(`down ${e.code}`));
+    canvas.addEventListener('keyup', (e) => keyEvents.push(`up ${e.code}`));
+    document.body.append(canvas);
+  });
+
+  afterEach(async () => {
+    const active = getActiveReplaySession();
+    if (active) {
+      active.handle.cancel();
+      await active.handle.result;
+    }
+    cleanup();
+    document.body.replaceChildren();
+  });
+
+  /** The cancelled line itself (a DIV), never the announcer span that says a shorter sentence. */
+  const findCancelledLine = (prefix: string) =>
+    screen.findByText((content, element) => element?.tagName === 'DIV' && content.startsWith(prefix));
+
+  /**
+   * The toolbar's move for each reason, on the store the runner watches, and
+   * what the engine must have been told. `engine-resumed` first pauses the
+   * replay THROUGH the runner (its `pause` moves the store to 'paused'), then
+   * the toolbar resumes the game behind it; no `resume` may follow from the
+   * runner, because the game is already running.
+   */
+  const TOOLBAR: Array<{
+    reason: ReplayCancelReason;
+    clause: string;
+    commands: string[];
+    /** The game is left as the toolbar chose it: a paused game stays paused. */
+    leftPaused: boolean;
+    drive: (replay: { pause: () => void; nextFrame: () => Promise<void> }) => Promise<void>;
+  }> = [
+    {
+      reason: 'engine-stopped',
+      clause: 'because Play was stopped',
+      commands: ['pin_frame_rate', 'unpin_frame_rate'],
+      leftPaused: false,
+      drive: async () => {
+        act(() => setEngineMode('edit'));
+      },
+    },
+    {
+      reason: 'engine-paused',
+      clause: 'because the game was paused from the toolbar',
+      commands: ['pin_frame_rate', 'unpin_frame_rate'],
+      leftPaused: true,
+      drive: async () => {
+        act(() => {
+          engine.paused = true;
+          setEngineMode('paused');
+        });
+      },
+    },
+    {
+      reason: 'engine-resumed',
+      clause: 'because the game was resumed from the toolbar while the replay was paused',
+      commands: ['pin_frame_rate', 'pause', 'unpin_frame_rate'],
+      leftPaused: false,
+      drive: async ({ pause, nextFrame }) => {
+        pause();
+        await nextFrame(); // the replay's pause settles at the next tick boundary
+        expect(engine.paused).toBe(true);
+        expect(state.engineMode).toBe('paused');
+        act(() => {
+          engine.paused = false;
+          setEngineMode('play');
+        });
+      },
+    },
+  ];
+
+  it.each(TOOLBAR)('the manual Replay, $reason: "$clause"', async ({ clause, commands, leftPaused, drive }) => {
+    const view = render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    let elapsed = 0;
+    await frame((elapsed += 16)); // warm-up
+    await frame((elapsed += 16)); // tick 0
+    expect(keyEvents).toEqual(['down KeyD']);
+
+    await drive({
+      pause: () => fireEvent.click(screen.getByRole('button', { name: 'Pause replay' })),
+      nextFrame: () => frame((elapsed += 16)),
+    });
+    view.rerender(<PlaytestPanel />);
+
+    const line = await findCancelledLine('Replay cancelled after');
+    expect(line).toHaveTextContent(/^Replay cancelled after \d+ ticks because/);
+    expect(line).toHaveTextContent(`ticks ${clause}. Input was released; no verdict was recorded.`);
+    expect(engine.commands).toEqual(commands);
+    expect(keyEvents).toEqual(['down KeyD', 'up KeyD']);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/^Replay (passed|failed)$/)).toBeNull();
+    expect(engine.paused).toBe(leftPaused);
+  });
+
+  it("the creator's own Cancel keeps today's sentence exactly, with no reason", async () => {
+    render(<PlaytestPanel />);
+    recordHoldRightTrace();
+    fireEvent.click(screen.getByRole('button', { name: 'Replay recorded input' }));
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel replay' }));
+    const line = await findCancelledLine('Replay cancelled after');
+    expect(line).toHaveTextContent(/^Replay cancelled after 1 ticks\. Input was released; no verdict was recorded\.$/);
+  });
+
+  it.each(TOOLBAR)("the bot's engine run, $reason: \"$clause\"", async ({ clause, commands, leftPaused, drive }) => {
+    const view = render(<PlaytestPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    expect(engine.commands).toEqual(['pin_frame_rate']);
+    let elapsed = 0;
+    await frame((elapsed += 16)); // warm-up
+    await frame((elapsed += 16)); // tick 0: the bot holds right
+    expect(keyEvents).toEqual(['down KeyD']);
+
+    // The bot's progress line has Cancel only; its pause is the handle's.
+    await drive({
+      pause: () => {
+        act(() => {
+          expect(getActiveReplaySession()?.handle.pause()).toBe(true);
+        });
+      },
+      nextFrame: () => frame((elapsed += 16)),
+    });
+    view.rerender(<PlaytestPanel />);
+
+    const line = await findCancelledLine('AI bot runtime replay cancelled after');
+    expect(line).toHaveTextContent(/^AI bot runtime replay cancelled after \d+ ticks because/);
+    expect(line).toHaveTextContent(`ticks ${clause}. Input was released; no verdict was recorded.`);
+    expect(engine.commands).toEqual(commands);
+    expect(keyEvents).toEqual(['down KeyD', 'up KeyD']);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/no engine play tick received/)).toBeNull();
+    expect(getActiveReplaySession()).toBeNull();
+    expect(engine.paused).toBe(leftPaused);
+  });
+
+  it("the bot's own Cancel keeps today's sentence exactly, with no reason", async () => {
+    render(<PlaytestPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel AI bot replay' }));
+    const line = await findCancelledLine('AI bot runtime replay cancelled after');
+    expect(line).toHaveTextContent(
+      /^AI bot runtime replay cancelled after 1 ticks\. Input was released; no verdict was recorded\.$/,
+    );
   });
 });
