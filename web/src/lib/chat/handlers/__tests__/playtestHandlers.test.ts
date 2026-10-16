@@ -12,6 +12,30 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invokeHandler } from './handlerTestUtils';
 import { playtestHandlers, REPLAY_NEEDS_ONE_SOURCE, REPLAY_REQUIRES_PLAY_MODE } from '../playtestHandlers';
 import { INPUT_TRACE_VERSION, parseInputTrace } from '@/lib/playtest/inputTrace';
+// The tool definition the in-app AI reads (`chat/tools.ts` and `ai/spawnforgeAgent.ts` import this copy).
+import manifestJson from '@/data/commands.json';
+
+/**
+ * Round-2 finding: the description promised the verdict covers "whether
+ * exactly one collectible was collected", while a strategy run opts out of
+ * that assertion (see "plans a bot strategy ..." below), so a model reading
+ * `verdict: 'passed'` on a strategy run would report a collectible collected
+ * when `collectiblesCollected` is 0. The contract now scopes the promise to a
+ * recorded trace and says what a strategy run asserts and reports.
+ */
+describe('replay_input_trace tool description — the contract the AI reads', () => {
+  const description = manifestJson.commands.find((c) => c.name === 'replay_input_trace')?.description ?? '';
+
+  it('scopes the collectible promise to a recorded trace', () => {
+    expect(description).toContain('for a recorded trace, whether exactly one collectible was collected');
+    expect(description).not.toContain('moved and whether exactly one collectible');
+  });
+
+  it('says a strategy run asserts movement only and reports the collectible count without asserting it', () => {
+    expect(description).toContain('A strategy run asserts movement only');
+    expect(description).toContain('reports collectiblesCollected without asserting it');
+  });
+});
 
 const runReplay = vi.hoisted(() => vi.fn());
 /** The single-flight guard's view: null when idle, the active session otherwise. */
@@ -164,6 +188,42 @@ describe('replay_input_trace', () => {
     const digitalTrace = runReplay.mock.calls[1][1].trace;
     expect(digitalTrace.frames.length).toBeGreaterThan(0);
     // Unbound, not reversed: pressing right for a leftward move is worse than not moving.
+    expect(digitalTrace.frames[0].actions).toEqual({});
+  });
+
+  // Round-2 finding: a two-player scene keeps a row per slot for one name in
+  // the flat list, each with its own actionType. The axis names come from the
+  // PRIMARY player's row (the one the key resolver answers and the engine's
+  // controller reads), not from any row of that name.
+  it("derives the axis names from the PRIMARY player's row, not a second player's row of the same name", async () => {
+    const primaryAxis = { actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'] };
+    const secondDigital = { actionName: 'move_right', actionType: 'digital', sources: ['ArrowRight'], player: 1 };
+    simulatePlaytest.mockResolvedValue(plannedSession({ x: -1, y: 0 }));
+    const primaryIsAxis = await invokeHandler(
+      playtestHandlers,
+      'replay_input_trace',
+      { strategy: 'explorer', playerEntityId: PLAYER },
+      { ...playing, inputBindings: [primaryAxis, secondDigital] },
+    );
+    expect(primaryIsAxis.result.success).toBe(true);
+    const axisTrace = runReplay.mock.calls[runReplay.mock.calls.length - 1][1].trace;
+    expect(axisTrace.frames[0].actions).toEqual({ move_right: { pressed: true, axis: -1 } });
+
+    const primaryDigital = { actionName: 'move_right', actionType: 'digital', sources: ['KeyD'] };
+    const secondAxis = {
+      actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['ArrowRight'], negativeKeys: ['ArrowLeft'], player: 1,
+    };
+    simulatePlaytest.mockResolvedValue(plannedSession({ x: -1, y: 0 }));
+    const primaryIsDigital = await invokeHandler(
+      playtestHandlers,
+      'replay_input_trace',
+      { strategy: 'explorer', playerEntityId: PLAYER },
+      { ...playing, inputBindings: [primaryDigital, secondAxis] },
+    );
+    expect(primaryIsDigital.result.success).toBe(true);
+    const digitalTrace = runReplay.mock.calls[runReplay.mock.calls.length - 1][1].trace;
+    expect(digitalTrace.frames.length).toBeGreaterThan(0);
+    // Player 1's axis row must not turn the primary's digital move_right into a negative axis.
     expect(digitalTrace.frames[0].actions).toEqual({});
   });
 

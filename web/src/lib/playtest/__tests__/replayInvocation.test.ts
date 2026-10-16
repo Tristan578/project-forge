@@ -6,6 +6,7 @@ import type { InputBinding } from '@/stores/slices/types';
 import {
   buildActionKeyResolver,
   createDomKeyboardEnvironment,
+  replayAxisActionNames,
   type EngineDispatch,
 } from '../replayInvocation';
 import { botSessionToInputTrace } from '../botTrace';
@@ -39,6 +40,40 @@ describe('browser replay boundary', () => {
     expect(resolve('move', { pressed: false, axis: 0 })).toEqual([]);
     expect(resolve('move', { pressed: false })).toEqual([]);
     expect(resolve('missing', { pressed: true })).toEqual([]);
+  });
+
+  /**
+   * #10007 (round-2 finding) — a two-player scene keeps BOTH slots' rows for
+   * one action name in the flat list (`scriptSlice.setInputBinding` keys a
+   * row by name and slot), each with its own `actionType`. The resolver used
+   * to key the list by name alone, so whichever slot's row came last answered
+   * — and the engine's character controller reads the primary slot only
+   * (`InputState::get_axis` is `get_axis_for(0, ..)`). It answers the
+   * primary player's row now, whatever the order.
+   */
+  it("answers the PRIMARY player's row for a name two slots bind, whichever row comes last", () => {
+    const primaryAxis: InputBinding = {
+      actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'],
+    };
+    const secondDigital: InputBinding = { actionName: 'move_right', actionType: 'digital', sources: ['ArrowRight'], player: 1 };
+    for (const bindings of [[primaryAxis, secondDigital], [secondDigital, primaryAxis]]) {
+      const resolve = buildActionKeyResolver(bindings);
+      expect(resolve('move_right', { pressed: true, axis: -1 })).toEqual(['KeyA']);
+      expect(resolve('move_right', { pressed: true, axis: 1 })).toEqual(['KeyD']);
+    }
+  });
+
+  it('answers nothing for a name only a second player binds — the controller never reads that slot', () => {
+    const resolve = buildActionKeyResolver([{ actionName: 'attack', actionType: 'digital', sources: ['KeyF'], player: 1 }]);
+    expect(resolve('attack', { pressed: true })).toEqual([]);
+  });
+
+  it('treats an explicit player: 0 as the primary slot, exactly like an absent player', () => {
+    const resolve = buildActionKeyResolver([
+      { actionName: 'move_right', actionType: 'digital', sources: ['ArrowRight'], player: 1 },
+      { actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'], player: 0 },
+    ]);
+    expect(resolve('move_right', { pressed: true, axis: -1 })).toEqual(['KeyA']);
   });
 
   it('dispatches keyboard events to the canvas where winit listens', async () => {
@@ -130,6 +165,40 @@ describe('browser replay boundary', () => {
 });
 
 /**
+ * #10007 (review finding) — the axis names handed to the bot's trace
+ * conversion come from the same rows the key resolver answers: the primary
+ * player's. A second player's row of the same name must not make a name an
+ * axis (round-2 finding: any-match over the flat list did, while the
+ * resolver answered the last row by name).
+ */
+describe('replayAxisActionNames', () => {
+  const primaryAxis: InputBinding = {
+    actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['KeyD'], negativeKeys: ['KeyA'],
+  };
+  const primaryDigital: InputBinding = { actionName: 'move_right', actionType: 'digital', sources: ['KeyD'] };
+  const secondAxis: InputBinding = {
+    actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['ArrowRight'], negativeKeys: ['ArrowLeft'], player: 1,
+  };
+  const secondDigital: InputBinding = { actionName: 'move_right', actionType: 'digital', sources: ['ArrowRight'], player: 1 };
+
+  it("lists the primary player's signed axes, in either order of the flat list", () => {
+    expect(replayAxisActionNames([primaryAxis, secondDigital])).toEqual(['move_right']);
+    expect(replayAxisActionNames([secondDigital, primaryAxis])).toEqual(['move_right']);
+  });
+
+  it("does not call a name an axis because a SECOND player's row is one", () => {
+    expect(replayAxisActionNames([primaryDigital, secondAxis])).toEqual([]);
+    expect(replayAxisActionNames([secondAxis, primaryDigital])).toEqual([]);
+    expect(replayAxisActionNames([secondAxis])).toEqual([]);
+  });
+
+  it('treats an explicit player: 0 as the primary slot, and an empty scene as no axes', () => {
+    expect(replayAxisActionNames([{ ...primaryAxis, player: 0 }])).toEqual(['move_right']);
+    expect(replayAxisActionNames([])).toEqual([]);
+  });
+});
+
+/**
  * #10007 (review finding) — end to end from the bot's plan to the resolver.
  * `buildActionKeyResolver` reads the sign for an AXIS binding only and
  * answers a DIGITAL binding's key whatever the sign, so a leftward plan on a
@@ -139,14 +208,18 @@ describe('browser replay boundary', () => {
  * resolver, KeyD is never pressed for a leftward move on that scene.
  */
 describe('a leftward bot move never presses a digital move_right key', () => {
-  /** The bot's plan on a scene's bindings, replayed through the real resolver into a key log. */
+  /**
+   * The bot's plan on a scene's bindings, replayed through the real resolver
+   * into a key log. The axis names are derived exactly as PlaytestPanel and
+   * the chat handler derive them (`replayAxisActionNames`).
+   */
   async function keysPressedFor(direction: { x: number; y: number }, bindings: InputBinding[]): Promise<string[]> {
     const trace = botSessionToInputTrace(
       { actions: [{ type: 'move', timestamp: 0, direction }, { type: 'wait', timestamp: 100 }] },
       {
         fixtureId: 'resolver-fixture',
         actionNames: bindings.map((b) => b.actionName),
-        axisActionNames: bindings.filter((b) => b.actionType === 'axis').map((b) => b.actionName),
+        axisActionNames: replayAxisActionNames(bindings),
         msPerTick: 50,
       },
     );
@@ -183,6 +256,83 @@ describe('a leftward bot move never presses a digital move_right key', () => {
 
   it('presses KeyA for a leftward move when move_right is a signed axis', async () => {
     expect(await keysPressedFor({ x: -1, y: 0 }, axisRight)).toEqual(['KeyA']);
+  });
+
+  /**
+   * Round-2 finding: the whole two-player binding matrix. Slot 0 (the primary
+   * player, `player` absent) and slot 1 each bind `move_right` as absent, a
+   * digital key or a signed axis, in both orders of the flat list, for a
+   * leftward and a rightward move. What is pressed is decided by the PRIMARY
+   * row alone — player 1's keys (Arrow*) are never pressed, and a primary
+   * digital `move_right` never answers a leftward move with KeyD even when
+   * player 1 binds the name as an axis. Before the fix, [primary axis +
+   * second digital] pressed ArrowRight (or KeyD) for a leftward move.
+   */
+  describe('two-player binding matrix: only the primary row decides', () => {
+    type Shape = 'absent' | 'digital' | 'axis';
+    const SHAPES: readonly Shape[] = ['absent', 'digital', 'axis'];
+    const PRIMARY_KEYS = { positive: 'KeyD', negative: 'KeyA' };
+    const SECOND_KEYS = { positive: 'ArrowRight', negative: 'ArrowLeft' };
+
+    function row(shape: Shape, keys: { positive: string; negative: string }, player?: number): InputBinding[] {
+      const slot = player === undefined ? {} : { player };
+      if (shape === 'absent') return [];
+      if (shape === 'digital') return [{ actionName: 'move_right', actionType: 'digital', sources: [keys.positive], ...slot }];
+      return [{
+        actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: [keys.positive], negativeKeys: [keys.negative], ...slot,
+      }];
+    }
+
+    /** What the primary row alone answers: its sign for an axis, its one key for a digital, nothing otherwise. */
+    function expectedKeys(primary: Shape, x: number): string[] {
+      if (primary === 'axis') return [x > 0 ? PRIMARY_KEYS.positive : PRIMARY_KEYS.negative];
+      if (primary === 'digital') return x > 0 ? [PRIMARY_KEYS.positive] : [];
+      return [];
+    }
+
+    const MATRIX: Array<{ primary: Shape; second: Shape; order: 'primary first' | 'second first'; x: number }> = [];
+    for (const primary of SHAPES) {
+      for (const second of SHAPES) {
+        for (const order of ['primary first', 'second first'] as const) {
+          for (const x of [-1, 1]) MATRIX.push({ primary, second, order, x });
+        }
+      }
+    }
+
+    it('enumerates every cell (3 x 3 shapes, both orders, both directions)', () => {
+      expect(MATRIX).toHaveLength(36);
+    });
+
+    it.each(MATRIX)(
+      'primary $primary + second $second ($order), x = $x',
+      async ({ primary, second, order, x }) => {
+        const primaryRows = row(primary, PRIMARY_KEYS);
+        const secondRows = row(second, SECOND_KEYS, 1);
+        const bindings = order === 'primary first' ? [...primaryRows, ...secondRows] : [...secondRows, ...primaryRows];
+        const pressed = await keysPressedFor({ x, y: 0 }, bindings);
+        expect(pressed).toEqual(expectedKeys(primary, x));
+        expect(pressed).not.toContain(SECOND_KEYS.positive);
+        expect(pressed).not.toContain(SECOND_KEYS.negative);
+      },
+    );
+
+    it('mirrors on y: a primary signed-axis move_forward answers a backward move with its own negative key', async () => {
+      const bindings: InputBinding[] = [
+        { actionName: 'move_forward', actionType: 'digital', sources: ['ArrowUp'], player: 1 },
+        { actionName: 'move_forward', actionType: 'axis', sources: [], positiveKeys: ['KeyW'], negativeKeys: ['KeyS'] },
+      ];
+      expect(await keysPressedFor({ x: 0, y: -1 }, bindings)).toEqual(['KeyS']);
+      expect(await keysPressedFor({ x: 0, y: 1 }, bindings)).toEqual(['KeyW']);
+    });
+
+    it("mirrors on y: a primary digital move_forward leaves a backward move unbound even though player 1's is an axis", async () => {
+      const bindings: InputBinding[] = [
+        { actionName: 'move_forward', actionType: 'digital', sources: ['KeyW'] },
+        { actionName: 'move_forward', actionType: 'axis', sources: [], positiveKeys: ['ArrowUp'], negativeKeys: ['ArrowDown'], player: 1 },
+      ];
+      expect(await keysPressedFor({ x: 0, y: -1 }, bindings)).toEqual([]);
+      expect(await keysPressedFor({ x: 0, y: 1 }, bindings)).toEqual(['KeyW']);
+    });
   });
 });
 

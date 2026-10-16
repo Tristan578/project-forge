@@ -1932,7 +1932,7 @@ Scope: `scene:write` | Token cost: 0
 
 ### `replay_input_trace`
 
-Replay a bounded input trace through the RUNNING engine and report what it observed: whether the player entity moved and whether exactly one collectible was collected. The engine clock is pinned for the whole run so the result is deterministic. Provide exactly one of trace (a recorded input trace from the Playtest panel, max 120 ticks / 30 s) or strategy (an AI gameplay-bot strategy, planned and converted into a trace). Requires Play mode. The verdict is a runtime outcome, never a heuristic rating.
+Replay a bounded input trace through the RUNNING engine and report what it observed: whether the player entity moved and, for a recorded trace, whether exactly one collectible was collected. A strategy run asserts movement only (the bot's plan does not aim for a collectible) and reports collectiblesCollected without asserting it. The engine clock is pinned for the whole run so the result is deterministic. Provide exactly one of trace (a recorded input trace from the Playtest panel, max 120 ticks / 30 s) or strategy (an AI gameplay-bot strategy, planned and converted into a trace). Requires Play mode. The verdict is a runtime outcome, never a heuristic rating.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

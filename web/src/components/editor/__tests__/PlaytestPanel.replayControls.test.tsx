@@ -665,4 +665,52 @@ describe("the bot's run policy and vocabulary come from the scene", () => {
     await frame((elapsed += 16));
     expect(keyEvents).toEqual(['down KeyA']);
   });
+
+  /**
+   * Round-2 finding: a two-player scene keeps a row per slot for one action
+   * name, each with its own actionType. The axis names used to be derived by
+   * any-match over the flat list while the resolver answered the last row by
+   * name, so player 1's digital `move_right` answered a leftward bot move with
+   * a RIGHT key. Both now read the primary player's row.
+   */
+  it("a two-player scene: a leftward bot move answers the PRIMARY player's signed axis (KeyA), never player 1's digital key", async () => {
+    state.inputBindings = [
+      { ...AXIS_MOVE_RIGHT },
+      { actionName: 'move_right', actionType: 'digital', sources: ['ArrowRight'], player: 1 },
+    ];
+    botSession.actions[0] = { type: 'move', timestamp: 0, direction: { x: -1, y: 0 } };
+    render(<PlaytestPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    const trace = aiCall?.[1].trace as { frames: Array<{ actions: Record<string, unknown> }> };
+    expect(trace.frames[0].actions).toEqual({ move_right: { pressed: true, axis: -1 } });
+
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    expect(keyEvents).toEqual(['down KeyA']);
+  });
+
+  it("a two-player scene whose PRIMARY move_right is digital leaves a leftward move unbound, although player 1's is an axis", async () => {
+    state.inputBindings = [
+      { actionName: 'move_right', actionType: 'digital', sources: ['KeyD'] },
+      { actionName: 'move_right', actionType: 'axis', sources: [], positiveKeys: ['ArrowRight'], negativeKeys: ['ArrowLeft'], player: 1 },
+    ];
+    botSession.actions[0] = { type: 'move', timestamp: 0, direction: { x: -1, y: 0 } };
+    render(<PlaytestPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run playtest with explorer strategy' }));
+    await flush();
+    const aiCall = startSession.mock.calls.find(([source]) => source === 'ai');
+    const trace = aiCall?.[1].trace as { frames: Array<{ actions: Record<string, unknown> }> };
+    expect(trace.frames.length).toBeGreaterThan(0);
+    expect(trace.frames[0].actions).toEqual({});
+
+    let elapsed = 0;
+    await frame((elapsed += 16));
+    await frame((elapsed += 16));
+    expect(keyEvents).toEqual([]);
+  });
 });

@@ -96,15 +96,61 @@ export function startReplayInvocation(
 /** The engine command dispatcher, as `getCommandDispatcher()` returns it. */
 export type EngineDispatch = (command: string, payload: unknown) => CommandResponse | void;
 
+/** The local-player slot a binding with no `player` belongs to. */
+const PRIMARY_PLAYER_SLOT = 0;
+
+/**
+ * The primary player's binding for each action name — the ONE map a replay's
+ * key resolver and the bot's axis-name derivation both read.
+ *
+ * A replay drives the primary player's entity, and the engine's character
+ * controller reads the primary slot alone (`InputState::get_axis` is
+ * `get_axis_for(0, ..)` in `core/input.rs`), so only a slot-0 row (`player`
+ * absent or 0) may answer a replayed action. Slot 1+ rows share action names
+ * with slot 0 in the ONE flat `inputBindings` list (`scriptSlice.setInputBinding`
+ * keys a row by name AND slot; the engine's own payload appends slot 1+ after
+ * slot 0), and each slot picks its own `actionType`. Keying the whole list by
+ * name let the last row win whatever its slot: with slot 0 binding `move_right`
+ * as a signed axis and slot 1 as a digital key, a leftward bot move resolved to
+ * player 1's digital row and pressed a RIGHT key — while the axis-name
+ * derivation, matching ANY row, had called `move_right` an axis. Reading both
+ * from this map makes "is this name a signed axis" and "which keys answer it"
+ * the same question about the same row.
+ * @param bindings The scene's flat binding list, every slot included.
+ * @returns The primary player's binding per action name.
+ */
+export function primaryPlayerBindings(bindings: readonly InputBinding[]): ReadonlyMap<string, InputBinding> {
+  const byName = new Map<string, InputBinding>();
+  for (const binding of bindings) {
+    if ((binding.player ?? PRIMARY_PLAYER_SLOT) === PRIMARY_PLAYER_SLOT) byName.set(binding.actionName, binding);
+  }
+  return byName;
+}
+
+/**
+ * The primary player's action names bound as signed axes: the only names the
+ * bot's trace conversion may answer a negative direction with
+ * (`BotTraceOptions.axisActionNames`). Every caller of `botSessionToInputTrace`
+ * derives the option here, never from the flat list, so a name counts as an
+ * axis exactly when `buildActionKeyResolver` will read the sign for it.
+ * @param bindings The scene's flat binding list, every slot included.
+ * @returns Action names whose primary-player binding is a signed axis.
+ */
+export function replayAxisActionNames(bindings: readonly InputBinding[]): string[] {
+  return [...primaryPlayerBindings(bindings).values()]
+    .filter((b) => b.actionType === 'axis')
+    .map((b) => b.actionName);
+}
+
 /**
  * Build an action-to-key resolver from the scene's bindings.
- * @param bindings Current digital and signed-axis bindings.
- * @returns A resolver yielding key codes for an action and direction, or none.
+ * @param bindings Current digital and signed-axis bindings, every slot included.
+ * @returns A resolver yielding the primary player's key codes for an action and direction, or none.
  */
 export function buildActionKeyResolver(
-  bindings: InputBinding[],
+  bindings: readonly InputBinding[],
 ): ReplayEnvironment['resolveKeys'] {
-  const byName = new Map(bindings.map((b) => [b.actionName, b]));
+  const byName = primaryPlayerBindings(bindings);
   return (actionName, state) => {
     const binding = byName.get(actionName);
     if (!binding) return [];

@@ -27,8 +27,10 @@
  * `move_right`; a negative x is `move_left` when the scene binds it, and
  * otherwise a negative `move_right` axis — the signed-axis form the recorder
  * produces — but ONLY when `move_right` is bound as a signed axis
- * (`BotTraceOptions.axisActionNames`). The replay resolver uses the sign for
- * an axis binding alone; a digital binding answers its one key whatever the
+ * (`BotTraceOptions.axisActionNames`, derived by `replayAxisActionNames` in
+ * `replayInvocation.ts` from the primary player's bindings — the same rows
+ * the replay's key resolver reads). The replay resolver uses the sign for an
+ * axis binding alone; a digital binding answers its one key whatever the
  * sign, so a negative `move_right` on a digital-only scene would press RIGHT.
  * A digital-only scene without `move_left` therefore leaves leftward moves
  * unbound (not moving is better than moving the wrong way). Likewise for y
@@ -60,6 +62,10 @@ export interface BotTraceOptions {
    * Names bound as signed axes (`InputBinding.actionType === 'axis'`). Only
    * these may carry a negative direction when the scene has no dedicated
    * negative action; a digital binding would press its positive key for it.
+   * Derive it with `replayAxisActionNames(bindings)` (`replayInvocation.ts`),
+   * which reads the primary player's rows — the ones the key resolver
+   * answers — not by filtering the flat list, where a second player's row of
+   * the same name can call an axis what the resolver treats as digital.
    * Defaults to none, so a caller that does not say leaves such moves unbound.
    */
   axisActionNames?: readonly string[];

@@ -35,7 +35,7 @@ import {
 import { botSessionToInputTrace } from '@/lib/playtest/botTrace';
 import type { ReplayHandle, ReplayOutcome, ReplayProgress } from '@/lib/playtest/replayRunner';
 import { ReplayLiveRegion, isTerminalReplayState, replayStatusText } from './ReplayLiveRegion';
-import type { ReplaySession } from '@/lib/playtest/replayInvocation';
+import { replayAxisActionNames, type ReplaySession } from '@/lib/playtest/replayInvocation';
 
 /**
  * The replay in flight — manual, the bot's engine run, or the chat tool's —
@@ -611,13 +611,14 @@ export function PlaytestPanel() {
       if (!primaryId) return;
       const bindings = inputBindings ?? [];
       const actionNames = bindings.map((b) => b.actionName);
-      // Only a signed-axis binding may answer a negative direction (a digital
-      // one would press its positive key for it — the wrong way).
-      const axisActionNames = bindings.filter((b) => b.actionType === 'axis').map((b) => b.actionName);
+      // Only the primary player's signed-axis bindings may answer a negative
+      // direction (a digital one would press its positive key for it — the
+      // wrong way), read from the same map the key resolver reads so a name
+      // is an axis here exactly when the resolver reads its sign.
       const trace = botSessionToInputTrace(session, {
         fixtureId: sceneName || 'current-scene',
         actionNames,
-        axisActionNames,
+        axisActionNames: replayAxisActionNames(bindings),
       });
       // The bot's plan never aims for a collectible, so its verdict is the
       // movement assertion alone; `collectiblesCollected` is still reported.
