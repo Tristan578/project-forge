@@ -34,6 +34,11 @@ import {
  * 3b; a value no other code writes, so a match can only come from that script.
  */
 const PLAY_TICK_MARKER = 'engine-smoke: onUpdate ran';
+/** Logged every tenth frame with the frame count appended; Step 3c reads it. */
+const PLAY_TICK_FRAME_PREFIX = 'engine-smoke: frame ';
+/** Logged when `forge.getTransform(entityId)` flips to non-null / null. */
+const ENTITY_SEEN = 'engine-smoke: entity seen';
+const ENTITY_LOST = 'engine-smoke: entity lost';
 
 test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
   /**
@@ -124,26 +129,40 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
     // not tell from an idle page. `setScript` is the same store action the
     // script inspector uses: it records the script locally (what the runner
     // gathers at Play start) and dispatches `set_script` to the engine. The
-    // script stops logging after five frames so it cannot flood the log.
+    // marker stops after five frames and the frame counter logs every tenth
+    // frame, so the 200-entry script log cannot overflow during the session.
+    // The script also reports whether it can still see its OWN entity each
+    // frame — on change only — which is what Step 3c asserts on.
     await page.evaluate(
-      ({ entityId, marker }) => {
+      ({ entityId, marker, framePrefix, seenMsg, lostMsg }) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__EDITOR_STORE;
         store.getState().setScript(
           entityId,
           [
-            'let ticks = 0;',
+            'let frames = 0;',
+            'let seen = null;',
             'function onUpdate(dt) {',
-            '  if (ticks < 5) {',
-            '    ticks += 1;',
-            `    forge.log(${JSON.stringify(marker)});`,
+            '  frames += 1;',
+            `  if (frames <= 5) forge.log(${JSON.stringify(marker)});`,
+            `  if (frames % 10 === 0) forge.log(${JSON.stringify(framePrefix)} + frames);`,
+            '  const present = forge.getTransform(entityId) !== null;',
+            '  if (present !== seen) {',
+            '    seen = present;',
+            `    forge.log(present ? ${JSON.stringify(seenMsg)} : ${JSON.stringify(lostMsg)});`,
             '  }',
             '}',
           ].join('\n'),
           true
         );
       },
-      { entityId: targetId, marker: PLAY_TICK_MARKER }
+      {
+        entityId: targetId,
+        marker: PLAY_TICK_MARKER,
+        framePrefix: PLAY_TICK_FRAME_PREFIX,
+        seenMsg: ENTITY_SEEN,
+        lostMsg: ENTITY_LOST,
+      }
     );
 
     // Step 3: enter Play mode — the engine snapshots state and inserts the
@@ -200,6 +219,75 @@ test.describe('Engine Smoke Journey @engine @engine-smoke', () => {
       PLAY_TICK_MARKER,
       { timeout: E2E_TIMEOUT_INTERACTION_MS }
     );
+
+    // Step 3c: a pause and a resume applied in ONE engine update must not cost
+    // the script its scene (#10375, Devin review on #10390). Two mode commands
+    // sent back-to-back land in the same `apply_mode_change_requests` drain —
+    // chat and MCP do exactly this — and the engine's per-frame delta cache
+    // used to clear only on a frame it spent outside Play, which this sequence
+    // never produces. The editor's hub, which did receive both mode events,
+    // had dropped its snapshot, so the next delta (nothing moved: empty)
+    // arrived as a frame with no entities; the script runner diffed every
+    // entity away, the worker forgot the Cube, `forge.getTransform(entityId)`
+    // went null and the script logged ENTITY_LOST. The engine now clears its
+    // cache on the transition itself (`core/play_tick_delta.rs`), so the next
+    // frame is full. This is the one executable test of that bridge wiring:
+    // `bridge/` is wasm32-only and never compiles into a native test.
+    //
+    // Raw commands through `__FORGE_DISPATCH`, not the Play controls, so both
+    // are queued before the engine's next update.
+    const framesBeforeBlip = await page.evaluate((prefix: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__EDITOR_STORE;
+      const logs: Array<{ message: string }> = store?.getState().scriptLogs ?? [];
+      const counts = logs
+        .filter((entry) => entry.message.startsWith(prefix))
+        .map((entry) => Number(entry.message.slice(prefix.length)));
+      return counts.length > 0 ? Math.max(...counts) : 0;
+    }, PLAY_TICK_FRAME_PREFIX);
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dispatch = (window as any).__FORGE_DISPATCH;
+      if (!dispatch('pause', {}) || !dispatch('resume', {})) {
+        throw new Error('engine-smoke: __FORGE_DISPATCH refused a mode command');
+      }
+    });
+    // Frames kept coming after the blip: at least two more frame-counter
+    // entries past the last one seen before it (the counter logs every tenth
+    // frame, so the one seen may have been up to nine frames stale). A runtime
+    // that stalled on the pause cannot pass this, and a Cube the script lost
+    // would have been logged by the time these frames ran.
+    await page.waitForFunction(
+      ({ prefix, atLeast }: { prefix: string; atLeast: number }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__EDITOR_STORE;
+        const logs: Array<{ message: string }> = store?.getState().scriptLogs ?? [];
+        return logs.some(
+          (entry) =>
+            entry.message.startsWith(prefix) && Number(entry.message.slice(prefix.length)) >= atLeast
+        );
+      },
+      { prefix: PLAY_TICK_FRAME_PREFIX, atLeast: framesBeforeBlip + 20 },
+      { timeout: E2E_TIMEOUT_INTERACTION_MS }
+    );
+    const sightings = await page.evaluate(
+      ({ seenMsg, lostMsg }: { seenMsg: string; lostMsg: string }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__EDITOR_STORE;
+        const logs: Array<{ message: string }> = store?.getState().scriptLogs ?? [];
+        return {
+          seen: logs.filter((entry) => entry.message === seenMsg).length,
+          lost: logs.filter((entry) => entry.message === lostMsg).length,
+          engineMode: store?.getState().engineMode as string,
+        };
+      },
+      { seenMsg: ENTITY_SEEN, lostMsg: ENTITY_LOST }
+    );
+    // `seen` first: a script that never saw its entity at all would report one
+    // `lost` on its first frame, but say so in the assertion that names it.
+    expect(sightings.seen).toBeGreaterThanOrEqual(1);
+    expect(sightings.lost).toBe(0);
+    expect(sightings.engineMode).toBe('play');
 
     // Step 4: stop — the engine restores the edit snapshot and PlayControls drops
     // the indicator span (back to edit mode). Editor stays live.
