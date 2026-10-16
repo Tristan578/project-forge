@@ -143,6 +143,16 @@ test.describe('Runtime input replay on the pinned clock @engine @engine-smoke', 
     await expect(page.locator('canvas').first()).toBeVisible({
       timeout: E2E_TIMEOUT_ELEMENT_MS,
     });
+    // The replay boundary injects input by dispatching KeyboardEvents on the
+    // editor's engine canvas — the <canvas> with id `game-canvas`
+    // (`EDITOR_CANVAS_ID` in `lib/engine/canvasId`), where winit's keyboard
+    // listeners sit. That is the whole precondition: nothing about focus or
+    // layout is required, which matters here because headless SwiftShader
+    // Chromium never focuses the canvas and keeps it `invisible` until the
+    // first frame. The first live run of this spec failed with "Replay
+    // requires the active engine canvas" because the boundary looked for an
+    // id nothing renders; this assertion pins the real one.
+    await expect(page.locator('canvas#game-canvas')).toHaveCount(1);
 
     // --- Build the fixture scene through REAL engine commands ---------------
     const ids = await page.evaluate((fx: Fixture) => {

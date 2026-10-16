@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResponse } from '@/hooks/useEngine';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 import {
   buildActionKeyResolver,
   createDomKeyboardEnvironment,
@@ -39,7 +40,7 @@ describe('browser replay boundary', () => {
 
   it('dispatches keyboard events to the canvas where winit listens', async () => {
     const canvas = document.createElement('canvas');
-    canvas.id = 'forge-canvas';
+    canvas.id = EDITOR_CANVAS_ID;
     document.body.append(canvas);
     const pressed = vi.fn();
     const released = vi.fn();
@@ -56,8 +57,50 @@ describe('browser replay boundary', () => {
     expect(released.mock.calls[0][0]).toMatchObject({ code: 'KeyD', target: canvas });
   });
 
-  it('fails explicitly when the engine canvas is missing', () => {
-    expect(() => environment().pressKeys(['KeyD'])).toThrow('active engine canvas');
+  /**
+   * The precondition, exactly (#10007, the first live run of the gate). The
+   * boundary needs ONE thing: the editor's engine canvas, the element whose
+   * id `CanvasArea` renders and `init_engine` attaches to, because winit's
+   * keyboard listeners sit on that element. Nothing else — not focus, not
+   * layout visibility (headless SwiftShader keeps the canvas `invisible`
+   * until the first frame and never focuses it). The id used to be a
+   * literal that no component renders ('forge-canvas'), and every test here
+   * fabricated it, so the check passed against an element the app never has.
+   */
+  it('targets the element with the editor canvas id, unfocused and hidden, and nothing else', async () => {
+    expect(EDITOR_CANVAS_ID).toBe('game-canvas');
+    const canvas = document.createElement('canvas');
+    canvas.id = EDITOR_CANVAS_ID;
+    canvas.className = 'invisible';
+    canvas.tabIndex = -1;
+    document.body.append(canvas);
+    const other = document.createElement('input');
+    document.body.append(other);
+    other.focus();
+    const pressed = vi.fn();
+    canvas.addEventListener('keydown', pressed);
+
+    await environment().pressKeys(['KeyD']);
+    expect(pressed).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(other);
+  });
+
+  it('refuses a <canvas> under any other id, the old literal included', () => {
+    const stray = document.createElement('canvas');
+    stray.id = 'forge-canvas';
+    document.body.append(stray);
+    expect(() => environment().pressKeys(['KeyD'])).toThrow(/engine canvas/);
+  });
+
+  it('refuses a non-canvas element that carries the id', () => {
+    const impostor = document.createElement('div');
+    impostor.id = EDITOR_CANVAS_ID;
+    document.body.append(impostor);
+    expect(() => environment().pressKeys(['KeyD'])).toThrow(/engine canvas/);
+  });
+
+  it('fails explicitly when the engine canvas is missing, naming the id it looked for', () => {
+    expect(() => environment().pressKeys(['KeyD'])).toThrow(`#${EDITOR_CANVAS_ID}`);
   });
 
   it('waits for a real play tick instead of elapsed animation frames', async () => {

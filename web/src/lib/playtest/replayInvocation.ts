@@ -18,6 +18,7 @@
  */
 
 import type { CommandResponse } from '@/hooks/useEngine';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 import type { InputBinding } from '@/stores/slices/types';
 import { getLatestPlayTick, subscribePlayTick } from './playTickBus';
 import type { InputTrace } from './inputTrace';
@@ -134,11 +135,22 @@ function nextPlayTick(): Promise<void> {
   });
 }
 
-/** Dispatch a keyboard event carrying a `code` on the real input channel. */
+/**
+ * Dispatch a keyboard event carrying a `code` on the real input channel.
+ *
+ * The precondition is exactly one thing: the editor's engine canvas — the
+ * `<canvas>` with `EDITOR_CANVAS_ID`, which `CanvasArea` renders and winit's
+ * keyboard listeners sit on. Neither focus nor layout visibility is required
+ * (`dispatchEvent` delivers to the element's own listeners regardless, and
+ * under headless SwiftShader the canvas is `invisible` until the first frame
+ * and never focused). Pinned by `__tests__/replayInvocation.test.ts`.
+ */
 function dispatchKey(type: 'keydown' | 'keyup', code: string): void {
-  const canvas = typeof document === 'undefined' ? null : document.getElementById('forge-canvas');
+  const canvas = typeof document === 'undefined' ? null : document.getElementById(EDITOR_CANVAS_ID);
   if (!canvas || typeof HTMLCanvasElement === 'undefined' || !(canvas instanceof HTMLCanvasElement)) {
-    throw new Error('Replay requires the active engine canvas.');
+    throw new Error(
+      `Replay requires the editor's engine canvas (#${EDITOR_CANVAS_ID}): no <canvas> with that id is in the document.`,
+    );
   }
   const event = new KeyboardEvent(type, {
     code,

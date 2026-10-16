@@ -3,7 +3,7 @@
  * #10007 — the manual Replay controls: pending display, Pause / Resume / Cancel.
  *
  * Drives the real panel against the real browser boundary (DOM key events on
- * `#forge-canvas`, the play-tick bus, a recording engine dispatcher) so what is
+ * the editor canvas `#game-canvas`, the play-tick bus, a recording engine dispatcher) so what is
  * asserted is the control surface a creator actually uses:
  *   - the pending/progress line is on screen within the NFR-C1 limit of the
  *     Replay click (measured and printed, asserted against
@@ -21,6 +21,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@/test/utils/componentTestUtils';
 import { PlaytestPanel } from '../PlaytestPanel';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 import { publishPlayTick, resetPlayTickBus } from '@/lib/playtest/playTickBus';
 import { MAX_TRACE_TICKS } from '@/lib/playtest/inputTrace';
 import { getActiveReplaySession } from '@/lib/playtest/replayEntryPoints';
@@ -173,7 +174,7 @@ describe('runtime replay controls', () => {
     keyEvents.length = 0;
     resetPlayTickBus();
     const canvas = document.createElement('canvas');
-    canvas.id = 'forge-canvas';
+    canvas.id = EDITOR_CANVAS_ID;
     canvas.addEventListener('keydown', (e) => keyEvents.push(`down ${e.code}`));
     canvas.addEventListener('keyup', (e) => keyEvents.push(`up ${e.code}`));
     document.body.append(canvas);
@@ -383,7 +384,7 @@ describe('the bot run and the manual run share one replay guard (review-board MA
     keyEvents.length = 0;
     resetPlayTickBus();
     const canvas = document.createElement('canvas');
-    canvas.id = 'forge-canvas';
+    canvas.id = EDITOR_CANVAS_ID;
     canvas.addEventListener('keydown', (e) => keyEvents.push(`down ${e.code}`));
     canvas.addEventListener('keyup', (e) => keyEvents.push(`up ${e.code}`));
     document.body.append(canvas);

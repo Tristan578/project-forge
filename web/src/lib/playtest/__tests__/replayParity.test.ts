@@ -5,7 +5,7 @@
  * The manual Replay button (`startReplaySession('manual', …)`, what
  * `PlaytestPanel` calls) and the in-app AI tool (`replay_input_trace`, the
  * chat handler) are run against ONE simulated engine: the real DOM-keyboard
- * boundary dispatching real `KeyboardEvent`s on the `#forge-canvas`, the real
+ * boundary dispatching real `KeyboardEvent`s on the the editor canvas `#game-canvas`, the real
  * play-tick bus, and one recording command dispatcher. The simulated engine
  * moves the player while `KeyD` is down and despawns the coin when reached,
  * which is enough to make both paths produce a full verdict.
@@ -18,6 +18,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResponse } from '@/hooks/useEngine';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 import { publishPlayTick, resetPlayTickBus, type PlayTickSnapshot } from '../playTickBus';
 import { INPUT_TRACE_VERSION, type InputTrace } from '../inputTrace';
 import type { EngineDispatch } from '../replayInvocation';
@@ -75,7 +76,7 @@ function holdRightTrace(): InputTrace {
  */
 function makeSimulatedEngine() {
   const canvas = document.createElement('canvas');
-  canvas.id = 'forge-canvas';
+  canvas.id = EDITOR_CANVAS_ID;
   document.body.append(canvas);
 
   const commandLog: Array<[string, unknown]> = [];

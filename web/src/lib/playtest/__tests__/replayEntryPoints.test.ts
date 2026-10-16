@@ -11,11 +11,12 @@
  * the editor leaves Play for Edit — so a bot or chat replay is cancelled by
  * Stop exactly as a manual one is.
  *
- * Driven against the REAL browser boundary (DOM key events on `#forge-canvas`,
+ * Driven against the REAL browser boundary (DOM key events on the editor canvas `#game-canvas`,
  * the play-tick bus, a recording engine dispatcher), as the parity test is.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResponse } from '@/hooks/useEngine';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 import { publishPlayTick, resetPlayTickBus, type PlayTickSnapshot } from '../playTickBus';
 import { INPUT_TRACE_VERSION, type InputTrace } from '../inputTrace';
 import type { EngineDispatch } from '../replayInvocation';
@@ -80,7 +81,7 @@ function engineModeBecomes(mode: string) {
 function makeEngine(options: { acceptPin?: boolean } = {}) {
   const acceptPin = options.acceptPin ?? true;
   const canvas = document.createElement('canvas');
-  canvas.id = 'forge-canvas';
+  canvas.id = EDITOR_CANVAS_ID;
   document.body.append(canvas);
   const commandLog: string[] = [];
   const keyLog: string[] = [];
