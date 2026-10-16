@@ -16,7 +16,7 @@ node --version   # If v25.x, this is likely the cause
 ```
 
 **Fix:**
-- Downgrade to Node 22 LTS (current LTS as of 2026): `nvm use 22`
+- Use Node 24 — `nvm use` reads `.nvmrc`; `package.json` engines require `>=24.15 <25`
 - Do NOT bypass with `--no-verify` or skip the hook — fix the runtime first
 - If downgrade is not possible, retry the operation once (JIT crashes are non-deterministic)
 

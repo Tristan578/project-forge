@@ -16,7 +16,7 @@ gh issue list --repo Tristan578/project-forge --state open --milestone "P0: Prod
 gh issue list --repo Tristan578/project-forge --state open --milestone "P1: User Workflow Blockers" --json number,title
 
 # 2. Recently closed — detect stale session log entries
-gh issue list --repo Tristan578/project-forge --state closed --since "$(date -v-7d +%Y-%m-%dT00:00:00Z)" --json number,title --jq '.[].number' | head -20
+gh issue list --repo Tristan578/project-forge --state closed --search "closed:>=$(date -u -d '7 days ago' +%F)" --json number,title --jq '.[].number' | head -20
 
 # 3. Read context
 cat .claude/rules/gotchas.md
@@ -45,20 +45,13 @@ You decide grouping, batch size, branch strategy. Optimize for throughput — ba
 
 ### Phase 2: Review Board (BEFORE push)
 
-Run the 5 specialized reviewers against your changes. Use `/review-protocol` dispatch rules.
+Run the board with `.claude/workflows/review-board.js`, following `.claude/skills/review-protocol/SKILL.md`. Check the PR's CI first (review-protocol rule 6).
 
-```
-Reviewers (dispatch in parallel, max 3 concurrent on M2):
-  1. feature-dev:code-architect — structure, dependencies, patterns
-  2. security-reviewer — injection, auth, validation, data exposure
-  3. dx-guardian — developer workflow, documentation, conventions
-  4. ux-reviewer — WCAG AA, component UX, responsive (if UI touched)
-  5. test-reviewer — coverage gaps, test quality, CI gates (read-only; test-writer is the builder)
-```
-
-- Skip reviewers whose domain wasn't touched (e.g. skip ux-reviewer for pure API fixes).
+- Round 1 runs all 5 seats — architect (`feature-dev:code-architect`), security, DX, UX and test (`test-reviewer`; `test-writer` never sits on the board). No seat is skipped because its domain looks untouched. If concurrency is limited, dispatch in batches of 3 then 2.
+- Re-reviews follow review-protocol rule 4: only the seats that failed plus any seat whose domain the fix touches, against the fix diff, passing `{round, since, seats, carried}` to the workflow.
+- The verdict is published to the PR as the `review-board` status (`scripts/post-board-verdict.sh`; the workflow does this in its Publish phase).
 - PASS/FAIL only, under the scope, severity and round-cap rules in `.claude/skills/review-protocol/SKILL.md`: blockers and majors in the diff fail; minors are fixed in the same push or filed; re-reviews cover only the fix diff; stop and ask the user if a blocker or major is still open after round 3.
-- NEVER use a generic `code-reviewer` in place of the 5 specialists.
+- Never use a single generic reviewer in place of the 5 specialists.
 
 ### Phase 3: Quality Gate (BEFORE push)
 
@@ -66,7 +59,7 @@ Reviewers (dispatch in parallel, max 3 concurrent on M2):
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 ```
 
-All three MUST pass. If `tsc --noEmit` OOMs on Node 25.x, use targeted `npx vitest run <files>` + eslint as fallback.
+All three MUST pass. If `tsc --noEmit` OOMs, use targeted `npx vitest run <files>` + eslint as fallback.
 
 ### Phase 4: Push
 
@@ -78,13 +71,7 @@ git push origin <branch>
 
 Bot comments (Sentry, Copilot) appear 2-5 minutes after push. You MUST wait and check.
 
-```bash
-# Wait for bot analysis to complete
-sleep 180
-
-# Then resolve ALL open PRs — not just the one you pushed to
-/resolve-all-pr-comments
-```
+Wait about 3 minutes for bot analysis (a background wait or Monitor — the Bash tool blocks a foreground `sleep`), then resolve ALL open PRs — not just the one you pushed to — with `/resolve-all-pr-comments`. This sweep is the last step before reporting, re-run after every push or update-branch, and quotes the head SHA it checked (lessons-learned #12).
 
 This invokes the full protocol: checkout each PR branch, read current code (not stale diffs), fix real bugs before replying, post threaded replies with commit SHAs, verify 0 unreplied remaining.
 
@@ -110,9 +97,9 @@ Move to the next item in the priority queue. Repeat the loop.
 4. **NEVER weaken tests.** Fix the violations, not the assertions.
 5. **Every PR:** `Closes #NNNN` (GitHub issue number, not PF-XXX), changeset, quality gate.
 6. **Review board BEFORE push.** Code that hasn't passed specialized review doesn't ship.
-7. **Resolve comments AFTER every push.** Wait 3 min, then `/resolve-all-pr-comments`.
+7. **Resolve comments AFTER every push.** Wait ~3 min (background wait, not foreground `sleep`), then `/resolve-all-pr-comments`.
 8. **No attribution.** No Co-Authored-By, no robot emoji, no "Generated with Claude Code" — anywhere.
-9. **Max 3 concurrent agents on M2.** Dispatch reviewers in batches of 3 then 2.
+9. **Limited concurrency:** dispatch reviewers in batches of 3 then 2 — all 5 still review (review-protocol → Rules).
 10. **Commit after every logical chunk.** Rate limits and crashes kill agents — uncommitted work is lost.
 11. **Read before writing.** Understand existing code before suggesting modifications.
 12. **Validate route params.** If POST validates name characters, PATCH/DELETE on `[name]` must too.
@@ -122,7 +109,7 @@ Move to the next item in the priority queue. Repeat the loop.
 ## Context Files
 
 - `.claude/rules/gotchas.md` — 40+ anti-patterns with real examples
-- `.claude/rules/lessons-learned.md` — 60+ recurring mistakes
+- `.claude/rules/lessons-learned.md` — anti-patterns from real bugs (injected by `inject-lessons-learned.sh`)
 - `.claude/rules/agent-operations.md` — SOPs for testing, committing, PR creation
 - `.claude/rules/web-quality.md` — ESLint rules, React patterns, Next.js constraints
 
@@ -130,19 +117,7 @@ Move to the next item in the priority queue. Repeat the loop.
 
 Lessons from prior runs. **Boot sequence validates these against live state and deletes stale entries.**
 
-### Session 2026-04-05
-- **Shipped**: PR #8231 (model names, token costs, leaderboard API, Replicate model fix, boardName validation). Closes #8174, #8200, #8173, #8172, #7512, #8175.
-- **Shipped**: PR #8232 (Stripe refund race, AI tier gate via `assertTier()`, 7 UX fixes, ChatPanel tests).
-- **Resolved**: 16 Copilot + 2 Sentry comments across 3 rounds with commit SHAs and code fixes.
-- **Boy Scout fixes**: hook env var convention, SKILL.md naming, gotchas.md typo, misleading UX copy, inconsistent tier gate.
-- **Created**: 3 P0 epics (#8233/#8234/#8235) with 21 atomic stories (#8236-#8256).
-- **Specs written**: 3 P0 architecture specs (DB resilience, CDN redundancy, keyboard nav).
-- **Lessons**:
-  - `vi.clearAllMocks()` does NOT clear `mockReturnValue` — use `mockReturnValueOnce` for test-scoped overrides.
-  - Hook env vars use `TOOL_INPUT_file_path`, not `$TOOL_INPUT` JSON parsing.
-  - `assertTier()` returns consistent `{ error: 'TIER_REQUIRED', currentTier }` — never hand-roll tier checks.
-  - Copilot re-reviews every push. Must `/resolve-pr-comments` after EVERY push, not just once.
-  - "Filed for follow-up" on a pre-existing bug is Boy Scout Rule violation — fix it or don't reply.
+_(empty — lessons that outlive a session go into `.claude/rules/lessons-learned.md` in its format)_
 
 ## Session End Protocol
 

@@ -42,13 +42,15 @@ import { safeAuth } from '@/lib/auth/safe-auth';
 Use `createSliceStore()` from the slice test template for testing actions in isolation:
 
 ```typescript
-import { createSliceStore, createMockDispatch } from '@/stores/slices/sliceTestTemplate';
+import { createSliceStore, createMockDispatch } from '@/stores/slices/__tests__/sliceTestTemplate';
+import { createMySlice, setMyDispatcher } from '@/stores/slices/mySlice';
 
-// Test store state without dispatch
-const store = createSliceStore();
+// Real store containing only the slice under test
+const store = createSliceStore(createMySlice);
 
 // Test that actions dispatch the right commands
-const { store, dispatch } = createMockDispatch();
+const dispatch = createMockDispatch();
+setMyDispatcher(dispatch);
 store.getState().someAction('arg');
 expect(dispatch).toHaveBeenCalledWith('command_name', { arg: 'arg' });
 ```

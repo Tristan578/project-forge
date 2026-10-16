@@ -9,8 +9,8 @@ Per-provider inventory for `capability-review`. For each provider: the **changel
 ### PostHog — `posthog-js`
 - Changelog: https://posthog.com/changelog · Roadmap: https://posthog.com/roadmap
 - Pricing: https://posthog.com/pricing (per-product free tiers: events, replays, flag requests, survey responses, LLM events)
-- We currently wire: event capture (gated behind cookie consent — PF-30). 
-- Opportunity surface: session replay, feature flags, experiments, surveys, web analytics, **LLM observability** (`$ai_generation` on `/api/generate/*` + chat), error tracking, group analytics, cohorts, data warehouse.
+- We currently wire: event capture (gated behind cookie consent — PF-30); local feature-flag evaluator (`web/src/lib/flags/posthogFlags.ts` — `deep-generation-tier`, `provider-kill-switch-<provider>`).
+- Opportunity surface: session replay, experiments, surveys, web analytics, **LLM observability** (`$ai_generation` on `/api/generate/*` + chat), error tracking, group analytics, cohorts, data warehouse.
 - Grep markers: `posthog.capture`, `posthog.feature_flags` / `useFeatureFlag`, `posthog.startSessionRecording` / `session_recording`, `$ai_generation`, `posthog.identify`, `posthog.group`.
 
 ### Vercel Analytics / Speed Insights
@@ -23,8 +23,8 @@ Per-provider inventory for `capability-review`. For each provider: the **changel
 ### Sentry — `@sentry/nextjs`
 - Releases: https://github.com/getsentry/sentry-javascript/releases · Changelog: https://sentry.io/changelog/
 - Pricing: https://sentry.io/pricing/ (errors, performance units, profile hours, replays, cron monitors, uptime monitors, Seer/AI billed separately)
-- We currently wire: error capture, tracing, `dataCollection`/`sendDefaultPii` migration (#8778/#8780).
-- Opportunity surface: **profiling**, **cron monitors**, **uptime monitoring**, **Seer** (AI root-cause + AI code review — note "Seer Code Review" already appears as a PR check), **logs**, session replay, **AI Agent Monitoring / LLM spans**, release health, user feedback widget.
+- We currently wire: error capture, tracing, `dataCollection`/`sendDefaultPii` migration (#8778/#8780), continuous profiling (Node `nodeProfilingIntegration` + browser `browserProfilingIntegration`), structured logs (`sentryLogger`), generation business metrics (`generationMetrics.ts`), user-feedback widget (`feedbackIntegration` in `web/instrumentation-client.ts`).
+- Opportunity surface: **cron monitors**, **uptime monitoring**, **Seer** (AI root-cause + AI code review — note "Seer Code Review" already appears as a PR check), session replay, **AI Agent Monitoring / LLM spans**, release health.
 - Grep markers: `Sentry.init`, `tracesSampleRate`, `profilesSampleRate`, `Sentry.cron` / `withMonitor`, `replayIntegration`, `Sentry.metrics`, `Sentry.captureFeedback`, `vercelAIIntegration` / `Sentry.ai`.
 
 ### Vercel Observability / Agent
@@ -37,8 +37,8 @@ Per-provider inventory for `capability-review`. For each provider: the **changel
 
 ### Vercel (platform)
 - Changelog: https://vercel.com/changelog · Pricing: https://vercel.com/pricing
-- We currently wire: Functions, crons (web/vercel.ts), preview deploys, Deployment Protection (SSO gate), typed `vercel.ts` project config (`@vercel/config`, PF-1060).
-- Opportunity surface: **Fluid Compute** tuning, **Queues** (beta), **Sandbox** (GA), **AI Gateway**, **BotID** (GA), **Rolling Releases** (GA), ISR, edge config.
+- We currently wire: Functions, crons (web/vercel.ts), preview deploys, Deployment Protection (SSO gate), typed `vercel.ts` project config (`@vercel/config`, PF-1060), BotID at `'basic'` on `/api/generate/*` + `/api/billing/checkout` (`web/src/lib/security/botId.ts`).
+- Opportunity surface: **Fluid Compute** tuning, **Queues** (beta), **Sandbox** (GA), **AI Gateway**, BotID Deep Analysis, **Rolling Releases** (GA), ISR, edge config.
 - Grep markers: `vercel.json`, `vercel.ts`, `waitUntil`, `unstable_after` / `after(`, `@vercel/functions`, `BotId` / `@vercel/bot`, `ai-gateway` / `gateway/`.
 
 ### Cloudflare
@@ -50,8 +50,8 @@ Per-provider inventory for `capability-review`. For each provider: the **changel
 ### Upstash
 - Releases: https://github.com/upstash/redis-js/releases · Changelog: https://upstash.com/changelog
 - Pricing: https://upstash.com/pricing (Redis, QStash, Vector, Workflow, Search — per-request / per-vector tiers)
-- We currently wire: Redis REST for rate limiting.
-- Opportunity surface: **QStash** (durable queues + schedules — could replace ad-hoc polling), **Workflow**, **Vector** (semantic search over games/assets), **Search**, daily backups.
+- We currently wire: Redis REST for rate limiting; QStash durable generation callbacks (`web/src/lib/qstash/client.ts`, PF-906 — dormant unless its three env vars are set).
+- Opportunity surface: QStash schedules, **Workflow**, **Vector** (semantic search over games/assets), **Search**, daily backups.
 - Grep markers: `@upstash/redis`, `@upstash/ratelimit`, `@upstash/qstash`, `@upstash/vector`, `@upstash/workflow`.
 
 ### Neon
@@ -81,14 +81,13 @@ Per-provider inventory for `capability-review`. For each provider: the **changel
 ### Stripe — `stripe`
 - Releases: https://github.com/stripe/stripe-node/releases · API changelog: https://docs.stripe.com/changelog
 - Pricing: https://stripe.com/pricing (+ Tax, Radar, Billing as separate line items)
-- We currently wire: Checkout, subscriptions (4 tiers), webhooks, atomic-CTE refunds, customer portal. SDK `22.x`, API `2026-08-26.dahlia` (pinned literal in `stripe-client.ts`).
-- Opportunity surface: **Billing meters / usage-based** (token overage billing), Tax, Radar (fraud), entitlements API, adaptive pricing, portal config.
+- We currently wire: Checkout, subscriptions (4 tiers), webhooks, atomic-CTE refunds, customer portal. SDK `22.x`, API `2026-08-26.dahlia` (pinned literal in `stripe-client.ts`). `generation_tokens` billing meter reporting (`web/src/lib/billing/meterEvents.ts`, behind `BILLING_METERS_ENABLED`).
+- Opportunity surface: usage-based pricing on the existing meter (token overage billing), Tax, Radar (fraud), entitlements API, adaptive pricing, portal config.
 - Grep markers: `stripe.checkout`, `stripe.subscriptions`, `stripe.billing.meters` / `billing/meters`, `stripe.tax` / `automatic_tax`, `radar`, `entitlements`.
 
 ### Clerk — `@clerk/nextjs`
 - Releases: https://github.com/clerk/javascript/releases · Changelog: https://clerk.com/changelog
 - Pricing: https://clerk.com/pricing (MAU tiers, B2B/orgs add-on)
 - We currently wire: auth, `<SignIn>`/`<SignUp>`, `safeAuth()`, `redirectToSignIn`.
-- Opportunity surface: Organizations/B2B, MFA, passkeys, bot protection, billing integration, new `Appearance` API.
-- Blocked note: `7.5.x` removes `baseTheme` from `Appearance` → TS2353 in `web/src/app/layout.tsx`; treat as blocked pending an appearance-API migration ticket.
+- Opportunity surface: Organizations/B2B, MFA, passkeys, bot protection, billing integration.
 - Grep markers: `@clerk/nextjs`, `clerkMiddleware`, `<SignIn`, `OrganizationProfile`, `baseTheme`, `appearance`.

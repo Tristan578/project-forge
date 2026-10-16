@@ -25,7 +25,7 @@ Design decisions must account for these constraints. A pattern that works on nat
 ```
 ┌─────────────────────────────────────────────────┐
 │  React Shell (Next.js 16, Zustand 5, Tailwind)  │  ← Editor UI + AI chat
-│  TypeScript 5.x, ESLint strict, Clerk auth      │
+│  TypeScript 6.x, ESLint strict, Clerk auth      │
 ├─────────────────────────────────────────────────┤
 │  JSON Commands (wasm-bindgen 0.2.127)           │  ← Bridge protocol
 ├─────────────────────────────────────────────────┤
@@ -63,7 +63,7 @@ Every feature MUST follow this pattern. No shortcuts, no direct ECS mutation fro
 - Every user-visible state change creates an `UndoableAction` with before/after snapshots
 - `EntitySnapshot::new()` defaults ~35 optional fields to None
 - Entity IDs are preserved across undo/redo for reference stability
-- 29 action variants — new features add new variants
+- Variants live in `UndoableAction` (`engine/src/core/history.rs`) — new features add new variants
 
 ### Feature Gating
 ```rust
@@ -74,12 +74,12 @@ Every feature MUST follow this pattern. No shortcuts, no direct ECS mutation fro
 
 ### Store Slice Composition (Zustand)
 ```typescript
-// editorStore.ts composes 16 domain slices
-const useEditorStore = create<EditorStore>()((...a) => ({
+// editorStore.ts composes the domain slices in stores/slices/ (`ls` for the live list)
+const useEditorStore = create<EditorState>()((...a) => ({
   ...createSelectionSlice(...a),
   ...createTransformSlice(...a),
   ...createMaterialSlice(...a),
-  // ... 13 more
+  // ... remaining slices
 }));
 ```
 
@@ -170,7 +170,7 @@ What else was evaluated and why was it rejected?
 | Spawning entities in core/ | Core has no Commands access | Pending queue + bridge system |
 | Feature flag for work-in-progress | Ships dead code to users | Feature branch |
 | Any new `unsafe` in WASM | Can crash the browser tab | Safe Rust alternatives |
-| Thread-local mutable statics | Race conditions in WASM | ECS resources |
+| New thread-local state outside the pending-queue pattern | Bypasses the drain/undo/event path | Add a queue in `core/pending/` |
 
 ## Validation Tools
 

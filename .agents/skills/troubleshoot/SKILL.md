@@ -70,15 +70,15 @@ lsof -i :3000 -i :1355 2>/dev/null
 
 ```bash
 # Recent deployments
-vercel ls --limit 5
+vercel ls --limit 5 --scope tnolan
 # Runtime logs
-vercel logs <deployment-url> --since 1h
+vercel logs <deployment-url> --since 1h --scope tnolan
 # Environment variables
-vercel env ls
+vercel env ls --scope tnolan
 ```
 
 **Common causes:**
-- Missing env vars: run `vercel env ls` and compare with `.env.example`
+- Missing env vars: run `vercel env ls --scope tnolan` and compare with `.env.example`
 - Build failures: check Vercel build logs, often CSP or Clerk key format issues
 - Stale WASM: content hash mismatch between deploy and CDN (`engine.spawnforge.ai`)
 
@@ -140,7 +140,7 @@ curl -s http://spawnforge.localhost:1355/api/health 2>/dev/null | python3 -m jso
 | Clerk | clerk.com | `CLERK_SECRET_KEY` |
 | Stripe | dashboard.stripe.com | `STRIPE_SECRET_KEY` |
 | PostHog | posthog.com | `NEXT_PUBLIC_POSTHOG_KEY` |
-| R2 CDN | engine.spawnforge.ai | `CLOUDFLARE_R2_*` |
+| R2 CDN | engine.spawnforge.ai | `NEXT_PUBLIC_ENGINE_CDN_URL`, `NEXT_PUBLIC_ENGINE_VERSION` (engine); `ASSET_R2_*` (assets) |
 
 ## Auto Mode
 

@@ -7,12 +7,12 @@ Conventions for Zustand 5.x store slices in `web/src/stores/`.
 The editor store is composed from domain slices in `web/src/stores/slices/`:
 
 ```
-editorStore.ts          — composition root (createSliceStore + all slices)
+editorStore.ts          — composition root (create<EditorState> + all slices)
 stores/slices/
   selectionSlice.ts
   transformSlice.ts
   materialSlice.ts
-  ... (16 domain files)
+  ... (one file per domain — `ls` for the live list)
   index.ts              — re-exports all slice creators
 ```
 
@@ -23,7 +23,6 @@ Each file exports one `StateCreator` factory. `editorStore.ts` combines them.
 ```ts
 // web/src/stores/slices/myDomainSlice.ts
 import { StateCreator } from 'zustand';
-import { EditorStore } from '../editorStore';
 
 export interface MyDomainSlice {
   myDataMap: Record<string, MyData>;
@@ -31,7 +30,7 @@ export interface MyDomainSlice {
   clearMyData: (entityId: string) => void;
 }
 
-export const createMyDomainSlice: StateCreator<EditorStore, [], [], MyDomainSlice> =
+export const createMyDomainSlice: StateCreator<MyDomainSlice, [], [], MyDomainSlice> =
   (set) => ({
     myDataMap: {},
 
@@ -52,9 +51,9 @@ Then add to `editorStore.ts`:
 ```ts
 import { createMyDomainSlice, MyDomainSlice } from './slices/myDomainSlice';
 
-type EditorStore = SelectionSlice & TransformSlice & ... & MyDomainSlice;
+export type EditorState = SelectionSlice & TransformSlice & ... & MyDomainSlice;
 
-export const useEditorStore = create<EditorStore>()((...args) => ({
+export const useEditorStore = create<EditorState>()((...args) => ({
   ...createSelectionSlice(...args),
   ...createMyDomainSlice(...args),
 }));
@@ -67,11 +66,11 @@ And re-export from `stores/slices/index.ts`.
 Use `createSliceStore` from `sliceTestTemplate.ts`:
 
 ```ts
-import { createSliceStore, createMockDispatch } from '@/stores/slices/sliceTestTemplate';
+import { createSliceStore, createMockDispatch } from '@/stores/slices/__tests__/sliceTestTemplate';
 
 describe('myDomainSlice', () => {
   it('sets data', () => {
-    const store = createSliceStore();
+    const store = createSliceStore(createMyDomainSlice);
     store.getState().setMyData('e1', { value: 42 });
     expect(store.getState().myDataMap['e1']).toEqual({ value: 42 });
   });
@@ -120,18 +119,17 @@ set((state) =>
 
 ## Dispatching Engine Commands from Slices
 
-Slices do NOT call `dispatchCommand` directly. Actions update local state optimistically
-and separately trigger engine commands from React event handlers:
+Slice actions may forward to the engine through an injected dispatcher (a module-level
+`dispatchCommand` set via the slice's `set*Dispatcher()` — see `materialSlice.ts`).
+Components that dispatch directly get the dispatcher with `getCommandDispatcher()`:
 
 ```ts
-// In the component's event handler (not the slice action)
+import { getCommandDispatcher } from '@/stores/editorStore';
+
 const handleChange = useCallback((value: number) => {
-  setMyData(entityId, { value });          // optimistic UI update
-  dispatchCommand('set_my_data', {         // engine sync
-    entityId,
-    value,
-  });
-}, [entityId, setMyData, dispatchCommand]);
+  setMyData(entityId, { value });                                    // optimistic UI update
+  getCommandDispatcher()?.('set_my_data', { entityId, value });      // engine sync
+}, [entityId, setMyData]);
 ```
 
 ## File Naming Convention

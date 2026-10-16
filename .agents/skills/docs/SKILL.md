@@ -31,7 +31,7 @@ Every document should be scannable in 30 seconds, complete in 5 minutes, and pre
 | Stripe | Latest | Payments |
 | Playwright | Latest | E2E testing |
 | Vitest | 4.x | Unit testing |
-| TypeScript | 5.x | Strict mode |
+| TypeScript | 6.x | Strict mode |
 | Rust | stable | wasm32-unknown-unknown target |
 | wasm-bindgen | 0.2.127 | Pinned — must match Cargo.lock |
 | bevy_rapier3d/2d | 0.35 | Physics |

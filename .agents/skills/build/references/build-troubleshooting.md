@@ -151,16 +151,6 @@ running `vercel build`.
 
 ---
 
-### Node 25.x V8 segfaults in hooks
-
-**Symptom:** A pre-commit hook crashes with a stack trace mentioning `libnode`.
-
-**Cause:** Intermittent V8 JIT crashes in Node 25.x. Not a code bug.
-
-**Fix:** If reproducible, downgrade to Node 22 LTS. Do NOT bypass with `--no-verify`.
-File a ticket and investigate the hook script for patterns that trigger the JIT issue.
-
----
 
 ## Validation Commands
 

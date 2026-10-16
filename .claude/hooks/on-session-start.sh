@@ -2,6 +2,7 @@
 # ============================================================================
 # on-session-start.sh — SessionStart hook (all AI tools)
 # ============================================================================
+# 0. Verify tracked symlinks are real links (scripts/check-symlinks.sh)
 # 1. Verify taskboard is installed
 # 2. Auto-start taskboard if not running
 # 3. Pull remote changes from GitHub Project
@@ -11,6 +12,25 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091  # dynamic $SCRIPT_DIR path; taskboard-state.sh is linted on its own by the whole-tree glob
 source "$SCRIPT_DIR/taskboard-state.sh"
+
+# ── Step 0: Symlinks ──────────────────────────────────────────────────────
+# Symlinks are required. Skills and references are shared by symlink, and a
+# checkout with core.symlinks=false writes each one as a text file holding its
+# target, so those skills silently do not load. Runs first because Step 1 can
+# exit early. Never changes the exit status: it reports, loudly.
+
+SYMLINK_CHECK="$SCRIPT_DIR/../../scripts/check-symlinks.sh"
+if [ -f "$SYMLINK_CHECK" ]; then
+    SYMLINK_REPORT="$(bash "$SYMLINK_CHECK" 2>&1)" && SYMLINK_OK=1 || SYMLINK_OK=0
+else
+    SYMLINK_REPORT="scripts/check-symlinks.sh is missing, so symlinks were not checked."
+    SYMLINK_OK=0
+fi
+if [ "$SYMLINK_OK" -eq 0 ]; then
+    echo "!! SYMLINKS ARE BROKEN — fix this before other work, and tell the user:"
+    echo "$SYMLINK_REPORT"
+    echo ""
+fi
 
 # ── Step 1: Check taskboard installation ──────────────────────────────────
 

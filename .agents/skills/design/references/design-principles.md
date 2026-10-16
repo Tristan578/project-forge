@@ -112,7 +112,7 @@ Game development is an iterative process. Users explore, make mistakes, and need
 - Multi-entity operations use `Multi*Change` variants (e.g., `MultiTransformChange`)
 - "Apply" operations (CSG booleans, mesh combines) are especially important to make undoable
 
-**Current variants (29):** TransformChange, MultiTransformChange, Rename, Spawn, Delete, Duplicate, VisibilityChange, MaterialChange, LightChange, PhysicsChange, ScriptChange, AudioChange, ReverbZoneChange, ParticleChange, ShaderChange, CsgOperation, TerrainChange, ExtrudeShape, LatheShape, ArrayEntity, CombineMeshes, JointChange, GameComponentChange, AnimationClipChange, SpriteChange, Physics2dChange, Joint2dChange, TilemapChange, SkeletonChange
+**Current variants:** see `pub enum UndoableAction` in `engine/src/core/history.rs`.
 
 **Test question:** After using this feature, does Ctrl+Z restore the previous state exactly?
 
