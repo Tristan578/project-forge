@@ -132,6 +132,11 @@ vi.mock('@/lib/sprites/sheetImporter', () => ({
 }));
 
 import { useGenerationPolling } from '../useGenerationPolling';
+// The REAL asset slice, for the tests that drive the poller against the
+// store's own answer when no engine is attached (#10396): no dispatcher is
+// ever set in this file, which is exactly that state.
+import { createAssetSlice, ENGINE_NOT_ATTACHED } from '@/stores/slices/assetSlice';
+import { createSliceStore } from '@/stores/slices/__tests__/sliceTestTemplate';
 // Imported, not retyped: the guidance sentence is the catalogue's, and a test
 // that hardcoded it would pass while the two drifted apart.
 import { RETRY_GUIDANCE } from '@/lib/generate/retryGuidance';
@@ -1932,6 +1937,31 @@ describe('useGenerationPolling', () => {
 
       cleanup();
     });
+
+    it('records a model that completes while no engine is attached as not placed, with that reason', async () => {
+      // The real slice with no dispatcher used to answer `success: true`, so
+      // the job was recorded as placed when nothing had been queued (#10396).
+      const cleanup = setupModelCompletion({ autoPlace: true, targetEntityId: 'ent-1' });
+      mockImportGltf.mockImplementationOnce(createSliceStore(createAssetSlice).getState().importGltf);
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockImportGltf).toHaveBeenCalledTimes(1);
+      expect(mockUpdateJob).toHaveBeenCalledWith('ap1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: ENGINE_NOT_ATTACHED,
+          targetEntityId: 'ent-1',
+        }),
+      }));
+      // A plain rejection: no refusal toast, and the job is not failed or refunded.
+      expect(mockShowPersistentError).not.toHaveBeenCalled();
+      expect(mockUpdateJob).not.toHaveBeenCalledWith('ap1', expect.objectContaining({ status: 'failed' }));
+
+      cleanup();
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -2340,6 +2370,143 @@ describe('useGenerationPolling', () => {
         globalThis.URL.revokeObjectURL = origRevokeObjectURL;
         cleanup();
       }
+    });
+
+    it('sprite: a job that completes while no engine is attached is recorded as not placed, with that reason', async () => {
+      // The real slice's answer with no dispatcher set, which is this file's
+      // state throughout: `{ success: false, error: ENGINE_NOT_ATTACHED }`,
+      // a rejection with no toast. It used to be `{ success: true }`.
+      const cleanup = setupImageCompletion('na1', 'sprite');
+      mockLoadTexture.mockImplementationOnce(createSliceStore(createAssetSlice).getState().loadTexture);
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(ENGINE_NOT_ATTACHED).toBe('the engine is not attached');
+      expect(mockUpdateJob).toHaveBeenCalledWith('na1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          placementError: ENGINE_NOT_ATTACHED,
+          targetEntityId: 'ent-refused',
+        }),
+      }));
+      expect(mockShowPersistentError).not.toHaveBeenCalled();
+      cleanup();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // A generated image served without a usable Content-Type (#10396)
+  // ---------------------------------------------------------------------------
+  describe('a generated image served without a usable type', () => {
+    /** The 8-byte PNG signature: what the poller sniffs. */
+    const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    /** A JPEG SOI marker plus the APP0 marker after it. */
+    const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+
+    /**
+     * A completed sprite job whose download is `blob`, which the FileReader
+     * stub reads as `dataUrl` - the header the real FileReader would write
+     * from the blob's type.
+     */
+    function setupUntypedCompletion(id: string, blob: Blob, dataUrl: string) {
+      mockJobs[id] = makeJob(id, {
+        type: 'sprite',
+        prompt: 'a thing',
+        autoPlace: true,
+        targetEntityId: 'ent-untyped',
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = dataUrl;
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: `job-${id}`,
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/image',
+            }),
+          } as Response;
+        }
+        return { ok: true, blob: () => Promise.resolve(blob) } as Response;
+      });
+
+      return () => { globalThis.FileReader = origFileReader; };
+    }
+
+    async function runToCompletion() {
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    }
+
+    it('a PNG served with an empty type is declared image/png before it is placed', async () => {
+      // `data:;base64,` is what the FileReader writes for a typeless blob, and
+      // the format gate refuses it as unrecognised: a correctly generated
+      // image was recorded as not placed.
+      const cleanup = setupUntypedCompletion('ut1', new Blob([PNG_BYTES], { type: '' }), 'data:;base64,iVBORw0KGgoAAAANSUhEUg==');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==',
+        'TestAsset',
+        'ent-untyped',
+        'base_color',
+      );
+      expect(mockUpdateJob).toHaveBeenCalledWith('ut1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({ autoPlaced: true, targetEntityId: 'ent-untyped' }),
+      }));
+      cleanup();
+    });
+
+    it('a JPEG served as application/octet-stream is declared image/jpeg', async () => {
+      const cleanup = setupUntypedCompletion(
+        'ut2',
+        new Blob([JPEG_BYTES], { type: 'application/octet-stream' }),
+        'data:application/octet-stream;base64,/9j/4A==',
+      );
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/jpeg;base64,/9j/4A==', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it('a typeless blob with neither signature is left as it is, so the gate still refuses it', async () => {
+      // RIFF....WEBP: a WebP the storage served untyped. Guessing a type for
+      // it would send it to a decoder that cannot read it.
+      const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+      const cleanup = setupUntypedCompletion('ut3', new Blob([webp], { type: '' }), 'data:;base64,UklGRgAAAABXRUJQ');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:;base64,UklGRgAAAABXRUJQ', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it('a declared type is never second-guessed, even when the bytes say otherwise', async () => {
+      const cleanup = setupUntypedCompletion('ut4', new Blob([PNG_BYTES], { type: 'image/webp' }), 'data:image/webp;base64,iVBORw0KGgo=');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/webp;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
     });
   });
 

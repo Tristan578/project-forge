@@ -18,6 +18,7 @@ import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
 import {
   readTextureFile,
   fileReadFailureMessage,
+  fileTypeNotAcceptedMessage,
   textureLoadFailureMessage,
   assetImportFailureMessage,
 } from '@/lib/engine/textureFormatGuard';
@@ -233,18 +234,26 @@ export const AssetPanel = memo(function AssetPanel() {
 
     const files = e.dataTransfer.files;
     const validFiles: File[] = [];
+    const failures = createBatchFailureReporter();
     for (let i = 0; i < files.length; i++) {
       const ext = files[i].name.split('.').pop()?.toLowerCase();
       // Only the texture formats the engine decodes (PNG, JPEG) are taken
-      // from a drop; a .webp would be refused by name downstream.
+      // from a drop; a .webp would be refused by name downstream. A file of
+      // any other type is not dropped silently: it is named in a toast, through
+      // the batch's reporter so a drop of many such files is still capped.
       if (ext === 'glb' || ext === 'gltf' || ['png', 'jpg', 'jpeg'].includes(ext ?? '') || ['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
         validFiles.push(files[i]);
+      } else {
+        failures.report(fileTypeNotAcceptedMessage(files[i].name));
       }
     }
 
-    if (validFiles.length === 0) return;
+    if (validFiles.length === 0) {
+      // Nothing to import, so no progress bar; what was dropped is still named.
+      failures.finish();
+      return;
+    }
     setImportProgress({ current: 0, total: validFiles.length });
-    const failures = createBatchFailureReporter();
 
     // Every read, and every store action, is caught per file so one
     // unreadable or unimportable model, texture or audio file does not stop

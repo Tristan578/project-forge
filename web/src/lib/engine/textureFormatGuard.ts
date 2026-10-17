@@ -38,8 +38,28 @@ export const ACCEPTED_TEXTURE_DECLARATIONS: ReadonlyArray<readonly [string, Allo
   ['image/jpg', 'image/jpeg'],
 ];
 
-/** What a raw base64 body (no `data:` header) is decoded as; mirrors `RAW_BASE64_MIME_TYPE`. */
-const RAW_BASE64_MIME_TYPE: AllowedTextureMimeType = 'image/png';
+/**
+ * The first 11 base64 characters of every PNG: the 8-byte signature
+ * `89 50 4E 47 0D 0A 1A 0A` plus the high byte of the IHDR chunk length,
+ * which is always zero. A raw base64 body (no `data:` header) starting with
+ * this is typed `image/png`; mirrors `RAW_PNG_BASE64_PREFIX`.
+ */
+const RAW_PNG_BASE64_PREFIX = 'iVBORw0KGgo';
+
+/**
+ * The first 4 base64 characters of every JPEG: the SOI marker and the first
+ * byte of the marker after it, `FF D8 FF`. A raw base64 body starting with
+ * this is typed `image/jpeg`; mirrors `RAW_JPEG_BASE64_PREFIX`.
+ */
+const RAW_JPEG_BASE64_PREFIX = '/9j/';
+
+/**
+ * The refusal for a raw base64 body that starts with neither prefix. The
+ * engine's `RAW_BASE64_REFUSAL` verbatim - the test pins the literal against
+ * the Rust source - so a person sees one sentence whichever side refused.
+ */
+export const RAW_BASE64_REFUSAL =
+  'raw base64 texture data is neither PNG nor JPEG; send a data URL that names image/png or image/jpeg';
 
 /** How many characters of a declared type a refusal echoes back; mirrors `ECHO_LIMIT`. */
 const ECHO_LIMIT = 48;
@@ -53,16 +73,19 @@ export type TextureCheck =
  *
  * Accepts a data URL (`data:<type>[;params];base64,<body>`) whose type is
  * allowlisted (or `image/jpg`), compared without regard to case or
- * parameters, or a raw base64 body, which is decoded as PNG. The `error` of a
- * refusal is the engine's own wording, so a person sees the same sentence
- * whichever side refused.
+ * parameters, or a raw base64 body, which is typed by its first bytes: a PNG
+ * signature is `image/png`, a JPEG SOI marker is `image/jpeg`, and anything
+ * else is refused with `RAW_BASE64_REFUSAL`. The `error` of a refusal is the
+ * engine's own wording, so a person sees the same sentence whichever side
+ * refused.
  */
 export function checkTexturePayload(data: string): TextureCheck {
   if (data === '') return refusal('texture data is empty');
-  // No header: a raw base64 body carries no type to check and is decoded as
-  // PNG, a fixed dispatch that can never reach the KTX2 decoder.
+  // No header: a raw base64 body carries no declared type, so its own first
+  // bytes choose between the two decoders the engine build has, and nothing
+  // else gets a decoder at all. Neither dispatch can reach the KTX2 decoder.
   if (data.slice(0, 5).toLowerCase() !== 'data:') {
-    return { ok: true, mimeType: RAW_BASE64_MIME_TYPE, base64: data };
+    return sniffRawBase64(data);
   }
   const rest = data.slice(5);
   const comma = rest.indexOf(',');
@@ -92,6 +115,45 @@ export function checkTexturePayload(data: string): TextureCheck {
 
 function refusal(error: string): TextureCheck {
   return { ok: false, error };
+}
+
+/**
+ * Type a raw base64 body by the signature its first characters encode.
+ *
+ * Base64 is case-sensitive and position-aligned, so the comparison is exact:
+ * `IVBORW0KGGO` decodes to different bytes and is not a PNG. Mirrors the
+ * engine's `sniff_raw_base64`.
+ */
+function sniffRawBase64(data: string): TextureCheck {
+  if (data.startsWith(RAW_PNG_BASE64_PREFIX)) return { ok: true, mimeType: 'image/png', base64: data };
+  if (data.startsWith(RAW_JPEG_BASE64_PREFIX)) return { ok: true, mimeType: 'image/jpeg', base64: data };
+  return refusal(RAW_BASE64_REFUSAL);
+}
+
+/** The bytes every PNG starts with: `89 50 4E 47` (the signature's first four). */
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47] as const;
+
+/** The bytes every JPEG starts with: the SOI marker `FF D8` and the `FF` of the marker after it. */
+const JPEG_SIGNATURE = [0xff, 0xd8, 0xff] as const;
+
+/**
+ * The accepted texture type `bytes` begin with, or null when they begin
+ * with neither signature (a WebP, a truncated file, nothing at all).
+ *
+ * For a fetched blob whose server gave it no usable Content-Type: the
+ * FileReader writes that absence into the data URL header, and the gate then
+ * refuses a correctly generated PNG as unrecognised. The caller declares the
+ * sniffed type on the data URL (`declareTextureType`) and leaves an
+ * unsniffable blob alone, so the gate still refuses what nobody can identify.
+ */
+export function sniffImageMimeType(bytes: Uint8Array): AllowedTextureMimeType | null {
+  if (startsWithBytes(bytes, PNG_SIGNATURE)) return 'image/png';
+  if (startsWithBytes(bytes, JPEG_SIGNATURE)) return 'image/jpeg';
+  return null;
+}
+
+function startsWithBytes(bytes: Uint8Array, signature: readonly number[]): boolean {
+  return bytes.length >= signature.length && signature.every((byte, i) => bytes[i] === byte);
 }
 
 /** A printable, bounded copy of a declared type for an error message. */
@@ -193,6 +255,17 @@ export function textureLoadFailureMessage(name: string, error: unknown): string 
  */
 export function assetImportFailureMessage(name: string, error: unknown): string {
   return `Could not import "${boundDisplayName(name)}": ${errorDetail(error)}`;
+}
+
+/**
+ * What the drop zone tells the person about a file whose extension names no
+ * type the editor imports - a `.webp`, a `.psd`, a `.txt`. Such a file used
+ * to be filtered out of a drop without a word, so a drop of nothing but a
+ * `.webp` did nothing and said nothing. Reported through the batch's
+ * reporter like a read failure, so it counts against the toast cap.
+ */
+export function fileTypeNotAcceptedMessage(name: string): string {
+  return `"${boundDisplayName(name)}" was not imported: the editor accepts PNG and JPEG textures, GLB and glTF models, and MP3, OGG, WAV and FLAC audio.`;
 }
 
 /**

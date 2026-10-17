@@ -13,11 +13,14 @@ import { join, sep } from 'path';
 import {
   ACCEPTED_TEXTURE_DECLARATIONS,
   ALLOWED_TEXTURE_MIME_TYPES,
+  RAW_BASE64_REFUSAL,
   assetImportFailureMessage,
   boundDisplayName,
   checkTexturePayload,
   declareTextureType,
   fileReadFailureMessage,
+  fileTypeNotAcceptedMessage,
+  sniffImageMimeType,
   textureLoadFailureMessage,
   textureMimeTypeForFile,
 } from '../textureFormatGuard';
@@ -42,12 +45,38 @@ function rustSource(relative: string): string {
 }
 
 describe('checkTexturePayload', () => {
-  it('decodes a raw base64 body as PNG', () => {
+  it('types a raw base64 body that starts with the PNG signature as image/png', () => {
     expect(checkTexturePayload('iVBORw0KGgo=')).toEqual({
       ok: true,
       mimeType: 'image/png',
       base64: 'iVBORw0KGgo=',
     });
+  });
+
+  it('types a raw base64 body that starts with the JPEG SOI marker as image/jpeg', () => {
+    expect(checkTexturePayload('/9j/4AAQSkZJRg==')).toEqual({
+      ok: true,
+      mimeType: 'image/jpeg',
+      base64: '/9j/4AAQSkZJRg==',
+    });
+  });
+
+  it("refuses a raw base64 body that is neither, in the engine's sentence", () => {
+    // The sentence is pinned as a literal here (and against the Rust source
+    // below): a raw JPEG used to be accepted as PNG and fail in the drain
+    // with only a log line (#10396).
+    const sentence = 'raw base64 texture data is neither PNG nor JPEG; send a data URL that names image/png or image/jpeg';
+    expect(RAW_BASE64_REFUSAL).toBe(sentence);
+    for (const body of [
+      'AAAA',
+      'UklGRg==', // RIFF: a WebP
+      'Z2xURg==', // glTF
+      'IVBORW0KGGO=', // the PNG prefix in the wrong case: different bytes
+      'iVBORw0KGg', // one character short of the PNG prefix
+      '/9j', // one character short of the JPEG prefix
+    ]) {
+      expect(checkTexturePayload(body), body).toEqual({ ok: false, error: sentence });
+    }
   });
 
   it('accepts png and jpeg data URLs with the header removed', () => {
@@ -148,6 +177,37 @@ describe('textureMimeTypeForFile', () => {
   });
 });
 
+describe('sniffImageMimeType', () => {
+  it('reads the PNG signature', () => {
+    expect(sniffImageMimeType(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe('image/png');
+    // Only the first four bytes are read; the rest of the file may be anything.
+    expect(sniffImageMimeType(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBe('image/png');
+  });
+
+  it('reads the JPEG SOI marker', () => {
+    expect(sniffImageMimeType(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]))).toBe('image/jpeg');
+    expect(sniffImageMimeType(new Uint8Array([0xff, 0xd8, 0xff]))).toBe('image/jpeg');
+  });
+
+  it('returns null for anything else, including too few bytes and a near miss', () => {
+    // RIFF....WEBP
+    expect(sniffImageMimeType(new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]))).toBeNull();
+    expect(sniffImageMimeType(new Uint8Array([0x89, 0x50, 0x4e]))).toBeNull();
+    expect(sniffImageMimeType(new Uint8Array([0xff, 0xd8]))).toBeNull();
+    expect(sniffImageMimeType(new Uint8Array([]))).toBeNull();
+    expect(sniffImageMimeType(new Uint8Array([0x89, 0x50, 0x4e, 0x48]))).toBeNull();
+    expect(sniffImageMimeType(new Uint8Array([0xff, 0xd8, 0xfe, 0xe0]))).toBeNull();
+  });
+
+  it('agrees with the base64 sniff: the bytes behind each raw prefix are typed the same way', () => {
+    const decode = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    expect(sniffImageMimeType(decode('iVBORw0KGgo='))).toBe('image/png');
+    expect(sniffImageMimeType(decode('/9j/'))).toBe('image/jpeg');
+    expect(sniffImageMimeType(decode('UklGRg=='))).toBeNull();
+    expect(checkTexturePayload('UklGRg==').ok).toBe(false);
+  });
+});
+
 describe('declareTextureType', () => {
   it('rewrites an empty or generic data URL header to the derived type', () => {
     expect(declareTextureType('data:;base64,AAAA', 'image/png')).toBe('data:image/png;base64,AAAA');
@@ -187,6 +247,12 @@ describe('the failure sentences a picker shows', () => {
     expect(assetImportFailureMessage('song.mp3', 'boom')).toBe('Could not import "song.mp3": boom');
   });
 
+  it('the not-accepted sentence names the file and every type the drop zone takes', () => {
+    expect(fileTypeNotAcceptedMessage('photo.webp')).toBe(
+      '"photo.webp" was not imported: the editor accepts PNG and JPEG textures, GLB and glTF models, and MP3, OGG, WAV and FLAC audio.',
+    );
+  });
+
   describe('the file name is bounded in every sentence', () => {
     const LONG = 'n'.repeat(100);
     const CUT = `${'n'.repeat(60)}…`;
@@ -203,16 +269,18 @@ describe('the failure sentences a picker shows', () => {
       expect(boundDisplayName(emoji)).toBe(`${'🙂'.repeat(60)}…`);
     });
 
-    it('the read, load and import sentences all cut a long name the same way', () => {
+    it('the read, load, import and not-accepted sentences all cut a long name the same way', () => {
       expect(fileReadFailureMessage(LONG)).toBe(`Failed to read file "${CUT}". The file may be corrupted or inaccessible.`);
       expect(textureLoadFailureMessage(LONG, new Error('x'))).toBe(`Could not load texture "${CUT}": x`);
       expect(assetImportFailureMessage(LONG, new Error('x'))).toBe(`Could not import "${CUT}": x`);
+      expect(fileTypeNotAcceptedMessage(LONG)).toMatch(new RegExp(`^"${CUT}" was not imported: `));
     });
 
     it('and leave a short name untouched', () => {
       expect(fileReadFailureMessage('stone.png')).toContain('"stone.png"');
       expect(textureLoadFailureMessage('stone.png', new Error('x'))).toContain('"stone.png"');
       expect(assetImportFailureMessage('stone.png', new Error('x'))).toContain('"stone.png"');
+      expect(fileTypeNotAcceptedMessage('photo.webp')).toContain('"photo.webp"');
     });
   });
 
@@ -315,6 +383,28 @@ describe('the allowlist matches engine/src/core/asset_import_guard.rs', () => {
         .replace('{}', 'image/webp')
         .replace('{}', ALLOWED_TEXTURE_MIME_TYPES.join(', ')),
     );
+  });
+
+  it('types a raw body by the same two prefixes, and refuses the rest in the same sentence', () => {
+    // The Rust side writes this refusal with `f.write_str(RAW_BASE64_REFUSAL)`,
+    // not `write!`, so the pin above does not see it; this one reads the
+    // constant itself and checks the Display arm writes that constant rather
+    // than a second copy of the words.
+    const png = source.match(/^const RAW_PNG_BASE64_PREFIX: &str = "([^"]+)";/m);
+    const jpeg = source.match(/^const RAW_JPEG_BASE64_PREFIX: &str = "([^"]+)";/m);
+    const refusal = source.match(/^pub const RAW_BASE64_REFUSAL: &str =\s*"([^"]+)";/m);
+    expect(png, 'the Rust PNG prefix must be where this test reads it').not.toBeNull();
+    expect(jpeg, 'the Rust JPEG prefix must be where this test reads it').not.toBeNull();
+    expect(refusal, 'the Rust refusal sentence must be where this test reads it').not.toBeNull();
+    expect(source).toMatch(/RawBase64NeitherPngNorJpeg => f\.write_str\(RAW_BASE64_REFUSAL\)/);
+    expect(RAW_BASE64_REFUSAL).toBe(refusal![1]);
+
+    // Exactly the Rust prefix is accepted (so the TS prefix is no longer than
+    // it), and one character short of it is refused (so it is no shorter).
+    expect(checkTexturePayload(png![1])).toEqual({ ok: true, mimeType: 'image/png', base64: png![1] });
+    expect(checkTexturePayload(jpeg![1])).toEqual({ ok: true, mimeType: 'image/jpeg', base64: jpeg![1] });
+    expect(checkTexturePayload(png![1].slice(0, -1))).toEqual({ ok: false, error: refusal![1] });
+    expect(checkTexturePayload(jpeg![1].slice(0, -1))).toEqual({ ok: false, error: refusal![1] });
   });
 });
 

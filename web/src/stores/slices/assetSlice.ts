@@ -10,13 +10,24 @@ import type { AssetMetadata } from './types';
 
 /**
  * The answer to an import or texture load. `success: false` carries the
- * reason - the format gate's or the engine's own sentence - so the chat tool
- * can hand it to the model and a picker can show it.
+ * reason - the format gate's or the engine's own sentence, or
+ * `ENGINE_NOT_ATTACHED` when there was no engine to send to - so the chat
+ * tool can hand it to the model and a picker can show it.
  */
 export interface AssetCommandResult {
   success: boolean;
   error?: string;
 }
+
+/**
+ * The reason `importGltf` and `loadTexture` answer with when no dispatcher is
+ * attached: nothing was queued, so nothing was placed. A plain rejection, not
+ * a refusal - no toast, because there is no file to blame and the editor's own
+ * engine-status surface already says the engine is not up. Before this the two
+ * answered `success: true`, and the generation poller recorded a job that
+ * queued nothing as `autoPlaced: true` (#10396).
+ */
+export const ENGINE_NOT_ATTACHED = 'the engine is not attached';
 
 export interface AssetSlice {
   assetRegistry: Record<string, AssetMetadata>;
@@ -105,7 +116,7 @@ export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (s
     // the payload is byte-identical to the original { dataBase64, name } so existing
     // callers and tests are unaffected. When present, the engine replaces that
     // entity's model/mesh in place instead of spawning a new root.
-    if (!dispatchCommand) return { success: true };
+    if (!dispatchCommand) return { success: false, error: ENGINE_NOT_ATTACHED };
     const response = dispatchCommand('import_gltf', {
       dataBase64,
       name,
@@ -125,7 +136,7 @@ export const createAssetSlice: StateCreator<AssetSlice, [], [], AssetSlice> = (s
       showRefusal('load_texture', name, check.error);
       return { success: false, error: check.error };
     }
-    if (!dispatchCommand) return { success: true };
+    if (!dispatchCommand) return { success: false, error: ENGINE_NOT_ATTACHED };
     const response = dispatchCommand('load_texture', { dataBase64, name, entityId, slot });
     return surfaceRefusal('load_texture', response, name);
   },

@@ -33,6 +33,7 @@ import { showPersistentError, showSuccess } from '@/lib/toast';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 import { ESTIMATED_TIMES } from '@/lib/generation/estimatedTimes';
+import { ACCEPTED_TEXTURE_DECLARATIONS, declareTextureType, sniffImageMimeType } from '@/lib/engine/textureFormatGuard';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
@@ -552,7 +553,7 @@ export function useGenerationPolling() {
           if (targetSlot && slot !== targetSlot) continue;
 
           const blob = await downloadBinary(url);
-          const base64 = await blobToBase64(blob);
+          const base64 = await blobToTextureDataUrl(blob);
           const placement = placementOf(
             useEditorStore.getState().loadTexture(base64, `${mapType}_${entityId}`, entityId, slot),
           );
@@ -649,7 +650,7 @@ export function useGenerationPolling() {
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
-        const base64 = await blobToBase64(blob);
+        const base64 = await blobToTextureDataUrl(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `PixelArt_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
@@ -675,7 +676,7 @@ export function useGenerationPolling() {
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
-        const base64 = await blobToBase64(blob);
+        const base64 = await blobToTextureDataUrl(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `SpriteSheet_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
@@ -721,7 +722,7 @@ export function useGenerationPolling() {
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
-        const base64 = await blobToBase64(blob);
+        const base64 = await blobToTextureDataUrl(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Sprite_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
@@ -927,6 +928,29 @@ export function useGenerationPolling() {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+  }
+
+  /**
+   * A generated image as the data URL `loadTexture` reads its format from.
+   *
+   * The FileReader writes the blob's type into the header, and the blob's
+   * type is whatever Content-Type the result was served with. Storage that
+   * serves a PNG as `application/octet-stream`, or with no type at all,
+   * yields `data:application/octet-stream;base64,` or `data:;base64,`, which
+   * the format gate refuses as unrecognised - so a correctly generated image
+   * was recorded as not placed (#10396). When the blob's type is not one the
+   * gate accepts, its first bytes decide: a PNG or JPEG signature declares
+   * that type on the header. A blob with neither signature is left as it is,
+   * and the gate refuses it as before; a declared type, right or wrong, is
+   * never second-guessed (`declareTextureType` only fills an empty header).
+   */
+  async function blobToTextureDataUrl(blob: Blob): Promise<string> {
+    const dataUrl = await blobToBase64(blob);
+    const declared = blob.type.trim().toLowerCase();
+    if (ACCEPTED_TEXTURE_DECLARATIONS.some(([d]) => d === declared)) return dataUrl;
+    const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+    const sniffed = sniffImageMimeType(head);
+    return sniffed === null ? dataUrl : declareTextureType(dataUrl, sniffed);
   }
 
   async function getImageDimensions(blob: Blob): Promise<{ width: number; height: number }> {

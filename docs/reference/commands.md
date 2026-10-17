@@ -2171,7 +2171,7 @@ Load a texture image and assign it to a material slot on an entity
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `dataBase64` | string | Yes | Image data as a data URL (data:image/png;base64,... or data:image/jpeg;base64,...) or raw base64 (decoded as PNG). Only PNG and JPEG are accepted; any other format, including KTX2, is refused with the accepted formats named. |
+| `dataBase64` | string | Yes | Image data as a data URL (data:image/png;base64,... or data:image/jpeg;base64,...) or raw base64, which is typed by its first bytes: a PNG signature is image/png, a JPEG marker is image/jpeg, and anything else is refused. Only PNG and JPEG are accepted; any other format, including KTX2, is refused with the accepted formats named. |
 | `name` | string | Yes | Display name for the texture |
 | `entityId` | string | Yes | Entity to apply texture to |
 | `slot` | `"base_color"` \| `"normal_map"` \| `"metallic_roughness"` \| `"emissive"` \| `"occlusion"` | Yes | Material texture slot |

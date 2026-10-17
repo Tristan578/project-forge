@@ -466,23 +466,76 @@ describe('AssetPanel texture upload (#10396)', () => {
     expect(textureInput(container).getAttribute('accept')).toBe('.png,.jpg,.jpeg');
   });
 
-  it('a dropped PNG is imported whole; a dropped .webp is not imported at all', async () => {
-    const { container } = render(<AssetPanel />);
-    const input = textureInput(container);
+  describe('a dropped file of a type the editor does not import is named, not ignored (#10396)', () => {
+    const notAccepted = (name: string) =>
+      `"${name}" was not imported: the editor accepts PNG and JPEG textures, GLB and glTF models, and MP3, OGG, WAV and FLAC audio.`;
 
-    // The drop lands on the panel; firing it on the hidden input bubbles there.
-    fireEvent.drop(input, {
-      dataTransfer: {
-        files: [pickedFile(PNG_BYTES, 'floor.png', 'image/png'), pickedFile(JPEG_BYTES, 'photo.webp', 'image/webp')],
-        types: ['Files'],
-      },
+    it('a drop of only a .webp raises one toast naming it, sends nothing, and never shows the progress bar', async () => {
+      const { container } = render(<AssetPanel />);
+
+      dropFiles(container, [pickedFile(JPEG_BYTES, 'photo.webp', 'image/webp')]);
+
+      // Nothing to import, so the bar is never shown - not shown-and-stuck.
+      expect(screen.queryByText(/Importing/)).toBeNull();
+      await waitFor(() => expect(showError).toHaveBeenCalledWith(notAccepted('photo.webp')));
+      expect(showError).toHaveBeenCalledTimes(1);
+      expect(mockDispatch).not.toHaveBeenCalled();
+      expect(showPersistentError).not.toHaveBeenCalled();
+      expect(screen.queryByText(/Importing/)).toBeNull();
     });
 
-    await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({
-      dataBase64: 'data:image/png;base64,iVBORw0KGgo=',
-      name: 'floor.png',
-    })));
-    expect(mockDispatch).toHaveBeenCalledTimes(1);
-    expect(showPersistentError).not.toHaveBeenCalled();
+    it('a dropped PNG is imported whole; a .webp beside it is named in one toast and not imported', async () => {
+      const { container } = render(<AssetPanel />);
+
+      dropFiles(container, [pickedFile(PNG_BYTES, 'floor.png', 'image/png'), pickedFile(JPEG_BYTES, 'photo.webp', 'image/webp')]);
+
+      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({
+        dataBase64: 'data:image/png;base64,iVBORw0KGgo=',
+        name: 'floor.png',
+      })));
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(showError).toHaveBeenCalledTimes(1));
+      expect(showError).toHaveBeenCalledWith(notAccepted('photo.webp'));
+      expect(showPersistentError).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
+    });
+
+    it('the toast cap applies: four such files raise two named toasts and one summary', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const { container } = render(<AssetPanel />);
+
+        dropFiles(container, ['a.webp', 'b.psd', 'c.txt', 'd.gif'].map((name) => pickedFile(JPEG_BYTES, name, '')));
+
+        await waitFor(() => expect(showError).toHaveBeenCalledTimes(3));
+        expect(vi.mocked(showError).mock.calls.map(([m]) => m)).toEqual([
+          notAccepted('a.webp'),
+          notAccepted('b.psd'),
+          '2 more files failed to import; details are in the browser console.',
+        ]);
+        expect(warn.mock.calls).toEqual([
+          [`[assets] ${notAccepted('c.txt')}`],
+          [`[assets] ${notAccepted('d.gif')}`],
+        ]);
+        expect(mockDispatch).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('every type the sentence names is taken from a drop, so none of them is reported as not accepted', async () => {
+      vi.stubGlobal('FileReader', SelectiveFileReader);
+      const { importGltf, importAudio } = setupStore();
+      const { container } = render(<AssetPanel />);
+      const names = ['a.png', 'b.jpg', 'c.jpeg', 'd.glb', 'e.gltf', 'f.mp3', 'g.ogg', 'h.wav', 'i.flac'];
+
+      dropFiles(container, names.map((name) => pickedFile(PNG_BYTES, name, '')));
+
+      await waitFor(() => expect(importAudio).toHaveBeenCalledTimes(4));
+      expect(importGltf).toHaveBeenCalledTimes(2);
+      expect(mockDispatch).toHaveBeenCalledTimes(3);
+      expect(showError).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
+    });
   });
 });

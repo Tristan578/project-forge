@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
-import { createAssetSlice, setAssetDispatcher, type AssetSlice } from '../assetSlice';
+import { createAssetSlice, ENGINE_NOT_ATTACHED, setAssetDispatcher, type AssetSlice } from '../assetSlice';
+import { RAW_BASE64_REFUSAL } from '@/lib/engine/textureFormatGuard';
 
 import type { AssetMetadata } from '../types';
 
@@ -127,6 +128,19 @@ describe('assetSlice', () => {
         id: '4ec30cf9-d98f-4e67-86d9-470a6cdbbe09',
       }));
     });
+
+    it('answers "not attached", with no toast, when no dispatcher is attached', () => {
+      // Nothing was queued, so nothing can read as placed: the generation
+      // poller used to record `autoPlaced: true` for this answer (#10396).
+      setAssetDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      const outcome = store.getState().importGltf('Z2xURg==', 'model.glb');
+
+      expect(outcome).toEqual({ success: false, error: 'the engine is not attached' });
+      expect(ENGINE_NOT_ATTACHED).toBe('the engine is not attached');
+      expect(mockDispatch).not.toHaveBeenCalled();
+      expect(showPersistentError).not.toHaveBeenCalled();
+    });
   });
 
   describe('loadTexture', () => {
@@ -143,12 +157,31 @@ describe('assetSlice', () => {
       expect(showPersistentError).not.toHaveBeenCalled();
     });
 
-    it('still sends a raw base64 body, which the engine decodes as PNG', () => {
+    it('still sends a raw base64 body whose first bytes are a PNG signature or a JPEG marker', () => {
       store.getState().loadTexture('iVBORw0KGgo=', 'texture.png', 'entity1', 'base_color');
+      store.getState().loadTexture('/9j/4AAQ', 'photo.jpg', 'entity1', 'base_color');
 
+      expect(mockDispatch).toHaveBeenCalledTimes(2);
       expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({
         dataBase64: 'iVBORw0KGgo=',
       }));
+      expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({
+        dataBase64: '/9j/4AAQ',
+      }));
+      expect(showPersistentError).not.toHaveBeenCalled();
+    });
+
+    it("refuses a raw base64 body that is neither PNG nor JPEG before any command, in the engine's sentence", () => {
+      // Used to be sent typed as PNG and fail in the engine's decoder with
+      // nothing but a log line (#10396).
+      const outcome = store.getState().loadTexture('AAAA', 'blob.bin', 'entity1', 'base_color');
+
+      expect(mockDispatch).not.toHaveBeenCalled();
+      expect(outcome).toEqual({ success: false, error: RAW_BASE64_REFUSAL });
+      expect(showPersistentError).toHaveBeenCalledWith(
+        `Couldn't load "blob.bin" as a texture: ${RAW_BASE64_REFUSAL}`,
+        { id: 'load_texture-refused:blob.bin' },
+      );
     });
 
     it('refuses a KTX2 data URL before the command is built, naming the accepted formats', () => {
@@ -202,6 +235,17 @@ describe('assetSlice', () => {
       const outcome = store.getState().loadTexture(KTX2_DATA_URL, 'lut.ktx2', 'entity1', 'base_color');
 
       expect(outcome).toEqual({ success: false, error: KTX2_REFUSAL });
+    });
+
+    it('answers "not attached", with no toast, for an accepted texture when no dispatcher is attached', () => {
+      setAssetDispatcher(null as unknown as (command: string, payload: unknown) => void);
+
+      const outcome = store.getState().loadTexture(PNG_DATA_URL, 'texture.png', 'entity1', 'base_color');
+
+      expect(outcome).toEqual({ success: false, error: ENGINE_NOT_ATTACHED });
+      expect(mockDispatch).not.toHaveBeenCalled();
+      // A rejection, not a refusal: there is no file to blame.
+      expect(showPersistentError).not.toHaveBeenCalled();
     });
 
     it('shows the engine\'s own refusal of a texture, and returns it', () => {
