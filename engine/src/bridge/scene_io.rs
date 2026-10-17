@@ -847,13 +847,26 @@ pub(super) fn apply_texture_load(
     use bevy::asset::RenderAssetUsages;
 
     for request in pending.texture_load_requests.drain(..) {
+        // Every failure below goes through `fail`, which reports it to the
+        // editor as TEXTURE_LOAD_ERROR as well as logging it: `load_texture`
+        // answers when the request is queued, and this drain decodes and
+        // assigns a frame later, so a failure that is only logged here is
+        // invisible to the person who sent the texture (#10399).
+        let fail = |reason: &str| {
+            tracing::warn!(
+                "Texture '{}' for entity {} (slot {}) was not applied: {}",
+                request.name,
+                request.entity_id,
+                request.slot,
+                reason
+            );
+            events::emit_texture_load_error(&request.name, &request.entity_id, &request.slot, reason);
+        };
+
         // Guard against excessively large texture payloads (base64 overhead ~1.33x,
         // so 50MB decoded ≈ 67.5MB base64).
         if request.data_base64.len() > MAX_TEXTURE_BASE64_LEN {
-            tracing::error!(
-                "Texture load rejected: base64 payload {} bytes exceeds 50MB limit",
-                request.data_base64.len()
-            );
+            fail("the texture data is larger than the 50 MB limit");
             continue;
         }
 
@@ -868,7 +881,7 @@ pub(super) fn apply_texture_load(
         let source = match asset_import_guard::check_texture_payload(&request.data_base64) {
             Ok(source) => source,
             Err(refusal) => {
-                tracing::error!("Texture load rejected: {}", refusal);
+                fail(&refusal.to_string());
                 continue;
             }
         };
@@ -878,7 +891,7 @@ pub(super) fn apply_texture_load(
         let bytes = match base64::engine::general_purpose::STANDARD.decode(source.base64) {
             Ok(b) => b,
             Err(e) => {
-                tracing::warn!("Failed to decode base64 texture data: {}", e);
+                fail(&format!("the texture data is not valid base64 ({e})"));
                 continue;
             }
         };
@@ -899,7 +912,7 @@ pub(super) fn apply_texture_load(
         let image = match image_result {
             Ok(img) => img,
             Err(e) => {
-                tracing::warn!("Failed to create image from texture data: {:?}", e);
+                fail(&format!("the {mime_type} data could not be decoded ({e})"));
                 continue;
             }
         };
@@ -932,17 +945,15 @@ pub(super) fn apply_texture_load(
                         sprite_data.texture_asset_id = Some(asset_id.clone());
                         events::emit_sprite_changed(&request.entity_id, Some(&*sprite_data));
                     }
-                    None => tracing::warn!(
-                        "Texture slot '{}' needs SpriteData, which entity {} does not have",
-                        request.slot,
-                        request.entity_id
-                    ),
+                    None => fail("the entity has no sprite to apply it to"),
                 }
             }
             _ => {
                 // Update the entity's MaterialData with the texture reference
+                let mut found = false;
                 for (eid, mut mat_data) in mat_query.iter_mut() {
                     if eid.0 == request.entity_id {
+                        found = true;
                         match request.slot.as_str() {
                             "base_color" => mat_data.base_color_texture = Some(asset_id.clone()),
                             "normal_map" => mat_data.normal_map_texture = Some(asset_id.clone()),
@@ -953,13 +964,14 @@ pub(super) fn apply_texture_load(
                             "clearcoat" => mat_data.clearcoat_texture = Some(asset_id.clone()),
                             "clearcoat_roughness" => mat_data.clearcoat_roughness_texture = Some(asset_id.clone()),
                             "clearcoat_normal" => mat_data.clearcoat_normal_texture = Some(asset_id.clone()),
-                            _ => {
-                                tracing::warn!("Unknown texture slot: {}", request.slot);
-                            }
+                            _ => fail(&format!("there is no texture slot named \"{}\"", request.slot)),
                         }
                         events::emit_material_changed(&request.entity_id, &mat_data);
                         break;
                     }
+                }
+                if !found {
+                    fail("the entity has no material to apply it to");
                 }
             }
         }

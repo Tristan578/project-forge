@@ -607,6 +607,51 @@ fn apply_texture_load_hands_the_sprite_slot_to_sprite_data_exactly_once() {
 }
 
 #[test]
+fn apply_texture_load_reports_every_failure_to_the_editor() {
+    // `load_texture` answers when the request is queued; this drain decodes
+    // and assigns a frame later, so a failure here that is only logged is
+    // invisible to the person who sent the texture (#10399). Every failure
+    // goes through the `fail` closure, which emits TEXTURE_LOAD_ERROR.
+    let body = drain_body("apply_texture_load");
+    assert_eq!(
+        executable_occurrences(&body, "events::emit_texture_load_error("),
+        1,
+        "proven: `apply_texture_load` emits TEXTURE_LOAD_ERROR from exactly one executable call \
+         (the `fail` closure). Not proven: that it runs - bridge/ is wasm32-only."
+    );
+    let lines: Vec<&str> = body
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//"))
+        .collect();
+    let mut continues = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if *line == "continue;" {
+            continues += 1;
+            let before = &lines[i.saturating_sub(2)..i];
+            assert!(
+                before.iter().any(|l| l.starts_with("fail(")),
+                "a `continue;` in `apply_texture_load` skips a texture without reporting it; the \
+                 executable lines before it are {before:?}"
+            );
+        }
+    }
+    assert!(
+        continues >= 4,
+        "the scan found {continues} `continue;` lines in `apply_texture_load`, expected the size \
+         cap, the guard, the base64 decode and the image decode; the scan is broken"
+    );
+    for missing in ["fail(\"the entity has no sprite", "fail(\"the entity has no material"] {
+        assert_eq!(
+            executable_occurrences(&body, missing),
+            1,
+            "proven: `apply_texture_load` reports a target with no sprite or material \
+             (`{missing}`). Not proven: that it runs - bridge/ is wasm32-only."
+        );
+    }
+}
+
+#[test]
 fn apply_gltf_import_re_inspects_the_decoded_document_exactly_once() {
     let statement = "if let Err(refusal) = asset_import_guard::inspect_gltf_bytes(&bytes)";
     assert_eq!(

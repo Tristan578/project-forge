@@ -5,6 +5,8 @@
 import { useEditorStore, type MaterialData, type EnvironmentData, type PostProcessingData } from '@/stores/editorStore';
 import { castPayload, type SetFn, type GetFn } from './types';
 import { applyWhenPrimary } from './primaryGate';
+import { showPersistentError } from '@/lib/toast';
+import { textureApplyFailureMessage } from '@/lib/engine/textureFormatGuard';
 
 export function handleMaterialEvent(
   type: string,
@@ -67,6 +69,17 @@ export function handleMaterialEvent(
     case 'CSG_COMPLETED': {
       const payload = castPayload<{ entityId: string; name: string; operation: string }>(data);
       console.log(`CSG ${payload.operation} completed: ${payload.name} (${payload.entityId})`);
+      return true;
+    }
+
+    case 'TEXTURE_LOAD_ERROR': {
+      // The engine accepted the texture, then could not apply it a frame
+      // later (#10399). Shown, not only logged, so the person knows the
+      // texture did not take; persistent like a refusal, deduped per file.
+      const payload = castPayload<{ name: string; entityId: string; slot: string; reason: string }>(data);
+      showPersistentError(textureApplyFailureMessage(payload.name, payload.reason), {
+        id: `load_texture-failed:${payload.name}`,
+      });
       return true;
     }
 

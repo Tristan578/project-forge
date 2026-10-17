@@ -276,6 +276,17 @@ export function assetImportFailureMessage(name: string, error: unknown): string 
 }
 
 /**
+ * What the editor shows when the engine accepted a texture and then could
+ * not apply it (`TEXTURE_LOAD_ERROR`, #10399): the image did not decode, or
+ * the entity has no sprite or material for the slot. `load_texture` answers
+ * when the request is queued, so this arrives a frame later. The engine's
+ * reason is bounded like every other detail.
+ */
+export function textureApplyFailureMessage(name: string, reason: string): string {
+  return `Texture "${boundDisplayName(name)}" was not applied: ${errorDetail(reason)}`;
+}
+
+/**
  * What the drop zone tells the person about a file whose extension names no
  * type the editor imports - a `.webp`, a `.psd`, a `.txt`. Such a file used
  * to be filtered out of a drop without a word, so a drop of nothing but a
