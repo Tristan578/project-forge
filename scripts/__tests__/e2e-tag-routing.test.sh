@@ -463,7 +463,9 @@ done
 # section still reported green when join_continuations was removed and one
 # wrapped invocation went invisible. Adding a playwright job raises this;
 # removing one lowers it, and either way the number is checked by a human.
-EXPECTED_PROD_WEBSERVER_INVOCATIONS=7
+# 7 → 8 when test-e2e-engine-journeys (#10161) added its run over
+# playwright.journeys.config.ts.
+EXPECTED_PROD_WEBSERVER_INVOCATIONS=8
 if [ "$prod_checked" -eq "$EXPECTED_PROD_WEBSERVER_INVOCATIONS" ]; then
   pass "checked ${prod_checked} playwright invocations against a production webServer (a walk over zero would pass vacuously)"
 else
@@ -566,6 +568,70 @@ if [ "$match_count" -ge "$EXPECTED_PROJECT_TESTMATCH" ]; then
   pass "inspected ${match_count} per-project testMatch entrie(s) (a walk over zero would pass vacuously)"
 else
   fail "found ${match_count} per-project testMatch entrie(s), expected at least ${EXPECTED_PROJECT_TESTMATCH} — the grep no longer sees them, so this whole section is vacuous"
+fi
+
+echo ""
+echo "=== the DB-backed journeys gate selects @engine-journey, and nothing else runs it (#10161) ==="
+# test-e2e-engine-journeys is the ONLY per-PR job that serves the app against a
+# database (one created for that run, behind Neon's local HTTP proxy —
+# docs/decisions/2026-10-05-engine-journeys-database.md), so it is the only
+# place the account journeys of #9723 can run. Three things keep that routing
+# real: the job runs the journeys config as its whole run: line; that config
+# selects exactly the @engine-journey tag; and no OTHER selection can pick a
+# journey up — not the smoke config (which has no database) and not the @ui
+# shard (keyless, database-less). All reads are of comment-stripped text, so a
+# step deleted with its explanatory comment left behind satisfies nothing.
+jn_job="$(awk '/^  test-e2e-engine-journeys:/{f=1} f{print} f && /^  [a-z][a-z0-9-]*:$/ && !/test-e2e-engine-journeys/{exit}' "$CI_YML")"
+if [ -z "$jn_job" ]; then
+  fail "no test-e2e-engine-journeys job in ci.yml — the @engine-journey specs run nowhere with a database, so journeys 3 and 4 of #9723 have no gate (#10161)"
+else
+  jn_exec="$(grep -v '^[[:space:]]*#' <<<"$jn_job")"
+  if grep -qE '^[[:space:]]+run: npx playwright test --config playwright\.journeys\.config\.ts[[:space:]]*$' <<<"$jn_exec"; then
+    pass "test-e2e-engine-journeys runs the journeys config as its whole run: line"
+  else
+    fail "test-e2e-engine-journeys does not run 'npx playwright test --config playwright.journeys.config.ts' as a whole run: line"
+  fi
+  # The hooks flag is what opens e2eHooksEnabled(), and that gate is what lets
+  # the driver honour E2E_NEON_HTTP_ENDPOINT (web/src/lib/db/e2eNeonEndpoint.ts).
+  # Without it the production build would post every query to Neon cloud.
+  if grep -q 'NEXT_PUBLIC_E2E_HOOKS' <<<"$jn_exec"; then
+    pass "test-e2e-engine-journeys builds with NEXT_PUBLIC_E2E_HOOKS (the gate that lets the driver reach the per-run database)"
+  else
+    fail "test-e2e-engine-journeys does not set NEXT_PUBLIC_E2E_HOOKS — e2eHooksEnabled() is false in that build, the driver ignores E2E_NEON_HTTP_ENDPOINT, and the job's queries go to Neon cloud"
+  fi
+fi
+
+JOURNEYS_CFG="$WEB_DIR/playwright.journeys.config.ts"
+if [ ! -f "$JOURNEYS_CFG" ]; then
+  fail "playwright.journeys.config.ts not found — test-e2e-engine-journeys has no config to run"
+else
+  jn_cfg_exec="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$JOURNEYS_CFG")"
+  if grep -qE "^[[:space:]]*grep: /@engine-journey/,?[[:space:]]*$" <<<"$jn_cfg_exec"; then
+    pass "playwright.journeys.config.ts selects exactly @engine-journey"
+  else
+    fail "playwright.journeys.config.ts does not select 'grep: /@engine-journey/' — a wider or different selector lets a non-journey spec into the one job with a database, or leaves the journeys unselected"
+  fi
+fi
+
+ENGINE_CFG="$WEB_DIR/playwright.engine.config.ts"
+if [ ! -f "$ENGINE_CFG" ]; then
+  fail "playwright.engine.config.ts not found — cannot verify the smoke gate never selects @engine-journey"
+else
+  eng_cfg_exec="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$ENGINE_CFG")"
+  if grep -E '^[[:space:]]*grep:' <<<"$eng_cfg_exec" | grep -q 'engine-journey'; then
+    fail "playwright.engine.config.ts's grep selects @engine-journey — a journey would run in the smoke gate, which has no database, and fail (or pass vacuously) there"
+  else
+    pass "the smoke config's grep never selects @engine-journey (a journey runs only where there is a database)"
+  fi
+fi
+
+jn_titles="$(grep -rhE "(test|describe)\((['\"])[^'\"]*@engine-journey\b" "$E2E_DIR" --include=*.spec.ts 2>/dev/null || true)"
+if [ -z "$jn_titles" ]; then
+  fail "no spec title carries @engine-journey — the journeys config selects zero tests, and Playwright fails the job with 'No tests found' (the health spec engine-journeys-health.spec.ts is the floor)"
+elif grep -q '@ui' <<<"$jn_titles"; then
+  fail "an @engine-journey title is also @ui — the keyless, database-less @ui shard would try to run a journey that needs both"
+else
+  pass "@engine-journey is applied ($(grep -c . <<<"$jn_titles") title(s)) and never together with @ui"
 fi
 
 echo ""
