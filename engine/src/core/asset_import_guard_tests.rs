@@ -6,6 +6,14 @@
 //! `include_str!` below is relative to this file, so the file must stay in
 //! `engine/src/core/`.
 
+// Line-anchored, as in the other sibling test files (`component_carry_tests.rs`,
+// `engine_mode_tests.rs`): the repo's source scanners treat everything after the
+// first `#[cfg(test)]` line as test code (`core/pending/runtime_drains.rs`,
+// `without_tests`). This module is test-only already - the guard declares it
+// `#[cfg(test)]` - but a scanner reading this file alone cannot see that, and the
+// source pins below quote the drains' own call text, which would otherwise read
+// as this file draining a queue. Nothing above that line may quote it either.
+#[cfg(test)]
 use super::*;
 
 /// Hand-built documents for these tests and for the command-handler tests in
