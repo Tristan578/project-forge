@@ -102,7 +102,11 @@ const slice = createSliceStore(createAssetSlice);
 /** The store actions the panel calls; the texture one is the real slice unless a test overrides it. */
 type ImportActions = Pick<AssetSlice, 'importGltf' | 'loadTexture' | 'importAudio'>;
 
-function setupStore(overrides: Partial<ImportActions> = {}, primaryId: string | null = 'ent-1'): ImportActions {
+function setupStore(
+  overrides: Partial<ImportActions> = {},
+  primaryId: string | null = 'ent-1',
+  sprites: Record<string, unknown> = {},
+): ImportActions {
   const actions: ImportActions = {
     importGltf: vi.fn(() => ({ success: true })),
     loadTexture: slice.getState().loadTexture,
@@ -116,6 +120,7 @@ function setupStore(overrides: Partial<ImportActions> = {}, primaryId: string | 
     placeAsset: vi.fn(),
     deleteAsset: vi.fn(),
     primaryId,
+    sprites,
   }));
   return actions;
 }
@@ -354,6 +359,49 @@ describe('AssetPanel texture upload (#10396)', () => {
       expect(showError).toHaveBeenCalledWith('Could not import "bad.glb": engine not ready');
       expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('Failed to read file'));
       await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
+    });
+  });
+
+  // A 2D sprite renders from its SpriteData, not a material: a texture
+  // imported or dropped while one is selected goes to the sprite's own slot.
+  // `base_color` found no material and changed nothing (#10399).
+  describe('a texture with a 2D sprite selected (#10399)', () => {
+    const spriteSelected = { 'ent-1': { textureAssetId: null } };
+
+    it('picked: the texture goes to the sprite slot', async () => {
+      setupStore({}, 'ent-1', spriteSelected);
+      const { container } = render(<AssetPanel />);
+
+      fireEvent.change(textureInput(container), { target: { files: [pickedFile(PNG_BYTES, 'hero.png', 'image/png')] } });
+
+      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith(
+        'load_texture',
+        expect.objectContaining({ name: 'hero.png', entityId: 'ent-1', slot: 'sprite' }),
+      ));
+    });
+
+    it('dropped: the texture goes to the sprite slot', async () => {
+      setupStore({}, 'ent-1', spriteSelected);
+      const { container } = render(<AssetPanel />);
+
+      dropFiles(container, [pickedFile(PNG_BYTES, 'hero.png', 'image/png')]);
+
+      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith(
+        'load_texture',
+        expect.objectContaining({ name: 'hero.png', entityId: 'ent-1', slot: 'sprite' }),
+      ));
+    });
+
+    it('a selected entity with no sprite data keeps the base colour slot', async () => {
+      setupStore({}, 'ent-1', { 'some-other-entity': { textureAssetId: null } });
+      const { container } = render(<AssetPanel />);
+
+      fireEvent.change(textureInput(container), { target: { files: [pickedFile(PNG_BYTES, 'floor.png', 'image/png')] } });
+
+      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith(
+        'load_texture',
+        expect.objectContaining({ name: 'floor.png', entityId: 'ent-1', slot: 'base_color' }),
+      ));
     });
   });
 

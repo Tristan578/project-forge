@@ -34,6 +34,7 @@ import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 import { ESTIMATED_TIMES } from '@/lib/generation/estimatedTimes';
 import { replaceDataUrlType, sniffImageMimeType } from '@/lib/engine/textureFormatGuard';
+import { defaultTextureSlot } from '@/lib/engine/textureSlot';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
@@ -654,7 +655,8 @@ export function useGenerationPolling() {
 
         const assetName = (ppResult.metadata.assetName as string) ?? `PixelArt_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
-        const slot = job.materialSlot ?? defaultTextureSlot(entityId);
+        // With no slot named, a 2D sprite target gets its own slot (#10399).
+        const slot = job.materialSlot ?? defaultTextureSlot(entityId, useEditorStore.getState().sprites);
 
         const placement = entityId && job.autoPlace !== false
           ? placementOf(useEditorStore.getState().loadTexture(base64, assetName, entityId, slot))
@@ -726,7 +728,8 @@ export function useGenerationPolling() {
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Sprite_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
-        const slot = job.materialSlot ?? defaultTextureSlot(entityId);
+        // With no slot named, a 2D sprite target gets its own slot (#10399).
+        const slot = job.materialSlot ?? defaultTextureSlot(entityId, useEditorStore.getState().sprites);
 
         // Apply as texture on the target entity
         const placement = entityId && job.autoPlace !== false
@@ -911,18 +914,6 @@ export function useGenerationPolling() {
    * generation itself succeeded, so the job still completes and nothing is
    * refunded; the slice has already shown the person the refusal.
    */
-  /**
-   * The slot a generated image goes to when the job named none. A 2D sprite
-   * renders from its SpriteData, not from a material, and the engine applies
-   * the `sprite` slot to it (#10399); `base_color` aimed at a sprite entity
-   * found no material, changed nothing, and was still recorded as placed.
-   * Any other target keeps the material's base colour.
-   */
-  function defaultTextureSlot(entityId: string | undefined): string {
-    if (!entityId) return 'base_color';
-    return useEditorStore.getState().sprites[entityId] !== undefined ? 'sprite' : 'base_color';
-  }
-
   function placementOf(
     outcome: { success: boolean; error?: string } | void,
   ): { autoPlaced: boolean; placementError?: string } {

@@ -23,6 +23,7 @@ import {
   assetImportFailureMessage,
   textureNeedsTargetMessage,
 } from '@/lib/engine/textureFormatGuard';
+import { defaultTextureSlot } from '@/lib/engine/textureSlot';
 import { createBatchFailureReporter, type BatchFailureReporter } from '@/lib/assets/batchFailureReporter';
 
 /**
@@ -147,6 +148,11 @@ export const AssetPanel = memo(function AssetPanel() {
   const loadTexture = useEditorStore((s) => s.loadTexture);
   const importAudio = useEditorStore((s) => s.importAudio);
   const primaryId = useEditorStore((s) => s.primaryId);
+  // Where an imported texture goes on the selected entity: a 2D sprite's own
+  // slot, or the material's base colour. `base_color` on a sprite found no
+  // material and changed nothing (#10399). A string, so the panel re-renders
+  // only when the answer changes, not on every sprite edit.
+  const textureSlot = useEditorStore((s) => defaultTextureSlot(s.primaryId, s.sprites));
   const gltfInputRef = useRef<HTMLInputElement>(null);
   const textureInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -201,7 +207,7 @@ export const AssetPanel = memo(function AssetPanel() {
         // file; caught so the rest of the batch still loads, and reported
         // through the batch's reporter so it counts against the toast cap.
         try {
-          loadTexture(dataUrl, file.name, primaryId, 'base_color');
+          loadTexture(dataUrl, file.name, primaryId, textureSlot);
         } catch (error) {
           failures.report(textureLoadFailureMessage(file.name, error));
         }
@@ -209,7 +215,7 @@ export const AssetPanel = memo(function AssetPanel() {
     } finally {
       failures.finish();
     }
-  }, [loadTexture, primaryId]);
+  }, [loadTexture, primaryId, textureSlot]);
 
   const handleAudioImport = useCallback(async (files: FileList | null) => {
     if (!files) return;
@@ -292,7 +298,7 @@ export const AssetPanel = memo(function AssetPanel() {
           const dataUrl = await readOrReport(file, readTextureFile, failures);
           if (dataUrl === null) continue;
           try {
-            loadTexture(dataUrl, file.name, primaryId, 'base_color');
+            loadTexture(dataUrl, file.name, primaryId, textureSlot);
           } catch (error) {
             failures.report(textureLoadFailureMessage(file.name, error));
           }
@@ -311,7 +317,7 @@ export const AssetPanel = memo(function AssetPanel() {
       setImportProgress(null);
       failures.finish();
     }
-  }, [importGltf, loadTexture, importAudio, primaryId]);
+  }, [importGltf, loadTexture, importAudio, primaryId, textureSlot]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
