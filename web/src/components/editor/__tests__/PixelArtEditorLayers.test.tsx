@@ -211,7 +211,7 @@ describe('PixelArtEditor layers panel (pixel.FR-1.OP-01)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply to Sprite' }));
     expect(lastImage().width).toBe(16);
     expect([...lastImage().data.slice((15 * 16 + 15) * 4, (15 * 16 + 15) * 4 + 4)]).toEqual([255, 0, 77, 255]);
-    expect(mockLoadTexture).toHaveBeenLastCalledWith('data:image/png;base64,mockbase64', 'pixel-art-16x16.png', 'sprite-1', 'base_color');
+    expect(mockLoadTexture).toHaveBeenLastCalledWith('data:image/png;base64,mockbase64', 'pixel-art-16x16.png', 'sprite-1', 'sprite');
     fireEvent.click(screen.getByTitle('Redo (Ctrl+Y)'));
     expect(screen.getByRole('combobox')).toHaveValue('64');
     expect(screen.queryByTitle('Select Layer 2')).not.toBeInTheDocument();
@@ -257,7 +257,7 @@ describe('PixelArtEditor layers panel (pixel.FR-1.OP-01)', () => {
     expect(firstPixel()).toEqual([148, 87, 166, 255]);
     fireEvent.click(screen.getByRole('button', { name: 'Apply to Sprite' }));
     expect(firstPixel()).toEqual([148, 87, 166, 255]);
-    expect(mockLoadTexture).toHaveBeenLastCalledWith('data:image/png;base64,mockbase64', 'pixel-art-16x16.png', 'sprite-1', 'base_color');
+    expect(mockLoadTexture).toHaveBeenLastCalledWith('data:image/png;base64,mockbase64', 'pixel-art-16x16.png', 'sprite-1', 'sprite');
     fireEvent.click(screen.getByTitle('Toggle visibility of Layer 2'));
     expect(firstPixel()).toEqual([255, 0, 77, 255]);
     fireEvent.click(screen.getByTitle('Undo (Ctrl+Z)'));

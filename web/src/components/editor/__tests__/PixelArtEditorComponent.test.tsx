@@ -252,7 +252,9 @@ describe('PixelArtEditor', () => {
       'data:image/png;base64,mockbase64',
       expect.stringContaining('pixel-art-'),
       'ent-1',
-      'base_color',
+      // The sprite's own slot: `base_color` looked for a material a sprite
+      // does not have, so Apply to Sprite changed nothing (#10399).
+      'sprite',
     );
     expect(onClose).toHaveBeenCalledOnce();
   });
