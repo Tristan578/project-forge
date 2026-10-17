@@ -305,6 +305,44 @@ describe('AssetPanel texture upload (#10396)', () => {
       expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('Failed to read file'));
       await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
     });
+
+    // The other two importer catches. Each of the four (picked model, picked
+    // audio, dropped model, dropped audio) has exactly one test here that goes
+    // red when its catch is deleted: without it the throw escapes as an
+    // unhandled rejection and the file after it never imports.
+    it('picked: a thrown importAudio is reported as an import failure, and the next audio file still imports', async () => {
+      const importAudio = vi.fn((_base64: string, name: string) => {
+        if (name === 'bad.mp3') throw new Error('audio graph not ready');
+      });
+      setupStore({ importAudio });
+      const { container } = render(<AssetPanel />);
+
+      fireEvent.change(audioInput(container), {
+        target: { files: [pickedFile(PNG_BYTES, 'bad.mp3', ''), pickedFile(PNG_BYTES, 'song.mp3', '')] },
+      });
+
+      await waitFor(() => expect(importAudio).toHaveBeenCalledWith('iVBORw0KGgo=', 'song.mp3'));
+      expect(importAudio).toHaveBeenCalledTimes(2);
+      await waitFor(() => expect(showError).toHaveBeenCalledTimes(1));
+      expect(showError).toHaveBeenCalledWith('Could not import "bad.mp3": audio graph not ready');
+      expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('Failed to read file'));
+    });
+
+    it('dropped: a thrown importGltf is reported as an import failure, the texture after it still loads, and the progress bar clears', async () => {
+      const importGltf = vi.fn(() => { throw new Error('engine not ready'); });
+      setupStore({ importGltf });
+      const { container } = render(<AssetPanel />);
+
+      dropFiles(container, [pickedFile(PNG_BYTES, 'bad.glb', ''), pickedFile(PNG_BYTES, 'floor.png', 'image/png')]);
+
+      await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({ name: 'floor.png' })));
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+      expect(importGltf).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(showError).toHaveBeenCalledTimes(1));
+      expect(showError).toHaveBeenCalledWith('Could not import "bad.glb": engine not ready');
+      expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('Failed to read file'));
+      await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
+    });
   });
 
   describe('a batch with many unreadable files raises at most three toasts: two named, one summary (#10396)', () => {
