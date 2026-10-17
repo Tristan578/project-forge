@@ -254,6 +254,18 @@ describe('AssetPanel texture upload (#10396)', () => {
       expect(showError).toHaveBeenCalledWith(readFailure('broken.glb'));
     });
 
+    it('a picked model with an upper-case extension is imported, as the drop zone would', async () => {
+      const { importGltf } = setupStore();
+      const { container } = render(<AssetPanel />);
+
+      fireEvent.change(gltfInput(container), {
+        target: { files: [pickedFile(PNG_BYTES, 'MODEL.GLB', '')] },
+      });
+
+      await waitFor(() => expect(importGltf).toHaveBeenCalledWith('iVBORw0KGgo=', 'MODEL.GLB'));
+      expect(showError).not.toHaveBeenCalled();
+    });
+
     it('a picked audio file that cannot be read is reported and the next one still imports', async () => {
       vi.stubGlobal('FileReader', SelectiveFileReader);
       const { importAudio } = setupStore();
@@ -357,7 +369,7 @@ describe('AssetPanel texture upload (#10396)', () => {
       expect(vi.mocked(showError).mock.calls.map(([m]) => m)).toEqual([
         readFailure('broken1.png'),
         readFailure('broken2.png'),
-        '3 more files could not be read; details are in the browser console.',
+        '3 more files failed to import; details are in the browser console.',
       ]);
       expect(warn.mock.calls).toEqual([
         [`[assets] ${readFailure('broken3.png')}`],

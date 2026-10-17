@@ -158,7 +158,9 @@ export const AssetPanel = memo(function AssetPanel() {
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        if (!file.name.endsWith('.glb') && !file.name.endsWith('.gltf')) continue;
+        // Lower-cased like the drop zone's filter: a picked MODEL.GLB is a model.
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        if (ext !== 'glb' && ext !== 'gltf') continue;
         const base64 = await readOrReport(file, fileToBase64, failures);
         if (base64 === null) continue;
         // A throw from the store action is an import failure, not an
@@ -285,8 +287,9 @@ export const AssetPanel = memo(function AssetPanel() {
         }
       }
     } finally {
-      failures.finish();
+      // The bar clears first: nothing the toasts do can leave it stuck.
       setImportProgress(null);
+      failures.finish();
     }
   }, [importGltf, loadTexture, importAudio, primaryId]);
 

@@ -1,7 +1,8 @@
 /**
  * Caps the transient toasts one import batch can raise for files that
  * could not be read, or that the store threw on while handing them to the
- * engine.
+ * engine. Both are "failed to import" to the person, which is what the
+ * summary says; the named toasts carry the precise sentence for each.
  *
  * Dropping or picking many files that all fail used to raise one toast per
  * file, stacking a wall of identical sentences. The cap is the toast STACK:
@@ -26,6 +27,19 @@
  */
 
 import { showError } from '@/lib/toast';
+
+/**
+ * Notifications are best-effort (the repo convention `editorStore` follows):
+ * a throw from the toast layer is logged, never propagated into the import
+ * loop or the caller's finally.
+ */
+function notify(message: string): void {
+  try {
+    showError(message);
+  } catch (error) {
+    console.error('[assets] could not show a toast', error);
+  }
+}
 
 /** The most transient toasts one batch raises: sonner's default visible stack. */
 export const MAX_BATCH_TOASTS = 3;
@@ -52,17 +66,19 @@ export function createBatchFailureReporter(): BatchFailureReporter {
       if (finished) return;
       finished = true;
       if (failures.length <= MAX_BATCH_TOASTS) {
-        for (const message of failures) showError(message);
+        for (const message of failures) notify(message);
         return;
       }
       const named = failures.slice(0, MAX_DETAILED_BATCH_FAILURES);
       const counted = failures.slice(MAX_DETAILED_BATCH_FAILURES);
-      for (const message of named) showError(message);
+      for (const message of named) notify(message);
       for (const message of counted) console.warn(`[assets] ${message}`);
       // Always plural: the summary takes the slot a named toast would have
       // had, so it is only raised when at least two failures were counted
       // (overflow means more than the stack; the stack minus one are named).
-      showError(`${counted.length} more files could not be read; details are in the browser console.`);
+      // "failed to import" covers every message this reporter carries: an
+      // unreadable file and a file the store threw on after reading it.
+      notify(`${counted.length} more files failed to import; details are in the browser console.`);
     },
   };
 }

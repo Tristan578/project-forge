@@ -78,7 +78,7 @@ describe('createBatchFailureReporter', () => {
 
     reporter.finish();
 
-    expect(shown()).toEqual([m1, m2, '2 more files could not be read; details are in the browser console.']);
+    expect(shown()).toEqual([m1, m2, '2 more files failed to import; details are in the browser console.']);
     expect(warn.mock.calls).toEqual([[`[assets] ${m3}`], [`[assets] ${m4}`]]);
   });
 
@@ -89,7 +89,7 @@ describe('createBatchFailureReporter', () => {
 
     reporter.finish();
 
-    expect(shown()).toEqual([m1, m2, '3 more files could not be read; details are in the browser console.']);
+    expect(shown()).toEqual([m1, m2, '3 more files failed to import; details are in the browser console.']);
     expect(warn.mock.calls).toEqual([[`[assets] ${m3}`], [`[assets] ${m4}`], [`[assets] ${m5}`]]);
   });
 
