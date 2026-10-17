@@ -17,6 +17,7 @@ import { invokeHandler, createMockStore } from './handlerTestUtils';
 import { assetHandlers } from '../assetHandlers';
 import { materialHandlers } from '../materialHandlers';
 import { performanceHandlers } from '../performanceHandlers';
+import { RAW_BASE64_REFUSAL } from '@/lib/engine/textureFormatGuard';
 import type { ToolCallContext } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -100,9 +101,12 @@ describe('assetHandlers — import_gltf', () => {
 });
 
 describe('assetHandlers — load_texture', () => {
+  // A raw body (no `data:` header) is typed by its first bytes before the
+  // store is touched (#10396). 'iVBORw0KGgo=' is the PNG signature, so the
+  // missing-field tests below can fail only for the field they name.
   it('returns error when entityId is missing', async () => {
     const { result } = await invokeHandler(assetHandlers, 'load_texture', {
-      dataBase64: 'abc',
+      dataBase64: 'iVBORw0KGgo=',
       name: 'tex.png',
       slot: 'base_color',
     });
@@ -111,7 +115,7 @@ describe('assetHandlers — load_texture', () => {
 
   it('returns error when slot is missing', async () => {
     const { result } = await invokeHandler(assetHandlers, 'load_texture', {
-      dataBase64: 'abc',
+      dataBase64: 'iVBORw0KGgo=',
       name: 'tex.png',
       entityId: 'ent-1',
     });
@@ -120,13 +124,27 @@ describe('assetHandlers — load_texture', () => {
 
   it('calls store.loadTexture with all four args', async () => {
     const { result, store } = await invokeHandler(assetHandlers, 'load_texture', {
-      dataBase64: 'texdata',
+      dataBase64: 'iVBORw0KGgo=',
       name: 'albedo.png',
       entityId: 'ent-1',
       slot: 'base_color',
     });
     expect(result.success).toBe(true);
-    expect(vi.mocked(store.loadTexture)).toHaveBeenCalledWith('texdata', 'albedo.png', 'ent-1', 'base_color');
+    expect(vi.mocked(store.loadTexture)).toHaveBeenCalledWith('iVBORw0KGgo=', 'albedo.png', 'ent-1', 'base_color');
+  });
+
+  it("refuses a raw body that is neither PNG nor JPEG in the engine's sentence, before the store is touched", async () => {
+    // 'texdata' is the body this suite used to send and report success for.
+    // Its first bytes are neither signature, so the tool must not say
+    // "Loading texture" for it, and the model needs the reason to act on.
+    const { result, store } = await invokeHandler(assetHandlers, 'load_texture', {
+      dataBase64: 'texdata',
+      name: 'albedo.png',
+      entityId: 'ent-1',
+      slot: 'base_color',
+    });
+    expect(result).toEqual({ success: false, error: RAW_BASE64_REFUSAL });
+    expect(vi.mocked(store.loadTexture)).not.toHaveBeenCalled();
   });
 });
 
