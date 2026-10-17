@@ -651,8 +651,11 @@ pub(super) fn apply_gltf_import(
             continue;
         }
 
-        // Determine the in-memory asset path using a unique name
-        let ext = if request.name.ends_with(".gltf") { "gltf" } else { "glb" };
+        // Determine the in-memory asset path using a unique name. The
+        // extension is what tells bevy_gltf to parse JSON or GLB, and it is
+        // decided without regard to case: a picked `MODEL.GLTF` used to be
+        // stored as `.glb`, where the loader could not read it (#10396).
+        let ext = asset_import_guard::gltf_memory_extension(&request.name);
         let memory_path = format!("{}.{}", asset_id, ext);
 
         // Write the decoded bytes to the in-memory asset directory
@@ -826,12 +829,15 @@ pub(super) fn apply_gltf_scene_spawn(
 }
 
 /// System that processes texture load requests.
-/// Decodes base64 image data, creates GPU texture assets, and updates MaterialData.
+/// Decodes base64 image data, creates GPU texture assets, and hands the asset
+/// to the slot's owner: a `MaterialData` texture slot, or `SpriteData` for the
+/// `"sprite"` slot the Sprite inspector sends.
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_texture_load(
     mut pending: ResMut<PendingCommands>,
     mut asset_registry: ResMut<AssetRegistry>,
     mut mat_query: Query<(&EntityId, &mut MaterialData)>,
+    mut sprite_query: Query<(&EntityId, &mut SpriteData)>,
     mut images: ResMut<Assets<Image>>,
     mut texture_handles: ResMut<crate::core::asset_manager::TextureHandleMap>,
 ) {
@@ -857,7 +863,8 @@ pub(super) fn apply_texture_load(
         // The allowlist the handler already applied, repeated on the payload
         // this drain decodes: the type handed to `ImageType::MimeType` below is
         // always one of ALLOWED_TEXTURE_MIME_TYPES, never the caller's string
-        // (#10396). A raw base64 body (no data URL header) is PNG.
+        // (#10396). A raw base64 body (no data URL header) is typed by its
+        // signature bytes, PNG or JPEG, and refused when it is neither.
         let source = match asset_import_guard::check_texture_payload(&request.data_base64) {
             Ok(source) => source,
             Err(refusal) => {
@@ -910,25 +917,50 @@ pub(super) fn apply_texture_load(
             source: AssetSource::Upload { filename: request.name.clone() },
         });
 
-        // Update the entity's MaterialData with the texture reference
-        for (eid, mut mat_data) in mat_query.iter_mut() {
-            if eid.0 == request.entity_id {
-                match request.slot.as_str() {
-                    "base_color" => mat_data.base_color_texture = Some(asset_id.clone()),
-                    "normal_map" => mat_data.normal_map_texture = Some(asset_id.clone()),
-                    "metallic_roughness" => mat_data.metallic_roughness_texture = Some(asset_id.clone()),
-                    "emissive" => mat_data.emissive_texture = Some(asset_id.clone()),
-                    "occlusion" => mat_data.occlusion_texture = Some(asset_id.clone()),
-                    "depth_map" => mat_data.depth_map_texture = Some(asset_id.clone()),
-                    "clearcoat" => mat_data.clearcoat_texture = Some(asset_id.clone()),
-                    "clearcoat_roughness" => mat_data.clearcoat_roughness_texture = Some(asset_id.clone()),
-                    "clearcoat_normal" => mat_data.clearcoat_normal_texture = Some(asset_id.clone()),
-                    _ => {
-                        tracing::warn!("Unknown texture slot: {}", request.slot);
+        // Hand the asset to the slot's owner. A sprite renders from
+        // `SpriteData.texture_asset_id` (bridge/sprite.rs,
+        // `sync_sprite_rendering`), not from a material slot; until #10396
+        // "sprite" fell through to the unknown-slot arm below, so a Sprite
+        // inspector upload registered an asset nothing displayed.
+        match request.slot.as_str() {
+            "sprite" => {
+                let target = sprite_query
+                    .iter_mut()
+                    .find(|(eid, _)| eid.0 == request.entity_id);
+                match target {
+                    Some((_, mut sprite_data)) => {
+                        sprite_data.texture_asset_id = Some(asset_id.clone());
+                        events::emit_sprite_changed(&request.entity_id, Some(&*sprite_data));
+                    }
+                    None => tracing::warn!(
+                        "Texture slot '{}' needs SpriteData, which entity {} does not have",
+                        request.slot,
+                        request.entity_id
+                    ),
+                }
+            }
+            _ => {
+                // Update the entity's MaterialData with the texture reference
+                for (eid, mut mat_data) in mat_query.iter_mut() {
+                    if eid.0 == request.entity_id {
+                        match request.slot.as_str() {
+                            "base_color" => mat_data.base_color_texture = Some(asset_id.clone()),
+                            "normal_map" => mat_data.normal_map_texture = Some(asset_id.clone()),
+                            "metallic_roughness" => mat_data.metallic_roughness_texture = Some(asset_id.clone()),
+                            "emissive" => mat_data.emissive_texture = Some(asset_id.clone()),
+                            "occlusion" => mat_data.occlusion_texture = Some(asset_id.clone()),
+                            "depth_map" => mat_data.depth_map_texture = Some(asset_id.clone()),
+                            "clearcoat" => mat_data.clearcoat_texture = Some(asset_id.clone()),
+                            "clearcoat_roughness" => mat_data.clearcoat_roughness_texture = Some(asset_id.clone()),
+                            "clearcoat_normal" => mat_data.clearcoat_normal_texture = Some(asset_id.clone()),
+                            _ => {
+                                tracing::warn!("Unknown texture slot: {}", request.slot);
+                            }
+                        }
+                        events::emit_material_changed(&request.entity_id, &mat_data);
+                        break;
                     }
                 }
-                events::emit_material_changed(&request.entity_id, &mat_data);
-                break;
             }
         }
 

@@ -151,8 +151,10 @@ fn png_decodes_through_the_extension_path_the_custom_skybox_uses() {
 #[test]
 fn a_jpeg_declared_as_png_fails_in_the_png_decoder_not_elsewhere() {
     // The declared type IS the dispatch: mislabelled bytes go to the decoder
-    // the label names and fail there. This is why a raw base64 body can be
-    // decoded as PNG unconditionally - the bytes never choose the decoder.
+    // the label names and fail there. The bytes never choose the decoder on
+    // their own, which is why the guard sniffs a raw base64 body's signature
+    // (PNG or JPEG) and refuses anything else: a raw JPEG decoded "as PNG"
+    // would end exactly here, with nothing but a log line to show for it.
     let err = from_buffer(&decode_base64(JPEG_1X1_BASE64), ImageType::MimeType("image/png"))
         .expect_err("JPEG bytes are not a PNG");
     assert!(matches!(err, TextureError::ImageError(_)), "{err:?}");

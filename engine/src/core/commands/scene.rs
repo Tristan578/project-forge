@@ -764,11 +764,27 @@ mod tests {
     }
 
     #[test]
-    fn load_texture_accepts_a_raw_base64_body() {
-        // No header means PNG, as before the gate; a fixed PNG dispatch can
-        // never reach the KTX2 decoder.
-        let pending = run_with_queue("load_texture", texture_payload("iVBORw0KGgo="));
-        assert_eq!(pending.texture_load_requests.len(), 1);
+    fn load_texture_accepts_a_raw_base64_body_that_starts_like_a_png_or_a_jpeg() {
+        // No header means the body's own signature bytes choose the decoder,
+        // PNG or JPEG; neither dispatch can reach the KTX2 decoder.
+        for raw in ["iVBORw0KGgo=", "/9j/4AAQ"] {
+            let pending = run_with_queue("load_texture", texture_payload(raw));
+            assert_eq!(pending.texture_load_requests.len(), 1, "{raw}");
+        }
+    }
+
+    #[test]
+    fn load_texture_refuses_a_raw_base64_body_that_is_neither_png_nor_jpeg() {
+        // Until #10396 this was accepted as PNG and failed in the drain with
+        // nothing but a log line.
+        let (result, pending) = run_with_queue_result("load_texture", texture_payload("AAAA"));
+        let err = result.unwrap_err();
+        assert_eq!(
+            err,
+            "load_texture refused: raw base64 texture data is neither PNG nor JPEG; send a data \
+             URL that names image/png or image/jpeg"
+        );
+        assert!(pending.texture_load_requests.is_empty());
     }
 
     #[test]
