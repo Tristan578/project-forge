@@ -1882,7 +1882,7 @@ jobs:
 
       - name: Upload blob report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: blob-report-${{ strategy.job-index }}
           path: web/blob-report/
@@ -1932,7 +1932,7 @@ jobs:
 
       - name: Upload blob report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: blob-report-api
           path: web/blob-report/
@@ -2037,7 +2037,7 @@ jobs:
 
       - name: Upload auth-journey report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-auth-report
           path: web/auth-results/summary.json
@@ -2167,7 +2167,7 @@ jobs:
 
       - name: Upload journey report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-journey-report
           path: web/playwright-report/
@@ -2334,7 +2334,7 @@ jobs:
       # tests exactly the binary the smoke gate did. One day is plenty — the
       # consumer runs in this workflow run.
       - name: Upload the WebGL2 engine for the journeys gate
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: engine-webgl2-pkg
           path: engine/pkg-webgl2/
@@ -2425,7 +2425,7 @@ jobs:
 
       - name: Upload engine-smoke report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-engine-smoke-report
           path: web/playwright-report/
@@ -2440,7 +2440,7 @@ jobs:
       # step failed and the job is already red), so they add no second error.
       - name: Upload journey evidence
         if: ${{ !cancelled() && steps.engine-smoke-run.outcome != 'skipped' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: journey-evidence
           path: web/journey-evidence/
@@ -2700,7 +2700,7 @@ jobs:
 
       - name: Upload engine-journeys report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-engine-journeys-report
           path: web/playwright-report/
@@ -2835,7 +2835,7 @@ jobs:
 
       - name: Upload cross-browser report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-crossbrowser-report-${{ matrix.project }}
           path: web/playwright-report-crossbrowser/
@@ -2883,7 +2883,7 @@ jobs:
         run: npx playwright merge-reports --reporter=html ./all-blob-reports
 
       - name: Upload merged report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-report
           path: web/playwright-report/
@@ -2953,7 +2953,7 @@ jobs:
 
       - name: Upload docs Playwright report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: docs-playwright-report
           path: apps/docs/playwright-report/
