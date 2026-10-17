@@ -1,10 +1,16 @@
 /**
- * The per-batch cap on read-failure toasts: the first few are shown by name,
- * the rest go to the console and are summarised once.
+ * The per-batch cap on failure toasts. A batch raises at most the toast
+ * stack (three): that many failures or fewer are each named; more, and the
+ * first two are named, the rest go to the console, and one summary takes
+ * the third slot. `report` only collects; `finish` decides.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createBatchFailureReporter, MAX_DETAILED_BATCH_FAILURES } from '../batchFailureReporter';
+import {
+  createBatchFailureReporter,
+  MAX_BATCH_TOASTS,
+  MAX_DETAILED_BATCH_FAILURES,
+} from '../batchFailureReporter';
 
 vi.mock('@/lib/toast', () => ({
   showError: vi.fn(),
@@ -20,6 +26,8 @@ function messages(n: number): string[] {
   return Array.from({ length: n }, (_, i) => `Failed to read file "broken${i + 1}.png". The file may be corrupted or inaccessible.`);
 }
 
+const shown = () => vi.mocked(showError).mock.calls.map(([m]) => m);
+
 const spyWarn = () => vi.spyOn(console, 'warn').mockImplementation(() => {});
 
 describe('createBatchFailureReporter', () => {
@@ -34,58 +42,68 @@ describe('createBatchFailureReporter', () => {
     warn.mockRestore();
   });
 
-  it('names three files by default', () => {
-    expect(MAX_DETAILED_BATCH_FAILURES).toBe(3);
+  it("the cap is sonner's visible stack of three, and the summary takes one of those slots", () => {
+    expect(MAX_BATCH_TOASTS).toBe(3);
+    expect(MAX_DETAILED_BATCH_FAILURES).toBe(2);
   });
 
-  it('shows the first three verbatim; the fourth and fifth go to the console with the [assets] prefix', () => {
+  it('report shows nothing; finish shows the collected failures in order', () => {
     const reporter = createBatchFailureReporter();
-    const [m1, m2, m3, m4, m5] = messages(5);
+    const [m1, m2] = messages(2);
 
-    for (const m of [m1, m2, m3, m4, m5]) reporter.report(m!);
-
-    expect(vi.mocked(showError).mock.calls.map(([m]) => m)).toEqual([m1, m2, m3]);
-    expect(warn.mock.calls).toEqual([[`[assets] ${m4}`], [`[assets] ${m5}`]]);
-  });
-
-  it('finish shows exactly one summary naming how many were only counted', () => {
-    const reporter = createBatchFailureReporter();
-    for (const m of messages(5)) reporter.report(m);
+    reporter.report(m1!);
+    reporter.report(m2!);
+    expect(showError).not.toHaveBeenCalled();
 
     reporter.finish();
 
-    expect(showError).toHaveBeenCalledTimes(4);
-    expect(showError).toHaveBeenLastCalledWith('2 more files could not be read; details are in the browser console.');
-  });
-
-  it('one counted failure reads as one file', () => {
-    const reporter = createBatchFailureReporter();
-    for (const m of messages(4)) reporter.report(m);
-
-    reporter.finish();
-
-    expect(showError).toHaveBeenLastCalledWith('1 more file could not be read; details are in the browser console.');
-  });
-
-  it('finish with no overflow shows nothing', () => {
-    const reporter = createBatchFailureReporter();
-    for (const m of messages(2)) reporter.report(m);
-
-    reporter.finish();
-
-    expect(showError).toHaveBeenCalledTimes(2);
+    expect(shown()).toEqual([m1, m2]);
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('a limit exactly reached shows no summary', () => {
+  it('three failures are each named, with no summary and nothing in the console', () => {
     const reporter = createBatchFailureReporter();
     for (const m of messages(3)) reporter.report(m);
 
     reporter.finish();
 
-    expect(showError).toHaveBeenCalledTimes(3);
-    expect(vi.mocked(showError).mock.calls.map(([m]) => m)).toEqual(messages(3));
+    expect(shown()).toEqual(messages(3));
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('four failures: the first two are named, the other two go to the console with the [assets] prefix, and one summary counts them', () => {
+    const reporter = createBatchFailureReporter();
+    const [m1, m2, m3, m4] = messages(4);
+    for (const m of [m1, m2, m3, m4]) reporter.report(m!);
+
+    reporter.finish();
+
+    expect(shown()).toEqual([m1, m2, '2 more files could not be read; details are in the browser console.']);
+    expect(warn.mock.calls).toEqual([[`[assets] ${m3}`], [`[assets] ${m4}`]]);
+  });
+
+  it('five failures: still two named and one summary, now counting three', () => {
+    const reporter = createBatchFailureReporter();
+    const [m1, m2, m3, m4, m5] = messages(5);
+    for (const m of [m1, m2, m3, m4, m5]) reporter.report(m!);
+
+    reporter.finish();
+
+    expect(shown()).toEqual([m1, m2, '3 more files could not be read; details are in the browser console.']);
+    expect(warn.mock.calls).toEqual([[`[assets] ${m3}`], [`[assets] ${m4}`], [`[assets] ${m5}`]]);
+  });
+
+  it('no batch of any size raises more than the stack', () => {
+    for (let n = 0; n <= 10; n++) {
+      vi.clearAllMocks();
+      const reporter = createBatchFailureReporter();
+      for (const m of messages(n)) reporter.report(m);
+
+      reporter.finish();
+
+      expect(showError, `${n} failures`).toHaveBeenCalledTimes(Math.min(n, MAX_BATCH_TOASTS));
+      expect(warn, `${n} failures`).toHaveBeenCalledTimes(n > MAX_BATCH_TOASTS ? n - MAX_DETAILED_BATCH_FAILURES : 0);
+    }
   });
 
   it('a second finish on the same batch repeats nothing', () => {
@@ -95,21 +113,18 @@ describe('createBatchFailureReporter', () => {
     reporter.finish();
     reporter.finish();
 
-    expect(showError).toHaveBeenCalledTimes(4);
+    expect(showError).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 
-  it('honours a caller-chosen limit', () => {
-    const reporter = createBatchFailureReporter(1);
-    const [m1, m2, m3] = messages(3);
-
-    for (const m of [m1, m2, m3]) reporter.report(m!);
+  it('a report after finish is dropped, not shown late', () => {
+    const reporter = createBatchFailureReporter();
     reporter.finish();
 
-    expect(vi.mocked(showError).mock.calls.map(([m]) => m)).toEqual([
-      m1,
-      '2 more files could not be read; details are in the browser console.',
-    ]);
-    expect(warn).toHaveBeenCalledTimes(2);
+    reporter.report(messages(1)[0]!);
+    reporter.finish();
+
+    expect(showError).not.toHaveBeenCalled();
   });
 
   it('a batch with no failures at all shows nothing', () => {

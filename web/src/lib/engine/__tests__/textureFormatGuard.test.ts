@@ -13,6 +13,8 @@ import { join, sep } from 'path';
 import {
   ACCEPTED_TEXTURE_DECLARATIONS,
   ALLOWED_TEXTURE_MIME_TYPES,
+  assetImportFailureMessage,
+  boundDisplayName,
   checkTexturePayload,
   declareTextureType,
   fileReadFailureMessage,
@@ -176,6 +178,42 @@ describe('the failure sentences a picker shows', () => {
   it('a non-Error throw is stringified into the load failure', () => {
     expect(textureLoadFailureMessage('stone.png', 'boom')).toBe('Could not load texture "stone.png": boom');
     expect(textureLoadFailureMessage('stone.png', 42)).toBe('Could not load texture "stone.png": 42');
+  });
+
+  it("the import failure names the file and carries the Error's message, or the stringified throw", () => {
+    expect(assetImportFailureMessage('tower.glb', new Error('engine not ready'))).toBe(
+      'Could not import "tower.glb": engine not ready',
+    );
+    expect(assetImportFailureMessage('song.mp3', 'boom')).toBe('Could not import "song.mp3": boom');
+  });
+
+  describe('the file name is bounded in every sentence', () => {
+    const LONG = 'n'.repeat(100);
+    const CUT = `${'n'.repeat(60)}…`;
+
+    it('boundDisplayName cuts a 100-character name to 60 plus an ellipsis, and leaves a short one as is', () => {
+      expect(boundDisplayName(LONG)).toBe(CUT);
+      expect([...boundDisplayName(LONG)]).toHaveLength(61);
+      expect(boundDisplayName('n'.repeat(60))).toBe('n'.repeat(60));
+      expect(boundDisplayName('stone.png')).toBe('stone.png');
+    });
+
+    it('counts characters, not UTF-16 units, so a cut never splits a surrogate pair', () => {
+      const emoji = '🙂'.repeat(70);
+      expect(boundDisplayName(emoji)).toBe(`${'🙂'.repeat(60)}…`);
+    });
+
+    it('the read, load and import sentences all cut a long name the same way', () => {
+      expect(fileReadFailureMessage(LONG)).toBe(`Failed to read file "${CUT}". The file may be corrupted or inaccessible.`);
+      expect(textureLoadFailureMessage(LONG, new Error('x'))).toBe(`Could not load texture "${CUT}": x`);
+      expect(assetImportFailureMessage(LONG, new Error('x'))).toBe(`Could not import "${CUT}": x`);
+    });
+
+    it('and leave a short name untouched', () => {
+      expect(fileReadFailureMessage('stone.png')).toContain('"stone.png"');
+      expect(textureLoadFailureMessage('stone.png', new Error('x'))).toContain('"stone.png"');
+      expect(assetImportFailureMessage('stone.png', new Error('x'))).toContain('"stone.png"');
+    });
   });
 
   it('the read-failure sentence has one definition in web/src: no component or reader copies it', () => {

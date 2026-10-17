@@ -7,7 +7,6 @@ import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { useUserStore } from '@/stores/userStore';
 import { canAccessPanel, canAccessPanelBeforeProfileLoad, effectiveTier, getRequiredTier, TIER_LABELS } from '@/lib/ai/tierAccess';
 import { useGenerationGate, combineGenerationGates } from '@/hooks/useGenerationGate';
-import { showError } from '@/lib/toast';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
 import { PrefabLibraryPanel } from './PrefabLibraryPanel';
@@ -16,7 +15,12 @@ import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { GenerateSoundDialog } from './GenerateSoundDialog';
 import { GenerateMusicDialog } from './GenerateMusicDialog';
 import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
-import { readTextureFile, fileReadFailureMessage, textureLoadFailureMessage } from '@/lib/engine/textureFormatGuard';
+import {
+  readTextureFile,
+  fileReadFailureMessage,
+  textureLoadFailureMessage,
+  assetImportFailureMessage,
+} from '@/lib/engine/textureFormatGuard';
 import { createBatchFailureReporter, type BatchFailureReporter } from '@/lib/assets/batchFailureReporter';
 
 /**
@@ -157,7 +161,13 @@ export const AssetPanel = memo(function AssetPanel() {
         if (!file.name.endsWith('.glb') && !file.name.endsWith('.gltf')) continue;
         const base64 = await readOrReport(file, fileToBase64, failures);
         if (base64 === null) continue;
-        importGltf(base64, file.name);
+        // A throw from the store action is an import failure, not an
+        // unreadable file; caught so the rest of the batch still imports.
+        try {
+          importGltf(base64, file.name);
+        } catch (error) {
+          failures.report(assetImportFailureMessage(file.name, error));
+        }
       }
     } finally {
       failures.finish();
@@ -177,11 +187,12 @@ export const AssetPanel = memo(function AssetPanel() {
         const dataUrl = await readOrReport(file, readTextureFile, failures);
         if (dataUrl === null) continue;
         // A throw from the store action is a load failure, not an unreadable
-        // file; caught so the rest of the batch still loads.
+        // file; caught so the rest of the batch still loads, and reported
+        // through the batch's reporter so it counts against the toast cap.
         try {
           loadTexture(dataUrl, file.name, primaryId, 'base_color');
         } catch (error) {
-          showError(textureLoadFailureMessage(file.name, error));
+          failures.report(textureLoadFailureMessage(file.name, error));
         }
       }
     } finally {
@@ -199,7 +210,13 @@ export const AssetPanel = memo(function AssetPanel() {
         if (!['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) continue;
         const base64 = await readOrReport(file, fileToBase64, failures);
         if (base64 === null) continue;
-        importAudio(base64, file.name);
+        // As for a model: a throw from the store action is reported as an
+        // import failure and the next file still imports.
+        try {
+          importAudio(base64, file.name);
+        } catch (error) {
+          failures.report(assetImportFailureMessage(file.name, error));
+        }
       }
     } finally {
       failures.finish();
@@ -227,9 +244,12 @@ export const AssetPanel = memo(function AssetPanel() {
     setImportProgress({ current: 0, total: validFiles.length });
     const failures = createBatchFailureReporter();
 
-    // Every read is reported per file so one unreadable model, texture or
-    // audio file does not stop the batch; the finally clears the progress
-    // indicator on every exit path so it can never be left stuck.
+    // Every read, and every store action, is caught per file so one
+    // unreadable or unimportable model, texture or audio file does not stop
+    // the batch. With every throwing path caught, the finally is
+    // belt-and-braces: it clears the progress indicator on an exit path no
+    // test can reach today, so a regression that adds one still cannot
+    // leave the bar stuck.
     try {
       for (let i = 0; i < validFiles.length; i++) {
         const file = validFiles[i];
@@ -238,22 +258,30 @@ export const AssetPanel = memo(function AssetPanel() {
         if (ext === 'glb' || ext === 'gltf') {
           const base64 = await readOrReport(file, fileToBase64, failures);
           if (base64 === null) continue;
-          importGltf(base64, file.name);
+          // Outside the read: a throw from the store action is an import
+          // failure, not an unreadable file, and is reported as itself.
+          try {
+            importGltf(base64, file.name);
+          } catch (error) {
+            failures.report(assetImportFailureMessage(file.name, error));
+          }
         } else if (['png', 'jpg', 'jpeg'].includes(ext ?? '')) {
           if (!primaryId) continue;
           const dataUrl = await readOrReport(file, readTextureFile, failures);
           if (dataUrl === null) continue;
-          // Outside the read: a throw from the store action is a load
-          // failure, not an unreadable file, and is reported as itself.
           try {
             loadTexture(dataUrl, file.name, primaryId, 'base_color');
           } catch (error) {
-            showError(textureLoadFailureMessage(file.name, error));
+            failures.report(textureLoadFailureMessage(file.name, error));
           }
         } else if (['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
           const base64 = await readOrReport(file, fileToBase64, failures);
           if (base64 === null) continue;
-          importAudio(base64, file.name);
+          try {
+            importAudio(base64, file.name);
+          } catch (error) {
+            failures.report(assetImportFailureMessage(file.name, error));
+          }
         }
       }
     } finally {

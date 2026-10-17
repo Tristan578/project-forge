@@ -270,33 +270,96 @@ describe('AssetPanel texture upload (#10396)', () => {
     });
   });
 
-  it('a drop with many unreadable files names the first three, sends the rest to the console, and adds one summary', async () => {
-    vi.stubGlobal('FileReader', SelectiveFileReader);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
+  describe('a model or audio file the store cannot import (#10396 round 4)', () => {
+    it('picked: a thrown importGltf is reported as an import failure, and the next model still imports', async () => {
+      const importGltf = vi.fn((_base64: string, name: string) => {
+        if (name === 'bad.glb') throw new Error('engine not ready');
+        return { success: true };
+      });
+      setupStore({ importGltf });
       const { container } = render(<AssetPanel />);
-      const files = [1, 2, 3, 4, 5].map((n) => pickedFile(PNG_BYTES, `broken${n}.png`, 'image/png'));
-      files.push(pickedFile(PNG_BYTES, 'floor.png', 'image/png'));
 
-      dropFiles(container, files);
+      fireEvent.change(gltfInput(container), {
+        target: { files: [pickedFile(PNG_BYTES, 'bad.glb', ''), pickedFile(PNG_BYTES, 'model.glb', '')] },
+      });
+
+      await waitFor(() => expect(importGltf).toHaveBeenCalledWith('iVBORw0KGgo=', 'model.glb'));
+      expect(importGltf).toHaveBeenCalledTimes(2);
+      await waitFor(() => expect(showError).toHaveBeenCalledTimes(1));
+      expect(showError).toHaveBeenCalledWith('Could not import "bad.glb": engine not ready');
+      expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('Failed to read file'));
+    });
+
+    it('dropped: a thrown importAudio is reported as an import failure, the texture after it still loads, and the progress bar clears', async () => {
+      const importAudio = vi.fn(() => { throw new Error('audio graph not ready'); });
+      setupStore({ importAudio });
+      const { container } = render(<AssetPanel />);
+
+      dropFiles(container, [pickedFile(PNG_BYTES, 'bad.mp3', ''), pickedFile(PNG_BYTES, 'floor.png', 'image/png')]);
 
       await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({ name: 'floor.png' })));
-      await waitFor(() => expect(showError).toHaveBeenCalledTimes(4));
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+      expect(importAudio).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(showError).toHaveBeenCalledTimes(1));
+      expect(showError).toHaveBeenCalledWith('Could not import "bad.mp3": audio graph not ready');
+      expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('Failed to read file'));
+      await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
+    });
+  });
+
+  describe('a batch with many unreadable files raises at most three toasts: two named, one summary (#10396)', () => {
+    /** Five unreadable PNGs and one readable one, the readable one last so the cap cannot hide it. */
+    const fiveBrokenAndOne = () => [
+      ...[1, 2, 3, 4, 5].map((n) => pickedFile(PNG_BYTES, `broken${n}.png`, 'image/png')),
+      pickedFile(PNG_BYTES, 'floor.png', 'image/png'),
+    ];
+
+    const expectCappedBatch = (warn: ReturnType<typeof vi.spyOn>) => {
       expect(mockDispatch).toHaveBeenCalledTimes(1);
       expect(vi.mocked(showError).mock.calls.map(([m]) => m)).toEqual([
         readFailure('broken1.png'),
         readFailure('broken2.png'),
-        readFailure('broken3.png'),
-        '2 more files could not be read; details are in the browser console.',
+        '3 more files could not be read; details are in the browser console.',
       ]);
       expect(warn.mock.calls).toEqual([
+        [`[assets] ${readFailure('broken3.png')}`],
         [`[assets] ${readFailure('broken4.png')}`],
         [`[assets] ${readFailure('broken5.png')}`],
       ]);
-      await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
-    } finally {
-      warn.mockRestore();
-    }
+    };
+
+    it('dropped', async () => {
+      vi.stubGlobal('FileReader', SelectiveFileReader);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const { container } = render(<AssetPanel />);
+
+        dropFiles(container, fiveBrokenAndOne());
+
+        await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({ name: 'floor.png' })));
+        await waitFor(() => expect(showError).toHaveBeenCalledTimes(3));
+        expectCappedBatch(warn);
+        await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('picked', async () => {
+      vi.stubGlobal('FileReader', SelectiveFileReader);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const { container } = render(<AssetPanel />);
+
+        fireEvent.change(textureInput(container), { target: { files: fiveBrokenAndOne() } });
+
+        await waitFor(() => expect(mockDispatch).toHaveBeenCalledWith('load_texture', expect.objectContaining({ name: 'floor.png' })));
+        await waitFor(() => expect(showError).toHaveBeenCalledTimes(3));
+        expectCappedBatch(warn);
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   it('a picked PNG reaches load_texture as the whole data URL, header included', async () => {

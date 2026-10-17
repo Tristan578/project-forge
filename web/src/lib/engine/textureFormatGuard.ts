@@ -151,6 +151,20 @@ export function declareTextureType(dataUrl: string, mimeType: string): string {
   return `data:${mimeType}${rest}${dataUrl.slice(comma)}`;
 }
 
+/** The longest file name shown in a refusal toast before it is cut. */
+const MAX_DISPLAY_NAME = 60;
+
+/**
+ * `name` cut to `MAX_DISPLAY_NAME` characters with an ellipsis, so a long
+ * file name cannot swamp a toast. The ONE bound for every sentence that
+ * embeds a file name - the slice's refusal and the three below - so they
+ * cannot drift apart; a name under the limit is returned as is.
+ */
+export function boundDisplayName(name: string): string {
+  const chars = [...name];
+  return chars.length > MAX_DISPLAY_NAME ? `${chars.slice(0, MAX_DISPLAY_NAME).join('')}…` : name;
+}
+
 /**
  * What a picker or drop zone tells the person when the browser could not
  * read a file at all, before any question of format. It applies to a model
@@ -159,7 +173,7 @@ export function declareTextureType(dataUrl: string, mimeType: string): string {
  * reader copies the wording.
  */
 export function fileReadFailureMessage(name: string): string {
-  return `Failed to read file "${name}". The file may be corrupted or inaccessible.`;
+  return `Failed to read file "${boundDisplayName(name)}". The file may be corrupted or inaccessible.`;
 }
 
 /**
@@ -169,8 +183,20 @@ export function fileReadFailureMessage(name: string): string {
  * message for the case nothing else names.
  */
 export function textureLoadFailureMessage(name: string, error: unknown): string {
-  const detail = error instanceof Error ? error.message : String(error);
-  return `Could not load texture "${name}": ${detail}`;
+  return `Could not load texture "${boundDisplayName(name)}": ${errorDetail(error)}`;
+}
+
+/**
+ * The same for the store's `importGltf` or `importAudio`: a throw while the
+ * editor hands a read file to the engine, named as an import failure rather
+ * than left as an unhandled rejection that tells the person nothing.
+ */
+export function assetImportFailureMessage(name: string, error: unknown): string {
+  return `Could not import "${boundDisplayName(name)}": ${errorDetail(error)}`;
+}
+
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**

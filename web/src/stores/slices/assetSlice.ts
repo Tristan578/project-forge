@@ -4,7 +4,7 @@
 
 import { StateCreator } from 'zustand';
 import { decodeBase64ToArrayBuffer, queueAudioImport } from '@/lib/audio/entityAudioGraph';
-import { checkTexturePayload } from '@/lib/engine/textureFormatGuard';
+import { boundDisplayName, checkTexturePayload } from '@/lib/engine/textureFormatGuard';
 import { showPersistentError } from '@/lib/toast';
 import type { AssetMetadata } from './types';
 
@@ -86,17 +86,9 @@ function surfaceRefusal(
  */
 function showRefusal(command: 'import_gltf' | 'load_texture', name: string, reason: string): void {
   const lead = command === 'load_texture'
-    ? `Couldn't load "${displayName(name)}" as a texture`
-    : `Couldn't import "${displayName(name)}"`;
+    ? `Couldn't load "${boundDisplayName(name)}" as a texture`
+    : `Couldn't import "${boundDisplayName(name)}"`;
   showPersistentError(`${lead}: ${reason}`, { id: `${command}-refused:${name}` });
-}
-
-/** The longest file name shown in a refusal toast before it is cut. */
-const MAX_DISPLAY_NAME = 60;
-
-function displayName(name: string): string {
-  const chars = [...name];
-  return chars.length > MAX_DISPLAY_NAME ? `${chars.slice(0, MAX_DISPLAY_NAME).join('')}…` : name;
 }
 
 function truncateReason(reason: string): string {

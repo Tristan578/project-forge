@@ -1519,78 +1519,79 @@ describe('useGenerationPolling', () => {
     });
 
     const OriginalImage = globalThis.Image;
-    globalThis.Image = class MockImage {
-      naturalWidth = 256;
-      naturalHeight = 64;
-      onload: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      set src(_url: string) {
-        queueMicrotask(() => this.onload?.());
-      }
-    } as unknown as typeof Image;
-
     const origCreateObjectURL = globalThis.URL.createObjectURL;
     const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
-    const mockCreateObjectURL = vi.fn(() => 'blob:mock-url');
-    const mockRevokeObjectURL = vi.fn();
-    globalThis.URL.createObjectURL = mockCreateObjectURL;
-    globalThis.URL.revokeObjectURL = mockRevokeObjectURL;
+    // Restored in a finally: a failing assertion must not leak these
+    // stubs into the tests that follow.
+    try {
+      globalThis.Image = class MockImage {
+        naturalWidth = 256;
+        naturalHeight = 64;
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        set src(_url: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      } as unknown as typeof Image;
+      globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+      globalThis.URL.revokeObjectURL = vi.fn();
 
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
-      const urlStr = typeof url === 'string' ? url : (url as Request).url;
-      if (urlStr.includes('/api/generate/sprite-sheet/status')) {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/api/generate/sprite-sheet/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: 'job-ss1',
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/spritesheet.png',
+            }),
+          } as Response;
+        }
         return {
           ok: true,
-          json: () => Promise.resolve({
-            jobId: 'job-ss1',
-            status: 'completed',
-            progress: 100,
-            resultUrl: 'https://example.com/spritesheet.png',
-          }),
+          blob: () => Promise.resolve(new Blob(['fake-png'], { type: 'image/png' })),
         } as Response;
-      }
-      return {
-        ok: true,
-        blob: () => Promise.resolve(new Blob(['fake-png'], { type: 'image/png' })),
-      } as Response;
-    });
+      });
 
-    renderHook(() => useGenerationPolling());
+      renderHook(() => useGenerationPolling());
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10);
-    });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10);
+      });
 
-    expect(mockLoadTexture).toHaveBeenCalledWith(
-      expect.any(String),
-      'TestAsset',
-      'entity-ss1',
-      'base_color',
-    );
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        expect.any(String),
+        'TestAsset',
+        'entity-ss1',
+        'base_color',
+      );
 
-    expect(mockSetSpriteSheet).toHaveBeenCalledWith(
-      'entity-ss1',
-      expect.objectContaining({
-        assetId: 'SpriteSheet_test',
-        frames: expect.arrayContaining([
-          expect.objectContaining({ index: 0, x: 0, y: 0 }),
-        ]),
-      }),
-    );
+      expect(mockSetSpriteSheet).toHaveBeenCalledWith(
+        'entity-ss1',
+        expect.objectContaining({
+          assetId: 'SpriteSheet_test',
+          frames: expect.arrayContaining([
+            expect.objectContaining({ index: 0, x: 0, y: 0 }),
+          ]),
+        }),
+      );
 
-    const completedCall = mockUpdateJob.mock.calls.find(
-      (c: unknown[]) => (c[1] as Record<string, unknown>).status === 'completed',
-    );
-    expect(completedCall).toBeDefined();
-    const meta = (completedCall![1] as Record<string, Record<string, unknown>>).metadata;
-    expect(meta).toHaveProperty('spriteSheet');
-
-    globalThis.Image = OriginalImage;
-    globalThis.URL.createObjectURL = origCreateObjectURL;
-    globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+      const completedCall = mockUpdateJob.mock.calls.find(
+        (c: unknown[]) => (c[1] as Record<string, unknown>).status === 'completed',
+      );
+      expect(completedCall).toBeDefined();
+      const meta = (completedCall![1] as Record<string, Record<string, unknown>>).metadata;
+      expect(meta).toHaveProperty('spriteSheet');
+    } finally {
+      globalThis.Image = OriginalImage;
+      globalThis.URL.createObjectURL = origCreateObjectURL;
+      globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+    }
   });
 
   // ---------------------------------------------------------------------------
