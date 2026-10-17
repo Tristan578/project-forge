@@ -684,8 +684,17 @@ export function useGenerationPolling() {
         const entityId = job.targetEntityId ?? job.entityId;
         const shouldPlace = !!entityId && job.autoPlace !== false;
 
+        // A sheet aimed at a 2D sprite goes to the sprite's own slot (#10399).
+        // It is still not cut into frames: the sheet names its texture by
+        // `assetName`, while the engine registers the texture under a fresh id
+        // that the atlas builder never sees (#10408).
         const placement = shouldPlace
-          ? placementOf(useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color'))
+          ? placementOf(useEditorStore.getState().loadTexture(
+              base64,
+              assetName,
+              entityId,
+              defaultTextureSlot(entityId, useEditorStore.getState().sprites),
+            ))
           : { autoPlaced: false };
 
         // Slice the sprite sheet into individual frames

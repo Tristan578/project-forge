@@ -2376,6 +2376,44 @@ describe('useGenerationPolling', () => {
       }
     });
 
+    it('sprite sheet: aimed at a 2D sprite, the texture goes to the sprite slot (#10399)', async () => {
+      // The image now reaches the sprite instead of a material the sprite does
+      // not have. The sheet is still not cut into frames - it names its texture
+      // by the job's display name, which the engine never registers (#10408).
+      mockSprites['ent-sheet'] = { textureAssetId: null };
+      const cleanup = setupImageCompletion('rss2', 'sprite_sheet', {
+        targetEntityId: 'ent-sheet',
+        metadata: { frameCount: 4, frameSize: '64' },
+      });
+      const OriginalImage = globalThis.Image;
+      const origCreateObjectURL = globalThis.URL.createObjectURL;
+      const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
+      try {
+        globalThis.Image = class MockImage {
+          naturalWidth = 256;
+          naturalHeight = 64;
+          onload: (() => void) | null = null;
+          onerror: (() => void) | null = null;
+          set src(_url: string) {
+            queueMicrotask(() => this.onload?.());
+          }
+        } as unknown as typeof Image;
+        globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+        globalThis.URL.revokeObjectURL = vi.fn();
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+        expect(mockLoadTexture).toHaveBeenCalledWith(expect.any(String), expect.any(String), 'ent-sheet', 'sprite');
+        expect(mockSetSpriteSheet).toHaveBeenCalledWith('ent-sheet', expect.anything());
+      } finally {
+        globalThis.Image = OriginalImage;
+        globalThis.URL.createObjectURL = origCreateObjectURL;
+        globalThis.URL.revokeObjectURL = origRevokeObjectURL;
+        cleanup();
+      }
+    });
+
     it('sprite: a job that completes while no engine is attached is recorded as not placed, with that reason', async () => {
       // The real slice's answer with no dispatcher set, which is this file's
       // state throughout: `{ success: false, error: ENGINE_NOT_ATTACHED }`,
