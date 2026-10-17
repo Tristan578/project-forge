@@ -203,6 +203,14 @@ check_triggered "test-e2e-auth"             "needs-web"
 # are mapped — guarding only one would leave the other as a silent `if: false`
 # skip vector. Protect it from unwiring like the other self-defending gates.
 check_triggered "test-e2e-engine-smoke"     "needs-web" "needs-engine"
+# The engine-journeys gate (#10161) is the ONLY per-PR job that serves the app
+# against a database — one created for that run, migrated with the real
+# db:migrate and drift-checked with the real db:drift — so it is the only place
+# the account journeys of #9723 (save and reopen, publish and play signed out)
+# can ever run. It `needs:` test-e2e-engine-smoke for the engine artifact and
+# shares its `if:` (`needs-web || needs-engine`), so BOTH arms are mapped here
+# exactly as the smoke gate's are.
+check_triggered "test-e2e-engine-journeys"  "needs-web" "needs-engine"
 # command-parity is the ONLY per-PR proof that the three commands.json copies stay
 # in sync and that every MCP command has a handler (web/scripts/check-command-parity.js
 # over mcp-server/manifest, web/src/data and apps/docs/data — one manifest per

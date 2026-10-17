@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { migrate } from 'drizzle-orm/neon-http/migrator';
+import { applyE2eNeonEndpointOverride } from './e2eNeonEndpoint';
 
 /**
  * Run all pending Drizzle migrations against the database.
@@ -20,6 +21,7 @@ async function runMigrations() {
 
   console.log('Running database migrations...');
 
+  applyE2eNeonEndpointOverride();
   const sql = neon(databaseUrl);
   const db = drizzle(sql);
 

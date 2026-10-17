@@ -36,7 +36,7 @@ Use these when verifying API signatures, configuration options, or migration gui
 
 | Library | Version | URL |
 |---------|---------|-----|
-| Stripe Node.js | 20.x (pinned) | https://stripe.com/docs/api |
+| Stripe Node.js | see `web/package.json` | https://stripe.com/docs/api |
 | Stripe webhooks | — | https://stripe.com/docs/webhooks |
 | Stripe checkout | — | https://stripe.com/docs/payments/checkout |
 

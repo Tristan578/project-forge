@@ -16,7 +16,7 @@ A feature meets quality standards when ALL of these pass:
 | Architecture | Bridge isolation enforced, sandwich maintained | `bash .claude/tools/validate-rust.sh check` |
 | Tests Exist | New functions have tests, coverage doesn't regress | `bash .claude/tools/validate-tests.sh coverage` |
 | Docs Updated | Known-limitations, README, rules files current | `bash .claude/tools/validate-docs.sh` |
-| Manifests Synced | MCP manifests identical in both locations | `bash .claude/tools/validate-mcp.sh sync` |
+| Manifests Synced | MCP manifests identical in all 3 locations (mcp-server, web/src/data, apps/docs/data) | `bash .claude/tools/validate-mcp.sh sync` |
 
 ## Definition of Done (DoD)
 
@@ -35,7 +35,7 @@ SpawnForge supports several AI coding tools. When skills or tools change, update
 
 | Config File | IDE | Key contents |
 |-------------|-----|-------------|
-| `.claude/CLAUDE.md` | Claude Code | Skills list, agents, hooks, rules |
+| `.claude/skills/claude-platform-reference/SKILL.md` | Claude Code | Skills list, agents, hooks, tools (`.claude/CLAUDE.md` keeps only the on-demand skill pointers) |
 | `.cursorrules` | Cursor | Referenced skills, tool paths, patterns |
 | `GEMINI.md` | Gemini CLI | Same as .cursorrules format |
 | `AGENTS.md`, `.codex/AGENTS.md` | OpenAI Codex CLI / Devin | Agent profiles, capabilities, the Codex hook and planning workflow |
@@ -102,7 +102,7 @@ All hooks in `.claude/hooks/` must:
 |---------|-------------|-----|
 | Stale version refs in docs | Agent reads wrong API, ships bug | Update immediately when upgrading |
 | Broken script paths in skills | Agent hits `not found`, wastes time | Run `dx-audit.sh` after any rename |
-| Missing `CLAUDE.md` entry for new skill | New agent sessions don't know it exists | Add to Skills section after every skill creation |
+| New skill missing from the inventory | New agent sessions don't know it exists | Add it to `.claude/skills/claude-platform-reference/SKILL.md` after every skill creation |
 | IDE config drift | Agents on different IDEs use different patterns | After every skill change, update the hand-written configs in the Cross-IDE table and run `node tools/agentic-sync/port.mjs --write` for the generated ones |
 | Undocumented gotchas | Same mistake repeated by every agent | Add to `.claude/rules/lessons-learned.md` immediately |
 | Ticket without user story or AC | Agent doesn't know what "done" looks like | Enforce template at ticket creation |

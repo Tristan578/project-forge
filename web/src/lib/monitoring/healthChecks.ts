@@ -145,6 +145,11 @@ export async function checkDatabase(): Promise<ServiceHealth> {
       withTimeout(
         (async () => {
           const { neon } = await import('@neondatabase/serverless');
+          const { applyE2eNeonEndpointOverride } = await import('@/lib/db/e2eNeonEndpoint');
+          // The CI engine-journeys job proves this probe reaches its per-run
+          // Postgres through a local Neon-protocol proxy; a no-op everywhere
+          // else (#10161).
+          applyE2eNeonEndpointOverride();
           const sql = neon(url);
           await sql`SELECT 1`;
         })(),

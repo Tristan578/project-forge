@@ -30,7 +30,7 @@ Configure these alert rules in Sentry (Settings > Alerts > Create Alert Rule) fo
 
 #### 4. Payment Processing Errors
 - **Type:** Issue Alert
-- **Condition:** Transaction matches `/api/webhooks/stripe`, level = error
+- **Condition:** Transaction matches `/api/stripe/webhook`, level = error
 - **Frequency:** Alert once per hour (Stripe retries automatically)
 - **Action:** Notify the owner via `#incidents`, if configured in Sentry
 

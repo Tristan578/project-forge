@@ -92,7 +92,7 @@ ever disagree, that one is right — fix this one.
 ### Clerk (Authentication)
 
 - **Key env vars**: `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-- **Webhooks**: `POST /api/webhooks/clerk` — handles `user.created`, `user.updated`, `user.deleted`
+- **Webhooks**: `POST /api/auth/webhook` — handles `user.created`, `user.updated`, `user.deleted`
 - **Proxy**: `proxy.ts` calls `clerkMiddleware()` — required for `auth()` in Server Components
 - **Gotchas**:
   - `vercel integration add clerk` needs terminal interaction (blocked for AI agents)
@@ -103,8 +103,8 @@ ever disagree, that one is right — fix this one.
 ### Stripe (Payments)
 
 - **Key env vars**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (no publishable key — checkout is a server-side redirect to a Stripe-hosted page, so `web/` never loads Stripe.js)
-- **Webhooks**: `POST /api/webhooks/stripe` — handles checkout, subscription, invoice, charge events
-- **Local testing**: `stripe listen --forward-to http://spawnforge.localhost:1355/api/webhooks/stripe`
+- **Webhooks**: `POST /api/stripe/webhook` — handles checkout, subscription, invoice, charge events
+- **Local testing**: `stripe listen --forward-to http://spawnforge.localhost:1355/api/stripe/webhook`
 - **Tiers**: starter (free), hobbyist, creator, pro
 - **Gotchas**:
   - Webhook signatures MUST be verified with `constructEvent()`

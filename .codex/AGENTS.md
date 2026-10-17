@@ -121,7 +121,7 @@ regenerate. `scripts/check-codex-port.sh` fails any PR where the two differ.
 
 ### Canonical Project Facts
 
-**Taskboard** — the single source of truth for all work:
+**Taskboard** — the local working view of the backlog. GitHub issues are the backlog of record; when the two disagree, the issue is correct:
 - Project: **Project Forge** (`01KMM9ZA6SBZ7RKJZJTZS9VR4R`, prefix `PF`)
 - Teams: Engineering `01KMR5E36TP59PRQA8GQEWJVM1`, PM `01KMR5E3852BWXAZ219W47CSKS`
 - API: `http://localhost:3010/api` · Web UI: `http://localhost:3010`
@@ -133,7 +133,7 @@ regenerate. `scripts/check-codex-port.sh` fails any PR where the two differ.
 
 **Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 81 · lines 87
 
-**Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
+**Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
 
 ## Required Ticket Fields
@@ -250,7 +250,9 @@ powershell.exe -File ".\build_wasm.ps1"
 # Web dev server
 cd web && npm install && npm run dev
 
-# Quick validation (run after every feature change)
+# After each change: only the tests for what you changed (never the full suite for a small change)
+cd web && npm run test:changed
+# Before a PR: the full gate
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 
 # MCP server tests

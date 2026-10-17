@@ -5,7 +5,7 @@ what does not, and what stands in for the part that does not. This is the
 retain/remove record #9745 asked for.
 
 **Most of what Codex reads is generated.** `tools/agentic-sync/port.mjs` derives
-the project skills under `.agents/skills/`, thirteen of the fourteen
+the project skills under `.agents/skills/`, twelve of the thirteen
 `.codex/agents/*.toml`, `.codex/hooks.json` and `.codex/hook-conditions.json`
 from `.claude/`; `scripts/check-codex-port.sh` fails a PR when the two differ.
 Four Codex-facing files are **hand-written** and reviewed like any other code:
@@ -360,7 +360,7 @@ Thirteen generated from `.claude/agents/*.md`, one hand-authored.
 
 ## Skills
 
-The 38 project skills under `.claude/skills/` are mirrored byte-for-byte into
+The 37 project skills under `.claude/skills/` are mirrored byte-for-byte into
 `.agents/skills/`. The check is two-directional: a stale file, a missing file and
 a hand-added file inside a mirrored directory all fail it.
 
@@ -374,7 +374,7 @@ third-party skills this tool does not own, and the lock is an editable text
 file, so "the lock names it" is not on its own a reason to delete anything.
 
 - **`.agents/skills/` is not Codex's alone.** Gemini CLI and Copilot read it too
-  (`GEMINI.md`, the README tool table), so the mirror puts these 38 skills in
+  (`GEMINI.md`, the README tool table), so the mirror puts these 37 skills in
   front of them as well. They were written for Claude Code and name its tools;
   the generated *agents* carry a preface mapping those names to Codex's, the
   mirrored *skills* carry none, because they are byte-exact copies by design.

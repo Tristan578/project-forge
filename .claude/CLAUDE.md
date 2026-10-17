@@ -43,7 +43,7 @@ Declared in `engine/Cargo.toml` (`webgl2`, `webgpu`, `runtime`; `default = []`).
 1. **Spec-First:** Never implement without an approved spec in `specs/`
 2. **Test-First:** Never write logic without a failing test case
 3. **Bridge Isolation:** Only `bridge/` may import `web_sys`/`js_sys`/`wasm_bindgen`
-4. **Taskboard-Driven:** ALL work tracked on taskboard. Use `/kanban` skill.
+4. **Issue-Driven:** All work is tracked as GitHub issues, the backlog of record. The taskboard (`/kanban`) is a local view synced with them.
 5. **Worktree Commit Safety:** Commit after every logical chunk. Uncommitted work is permanently lost.
 6. **Keep Context Current:** Update `.claude/rules/` and `MEMORY.md` as part of every iteration
 
@@ -76,6 +76,7 @@ Key: `_` prefix for unused params, no `useRef.current` during render, no blanket
 | `rules/gotchas-codex-port.md` | The generated Codex CLI surface: what `tools/agentic-sync/port.mjs` derives from `.claude/`, the regen recipe, adding a hook |
 | `rules/agent-operations.md` | Agent SOPs, testing, committing, PR creation |
 | `rules/hook-testing.md` | Conventions for the bash suites under `.claude/hooks/__tests__/` |
+| `rules/lessons-learned.md` | Anti-patterns from real bugs; read by `inject-lessons-learned.sh` before Edit/Write/Bash |
 
-Every file except `gotchas.md` carries `paths:` frontmatter and loads only in sessions that
-touch its area; `Read` one directly if you need it outside those paths.
+`gotchas.md`, `agent-operations.md` and `lessons-learned.md` load in every session. Every other
+file carries `paths:` frontmatter and loads only in sessions that touch its area; `Read` one directly if you need it outside those paths.

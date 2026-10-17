@@ -121,7 +121,7 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 
 ### Canonical Project Facts
 
-**Taskboard** — the single source of truth for all work:
+**Taskboard** — the local working view of the backlog. GitHub issues are the backlog of record; when the two disagree, the issue is correct:
 - Project: **Project Forge** (`01KMM9ZA6SBZ7RKJZJTZS9VR4R`, prefix `PF`)
 - Teams: Engineering `01KMR5E36TP59PRQA8GQEWJVM1`, PM `01KMR5E3852BWXAZ219W47CSKS`
 - API: `http://localhost:3010/api` · Web UI: `http://localhost:3010`
@@ -133,7 +133,7 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 
 **Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 81 · lines 87
 
-**Quick validation:** `cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run`
+**Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
 
 See `AGENTS.md` for full taskboard setup, workflow, and GitHub Project sync details.
