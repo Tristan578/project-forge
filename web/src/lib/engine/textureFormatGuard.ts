@@ -195,8 +195,18 @@ export function assetImportFailureMessage(name: string, error: unknown): string 
   return `Could not import "${boundDisplayName(name)}": ${errorDetail(error)}`;
 }
 
+/**
+ * The longest thrown-error detail a transient toast carries. The file name
+ * is bounded above and the engine's relayed refusal reason is truncated by
+ * the slice; a store action's message is bounded here for the same reason,
+ * so one unexpectedly long throw cannot swamp a four-second toast.
+ */
+export const MAX_ERROR_DETAIL = 200;
+
 function errorDetail(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const detail = error instanceof Error ? error.message : String(error);
+  const chars = [...detail];
+  return chars.length > MAX_ERROR_DETAIL ? `${chars.slice(0, MAX_ERROR_DETAIL).join('')}…` : detail;
 }
 
 /**
