@@ -887,6 +887,26 @@ pub(super) fn apply_texture_load(
         };
         let mime_type = source.mime_type;
 
+        // Where the texture goes, checked before anything is decoded or
+        // registered: a texture whose target cannot take it changes nothing
+        // and is reported, instead of leaving behind an asset that no command
+        // can assign yet (#10398, #10399).
+        let target_problem = match asset_import_guard::texture_slot_owner(&request.slot) {
+            Some(asset_import_guard::TextureSlotOwner::Sprite) => (!sprite_query
+                .iter()
+                .any(|(eid, _)| eid.0 == request.entity_id))
+            .then(|| "the entity has no sprite to apply it to".to_string()),
+            Some(asset_import_guard::TextureSlotOwner::Material) => (!mat_query
+                .iter()
+                .any(|(eid, _)| eid.0 == request.entity_id))
+            .then(|| "the entity has no material to apply it to".to_string()),
+            None => Some(format!("there is no texture slot named \"{}\"", request.slot)),
+        };
+        if let Some(problem) = target_problem {
+            fail(&problem);
+            continue;
+        }
+
         // Decode base64 to raw bytes
         let bytes = match base64::engine::general_purpose::STANDARD.decode(source.base64) {
             Ok(b) => b,
@@ -930,48 +950,38 @@ pub(super) fn apply_texture_load(
             source: AssetSource::Upload { filename: request.name.clone() },
         });
 
-        // Hand the asset to the slot's owner. A sprite renders from
-        // `SpriteData.texture_asset_id` (bridge/sprite.rs,
+        // Hand the asset to the slot's owner, checked above to exist. A sprite
+        // renders from `SpriteData.texture_asset_id` (bridge/sprite.rs,
         // `sync_sprite_rendering`), not from a material slot; until #10396
-        // "sprite" fell through to the unknown-slot arm below, so a Sprite
-        // inspector upload registered an asset nothing displayed.
+        // "sprite" fell through to the unknown-slot arm, so a Sprite inspector
+        // upload registered an asset nothing displayed.
         match request.slot.as_str() {
             "sprite" => {
-                let target = sprite_query
-                    .iter_mut()
-                    .find(|(eid, _)| eid.0 == request.entity_id);
-                match target {
-                    Some((_, mut sprite_data)) => {
-                        sprite_data.texture_asset_id = Some(asset_id.clone());
-                        events::emit_sprite_changed(&request.entity_id, Some(&*sprite_data));
-                    }
-                    None => fail("the entity has no sprite to apply it to"),
+                if let Some((_, mut sprite_data)) =
+                    sprite_query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id)
+                {
+                    sprite_data.texture_asset_id = Some(asset_id.clone());
+                    events::emit_sprite_changed(&request.entity_id, Some(&*sprite_data));
                 }
             }
-            _ => {
-                // Update the entity's MaterialData with the texture reference
-                let mut found = false;
-                for (eid, mut mat_data) in mat_query.iter_mut() {
-                    if eid.0 == request.entity_id {
-                        found = true;
-                        match request.slot.as_str() {
-                            "base_color" => mat_data.base_color_texture = Some(asset_id.clone()),
-                            "normal_map" => mat_data.normal_map_texture = Some(asset_id.clone()),
-                            "metallic_roughness" => mat_data.metallic_roughness_texture = Some(asset_id.clone()),
-                            "emissive" => mat_data.emissive_texture = Some(asset_id.clone()),
-                            "occlusion" => mat_data.occlusion_texture = Some(asset_id.clone()),
-                            "depth_map" => mat_data.depth_map_texture = Some(asset_id.clone()),
-                            "clearcoat" => mat_data.clearcoat_texture = Some(asset_id.clone()),
-                            "clearcoat_roughness" => mat_data.clearcoat_roughness_texture = Some(asset_id.clone()),
-                            "clearcoat_normal" => mat_data.clearcoat_normal_texture = Some(asset_id.clone()),
-                            _ => fail(&format!("there is no texture slot named \"{}\"", request.slot)),
-                        }
-                        events::emit_material_changed(&request.entity_id, &mat_data);
-                        break;
+            slot => {
+                if let Some((_, mut mat_data)) =
+                    mat_query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id)
+                {
+                    match slot {
+                        "base_color" => mat_data.base_color_texture = Some(asset_id.clone()),
+                        "normal_map" => mat_data.normal_map_texture = Some(asset_id.clone()),
+                        "metallic_roughness" => mat_data.metallic_roughness_texture = Some(asset_id.clone()),
+                        "emissive" => mat_data.emissive_texture = Some(asset_id.clone()),
+                        "occlusion" => mat_data.occlusion_texture = Some(asset_id.clone()),
+                        "depth_map" => mat_data.depth_map_texture = Some(asset_id.clone()),
+                        "clearcoat" => mat_data.clearcoat_texture = Some(asset_id.clone()),
+                        "clearcoat_roughness" => mat_data.clearcoat_roughness_texture = Some(asset_id.clone()),
+                        "clearcoat_normal" => mat_data.clearcoat_normal_texture = Some(asset_id.clone()),
+                        // `texture_slot_owner` admitted only the slots above.
+                        _ => {}
                     }
-                }
-                if !found {
-                    fail("the entity has no material to apply it to");
+                    events::emit_material_changed(&request.entity_id, &mat_data);
                 }
             }
         }

@@ -279,6 +279,44 @@ pub fn gltf_payload_base64(data: &str) -> &str {
     }
 }
 
+/// The material texture slots `load_texture` can fill, named as `MaterialData`
+/// names them. `apply_texture_load` assigns exactly these (pinned by
+/// `apply_texture_load_assigns_exactly_the_material_slots_the_guard_admits`).
+pub const MATERIAL_TEXTURE_SLOTS: [&str; 9] = [
+    "base_color",
+    "normal_map",
+    "metallic_roughness",
+    "emissive",
+    "occlusion",
+    "depth_map",
+    "clearcoat",
+    "clearcoat_roughness",
+    "clearcoat_normal",
+];
+
+/// The component a `load_texture` slot writes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextureSlotOwner {
+    /// `sprite`: a 2D sprite's `SpriteData.texture_asset_id`.
+    Sprite,
+    /// One of [`MATERIAL_TEXTURE_SLOTS`] on a 3D entity's `MaterialData`.
+    Material,
+}
+
+/// The owner of `slot`, or `None` for a slot no component has. Checked by
+/// `apply_texture_load` before anything is decoded or registered, so a
+/// texture whose target cannot take it changes nothing and leaves no asset
+/// behind (#10399).
+pub fn texture_slot_owner(slot: &str) -> Option<TextureSlotOwner> {
+    if slot == "sprite" {
+        Some(TextureSlotOwner::Sprite)
+    } else if MATERIAL_TEXTURE_SLOTS.contains(&slot) {
+        Some(TextureSlotOwner::Material)
+    } else {
+        None
+    }
+}
+
 /// The extension the drain stores an `import_gltf` payload under in the
 /// in-memory asset source, which is what tells `bevy_gltf` whether to parse
 /// JSON (`gltf`) or a binary container (`glb`).

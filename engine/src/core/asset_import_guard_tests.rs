@@ -637,16 +637,64 @@ fn apply_texture_load_reports_every_failure_to_the_editor() {
         }
     }
     assert!(
-        continues >= 4,
+        continues >= 5,
         "the scan found {continues} `continue;` lines in `apply_texture_load`, expected the size \
-         cap, the guard, the base64 decode and the image decode; the scan is broken"
+         cap, the guard, the target check, the base64 decode and the image decode; the scan is \
+         broken"
     );
-    for missing in ["fail(\"the entity has no sprite", "fail(\"the entity has no material"] {
+    for reason in [
+        "\"the entity has no sprite to apply it to\"",
+        "\"the entity has no material to apply it to\"",
+    ] {
         assert_eq!(
-            executable_occurrences(&body, missing),
+            executable_occurrences(&body, reason),
             1,
-            "proven: `apply_texture_load` reports a target with no sprite or material \
-             (`{missing}`). Not proven: that it runs - bridge/ is wasm32-only."
+            "proven: `apply_texture_load` names a target with no sprite or material ({reason}). \
+             Not proven: that it runs - bridge/ is wasm32-only."
+        );
+    }
+    // The target is checked before the data is decoded or anything is
+    // registered, so a texture whose target cannot take it leaves no asset
+    // behind (#10399).
+    let at = |needle: &str| {
+        lines
+            .iter()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("`{needle}` is missing from `apply_texture_load`"))
+    };
+    let check = at("fail(&problem);");
+    for later in ["STANDARD.decode(", "texture_handles.0.insert(", "asset_registry.assets.insert("] {
+        assert!(
+            check < at(later),
+            "proven: in `apply_texture_load` the target check reports before `{later}` runs. Not \
+             proven: that it runs - bridge/ is wasm32-only."
+        );
+    }
+}
+
+#[test]
+fn every_material_slot_belongs_to_the_material_and_sprite_to_the_sprite() {
+    assert_eq!(texture_slot_owner("sprite"), Some(TextureSlotOwner::Sprite));
+    for slot in MATERIAL_TEXTURE_SLOTS {
+        assert_eq!(texture_slot_owner(slot), Some(TextureSlotOwner::Material), "{slot}");
+    }
+    for slot in ["", "Sprite", "sprite ", "base color", "BASE_COLOR", "albedo"] {
+        assert_eq!(texture_slot_owner(slot), None, "{slot:?}");
+    }
+}
+
+#[test]
+fn apply_texture_load_assigns_exactly_the_material_slots_the_guard_admits() {
+    // A slot the guard admits but the drain does not assign would be checked,
+    // decoded, registered and then dropped without a word.
+    let body = drain_body("apply_texture_load");
+    for slot in MATERIAL_TEXTURE_SLOTS {
+        assert_eq!(
+            executable_lines_starting_with(&body, &format!("\"{slot}\" =>")),
+            1,
+            "proven: `apply_texture_load` has exactly one executable match arm for the material \
+             slot `{slot}` that MATERIAL_TEXTURE_SLOTS admits. Not proven: that it runs - bridge/ \
+             is wasm32-only."
         );
     }
 }
