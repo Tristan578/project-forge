@@ -2039,6 +2039,48 @@ describe('useGenerationPolling', () => {
       cleanup();
     });
 
+    // A 2D sprite has one image and no material (#10399): the colour map
+    // becomes the sprite's image and the material-only maps are skipped and
+    // named, instead of each reaching the engine as "no material".
+    it('on a 2D sprite: the albedo map becomes the sprite image, the normal map is skipped and named', async () => {
+      mockSprites['ent-tex-sprite'] = { textureAssetId: null };
+      const cleanup = setupTextureCompletion({ autoPlace: true, targetEntityId: 'ent-tex-sprite' });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).toHaveBeenCalledExactlyOnceWith(
+        'data:image/png;base64,AAAA',
+        expect.stringContaining('albedo'),
+        'ent-tex-sprite',
+        'sprite',
+      );
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({ autoPlaced: true, skippedMaps: ['normal'] }),
+      }));
+      cleanup();
+    });
+
+    it('on a 2D sprite with only a material map requested: nothing is sent and the record says why', async () => {
+      mockSprites['ent-tex-sprite'] = { textureAssetId: null };
+      const cleanup = setupTextureCompletion({ autoPlace: true, targetEntityId: 'ent-tex-sprite', materialSlot: 'normal_map' });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).not.toHaveBeenCalled();
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: false,
+          skippedMaps: ['normal'],
+          placementError: 'a 2D sprite takes only the colour map, so normal could not be applied',
+        }),
+      }));
+      cleanup();
+    });
+
     it('applies only the specified materialSlot map', async () => {
       const cleanup = setupTextureCompletion({
         autoPlace: true,

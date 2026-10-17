@@ -544,14 +544,28 @@ export function useGenerationPolling() {
 
         // If a specific materialSlot was requested, only apply that map
         const targetSlot = job.materialSlot;
+        // A 2D sprite has one image and no material (#10399): the colour map
+        // becomes the sprite's image, and the material-only maps (normal,
+        // metallic-roughness, emissive, occlusion) have nowhere to go. They
+        // are skipped and named in the record, instead of each one reaching
+        // the engine and coming back as "the entity has no material".
+        const spriteTarget = defaultTextureSlot(entityId, useEditorStore.getState().sprites) === 'sprite';
+        const skippedMaps: string[] = [];
+        let appliedMaps = 0;
         // One refused map means the material was not fully placed; every
         // refusal is kept, named by its map, so the record says which.
         const placementErrors: string[] = [];
         for (const [mapType, url] of Object.entries(data.maps)) {
-          const slot = slotMap[mapType];
-          if (!slot) continue;
+          const materialSlot = slotMap[mapType];
+          if (!materialSlot) continue;
           // When materialSlot is specified, only apply the matching slot
-          if (targetSlot && slot !== targetSlot) continue;
+          if (targetSlot && materialSlot !== targetSlot) continue;
+          if (spriteTarget && materialSlot !== 'base_color') {
+            skippedMaps.push(mapType);
+            continue;
+          }
+          const slot = spriteTarget ? 'sprite' : materialSlot;
+          appliedMaps += 1;
 
           const blob = await downloadBinary(url);
           const base64 = await blobToTextureDataUrl(blob);
@@ -562,6 +576,12 @@ export function useGenerationPolling() {
             placementErrors.push(`${mapType}: ${placement.placementError}`);
           }
         }
+        // On a sprite, a job whose every map was material-only placed nothing.
+        if (spriteTarget && appliedMaps === 0) {
+          placementErrors.push(
+            `a 2D sprite takes only the colour map, so ${skippedMaps.length > 0 ? skippedMaps.join(', ') : 'no map'} could not be applied`,
+          );
+        }
 
         updateJob(id, {
           status: 'completed',
@@ -570,6 +590,7 @@ export function useGenerationPolling() {
             ...ppResult.metadata,
             autoPlaced: placementErrors.length === 0,
             ...(placementErrors.length > 0 ? { placementError: placementErrors.join('; ') } : {}),
+            ...(skippedMaps.length > 0 ? { skippedMaps } : {}),
             targetEntityId: entityId,
             materialSlot: targetSlot,
           },
