@@ -33,7 +33,7 @@ import { showPersistentError, showSuccess } from '@/lib/toast';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 import { ESTIMATED_TIMES } from '@/lib/generation/estimatedTimes';
-import { ACCEPTED_TEXTURE_DECLARATIONS, declareTextureType, sniffImageMimeType } from '@/lib/engine/textureFormatGuard';
+import { replaceDataUrlType, sniffImageMimeType } from '@/lib/engine/textureFormatGuard';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
@@ -654,7 +654,7 @@ export function useGenerationPolling() {
 
         const assetName = (ppResult.metadata.assetName as string) ?? `PixelArt_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
-        const slot = job.materialSlot ?? 'base_color';
+        const slot = job.materialSlot ?? defaultTextureSlot(entityId);
 
         const placement = entityId && job.autoPlace !== false
           ? placementOf(useEditorStore.getState().loadTexture(base64, assetName, entityId, slot))
@@ -726,7 +726,7 @@ export function useGenerationPolling() {
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Sprite_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
-        const slot = job.materialSlot ?? 'base_color';
+        const slot = job.materialSlot ?? defaultTextureSlot(entityId);
 
         // Apply as texture on the target entity
         const placement = entityId && job.autoPlace !== false
@@ -911,6 +911,18 @@ export function useGenerationPolling() {
    * generation itself succeeded, so the job still completes and nothing is
    * refunded; the slice has already shown the person the refusal.
    */
+  /**
+   * The slot a generated image goes to when the job named none. A 2D sprite
+   * renders from its SpriteData, not from a material, and the engine applies
+   * the `sprite` slot to it (#10399); `base_color` aimed at a sprite entity
+   * found no material, changed nothing, and was still recorded as placed.
+   * Any other target keeps the material's base colour.
+   */
+  function defaultTextureSlot(entityId: string | undefined): string {
+    if (!entityId) return 'base_color';
+    return useEditorStore.getState().sprites[entityId] !== undefined ? 'sprite' : 'base_color';
+  }
+
   function placementOf(
     outcome: { success: boolean; error?: string } | void,
   ): { autoPlaced: boolean; placementError?: string } {
@@ -935,22 +947,21 @@ export function useGenerationPolling() {
    *
    * The FileReader writes the blob's type into the header, and the blob's
    * type is whatever Content-Type the result was served with. Storage that
-   * serves a PNG as `application/octet-stream`, or with no type at all,
-   * yields `data:application/octet-stream;base64,` or `data:;base64,`, which
-   * the format gate refuses as unrecognised - so a correctly generated image
-   * was recorded as not placed (#10396). When the blob's type is not one the
-   * gate accepts, its first bytes decide: a PNG or JPEG signature declares
-   * that type on the header. A blob with neither signature is left as it is,
-   * and the gate refuses it as before; a declared type, right or wrong, is
-   * never second-guessed (`declareTextureType` only fills an empty header).
+   * serves an image with no type, as `application/octet-stream`, as
+   * `binary/octet-stream`, or under any other wrong type yields a header the
+   * format gate refuses or the engine decodes with the wrong decoder - so a
+   * correctly generated image was recorded as not placed, or as placed and
+   * never shown (#10396). The image's own first bytes decide: a PNG or JPEG
+   * signature is declared on the header whatever the storage said, because
+   * the engine picks its decoder from that header. A blob with neither
+   * signature keeps the header it came with, and the gate judges it as
+   * before (a WebP or a KTX2 is still refused by name).
    */
   async function blobToTextureDataUrl(blob: Blob): Promise<string> {
     const dataUrl = await blobToBase64(blob);
-    const declared = blob.type.trim().toLowerCase();
-    if (ACCEPTED_TEXTURE_DECLARATIONS.some(([d]) => d === declared)) return dataUrl;
     const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
     const sniffed = sniffImageMimeType(head);
-    return sniffed === null ? dataUrl : declareTextureType(dataUrl, sniffed);
+    return sniffed === null ? dataUrl : replaceDataUrlType(dataUrl, sniffed);
   }
 
   async function getImageDimensions(blob: Blob): Promise<{ width: number; height: number }> {

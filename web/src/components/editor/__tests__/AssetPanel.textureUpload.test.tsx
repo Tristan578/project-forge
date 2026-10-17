@@ -102,7 +102,7 @@ const slice = createSliceStore(createAssetSlice);
 /** The store actions the panel calls; the texture one is the real slice unless a test overrides it. */
 type ImportActions = Pick<AssetSlice, 'importGltf' | 'loadTexture' | 'importAudio'>;
 
-function setupStore(overrides: Partial<ImportActions> = {}): ImportActions {
+function setupStore(overrides: Partial<ImportActions> = {}, primaryId: string | null = 'ent-1'): ImportActions {
   const actions: ImportActions = {
     importGltf: vi.fn(() => ({ success: true })),
     loadTexture: slice.getState().loadTexture,
@@ -115,7 +115,7 @@ function setupStore(overrides: Partial<ImportActions> = {}): ImportActions {
     ...actions,
     placeAsset: vi.fn(),
     deleteAsset: vi.fn(),
-    primaryId: 'ent-1',
+    primaryId,
   }));
   return actions;
 }
@@ -353,6 +353,37 @@ describe('AssetPanel texture upload (#10396)', () => {
       await waitFor(() => expect(showError).toHaveBeenCalledTimes(1));
       expect(showError).toHaveBeenCalledWith('Could not import "bad.glb": engine not ready');
       expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('Failed to read file'));
+      await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
+    });
+  });
+
+  describe('a texture with no entity selected (#10396)', () => {
+    const needsTarget = (name: string) =>
+      `"${name}" was not imported: select an entity to apply the texture to, then import it again.`;
+
+    it('picked: each texture is named in a notice, and nothing is sent', async () => {
+      setupStore({}, null);
+      const { container } = render(<AssetPanel />);
+
+      fireEvent.change(textureInput(container), {
+        target: { files: [pickedFile(PNG_BYTES, 'floor.png', 'image/png'), pickedFile(PNG_BYTES, 'wall.png', 'image/png')] },
+      });
+
+      await waitFor(() => expect(showError).toHaveBeenCalledTimes(2));
+      expect(vi.mocked(showError).mock.calls.map(([m]) => m)).toEqual([needsTarget('floor.png'), needsTarget('wall.png')]);
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('dropped: the texture is named, the model in the same drop still imports, and the progress bar clears', async () => {
+      const { importGltf } = setupStore({}, null);
+      const { container } = render(<AssetPanel />);
+
+      dropFiles(container, [pickedFile(PNG_BYTES, 'floor.png', 'image/png'), pickedFile(PNG_BYTES, 'model.glb', '')]);
+
+      await waitFor(() => expect(importGltf).toHaveBeenCalledWith('iVBORw0KGgo=', 'model.glb'));
+      await waitFor(() => expect(showError).toHaveBeenCalledTimes(1));
+      expect(showError).toHaveBeenCalledWith(needsTarget('floor.png'));
+      expect(mockDispatch).not.toHaveBeenCalled();
       await waitFor(() => expect(screen.queryByText(/Importing/)).toBeNull());
     });
   });

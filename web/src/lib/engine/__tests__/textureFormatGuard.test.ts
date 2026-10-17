@@ -20,9 +20,11 @@ import {
   declareTextureType,
   fileReadFailureMessage,
   fileTypeNotAcceptedMessage,
+  replaceDataUrlType,
   sniffImageMimeType,
   textureLoadFailureMessage,
   textureMimeTypeForFile,
+  textureNeedsTargetMessage,
 } from '../textureFormatGuard';
 
 // The wire-shape pin dispatches through the real slice; only the audio queue
@@ -516,5 +518,35 @@ describe('the load_texture wire shape matches engine/src/core/commands/scene.rs'
       expect(fields, key).toContain(key);
     }
     expect(Object.keys(payload)).toContain('dataBase64');
+  });
+});
+
+describe('replaceDataUrlType (the generation poller: the bytes outrank the served type)', () => {
+  it('replaces any declared type and keeps the parameters', () => {
+    expect(replaceDataUrlType('data:binary/octet-stream;base64,iVBORw0KGgo=', 'image/png')).toBe('data:image/png;base64,iVBORw0KGgo=');
+    expect(replaceDataUrlType('data:text/plain;base64,/9j/4A==', 'image/jpeg')).toBe('data:image/jpeg;base64,/9j/4A==');
+    expect(replaceDataUrlType('data:image/webp;base64,iVBORw0KGgo=', 'image/png')).toBe('data:image/png;base64,iVBORw0KGgo=');
+    expect(replaceDataUrlType('data:;base64,iVBORw0KGgo=', 'image/png')).toBe('data:image/png;base64,iVBORw0KGgo=');
+  });
+
+  it('leaves a raw body, a header with no comma, and an empty type alone', () => {
+    expect(replaceDataUrlType('iVBORw0KGgo=', 'image/png')).toBe('iVBORw0KGgo=');
+    expect(replaceDataUrlType('data:image/webp;base64', 'image/png')).toBe('data:image/webp;base64');
+    expect(replaceDataUrlType('data:image/webp;base64,AAAA', '')).toBe('data:image/webp;base64,AAAA');
+  });
+
+  it('differs from declareTextureType, which never overrides a declared type', () => {
+    const served = 'data:binary/octet-stream;base64,iVBORw0KGgo=';
+    expect(declareTextureType(served, 'image/png')).toBe(served);
+    expect(replaceDataUrlType(served, 'image/png')).toBe('data:image/png;base64,iVBORw0KGgo=');
+  });
+});
+
+describe('textureNeedsTargetMessage', () => {
+  it('names the file, bounded, and says what to do', () => {
+    expect(textureNeedsTargetMessage('floor.png')).toBe(
+      '"floor.png" was not imported: select an entity to apply the texture to, then import it again.',
+    );
+    expect(textureNeedsTargetMessage(`${'n'.repeat(100)}.png`)).toContain(`"${'n'.repeat(60)}…"`);
   });
 });

@@ -53,6 +53,8 @@ const mockSetCustomSkybox = vi.fn();
 const mockImportAudio = vi.fn();
 const mockSetAudio = vi.fn();
 const mockSetSpriteSheet = vi.fn();
+/** Per-entity sprite data, as the store's `sprites`: an entry marks a 2D sprite target. */
+const mockSprites: Record<string, unknown> = {};
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: {
@@ -63,6 +65,7 @@ vi.mock('@/stores/editorStore', () => ({
       importAudio: mockImportAudio,
       setAudio: mockSetAudio,
       setSpriteSheet: mockSetSpriteSheet,
+      sprites: mockSprites,
     }),
   },
 }));
@@ -181,6 +184,7 @@ describe('useGenerationPolling', () => {
     mockProcessFailedRefunds.mockResolvedValue(undefined);
     // Clear jobs
     Object.keys(mockJobs).forEach(k => delete mockJobs[k]);
+    Object.keys(mockSprites).forEach(k => delete mockSprites[k]);
     mockDurable.enabled = false;
   });
 
@@ -2410,12 +2414,13 @@ describe('useGenerationPolling', () => {
      * stub reads as `dataUrl` - the header the real FileReader would write
      * from the blob's type.
      */
-    function setupUntypedCompletion(id: string, blob: Blob, dataUrl: string) {
+    function setupUntypedCompletion(id: string, blob: Blob, dataUrl: string, jobOverrides: Record<string, unknown> = {}) {
       mockJobs[id] = makeJob(id, {
         type: 'sprite',
         prompt: 'a thing',
         autoPlace: true,
         targetEntityId: 'ent-untyped',
+        ...jobOverrides,
       });
 
       const origFileReader = globalThis.FileReader;
@@ -2500,13 +2505,75 @@ describe('useGenerationPolling', () => {
       cleanup();
     });
 
-    it('a declared type is never second-guessed, even when the bytes say otherwise', async () => {
+    it('the bytes outrank a wrong served type: a PNG served as image/webp is declared image/png', async () => {
+      // The engine picks its decoder from the header; a PNG declared WebP was
+      // refused by the gate although nothing about the image was wrong.
       const cleanup = setupUntypedCompletion('ut4', new Blob([PNG_BYTES], { type: 'image/webp' }), 'data:image/webp;base64,iVBORw0KGgo=');
 
       await runToCompletion();
 
-      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/webp;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'base_color');
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'base_color');
       cleanup();
+    });
+
+    it.each([
+      ['binary/octet-stream', JPEG_BYTES, '/9j/4A==', 'image/jpeg'],
+      ['text/plain', PNG_BYTES, 'iVBORw0KGgo=', 'image/png'],
+    ] as const)('an image served as %s is declared by its bytes', async (served, bytes, body, expected) => {
+      const cleanup = setupUntypedCompletion('ut5', new Blob([bytes], { type: served }), `data:${served};base64,${body}`);
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith(`data:${expected};base64,${body}`, 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    it('a JPEG served as image/png is declared image/jpeg, so the engine does not decode it as a PNG', async () => {
+      const cleanup = setupUntypedCompletion('ut6', new Blob([JPEG_BYTES], { type: 'image/png' }), 'data:image/png;base64,/9j/4A==');
+
+      await runToCompletion();
+
+      expect(mockLoadTexture).toHaveBeenCalledWith('data:image/jpeg;base64,/9j/4A==', 'TestAsset', 'ent-untyped', 'base_color');
+      cleanup();
+    });
+
+    // A 2D sprite renders from its SpriteData, not from a material: with no
+    // slot named, a generated image aimed at a sprite entity goes to the
+    // `sprite` slot the engine now applies (#10399). Before, `base_color`
+    // found no material, changed nothing, and was recorded as placed.
+    describe('the default slot for a 2D sprite target', () => {
+      it.each(['sprite', 'tileset', 'pixel-art'])('a %s job aimed at a sprite entity goes to the sprite slot', async (type) => {
+        mockSprites['ent-untyped'] = { textureAssetId: null };
+        const cleanup = setupUntypedCompletion('ds1', new Blob([PNG_BYTES], { type: 'image/png' }), 'data:image/png;base64,iVBORw0KGgo=', { type });
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', expect.any(String), 'ent-untyped', 'sprite');
+        expect(mockUpdateJob).toHaveBeenCalledWith('ds1', expect.objectContaining({
+          metadata: expect.objectContaining({ materialSlot: 'sprite' }),
+        }));
+        cleanup();
+      });
+
+      it('a slot the job named still wins on a sprite entity', async () => {
+        mockSprites['ent-untyped'] = { textureAssetId: null };
+        const cleanup = setupUntypedCompletion('ds2', new Blob([PNG_BYTES], { type: 'image/png' }), 'data:image/png;base64,iVBORw0KGgo=', { materialSlot: 'emissive' });
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'emissive');
+        cleanup();
+      });
+
+      it('an entity with no sprite data keeps the base colour slot', async () => {
+        mockSprites['some-other-entity'] = { textureAssetId: null };
+        const cleanup = setupUntypedCompletion('ds3', new Blob([PNG_BYTES], { type: 'image/png' }), 'data:image/png;base64,iVBORw0KGgo=');
+
+        await runToCompletion();
+
+        expect(mockLoadTexture).toHaveBeenCalledWith('data:image/png;base64,iVBORw0KGgo=', 'TestAsset', 'ent-untyped', 'base_color');
+        cleanup();
+      });
     });
   });
 

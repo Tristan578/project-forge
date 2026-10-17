@@ -21,6 +21,7 @@ import {
   fileTypeNotAcceptedMessage,
   textureLoadFailureMessage,
   assetImportFailureMessage,
+  textureNeedsTargetMessage,
 } from '@/lib/engine/textureFormatGuard';
 import { createBatchFailureReporter, type BatchFailureReporter } from '@/lib/assets/batchFailureReporter';
 
@@ -178,11 +179,18 @@ export const AssetPanel = memo(function AssetPanel() {
   }, [importGltf]);
 
   const handleTextureImport = useCallback(async (files: FileList | null) => {
-    if (!files || !primaryId) return;
+    if (!files) return;
     const failures = createBatchFailureReporter();
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        // A texture is applied to a slot on an entity: with nothing selected
+        // it has nowhere to go, and the person is told so rather than left
+        // with a picker that did nothing.
+        if (!primaryId) {
+          failures.report(textureNeedsTargetMessage(file.name));
+          continue;
+        }
         // Header kept (and filled in from the extension when the OS declared
         // no type): the engine reads the format from it and refuses anything
         // but PNG/JPEG by name; the slice shows that refusal. A file that
@@ -277,7 +285,10 @@ export const AssetPanel = memo(function AssetPanel() {
             failures.report(assetImportFailureMessage(file.name, error));
           }
         } else if (['png', 'jpg', 'jpeg'].includes(ext ?? '')) {
-          if (!primaryId) continue;
+          if (!primaryId) {
+            failures.report(textureNeedsTargetMessage(file.name));
+            continue;
+          }
           const dataUrl = await readOrReport(file, readTextureFile, failures);
           if (dataUrl === null) continue;
           try {

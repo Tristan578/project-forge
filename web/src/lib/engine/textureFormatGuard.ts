@@ -213,6 +213,24 @@ export function declareTextureType(dataUrl: string, mimeType: string): string {
   return `data:${mimeType}${rest}${dataUrl.slice(comma)}`;
 }
 
+/**
+ * `dataUrl` with its header naming `mimeType`, whatever it named before;
+ * parameters such as `;base64` are kept, and a raw body or a header with no
+ * `,` is returned as is. For a caller whose evidence is the bytes' own
+ * signature (`sniffImageMimeType`, used by the generation poller): the bytes
+ * outrank whatever Content-Type the storage served, because the engine picks
+ * its decoder from this header. A picker uses `declareTextureType`, which
+ * never overrides a type the browser declared.
+ */
+export function replaceDataUrlType(dataUrl: string, mimeType: string): string {
+  if (mimeType === '' || dataUrl.slice(0, 5).toLowerCase() !== 'data:') return dataUrl;
+  const comma = dataUrl.indexOf(',');
+  if (comma === -1) return dataUrl;
+  const [, ...params] = dataUrl.slice(5, comma).split(';');
+  const rest = params.length > 0 ? `;${params.join(';')}` : '';
+  return `data:${mimeType}${rest}${dataUrl.slice(comma)}`;
+}
+
 /** The longest file name shown in a refusal toast before it is cut. */
 const MAX_DISPLAY_NAME = 60;
 
@@ -266,6 +284,16 @@ export function assetImportFailureMessage(name: string, error: unknown): string 
  */
 export function fileTypeNotAcceptedMessage(name: string): string {
   return `"${boundDisplayName(name)}" was not imported: the editor accepts PNG and JPEG textures, GLB and glTF models, and MP3, OGG, WAV and FLAC audio.`;
+}
+
+/**
+ * What the texture picker and the drop zone tell the person about a texture
+ * when no entity is selected. `load_texture` applies an image to a slot on an
+ * entity, so with nothing selected the texture has nowhere to go; it used to
+ * be skipped without a word while the drop's progress bar counted it.
+ */
+export function textureNeedsTargetMessage(name: string): string {
+  return `"${boundDisplayName(name)}" was not imported: select an entity to apply the texture to, then import it again.`;
 }
 
 /**
