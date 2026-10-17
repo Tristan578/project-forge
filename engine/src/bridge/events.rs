@@ -296,6 +296,22 @@ pub fn emit_asset_imported(asset_id: &str, name: &str, kind: &str, file_size: u6
     });
 }
 
+/// Emit a texture the engine accepted but could not apply (#10399).
+///
+/// `load_texture` answers when the request is queued; `apply_texture_load`
+/// decodes the image and assigns it a frame later, so a failure there - data
+/// that is not base64, an image that does not decode, a target with no sprite
+/// or material, a slot that does not exist - reaches the editor only through
+/// this event, which it shows naming the file.
+pub fn emit_texture_load_error(name: &str, entity_id: &str, slot: &str, reason: &str) {
+    emit_event("TEXTURE_LOAD_ERROR", &serde_json::json!({
+        "name": name,
+        "entityId": entity_id,
+        "slot": slot,
+        "reason": reason,
+    }));
+}
+
 /// Emit an asset deleted event.
 pub fn emit_asset_deleted(asset_id: &str) {
     #[derive(Serialize)]

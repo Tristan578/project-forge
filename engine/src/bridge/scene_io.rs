@@ -4,16 +4,14 @@
 //! scene to the runtime engine through `load_scene` and nothing else (#10195).
 //! The rest of the import/export surface is editor-only.
 
-// Payload ceilings for the editor-only import paths. Each is read from exactly
-// one `#[cfg(not(feature = "runtime"))]` system below, so the constants carry
-// the same gate — a `runtime` build never parses a glTF blob or a texture blob
+// Payload ceilings and format gates for the editor-only import paths. They
+// live in `core::asset_import_guard` (always compiled: the command handlers
+// enforce them first, #10396) and are read here from exactly one
+// `#[cfg(not(feature = "runtime"))]` system each, so this `use` carries the
+// same gate — a `runtime` build never parses a glTF blob or a texture blob
 // handed in from the shell. (A scene it does parse; see `apply_scene_load`.)
-/// Maximum byte length of a glTF base64 payload (~50 MB decoded, 1.33× overhead).
 #[cfg(not(feature = "runtime"))]
-pub const MAX_GLTF_BASE64_LEN: usize = 67_500_000;
-/// Maximum byte length of a texture base64 payload (~50 MB decoded, 1.33× overhead).
-#[cfg(not(feature = "runtime"))]
-pub const MAX_TEXTURE_BASE64_LEN: usize = 67_500_000;
+use crate::core::asset_import_guard::{self, MAX_GLTF_BASE64_LEN, MAX_TEXTURE_BASE64_LEN};
 
 use bevy::prelude::*;
 
@@ -645,8 +643,19 @@ pub(super) fn apply_gltf_import(
             }
         };
 
-        // Determine the in-memory asset path using a unique name
-        let ext = if request.name.ends_with(".gltf") { "gltf" } else { "glb" };
+        // The handler refused anything KTX2 or Basis Universal before it was
+        // queued; repeated on the decoded bytes so no other producer that
+        // reaches this queue gets past it (#10396).
+        if let Err(refusal) = asset_import_guard::inspect_gltf_bytes(&bytes) {
+            tracing::error!("glTF import rejected: {}", refusal);
+            continue;
+        }
+
+        // Determine the in-memory asset path using a unique name. The
+        // extension is what tells bevy_gltf to parse JSON or GLB, and it is
+        // decided without regard to case: a picked `MODEL.GLTF` used to be
+        // stored as `.glb`, where the loader could not read it (#10396).
+        let ext = asset_import_guard::gltf_memory_extension(&request.name);
         let memory_path = format!("{}.{}", asset_id, ext);
 
         // Write the decoded bytes to the in-memory asset directory
@@ -820,12 +829,15 @@ pub(super) fn apply_gltf_scene_spawn(
 }
 
 /// System that processes texture load requests.
-/// Decodes base64 image data, creates GPU texture assets, and updates MaterialData.
+/// Decodes base64 image data, creates GPU texture assets, and hands the asset
+/// to the slot's owner: a `MaterialData` texture slot, or `SpriteData` for the
+/// `"sprite"` slot the Sprite inspector sends.
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_texture_load(
     mut pending: ResMut<PendingCommands>,
     mut asset_registry: ResMut<AssetRegistry>,
     mut mat_query: Query<(&EntityId, &mut MaterialData)>,
+    mut sprite_query: Query<(&EntityId, &mut SpriteData)>,
     mut images: ResMut<Assets<Image>>,
     mut texture_handles: ResMut<crate::core::asset_manager::TextureHandleMap>,
 ) {
@@ -835,37 +847,71 @@ pub(super) fn apply_texture_load(
     use bevy::asset::RenderAssetUsages;
 
     for request in pending.texture_load_requests.drain(..) {
+        // Every failure below goes through `fail`, which reports it to the
+        // editor as TEXTURE_LOAD_ERROR as well as logging it: `load_texture`
+        // answers when the request is queued, and this drain decodes and
+        // assigns a frame later, so a failure that is only logged here is
+        // invisible to the person who sent the texture (#10399).
+        let fail = |reason: &str| {
+            tracing::warn!(
+                "Texture '{}' for entity {} (slot {}) was not applied: {}",
+                request.name,
+                request.entity_id,
+                request.slot,
+                reason
+            );
+            events::emit_texture_load_error(&request.name, &request.entity_id, &request.slot, reason);
+        };
+
         // Guard against excessively large texture payloads (base64 overhead ~1.33x,
         // so 50MB decoded ≈ 67.5MB base64).
         if request.data_base64.len() > MAX_TEXTURE_BASE64_LEN {
-            tracing::error!(
-                "Texture load rejected: base64 payload {} bytes exceeds 50MB limit",
-                request.data_base64.len()
-            );
+            fail("the texture data is larger than the 50 MB limit");
             continue;
         }
 
         let asset_id = uuid::Uuid::new_v4().to_string();
         let file_size = request.data_base64.len() as u64;
 
-        // Parse data URL: "data:image/png;base64,AAAA..."
-        let (mime_type, raw_base64) = if let Some(comma_pos) = request.data_base64.find(',') {
-            let header = &request.data_base64[..comma_pos];
-            let mime = header
-                .strip_prefix("data:")
-                .and_then(|s| s.strip_suffix(";base64"))
-                .unwrap_or("image/png");
-            (mime.to_string(), &request.data_base64[comma_pos + 1..])
-        } else {
-            // Raw base64 without data URL prefix
-            ("image/png".to_string(), request.data_base64.as_str())
+        // The allowlist the handler already applied, repeated on the payload
+        // this drain decodes: the type handed to `ImageType::MimeType` below is
+        // always one of ALLOWED_TEXTURE_MIME_TYPES, never the caller's string
+        // (#10396). A raw base64 body (no data URL header) is typed by its
+        // signature bytes, PNG or JPEG, and refused when it is neither.
+        let source = match asset_import_guard::check_texture_payload(&request.data_base64) {
+            Ok(source) => source,
+            Err(refusal) => {
+                fail(&refusal.to_string());
+                continue;
+            }
         };
+        let mime_type = source.mime_type;
+
+        // Where the texture goes, checked before anything is decoded or
+        // registered: a texture whose target cannot take it changes nothing
+        // and is reported, instead of leaving behind an asset that no command
+        // can assign yet (#10398, #10399).
+        let target_problem = match asset_import_guard::texture_slot_owner(&request.slot) {
+            Some(asset_import_guard::TextureSlotOwner::Sprite) => (!sprite_query
+                .iter()
+                .any(|(eid, _)| eid.0 == request.entity_id))
+            .then(|| "the entity has no sprite to apply it to".to_string()),
+            Some(asset_import_guard::TextureSlotOwner::Material) => (!mat_query
+                .iter()
+                .any(|(eid, _)| eid.0 == request.entity_id))
+            .then(|| "the entity has no material to apply it to".to_string()),
+            None => Some(format!("there is no texture slot named \"{}\"", request.slot)),
+        };
+        if let Some(problem) = target_problem {
+            fail(&problem);
+            continue;
+        }
 
         // Decode base64 to raw bytes
-        let bytes = match base64::engine::general_purpose::STANDARD.decode(raw_base64) {
+        let bytes = match base64::engine::general_purpose::STANDARD.decode(source.base64) {
             Ok(b) => b,
             Err(e) => {
-                tracing::warn!("Failed to decode base64 texture data: {}", e);
+                fail(&format!("the texture data is not valid base64 ({e})"));
                 continue;
             }
         };
@@ -876,7 +922,7 @@ pub(super) fn apply_texture_load(
         // Create Bevy Image from raw bytes
         let image_result = Image::from_buffer(
             &bytes,
-            ImageType::MimeType(&mime_type),
+            ImageType::MimeType(mime_type),
             CompressedImageFormats::NONE,
             is_srgb,
             ImageSampler::Default,
@@ -886,7 +932,7 @@ pub(super) fn apply_texture_load(
         let image = match image_result {
             Ok(img) => img,
             Err(e) => {
-                tracing::warn!("Failed to create image from texture data: {:?}", e);
+                fail(&format!("the {mime_type} data could not be decoded ({e})"));
                 continue;
             }
         };
@@ -904,25 +950,39 @@ pub(super) fn apply_texture_load(
             source: AssetSource::Upload { filename: request.name.clone() },
         });
 
-        // Update the entity's MaterialData with the texture reference
-        for (eid, mut mat_data) in mat_query.iter_mut() {
-            if eid.0 == request.entity_id {
-                match request.slot.as_str() {
-                    "base_color" => mat_data.base_color_texture = Some(asset_id.clone()),
-                    "normal_map" => mat_data.normal_map_texture = Some(asset_id.clone()),
-                    "metallic_roughness" => mat_data.metallic_roughness_texture = Some(asset_id.clone()),
-                    "emissive" => mat_data.emissive_texture = Some(asset_id.clone()),
-                    "occlusion" => mat_data.occlusion_texture = Some(asset_id.clone()),
-                    "depth_map" => mat_data.depth_map_texture = Some(asset_id.clone()),
-                    "clearcoat" => mat_data.clearcoat_texture = Some(asset_id.clone()),
-                    "clearcoat_roughness" => mat_data.clearcoat_roughness_texture = Some(asset_id.clone()),
-                    "clearcoat_normal" => mat_data.clearcoat_normal_texture = Some(asset_id.clone()),
-                    _ => {
-                        tracing::warn!("Unknown texture slot: {}", request.slot);
-                    }
+        // Hand the asset to the slot's owner, checked above to exist. A sprite
+        // renders from `SpriteData.texture_asset_id` (bridge/sprite.rs,
+        // `sync_sprite_rendering`), not from a material slot; until #10396
+        // "sprite" fell through to the unknown-slot arm, so a Sprite inspector
+        // upload registered an asset nothing displayed.
+        match request.slot.as_str() {
+            "sprite" => {
+                if let Some((_, mut sprite_data)) =
+                    sprite_query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id)
+                {
+                    sprite_data.texture_asset_id = Some(asset_id.clone());
+                    events::emit_sprite_changed(&request.entity_id, Some(&*sprite_data));
                 }
-                events::emit_material_changed(&request.entity_id, &mat_data);
-                break;
+            }
+            slot => {
+                if let Some((_, mut mat_data)) =
+                    mat_query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id)
+                {
+                    match slot {
+                        "base_color" => mat_data.base_color_texture = Some(asset_id.clone()),
+                        "normal_map" => mat_data.normal_map_texture = Some(asset_id.clone()),
+                        "metallic_roughness" => mat_data.metallic_roughness_texture = Some(asset_id.clone()),
+                        "emissive" => mat_data.emissive_texture = Some(asset_id.clone()),
+                        "occlusion" => mat_data.occlusion_texture = Some(asset_id.clone()),
+                        "depth_map" => mat_data.depth_map_texture = Some(asset_id.clone()),
+                        "clearcoat" => mat_data.clearcoat_texture = Some(asset_id.clone()),
+                        "clearcoat_roughness" => mat_data.clearcoat_roughness_texture = Some(asset_id.clone()),
+                        "clearcoat_normal" => mat_data.clearcoat_normal_texture = Some(asset_id.clone()),
+                        // `texture_slot_owner` admitted only the slots above.
+                        _ => {}
+                    }
+                    events::emit_material_changed(&request.entity_id, &mat_data);
+                }
             }
         }
 
