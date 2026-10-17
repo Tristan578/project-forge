@@ -131,7 +131,7 @@ regenerate. `scripts/check-codex-port.sh` fails any PR where the two differ.
 
 **Pinned versions:** Next.js 16.3.8 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 81 · lines 87
+**Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 82 · lines 87
 
 **Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
