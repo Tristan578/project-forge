@@ -25,7 +25,7 @@
     "coverageThresholds": {
       "statements": 86,
       "branches": 78,
-      "functions": 81,
+      "functions": 82,
       "lines": 87
     },
     "quickValidation": "cd web && npm run test:changed"
