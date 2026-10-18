@@ -16,17 +16,21 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, act, waitFor } from '@testing-library/react';
+import { render, cleanup, act, waitFor, screen } from '@testing-library/react';
 import EditorPage from '../page';
 import { useEditorStore } from '@/stores/editorStore';
 import { hasDeferredSceneLoad, setSceneDispatcher } from '@/stores/slices/sceneSlice';
 
 const routerPush = vi.fn();
+// One router object for the page's lifetime, as Next's is: a fresh object per
+// render would re-run the page's effect (the router is among its deps) after
+// every state change and load the scene again.
+const router = { push: routerPush };
 let currentProjectId = 'project-a';
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: currentProjectId }),
-  useRouter: () => ({ push: routerPush }),
+  useRouter: () => router,
   useSearchParams: () => new URLSearchParams(),
 }));
 
@@ -181,5 +185,70 @@ describe('EditorPage reopen restores the completion mode (#9998)', () => {
 
     await waitFor(() => expect(useEditorStore.getState().projectId).toBe('project-a'));
     expect(useEditorStore.getState().sceneGraph.completionMode).toBeUndefined();
+  });
+});
+
+/**
+ * A WARM open: the page's effect runs for a project while the engine
+ * dispatcher is already attached (the Welcome modal's recent projects, a
+ * remix landing in an open editor), so `loadScene` dispatches at once rather
+ * than deferring. An engine throw then raises `EngineDispatchThrewError`
+ * synchronously from the call (#10202). The page must keep the editor up —
+ * the slice has locked saving and `SceneLoadErrorNotice` explains it there —
+ * and finish hydrating, not replace everything with the generic error screen.
+ */
+describe('EditorPage warm open: the engine throws on load_scene (#10202 review)', () => {
+  const originalLoadScene = useEditorStore.getState().loadScene;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentProjectId = 'project-a';
+    useEditorStore.setState({ projectId: null, sceneLoadError: null, loadScene: originalLoadScene });
+    useEditorStore.getState().hydrateCompletionMode(undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    setSceneDispatcher(null);
+    useEditorStore.setState({ sceneLoadError: null, loadScene: originalLoadScene });
+    vi.restoreAllMocks();
+  });
+
+  it('keeps the editor up with the lockout recorded, and still hydrates the completion mode', async () => {
+    // The dispatcher the editor registers reports an engine throw this way.
+    const engine = vi.fn((command: string, _payload: unknown) =>
+      command === 'load_scene' ? { success: false, error: 'wasm panic in load_scene', threw: true as const } : { success: true });
+    setSceneDispatcher(engine);
+    serveProject({ ...BASE_SCENE, completionMode: 'endless' });
+
+    render(<EditorPage />);
+
+    await waitFor(() => expect(useEditorStore.getState().projectId).toBe('project-a'));
+    expect(engine.mock.calls.filter(([command]) => command === 'load_scene')).toHaveLength(1);
+    // The slice locked saving with the engine-threw reason: that is what the
+    // in-editor notice shows, and why the page must not throw the editor away.
+    expect(useEditorStore.getState().sceneLoadError?.reason).toContain('the engine failed while loading it');
+    // Not the generic error screen, and no longer loading: the editor branch rendered.
+    await waitFor(() => expect(screen.queryByText('Loading project...')).toBeNull());
+    expect(screen.queryByText('Back to Dashboard')).toBeNull();
+    expect(screen.queryByText(/wasm panic/)).toBeNull();
+    // The hydration after the load still ran.
+    expect(useEditorStore.getState().sceneGraph.completionMode).toBe('endless');
+  });
+
+  it('still shows the generic error screen for a throw that is NOT the engine (no lockout exists for it)', async () => {
+    useEditorStore.setState({
+      loadScene: () => {
+        throw new Error('storage quota exceeded');
+      },
+    });
+    serveProject(BASE_SCENE);
+
+    render(<EditorPage />);
+
+    await waitFor(() => expect(screen.queryByText('Back to Dashboard')).not.toBeNull());
+    expect(screen.queryByText('storage quota exceeded')).not.toBeNull();
+    expect(useEditorStore.getState().sceneLoadError).toBeNull();
   });
 });

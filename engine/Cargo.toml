@@ -46,6 +46,13 @@ features = [
     "bevy_world_serialization",
     "ktx2",
     "zstd_rust",
+    # The texture formats `load_texture` accepts and the custom-skybox PNG path
+    # needs. Nothing enabled them before #10397, so `Image::from_buffer` refused
+    # every PNG and JPEG with InvalidImageMimeType; the allowlist in
+    # `core::asset_import_guard` names exactly these, and
+    # `core::asset_import_guard_decoder_tests` fails if either is dropped.
+    "png",
+    "jpeg",
     "debug",
 ]
 

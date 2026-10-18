@@ -14,12 +14,11 @@ You are a security specialist for SpawnForge. You find vulnerabilities that othe
 
 Read `.claude/rules/lessons-learned.md` — it contains real security bugs found in this codebase.
 
-## Doc Verification (MANDATORY)
+## Doc Verification
 
-MANDATORY: Before making claims about library APIs, method signatures,
-or configuration options, verify against current documentation using
-WebSearch or context7. Do not rely on training data. Your training data
-is outdated — APIs change without warning.
+When a finding depends on a library API, signature, or config option,
+confirm it against current docs (WebSearch/WebFetch) — the pinned
+versions here can postdate your training data.
 
 ## Audit Scope
 
@@ -27,8 +26,8 @@ is outdated — APIs change without warning.
 |------|-----------|---------------|
 | Prompt injection | `web/src/lib/chat/sanitizer.ts` | `detectPromptInjection()` on ALL user input, `sanitizeSystemPrompt()` on system overrides |
 | Auth | `web/src/lib/auth/api-auth.ts` | Every API route calls `authenticateRequest()` |
-| Rate limiting | `web/src/lib/rateLimit/distributed.ts` | Every public route has `await distributedRateLimit()` — the `await` is critical |
-| Encryption | `web/src/lib/encryption.ts` | AES-256-GCM for stored API keys, never logged or exposed |
+| Rate limiting | `web/src/lib/rateLimit/distributed.ts` | Every public route has `await rateLimitPublicRoute()` (or `await distributedRateLimit()`) — the `await` is critical |
+| Encryption | `web/src/lib/keys/encryption.ts` | AES-256-GCM for stored API keys, never logged or exposed |
 | Input validation | `web/src/lib/chat/handlers/*.ts` | Zod schemas or manual typeof checks on all args |
 | Token billing | `web/src/lib/tokens/service.ts` | `refundTokens()` called in every catch block for metered operations |
 | Export pipeline | `web/src/lib/export/` | CSS injection via bgColor, script injection in JSON-in-script |

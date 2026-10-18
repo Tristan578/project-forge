@@ -1688,6 +1688,81 @@
       "visibility": "public"
     },
     {
+      "name": "replay_input_trace",
+      "description": "Replay a bounded input trace through the RUNNING engine and report what it observed: whether the player entity moved and, for a recorded trace, whether exactly one collectible was collected. A strategy run asserts movement only (the bot's plan does not aim for a collectible) and reports collectiblesCollected without asserting it. The engine clock is pinned for the whole run so the result is deterministic. Provide exactly one of trace (a recorded input trace from the Playtest panel, max 120 ticks / 30 s) or strategy (an AI gameplay-bot strategy, planned and converted into a trace). Requires Play mode. The verdict is a runtime outcome, never a heuristic rating.",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "playerEntityId": {
+            "type": "string",
+            "description": "Entity whose displacement proves input reached the runtime"
+          },
+          "collectibleEntityIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Collectibles expected to be collected. Defaults to every entity carrying a collectible component."
+          },
+          "trace": {
+            "type": "object",
+            "description": "A recorded input trace: { version: 1, fixtureId, actionNames, durationMs, frames: [{ tick, actions: { <name>: { pressed, axis? } } }] }"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "explorer",
+              "speedrunner",
+              "completionist",
+              "random",
+              "cautious"
+            ],
+            "description": "AI gameplay-bot strategy to plan and replay instead of a recorded trace"
+          }
+        },
+        "required": [
+          "playerEntityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "public"
+    },
+    {
+      "name": "pin_frame_rate",
+      "description": "Pin the simulation clock so every rendered frame advances the simulation by exactly 1/hz seconds, regardless of wall-clock frame time. Used by replay_input_trace for deterministic replays; unpin_frame_rate restores the wall clock. Stop releases a pin that is in force during Play; a pin made in Edit, or queued in the frame Play stops, stays until unpin_frame_rate. Physics tracks the pin only at hz >= 60 (Rapier caps its step at 1/60 s); below that, gameplay systems step 1/hz per frame while physics steps 1/60.",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "hz": {
+            "type": "number",
+            "description": "Simulation rate in Hz (ticks per second of game time), integer 4-240 (default 60). The engine always advances exactly one tick per rendered frame; hz sets how long that tick is. 4 Hz (a 250 ms tick) is the floor because Bevy clamps any longer step to 250 ms."
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
+      "name": "unpin_frame_rate",
+      "description": "Return the simulation clock to the wall clock after pin_frame_rate; the next frame is measured from now. Stop does this for a pin in force during Play; a pin made in Edit stays until this command.",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write",
+      "destructive": false,
+      "visibility": "internal"
+    },
+    {
       "name": "get_mode",
       "description": "Get current engine mode (edit, play, or paused)",
       "category": "runtime",
@@ -2144,7 +2219,7 @@
         "properties": {
           "dataBase64": {
             "type": "string",
-            "description": "Base64-encoded glTF/GLB file data"
+            "description": "Base64-encoded glTF/GLB file data (a data:model/gltf-binary;base64, header is accepted). A model whose images are KTX2 or Basis Universal (KHR_texture_basisu), or that is not a readable glTF/GLB, is refused with the reason; use PNG or JPEG textures."
           },
           "name": {
             "type": "string",
@@ -2170,7 +2245,7 @@
         "properties": {
           "dataBase64": {
             "type": "string",
-            "description": "Base64-encoded image data (PNG/JPG)"
+            "description": "Image data as a data URL (data:image/png;base64,... or data:image/jpeg;base64,...) or raw base64, which is typed by its first bytes: a PNG signature is image/png, a JPEG marker is image/jpeg, and anything else is refused. Only PNG and JPEG are accepted; any other format, including KTX2, is refused with the accepted formats named."
           },
           "name": {
             "type": "string",

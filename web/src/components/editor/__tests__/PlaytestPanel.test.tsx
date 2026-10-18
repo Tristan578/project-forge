@@ -10,6 +10,7 @@ import { publishPlayTick, resetPlayTickBus } from '@/lib/playtest/playTickBus';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
+  getCommandDispatcher: () => null,
 }));
 vi.mock('@/lib/ai/gameplayBot', () => ({
   BOT_STRATEGIES: [],

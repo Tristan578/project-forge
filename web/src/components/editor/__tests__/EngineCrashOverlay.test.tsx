@@ -90,7 +90,9 @@ describe('EngineCrashOverlay', () => {
     render(<EngineCrashOverlay />);
     if (capturedListener) capturedListener('test panic');
     fireEvent.click(await screen.findByText('Recover Engine'));
-    expect(mockRecoverEngine).toHaveBeenCalledWith('forge-canvas');
+    // The id CanvasArea renders (pinned as 'game-canvas' by CanvasArea.test.tsx),
+    // not the 'forge-canvas' literal recovery used to name and never found.
+    expect(mockRecoverEngine).toHaveBeenCalledWith('game-canvas');
   });
 
   it('shows crash dialog immediately if engine already crashed before mount', () => {

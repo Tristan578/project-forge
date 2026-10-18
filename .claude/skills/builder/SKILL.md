@@ -43,7 +43,7 @@ SpawnForge is "Canva for games" — an AI-native 2D/3D game engine in the browse
 | Web | Next.js | 16.x |
 | Web | React | 19.x |
 | Web | Zustand | 5.x |
-| Web | TypeScript | 5.x |
+| Web | TypeScript | 6.x |
 | Web | Tailwind | 4.x |
 | Web | Vitest | 4.x |
 | Web | Playwright | latest |

@@ -1091,6 +1091,11 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "pin_frame_rate",
+      "category": "runtime",
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "place_asset",
       "category": "asset",
       "requiredScope": "scene:write"
@@ -1303,6 +1308,11 @@
     {
       "name": "reparent_entity",
       "category": "scene",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "replay_input_trace",
+      "category": "runtime",
       "requiredScope": "scene:write"
     },
     {
@@ -1793,6 +1803,11 @@
     {
       "name": "undo",
       "category": "history",
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "unpin_frame_rate",
+      "category": "runtime",
       "requiredScope": "scene:write"
     },
     {

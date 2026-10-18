@@ -31,10 +31,24 @@ export function attachFixtureValidator(): void {
   });
 }
 
+/**
+ * How the engine answers the NEXT `load_scene`. Every mode is one-shot and
+ * falls back to `apply`. `threw` is the shape the editor's own dispatcher
+ * (`useEngineEvents`) produces when the engine call throws: a caught throw
+ * answered as `{ success: false, error, threw: true }`, which the store
+ * re-raises as `EngineDispatchThrewError` (#10202). Nothing is applied for
+ * it, so the test is deterministic.
+ */
+type CheckpointEngineMode = 'apply' | 'reject' | 'threw' | 'silent' | 'wrong';
+
 /** Queue commands, then emit application/export events as the bridge does. */
 export function attachCheckpointEngine(initial = sceneFixture('Live')) {
   let current = initial;
-  let mode: 'apply' | 'reject' | 'silent' | 'wrong' = 'apply';
+  let mode: CheckpointEngineMode = 'apply';
+  // Modes for the next loads in order, for a flow that dispatches more than
+  // one `load_scene` before the test regains control (a restore whose
+  // recovery of the prior scene must also fail). Consumed before `mode`.
+  let queued: CheckpointEngineMode[] = [];
   const dispatch = vi.fn((command: string, payload: unknown) => {
     if (command === 'validate_scene') return { success: true };
     if (command === 'export_scene') {
@@ -44,11 +58,13 @@ export function attachCheckpointEngine(initial = sceneFixture('Live')) {
       })));
     }
     if (command === 'load_scene') {
-      if (mode === 'reject') { mode = 'apply'; return { success: false, error: 'Refused' }; }
-      if (mode === 'silent') { mode = 'apply'; return { success: true }; }
-      const next = JSON.parse((payload as { json: string }).json) as SceneFileData;
-      const wrong = mode === 'wrong';
+      const answerAs = queued.length > 0 ? queued.shift()! : mode;
       mode = 'apply';
+      if (answerAs === 'reject') return { success: false, error: 'Refused' };
+      if (answerAs === 'threw') return { success: false, error: 'Engine failed', threw: true as const };
+      if (answerAs === 'silent') return { success: true };
+      const next = JSON.parse((payload as { json: string }).json) as SceneFileData;
+      const wrong = answerAs === 'wrong';
       queueMicrotask(() => {
         current = wrong ? sceneFixture('Wrong scene') : next;
         window.dispatchEvent(new CustomEvent(SCENE_LOADED_EVENT));
@@ -61,6 +77,9 @@ export function attachCheckpointEngine(initial = sceneFixture('Live')) {
     dispatch,
     getScene: () => current,
     setScene: (scene: SceneFileData) => { current = scene; },
-    setMode: (value: typeof mode) => { mode = value; },
+    /** The next load answers this way (and any queued sequence is dropped). */
+    setMode: (value: CheckpointEngineMode) => { mode = value; queued = []; },
+    /** The next loads answer this way, in order, then `apply`. */
+    setModes: (values: CheckpointEngineMode[]) => { queued = [...values]; mode = 'apply'; },
   };
 }

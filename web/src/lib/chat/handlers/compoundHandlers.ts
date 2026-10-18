@@ -15,9 +15,11 @@
 
 import type { ToolHandler, ExecutionResult, ToolCallContext } from './types';
 import type { EntityType, InputBinding, SceneNode } from './types';
-import { ownEntry, parseArgs, zSetupGameFromDescription } from './types';
+import { ownEntry, parseArgs, sceneDispatchThrewResult, zSetupGameFromDescription } from './types';
 import { getPresetById } from '@/lib/materialPresets';
 import { getCapabilityUnavailability } from '@/lib/config/providers';
+import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
+import { describeNewSceneRefusal } from '@/lib/scenes/newSceneRefusal';
 import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
 import { buildStoreComponent, buildStoreComponentWithReport } from '@/lib/engine/gameComponentWire';
 import { withCorrectionSummary, type GameComponentFieldCorrection } from '@/lib/engine/gameComponentCorrections';
@@ -452,11 +454,31 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     // Discarding it would spawn every entity below on top of the scene the user
     // asked to replace, then report success — the same false-success class
     // `newScene` was made boolean to close (#10056). Stop before spawning.
-    if (clearExisting && ctx.store.newScene() === false) {
-      return {
-        success: false,
-        error: 'The engine did not accept a new scene, so the existing scene was not cleared. Nothing was created.',
-      };
+    if (clearExisting) {
+      let cleared: boolean;
+      try {
+        cleared = ctx.store.newScene();
+      } catch (error) {
+        // A THROWN `new_scene` is re-raised after the store has locked saving
+        // (#10079, #10202): the viewport may be half-cleared, so nothing may
+        // be spawned onto it and the user is told to reload. Only the typed
+        // engine throw carries that lockout; anything else is rethrown —
+        // still before spawning — for the executor's generic catch to report
+        // as the plain failure it is (#10202 review).
+        if (!(error instanceof EngineDispatchThrewError)) throw error;
+        const threw = sceneDispatchThrewResult('The existing scene could not be cleared', error);
+        return { ...threw, error: `${threw.error} Nothing was created.` };
+      }
+      if (cleared === false) {
+        // By cause (#10202 review): the store also answers `false` when no
+        // engine is attached yet, or when browser storage refused the
+        // registry write that precedes the dispatch — neither is the engine
+        // refusing, and the model should not be told it was.
+        return {
+          success: false,
+          error: `${describeNewSceneRefusal(ctx.store.newSceneRefusal())} The existing scene was not cleared, so nothing was created.`,
+        };
+      }
     }
 
     if (envSettings) {

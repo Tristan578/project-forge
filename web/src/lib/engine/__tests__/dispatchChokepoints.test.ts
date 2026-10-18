@@ -66,9 +66,9 @@ const ACCOUNTED_FOR: Record<string, { calls: number; reason: string }> = {
   },
   'hooks/usePointerLock.ts': { calls: 1, reason: 'fixed { dx, dy } literal' },
   'components/play/GamePlayer.tsx': {
-    calls: 3,
+    calls: 4,
     reason:
-      'fixed object literals built in the file: { preset } through sendReported, {} for set_quality, and {} for the explicit play whose refusal is a failed start; the scene goes through lib/engine/playSceneLoad.ts (#10196)',
+      "fixed object literals built in the file: { preset } through sendReported, {} for set_quality, { projectType: '2d' } for the set_project_type a 2D game sends after the scene is accepted (#10227), and {} for the explicit play whose refusal is a failed start; the scene goes through lib/engine/playSceneLoad.ts (#10196)",
   },
   'lib/engine/playSceneLoad.ts': {
     calls: 0,
@@ -102,6 +102,16 @@ const ACCOUNTED_FOR: Record<string, { calls: number; reason: string }> = {
     reason: 'doc comment naming the load_scene command the fixture JSON is fed to; the builders only return data',
   },
   'app/blog/content/spawnforge-browser-ai-game-engine.tsx': { calls: 1, reason: 'prose code sample' },
+  'lib/chat/handlers/types.ts': {
+    calls: 0,
+    reason:
+      'prose only: the doc of sceneDispatchThrewResult explains why a throw from the engine handler can land after the command was applied (#10202); the helper builds a message and never dispatches',
+  },
+  'stores/slices/sceneSlice.ts': {
+    calls: 0,
+    reason:
+      'prose only: the doc of rethrowCaughtEngineThrow names the useEngineEvents catch it converts back into a throw (#10202); the slice dispatches through the registered dispatcher, never directly',
+  },
 
   // --- Emitted into an exported game, which runs its own engine instance ---
   'lib/export/gameLoopFragment.ts': { calls: 0, reason: 'emits player JS; not a call in this app' },

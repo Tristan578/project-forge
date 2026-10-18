@@ -2892,6 +2892,7 @@ STEPS_EOF
   test-e2e-auth:
   test-e2e-journey:
   test-e2e-engine-smoke:
+  test-e2e-engine-journeys:
   test-e2e-crossbrowser:
   merge-e2e-reports:
   docs-e2e:
@@ -3429,6 +3430,7 @@ OUTPUTS_EOF
             scripts/install-playwright-ci.sh scripts/__tests__/install-playwright-ci.test.sh \
             scripts/run-vitest-coverage.sh scripts/__tests__/run-vitest-coverage.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
+            scripts/__tests__/cargo-audit-ignores.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
             scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
@@ -3464,6 +3466,7 @@ OUTPUTS_EOF
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
+            scripts/assert-e2e-db-host.sh scripts/__tests__/assert-e2e-db-host.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
             scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh'
@@ -3643,7 +3646,7 @@ fi
 # It is a pin whose evidence is the artifact's own text (round 30's lesson), not
 # one that consumes the audited program's output. Regenerate after editing any
 # fixture: the failure message prints the observed value, which IS the new pin.
-readonly SELF_EXEC_EXPECTED_DROP=688
+readonly SELF_EXEC_EXPECTED_DROP=700
 self_exec_total="$(awk 'END { print NR }' "$SELF")"
 self_exec_kept="$(awk 'END { print NR }' <<<"$SELF_EXEC")"
 self_exec_dropped=$(( self_exec_total - self_exec_kept ))
@@ -3967,6 +3970,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/install-playwright-ci.sh scripts/__tests__/install-playwright-ci.test.sh \
             scripts/run-vitest-coverage.sh scripts/__tests__/run-vitest-coverage.test.sh \
             scripts/check-npm-audit.sh scripts/__tests__/check-npm-audit.test.sh \
+            scripts/__tests__/cargo-audit-ignores.test.sh \
             scripts/check-security-alerts.sh scripts/__tests__/check-security-alerts.test.sh \
             scripts/notify-workflow-failure.sh scripts/__tests__/notify-workflow-failure.test.sh \
             scripts/check-openapi-route-sync.sh scripts/__tests__/check-openapi-route-sync.test.sh \
@@ -4002,6 +4006,7 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
             scripts/db-migration-guard.sh scripts/__tests__/db-migration-guard.test.sh \
             scripts/neon-branch.sh scripts/__tests__/neon-branch.test.sh \
             scripts/preview-db-branch.sh scripts/__tests__/preview-db-branch.test.sh \
+            scripts/assert-e2e-db-host.sh scripts/__tests__/assert-e2e-db-host.test.sh \
             scripts/check-pin-strength.sh scripts/__tests__/check-pin-strength.test.sh \
             scripts/check-fn-freeze.sh scripts/__tests__/check-fn-freeze.test.sh \
             .claude/tools/dx-audit.sh .claude/tools/__tests__/dx-audit.test.sh
@@ -4041,6 +4046,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/run-vitest-coverage.test.sh
       - name: Run npm-audit allowlist gate test suite
         run: bash scripts/__tests__/check-npm-audit.test.sh
+      - name: Run cargo-audit ignore-list test suite
+        run: bash scripts/__tests__/cargo-audit-ignores.test.sh
       - name: Run security-alerts gate test suite
         run: bash scripts/__tests__/check-security-alerts.test.sh
       - name: Run workflow-failure notifier test suite
@@ -4067,6 +4074,8 @@ IFS= read -r -d '' expected_steps_3 <<'STEPS_EOF' || true
         run: bash scripts/__tests__/neon-branch.test.sh
       - name: Run preview-database branch-policy test suite
         run: bash scripts/__tests__/preview-db-branch.test.sh
+      - name: Run E2E database host-guard test suite
+        run: bash scripts/__tests__/assert-e2e-db-host.test.sh
       - name: Run ci-gate path-filter test suite
         run: bash scripts/__tests__/ci-gate-path-filters.test.sh
       - name: Run CI diff-range resolver test suite
@@ -4166,6 +4175,12 @@ IFS= read -r -d '' expected_steps_pp <<'STEPS_EOF' || true
         run: shellcheck -x scripts/check-portable-paths.sh scripts/__tests__/check-portable-paths.test.sh
       - name: Check for machine-local absolute paths in tracked files
         run: bash scripts/check-portable-paths.sh
+      - name: Test the symlinks gate's decision logic
+        run: bash scripts/__tests__/check-symlinks.test.sh
+      - name: Shellcheck the symlinks gate and its suite
+        run: shellcheck -x scripts/check-symlinks.sh scripts/__tests__/check-symlinks.test.sh
+      - name: Check that every tracked symlink resolves to a tracked file
+        run: bash scripts/check-symlinks.sh
 STEPS_EOF
 readonly expected_steps_pp
 assert_steps_block "${ci_pp_block:-}" "ci.yml portable-paths job steps:" "${expected_steps_pp%$'\n'}"

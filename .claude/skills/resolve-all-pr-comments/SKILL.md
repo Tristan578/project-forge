@@ -17,12 +17,18 @@ REPO="Tristan578/project-forge"
 # Get all open PRs
 OPEN_PRS=$(gh pr list --repo "$REPO" --state open --json number --jq '.[].number')
 
-# For each PR, check for unreplied bot comments
+# For each PR, check for unreplied top-level review comments from anyone but the PR author
+# (same filter as /resolve-pr-comments Step 2)
 for PR in $OPEN_PRS; do
-  UNREPLIED=$(gh api "repos/$REPO/pulls/$PR/comments" --paginate --jq '
+  AUTHOR=$(gh pr view "$PR" --repo "$REPO" --json author --jq .author.login)
+  # --slurp collects every page into one array of pages; `add` flattens them.
+  # (--jq would run once PER PAGE, and a reply on page 2 must still count
+  # against its parent on page 1.)
+  UNREPLIED=$(gh api "repos/$REPO/pulls/$PR/comments" --paginate --slurp | AUTHOR="$AUTHOR" jq '
+    add // [] |
     [.[] | {id, user: .user.login, in_reply_to_id}] |
     [.[].in_reply_to_id // empty] as $replied |
-    [.[] | select(.user == "sentry[bot]" or .user == "Copilot") | select(.id | IN($replied[]) | not)] |
+    [.[] | select(.in_reply_to_id == null and .user != env.AUTHOR) | select(.id | IN($replied[]) | not)] |
     # NOTE: IN($replied[]) streams scalar IDs correctly in jq 1.7+.
     # For jq < 1.7, use: select([.id] | inside($replied) | not)
     length
@@ -40,9 +46,8 @@ For each PR with unreplied comments, invoke `/resolve-pr-comments <PR_NUMBER>`.
 
 Process PRs sequentially (not in parallel) to avoid branch conflicts:
 
-1. Checkout the PR branch
-2. Follow the full `/resolve-pr-comments` protocol (Step 0-5)
-3. Return to the previous branch before moving to the next PR
+1. Follow the full `/resolve-pr-comments` protocol (Step 0-5); its Step 0 works in a dedicated worktree for the PR branch
+2. Leave the checkout you started in untouched — never stash or switch it
 
 ## Step 3: Summary Report
 

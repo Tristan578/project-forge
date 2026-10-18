@@ -140,14 +140,16 @@ cd web && npx playwright test <test-file> --reporter=html
 **Symptom:** CI check for manifest sync fails
 
 ```bash
-# Check what's different
+# Check what's different (three copies: source + one per deploy root)
 diff mcp-server/manifest/commands.json web/src/data/commands.json
+diff mcp-server/manifest/commands.json apps/docs/data/commands.json
 ```
 
 **Fix:**
 ```bash
-# Copy the source to the web copy (mcp-server is the source of truth)
+# Copy the source to both copies (mcp-server is the source of truth)
 cp mcp-server/manifest/commands.json web/src/data/commands.json
+cp mcp-server/manifest/commands.json apps/docs/data/commands.json
 ```
 
 Then verify:
@@ -162,8 +164,9 @@ bash .claude/tools/validate-mcp.sh sync
 **Symptom:** CI fails with `npm ci` error about lockfile
 
 ```bash
-# Regenerate the lockfile
-cd web && npm install
+# Regenerate the single root lockfile — run from the repo root, not web/
+# (see .claude/rules/gotchas-build-ci.md → Build & CI for the platform-metadata trap)
+npm install
 git add package-lock.json
 git commit -m "fix: regenerate lockfile"
 ```
@@ -196,13 +199,13 @@ gh run view <ID> --log-failed
 
 ---
 
-## Archive of Common CI Patterns (from .claude/rules/lessons-learned.md)
+## Common CI Patterns
 
-| Pattern | PR that introduced it | Fix |
-|---------|----------------------|-----|
-| Duplicate `env:` YAML key | #6732 | Merge into single block |
-| `npm` not found in CI for vercel build | — | Use `vercel deploy` (remote build), not `vercel build --prebuilt` |
-| Artifact version mismatch (`@v3` vs `@v4`) | — | Both upload-artifact and download-artifact must use same major version |
-| `reusable-workflow` with `write` permissions | — | Must be `read: contents` |
-| `auth()` crash without Clerk | — | Use `safeAuth()` in Server Components |
-| vitest coverage hangs in CI | — | Use `--pool=threads --coverage` + `timeout 600` wrapper |
+| Pattern | Fix |
+|---------|-----|
+| Duplicate `env:` YAML key | Merge into single block |
+| `npm` not found in CI for vercel build | Use `vercel deploy` (remote build), not `vercel build --prebuilt` |
+| Artifact version mismatch (`@v3` vs `@v4`) | Both upload-artifact and download-artifact must use same major version |
+| `reusable-workflow` with `write` permissions | Must be `read: contents` |
+| `auth()` crash without Clerk | Use `safeAuth()` in Server Components |
+| vitest coverage hangs in CI | Use `--pool=threads --coverage` + `timeout 600` wrapper |

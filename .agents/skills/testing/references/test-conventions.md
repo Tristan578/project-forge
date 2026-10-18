@@ -45,39 +45,32 @@ Test files always live in `__tests__/` sibling to the source file.
 ## Store Slice Test Template
 
 ```typescript
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createSliceStore, createMockDispatch } from '@/stores/slices/sliceTestTemplate';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { createSliceStore, createMockDispatch } from '@/stores/slices/__tests__/sliceTestTemplate';
+import { createMaterialSlice, setMaterialDispatcher, type MaterialSlice } from '@/stores/slices/materialSlice';
+import type { MaterialData } from '@/stores/slices/types';
+
+let store: ReturnType<typeof createSliceStore<MaterialSlice>>;
+let dispatch: ReturnType<typeof createMockDispatch>;
+
+beforeEach(() => {
+  store = createSliceStore(createMaterialSlice);
+  dispatch = createMockDispatch();
+  setMaterialDispatcher(dispatch);
+});
 
 describe('materialSlice', () => {
-  describe('state updates', () => {
-    it('stores material data keyed by entityId', () => {
-      const store = createSliceStore();
-      const data = { color: [1, 0, 0, 1], metallic: 0.5 };
-
-      store.getState().setMaterialData('entity-1', data);
-
-      expect(store.getState().materialDataMap['entity-1']).toEqual(data);
-    });
-
-    it('overwrites existing data for same entity', () => {
-      const store = createSliceStore();
-      store.getState().setMaterialData('entity-1', { color: [1, 0, 0, 1] });
-      store.getState().setMaterialData('entity-1', { color: [0, 1, 0, 1] });
-
-      expect(store.getState().materialDataMap['entity-1'].color).toEqual([0, 1, 0, 1]);
-    });
+  it('stores the primary material', () => {
+    const material = { metallic: 0.5 } as MaterialData;
+    store.getState().setPrimaryMaterial(material);
+    expect(store.getState().primaryMaterial).toEqual(material);
   });
 
-  describe('command dispatch', () => {
-    it('dispatches set_material with correct payload', () => {
-      const { store, dispatch } = createMockDispatch();
-
-      store.getState().applyMaterial('entity-1', { metallic: 0.8 });
-
-      expect(dispatch).toHaveBeenCalledWith('set_material', {
-        entityId: 'entity-1',
-        metallic: 0.8,
-      });
+  it('dispatches update_material with the entity id and fields', () => {
+    store.getState().updateMaterial('entity-1', { metallic: 0.8 } as MaterialData);
+    expect(dispatch).toHaveBeenCalledWith('update_material', {
+      entityId: 'entity-1',
+      metallic: 0.8,
     });
   });
 });
@@ -115,31 +108,32 @@ describe('scriptWorker', () => {
 ## Chat Handler Test Pattern
 
 ```typescript
-import { describe, it, expect, vi } from 'vitest';
-import { handlers } from '@/lib/chat/handlers/materialHandlers';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { materialHandlers } from '@/lib/chat/handlers/materialHandlers';
 
 describe('materialHandlers', () => {
-  const mockDispatch = vi.fn();
-  const mockContext = { store: {} as never, dispatchCommand: mockDispatch };
+  // update_material writes through the store action, which dispatches to the engine
+  const updateMaterial = vi.fn();
+  const mockContext = {
+    store: { primaryMaterial: null, updateMaterial } as never,
+    dispatchCommand: vi.fn(),
+  };
 
-  beforeEach(() => { mockDispatch.mockClear(); });
+  beforeEach(() => { updateMaterial.mockClear(); });
 
   it('returns error when entityId is missing', async () => {
-    const result = await handlers['set_material']({}, mockContext);
+    const result = await materialHandlers['update_material']({}, mockContext);
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/entityId/i);
   });
 
-  it('dispatches set_material with metallic value', async () => {
-    const result = await handlers['set_material'](
+  it('applies the metallic value to the entity', async () => {
+    const result = await materialHandlers['update_material'](
       { entityId: 'e1', metallic: 0.5 },
       mockContext,
     );
     expect(result.success).toBe(true);
-    expect(mockDispatch).toHaveBeenCalledWith('set_material', {
-      entityId: 'e1',
-      metallic: 0.5,
-    });
+    expect(updateMaterial).toHaveBeenCalledWith('e1', expect.objectContaining({ metallic: 0.5 }));
   });
 });
 ```

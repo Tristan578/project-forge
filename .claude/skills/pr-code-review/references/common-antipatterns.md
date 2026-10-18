@@ -98,7 +98,7 @@ const { userId } = auth(); // crashes in CI
 **Fix:**
 ```ts
 import { safeAuth } from '@/lib/auth/safe-auth';
-const { userId } = safeAuth(); // returns { userId: null } if Clerk not configured
+const { userId } = await safeAuth(); // async; returns { userId: null } if Clerk not configured
 ```
 
 ---

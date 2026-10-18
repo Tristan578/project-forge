@@ -95,8 +95,9 @@ readonly -f fail
 # rather than parameterised — they are constant for essentially every fixture, and
 # mk's positional list is already 26 long. Flip them with a jq post-filter (see the
 # docs-internal-gate and quality-gates cases) instead of adding a 27th arg.
-# `command-parity`, `build-nextjs`, `test-e2e-ui`, `test-e2e-api` and `test-e2e-auth` are hardcoded to success for
-# the same reason and overridden with jq in the #9437 cases at the end.
+# `command-parity`, `build-nextjs`, `test-e2e-ui`, `test-e2e-api`, `test-e2e-auth` and
+# `test-e2e-engine-journeys` are hardcoded to success for the same reason and overridden
+# with jq in the #9437 cases at the end and in the 47a-47e engine-journeys cases.
 mk() {
   local nci="$1" ndeps="$2" ls="$3" lst="$4" qg="${5:-success}" ht="${6:-success}" nagentic="${7:-true}" as="${8:-success}" nonboarding="${9:-true}" tog="${10:-success}" ncodex="${11:-true}" ccg="${12:-success}" nghaw="${13:-true}" glr="${14:-success}" nhooks="${15:-false}" te2ej="${16:-success}" nweb="${17:-false}" nskills="${18:-false}" sl="${19:-success}" napi="${20:-false}" ors="${21:-success}" apc="${22:-success}" te2es="${23:-success}" nengine="${24:-false}" dig="${25:-success}" ndesign="${26:-false}" bvt="${27:-success}" pp="${28:-success}" alr="${29:-success}"
   jq -nc \
@@ -133,6 +134,10 @@ mk() {
       "test-e2e-auth":        { result: "success" },
       "test-e2e-journey":     { result: $te2ej },
       "test-e2e-engine-smoke": { result: $te2es },
+      # The DB-backed journeys gate (#10161) shares both arms of the smoke
+      # gate; constant success here, flipped with jq in cases 47a-47e. (No
+      # apostrophe in this comment: it sits inside a single-quoted jq program.)
+      "test-e2e-engine-journeys": { result: "success" },
       # Unconditional jobs. They have no ci-gate trigger, so every fixture
       # carries them as success and the dedicated cases below flip them —
       # otherwise `check_unconditional` would fire on every fixture and the
@@ -652,6 +657,62 @@ res="$(run_verify "$(mk true true success success success success true success t
 rc="${res%%|*}"; out="${res#*|}"
 if [ "$rc" = "1" ]; then pass "engine-smoke failure fails (exit 1)"; else fail "engine-smoke failure should exit 1, got $rc"; fi
 if echo "$out" | grep -q "test-e2e-engine-smoke"; then pass "the failing engine-smoke gate is named"; else fail "failing engine-smoke gate not named"; fi
+
+# --- 47a. TAMPER: test-e2e-engine-journeys skipped while needs-web=true → exit 1
+# The engine-journeys gate (#10161) is self-defending: it is the ONLY per-PR job
+# that serves the app against a database — one created for that run, migrated
+# with the real db:migrate and drift-checked with the real db:drift — so it is
+# the only place the account journeys of #9723 can run. It shares the smoke
+# gate's `if:` (`needs-web || needs-engine`). mk hardcodes it to success, so
+# these cases use the jq post-filter idiom of the #9437 cases. Every other
+# needs-web gate runs+succeeds here, so the skipped journeys job is the SOLE
+# tamper.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."test-e2e-engine-journeys".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys skipped while needs-web=true fails (exit 1)"; else fail "tamper (engine-journeys via web arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -qi "unwiring"; then pass "engine-journeys tamper is flagged as a possible unwiring"; else fail "engine-journeys tamper message missing"; fi
+if echo "$out" | grep -q "test-e2e-engine-journeys ("; then pass "the unwired engine-journeys gate is named (web arm)"; else fail "unwired engine-journeys gate not named (web arm)"; fi
+
+# --- 47b. TAMPER via the needs-engine arm in ISOLATION: engine-journeys skipped
+#         while ONLY needs-engine=true (needs-web=false) → exit 1.
+# An engine-only PR changes what the journeys serve (the WASM the smoke gate
+# hands over), so the needs-engine arm must be independently load-bearing, as
+# it is for the smoke gate. needs-web stays false (mk's default), so no other
+# gate can raise a competing tamper: the journeys job is the SOLE one.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-engine" = "true" | ."test-e2e-engine-journeys".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys skipped while ONLY needs-engine=true fails (exit 1)"; else fail "tamper (engine-journeys via engine arm) should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-engine-journeys ("; then pass "the unwired engine-journeys gate is named (engine arm)"; else fail "unwired engine-journeys gate not named (engine arm)"; fi
+
+# --- 47c. engine-journeys legit-skips (needs-web=false AND needs-engine=false) → 0
+# A PR touching neither web/ nor engine/ legitimately skips the journeys gate;
+# that must NOT trip the anti-tamper check (neither arm false-positives on an
+# unrelated PR).
+needs="$(mk true true success success success | jq -c '."test-e2e-engine-journeys".result = "skipped"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "0" ]; then pass "engine-journeys legit-skip (web+engine false) passes (exit 0)"; else fail "engine-journeys legit skip should exit 0, got $rc"; fi
+if echo "$out" | grep -q "All required gates passed"; then pass "engine-journeys legit-skip prints the all-passed line"; else fail "engine-journeys legit-skip all-passed line missing"; fi
+
+# --- 47d. engine-journeys FAILED while triggered → exit 1 (hard-failure path) ---
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-web" = "true" | ."test-e2e-engine-journeys".result = "failure"')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys failure fails (exit 1)"; else fail "engine-journeys failure should exit 1, got $rc"; fi
+if echo "$out" | grep -q "test-e2e-engine-journeys"; then pass "the failing engine-journeys gate is named"; else fail "failing engine-journeys gate not named"; fi
+
+# --- 47e. engine-journeys ABSENT from needs while triggered → exit 1 ------------
+# The other one-line unwiring: dropping `- test-e2e-engine-journeys` from
+# ci-success's `needs:` list. Valid YAML, the job still runs, the aggregate
+# stops observing it. `.result // "absent"` reads that as absent != success →
+# tamper, but ONLY for jobs the map lists — which is what the entry buys.
+needs="$(mk true true success success success | jq -c '."ci-gate".outputs."needs-engine" = "true" | del(."test-e2e-engine-journeys")')"
+res="$(run_verify "$needs")"
+rc="${res%%|*}"; out="${res#*|}"
+if [ "$rc" = "1" ]; then pass "engine-journeys absent from needs while triggered fails (exit 1)"; else fail "absent engine-journeys should exit 1, got $rc"; fi
+if echo "$out" | grep -q "result=absent"; then pass "the absent engine-journeys job reports result=absent"; else fail "engine-journeys result=absent missing"; fi
 
 # --- 48. TAMPER: design-internal-gate skipped while needs-design=true → exit 1 --
 # The design gate (PF-1003) is the ONLY per-PR job that runs the @spawnforge/ui
@@ -1409,12 +1470,17 @@ RUNS
   else
     fail "verifier anti-tamper map lost its test-e2e-auth/needs-web entry — the only per-PR sign-in against a real Clerk instance stops being observed"
   fi
+  if [ "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -Ec 'check_triggered "test-e2e-engine-journeys"[[:space:]]+"needs-web"[[:space:]]+"needs-engine"')" -ge 1 ]; then
+    pass "verifier anti-tamper map covers test-e2e-engine-journeys <-> needs-web + needs-engine (both if: arms)"
+  else
+    fail "verifier anti-tamper map lost its test-e2e-engine-journeys entry, or stopped naming BOTH arms of its if: (needs-web, needs-engine) — the only per-PR job that serves the app against a database could be skipped with every required gate green (#10161)"
+  fi
   # And pin the real `if:` each new entry is paired with, matching the
   # quality-gates caller pin below: a map entry paired with a trigger that no
   # longer gates the job is decorative. Whole expression, on the `if:` line only,
   # comments stripped — so `!= 'true'` inversion and trailing-comment survival
   # both fail (the three vectors documented at the quality-gates pin).
-  for pair in "observatory-tests:needs-observatory:needs-ci:needs-deps" "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web" "test-e2e-api:needs-web" "test-e2e-auth:needs-web"; do
+  for pair in "observatory-tests:needs-observatory:needs-ci:needs-deps" "command-parity:needs-web:needs-mcp" "build-nextjs:needs-web" "test-e2e-ui:needs-web" "test-e2e-api:needs-web" "test-e2e-auth:needs-web" "test-e2e-engine-journeys:needs-web:needs-engine"; do
     pj="${pair%%:*}"; ptrigs="${pair#*:}"
     pblk="$(awk -v j="  $pj:" '$0==j{f=1} f{print} f && /^  ["'"'"']?[A-Za-z_][A-Za-z0-9_-]*["'"'"']?[[:space:]]*:/ && $0!=j{exit}' "$CI_YML")"
     pif="$(grep -v '^[[:space:]]*#' <<<"$pblk" | sed 's/#.*$//' | grep -E '^    ["'"'"']?if["'"'"']?[[:space:]]*:')"

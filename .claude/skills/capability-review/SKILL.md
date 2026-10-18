@@ -46,22 +46,22 @@ Grouped by the domains the user cares about. This is the **opportunity** lens, n
 ### Analytics & Product Intelligence
 | Provider | We use (verify with script) | Look for (verify by date) |
 |----------|-----------------------------|---------------------------|
-| **PostHog** (`posthog-js`) | event capture | Session replay, feature flags, experiments/A-B, surveys, web analytics, **LLM observability** (`$ai_generation`), error tracking, cohorts, data warehouse, group analytics |
+| **PostHog** (`posthog-js`) | event capture, local flag evaluator (`deep-generation-tier`, provider kill switches) | Session replay, experiments/A-B, surveys, web analytics, **LLM observability** (`$ai_generation`), error tracking, cohorts, data warehouse, group analytics |
 | **Vercel Analytics / Speed Insights** | ? | `@vercel/analytics`, `@vercel/speed-insights`, Web Vitals attribution |
 
 ### Monitoring, Observability & Agent Tracking
 | Provider | We use | Look for |
 |----------|--------|----------|
-| **Sentry** (`@sentry/nextjs`) | error capture, tracing | Performance/tracing depth, **profiling**, **cron monitors**, **uptime monitoring**, **Seer (AI root-cause / AI code review)**, **logs**, session replay, **AI Agent Monitoring / LLM spans**, release health, user feedback |
+| **Sentry** (`@sentry/nextjs`) | error capture, tracing, profiling (Node + browser), structured logs, generation metrics, user-feedback widget | Performance/tracing depth, **cron monitors**, **uptime monitoring**, **Seer (AI root-cause / AI code review)**, session replay, **AI Agent Monitoring / LLM spans**, release health |
 | **PostHog LLM analytics** | ? | Per-generation cost/latency/token dashboards, trace view for the AI chat + generate routes |
 | **Vercel Observability** | ? | Runtime logs, OpenTelemetry export, Vercel Agent (AI reviews / prod investigations, beta) |
 
 ### Infrastructure & Platform
 | Provider | We use | Look for |
 |----------|--------|----------|
-| **Vercel** | Functions, crons, preview deploys, typed `vercel.ts` config | Fluid Compute tuning, **Queues** (beta), **Sandbox**, **AI Gateway**, **BotID**, **Rolling Releases**, ISR, image optimization, edge config |
+| **Vercel** | Functions, crons, preview deploys, typed `vercel.ts` config, BotID (basic) | Fluid Compute tuning, **Queues** (beta), **Sandbox**, **AI Gateway**, BotID Deep Analysis, **Rolling Releases**, ISR, image optimization, edge config |
 | **Cloudflare** | R2 (engine + assets), `engine-cdn` Worker | Workers AI, Vectorize, D1, Hyperdrive, Queues, Images, Cache Reserve, R2 event notifications |
-| **Upstash** | Redis (rate limiting) | **QStash** (durable queues/schedules), **Workflow**, **Vector**, **Search**, daily backups |
+| **Upstash** | Redis (rate limiting), QStash (generation callbacks) | QStash schedules, **Workflow**, **Vector**, **Search**, daily backups |
 | **Neon** | Postgres + Drizzle | DB **branching** for preview envs, autoscaling, read replicas, **Data API**, Neon Auth, scheduled backups |
 
 ### AI / Generation Stack
@@ -73,8 +73,8 @@ Grouped by the domains the user cares about. This is the **opportunity** lens, n
 ### Payments, Auth & Compliance
 | Provider | We use | Look for |
 |----------|--------|----------|
-| **Stripe** (`stripe`) | Checkout, subscriptions (4 tiers), webhooks, refunds | **Billing meters / usage-based**, Tax, Radar (fraud), customer portal features, adaptive pricing, entitlements API |
-| **Clerk** (`@clerk/nextjs`) | auth, sign-in/up | Organizations/B2B, MFA, passkeys, bot protection, billing integration, new `Appearance` API (note: 7.5.x drops `baseTheme`) |
+| **Stripe** (`stripe`) | Checkout, subscriptions (4 tiers), webhooks, refunds, `generation_tokens` billing meter | Usage-based pricing on the meter, Tax, Radar (fraud), customer portal features, adaptive pricing, entitlements API |
+| **Clerk** (`@clerk/nextjs`) | auth, sign-in/up | Organizations/B2B, MFA, passkeys, bot protection, billing integration |
 
 > When the user is working in a specific domain, you may scope the review to that group rather than all of them.
 
@@ -155,7 +155,7 @@ For each selected opportunity, write a ticket the team could pick up and build *
 
 1. **Locate the integration point in our current architecture.** Use `.claude/rules/file-map.md`, the `scan-usage.sh` fingerprint, and a quick `Grep`/`Read` of the relevant code to find exactly where this wires in (e.g. Sentry → `web/sentry.server.config.ts` + `web/instrumentation-client.ts`; an LLM-observability hook → `createGenerationHandler` / the `/api/chat` route; a queue → wherever we currently poll). Name the real files and functions.
 2. **Map the developer-doc steps (Step 4b) onto those files.** Translate the provider's documented setup into "add X to file A, wire B in route C," including the env var / dashboard toggle / package install prerequisites.
-3. **Flag any conflict with current constraints** — a required SDK bump that hits a pin or a blocked upgrade (e.g. `@clerk/nextjs` 7.5.x `baseTheme`), a feature needing a plan change, or a gate it would trip.
+3. **Flag any conflict with current constraints** — a required SDK bump that hits a pin or a blocked upgrade (see `changelog-review/references/version-pins.md`), a feature needing a plan change, or a gate it would trip.
 
 Each ticket then contains: the capability + why; the **dated source URLs** (changelog, pricing, **dev docs**); the **provider cost**; the effort estimate; the **concrete file/route touch-list** from step 1–2; prerequisites; and testable acceptance criteria (including the regression/coverage expectation per our test policy). File it on the taskboard (per `.claude/rules/agent-operations.md` — `projectId` Forge `01KMM9ZA6SBZ7RKJZJTZS9VR4R`, a `teamId`; never `move_ticket` from this skill), then `python3 .claude/hooks/github_project_sync.py push` and open the GitHub issue. Do not create tickets for anything the user did not pick, and do not start implementing — the ticket is the deliverable.
 
@@ -172,7 +172,7 @@ Mirrors `changelog-review`'s `.changelog-last-review` timestamp so a future Sess
 - **Recommend, never enact.** No installs, no plan changes, no enabling paid features. Surface and ask. The user decides.
 - **Tickets must be buildable today.** Every implementation ticket cites the provider's current **developer docs** and names the actual files/routes in our architecture where the feature wires in (Step 4b + Step 7). A ticket that says "adopt X" without the integration touch-list is incomplete. Stop at the ticket — do not implement.
 - **Adoption gaps count.** A GA feature we've never wired (not just this month's release) is a legitimate, often higher-ROI opportunity than the newest beta.
-- **Respect existing pins & constraints.** Don't propose an "opportunity" that requires breaking a documented pin (e.g. `wasm-bindgen =0.2.127`) or a blocked upgrade (e.g. `@clerk/nextjs` 7.5.x `baseTheme` removal) without flagging it as blocked and pointing at the migration work.
+- **Respect existing pins & constraints.** Don't propose an "opportunity" that requires breaking a documented pin (e.g. `wasm-bindgen =0.2.127`) or a blocked upgrade listed in `changelog-review/references/version-pins.md` without flagging it as blocked and pointing at the migration work.
 - **No attribution / no AI-tool mentions** in any ticket, issue, or doc this skill produces (per repo policy).
 - **Scope to the user's intent.** If they ask only about observability, review that domain — don't dump all ten providers.
 

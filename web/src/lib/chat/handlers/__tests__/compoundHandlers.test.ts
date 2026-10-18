@@ -6,6 +6,7 @@ import { createMockStore } from './handlerTestUtils';
 import { compoundHandlers } from '../compoundHandlers';
 import { generationHandlers } from '../generationHandlers';
 import type { ToolCallContext, ExecutionResult } from '../types';
+import { EngineDispatchThrewError, ENGINE_THREW_RELOAD_GUIDANCE } from '@/lib/scenes/engineDispatchThrew';
 
 // Capture jobs registered by the REAL generate_texture handler so the compound
 // flow can be exercised end-to-end against the handler that actually consumes
@@ -404,7 +405,68 @@ describe('create_scene_from_description', () => {
       });
 
       expect(result.success).toBe(false);
+      expect(result.error).toBe('The engine did not accept a new scene. The existing scene was not cleared, so nothing was created.');
       expect(store.newScene).toHaveBeenCalled();
+      expect(spawnEntity).not.toHaveBeenCalled();
+    });
+
+    // #10202 review, round 2: the store also answers `false` when IT refused
+    // — browser storage would not clear the prefab-instance registry before
+    // the dispatch — so the model must not be told the engine did.
+    it('names browser storage, not the engine, when the registry could not be cleared before the dispatch', async () => {
+      const spawnEntity = vi.fn(() => 'spawned-1');
+      const { result } = await invoke('create_scene_from_description', {
+        entities: [{ type: 'cube', name: 'Box' }],
+        clearExisting: true,
+      }, {
+        newScene: vi.fn(() => false),
+        newSceneRefusal: vi.fn(() => 'registry_not_cleared'),
+        spawnEntity,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('the browser refused to update its local storage (the prefab-instance registry), so the engine was never asked.');
+      expect(result.error).toContain('nothing was created.');
+      expect(result.error).not.toContain('engine did not accept');
+      expect(spawnEntity).not.toHaveBeenCalled();
+    });
+
+    // #10202: `newScene()` re-raises a dispatch the engine threw on, after
+    // locking saving (#10079). The handler must stop before spawning anything
+    // onto a viewport that may be half-cleared, and tell the user to reload
+    // rather than let the executor's generic catch relay the raw engine text.
+    it('fails without spawning and tells the user to reload when clearing the scene throws the engine error', async () => {
+      const spawnEntity = vi.fn(() => 'spawned-1');
+      const { result, store } = await invoke('create_scene_from_description', {
+        entities: [{ type: 'cube', name: 'Box' }],
+        clearExisting: true,
+      }, {
+        newScene: vi.fn(() => { throw new EngineDispatchThrewError('new_scene', 'engine unreachable'); }),
+        spawnEntity,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(ENGINE_THREW_RELOAD_GUIDANCE);
+      expect(result.error).toContain('engine unreachable');
+      expect(result.error).toContain('Nothing was created.');
+      expect(store.newScene).toHaveBeenCalled();
+      expect(spawnEntity).not.toHaveBeenCalled();
+    });
+
+    // #10202 review, M3: a plain throw out of `newScene` (a storage write
+    // refused under quota) set no lockout, so this catch must not claim one.
+    // It rethrows — still before spawning anything — and the executor's
+    // generic catch reports the plain message.
+    it('rethrows a non-engine throw without spawning and without claiming a lockout', async () => {
+      const spawnEntity = vi.fn(() => 'spawned-1');
+      await expect(invoke('create_scene_from_description', {
+        entities: [{ type: 'cube', name: 'Box' }],
+        clearExisting: true,
+      }, {
+        newScene: vi.fn(() => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); }),
+        spawnEntity,
+      })).rejects.toThrow('Quota exceeded');
+
       expect(spawnEntity).not.toHaveBeenCalled();
     });
 

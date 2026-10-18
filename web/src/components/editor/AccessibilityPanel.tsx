@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { ScanSearch, Wand2, ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
+import { EDITOR_CANVAS_ID } from '@/lib/engine/canvasId';
 import {
   analyzeAccessibility,
   generateAccessibilityProfile,
@@ -397,7 +398,7 @@ const COLORBLIND_PARAMS: Record<ColorblindType, { saturate: number; hueRotate: n
 };
 
 function applyColorblindFilter(mode: ColorblindType | null, strength: number): void {
-  const canvas = document.getElementById('game-canvas');
+  const canvas = document.getElementById(EDITOR_CANVAS_ID);
   if (!canvas) return;
 
   if (!mode || strength <= 0) {

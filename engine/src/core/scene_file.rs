@@ -14,6 +14,7 @@ use super::environment::EnvironmentSettings;
 use super::history::EntitySnapshot;
 use super::input::InputMap;
 use super::post_processing::PostProcessingSettings;
+use super::project_type::ProjectType;
 
 /// Maximum serialized scene size accepted by both preflight and load.
 pub const MAX_SCENE_JSON_BYTES: usize = 50 * 1024 * 1024;
@@ -57,7 +58,7 @@ pub struct SceneFile {
     pub custom_wgsl_source: Option<CustomWgslSource>,
 }
 
-/// Scene metadata (name, timestamps).
+/// Scene metadata (name, timestamps, project dimension).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneMetadata {
@@ -66,6 +67,32 @@ pub struct SceneMetadata {
     pub created_at: String,
     #[serde(default)]
     pub modified_at: String,
+    /// The project's dimension, `"2d"` or `"3d"` (#10227).
+    ///
+    /// Written from the engine's `ProjectType` resource on export — always
+    /// `Some` — and queued back into it on load, so the 2D camera a 2D game's
+    /// sprites render through comes back with the scene — through save,
+    /// publication snapshots, the R2 bundle, remix, fork and export alike.
+    /// Before this field the resource was set only by the live
+    /// `set_project_type` command, and a reopened or published 2D game started
+    /// in the default 3D mode with nothing visible.
+    ///
+    /// `None` is a file that states no dimension: every scene saved before
+    /// the field existed, at any `format_version`, and any producer that left
+    /// the key out. The loader passes `None` through and the drain leaves the
+    /// live resource alone (`ProjectType::apply_request`), so such a scene
+    /// INHERITS the session's dimension — switching to it in a 2D project
+    /// keeps 2D — while a fresh engine, which starts at 3D, opens it as 3D. It
+    /// is never read as `Some(ThreeD)`: that flipped a 2D session to 3D on
+    /// every legacy load (a second scene, a pre-#10227 save, a legacy import,
+    /// an auto-save recovery), which is the regression the review board found
+    /// on #10358. No `format_version` bump, for the same reason
+    /// `completionMode` has none — a bump is refused by every engine already
+    /// deployed, and an optional key's absence IS the legacy case.
+    /// `skip_serializing_if` keeps absence as absence on the way out, never an
+    /// explicit `null` (which reads back as `None` too).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_type: Option<ProjectType>,
 }
 
 /// Serializable representation of Bevy's AmbientLight.
@@ -104,8 +131,15 @@ impl Default for SceneName {
 // ---------------------------------------------------------------------------
 
 /// Build a `SceneFile` from pre-collected data.
+///
+/// `project_type` is the engine's live `ProjectType` resource: the export
+/// system passes it so the file records the dimension the scene was authored
+/// in (#10227), never a default. It is always written as `Some` — the engine
+/// can state its dimension, so it does; `None` in a file means a producer
+/// that could not (see `SceneMetadata::project_type`).
 pub fn build_scene_file(
     scene_name: &str,
+    project_type: ProjectType,
     env: &EnvironmentSettings,
     ambient: &GlobalAmbientLight,
     input_map: &InputMap,
@@ -122,6 +156,7 @@ pub fn build_scene_file(
             name: scene_name.to_string(),
             created_at: String::new(),
             modified_at: String::new(),
+            project_type: Some(project_type),
         },
         environment: env.clone(),
         ambient_light: AmbientLightData {
@@ -221,6 +256,7 @@ pub fn parse_scene_file(json: &str) -> Result<SceneFile, String> {
 pub(crate) fn test_scene_json() -> String {
     serde_json::to_string(&build_scene_file(
         "Recovery",
+        ProjectType::default(),
         &EnvironmentSettings::default(),
         &GlobalAmbientLight::default(),
         &InputMap::default(),
@@ -345,6 +381,7 @@ mod validation_tests {
             snapshot.material_data = Some(material);
             build_scene_file(
                 "Recovery",
+                ProjectType::default(),
                 &EnvironmentSettings::default(),
                 &GlobalAmbientLight::default(),
                 &InputMap::default(),
@@ -483,6 +520,7 @@ mod validation_tests {
             snapshot.material_data = Some(material);
             build_scene_file(
                 "Recovery",
+                ProjectType::default(),
                 &EnvironmentSettings::default(),
                 &GlobalAmbientLight::default(),
                 &InputMap::default(),
@@ -602,6 +640,7 @@ mod validation_tests {
 
             let scene_file = build_scene_file(
                 "Recovery",
+                ProjectType::default(),
                 &EnvironmentSettings::default(),
                 &GlobalAmbientLight::default(),
                 &InputMap::default(),
@@ -693,6 +732,7 @@ mod animation_round_trip_tests {
         // Save: the same builder and serializer the export path uses.
         let json = serde_json::to_string(&build_scene_file(
             "Animated",
+            ProjectType::default(),
             &EnvironmentSettings::default(),
             &GlobalAmbientLight::default(),
             &InputMap::default(),
@@ -802,5 +842,389 @@ mod animation_round_trip_tests {
         let mut transform = Transform::default();
         probe.sample(&mut transform, None, None);
         assert!((transform.translation.y - 7.5).abs() < 1e-5, "{}", transform.translation.y);
+    }
+}
+
+/// #10227: the project's dimension (`ProjectType`) lives in the scene file, in
+/// `metadata.projectType`, so it rides every path a scene takes — save,
+/// publication snapshot, R2 bundle, remix, fork and export — and `load_scene`
+/// restores it. Before this the resource was set only by the live
+/// `set_project_type` command, so a 2D game reopened or published came back in
+/// the engine's default 3D mode with no 2D camera and invisible sprites.
+///
+/// The field is ABSENT-AWARE (review board round 1 on #10358). `None` — a
+/// scene saved before the field existed, a second scene created by an older
+/// editor, a legacy import, an auto-save recovery — leaves the engine's
+/// `ProjectType` resource alone, so a key-less scene inherits the session's
+/// dimension instead of flipping a 2D project to 3D; a fresh engine starts at
+/// 3D, which is how a cold open of such a scene still comes up 3D. `Some`
+/// applies the stated type. The export always writes `Some(current)`.
+#[cfg(test)]
+mod project_type_persistence_tests {
+    use super::*;
+
+    fn scene_json(project_type: ProjectType) -> String {
+        serde_json::to_string(&build_scene_file(
+            "Dimension",
+            project_type,
+            &EnvironmentSettings::default(),
+            &GlobalAmbientLight::default(),
+            &InputMap::default(),
+            HashMap::new(),
+            &PostProcessingSettings::default(),
+            &AudioBusConfig::default(),
+            Vec::new(),
+            None,
+            None,
+        ))
+        .expect("serialize scene")
+    }
+
+    #[test]
+    fn build_scene_file_writes_the_live_type_into_metadata_and_load_reads_it_back() {
+        for (project_type, spelling) in [(ProjectType::TwoD, "2d"), (ProjectType::ThreeD, "3d")] {
+            let json = scene_json(project_type);
+            // The TEXT, not just the parsed value: the web exporters and the
+            // `/play` page read this key straight out of the JSON.
+            assert!(
+                json.contains(&format!("\"projectType\":\"{spelling}\"")),
+                "{json}"
+            );
+            let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(value["metadata"]["projectType"], spelling, "it lives under metadata");
+            let parsed = parse_scene_file(&json).expect("a scene with a project type must load");
+            // `Some`, always: the export states the type, so a reopen APPLIES
+            // it rather than inheriting whatever the session happens to be in.
+            assert_eq!(parsed.metadata.project_type, Some(project_type));
+        }
+    }
+
+    #[test]
+    fn a_scene_saved_before_the_field_existed_carries_no_type_and_inherits_the_session() {
+        // Every `.forge` file, publication snapshot and R2 bundle written
+        // before #10227 — the key is simply absent, at every supported
+        // formatVersion. Spelled by REMOVING the key from a real export rather
+        // than hand-writing a file, so the fixture cannot drift from the format.
+        //
+        // `None`, NOT `Some(ThreeD)`: the loader passes it through and the
+        // drain leaves the live resource alone (`ProjectType::apply_request`),
+        // so a 2D session that opens this scene stays 2D. Only a fresh engine,
+        // which starts at `ProjectType::default()` (3D), comes up 3D with it.
+        // Reading absence as `Some(ThreeD)` is what flipped a 2D project to 3D
+        // on every legacy load — the review board's major on #10358.
+        for version in 1..=3 {
+            let mut value: serde_json::Value = serde_json::from_str(&scene_json(ProjectType::TwoD)).unwrap();
+            value["formatVersion"] = version.into();
+            assert!(
+                value["metadata"].as_object_mut().unwrap().remove("projectType").is_some(),
+                "the fixture must have carried the key for its removal to mean anything"
+            );
+            let parsed = parse_scene_file(&value.to_string())
+                .unwrap_or_else(|e| panic!("a legacy scene at version {version} must still load: {e}"));
+            assert_eq!(parsed.metadata.project_type, None, "version {version}");
+            // What the drain does with it, against each session the scene can
+            // be opened in — the same call `apply_project_type_changes` makes.
+            assert_eq!(
+                ProjectType::TwoD.apply_request(parsed.metadata.project_type),
+                (ProjectType::TwoD, false),
+                "version {version}: a 2D session keeps 2D"
+            );
+            assert_eq!(
+                ProjectType::default().apply_request(parsed.metadata.project_type),
+                (ProjectType::ThreeD, false),
+                "version {version}: a fresh engine stays at its 3D default"
+            );
+        }
+    }
+
+    #[test]
+    fn an_explicit_null_reads_as_absent() {
+        // No writer emits `null`, but a hand-edited file or a JS producer
+        // could. Option semantics: it is the absence of a statement, not a
+        // malformed one, so it inherits like a missing key.
+        let json = scene_json(ProjectType::TwoD).replace("\"projectType\":\"2d\"", "\"projectType\":null");
+        assert!(json.contains("\"projectType\":null"), "replacement must have happened: {json}");
+        assert_eq!(parse_scene_file(&json).expect("null is absence").metadata.project_type, None);
+    }
+
+    #[test]
+    fn a_metadata_with_no_type_serializes_without_the_key() {
+        // `skip_serializing_if`: `None` round-trips as ABSENCE, never as an
+        // explicit `null`, so what a producer cannot state it does not write.
+        // The export path never builds this (`build_scene_file` always writes
+        // `Some`); this pins the wire shape for every other producer.
+        let mut scene_file = parse_scene_file(&scene_json(ProjectType::TwoD)).unwrap();
+        scene_file.metadata.project_type = None;
+        let json = serde_json::to_string(&scene_file).unwrap();
+        assert!(!json.contains("projectType"), "{json}");
+        assert_eq!(parse_scene_file(&json).unwrap().metadata.project_type, None);
+    }
+
+    #[test]
+    fn the_field_needs_no_format_version_bump() {
+        // An optional key, like `completionMode`: every engine binary already
+        // deployed refuses a formatVersion outside 1..=3, so a bump would make
+        // new saves unreadable until a WASM rebuild shipped. The key is
+        // accepted at every supported version instead.
+        for version in 1..=3 {
+            let mut value: serde_json::Value = serde_json::from_str(&scene_json(ProjectType::TwoD)).unwrap();
+            value["formatVersion"] = version.into();
+            let parsed = parse_scene_file(&value.to_string()).unwrap();
+            assert_eq!(parsed.metadata.project_type, Some(ProjectType::TwoD), "version {version}");
+        }
+        let current: serde_json::Value = serde_json::from_str(&scene_json(ProjectType::TwoD)).unwrap();
+        assert_eq!(current["formatVersion"], 3, "the writer still emits version 3");
+    }
+
+    #[test]
+    fn a_value_outside_the_vocabulary_refuses_the_whole_scene() {
+        // Scene JSON crosses the remix / published-play trust boundary. An
+        // unknown dimension is malformed input, refused with serde's own text
+        // naming the key and the accepted spellings — the same strictness every
+        // other enum in the file (entityType, anchor, …) already has. `null` is
+        // not in this list: it is absence (`an_explicit_null_reads_as_absent`).
+        for bad in ["\"4d\"", "\"2D\"", "\"TwoD\"", "2", "true", "{}", "[]"] {
+            let json = scene_json(ProjectType::TwoD).replace("\"projectType\":\"2d\"", &format!("\"projectType\":{bad}"));
+            assert!(json.contains(&format!("\"projectType\":{bad}")), "replacement must have happened: {json}");
+            let error = parse_scene_file(&json).expect_err(&format!("projectType {bad} must be refused"));
+            assert!(error.starts_with("Invalid scene file:"), "{error}");
+        }
+    }
+
+    // --- Bridge wiring pins -------------------------------------------------
+    //
+    // The bridge is wasm32-only and cannot be reached by native `cargo test`
+    // (`lib.rs` gates the module), so the systems that make the field DO
+    // anything are pinned textually, the way `pending/query.rs` pins its
+    // deferred-query systems. The RULE itself (`ProjectType::apply_request`)
+    // is pure and unit-tested in `project_type.rs`; these pins hold the drain
+    // to calling it and to reporting the result once per request. Each pin
+    // demands an EXECUTABLE occurrence — a line that is not a comment — inside
+    // the one block that must carry it (lessons-learned #16), and fails closed
+    // when it cannot find the function or the block.
+
+    const BRIDGE_SCENE_IO: &str = include_str!("../bridge/scene_io.rs");
+    const BRIDGE_SPRITE: &str = include_str!("../bridge/sprite.rs");
+    const BRIDGE_EVENTS: &str = include_str!("../bridge/events.rs");
+    const BRIDGE_MOD: &str = include_str!("../bridge/mod.rs");
+
+    /// The body of `fn <name>(`, from its signature to the first `}` at column
+    /// zero. Panics when the function is not there: a renamed system must fail
+    /// this suite, not pass it vacuously.
+    ///
+    /// The delimiter is rustfmt's: a function's closing brace is the only `}`
+    /// at column 0, so the first `"\n}\n"` after the signature ends the
+    /// function. A file that is not rustfmt-clean could put a `}` at column 0
+    /// INSIDE a function, and the extract would then stop early and inspect a
+    /// fragment — so the braces of the extract are counted over its executable
+    /// lines and must balance, which a premature cut cannot satisfy. String
+    /// literals are not parsed: a brace-bearing literal inside one of the
+    /// pinned functions would have to be balanced too, and none of them has
+    /// one today (`format!`-style `{}` pairs are balanced by construction).
+    fn fn_body<'a>(source: &'a str, file: &str, name: &str) -> &'a str {
+        let needle = format!("fn {name}(");
+        let start = source
+            .find(&needle)
+            .unwrap_or_else(|| panic!("{needle} not found in {file}"));
+        let rest = &source[start..];
+        let end = rest
+            .match_indices("\n}\n")
+            .next()
+            .map(|(i, _)| i + 3)
+            .unwrap_or_else(|| panic!("could not delimit {needle} in {file}"));
+        let body = &rest[..end];
+        let (open, close) = brace_counts(body);
+        assert_eq!(
+            open, close,
+            "{needle} in {file}: the extract has {open} opening and {close} closing braces — a `}}` at column 0 inside the function cut it short"
+        );
+        body
+    }
+
+    /// Lines of `body` that are code: not blank, not a `//` comment.
+    fn executable_lines(body: &str) -> impl Iterator<Item = &str> {
+        body.lines()
+            .map(str::trim_start)
+            .filter(|line| !line.is_empty() && !line.starts_with("//"))
+    }
+
+    fn count_executable(body: &str, needle: &str) -> usize {
+        executable_lines(body).filter(|line| line.contains(needle)).count()
+    }
+
+    /// `{` and `}` on the executable lines of `body`.
+    fn brace_counts(body: &str) -> (usize, usize) {
+        executable_lines(body).fold((0, 0), |(open, close), line| {
+            (open + line.matches('{').count(), close + line.matches('}').count())
+        })
+    }
+
+    /// The block opened by the first EXECUTABLE line of `body` containing
+    /// `opener`, from that line through its matching close brace. A hoisted
+    /// statement — moved from inside the block to after it — is outside the
+    /// returned text, so a count over it goes to zero. Panics when the opener
+    /// is absent or the block never closes.
+    fn block_body<'a>(body: &'a str, opener: &str) -> &'a str {
+        let mut offset = 0usize;
+        let mut start = None;
+        let mut depth = 0i32;
+        for line in body.split_inclusive('\n') {
+            let code = line.trim_start();
+            let executable = !code.is_empty() && !code.starts_with("//");
+            if start.is_none() {
+                if executable && code.contains(opener) {
+                    start = Some(offset);
+                } else {
+                    offset += line.len();
+                    continue;
+                }
+            }
+            if executable {
+                depth += line.matches('{').count() as i32;
+                depth -= line.matches('}').count() as i32;
+            }
+            offset += line.len();
+            if depth == 0 {
+                return &body[start.unwrap()..offset];
+            }
+        }
+        match start {
+            Some(_) => panic!("unterminated block {opener:?} in: {body}"),
+            None => panic!("no executable line contains {opener:?} in: {body}"),
+        }
+    }
+
+    /// The `.add_systems(Update, <system>…)` call that registers `system` in
+    /// `bridge/mod.rs`, from `add_systems(` through its matching `)`. Panics
+    /// when the system is registered zero or several times, or only inside a
+    /// comment.
+    fn registration_of(system: &str) -> &'static str {
+        let needle = format!("add_systems(Update, {system}");
+        let mut matches = BRIDGE_MOD.match_indices(&needle).map(|(i, _)| i);
+        let start = matches.next().unwrap_or_else(|| panic!("{needle} not found in bridge/mod.rs"));
+        assert!(matches.next().is_none(), "{needle} appears more than once in bridge/mod.rs");
+        let line_start = BRIDGE_MOD[..start].rfind('\n').map_or(0, |i| i + 1);
+        assert!(
+            !BRIDGE_MOD[line_start..start].trim_start().starts_with("//"),
+            "{needle} is only mentioned in a comment"
+        );
+        let open = start + "add_systems".len();
+        let bytes = BRIDGE_MOD.as_bytes();
+        let mut depth = 0i32;
+        for (off, b) in bytes[open..].iter().enumerate() {
+            match b {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &BRIDGE_MOD[start..open + off + 1];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unbalanced add_systems( for {system} in bridge/mod.rs")
+    }
+
+    #[test]
+    fn apply_scene_load_hands_the_files_type_to_the_queue_untouched() {
+        // The load system is at Bevy's 16-parameter cap, so it cannot take
+        // `ResMut<ProjectType>`; it hands the saved type to the queue
+        // `apply_project_type_changes` drains — which is also what creates the
+        // 2D camera. Exactly one request, from the parsed file, as a direct
+        // `.push(`: the shape `pending/runtime_drains.rs` recognises as a
+        // runtime producer (a `queue_*` helper call is invisible to that scan).
+        let body = fn_body(BRIDGE_SCENE_IO, "bridge/scene_io.rs", "apply_scene_load");
+        assert_eq!(count_executable(body, "set_project_type_requests.push("), 1, "{body}");
+        assert_eq!(count_executable(body, "queue_set_project_type("), 0, "the helper hides the producer from the drain scan");
+        // The file's `Option` travels AS IT STANDS. `Some` is applied and
+        // `None` inherited by the DRAIN (`ProjectType::apply_request`), so the
+        // loader must not default, unwrap or substitute it — a `.unwrap_or(..)`
+        // here is the review board's regression in one token.
+        let carried: Vec<&str> = executable_lines(body)
+            .filter(|line| line.contains("scene_file.metadata.project_type"))
+            .collect();
+        assert_eq!(
+            carried,
+            vec!["project_type: scene_file.metadata.project_type,"],
+            "the request must carry the FILE's Option, un-defaulted"
+        );
+    }
+
+    #[test]
+    fn apply_scene_export_writes_the_live_resource_not_a_default() {
+        let body = fn_body(BRIDGE_SCENE_IO, "bridge/scene_io.rs", "apply_scene_export");
+        assert_eq!(count_executable(body, "Res<ProjectType>"), 1, "{body}");
+        assert_eq!(count_executable(body, "*project_type,"), 1, "the resource goes into build_scene_file, which writes it as Some");
+        assert_eq!(count_executable(body, "ProjectType::default()"), 0);
+        assert_eq!(count_executable(body, "ProjectType::ThreeD"), 0);
+        assert_eq!(count_executable(body, "ProjectType::TwoD"), 0);
+    }
+
+    #[test]
+    fn apply_project_type_changes_resolves_each_request_and_reports_the_resource_inside_the_loop() {
+        // `PROJECT_TYPE_CHANGED` is how `spriteSlice.projectType` follows the
+        // engine instead of only the AI handlers (#10227). The rule is
+        // `ProjectType::apply_request` (unit-tested natively); the drain must
+        // call it with the request's Option, store what it resolved, and emit
+        // ONCE PER REQUEST — inside the loop, a hoist to after it fails here —
+        // carrying the RESOURCE, not the request: for `None` that is the
+        // unchanged current type, which is the whole point of the report, and
+        // it is what lets a store that drifted converge on the engine.
+        let body = fn_body(BRIDGE_SPRITE, "bridge/sprite.rs", "apply_project_type_changes");
+        let the_loop = block_body(body, "for request in pending.set_project_type_requests.drain(..) {");
+        assert_eq!(count_executable(the_loop, "apply_request(request.project_type)"), 1, "{the_loop}");
+        assert_eq!(count_executable(the_loop, "*project_type = resolved;"), 1, "{the_loop}");
+        assert_eq!(count_executable(the_loop, "emit_project_type_changed(*project_type)"), 1, "{the_loop}");
+        assert_eq!(count_executable(body, "emit_project_type_changed("), 1, "exactly one emit in the system, and it is the one inside the loop");
+        assert_eq!(count_executable(body, "emit_project_type_changed(resolved)"), 0, "the request's value is not the report");
+        assert_eq!(count_executable(body, "continue"), 0, "no request is dropped on the floor");
+        let emit = fn_body(BRIDGE_EVENTS, "bridge/events.rs", "emit_project_type_changed");
+        assert_eq!(count_executable(emit, "\"PROJECT_TYPE_CHANGED\""), 1, "{emit}");
+        assert_eq!(count_executable(emit, "wire_name()"), 1, "the payload spells the type as the web store does");
+    }
+
+    #[test]
+    fn the_type_drain_runs_after_the_load_and_before_the_export() {
+        // Without the edges Bevy orders the three systems freely, and the web
+        // side depends on both: `PROJECT_TYPE_CHANGED` must describe the scene
+        // that was just loaded, and the export `checkpointRecovery.matchesExpected`
+        // compares against the loaded scene must carry that scene's type, not
+        // the type of the scene it replaced.
+        let drain = registration_of("sprite::apply_project_type_changes");
+        assert!(drain.contains(".after(scene_io::apply_scene_load)"), "{drain}");
+        let export = registration_of("scene_io::apply_scene_export");
+        assert!(export.contains(".after(sprite::apply_project_type_changes)"), "{export}");
+        // The edge names a system that is really registered.
+        registration_of("scene_io::apply_scene_load");
+    }
+
+    #[test]
+    fn the_pin_helpers_refuse_a_commented_out_line_a_missing_function_a_truncated_body_and_a_hoisted_emit() {
+        // The extractors are the one place this module can report a false
+        // pass, so each is asserted on a synthetic corpus (lessons-learned #16).
+        let corpus = "fn target(\n) {\n    // queue_set_project_type(gone);\n    live();\n}\n\nfn other() {\n    queue_set_project_type(real);\n}\n";
+        let body = fn_body(corpus, "corpus", "target");
+        assert_eq!(count_executable(body, "queue_set_project_type("), 0);
+        assert_eq!(count_executable(body, "live()"), 1);
+        assert_eq!(count_executable(fn_body(corpus, "corpus", "other"), "queue_set_project_type("), 1);
+        assert!(std::panic::catch_unwind(|| fn_body(corpus, "corpus", "absent")).is_err());
+
+        // A `}` at column 0 inside a function: the extract stops early and its
+        // braces no longer balance, so the helper panics instead of inspecting
+        // a fragment that could pass or fail a pin for the wrong reason.
+        let truncated = "fn cut() {\n    if x {\n}\n    live();\n}\n";
+        assert!(std::panic::catch_unwind(|| fn_body(truncated, "corpus", "cut")).is_err());
+
+        // `block_body`: a statement inside the loop counts; the same statement
+        // hoisted to after the loop does not; a commented opener is not the block.
+        let opener = "for r in q.drain(..) {";
+        let inside = "fn s() {\n    for r in q.drain(..) {\n        if let Some(t) = r {\n            apply(t);\n        }\n        emit(*p);\n    }\n}\n";
+        let hoisted = "fn s() {\n    for r in q.drain(..) {\n        if let Some(t) = r {\n            apply(t);\n        }\n    }\n    emit(*p);\n}\n";
+        let commented = "fn s() {\n    // for r in q.drain(..) {\n    for r in q.drain(..) {\n        emit(*p);\n    }\n}\n";
+        assert_eq!(count_executable(block_body(fn_body(inside, "corpus", "s"), opener), "emit(*p)"), 1);
+        assert_eq!(count_executable(block_body(fn_body(hoisted, "corpus", "s"), opener), "emit(*p)"), 0);
+        assert_eq!(count_executable(block_body(fn_body(commented, "corpus", "s"), opener), "emit(*p)"), 1);
+        assert!(std::panic::catch_unwind(|| block_body(fn_body(inside, "corpus", "s"), "for nothing in here {")).is_err());
     }
 }
