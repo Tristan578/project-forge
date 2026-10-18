@@ -369,8 +369,9 @@ if [ "$wired" = 1 ]; then ok "settings.json runs the hook on every Bash call"; e
 # ...and once more for the GitHub MCP tools that mark ready or post a comment (#10330).
 mcp_matcher=$(jq -r '[.hooks.PreToolUse[] | select(.hooks[]? | (.command // "") | test("/\\.claude/hooks/require-pr-ready\\.sh")) | .matcher | select(. != "Bash")] | .[0] // ""' "$SETTINGS" 2>/dev/null)
 # The GitHub server can be installed under another name (a plugin's is
-# mcp__plugin_github_github__...); the hook reads only the part after the last __.
-for server in github plugin_github_github GitHub; do
+# mcp__plugin_github_github__...; .mcp.json's own is github-local, #10389); the
+# hook reads only the part after the last __.
+for server in github github-local plugin_github_github GitHub; do
   for tool in update_pull_request add_issue_comment update_issue_comment; do
     if [ -n "$mcp_matcher" ] && grep -qE "^(${mcp_matcher})\$" <<<"mcp__${server}__$tool"; then
       ok "settings.json runs the hook on mcp__${server}__$tool"

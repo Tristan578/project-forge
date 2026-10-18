@@ -22,7 +22,7 @@
     ".agents/skills/changelog-review/SKILL.md": "7d5b062c5218966edf7000de326d56b6115f74b710120e498867c939bb192ff7",
     ".agents/skills/changelog-review/references/version-pins.md": "cd5d0e012871c4246a81a9763d63b2e5c3ddf3bbcefeb0c26e27bc13f054def7",
     ".agents/skills/changelog-review/scripts/check-deps.sh": "849d57ba80be491f0739210df3875b267671292f4dc902502fe5b1bac4fa2244",
-    ".agents/skills/claude-platform-reference/SKILL.md": "cc6196e47fd18f5ead5433b7600c6546ed3cb38f81656f69980b144221ad8144",
+    ".agents/skills/claude-platform-reference/SKILL.md": "84286e20291201fb12233cd16cbca7c09d1e17e698e87915523fa85a66789e26",
     ".agents/skills/component-checklist/SKILL.md": "23d69e913789f661b91cf1288eb136f07bff98564c66d948c990d3cd178ad7db",
     ".agents/skills/cycle/SKILL.md": "2057341a02b985839b9141f613262074dfd721495ebacac56d02e841309b04ac",
     ".agents/skills/db-migrate/SKILL.md": "dbc26d694e1b14e6c721f4d43d9653922ed7ff411498e395260beeab66fc0e2c",
