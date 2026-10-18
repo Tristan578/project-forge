@@ -29,6 +29,7 @@
  */
 import { neon } from '@neondatabase/serverless';
 
+import { applyE2eNeonEndpointOverride } from '../src/lib/db/e2eNeonEndpoint.ts';
 import {
   assertSchemaMatches,
   loadMigrationRecords,
@@ -47,6 +48,9 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Reaches the CI engine-journeys job's per-run Postgres through its local
+  // Neon-protocol proxy; a no-op everywhere else (#10161).
+  applyE2eNeonEndpointOverride();
   const sql = neon(process.env.DATABASE_URL);
   const problems: string[] = [];
 

@@ -84,6 +84,7 @@ use super::scene_file::SceneName;
 use super::scene_graph::SceneGraphCache;
 use super::selection::{Selection, SelectionChangedEvent};
 use super::shader_effects::ShaderEffectsPlugin;
+use super::simulation_clock::SimulationClockPlugin;
 // Editor-only, matching the gate on the `add_plugins` call below.
 #[cfg(not(feature = "runtime"))]
 use super::snap::SnapPlugin;
@@ -175,6 +176,7 @@ const REGISTERED_PLUGINS: &[&str] = &[
     "PostProcessingPlugin",
     "RenderErrorReportingPlugin",
     "ShaderEffectsPlugin",
+    "SimulationClockPlugin",
     "SnapPlugin",
 ];
 
@@ -350,9 +352,16 @@ fn build_full_app() -> App {
     // drain system lives in the wasm32-only bridge.
     app.add_plugins(RenderErrorReportingPlugin);
 
-    // The 16 `core::*` plugins that own `fn build`. Registration order
-    // mirrors `bridge::init_engine` so `.after(...)`/`.before(...)` edges
-    // resolve against the same set of already-declared systems/sets.
+    // The `core::*` plugins that own `fn build` (sixteen here, plus the two
+    // editor-only ones below). Registration order mirrors
+    // `bridge::init_engine` so `.after(...)`/`.before(...)` edges resolve
+    // against the same set of already-declared systems/sets.
+    //
+    // `SimulationClockPlugin` (#10007) is registered on its own: Bevy
+    // implements `Plugins` for tuples of at most fifteen, and the tuple below
+    // is already full. Its only ordering edge is `.before(TimeSystems)`, which
+    // `TimePlugin` above has already declared, so the position is immaterial.
+    app.add_plugins(SimulationClockPlugin);
     app.add_plugins((
         AnimationPlugin,
         ForgeMaterialPlugin,

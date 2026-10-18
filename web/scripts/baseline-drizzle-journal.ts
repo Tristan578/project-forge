@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { neon } from '@neondatabase/serverless';
 import { getTableName, is } from 'drizzle-orm';
 import { getTableConfig, PgTable } from 'drizzle-orm/pg-core';
+import { applyE2eNeonEndpointOverride } from '../src/lib/db/e2eNeonEndpoint.ts';
 import * as schema from '../src/lib/db/schema.ts';
 
 export interface MigrationRecord {
@@ -203,6 +204,9 @@ async function main(): Promise<void> {
   const migrations = await loadMigrationRecords();
   if (migrations.length === 0) throw new Error('No repository migrations found');
 
+  // Reaches the CI engine-journeys job's per-run Postgres through its local
+  // Neon-protocol proxy; a no-op everywhere else (#10161).
+  applyE2eNeonEndpointOverride();
   const sql = neon(process.env.DATABASE_URL);
 
   if (guardMigrate) {

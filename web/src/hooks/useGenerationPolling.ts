@@ -33,6 +33,8 @@ import { showPersistentError, showSuccess } from '@/lib/toast';
 import { withRetryGuidance } from '@/lib/generate/retryGuidance';
 import { JOB_NOT_FOUND_MESSAGE } from '@/lib/generate/jobNotFound';
 import { ESTIMATED_TIMES } from '@/lib/generation/estimatedTimes';
+import { replaceDataUrlType, sniffImageMimeType } from '@/lib/engine/textureFormatGuard';
+import { defaultTextureSlot } from '@/lib/engine/textureSlot';
 
 const POLL_INTERVAL_MS = 3000;
 const DURABLE_POLL_INTERVAL_MS = 30_000;
@@ -489,13 +491,13 @@ export function useGenerationPolling() {
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Generated_${job.prompt.slice(0, 20)}`;
 
-        if (shouldPlace) {
-          // Pass the job's targetEntityId so a placeholder primitive (spawned by the
-          // orchestrator before generation) is replaced in place rather than leaving
-          // the model as a sibling root. Textures/audio already consume this id;
-          // models were the only generated type that dropped it.
-          useEditorStore.getState().importGltf(base64, assetName, job.targetEntityId);
-        }
+        // Pass the job's targetEntityId so a placeholder primitive (spawned by the
+        // orchestrator before generation) is replaced in place rather than leaving
+        // the model as a sibling root. Textures/audio already consume this id;
+        // models were the only generated type that dropped it.
+        const placement = shouldPlace
+          ? placementOf(useEditorStore.getState().importGltf(base64, assetName, job.targetEntityId))
+          : { autoPlaced: false };
 
         updateJob(id, {
           status: 'completed',
@@ -503,7 +505,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: shouldPlace,
+            ...placement,
             targetEntityId: job.targetEntityId,
             quality: {
               fileSize: qualityMetrics.fileSize,
@@ -542,15 +544,43 @@ export function useGenerationPolling() {
 
         // If a specific materialSlot was requested, only apply that map
         const targetSlot = job.materialSlot;
+        // A 2D sprite has one image and no material (#10399): the colour map
+        // becomes the sprite's image, and the material-only maps (normal,
+        // metallic-roughness, emissive, occlusion) have nowhere to go. They
+        // are skipped and named in the record, instead of each one reaching
+        // the engine and coming back as "the entity has no material".
+        const spriteTarget = defaultTextureSlot(entityId, useEditorStore.getState().sprites) === 'sprite';
+        const skippedMaps: string[] = [];
+        let appliedMaps = 0;
+        // One refused map means the material was not fully placed; every
+        // refusal is kept, named by its map, so the record says which.
+        const placementErrors: string[] = [];
         for (const [mapType, url] of Object.entries(data.maps)) {
-          const slot = slotMap[mapType];
-          if (!slot) continue;
+          const materialSlot = slotMap[mapType];
+          if (!materialSlot) continue;
           // When materialSlot is specified, only apply the matching slot
-          if (targetSlot && slot !== targetSlot) continue;
+          if (targetSlot && materialSlot !== targetSlot) continue;
+          if (spriteTarget && materialSlot !== 'base_color') {
+            skippedMaps.push(mapType);
+            continue;
+          }
+          const slot = spriteTarget ? 'sprite' : materialSlot;
+          appliedMaps += 1;
 
           const blob = await downloadBinary(url);
-          const base64 = await blobToBase64(blob);
-          useEditorStore.getState().loadTexture(base64, `${mapType}_${entityId}`, entityId, slot);
+          const base64 = await blobToTextureDataUrl(blob);
+          const placement = placementOf(
+            useEditorStore.getState().loadTexture(base64, `${mapType}_${entityId}`, entityId, slot),
+          );
+          if (placement.placementError !== undefined) {
+            placementErrors.push(`${mapType}: ${placement.placementError}`);
+          }
+        }
+        // On a sprite, a job whose every map was material-only placed nothing.
+        if (spriteTarget && appliedMaps === 0) {
+          placementErrors.push(
+            `a 2D sprite takes only the colour map, so ${skippedMaps.length > 0 ? skippedMaps.join(', ') : 'no map'} could not be applied`,
+          );
         }
 
         updateJob(id, {
@@ -558,7 +588,9 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: true,
+            autoPlaced: placementErrors.length === 0,
+            ...(placementErrors.length > 0 ? { placementError: placementErrors.join('; ') } : {}),
+            ...(skippedMaps.length > 0 ? { skippedMaps } : {}),
             targetEntityId: entityId,
             materialSlot: targetSlot,
           },
@@ -640,15 +672,16 @@ export function useGenerationPolling() {
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
-        const base64 = await blobToBase64(blob);
+        const base64 = await blobToTextureDataUrl(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `PixelArt_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
-        const slot = job.materialSlot ?? 'base_color';
+        // With no slot named, a 2D sprite target gets its own slot (#10399).
+        const slot = job.materialSlot ?? defaultTextureSlot(entityId, useEditorStore.getState().sprites);
 
-        if (entityId && job.autoPlace !== false) {
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, slot);
-        }
+        const placement = entityId && job.autoPlace !== false
+          ? placementOf(useEditorStore.getState().loadTexture(base64, assetName, entityId, slot))
+          : { autoPlaced: false };
 
         updateJob(id, {
           status: 'completed',
@@ -656,7 +689,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: !!entityId && job.autoPlace !== false,
+            ...placement,
             targetEntityId: entityId,
             materialSlot: slot,
           },
@@ -666,15 +699,24 @@ export function useGenerationPolling() {
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
-        const base64 = await blobToBase64(blob);
+        const base64 = await blobToTextureDataUrl(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `SpriteSheet_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
         const shouldPlace = !!entityId && job.autoPlace !== false;
 
-        if (shouldPlace) {
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color');
-        }
+        // A sheet aimed at a 2D sprite goes to the sprite's own slot (#10399).
+        // It is still not cut into frames: the sheet names its texture by
+        // `assetName`, while the engine registers the texture under a fresh id
+        // that the atlas builder never sees (#10408).
+        const placement = shouldPlace
+          ? placementOf(useEditorStore.getState().loadTexture(
+              base64,
+              assetName,
+              entityId,
+              defaultTextureSlot(entityId, useEditorStore.getState().sprites),
+            ))
+          : { autoPlaced: false };
 
         // Slice the sprite sheet into individual frames
         const imgDims = await getImageDimensions(blob);
@@ -696,7 +738,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: shouldPlace,
+            ...placement,
             targetEntityId: entityId,
             spriteSheet: {
               columns: grid.columns,
@@ -712,16 +754,17 @@ export function useGenerationPolling() {
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
-        const base64 = await blobToBase64(blob);
+        const base64 = await blobToTextureDataUrl(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Sprite_${job.prompt.slice(0, 20)}`;
         const entityId = job.targetEntityId ?? job.entityId;
-        const slot = job.materialSlot ?? 'base_color';
+        // With no slot named, a 2D sprite target gets its own slot (#10399).
+        const slot = job.materialSlot ?? defaultTextureSlot(entityId, useEditorStore.getState().sprites);
 
-        if (entityId && job.autoPlace !== false) {
-          // Apply as texture on the target entity
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, slot);
-        }
+        // Apply as texture on the target entity
+        const placement = entityId && job.autoPlace !== false
+          ? placementOf(useEditorStore.getState().loadTexture(base64, assetName, entityId, slot))
+          : { autoPlaced: false };
 
         updateJob(id, {
           status: 'completed',
@@ -729,7 +772,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: !!entityId && job.autoPlace !== false,
+            ...placement,
             targetEntityId: entityId,
             materialSlot: slot,
           },
@@ -892,6 +935,22 @@ export function useGenerationPolling() {
     return response.blob();
   }
 
+  /**
+   * What handing a generated asset to the editor came to.
+   *
+   * A refusal - the engine, or the format gate in front of it, turning the
+   * file away, reachable since #10396 - is recorded against the job as NOT
+   * placed, with the reason, rather than reported as `autoPlaced: true`. The
+   * generation itself succeeded, so the job still completes and nothing is
+   * refunded; the slice has already shown the person the refusal.
+   */
+  function placementOf(
+    outcome: { success: boolean; error?: string } | void,
+  ): { autoPlaced: boolean; placementError?: string } {
+    if (!outcome || outcome.success !== false) return { autoPlaced: true };
+    return { autoPlaced: false, placementError: outcome.error ?? 'the engine rejected it' };
+  }
+
   async function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -902,6 +961,28 @@ export function useGenerationPolling() {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+  }
+
+  /**
+   * A generated image as the data URL `loadTexture` reads its format from.
+   *
+   * The FileReader writes the blob's type into the header, and the blob's
+   * type is whatever Content-Type the result was served with. Storage that
+   * serves an image with no type, as `application/octet-stream`, as
+   * `binary/octet-stream`, or under any other wrong type yields a header the
+   * format gate refuses or the engine decodes with the wrong decoder - so a
+   * correctly generated image was recorded as not placed, or as placed and
+   * never shown (#10396). The image's own first bytes decide: a PNG or JPEG
+   * signature is declared on the header whatever the storage said, because
+   * the engine picks its decoder from that header. A blob with neither
+   * signature keeps the header it came with, and the gate judges it as
+   * before (a WebP or a KTX2 is still refused by name).
+   */
+  async function blobToTextureDataUrl(blob: Blob): Promise<string> {
+    const dataUrl = await blobToBase64(blob);
+    const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+    const sniffed = sniffImageMimeType(head);
+    return sniffed === null ? dataUrl : replaceDataUrlType(dataUrl, sniffed);
   }
 
   async function getImageDimensions(blob: Blob): Promise<{ width: number; height: number }> {

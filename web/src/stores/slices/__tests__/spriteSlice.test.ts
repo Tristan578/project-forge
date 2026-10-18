@@ -117,6 +117,34 @@ describe('spriteSlice', () => {
     });
   });
 
+  // #10227: the engine reports its `ProjectType` resource on every processed
+  // request (`PROJECT_TYPE_CHANGED`), including the one `load_scene` queues
+  // from the scene file's `metadata.projectType`. This is the state-only
+  // mirror the event handler writes through, so a reopened or published 2D
+  // project switches the store to 2D without an AI turn.
+  describe('applyProjectTypeFromEngine', () => {
+    it.each(['2d', '3d'] as const)('mirrors %s into the store', (type) => {
+      // Start on the OTHER type, so a no-op mirror cannot pass on the default.
+      store.setState({ projectType: type === '2d' ? '3d' : '2d' });
+      store.getState().applyProjectTypeFromEngine(type);
+      expect(store.getState().projectType).toBe(type);
+    });
+
+    it('never echoes set_project_type back at the engine that just reported it', () => {
+      store.getState().applyProjectTypeFromEngine('2d');
+      store.getState().applyProjectTypeFromEngine('3d');
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('overrides a store that drifted from the engine', () => {
+      // A `setProjectType` dispatched before the engine attached is refused,
+      // leaving the store ahead of the resource. The next load's report wins.
+      store.getState().setProjectType('2d');
+      store.getState().applyProjectTypeFromEngine('3d');
+      expect(store.getState().projectType).toBe('3d');
+    });
+  });
+
   describe('setSpriteData', () => {
     it('should add sprite data and dispatch', () => {
       const data: SpriteData = {

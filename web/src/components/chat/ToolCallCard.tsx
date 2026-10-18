@@ -31,6 +31,9 @@ interface ToolCallCardProps {
 }
 
 const TOOL_LABELS: Record<string, string> = {
+  replay_input_trace: 'Replay Input (Runtime)',
+  pin_frame_rate: 'Pin Simulation Clock',
+  unpin_frame_rate: 'Unpin Simulation Clock',
   spawn_entity: 'Spawn Entity',
   despawn_entity: 'Remove Entity',
   delete_entities: 'Delete Entities',

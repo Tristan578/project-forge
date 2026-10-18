@@ -565,13 +565,13 @@ assert_grep "a non-apt host says the lock-wait config was skipped" \
 CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
 QG_YML="$REPO_ROOT/.github/workflows/quality-gates.yml"
 CD_YML="$REPO_ROOT/.github/workflows/cd.yml"
-assert_eq "all eight browser-install steps use the retry helper" "8" \
+assert_eq "all nine browser-install steps use the retry helper" "9" \
   "$(( $(grep -c 'scripts/install-playwright-ci.sh browsers' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh browsers' "$QG_YML") + $(grep -c 'scripts/install-playwright-ci.sh browsers' "$CD_YML") ))"
 # Every workflow that installs Playwright is summed here, quality-gates.yml
 # included. Leaving it out of this sum is what let the editor-boot cache-hit
 # step keep calling `npx playwright install-deps` bare while the suite reported
 # full coverage (#9570 review).
-assert_eq "all seven cache-hit dependency steps use the retry helper" "7" \
+assert_eq "all eight cache-hit dependency steps use the retry helper" "8" \
   "$(( $(grep -c 'scripts/install-playwright-ci.sh deps' "$CI_YML") + $(grep -c 'scripts/install-playwright-ci.sh deps' "$QG_YML") + $(grep -c 'scripts/install-playwright-ci.sh deps' "$CD_YML") ))"
 
 # Every install step's budget must END before its own step timeout, or the
@@ -649,8 +649,10 @@ budget_problems() {
 readonly -f budget_problems
 
 { install_steps "$CI_YML"; install_steps "$QG_YML"; install_steps "$CD_YML"; } > "$TMP/steps"
-# Vacuity guard: the derivation must find every step counted above.
-assert_eq "the step derivation found all fifteen install steps" "15" "$(wc -l < "$TMP/steps" | tr -d ' ')"
+# Vacuity guard: the derivation must find every step counted above (9 browser
+# installs + 8 cache-hit dependency installs; 15 → 17 when
+# test-e2e-engine-journeys added its pair, #10161).
+assert_eq "the step derivation found all seventeen install steps" "17" "$(wc -l < "$TMP/steps" | tr -d ' ')"
 assert_eq "every install step's budget fits inside its own step timeout, and every budget belongs to a step" \
   "" "$(budget_problems "$CI_YML" "$QG_YML" "$CD_YML")"
 

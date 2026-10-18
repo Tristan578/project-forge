@@ -5,7 +5,7 @@ description: "Manage SpawnForge taskboard tickets — create, view, move, and sy
 
 # Taskboard Management Protocol
 
-You manage project work via the **taskboard MCP server** (22 tools). The taskboard is the single source of truth for all project work.
+You manage project work via the **taskboard MCP server** (22 tools). GitHub issues are the backlog of record; the taskboard is a local working view synced with them, and when the two disagree the GitHub issue is correct.
 
 ## Taskboard Ownership Model
 
@@ -97,13 +97,13 @@ As a [persona], I want [specific goal] so that [measurable benefit].
    - Team assigned (metadata)
    - Subtasks defined (at least 3 implementation steps)
 5. Fix any validation gaps BEFORE moving to `in_progress`
-6. **Sync ticket to GitHub** — run `/sync-push` so the ticket becomes a GitHub issue. You need the GitHub issue number (`#NNNN`) to link PRs with `Closes #NNNN`.
+6. **Sync ticket to GitHub** — run `python3 .claude/hooks/github_project_sync.py push` so the ticket becomes a GitHub issue. You need the GitHub issue number (`#NNNN`) to link PRs with `Closes #NNNN`.
 7. Move the ticket to `in_progress` using `move_ticket`
 
 ### Before Creating Any PR
 
 **MANDATORY** — every PR must link to a GitHub issue:
-1. Run `/sync-push` to ensure your ticket exists as a GitHub issue
+1. Run `python3 .claude/hooks/github_project_sync.py push` to ensure your ticket exists as a GitHub issue
 2. Find the GitHub issue number: `gh issue list --search "PF-XXX in:title" --limit 1`
 3. Include `Closes #NNNN` (GitHub issue number, NOT `PF-XXX`) in the PR body
 4. The CI work item check will **fail** if the PF-XXX ticket isn't found as a GitHub issue

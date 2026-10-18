@@ -239,7 +239,16 @@ export async function invokeHandler(
   handlers: Record<string, (args: Record<string, unknown>, ctx: ToolCallContext) => Promise<ExecutionResult>>,
   name: string,
   args: Record<string, unknown> = {},
-  storeOverrides: Record<string, unknown> = {}
+  storeOverrides: Record<string, unknown> = {},
+  options: {
+    /**
+     * What the mocked engine dispatcher answers. Omitted, it answers nothing
+     * (`undefined`), as it always has; a handler that reads the engine's
+     * `CommandResponse` (the simulation-clock tools, #10007) is driven with an
+     * explicit acceptance or refusal here.
+     */
+    dispatchResponse?: { success: boolean; error?: string } | undefined;
+  } = {},
 ): Promise<{
   result: ExecutionResult;
   store: ToolCallContext['store'];
@@ -250,7 +259,7 @@ export async function invokeHandler(
   // (e.g. `update_physics`, whose payload IS its behaviour) have nothing
   // observable on the store, so a suite that can only see `store` would have to
   // assert on nothing at all.
-  const dispatchCommand = vi.fn();
+  const dispatchCommand = vi.fn(() => options.dispatchResponse);
   const result = await handlers[name](args, { store, dispatchCommand });
   return { result, store, dispatchCommand };
 }

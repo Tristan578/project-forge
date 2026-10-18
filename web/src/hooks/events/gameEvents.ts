@@ -14,6 +14,17 @@ import { setCharacterGrounded } from '@/lib/scripting/groundedRegistry';
 import { parseSkippedCharacters, describeSkippedCharacters } from '@/lib/engine/characterDiagnostics';
 import { showPersistentError } from '@/lib/toast';
 import { castPayload, type SetFn, type GetFn } from './types';
+import {
+  mergePlayTickDelta,
+  replacePlayTickSnapshot,
+  type PlayTickDeltaPayload,
+  type PlayTickFrame,
+} from './playTickSnapshot';
+
+// The snapshot state and its reset live in `playTickSnapshot.ts` (which
+// imports nothing) so `useEngine.ts` can reset it on engine reset/recovery
+// without an import cycle. Re-exported here for the hub and for tests.
+export { resetPlayTickSnapshot } from './playTickSnapshot';
 
 /**
  * Types already reported, so a per-frame event stream warns once rather than every tick.
@@ -114,12 +125,20 @@ export function handleGameEvent(
     }
 
     case 'PLAY_TICK': {
-      const payload = castPayload<{
-        entities: Record<string, { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] }>;
-        entityInfos: Record<string, { name: string; type: string; colliderRadius: number }>;
-        inputState: { pressed: Record<string, boolean>; justPressed: Record<string, boolean>; justReleased: Record<string, boolean>; axes: Record<string, number> };
-      }>(data);
+      // A full frame replaces the delta snapshot (keyframe); the full payload
+      // goes on unchanged. See `playTickSnapshot.ts`.
+      const payload = castPayload<PlayTickFrame>(data);
+      replacePlayTickSnapshot(payload);
       firePlayTick(payload);
+      return true;
+    }
+
+    case 'PLAY_TICK_DELTA': {
+      // The engine's per-frame Play event (#10375). Merged onto the snapshot
+      // and handed on as the same full frame `PLAY_TICK` carries, so
+      // `useScriptRunner` and `playTickBus` never see a delta. Fires for an
+      // empty delta too — see `mergePlayTickDelta`.
+      firePlayTick(mergePlayTickDelta(castPayload<PlayTickDeltaPayload>(data)));
       return true;
     }
 

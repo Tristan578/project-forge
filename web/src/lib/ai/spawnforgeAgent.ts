@@ -91,7 +91,7 @@ function isAgentAdvertised(cmd: ManifestEntry): boolean {
  * Build AI SDK tool definitions from the MCP command manifest.
  *
  * Filter policy: includes available `:write`-scoped and `query`-category commands.
- * Read-only informational commands are excluded to reduce tool count (296 of 380)
+ * Read-only informational commands are excluded to reduce tool count (299 of 383)
  * and prevent the model from calling informational endpoints when it should be acting.
  *
  * Schemas go through `modelToolSchema`, which withholds the manifest parameters
@@ -148,7 +148,7 @@ export const AGENT_TOOLS = getAgentTools();
  * exactly today's path.
  *
  * Derived from the manifest's `destructive` flag rather than from
- * `requiredScope`: `:write` covers 281 of 380 commands, so scope-gating would
+ * `requiredScope`: `:write` covers 284 of 383 commands, so scope-gating would
  * put an approval prompt in front of every `spawn_entity` in a normal
  * "build me a platformer" turn. A gate that fires on 95% of ordinary edits is
  * a gate users turn off.

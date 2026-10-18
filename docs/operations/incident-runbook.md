@@ -43,7 +43,7 @@ or paging service — see `docs/decisions/2026-09-24-no-paging-or-on-call.md`.
 
 ### Stripe Webhook Failure
 
-**Symptoms:** Payments processing but tier not upgrading, tokens not granted, Sentry errors on `/api/webhooks/stripe`.
+**Symptoms:** Payments processing but tier not upgrading, tokens not granted, Sentry errors on `/api/stripe/webhook`.
 
 **Steps:**
 1. Check Stripe dashboard > Developers > Webhooks for failed deliveries
@@ -55,7 +55,7 @@ or paging service — see `docs/decisions/2026-09-24-no-paging-or-on-call.md`.
 5. If endpoint is returning errors:
    - Check Sentry for the specific error
    - Common issue: webhook idempotency table (`webhookEvents`) constraint violation -- safe to ignore (means event was already processed)
-6. Verify the webhook URL is correct: `https://spawnforge.ai/api/webhooks/stripe`
+6. Verify the webhook URL is correct: `https://spawnforge.ai/api/stripe/webhook`
 
 ### Clerk Auth Failure
 

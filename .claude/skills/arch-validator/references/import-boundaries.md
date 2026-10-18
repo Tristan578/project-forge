@@ -37,7 +37,7 @@ use crate::bridge;     // reverse dependency into bridge
 
 **Key pattern:**
 ```rust
-// bridge/mod.rs — the only file with #[wasm_bindgen]
+// bridge/mod.rs — handle_command entry point (#[wasm_bindgen] is allowed anywhere in bridge/)
 #[wasm_bindgen]
 pub fn handle_command(json: &str) -> JsValue {
     // delegates to core::commands::dispatch()
@@ -72,7 +72,7 @@ import { ... } from '../packages/ui/src/...';  // use @spawnforge/ui alias
 
 ### `web/src/data/commands.json` — Must Stay Synced
 
-This file is a **copy** of `mcp-server/manifest/commands.json`. They must always be identical. Any PR touching one must also update the other.
+This file is a **copy** of `mcp-server/manifest/commands.json`, as is `apps/docs/data/commands.json` (one copy per deploy root). All three must always be identical. Any PR touching one must update the others.
 
 Check sync status:
 ```bash

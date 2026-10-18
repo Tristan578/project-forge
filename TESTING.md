@@ -167,6 +167,18 @@ These checks cover authored metadata. Runtime tilemap colliders remain unimpleme
 - [ ] Pause → verify simulation frozen
 - [ ] Stop → verify scene restored to edit state
 
+### Runtime input replay (#9902, #10007)
+Playtest panel → "Runtime replay". Needs a 2D scene with a player (character controller, `move_right` bound to a key), one collectible with `destroy_on_collect`, and the player selected.
+- [ ] Enter Play, click Record, hold the move key for a few seconds, click Stop Recording → Replay becomes enabled.
+- [ ] Click Replay → the progress line reads "Pinning the engine clock…" at once, then "Replaying tick N of M on the pinned clock"; the player moves without any key held; the verdict shows "Replay passed · N ticks · pinned 60 Hz" and both assertions (`qa.FR-1.OP-01`, `qa.FR-1.OP-03`) green.
+- [ ] Replay the same recording twice from a freshly stopped scene → the two end positions agree to within 0.01 world units.
+- [ ] Click Pause during a replay → "Pausing at tick N…" then "Paused at tick N of M; input released"; the game is paused and the player stops; the Resume control is offered. The replay must NOT be cancelled by its own pause.
+- [ ] Click Resume → the key is pressed again, the replay runs to a verdict with the full tick count.
+- [ ] Click Cancel (while paused and while running) → "Replay cancelled after N ticks. Input was released; no verdict was recorded."; the game keeps running; no key stays held (the player does not keep moving).
+- [ ] Click Stop (leave Play) mid-replay → the replay is cancelled immediately with the same message, not two seconds later with an error.
+- [ ] Remove the move binding (Input panel), keep the player and collectible, replay → the verdict is "Replay failed" with `qa.FR-1.OP-01` red; the heuristic AI Playtest rating does not change it.
+- [ ] AI parity: with Play active and the player selected, click Run Playtest → an "AI bot runtime replay" verdict appears under the heuristic report; ask the chat "replay a speedrunner strategy on the player" → the `replay_input_trace` tool card shows the same kind of verdict, and the same request in Edit mode is refused with "Replay requires Play mode…".
+
 ### Completion Modes (#9998)
 Leave these unchecked until exercised in a running editor.
 - [ ] Scene Settings → Completion mode: pick each of Win / Endless / Sandbox / Narrative with the keyboard (Tab to the group, arrow keys). Verify the screen reader reads each option's consequence and the status line announces the change.

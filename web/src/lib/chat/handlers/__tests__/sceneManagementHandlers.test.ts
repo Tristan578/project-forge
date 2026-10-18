@@ -580,7 +580,9 @@ describe('create_scene', () => {
     const { result, store } = await invokeHandler(
       sceneManagementHandlers,
       'create_scene',
-      { name: 'Boss Fight' }
+      { name: 'Boss Fight' },
+      // The store's mirror of the engine's dimension (#10227).
+      { projectType: '2d' },
     );
 
     expect(result.success).toBe(true);
@@ -589,7 +591,8 @@ describe('create_scene', () => {
     expect((payload.message as string)).toContain('Boss Fight');
 
     expect(mockLoadProjectScenes).toHaveBeenCalled();
-    expect(mockCreateScene).toHaveBeenCalledWith(baseProject, 'Boss Fight');
+    // The live type travels into the new scene so it is self-describing (#10227).
+    expect(mockCreateScene).toHaveBeenCalledWith(baseProject, 'Boss Fight', '2d');
     expect(mockSaveProjectScenes).toHaveBeenCalledWith(updatedProject, undefined);
     expect(store.setScenes).toHaveBeenCalledWith(
       updatedProject.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),

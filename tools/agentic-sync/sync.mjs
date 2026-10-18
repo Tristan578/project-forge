@@ -162,7 +162,7 @@ function renderBlock(canonical) {
     '',
     '### Canonical Project Facts',
     '',
-    '**Taskboard** — the single source of truth for all work:',
+    '**Taskboard** — the local working view of the backlog. GitHub issues are the backlog of record; when the two disagree, the issue is correct:',
   ];
   if (tb.projectName || tb.projectId) {
     lines.push(
