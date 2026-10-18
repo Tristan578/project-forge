@@ -5,8 +5,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { decomposeIntoSystems, PromptRejectedError } from '../decomposer';
 import { BEHAVIOR_VOCAB } from '../behaviorVocabulary';
+import { BUILD_BLOCKING_BRIEF_ISSUE_CODES, validateBrief, zBriefContent } from '../briefSchema';
 import { COMPLETION_MODES } from '@/lib/playMode/completionMode';
 
 // The decomposer asks the model for a typed object via `Output.object`
@@ -65,6 +68,12 @@ function makeValidDecomposition(
             appearance: 'small humanoid character',
           },
         ],
+        // Lands on a scene this design never declares. On purpose: that is
+        // ordinary model output, the plan builder never reads transitions, and
+        // the decomposer accepts it — `validateBrief` reports it to the editor
+        // as TRANSITION_TARGET_MISSING (#10174). Every test built on this
+        // helper therefore also pins that the AI gate stays the build-blocking
+        // subset; widening it turns the whole suite red.
         transitions: [{ to: 'Game Over', trigger: 'player dies' }],
       },
     ],
@@ -719,5 +728,193 @@ describe('decomposeIntoSystems — completionMode', () => {
     }
     expect(systemPrompt).toMatch(/completionMode/);
     expect(systemPrompt).toMatch(/omit[^.]*"win"/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One contract for manual and AI briefs (idea.FR-1.OP-02, #10174)
+//
+// The shape the model is asked for and the invariants its object is checked
+// against are the ones `briefSchema.ts` exports and `validateBrief` runs for
+// the manual editor. These pin the AI side of that agreement.
+// ---------------------------------------------------------------------------
+
+describe('decomposeIntoSystems — shared brief contract', () => {
+  const INVALID_FIXTURE = path.resolve(__dirname, '../__fixtures__/invalid/idea-score3-v1-invalid.json');
+
+  it('hands the provider the shared zBriefContent shape itself, not a copy', async () => {
+    await decomposeIntoSystems('make a game', '2d');
+
+    const [, , schema] = generateDecomposition.mock.calls[0] as [string, string, unknown];
+    // Identity, not equivalence: a second schema that merely agreed today
+    // is the drift #10174 removes.
+    expect(schema).toBe(zBriefContent);
+  });
+
+  it('retries an object that passes the shape but fails a shared invariant, and names the code', async () => {
+    // Two scenes called "Main Level": the provider's JSON Schema cannot say
+    // scene names are unique, so this object passes the shape and only the
+    // local re-validation can refuse it.
+    const main = (makeValidDecomposition().scenes as Array<Record<string, unknown>>)[0];
+    generateDecomposition.mockResolvedValue(
+      makeValidDecomposition({ scenes: [main, { ...main, transitions: [] }] }),
+    );
+
+    await expect(decomposeIntoSystems('make a game', '2d')).rejects.toThrow(
+      /scenes\.1\.name: .*\[DUPLICATE_SCENE_NAME\]/,
+    );
+    // The existing retry: one initial attempt plus MAX_RETRIES.
+    expect(generateDecomposition).toHaveBeenCalledTimes(3);
+  });
+
+  it('names the movement invariant by the code validateBrief uses', async () => {
+    const noPlayer = makeValidDecomposition();
+    (noPlayer.scenes as Array<{ entities: unknown[] }>)[0].entities = [];
+    generateDecomposition.mockResolvedValue(noPlayer);
+
+    await expect(decomposeIntoSystems('make a game', '2d')).rejects.toThrow(
+      /scenes: .*"player".*\[MOVEMENT_WITHOUT_PLAYER\]/,
+    );
+  });
+
+  it('reports exactly the codes validateBrief reports for the invalid domain fixture', async () => {
+    // The same object through both paths. `zBriefContent` strips the
+    // brief-only keys (`id`, `briefVersion`, item ids), so the model-shaped
+    // view of the fixture is what the decomposer re-validates. The fixture's
+    // three problems are all build-blocking, so the two paths report the
+    // same set here; the cases below are where they differ on purpose.
+    const fixture = JSON.parse(fs.readFileSync(INVALID_FIXTURE, 'utf-8')) as Record<string, unknown>;
+    const manualCodes = validateBrief(fixture).issues.map(issue => issue.code).sort();
+    expect(manualCodes).toEqual(['DEPENDENCY_CYCLE', 'DUPLICATE_SCENE_NAME', 'MOVEMENT_WITHOUT_PLAYER']);
+
+    generateDecomposition.mockResolvedValue(fixture);
+
+    let thrown: unknown;
+    try {
+      await decomposeIntoSystems('make a game', '3d');
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const message = (thrown as Error).message;
+
+    const aiCodes = [...message.matchAll(/\[([A-Z_]+)\]/g)].map(match => match[1]).sort();
+    expect(aiCodes).toEqual(manualCodes);
+    expect(generateDecomposition).toHaveBeenCalledTimes(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The AI gate is the BUILD-BLOCKING subset of the shared invariants (#10174,
+// review board round 1 M1).
+//
+// The model is told about one rule (movement needs a player). The rules it is
+// never told about fall in two groups. Three break the build — no player to
+// move, a dependsOn cycle (`buildPlan` throws), two scenes with one name
+// (`buildPlan` keys scenes by name and the second silently replaces the
+// first) — and the decomposer asks again on those. The other three are
+// advisory: the plan builder never reads `transitions` or `entityRef`, and a
+// progression system in a goal-free mode is planned as declared. Those stay
+// `validateBrief` issues for the editor; costing the model a retry on a rule
+// it was never given, with a generic hint, would be a retry spent on nothing.
+// ---------------------------------------------------------------------------
+
+describe('decomposeIntoSystems — the AI gate is the build-blocking subset', () => {
+  /** The model-shaped object as a brief, so `validateBrief` can see it. */
+  function asBrief(content: Record<string, unknown>): Record<string, unknown> {
+    return { ...content, id: 'brief-under-test', description: 'test', projectType: '2d' };
+  }
+
+  it('pins the subset: movement without a player, a dependsOn cycle, a duplicate scene name', () => {
+    expect([...BUILD_BLOCKING_BRIEF_ISSUE_CODES].sort()).toEqual([
+      'DEPENDENCY_CYCLE',
+      'DUPLICATE_SCENE_NAME',
+      'MOVEMENT_WITHOUT_PLAYER',
+    ]);
+  });
+
+  it('accepts a transition to a scene the design does not declare; validateBrief still reports it', async () => {
+    // The default helper's "Game Over" transition lands nowhere.
+    const content = makeValidDecomposition();
+    generateDecomposition.mockResolvedValue(content);
+
+    const gdd = await decomposeIntoSystems('make a game', '2d');
+
+    expect(generateDecomposition).toHaveBeenCalledTimes(1);
+    expect(gdd.scenes[0].transitions).toEqual([{ to: 'Game Over', trigger: 'player dies' }]);
+    expect(validateBrief(asBrief(content)).issues.map(issue => [issue.code, issue.path])).toEqual([
+      ['TRANSITION_TARGET_MISSING', ['scenes', 0, 'transitions', 0, 'to']],
+    ]);
+  });
+
+  it('accepts an asset entityRef that names a scene; validateBrief still reports it', async () => {
+    const content = makeValidDecomposition({
+      assetManifest: [
+        {
+          type: 'music',
+          description: 'Main level theme',
+          entityRef: 'Main Level',
+          styleDirective: 'chiptune',
+          priority: 'nice-to-have',
+          fallback: 'builtin:theme',
+        },
+      ],
+      scenes: [{ ...(makeValidDecomposition().scenes as Array<Record<string, unknown>>)[0], transitions: [] }],
+    });
+    generateDecomposition.mockResolvedValue(content);
+
+    const gdd = await decomposeIntoSystems('make a game', '2d');
+
+    expect(generateDecomposition).toHaveBeenCalledTimes(1);
+    expect(gdd.assetManifest[0].entityRef).toBe('Main Level');
+    expect(validateBrief(asBrief(content)).issues.map(issue => [issue.code, issue.path])).toEqual([
+      ['ENTITY_REF_MISSING', ['assetManifest', 0, 'entityRef']],
+    ]);
+  });
+
+  it('accepts a progression system in a sandbox brief; validateBrief still reports it', async () => {
+    // `planBuilder` plans a declared progression system in every mode (its
+    // Phase 3b comment says so), so the pairing is not a build error — it is
+    // the editor's call, as COMPLETION_MODE_CONFLICT (round 1 m6).
+    const base = makeValidDecomposition();
+    const content = makeValidDecomposition({
+      completionMode: 'sandbox',
+      systems: [
+        ...(base.systems as unknown[]),
+        { category: 'progression', type: 'score', config: {}, priority: 'secondary', dependsOn: [] },
+      ],
+      scenes: [{ ...(base.scenes as Array<Record<string, unknown>>)[0], transitions: [] }],
+    });
+    generateDecomposition.mockResolvedValue(content);
+
+    const gdd = await decomposeIntoSystems('a sandbox', '3d');
+
+    expect(generateDecomposition).toHaveBeenCalledTimes(1);
+    expect(gdd.completionMode).toBe('sandbox');
+    expect(gdd.systems.some(s => s.category === 'progression')).toBe(true);
+    expect(validateBrief(asBrief(content)).issues.map(issue => [issue.code, issue.path])).toEqual([
+      ['COMPLETION_MODE_CONFLICT', ['systems', 3]],
+    ]);
+  });
+
+  it('retries a dependsOn cycle and the final error names DEPENDENCY_CYCLE', async () => {
+    // `buildPlan` throws on this; before #10174 that throw was where the
+    // cycle first surfaced. The decomposer asks the model again instead.
+    const base = makeValidDecomposition();
+    const systems = base.systems as Array<Record<string, unknown>>;
+    generateDecomposition.mockResolvedValue(
+      makeValidDecomposition({
+        systems: [
+          { ...systems[0], dependsOn: ['camera'] },
+          { ...systems[1], dependsOn: ['movement'] },
+          systems[2],
+        ],
+      }),
+    );
+
+    await expect(decomposeIntoSystems('make a game', '2d')).rejects.toThrow(
+      /systems\.1\.dependsOn\.0: .*movement -> camera -> movement.*\[DEPENDENCY_CYCLE\]/,
+    );
+    expect(generateDecomposition).toHaveBeenCalledTimes(3);
   });
 });
