@@ -131,7 +131,7 @@ Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria
 
 **Pinned versions:** Next.js 16.3.8 · React 19.3.0 · wasm-bindgen 0.2.127 · Bevy 0.19 *(wasm-bindgen must match Cargo.lock exactly)*
 
-**Coverage thresholds (CI-enforced):** statements 86 · branches 78 · functions 81 · lines 87
+**Coverage thresholds (CI-enforced):** statements 86 · branches 79 · functions 82 · lines 88
 
 **Quick validation:** `cd web && npm run test:changed`
 <!-- AGENTIC-SYNC:END -->
