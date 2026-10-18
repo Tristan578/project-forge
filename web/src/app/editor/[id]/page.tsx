@@ -19,6 +19,7 @@ import { WasmErrorBoundary } from '@/components/editor/WasmErrorBoundary';
 import { EngineCrashOverlay } from '@/components/editor/EngineCrashOverlay';
 import { RemixQuarantineNotice } from '@/components/editor/RemixQuarantineNotice';
 import { SceneLoadErrorNotice } from '@/components/editor/SceneLoadErrorNotice';
+import { EngineDispatchThrewError } from '@/lib/scenes/engineDispatchThrew';
 
 function EditorPageContent() {
   const params = useParams();
@@ -73,7 +74,23 @@ function EditorPageContent() {
         // (and so the engine dispatcher) mounts after this effect, and the
         // held load replays once it attaches (#10192). The cleanup below
         // cancels it if this page goes away first.
-        loadScene(JSON.stringify(project.sceneData), { deferUntilEngineAttaches: true });
+        //
+        // A WARM open — this effect re-run for another project while the
+        // engine dispatcher is already attached (the Welcome modal's recent
+        // projects, a remix landing in an open editor) — dispatches at once
+        // instead, and an engine throw raises `EngineDispatchThrewError`
+        // right here. The slice has already locked saving and recorded the
+        // reason, which `SceneLoadErrorNotice` shows inside the editor with
+        // the reload guidance; the generic catch below would instead replace
+        // the editor with "Back to Dashboard" and skip the hydration that
+        // follows. Only that class is caught: any other throw is a page
+        // error for which no lockout exists (#10202 review).
+        try {
+          loadScene(JSON.stringify(project.sceneData), { deferUntilEngineAttaches: true });
+        } catch (loadError) {
+          if (!(loadError instanceof EngineDispatchThrewError)) throw loadError;
+          console.error('The engine threw while loading the project scene; saving is locked until a reload:', loadError);
+        }
         // Restore the music arrangement persisted alongside the scene (#9854).
         // `loadScene` itself now does this too (#10058, for every OTHER
         // caller of loadScene/newScene) — this direct call stays as a
@@ -115,12 +132,12 @@ function EditorPageContent() {
       <WasmErrorBoundary>
         <EngineCrashOverlay />
         <RemixQuarantineNotice count={quarantinedScripts} />
-        {/* Renders only when a scene load was REJECTED. `loadScene`'s boolean is
-            deliberately still discarded above: it is also false on a healthy
-            cold open (no engine dispatcher yet), so the store's
-            `sceneLoadError` — set only on the rejection branches — is the one
-            fact that can be shown to the user without false positives
-            (#10056). */}
+        {/* Renders only when a scene load was REJECTED, or the engine THREW on
+            a warm open (caught above). `loadScene`'s boolean is deliberately
+            still discarded above: it is also false on a healthy cold open (no
+            engine dispatcher yet), so the store's `sceneLoadError` — set only
+            on the rejection and throw branches — is the one fact that can be
+            shown to the user without false positives (#10056). */}
         <SceneLoadErrorNotice />
         <EditorLayout />
       </WasmErrorBoundary>
